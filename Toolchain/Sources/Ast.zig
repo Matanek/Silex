@@ -1,10 +1,22 @@
 const Source = @import("Source.zig");
 
 pub const BinaryOperator = enum {
+    logical_or,
+    logical_and,
+    equal,
+    not_equal,
+    less,
+    less_equal,
+    greater,
+    greater_equal,
     add,
     subtract,
     multiply,
     divide,
+};
+
+pub const UnaryOperator = enum {
+    logical_not,
 };
 
 pub const TypeName = enum {
@@ -25,8 +37,15 @@ pub const Expression = struct {
         boolean: bool,
         string: []const u8,
         identifier: []const u8,
+        unary: Unary,
         binary: Binary,
     },
+
+    pub const Unary = struct {
+        operator: UnaryOperator,
+        operator_position: Source.Position,
+        operand: *Expression,
+    };
 
     pub const Binary = struct {
         operator: BinaryOperator,
@@ -41,6 +60,7 @@ pub const Statement = union(enum) {
     variable_declaration: VariableDeclaration,
     assignment: Assignment,
     if_statement: If,
+    while_statement: While,
 
     pub const Print = struct {
         position: Source.Position,
@@ -63,6 +83,13 @@ pub const Statement = union(enum) {
     };
 
     pub const If = struct {
+        position: Source.Position,
+        condition: *Expression,
+        body: []const Statement,
+        else_body: ?[]const Statement,
+    };
+
+    pub const While = struct {
         position: Source.Position,
         condition: *Expression,
         body: []const Statement,

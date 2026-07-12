@@ -49,15 +49,31 @@ pub fn build(b: *std.Build) void {
         "Tests/InvalidCondition.sx:2:9: error: expected 'bool', found 'int'\n",
     );
 
+    const invalid_logical_command = b.addRunArtifact(executable);
+    invalid_logical_command.addArgs(&.{ "compile", "Tests/InvalidLogical.sx" });
+    invalid_logical_command.expectExitCode(1);
+    invalid_logical_command.expectStdErrEqual(
+        "Tests/InvalidLogical.sx:2:11: error: logical operator requires 'bool' operands, found 'int' and 'bool'\n",
+    );
+
+    const invalid_while_command = b.addRunArtifact(executable);
+    invalid_while_command.addArgs(&.{ "compile", "Tests/InvalidWhileCondition.sx" });
+    invalid_while_command.expectExitCode(1);
+    invalid_while_command.expectStdErrEqual(
+        "Tests/InvalidWhileCondition.sx:2:12: error: expected 'bool', found 'int'\n",
+    );
+
     const test_step = b.step("test", "Run the toolchain tests");
     test_step.dependOn(&test_command.step);
     test_step.dependOn(&invalid_command.step);
     test_step.dependOn(&immutable_assignment_command.step);
     test_step.dependOn(&invalid_condition_command.step);
+    test_step.dependOn(&invalid_logical_command.step);
+    test_step.dependOn(&invalid_while_command.step);
 
     const smoke_command = b.addRunArtifact(executable);
     smoke_command.addArgs(&.{ "run", "Smokes/Main.sx" });
-    smoke_command.expectStdOutEqual("Hello from Silex smoke test\n50\nfalse\n");
+    smoke_command.expectStdOutEqual("Hello from Silex smoke test\n50\nlogic works\ntrue\nfalse\n2\n1\n");
 
     const boolean_condition_command = b.addRunArtifact(executable);
     boolean_condition_command.addArgs(&.{ "run", "Smokes/BooleanCondition.sx" });

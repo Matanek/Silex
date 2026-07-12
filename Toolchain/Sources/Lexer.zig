@@ -6,6 +6,8 @@ pub const TokenTag = enum {
     keyword_let,
     keyword_var,
     keyword_if,
+    keyword_else,
+    keyword_while,
     keyword_true,
     keyword_false,
     keyword_int,
@@ -19,7 +21,16 @@ pub const TokenTag = enum {
     minus,
     star,
     slash,
+    bang,
     equal,
+    equal_equal,
+    bang_equal,
+    less,
+    less_equal,
+    greater,
+    greater_equal,
+    amp_amp,
+    pipe_pipe,
     colon,
     left_parenthesis,
     right_parenthesis,
@@ -77,13 +88,19 @@ pub const Lexer = struct {
 
         if (character == '"') return self.stringToken(position);
 
+        if (character == '=') return self.optionalDoubleToken(start, position, '=', .equal, .equal_equal);
+        if (character == '!') return self.optionalDoubleToken(start, position, '=', .bang, .bang_equal);
+        if (character == '<') return self.optionalDoubleToken(start, position, '=', .less, .less_equal);
+        if (character == '>') return self.optionalDoubleToken(start, position, '=', .greater, .greater_equal);
+        if (character == '&') return self.requiredDoubleToken(start, position, '&', .amp_amp, "expected '&&'");
+        if (character == '|') return self.requiredDoubleToken(start, position, '|', .pipe_pipe, "expected '||'");
+
         self.advance();
         return switch (character) {
             '+' => self.token(.plus, start, position),
             '-' => self.token(.minus, start, position),
             '*' => self.token(.star, start, position),
             '/' => self.token(.slash, start, position),
-            '=' => self.token(.equal, start, position),
             ':' => self.token(.colon, start, position),
             '(' => self.token(.left_parenthesis, start, position),
             ')' => self.token(.right_parenthesis, start, position),
@@ -116,6 +133,38 @@ pub const Lexer = struct {
             }
         }
         return self.fail(position, "unterminated string literal");
+    }
+
+    fn optionalDoubleToken(
+        self: *Lexer,
+        start: usize,
+        position: Source.Position,
+        second: u8,
+        single_tag: TokenTag,
+        double_tag: TokenTag,
+    ) Token {
+        self.advance();
+        if (self.index < self.source.len and self.source[self.index] == second) {
+            self.advance();
+            return self.token(double_tag, start, position);
+        }
+        return self.token(single_tag, start, position);
+    }
+
+    fn requiredDoubleToken(
+        self: *Lexer,
+        start: usize,
+        position: Source.Position,
+        second: u8,
+        tag: TokenTag,
+        message: []const u8,
+    ) Source.Error!Token {
+        self.advance();
+        if (self.index == self.source.len or self.source[self.index] != second) {
+            return self.fail(position, message);
+        }
+        self.advance();
+        return self.token(tag, start, position);
     }
 
     fn skipIgnored(self: *Lexer) void {
@@ -163,6 +212,8 @@ fn keywordTag(lexeme: []const u8) ?TokenTag {
         .{ "let", TokenTag.keyword_let },
         .{ "var", TokenTag.keyword_var },
         .{ "if", TokenTag.keyword_if },
+        .{ "else", TokenTag.keyword_else },
+        .{ "while", TokenTag.keyword_while },
         .{ "true", TokenTag.keyword_true },
         .{ "false", TokenTag.keyword_false },
         .{ "int", TokenTag.keyword_int },
@@ -199,4 +250,20 @@ test "skip line comments" {
     const token = try lexer.next();
     try std.testing.expectEqual(TokenTag.integer, token.tag);
     try std.testing.expectEqual(@as(usize, 2), token.position.line);
+}
+
+test "recognize comparison and logical operators" {
+    var lexer = Lexer.init("!= == < <= > >= ! && ||");
+    const expected = [_]TokenTag{
+        .bang_equal,
+        .equal_equal,
+        .less,
+        .less_equal,
+        .greater,
+        .greater_equal,
+        .bang,
+        .amp_amp,
+        .pipe_pipe,
+    };
+    for (expected) |tag| try std.testing.expectEqual(tag, (try lexer.next()).tag);
 }

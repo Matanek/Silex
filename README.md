@@ -19,16 +19,26 @@ void main() {
 
     print("Hello World");
 
-    if (hit) {
+    if (hit && a < b) {
         print(a * b);
+    } else {
+        print("blocked");
+    }
+
+    var count = 3;
+    while (count > 0) {
+        print(count);
+        count = count - 1;
     }
 }
 ```
 
 `let` déclare une valeur immuable et `var` une variable réaffectable. Le type est
 inféré lorsque l'annotation `: type` est absente. Les opérateurs disponibles
-sont `+`, `-`, `*` et `/`, avec leur précédence usuelle et des parenthèses
-explicites. Une condition `if` exige une expression booléenne.
+sont `+`, `-`, `*`, `/`, les comparaisons `==`, `!=`, `<`, `<=`, `>` et `>=`,
+ainsi que les opérateurs logiques `!`, `&&` et `||`. Une condition `if` exige
+une expression booléenne et peut être suivie d'un bloc `else`. Une boucle
+`while` réévalue une condition booléenne avant chaque itération.
 
 La commande `compile` produit un exécutable natif. La commande `run` compile et
 exécute le programme :

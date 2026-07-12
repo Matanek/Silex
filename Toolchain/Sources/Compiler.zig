@@ -110,7 +110,7 @@ fn report(source_path: []const u8, diagnostic: @import("Source.zig").Diagnostic)
 
 fn cacheKey(cpp: []const u8) [64]u8 {
     var hasher = std.crypto.hash.sha2.Sha256.init(.{});
-    hasher.update("silex-cache-v3\x00");
+    hasher.update("silex-cache-v5\x00");
     hasher.update(@tagName(builtin.target.cpu.arch));
     hasher.update("\x00");
     hasher.update(@tagName(builtin.target.os.tag));

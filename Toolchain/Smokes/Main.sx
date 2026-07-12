@@ -6,13 +6,25 @@ void main() {
 
     print(message);
 
-    if (hit) {
+    if (hit && a < b) {
         print(a * b);
+    } else {
+        print("unexpected branch");
     }
 
     hit = false;
+    if (!hit || a == b) {
+        print("logic works");
+    } else {
+        print("unexpected branch");
+    }
+
+    print("Silex" == "Silex");
     print(hit);
-    if (hit) {
-        print("This line must not be printed");
+
+    var countdown = 2;
+    while (countdown > 0) {
+        print(countdown);
+        countdown = countdown - 1;
     }
 }

@@ -19,8 +19,14 @@ pub const Expression = struct {
         boolean: bool,
         string: []const u8,
         variable: []const u8,
+        unary: Unary,
         binary: Binary,
     },
+
+    pub const Unary = struct {
+        operator: Ast.UnaryOperator,
+        operand: *Expression,
+    };
 
     pub const Binary = struct {
         operator: Ast.BinaryOperator,
@@ -34,6 +40,7 @@ pub const Statement = union(enum) {
     variable_declaration: VariableDeclaration,
     assignment: Assignment,
     if_statement: If,
+    while_statement: While,
 
     pub const VariableDeclaration = struct {
         generated_name: []const u8,
@@ -48,6 +55,12 @@ pub const Statement = union(enum) {
     };
 
     pub const If = struct {
+        condition: *Expression,
+        body: []const Statement,
+        else_body: ?[]const Statement,
+    };
+
+    pub const While = struct {
         condition: *Expression,
         body: []const Statement,
     };
@@ -101,6 +114,7 @@ pub const Analyzer = struct {
             .variable_declaration => |declaration| self.variableDeclaration(declaration, scope),
             .assignment => |ast_assignment| self.assignment(ast_assignment, scope),
             .if_statement => |if_statement| self.ifStatement(if_statement, scope),
+            .while_statement => |while_statement| self.whileStatement(while_statement, scope),
         };
     }
 
@@ -180,7 +194,34 @@ pub const Analyzer = struct {
         }
 
         var body_scope = Scope{ .parent = parent_scope };
+        const body = try self.statements(ast.body, &body_scope);
+
+        var else_body: ?[]const Statement = null;
+        if (ast.else_body) |ast_else_body| {
+            var else_scope = Scope{ .parent = parent_scope };
+            else_body = try self.statements(ast_else_body, &else_scope);
+        }
+
         return .{ .if_statement = .{
+            .condition = condition,
+            .body = body,
+            .else_body = else_body,
+        } };
+    }
+
+    fn whileStatement(
+        self: *Analyzer,
+        ast: Ast.Statement.While,
+        parent_scope: *const Scope,
+    ) AnalyzeError!Statement {
+        const condition = try self.expression(ast.condition, parent_scope);
+        if (condition.type != .bool) {
+            const message = try typeMismatchMessage(self.allocator, .bool, condition.type);
+            return self.fail(ast.condition.position, message);
+        }
+
+        var body_scope = Scope{ .parent = parent_scope };
+        return .{ .while_statement = .{
             .condition = condition,
             .body = try self.statements(ast.body, &body_scope),
         } };
@@ -200,6 +241,7 @@ pub const Analyzer = struct {
                 .value = .{ .string = value },
             }),
             .identifier => |name| self.variableExpression(ast.position, name, scope),
+            .unary => |unary| self.unaryExpression(unary, scope),
             .binary => |binary| self.binaryExpression(binary, scope),
         };
     }
@@ -239,19 +281,87 @@ pub const Analyzer = struct {
     ) AnalyzeError!*Expression {
         const left = try self.expression(binary.left, scope);
         const right = try self.expression(binary.right, scope);
-        if (left.type != .int or right.type != .int) {
-            const message = try std.fmt.allocPrint(
-                self.allocator,
-                "arithmetic operator requires 'int' operands, found '{s}' and '{s}'",
-                .{ @tagName(left.type), @tagName(right.type) },
-            );
-            return self.fail(binary.operator_position, message);
-        }
+        const result_type: Type = switch (binary.operator) {
+            .add, .subtract, .multiply, .divide => try self.requireBinaryOperands(
+                binary.operator_position,
+                "arithmetic operator",
+                .int,
+                left.type,
+                right.type,
+                .int,
+            ),
+            .less, .less_equal, .greater, .greater_equal => try self.requireBinaryOperands(
+                binary.operator_position,
+                "comparison operator",
+                .int,
+                left.type,
+                right.type,
+                .bool,
+            ),
+            .logical_and, .logical_or => try self.requireBinaryOperands(
+                binary.operator_position,
+                "logical operator",
+                .bool,
+                left.type,
+                right.type,
+                .bool,
+            ),
+            .equal, .not_equal => equality: {
+                if (left.type != right.type) {
+                    const message = try std.fmt.allocPrint(
+                        self.allocator,
+                        "equality operator requires operands of the same type, found '{s}' and '{s}'",
+                        .{ @tagName(left.type), @tagName(right.type) },
+                    );
+                    return self.fail(binary.operator_position, message);
+                }
+                break :equality .bool;
+            },
+        };
         return self.newExpression(.{
-            .type = .int,
+            .type = result_type,
             .position = left.position,
             .value = .{ .binary = .{ .operator = binary.operator, .left = left, .right = right } },
         });
+    }
+
+    fn unaryExpression(
+        self: *Analyzer,
+        unary: Ast.Expression.Unary,
+        scope: *const Scope,
+    ) AnalyzeError!*Expression {
+        const operand = try self.expression(unary.operand, scope);
+        if (operand.type != .bool) {
+            const message = try std.fmt.allocPrint(
+                self.allocator,
+                "logical operator '!' requires a 'bool' operand, found '{s}'",
+                .{@tagName(operand.type)},
+            );
+            return self.fail(unary.operator_position, message);
+        }
+        return self.newExpression(.{
+            .type = .bool,
+            .position = unary.operator_position,
+            .value = .{ .unary = .{ .operator = unary.operator, .operand = operand } },
+        });
+    }
+
+    fn requireBinaryOperands(
+        self: *Analyzer,
+        position: Source.Position,
+        operator_name: []const u8,
+        required_type: Type,
+        left_type: Type,
+        right_type: Type,
+        result_type: Type,
+    ) AnalyzeError!Type {
+        if (left_type == required_type and right_type == required_type) return result_type;
+        const message = try std.fmt.allocPrint(
+            self.allocator,
+            "{s} requires '{s}' operands, found '{s}' and '{s}'",
+            .{ operator_name, @tagName(required_type), @tagName(left_type), @tagName(right_type) },
+        );
+        return self.fail(position, message);
     }
 
     fn newExpression(self: *Analyzer, value: Expression) !*Expression {
@@ -404,4 +514,107 @@ test "reject arithmetic between string and int" {
     var analyzer = Analyzer.init(allocator);
     try std.testing.expectError(error.InvalidSource, analyzer.analyze(try parser.parse()));
     try std.testing.expectEqual(@as(usize, 37), analyzer.diagnostic.?.position.column);
+}
+
+test "comparison and logical expressions produce bool" {
+    const Parser = @import("Parser.zig").Parser;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var parser = Parser.init(
+        allocator,
+        "void main() { let result = !(1 >= 2) && \"Silex\" == \"Silex\"; }",
+    );
+    var analyzer = Analyzer.init(allocator);
+    const program = try analyzer.analyze(try parser.parse());
+    try std.testing.expectEqual(Type.bool, program.statements[0].variable_declaration.type);
+}
+
+test "reject logical operator with int operand" {
+    const Parser = @import("Parser.zig").Parser;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var parser = Parser.init(allocator, "void main() { let result = 1 && true; }");
+    var analyzer = Analyzer.init(allocator);
+    try std.testing.expectError(error.InvalidSource, analyzer.analyze(try parser.parse()));
+    try std.testing.expectEqualStrings(
+        "logical operator requires 'bool' operands, found 'int' and 'bool'",
+        analyzer.diagnostic.?.message,
+    );
+}
+
+test "reject comparison with string operand" {
+    const Parser = @import("Parser.zig").Parser;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var parser = Parser.init(allocator, "void main() { let result = \"one\" < 2; }");
+    var analyzer = Analyzer.init(allocator);
+    try std.testing.expectError(error.InvalidSource, analyzer.analyze(try parser.parse()));
+    try std.testing.expectEqualStrings(
+        "comparison operator requires 'int' operands, found 'string' and 'int'",
+        analyzer.diagnostic.?.message,
+    );
+}
+
+test "reject equality between different types" {
+    const Parser = @import("Parser.zig").Parser;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var parser = Parser.init(allocator, "void main() { let result = 1 == true; }");
+    var analyzer = Analyzer.init(allocator);
+    try std.testing.expectError(error.InvalidSource, analyzer.analyze(try parser.parse()));
+    try std.testing.expectEqualStrings(
+        "equality operator requires operands of the same type, found 'int' and 'bool'",
+        analyzer.diagnostic.?.message,
+    );
+}
+
+test "if and else use separate scopes" {
+    const Parser = @import("Parser.zig").Parser;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var parser = Parser.init(
+        allocator,
+        "void main() { if (true) { let value = 1; } else { let value = 2; } }",
+    );
+    var analyzer = Analyzer.init(allocator);
+    const program = try analyzer.analyze(try parser.parse());
+    try std.testing.expectEqual(@as(usize, 1), program.statements[0].if_statement.else_body.?.len);
+}
+
+test "while requires bool condition and creates a scope" {
+    const Parser = @import("Parser.zig").Parser;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var parser = Parser.init(
+        allocator,
+        "void main() { var count = 2; while (count > 0) { let inside = count; count = count - 1; } }",
+    );
+    var analyzer = Analyzer.init(allocator);
+    const program = try analyzer.analyze(try parser.parse());
+    try std.testing.expectEqual(Type.bool, program.statements[1].while_statement.condition.type);
+    try std.testing.expectEqual(@as(usize, 2), program.statements[1].while_statement.body.len);
+}
+
+test "reject while condition that is not bool" {
+    const Parser = @import("Parser.zig").Parser;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var parser = Parser.init(allocator, "void main() { while (1) { print(1); } }");
+    var analyzer = Analyzer.init(allocator);
+    try std.testing.expectError(error.InvalidSource, analyzer.analyze(try parser.parse()));
+    try std.testing.expectEqualStrings("expected 'bool', found 'int'", analyzer.diagnostic.?.message);
 }

@@ -46,6 +46,7 @@ pub const Parser = struct {
             .keyword_let => self.parseVariableDeclaration(.immutable),
             .keyword_var => self.parseVariableDeclaration(.mutable),
             .keyword_if => self.parseIf(),
+            .keyword_while => self.parseWhile(),
             .identifier => self.parseAssignment(),
             else => self.fail("expected statement"),
         };
@@ -117,11 +118,75 @@ pub const Parser = struct {
         const condition = try self.parseExpression();
         try self.expect(.right_parenthesis, "expected ')'");
         const body = try self.parseBlock();
-        return .{ .if_statement = .{ .position = position, .condition = condition, .body = body } };
+        var else_body: ?[]const Ast.Statement = null;
+        if (self.current.tag == .keyword_else) {
+            try self.advance();
+            else_body = try self.parseBlock();
+        }
+        return .{ .if_statement = .{
+            .position = position,
+            .condition = condition,
+            .body = body,
+            .else_body = else_body,
+        } };
+    }
+
+    fn parseWhile(self: *Parser) ParseError!Ast.Statement {
+        const position = self.current.position;
+        try self.advance();
+        try self.expect(.left_parenthesis, "expected '('");
+        const condition = try self.parseExpression();
+        try self.expect(.right_parenthesis, "expected ')'");
+        const body = try self.parseBlock();
+        return .{ .while_statement = .{ .position = position, .condition = condition, .body = body } };
     }
 
     fn parseExpression(self: *Parser) ParseError!*Ast.Expression {
-        return self.parseAdditive();
+        return self.parseLogicalOr();
+    }
+
+    fn parseLogicalOr(self: *Parser) ParseError!*Ast.Expression {
+        var expression = try self.parseLogicalAnd();
+        while (self.current.tag == .pipe_pipe) {
+            const operator_token = self.current;
+            try self.advance();
+            const right = try self.parseLogicalAnd();
+            expression = try self.binaryExpression(expression, right, operator_token);
+        }
+        return expression;
+    }
+
+    fn parseLogicalAnd(self: *Parser) ParseError!*Ast.Expression {
+        var expression = try self.parseEquality();
+        while (self.current.tag == .amp_amp) {
+            const operator_token = self.current;
+            try self.advance();
+            const right = try self.parseEquality();
+            expression = try self.binaryExpression(expression, right, operator_token);
+        }
+        return expression;
+    }
+
+    fn parseEquality(self: *Parser) ParseError!*Ast.Expression {
+        var expression = try self.parseComparison();
+        while (self.current.tag == .equal_equal or self.current.tag == .bang_equal) {
+            const operator_token = self.current;
+            try self.advance();
+            const right = try self.parseComparison();
+            expression = try self.binaryExpression(expression, right, operator_token);
+        }
+        return expression;
+    }
+
+    fn parseComparison(self: *Parser) ParseError!*Ast.Expression {
+        var expression = try self.parseAdditive();
+        while (isComparisonOperator(self.current.tag)) {
+            const operator_token = self.current;
+            try self.advance();
+            const right = try self.parseAdditive();
+            expression = try self.binaryExpression(expression, right, operator_token);
+        }
+        return expression;
     }
 
     fn parseAdditive(self: *Parser) ParseError!*Ast.Expression {
@@ -136,14 +201,30 @@ pub const Parser = struct {
     }
 
     fn parseMultiplicative(self: *Parser) ParseError!*Ast.Expression {
-        var expression = try self.parsePrimary();
+        var expression = try self.parseUnary();
         while (self.current.tag == .star or self.current.tag == .slash) {
             const operator_token = self.current;
             try self.advance();
-            const right = try self.parsePrimary();
+            const right = try self.parseUnary();
             expression = try self.binaryExpression(expression, right, operator_token);
         }
         return expression;
+    }
+
+    fn parseUnary(self: *Parser) ParseError!*Ast.Expression {
+        if (self.current.tag != .bang) return self.parsePrimary();
+
+        const operator_token = self.current;
+        try self.advance();
+        const operand = try self.parseUnary();
+        return self.newExpression(.{
+            .position = operator_token.position,
+            .value = .{ .unary = .{
+                .operator = .logical_not,
+                .operator_position = operator_token.position,
+                .operand = operand,
+            } },
+        });
     }
 
     fn parsePrimary(self: *Parser) ParseError!*Ast.Expression {
@@ -185,6 +266,14 @@ pub const Parser = struct {
         operator_token: Token,
     ) ParseError!*Ast.Expression {
         const operator: Ast.BinaryOperator = switch (operator_token.tag) {
+            .pipe_pipe => .logical_or,
+            .amp_amp => .logical_and,
+            .equal_equal => .equal,
+            .bang_equal => .not_equal,
+            .less => .less,
+            .less_equal => .less_equal,
+            .greater => .greater,
+            .greater_equal => .greater_equal,
             .plus => .add,
             .minus => .subtract,
             .star => .multiply,
@@ -233,6 +322,13 @@ pub const Parser = struct {
     }
 };
 
+fn isComparisonOperator(tag: TokenTag) bool {
+    return switch (tag) {
+        .less, .less_equal, .greater, .greater_equal => true,
+        else => false,
+    };
+}
+
 test "multiplication binds tighter than addition" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -259,6 +355,52 @@ test "parse inferred and annotated declarations" {
         "count",
         program.statements[2].if_statement.body[0].print.argument.value.identifier,
     );
+}
+
+test "logical operators follow comparison precedence" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(
+        arena.allocator(),
+        "void main() { let result = !false || 1 < 2 && 3 == 3; }",
+    );
+    const program = try parser.parse();
+
+    const logical_or = program.statements[0].variable_declaration.initializer.value.binary;
+    try std.testing.expectEqual(Ast.BinaryOperator.logical_or, logical_or.operator);
+    try std.testing.expectEqual(Ast.UnaryOperator.logical_not, logical_or.left.value.unary.operator);
+    try std.testing.expectEqual(Ast.BinaryOperator.logical_and, logical_or.right.value.binary.operator);
+    try std.testing.expectEqual(
+        Ast.BinaryOperator.less,
+        logical_or.right.value.binary.left.value.binary.operator,
+    );
+    try std.testing.expectEqual(
+        Ast.BinaryOperator.equal,
+        logical_or.right.value.binary.right.value.binary.operator,
+    );
+}
+
+test "parse else block" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(
+        arena.allocator(),
+        "void main() { if (true) { print(1); } else { print(2); } }",
+    );
+    const program = try parser.parse();
+    try std.testing.expectEqual(@as(usize, 1), program.statements[0].if_statement.else_body.?.len);
+}
+
+test "parse while loop" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(
+        arena.allocator(),
+        "void main() { var count = 2; while (count > 0) { count = count - 1; } }",
+    );
+    const program = try parser.parse();
+    try std.testing.expectEqual(Ast.BinaryOperator.greater, program.statements[1].while_statement.condition.value.binary.operator);
+    try std.testing.expectEqual(@as(usize, 1), program.statements[1].while_statement.body.len);
 }
 
 test "reject missing semicolon" {

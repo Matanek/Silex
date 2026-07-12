@@ -76,6 +76,20 @@ fn generateStatement(
             try output.appendSlice(allocator, ") {\n");
             try generateStatements(allocator, output, if_statement.body, indentation + 1);
             try indent(allocator, output, indentation);
+            if (if_statement.else_body) |else_body| {
+                try output.appendSlice(allocator, "} else {\n");
+                try generateStatements(allocator, output, else_body, indentation + 1);
+                try indent(allocator, output, indentation);
+            }
+            try output.appendSlice(allocator, "}\n");
+        },
+        .while_statement => |while_statement| {
+            try indent(allocator, output, indentation);
+            try output.appendSlice(allocator, "while (");
+            try generateExpression(allocator, output, while_statement.condition);
+            try output.appendSlice(allocator, ") {\n");
+            try generateStatements(allocator, output, while_statement.body, indentation + 1);
+            try indent(allocator, output, indentation);
             try output.appendSlice(allocator, "}\n");
         },
     }
@@ -89,11 +103,16 @@ fn generateExpression(allocator: Allocator, output: *std.ArrayList(u8), expressi
         },
         .boolean => |value| try output.appendSlice(allocator, if (value) "true" else "false"),
         .string => |value| {
-            try output.append(allocator, '"');
+            try output.appendSlice(allocator, "std::string{\"");
             try output.appendSlice(allocator, value);
-            try output.append(allocator, '"');
+            try output.appendSlice(allocator, "\"}");
         },
         .variable => |generated_name| try output.appendSlice(allocator, generated_name),
+        .unary => |unary| {
+            try output.appendSlice(allocator, "(!");
+            try generateExpression(allocator, output, unary.operand);
+            try output.append(allocator, ')');
+        },
         .binary => |binary| {
             try output.append(allocator, '(');
             try generateExpression(allocator, output, binary.left);
@@ -119,6 +138,14 @@ fn cppType(type_name: Semantic.Type) []const u8 {
 
 fn operatorText(operator: Ast.BinaryOperator) []const u8 {
     return switch (operator) {
+        .logical_or => " || ",
+        .logical_and => " && ",
+        .equal => " == ",
+        .not_equal => " != ",
+        .less => " < ",
+        .less_equal => " <= ",
+        .greater => " > ",
+        .greater_equal => " >= ",
         .add => " + ",
         .subtract => " - ",
         .multiply => " * ",
@@ -134,12 +161,30 @@ test "generate typed variables and control flow" {
 
     var parser = Parser.init(
         allocator,
-        "void main() { let count = 5; var hit: bool = true; if (hit) { print(count); } }",
+        "void main() { let count = 5; if (!(count < 3)) { print(\"yes\"); } else { print(\"no\"); } }",
     );
     var analyzer = Semantic.Analyzer.init(allocator);
     const cpp = try generate(allocator, try analyzer.analyze(try parser.parse()));
 
     try std.testing.expect(std.mem.indexOf(u8, cpp, "const std::int64_t silexValue0") != null);
-    try std.testing.expect(std.mem.indexOf(u8, cpp, "bool silexValue1 = true") != null);
-    try std.testing.expect(std.mem.indexOf(u8, cpp, "if (silexValue1)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "if ((!(silexValue0 < std::int64_t{3})))") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "} else {") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "std::string{\"yes\"}") != null);
+}
+
+test "generate while loop" {
+    const Parser = @import("Parser.zig").Parser;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var parser = Parser.init(
+        allocator,
+        "void main() { var count = 2; while (count > 0) { count = count - 1; } }",
+    );
+    var analyzer = Semantic.Analyzer.init(allocator);
+    const cpp = try generate(allocator, try analyzer.analyze(try parser.parse()));
+
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "while ((silexValue0 > std::int64_t{0})) {") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "silexValue0 = (silexValue0 - std::int64_t{1});") != null);
 }
