@@ -10,4 +10,4 @@ snippets = ["snippets/silex.json"]
 
 [grammars.silex]
 repository = "https://github.com/fmathey/Silex"
-rev = "698f8dec2f223e1ac8411dda7c6307f31bafba9f"
+rev = "c21667a340a9c46fd4b087be5481567db6f3e7e4"
