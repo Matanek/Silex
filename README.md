@@ -8,37 +8,69 @@ d'implémentation du C++ généré.
 
 ## État du prototype
 
-Le premier noyau accepte un point d'entrée, les variables locales, les
-booléens, les conditions et les expressions arithmétiques entières :
+Le premier noyau accepte un point d'entrée, les fonctions, les variables
+locales, les structures, les booléens, le contrôle de flux et les expressions
+arithmétiques entières :
 
 ```sx
-void main() {
-    let a = 5;
-    let b: int = 10;
-    var hit: bool = true;
+struct Position {
+    x:int
+    y:int = 10
 
-    print("Hello World");
-
-    if (hit && a < b) {
-        print(a * b);
-    } else {
-        print("blocked");
-    }
-
-    var count = 3;
-    while (count > 0) {
-        print(count);
-        count = count - 1;
+    func multiplyX(factor:int) void {
+        self.x *= factor
     }
 }
+
+func main() void {
+    var position:Position
+    var hit = true
+
+    print("Hello World")
+
+    if (hit && position.x < position.y) {
+        position.multiplyX(2)
+        print(position.x)
+    } else {
+        print("blocked")
+    }
+
+    var count = 3
+    while (count > 0) {
+        print(count)
+        count = count - 1
+    }
+}
+
 ```
 
 `let` déclare une valeur immuable et `var` une variable réaffectable. Le type est
-inféré lorsque l'annotation `: type` est absente. Les opérateurs disponibles
+inféré lorsque l'annotation `:type` est absente. Une `struct` est une valeur
+nominale, construite en nommant tous ses champs ; ceux d'une variable `var`
+peuvent être modifiés avec `.`. Les méthodes utilisent `self` explicitement ;
+le compilateur infère si elles modifient leur receveur et interdit alors leur
+appel sur une valeur `let`. Les opérateurs disponibles
 sont `+`, `-`, `*`, `/`, les comparaisons `==`, `!=`, `<`, `<=`, `>` et `>=`,
 ainsi que les opérateurs logiques `!`, `&&` et `||`. Une condition `if` exige
 une expression booléenne et peut être suivie d'un bloc `else`. Une boucle
 `while` réévalue une condition booléenne avant chaque itération.
+Les fonctions et méthodes utilisent la signature `func name(param:type)
+returnType`. Les fonctions utilisateur peuvent être appelées avant leur
+définition.
+
+Une annotation sans initialisateur utilise une valeur déterministe : `0` pour
+`int`, `false` pour `bool`, `""` pour `string`, et les valeurs par défaut de
+chaque champ pour une `struct`. Les champs peuvent déclarer leur propre défaut
+avec `field:type = value`. Les affectations `+=`, `-=`, `*=`, `/=` ainsi que les
+instructions postfixées `++` et `--` sont disponibles pour les entiers mutables.
+
+Les instructions se terminent naturellement à la fin de leur ligne ou devant
+`}`. Le point-virgule reste disponible pour placer plusieurs instructions sur
+une même ligne :
+
+```sx
+let a = 1; let b = 2; print(a + b)
+```
 
 La commande `compile` produit un exécutable natif. La commande `run` compile et
 exécute le programme :

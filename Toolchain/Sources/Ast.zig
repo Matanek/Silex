@@ -19,15 +19,34 @@ pub const UnaryOperator = enum {
     logical_not,
 };
 
-pub const TypeName = enum {
+pub const TypeName = union(enum) {
     int,
     bool,
     string,
+    structure: []const u8,
+};
+
+pub const ReturnType = union(enum) {
+    void,
+    int,
+    bool,
+    string,
+    structure: []const u8,
 };
 
 pub const Mutability = enum {
     immutable,
     mutable,
+};
+
+pub const AssignmentOperator = enum {
+    assign,
+    add,
+    subtract,
+    multiply,
+    divide,
+    increment,
+    decrement,
 };
 
 pub const Expression = struct {
@@ -37,6 +56,11 @@ pub const Expression = struct {
         boolean: bool,
         string: []const u8,
         identifier: []const u8,
+        self,
+        call: Call,
+        method_call: MethodCall,
+        structure_initializer: StructureInitializer,
+        member_access: MemberAccess,
         unary: Unary,
         binary: Binary,
     },
@@ -45,6 +69,37 @@ pub const Expression = struct {
         operator: UnaryOperator,
         operator_position: Source.Position,
         operand: *Expression,
+    };
+
+    pub const Call = struct {
+        name: []const u8,
+        name_position: Source.Position,
+        arguments: []const *Expression,
+    };
+
+    pub const MethodCall = struct {
+        object: *Expression,
+        name: []const u8,
+        name_position: Source.Position,
+        arguments: []const *Expression,
+    };
+
+    pub const StructureInitializer = struct {
+        name: []const u8,
+        name_position: Source.Position,
+        fields: []const FieldInitializer,
+    };
+
+    pub const FieldInitializer = struct {
+        name: []const u8,
+        position: Source.Position,
+        value: *Expression,
+    };
+
+    pub const MemberAccess = struct {
+        object: *Expression,
+        name: []const u8,
+        name_position: Source.Position,
     };
 
     pub const Binary = struct {
@@ -61,6 +116,8 @@ pub const Statement = union(enum) {
     assignment: Assignment,
     if_statement: If,
     while_statement: While,
+    return_statement: Return,
+    expression_statement: *Expression,
 
     pub const Print = struct {
         position: Source.Position,
@@ -73,13 +130,14 @@ pub const Statement = union(enum) {
         name_position: Source.Position,
         mutability: Mutability,
         annotation: ?TypeName,
-        initializer: *Expression,
+        initializer: ?*Expression,
     };
 
     pub const Assignment = struct {
         position: Source.Position,
-        name: []const u8,
-        value: *Expression,
+        target: *Expression,
+        operator: AssignmentOperator,
+        value: ?*Expression,
     };
 
     pub const If = struct {
@@ -94,8 +152,44 @@ pub const Statement = union(enum) {
         condition: *Expression,
         body: []const Statement,
     };
+
+    pub const Return = struct {
+        position: Source.Position,
+        value: ?*Expression,
+    };
 };
 
 pub const Program = struct {
+    structures: []const Structure,
+    functions: []const Function,
+};
+
+pub const Structure = struct {
+    position: Source.Position,
+    name: []const u8,
+    name_position: Source.Position,
+    fields: []const StructureField,
+    methods: []const Function,
+};
+
+pub const StructureField = struct {
+    name: []const u8,
+    position: Source.Position,
+    type: TypeName,
+    initializer: ?*Expression,
+};
+
+pub const Parameter = struct {
+    name: []const u8,
+    position: Source.Position,
+    type: TypeName,
+};
+
+pub const Function = struct {
+    position: Source.Position,
+    name: []const u8,
+    name_position: Source.Position,
+    return_type: ReturnType,
+    parameters: []const Parameter,
     statements: []const Statement,
 };

@@ -1,5 +1,5 @@
-void main() {
+func main() void {
     while (1) {
-        print("unreachable");
+        print("unreachable")
     }
 }

@@ -1,0 +1,9 @@
+struct Position {
+    x:int
+    y:int
+}
+
+func main() void {
+    let position = Position { x:10, depth:20 }
+    print(position.x)
+}

@@ -8,6 +8,10 @@ pub const TokenTag = enum {
     keyword_if,
     keyword_else,
     keyword_while,
+    keyword_return,
+    keyword_struct,
+    keyword_func,
+    keyword_self,
     keyword_true,
     keyword_false,
     keyword_int,
@@ -18,9 +22,15 @@ pub const TokenTag = enum {
     integer,
     string,
     plus,
+    plus_plus,
+    plus_equal,
     minus,
+    minus_minus,
+    minus_equal,
     star,
+    star_equal,
     slash,
+    slash_equal,
     bang,
     equal,
     equal_equal,
@@ -32,6 +42,8 @@ pub const TokenTag = enum {
     amp_amp,
     pipe_pipe,
     colon,
+    comma,
+    dot,
     left_parenthesis,
     right_parenthesis,
     left_brace,
@@ -94,14 +106,16 @@ pub const Lexer = struct {
         if (character == '>') return self.optionalDoubleToken(start, position, '=', .greater, .greater_equal);
         if (character == '&') return self.requiredDoubleToken(start, position, '&', .amp_amp, "expected '&&'");
         if (character == '|') return self.requiredDoubleToken(start, position, '|', .pipe_pipe, "expected '||'");
+        if (character == '+') return self.arithmeticToken(start, position, '+', .plus, .plus_plus, .plus_equal);
+        if (character == '-') return self.arithmeticToken(start, position, '-', .minus, .minus_minus, .minus_equal);
+        if (character == '*') return self.arithmeticToken(start, position, 0, .star, .star, .star_equal);
+        if (character == '/') return self.arithmeticToken(start, position, 0, .slash, .slash, .slash_equal);
 
         self.advance();
         return switch (character) {
-            '+' => self.token(.plus, start, position),
-            '-' => self.token(.minus, start, position),
-            '*' => self.token(.star, start, position),
-            '/' => self.token(.slash, start, position),
             ':' => self.token(.colon, start, position),
+            ',' => self.token(.comma, start, position),
+            '.' => self.token(.dot, start, position),
             '(' => self.token(.left_parenthesis, start, position),
             ')' => self.token(.right_parenthesis, start, position),
             '{' => self.token(.left_brace, start, position),
@@ -167,6 +181,29 @@ pub const Lexer = struct {
         return self.token(tag, start, position);
     }
 
+    fn arithmeticToken(
+        self: *Lexer,
+        start: usize,
+        position: Source.Position,
+        repeated: u8,
+        single_tag: TokenTag,
+        repeated_tag: TokenTag,
+        assignment_tag: TokenTag,
+    ) Token {
+        self.advance();
+        if (self.index < self.source.len) {
+            if (repeated != 0 and self.source[self.index] == repeated) {
+                self.advance();
+                return self.token(repeated_tag, start, position);
+            }
+            if (self.source[self.index] == '=') {
+                self.advance();
+                return self.token(assignment_tag, start, position);
+            }
+        }
+        return self.token(single_tag, start, position);
+    }
+
     fn skipIgnored(self: *Lexer) void {
         while (self.index < self.source.len) {
             switch (self.source[self.index]) {
@@ -214,6 +251,10 @@ fn keywordTag(lexeme: []const u8) ?TokenTag {
         .{ "if", TokenTag.keyword_if },
         .{ "else", TokenTag.keyword_else },
         .{ "while", TokenTag.keyword_while },
+        .{ "return", TokenTag.keyword_return },
+        .{ "struct", TokenTag.keyword_struct },
+        .{ "func", TokenTag.keyword_func },
+        .{ "self", TokenTag.keyword_self },
         .{ "true", TokenTag.keyword_true },
         .{ "false", TokenTag.keyword_false },
         .{ "int", TokenTag.keyword_int },
@@ -236,7 +277,7 @@ fn isIdentifierContinue(character: u8) bool {
 }
 
 test "recognize declaration keywords" {
-    var lexer = Lexer.init("let value: bool = true;");
+    var lexer = Lexer.init("let value:bool = true;");
     try std.testing.expectEqual(TokenTag.keyword_let, (try lexer.next()).tag);
     try std.testing.expectEqual(TokenTag.identifier, (try lexer.next()).tag);
     try std.testing.expectEqual(TokenTag.colon, (try lexer.next()).tag);
@@ -264,6 +305,19 @@ test "recognize comparison and logical operators" {
         .bang,
         .amp_amp,
         .pipe_pipe,
+    };
+    for (expected) |tag| try std.testing.expectEqual(tag, (try lexer.next()).tag);
+}
+
+test "recognize compound and update operators" {
+    var lexer = Lexer.init("++ -- += -= *= /=");
+    const expected = [_]TokenTag{
+        .plus_plus,
+        .minus_minus,
+        .plus_equal,
+        .minus_equal,
+        .star_equal,
+        .slash_equal,
     };
     for (expected) |tag| try std.testing.expectEqual(tag, (try lexer.next()).tag);
 }

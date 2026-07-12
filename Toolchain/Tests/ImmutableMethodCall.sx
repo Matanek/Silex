@@ -1,0 +1,16 @@
+struct Counter {
+    value:int
+
+    func increment() void {
+        self.apply()
+    }
+
+    func apply() void {
+        self.value = self.value + 1
+    }
+}
+
+func main() void {
+    let counter = Counter { value:2 }
+    counter.increment()
+}
