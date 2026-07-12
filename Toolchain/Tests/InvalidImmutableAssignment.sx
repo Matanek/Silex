@@ -1,4 +1,0 @@
-void main() {
-    let count = 5;
-    count = 6;
-}
