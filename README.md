@@ -83,17 +83,5 @@ l'indentation, le plan des fonctions et quelques snippets.
 Elle s'appuie sur la grammaire native `tree-sitter-silex` développée dans
 `Editors/Zed/TreeSitter/`.
 
-Pour tester une modification locale sans commit ni publication, préparer une
-extension de développement isolée :
-
-```sh
-./Editors/Zed/prepare-dev-extension.sh
-```
-
-Exécuter ensuite `zed: install dev extension` dans Zed et sélectionner le
-dossier `Editors/Zed/.dev/extension/` affiché par le script. Cette installation
-n'est nécessaire qu'une fois. Après une modification de la grammaire, relancer
-le script puis exécuter `zed: rebuild dev extension` pour reconstruire et
-recharger directement l'extension déjà enregistrée. Le manifeste public
-`Editors/Zed/extension.toml` continue de référencer uniquement une révision
-Tree-sitter distribuée et reproductible.
+Pour l'utiliser pendant le développement, exécuter `zed: install dev extension`
+dans Zed, puis sélectionner le dossier `Editors/Zed/`.
