@@ -1,3 +1,18 @@
 void main() {
-    print("Hello from Silex smoke test");
+    let a = 5;
+    let b: int = 10;
+    let message = "Hello from Silex smoke test";
+    var hit: bool = true;
+
+    print(message);
+
+    if (hit) {
+        print(a * b);
+    }
+
+    hit = false;
+    print(hit);
+    if (hit) {
+        print("This line must not be printed");
+    }
 }

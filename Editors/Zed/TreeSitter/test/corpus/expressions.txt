@@ -1,0 +1,78 @@
+==================
+Arithmetic precedence
+==================
+
+void main() {
+    print(1 + 2 * 3);
+}
+
+---
+
+(source_file
+  (function_definition
+    (void_type)
+    (identifier)
+    (parameter_list)
+    (block
+      (statement
+        (print_statement
+          (identifier)
+          (expression
+            (binary_expression
+              (expression
+                (integer_literal))
+              (expression
+                (binary_expression
+                  (expression
+                    (integer_literal))
+                  (expression
+                    (integer_literal)))))))))))
+
+===============================
+Variables and conditional block
+===============================
+
+void main() {
+    let a = 5;
+    var hit: bool = true;
+    if (hit) {
+        print(a);
+    }
+    hit = false;
+}
+
+---
+
+(source_file
+  (function_definition
+    (void_type)
+    (identifier)
+    (parameter_list)
+    (block
+      (statement
+        (variable_declaration
+          (identifier)
+          (expression
+            (integer_literal))))
+      (statement
+        (variable_declaration
+          (identifier)
+          (type_annotation
+            (builtin_type))
+          (expression
+            (boolean_literal))))
+      (statement
+        (if_statement
+          (expression
+            (identifier))
+          (block
+            (statement
+              (print_statement
+                (identifier)
+                (expression
+                  (identifier)))))))
+      (statement
+        (assignment_statement
+          (identifier)
+          (expression
+            (boolean_literal)))))))

@@ -8,13 +8,27 @@ d'implémentation du C++ généré.
 
 ## État du prototype
 
-Le premier noyau accepte un point d'entrée et l'affichage d'une chaîne :
+Le premier noyau accepte un point d'entrée, les variables locales, les
+booléens, les conditions et les expressions arithmétiques entières :
 
 ```sx
 void main() {
+    let a = 5;
+    let b: int = 10;
+    var hit: bool = true;
+
     print("Hello World");
+
+    if (hit) {
+        print(a * b);
+    }
 }
 ```
+
+`let` déclare une valeur immuable et `var` une variable réaffectable. Le type est
+inféré lorsque l'annotation `: type` est absente. Les opérateurs disponibles
+sont `+`, `-`, `*` et `/`, avec leur précédence usuelle et des parenthèses
+explicites. Une condition `if` exige une expression booléenne.
 
 La commande `compile` produit un exécutable natif. La commande `run` compile et
 exécute le programme :
@@ -36,6 +50,7 @@ Silex/
 │   └── Zed/           extension Zed et grammaire Tree-sitter
 └── Toolchain/         projet Zig autonome
     ├── Sources/       implémentation de la commande silex
+    ├── Tests/         programmes invalides et diagnostics attendus
     └── Smokes/        programmes .sx compilés de bout en bout
 ```
 
@@ -68,5 +83,17 @@ l'indentation, le plan des fonctions et quelques snippets.
 Elle s'appuie sur la grammaire native `tree-sitter-silex` développée dans
 `Editors/Zed/TreeSitter/`.
 
-Pour l'utiliser pendant le développement, exécuter `zed: install dev extension`
-dans Zed, puis sélectionner le dossier `Editors/Zed/`.
+Pour tester une modification locale sans commit ni publication, préparer une
+extension de développement isolée :
+
+```sh
+./Editors/Zed/prepare-dev-extension.sh
+```
+
+Exécuter ensuite `zed: install dev extension` dans Zed et sélectionner le
+dossier `Editors/Zed/.dev/extension/` affiché par le script. Cette installation
+n'est nécessaire qu'une fois. Après une modification de la grammaire, relancer
+le script puis exécuter `zed: rebuild dev extension` pour reconstruire et
+recharger directement l'extension déjà enregistrée. Le manifeste public
+`Editors/Zed/extension.toml` continue de référencer uniquement une révision
+Tree-sitter distribuée et reproductible.
