@@ -1,5 +1,7 @@
 const std = @import("std");
 const Compiler = @import("Compiler.zig");
+const TargetModule = @import("Target.zig");
+const NativeDependency = @import("NativeDependency.zig");
 
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
@@ -21,7 +23,7 @@ fn runCli(init: std.process.Init) !u8 {
     }
 
     if (args.len == 2 and std.mem.eql(u8, args[1], "--version")) {
-        try Io.File.stdout().writeStreamingAll(init.io, "Silex 0.5.0\n");
+        try Io.File.stdout().writeStreamingAll(init.io, "Silex 0.6.0\n");
         return 0;
     }
 
@@ -41,6 +43,8 @@ fn compileCommand(allocator: Allocator, io: Io, args: []const []const u8) !u8 {
     const source_path = args[0];
     var output_path: ?[]const u8 = null;
     var emit_cpp = false;
+    var target = TargetModule.Target.native();
+    var native_dependencies: std.ArrayList(NativeDependency.Dependency) = .empty;
     var index: usize = 1;
     while (index < args.len) : (index += 1) {
         if (std.mem.eql(u8, args[index], "--emit-cpp")) {
@@ -52,13 +56,34 @@ fn compileCommand(allocator: Allocator, io: Io, args: []const []const u8) !u8 {
                 return 1;
             }
             output_path = args[index];
+        } else if (std.mem.eql(u8, args[index], "--target")) {
+            index += 1;
+            if (index == args.len) {
+                std.debug.print("silex: expected a target after '--target'\n", .{});
+                return 1;
+            }
+            target = TargetModule.Target.parse(allocator, io, args[index]) catch |err| {
+                std.debug.print("silex: target '{s}' is unavailable: {t}\n", .{ args[index], err });
+                return 1;
+            };
+        } else if (std.mem.eql(u8, args[index], "--native")) {
+            index += 1;
+            if (index == args.len) {
+                std.debug.print("silex: expected a dependency manifest after '--native'\n", .{});
+                return 1;
+            }
+            const dependency = NativeDependency.load(allocator, io, args[index]) catch |err| {
+                std.debug.print("silex: unable to load native dependency '{s}': {t}\n", .{ args[index], err });
+                return 1;
+            };
+            try native_dependencies.append(allocator, dependency);
         } else {
             std.debug.print("silex: unknown option '{s}'\n", .{args[index]});
             return 1;
         }
     }
 
-    const compilation = try Compiler.compile(allocator, io, source_path);
+    const compilation = try Compiler.compile(allocator, io, source_path, target, native_dependencies.items);
     const output = output_path orelse try Compiler.defaultOutputPath(
         allocator,
         compilation.project_path,
@@ -81,12 +106,37 @@ fn compileCommand(allocator: Allocator, io: Io, args: []const []const u8) !u8 {
 }
 
 fn runCommand(allocator: Allocator, io: Io, args: []const []const u8) !u8 {
-    if (args.len != 1) {
-        std.debug.print("silex: run expects exactly one source file\n\n{s}", .{usage});
+    if (args.len == 0) {
+        std.debug.print("silex: run expects a source file\n\n{s}", .{usage});
         return 1;
     }
 
-    const compilation = try Compiler.compile(allocator, io, args[0]);
+    var native_dependencies: std.ArrayList(NativeDependency.Dependency) = .empty;
+    var index: usize = 1;
+    while (index < args.len) : (index += 1) {
+        if (!std.mem.eql(u8, args[index], "--native")) {
+            std.debug.print("silex: unknown option '{s}'\n", .{args[index]});
+            return 1;
+        }
+        index += 1;
+        if (index == args.len) {
+            std.debug.print("silex: expected a dependency manifest after '--native'\n", .{});
+            return 1;
+        }
+        const dependency = NativeDependency.load(allocator, io, args[index]) catch |err| {
+            std.debug.print("silex: unable to load native dependency '{s}': {t}\n", .{ args[index], err });
+            return 1;
+        };
+        try native_dependencies.append(allocator, dependency);
+    }
+
+    const compilation = try Compiler.compile(
+        allocator,
+        io,
+        args[0],
+        TargetModule.Target.native(),
+        native_dependencies.items,
+    );
     const term = try Compiler.runProcess(io, &.{compilation.executable_path});
     return Compiler.exitCode(term);
 }
@@ -98,7 +148,8 @@ fn isHelp(argument: []const u8) bool {
 const usage =
     \\Usage:
     \\  silex compile <source.sx> [-o <executable>] [--emit-cpp]
-    \\  silex run <source.sx>
+    \\      [--target <arch-os-abi>] [--native <dependency.json>]
+    \\  silex run <source.sx> [--native <dependency.json>]
     \\  silex --help
     \\  silex --version
     \\

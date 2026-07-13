@@ -4,11 +4,15 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    const build_options = b.addOptions();
+    build_options.addOption([]const u8, "developer_zig", b.graph.zig_exe);
+
     const module = b.createModule(.{
         .root_source_file = b.path("Sources/Main.zig"),
         .target = target,
         .optimize = optimize,
     });
+    module.addOptions("build_options", build_options);
 
     const executable = b.addExecutable(.{
         .name = "silex",
@@ -175,6 +179,54 @@ pub fn build(b: *std.Build) void {
         "Tests/InvalidSignedUnsignedArithmetic.sx:4:18: error: arithmetic operator requires compatible numeric operands, found 'int8' and 'uint8'\n",
     );
 
+    const invalid_target_command = b.addRunArtifact(executable);
+    invalid_target_command.addArgs(&.{ "compile", "Smokes/Main.sx", "--target", "definitely-not-a-target" });
+    invalid_target_command.expectExitCode(1);
+    invalid_target_command.expectStdErrEqual(
+        "silex: target 'definitely-not-a-target' is unavailable: UnknownArchitecture\n",
+    );
+
+    const unavailable_cpp_target_command = b.addRunArtifact(executable);
+    unavailable_cpp_target_command.addArgs(&.{
+        "compile",
+        "Smokes/Main.sx",
+        "--target",
+        "x86_64-freestanding-none",
+    });
+    unavailable_cpp_target_command.expectExitCode(1);
+    unavailable_cpp_target_command.expectStdErrEqual(
+        "silex: target 'x86_64-freestanding-none' is unavailable: Silex programs require a hosted operating system with a C++ standard library\n",
+    );
+
+    const backend_discovered_target_failure_command = b.addRunArtifact(executable);
+    backend_discovered_target_failure_command.addArgs(&.{
+        "compile",
+        "Smokes/Main.sx",
+        "--native",
+        "Tests/NativeBackend/dependency.json",
+        "--target",
+        "x86_64-linux-musl",
+    });
+    backend_discovered_target_failure_command.expectExitCode(1);
+    backend_discovered_target_failure_command.expectStdErrMatch(
+        "silex: native compilation failed for target 'x86_64-linux-musl'; target support, SDKs, or native sources may be unavailable or incomplete\n",
+    );
+    backend_discovered_target_failure_command.expectStdErrMatch("silex: backend details: .silex/cache/x86_64-linux-musl/");
+
+    const unsupported_native_target_command = b.addRunArtifact(executable);
+    unsupported_native_target_command.addArgs(&.{
+        "compile",
+        "Smokes/Native/Main.sx",
+        "--native",
+        "Smokes/Native/dependency.json",
+        "--target",
+        "x86_64-windows-gnu",
+    });
+    unsupported_native_target_command.expectExitCode(1);
+    unsupported_native_target_command.expectStdErrEqual(
+        "silex: native dependency 'native-smoke' does not support target 'x86_64-windows-gnu'\n",
+    );
+
     const test_step = b.step("test", "Run the toolchain tests");
     test_step.dependOn(&test_command.step);
     test_step.dependOn(&invalid_command.step);
@@ -198,6 +250,10 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&invalid_numeric_negation_command.step);
     test_step.dependOn(&invalid_integer_literal_range_command.step);
     test_step.dependOn(&invalid_signed_unsigned_arithmetic_command.step);
+    test_step.dependOn(&invalid_target_command.step);
+    test_step.dependOn(&unavailable_cpp_target_command.step);
+    test_step.dependOn(&backend_discovered_target_failure_command.step);
+    test_step.dependOn(&unsupported_native_target_command.step);
 
     const smoke_command = b.addRunArtifact(executable);
     smoke_command.addArgs(&.{ "run", "Smokes/Main.sx" });
@@ -232,6 +288,15 @@ pub fn build(b: *std.Build) void {
     integer_overflow_command.expectExitCode(1);
     integer_overflow_command.expectStdErrEqual("silex: runtime error: integer overflow in addition\n");
 
+    const native_source_command = b.addRunArtifact(executable);
+    native_source_command.addArgs(&.{
+        "run",
+        "Smokes/Native/Main.sx",
+        "--native",
+        "Smokes/Native/dependency.json",
+    });
+    native_source_command.expectStdOutEqual("Native wrapper initialized\nSilex with native source\n");
+
     const smoke_step = b.step("smoke", "Compile and run the smoke program");
     smoke_step.dependOn(&smoke_command.step);
     smoke_step.dependOn(&boolean_condition_command.step);
@@ -241,4 +306,89 @@ pub fn build(b: *std.Build) void {
     smoke_step.dependOn(&floats_command.step);
     smoke_step.dependOn(&numeric_types_command.step);
     smoke_step.dependOn(&integer_overflow_command.step);
+    smoke_step.dependOn(&native_source_command.step);
+
+    const cross_smoke_command = b.addRunArtifact(executable);
+    cross_smoke_command.addArgs(&.{
+        "compile",
+        "Smokes/Main.sx",
+        "--target",
+        "x86_64-linux-musl",
+        "-o",
+        ".silex/cross-smoke/Main-x86_64-linux",
+    });
+
+    const cross_smoke_step = b.step("cross-smoke", "Cross-compile the smoke program for x86_64 Linux");
+    cross_smoke_step.dependOn(&cross_smoke_command.step);
+
+    const cross_native_smoke_command = b.addRunArtifact(executable);
+    cross_native_smoke_command.addArgs(&.{
+        "compile",
+        "Smokes/Native/Main.sx",
+        "--native",
+        "Smokes/Native/dependency.json",
+        "--target",
+        "x86_64-linux-musl",
+        "-o",
+        ".silex/cross-native-smoke/Main-x86_64-linux",
+    });
+
+    const cross_native_smoke_step = b.step(
+        "cross-native-smoke",
+        "Cross-compile the native source smoke program for x86_64 Linux",
+    );
+    cross_native_smoke_step.dependOn(&cross_native_smoke_command.step);
+
+    const distribution_options = b.addOptions();
+    distribution_options.addOption([]const u8, "developer_zig", "");
+    const distribution_module = b.createModule(.{
+        .root_source_file = b.path("Sources/Main.zig"),
+        .target = b.graph.host,
+        .optimize = .ReleaseSafe,
+    });
+    distribution_module.addOptions("build_options", distribution_options);
+
+    const distribution_executable = b.addExecutable(.{
+        .name = "silex",
+        .root_module = distribution_module,
+    });
+    const host = b.graph.host.result;
+    const distribution_name = b.fmt("silex-0.6.0-{s}-{s}", .{
+        @tagName(host.cpu.arch),
+        @tagName(host.os.tag),
+    });
+    const distribution_root = b.fmt("dist/{s}", .{distribution_name});
+    const silex_name = if (host.os.tag == .windows) "silex.exe" else "silex";
+    const zig_name = if (host.os.tag == .windows) "zig.exe" else "zig";
+
+    const install_silex = b.addInstallFile(
+        distribution_executable.getEmittedBin(),
+        b.fmt("{s}/bin/{s}", .{ distribution_root, silex_name }),
+    );
+    const install_zig = b.addInstallFile(
+        .{ .cwd_relative = b.graph.zig_exe },
+        b.fmt("{s}/toolchain/zig/{s}", .{ distribution_root, zig_name }),
+    );
+    const install_zig_lib = b.addInstallDirectory(.{
+        .source_dir = .{ .cwd_relative = b.graph.zig_lib_directory.path.? },
+        .install_dir = .prefix,
+        .install_subdir = b.fmt("{s}/toolchain/zig/lib", .{distribution_root}),
+    });
+
+    const distribution_step = b.step("dist", "Build a self-contained distribution for this host");
+    distribution_step.dependOn(&install_silex.step);
+    distribution_step.dependOn(&install_zig.step);
+    distribution_step.dependOn(&install_zig_lib.step);
+
+    const distribution_check_files = b.addWriteFiles();
+    _ = distribution_check_files.addCopyFile(b.path("Smokes/Main.sx"), "Main.sx");
+    const installed_silex = b.getInstallPath(.prefix, b.fmt("{s}/bin/{s}", .{ distribution_root, silex_name }));
+    const verify_distribution = b.addSystemCommand(&.{ installed_silex, "run", "Main.sx" });
+    verify_distribution.setCwd(distribution_check_files.getDirectory());
+    verify_distribution.setEnvironmentVariable("PATH", "");
+    verify_distribution.expectStdOutEqual("Hello from Silex smoke test\n50\nlogic works\ntrue\nfalse\n2\n1\n");
+    verify_distribution.step.dependOn(distribution_step);
+
+    const distribution_check_step = b.step("dist-check", "Build and verify the self-contained host distribution");
+    distribution_check_step.dependOn(&verify_distribution.step);
 }

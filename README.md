@@ -1,7 +1,7 @@
 # Silex
 
 Silex est un langage de programmation compilé. Son premier backend génère du
-C++, puis invoque la toolchain native pour produire un exécutable.
+C++, puis utilise une version maîtrisée de Zig pour produire un exécutable.
 
 Le projet recherche une syntaxe concise et familière sans exposer les détails
 d'implémentation du C++ généré.
@@ -89,6 +89,29 @@ silex compile path/to/Main.sx
 silex run path/to/Main.sx
 ```
 
+La compilation est native par défaut. Une cible Zig explicite permet de
+produire un autre système, une autre architecture ou une autre ABI :
+
+```sh
+silex compile path/to/Main.sx --target x86_64-linux-musl
+```
+
+Une source ou un wrapper C/C++ natif peut être ajouté avec `--native`. Le
+manifeste JSON nomme la dépendance, ses sources relatives et les triplets
+qu'elle prend explicitement en charge :
+
+```json
+{
+  "name": "example",
+  "sources": ["Wrapper.cpp"],
+  "targets": ["aarch64-macos-none", "x86_64-linux-musl"]
+}
+```
+
+```sh
+silex compile path/to/Main.sx --native path/to/dependency.json
+```
+
 Les artefacts sont regroupés dans `.silex/` sous le dossier depuis lequel la
 commande est lancée. Un programme inchangé réutilise l'exécutable présent dans
 le cache de compilation.
@@ -114,8 +137,27 @@ cd Toolchain
 zig build
 ```
 
-Le binaire est produit dans `Toolchain/zig-out/bin/`. Il peut être invoqué avec
-son chemin ou installé dans un dossier présent dans le `PATH` de la plateforme.
+Le binaire de développement est produit dans `Toolchain/zig-out/bin/`. Il
+utilise exactement le Zig qui l'a construit. Une distribution destinée aux
+utilisateurs se fabrique et se vérifie avec :
+
+```sh
+zig build dist-check
+```
+
+Elle est placée dans `Toolchain/zig-out/dist/silex-<version>-<arch>-<os>/` et
+contient `bin/silex` ainsi que le binaire et la bibliothèque Zig sous
+`toolchain/zig/`. Son binaire Silex n'a aucun repli vers le Zig du poste de
+fabrication. Chaque plateforme hôte doit donc fabriquer sa propre archive à
+partir de cette arborescence.
+
+Zig ne remplace pas les SDK, licences ou droits de distribution imposés par
+les systèmes ciblés. Une cible ou une dépendance native peut donc rester
+indisponible malgré la présence de la toolchain embarquée ; Silex doit alors la
+diagnostiquer explicitement. Lorsqu'un échec n'est découvert que pendant la
+compilation native, le diagnostic Silex est affiché en premier et les détails
+du backend sont conservés dans `Backend.log`, au sein de l'entrée de cache de
+la cible.
 
 Les vérifications sont disponibles avec :
 
@@ -123,7 +165,14 @@ Les vérifications sont disponibles avec :
 cd Toolchain
 zig build test
 zig build smoke
+zig build cross-smoke
+zig build cross-native-smoke
 ```
+
+Le workflow `Distribution matrix` exécute ces vérifications et `dist-check`
+sur Linux x86-64, macOS ARM64 et Windows x86-64 avec Zig 0.16.0. Chaque job
+conserve pendant sept jours l'arborescence autonome produite. Cette matrice
+valide les plateformes hôtes de distribution ; elle ne publie aucune release.
 
 ## Zed
 

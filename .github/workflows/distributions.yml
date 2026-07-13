@@ -1,0 +1,66 @@
+name: Distribution matrix
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  distribution:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x86-64
+            runner: ubuntu-24.04
+            artifact: silex-linux-x86_64
+          - name: macOS ARM64
+            runner: macos-15
+            artifact: silex-macos-aarch64
+          - name: Windows x86-64
+            runner: windows-2025
+            artifact: silex-windows-x86_64
+
+    defaults:
+      run:
+        working-directory: Toolchain
+
+    steps:
+      - name: Check out Silex
+        uses: actions/checkout@v6
+
+      - name: Install Zig 0.16.0
+        uses: mlugg/setup-zig@v2.2.1
+        with:
+          version: 0.16.0
+
+      - name: Run toolchain tests
+        run: zig build test
+
+      - name: Run native smokes
+        run: zig build smoke
+
+      - name: Run cross-compilation smokes
+        run: zig build cross-smoke
+
+      - name: Run native-source cross-compilation smoke
+        run: zig build cross-native-smoke
+
+      - name: Build and verify host distribution
+        run: zig build dist-check
+
+      - name: Preserve host distribution
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact }}
+          path: Toolchain/zig-out/dist/silex-*
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0

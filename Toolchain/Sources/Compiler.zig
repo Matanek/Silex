@@ -1,8 +1,11 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const build_options = @import("build_options");
 const CppGenerator = @import("CppGenerator.zig");
 const ParserModule = @import("Parser.zig");
 const Semantic = @import("Semantic.zig");
+const TargetModule = @import("Target.zig");
+const NativeDependency = @import("NativeDependency.zig");
 
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
@@ -13,9 +16,16 @@ pub const Compilation = struct {
     project_path: []const u8,
     program_name: []const u8,
     cache_hit: bool,
+    target: TargetModule.Target,
 };
 
-pub fn compile(allocator: Allocator, io: Io, source_path: []const u8) !Compilation {
+pub fn compile(
+    allocator: Allocator,
+    io: Io,
+    source_path: []const u8,
+    target: TargetModule.Target,
+    native_dependencies: []const NativeDependency.Dependency,
+) !Compilation {
     if (!std.mem.endsWith(u8, source_path, ".sx")) {
         std.debug.print("silex: source file must use the .sx extension\n", .{});
         return error.Reported;
@@ -42,18 +52,65 @@ pub fn compile(allocator: Allocator, io: Io, source_path: []const u8) !Compilati
     const project_path = "";
     const source_name = std.fs.path.basename(source_path);
     const program_name = source_name[0 .. source_name.len - 3];
-    const cache_key = cacheKey(cpp);
-    const cache_dir = try std.fs.path.join(allocator, &.{ project_path, ".silex", "cache", &cache_key });
+    const target_name = try target.cacheName(allocator);
+    if (target.cppBackendUnavailableReason()) |reason| {
+        std.debug.print("silex: target '{s}' is unavailable: {s}\n", .{ target_name, reason });
+        return error.Reported;
+    }
+    for (native_dependencies) |dependency| {
+        if (!try dependency.supports(allocator, target)) {
+            std.debug.print("silex: native dependency '{s}' does not support target '{s}'\n", .{
+                dependency.name,
+                target_name,
+            });
+            return error.Reported;
+        }
+    }
+    const cache_key = try cacheKey(allocator, io, cpp, target, native_dependencies);
+    const cache_dir = try std.fs.path.join(allocator, &.{ project_path, ".silex", "cache", target_name, &cache_key });
     try Io.Dir.cwd().createDirPath(io, cache_dir);
 
     const cpp_path = try std.fs.path.join(allocator, &.{ cache_dir, "Generated.cpp" });
     const executable_path = try std.fs.path.join(allocator, &.{ cache_dir, program_name });
+    const temporary_name = try std.fmt.allocPrint(allocator, "{s}.tmp", .{program_name});
+    const temporary_executable_path = try std.fs.path.join(allocator, &.{ cache_dir, temporary_name });
     const cache_hit = try fileExists(io, executable_path);
 
     if (!cache_hit) {
         try Io.Dir.cwd().writeFile(io, .{ .sub_path = cpp_path, .data = cpp });
-        const term = try runProcess(io, &.{ "c++", "-std=c++23", cpp_path, "-o", executable_path });
-        if (exitCode(term) != 0) return error.NativeCompilationFailed;
+        const zig_path = resolveZig(allocator, io) catch {
+            std.debug.print(
+                "silex: bundled Zig toolchain was not found; reinstall Silex or rebuild it for development\n",
+                .{},
+            );
+            return error.Reported;
+        };
+        var arguments: std.ArrayList([]const u8) = .empty;
+        try arguments.appendSlice(allocator, &.{ zig_path, "c++" });
+        if (target.zig_triple) |triple| try arguments.appendSlice(allocator, &.{ "-target", triple });
+        try arguments.appendSlice(allocator, &.{ "-std=c++23", "-Wno-nullability-completeness", cpp_path });
+        for (native_dependencies) |dependency| try arguments.appendSlice(allocator, dependency.sources);
+        try arguments.appendSlice(allocator, &.{ "-o", temporary_executable_path });
+
+        const result = try std.process.run(allocator, io, .{
+            .argv = arguments.items,
+            .stdout_limit = .limited(16 * 1024 * 1024),
+            .stderr_limit = .limited(16 * 1024 * 1024),
+        });
+        if (exitCode(result.term) != 0) {
+            Io.Dir.cwd().deleteFile(io, temporary_executable_path) catch {};
+            const backend_log_path = try std.fs.path.join(allocator, &.{ cache_dir, "Backend.log" });
+            try Io.Dir.cwd().writeFile(io, .{ .sub_path = backend_log_path, .data = result.stderr });
+            std.debug.print(
+                "silex: native compilation failed for target '{s}'; target support, SDKs, or native sources may be unavailable or incomplete\n",
+                .{target_name},
+            );
+            std.debug.print("silex: backend details: {s}\n", .{backend_log_path});
+            return error.Reported;
+        }
+        if (result.stdout.len > 0) try Io.File.stdout().writeStreamingAll(io, result.stdout);
+        if (result.stderr.len > 0) try Io.File.stderr().writeStreamingAll(io, result.stderr);
+        try Io.Dir.cwd().rename(temporary_executable_path, .cwd(), executable_path, io);
     }
 
     return .{
@@ -62,6 +119,7 @@ pub fn compile(allocator: Allocator, io: Io, source_path: []const u8) !Compilati
         .project_path = project_path,
         .program_name = program_name,
         .cache_hit = cache_hit,
+        .target = target,
     };
 }
 
@@ -108,18 +166,59 @@ fn report(source_path: []const u8, diagnostic: @import("Source.zig").Diagnostic)
     return error.Reported;
 }
 
-fn cacheKey(cpp: []const u8) [64]u8 {
+fn cacheKey(
+    allocator: Allocator,
+    io: Io,
+    cpp: []const u8,
+    target: TargetModule.Target,
+    native_dependencies: []const NativeDependency.Dependency,
+) ![64]u8 {
     var hasher = std.crypto.hash.sha2.Sha256.init(.{});
-    hasher.update("silex-cache-v7\x00");
-    hasher.update(@tagName(builtin.target.cpu.arch));
+    hasher.update("silex-cache-v10\x00");
+    hasher.update(@tagName(target.cpu_arch));
     hasher.update("\x00");
-    hasher.update(@tagName(builtin.target.os.tag));
+    hasher.update(@tagName(target.os_tag));
+    hasher.update("\x00");
+    hasher.update(@tagName(target.abi));
+    if (target.zig_triple) |triple| {
+        hasher.update("\x00");
+        hasher.update(triple);
+    }
     hasher.update("\x00");
     hasher.update(cpp);
+    for (native_dependencies) |dependency| {
+        hasher.update("\x00");
+        hasher.update(dependency.name);
+        for (dependency.sources) |source_path| {
+            const source = try Io.Dir.cwd().readFileAlloc(io, source_path, allocator, .limited(16 * 1024 * 1024));
+            hasher.update("\x00");
+            hasher.update(source_path);
+            hasher.update("\x00");
+            hasher.update(source);
+        }
+    }
 
     var digest: [std.crypto.hash.sha2.Sha256.digest_length]u8 = undefined;
     hasher.final(&digest);
     return std.fmt.bytesToHex(digest, .lower);
+}
+
+fn resolveZig(allocator: Allocator, io: Io) ![]const u8 {
+    const executable_dir = try std.process.executableDirPathAlloc(io, allocator);
+    const zig_name = if (builtin.os.tag == .windows) "zig.exe" else "zig";
+    const bundled_path = try std.fs.path.resolve(allocator, &.{
+        executable_dir,
+        "..",
+        "toolchain",
+        "zig",
+        zig_name,
+    });
+    if (try fileExists(io, bundled_path)) return bundled_path;
+
+    if (build_options.developer_zig.len > 0 and try fileExists(io, build_options.developer_zig)) {
+        return build_options.developer_zig;
+    }
+    return error.ZigToolchainNotFound;
 }
 
 fn fileExists(io: Io, path: []const u8) !bool {
@@ -131,9 +230,10 @@ fn fileExists(io: Io, path: []const u8) !bool {
 }
 
 test "cache key follows generated content" {
-    const first = cacheKey("first");
-    const repeated = cacheKey("first");
-    const changed = cacheKey("second");
+    const target = TargetModule.Target.native();
+    const first = try cacheKey(std.testing.allocator, std.testing.io, "first", target, &.{});
+    const repeated = try cacheKey(std.testing.allocator, std.testing.io, "first", target, &.{});
+    const changed = try cacheKey(std.testing.allocator, std.testing.io, "second", target, &.{});
     try std.testing.expectEqualSlices(u8, &first, &repeated);
     try std.testing.expect(!std.mem.eql(u8, &first, &changed));
 }
