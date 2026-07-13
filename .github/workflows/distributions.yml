@@ -45,7 +45,18 @@ jobs:
         run: zig build test
 
       - name: Run native smokes
-        run: zig build smoke
+        shell: bash
+        run: zig build smoke 2>&1 | tee native-smoke.log
+
+      - name: Report native smoke failure
+        if: failure() && hashFiles('Toolchain/native-smoke.log') != ''
+        shell: bash
+        run: |
+          details="$(tail -n 100 native-smoke.log)"
+          details="${details//'%'/'%25'}"
+          details="${details//$'\r'/'%0D'}"
+          details="${details//$'\n'/'%0A'}"
+          echo "::error title=Native smoke failure::$details"
 
       - name: Run cross-compilation smokes
         run: zig build cross-smoke
