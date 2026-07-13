@@ -22,7 +22,7 @@ pub fn generate(allocator: Allocator, program: Semantic.Program) ![]u8 {
         \\
         \\[[noreturn]] inline void integerRuntimeError(const char* message) {
         \\    std::cerr << "silex: runtime error: " << message << '\n';
-        \\    std::abort();
+        \\    std::exit(1);
         \\}
         \\
         \\template <typename T> T checkedAdd(T left, T right) {
