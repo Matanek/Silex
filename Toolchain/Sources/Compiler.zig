@@ -67,7 +67,7 @@ pub fn compile(
         else => |other| return other,
     };
 
-    const cpp = try CppGenerator.generate(allocator, program);
+    const cpp = try CppGenerator.generateWithSources(allocator, program, source_paths);
     const project_path = project.root_path;
     const program_name = project.program_name;
     const target_name = try target.cacheName(allocator);

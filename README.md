@@ -71,7 +71,8 @@ désigne `float32`. Les
 élargissements compatibles sont implicites, mais les mélanges signé/non signé
 et les conversions flottant vers entier sont refusés. Les opérations entières
 arrêtent le programme sur débordement au lieu de boucler ou de saturer
-silencieusement.
+silencieusement. Le diagnostic d'exécution indique la source, l'opération, son
+type et les valeurs qui ont provoqué le dépassement.
 
 Les instructions se terminent naturellement à la fin de leur ligne ou devant
 `}`. Le point-virgule reste disponible pour placer plusieurs instructions sur

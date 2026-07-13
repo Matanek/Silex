@@ -3,13 +3,23 @@ const builtin = @import("builtin");
 const build_options = @import("build_options");
 const Ast = @import("Ast.zig");
 const Semantic = @import("Semantic.zig");
+const Source = @import("Source.zig");
 
 const Allocator = std.mem.Allocator;
 const GenerateError = Allocator.Error;
 
 pub fn generate(allocator: Allocator, program: Semantic.Program) ![]u8 {
+    return generateWithSources(allocator, program, &.{"<memory>"});
+}
+
+pub fn generateWithSources(
+    allocator: Allocator,
+    program: Semantic.Program,
+    source_paths: []const []const u8,
+) ![]u8 {
     var output: std.ArrayList(u8) = .empty;
     try output.appendSlice(allocator,
+        \\#include <cstddef>
         \\#include <cstdint>
         \\#include <cstdlib>
         \\#include <iostream>
@@ -22,49 +32,106 @@ pub fn generate(allocator: Allocator, program: Semantic.Program) ![]u8 {
         \\
         \\namespace SilexGenerated {
         \\
-        \\[[noreturn, gnu::cold, gnu::noinline]] void integerRuntimeError(const char* message) {
-        \\    std::cerr << "silex: runtime error: " << message << '\n';
+        \\// -----------------------------------------------------------------------------
+        \\
+    );
+    try generateSourcePaths(allocator, &output, source_paths);
+    try output.appendSlice(allocator,
+        \\
+        \\struct SilexSourceLocation {
+        \\    std::size_t file;
+        \\    std::size_t line;
+        \\    std::size_t column;
+        \\};
+        \\
+        \\const char* silexSourcePath(SilexSourceLocation location) {
+        \\    return location.file < k_silexSourcePathCount ? k_silexSourcePaths[location.file] : "<unknown>";
+        \\}
+        \\
+        \\template <typename T> void printIntegerValue(T value) {
+        \\    if constexpr (sizeof(T) == 1) {
+        \\        std::cerr << static_cast<int>(value);
+        \\    } else {
+        \\        std::cerr << value;
+        \\    }
+        \\}
+        \\
+        \\template <typename T>
+        \\[[noreturn, gnu::cold, gnu::noinline]] void binaryIntegerRuntimeError(
+        \\    SilexSourceLocation location,
+        \\    const char* typeName,
+        \\    const char* operation,
+        \\    const char* failure,
+        \\    T left,
+        \\    const char* symbol,
+        \\    T right
+        \\) {
+        \\    std::cerr << silexSourcePath(location) << ':' << location.line << ':' << location.column
+        \\              << ": runtime error: " << typeName << ' ' << operation << ' ' << failure << ": ";
+        \\    printIntegerValue(left);
+        \\    std::cerr << ' ' << symbol << ' ';
+        \\    printIntegerValue(right);
+        \\    std::cerr << '\n';
         \\    std::exit(1);
         \\}
         \\
-        \\template <typename T> inline T checkedAdd(T left, T right) {
+        \\template <typename T>
+        \\[[noreturn, gnu::cold, gnu::noinline]] void unaryIntegerRuntimeError(
+        \\    SilexSourceLocation location,
+        \\    const char* typeName,
+        \\    const char* failure,
+        \\    T value
+        \\) {
+        \\    std::cerr << silexSourcePath(location) << ':' << location.line << ':' << location.column
+        \\              << ": runtime error: " << typeName << " negation " << failure << ": -(";
+        \\    printIntegerValue(value);
+        \\    std::cerr << ")\n";
+        \\    std::exit(1);
+        \\}
+        \\
+        \\template <typename T> inline T checkedAdd(T left, T right, SilexSourceLocation location, const char* typeName) {
         \\    T result;
         \\    if (__builtin_add_overflow(left, right, &result)) [[unlikely]] {
-        \\        integerRuntimeError("integer overflow in addition");
+        \\        const char* failure = std::is_unsigned_v<T> || right >= 0 ? "overflow" : "underflow";
+        \\        binaryIntegerRuntimeError(location, typeName, "addition", failure, left, "+", right);
         \\    }
         \\    return result;
         \\}
         \\
-        \\template <typename T> inline T checkedSubtract(T left, T right) {
+        \\template <typename T> inline T checkedSubtract(T left, T right, SilexSourceLocation location, const char* typeName) {
         \\    T result;
         \\    if (__builtin_sub_overflow(left, right, &result)) [[unlikely]] {
-        \\        integerRuntimeError("integer overflow in subtraction");
+        \\        const char* failure = std::is_unsigned_v<T> || right >= 0 ? "underflow" : "overflow";
+        \\        binaryIntegerRuntimeError(location, typeName, "subtraction", failure, left, "-", right);
         \\    }
         \\    return result;
         \\}
         \\
-        \\template <typename T> inline T checkedMultiply(T left, T right) {
+        \\template <typename T> inline T checkedMultiply(T left, T right, SilexSourceLocation location, const char* typeName) {
         \\    T result;
         \\    if (__builtin_mul_overflow(left, right, &result)) [[unlikely]] {
-        \\        integerRuntimeError("integer overflow in multiplication");
+        \\        const char* failure = std::is_unsigned_v<T> || (left < 0) == (right < 0) ? "overflow" : "underflow";
+        \\        binaryIntegerRuntimeError(location, typeName, "multiplication", failure, left, "*", right);
         \\    }
         \\    return result;
         \\}
         \\
-        \\template <typename T> inline T checkedDivide(T left, T right) {
-        \\    if (right == 0) [[unlikely]] integerRuntimeError("division by zero");
+        \\template <typename T> inline T checkedDivide(T left, T right, SilexSourceLocation location, const char* typeName) {
+        \\    if (right == 0) [[unlikely]] {
+        \\        binaryIntegerRuntimeError(location, typeName, "division", "by zero", left, "/", right);
+        \\    }
         \\    if constexpr (std::is_signed_v<T>) {
         \\        if (left == std::numeric_limits<T>::min() && right == T{-1}) [[unlikely]] {
-        \\            integerRuntimeError("integer overflow in division");
+        \\            binaryIntegerRuntimeError(location, typeName, "division", "overflow", left, "/", right);
         \\        }
         \\    }
         \\    return left / right;
         \\}
         \\
-        \\template <typename T> inline T checkedNegate(T value) {
+        \\template <typename T> inline T checkedNegate(T value, SilexSourceLocation location, const char* typeName) {
         \\    T result;
         \\    if (__builtin_sub_overflow(T{0}, value, &result)) [[unlikely]] {
-        \\        integerRuntimeError("integer overflow in negation");
+        \\        unaryIntegerRuntimeError(location, typeName, std::is_unsigned_v<T> ? "underflow" : "overflow", value);
         \\    }
         \\    return result;
         \\}
@@ -232,6 +299,7 @@ fn generateStatement(
                 } else {
                     try generateIntegerOne(allocator, output, assignment.target.type);
                 }
+                try generateRuntimeArguments(allocator, output, assignment.position, assignment.target.type);
                 try output.append(allocator, ')');
             } else switch (assignment.operator) {
                 .assign, .add, .subtract, .multiply, .divide => {
@@ -364,6 +432,9 @@ fn generateExpression(allocator: Allocator, output: *std.ArrayList(u8), expressi
                 try output.appendSlice(allocator, if (unary.operator == .logical_not) "(!" else "(-");
             }
             try generateExpression(allocator, output, unary.operand);
+            if (unary.operator == .numeric_negate and isInteger(expression.type)) {
+                try generateRuntimeArguments(allocator, output, expression.position, expression.type);
+            }
             try output.append(allocator, ')');
         },
         .binary => |binary| {
@@ -373,6 +444,7 @@ fn generateExpression(allocator: Allocator, output: *std.ArrayList(u8), expressi
                 try generateExpression(allocator, output, binary.left);
                 try output.appendSlice(allocator, ", ");
                 try generateExpression(allocator, output, binary.right);
+                try generateRuntimeArguments(allocator, output, expression.position, expression.type);
                 try output.append(allocator, ')');
             } else {
                 try output.append(allocator, '(');
@@ -390,6 +462,51 @@ fn generateExpression(allocator: Allocator, output: *std.ArrayList(u8), expressi
             try output.append(allocator, ')');
         },
     }
+}
+
+fn generateSourcePaths(
+    allocator: Allocator,
+    output: *std.ArrayList(u8),
+    source_paths: []const []const u8,
+) !void {
+    try output.appendSlice(allocator, "constexpr const char* k_silexSourcePaths[] = {\n");
+    if (source_paths.len == 0) {
+        try output.appendSlice(allocator, "    \"<unknown>\",\n");
+    } else for (source_paths) |source_path| {
+        try output.appendSlice(allocator, "    ");
+        try appendCppStringLiteral(allocator, output, source_path);
+        try output.appendSlice(allocator, ",\n");
+    }
+    try output.appendSlice(allocator, "};\nconstexpr std::size_t k_silexSourcePathCount = ");
+    try output.appendSlice(allocator, if (source_paths.len == 0) "1" else try std.fmt.allocPrint(allocator, "{d}", .{source_paths.len}));
+    try output.appendSlice(allocator, ";\n");
+}
+
+fn appendCppStringLiteral(allocator: Allocator, output: *std.ArrayList(u8), value: []const u8) !void {
+    try output.append(allocator, '"');
+    for (value) |character| switch (character) {
+        '\\' => try output.appendSlice(allocator, "\\\\"),
+        '"' => try output.appendSlice(allocator, "\\\""),
+        '\n' => try output.appendSlice(allocator, "\\n"),
+        '\r' => try output.appendSlice(allocator, "\\r"),
+        '\t' => try output.appendSlice(allocator, "\\t"),
+        else => try output.append(allocator, character),
+    };
+    try output.append(allocator, '"');
+}
+
+fn generateRuntimeArguments(
+    allocator: Allocator,
+    output: *std.ArrayList(u8),
+    position: Source.Position,
+    type_name: Semantic.Type,
+) !void {
+    try output.appendSlice(allocator, try std.fmt.allocPrint(
+        allocator,
+        ", SilexSourceLocation{{{d}, {d}, {d}}}, ",
+        .{ position.file, position.line, position.column },
+    ));
+    try appendCppStringLiteral(allocator, output, silexTypeName(type_name));
 }
 
 fn indent(allocator: Allocator, output: *std.ArrayList(u8), level: usize) !void {
@@ -413,6 +530,25 @@ fn cppType(type_name: Semantic.Type) []const u8 {
         .bool => "bool",
         .str => "std::string",
         .structure => |structure_type| structure_type.generated_name,
+    };
+}
+
+fn silexTypeName(type_name: Semantic.Type) []const u8 {
+    return switch (type_name) {
+        .void => "void",
+        .int => "int",
+        .int8 => "int8",
+        .int16 => "int16",
+        .int32 => "int32",
+        .uint8 => "uint8",
+        .uint16 => "uint16",
+        .uint32 => "uint32",
+        .uint64 => "uint64",
+        .float => "float",
+        .float64 => "float64",
+        .bool => "bool",
+        .str => "str",
+        .structure => |structure_type| structure_type.source_name,
     };
 }
 
@@ -533,7 +669,7 @@ test "generate while loop" {
     const cpp = try generate(allocator, try analyzer.analyze(try parser.parse()));
 
     try std.testing.expect(std.mem.indexOf(u8, cpp, "while ((silexValue0 > std::int64_t{0})) {") != null);
-    try std.testing.expect(std.mem.indexOf(u8, cpp, "silexValue0 = checkedSubtract(silexValue0, std::int64_t{1});") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "silexValue0 = checkedSubtract(silexValue0, std::int64_t{1}, SilexSourceLocation{") != null);
 }
 
 test "generate checked integer operations with backend overflow primitives" {
@@ -563,11 +699,11 @@ test "generate checked integer operations with backend overflow primitives" {
     try std.testing.expect(std.mem.indexOf(u8, cpp, "__builtin_sub_overflow(T{0}, value, &result)") != null);
     try std.testing.expect(std.mem.indexOf(u8, cpp, "gnu::cold, gnu::noinline") != null);
     try std.testing.expect(std.mem.indexOf(u8, cpp, "if (right == 0) [[unlikely]]") != null);
-    try std.testing.expect(std.mem.indexOf(u8, cpp, "silexValue0 = checkedAdd(silexValue0, std::int8_t{1});") != null);
-    try std.testing.expect(std.mem.indexOf(u8, cpp, "silexValue0 = checkedSubtract(silexValue0, std::int8_t{1});") != null);
-    try std.testing.expect(std.mem.indexOf(u8, cpp, "silexValue0 = checkedMultiply(silexValue0, std::int8_t{2});") != null);
-    try std.testing.expect(std.mem.indexOf(u8, cpp, "silexValue0 = checkedDivide(silexValue0, std::int8_t{2});") != null);
-    try std.testing.expect(std.mem.indexOf(u8, cpp, "checkedNegate(silexValue0)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "silexValue0 = checkedAdd(silexValue0, std::int8_t{1}, SilexSourceLocation{") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "silexValue0 = checkedSubtract(silexValue0, std::int8_t{1}, SilexSourceLocation{") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "silexValue0 = checkedMultiply(silexValue0, std::int8_t{2}, SilexSourceLocation{") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "silexValue0 = checkedDivide(silexValue0, std::int8_t{2}, SilexSourceLocation{") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "checkedNegate(silexValue0, SilexSourceLocation{") != null);
 }
 
 test "optimized backend eliminates a provably unnecessary integer check" {
@@ -682,7 +818,7 @@ test "generate function declarations calls and returns" {
     var analyzer = Semantic.Analyzer.init(allocator);
     const cpp = try generate(allocator, try analyzer.analyze(try parser.parse()));
     try std.testing.expect(std.mem.indexOf(u8, cpp, "std::int64_t silexFunction1(std::int64_t);") != null);
-    try std.testing.expect(std.mem.indexOf(u8, cpp, "return checkedMultiply(silexValue0, std::int64_t{2});") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "return checkedMultiply(silexValue0, std::int64_t{2}, SilexSourceLocation{") != null);
     try std.testing.expect(std.mem.indexOf(u8, cpp, "silexFunction1(std::int64_t{5})") != null);
 }
 

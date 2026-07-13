@@ -105,6 +105,7 @@ pub const Statement = union(enum) {
     };
 
     pub const Assignment = struct {
+        position: Source.Position,
         target: *Expression,
         operator: Ast.AssignmentOperator,
         value: ?*Expression,
@@ -639,7 +640,12 @@ pub const Analyzer = struct {
                 return self.fail(ast.position, message);
             },
         }
-        return .{ .assignment = .{ .target = target, .operator = ast.operator, .value = value } };
+        return .{ .assignment = .{
+            .position = ast.position,
+            .target = target,
+            .operator = ast.operator,
+            .value = value,
+        } };
     }
 
     fn ifStatement(
@@ -878,7 +884,7 @@ pub const Analyzer = struct {
         };
         return self.newExpression(.{
             .type = result_type,
-            .position = left.position,
+            .position = binary.operator_position,
             .value = .{ .binary = .{ .operator = binary.operator, .left = left, .right = right } },
         });
     }
