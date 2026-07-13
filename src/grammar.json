@@ -1231,6 +1231,10 @@
         },
         {
           "type": "SYMBOL",
+          "name": "copy_expression"
+        },
+        {
+          "type": "SYMBOL",
           "name": "move_expression"
         },
         {
@@ -2145,6 +2149,48 @@
             "content": {
               "type": "SYMBOL",
               "name": "expression"
+            }
+          }
+        ]
+      }
+    },
+    "copy_expression": {
+      "type": "PREC_RIGHT",
+      "value": 7,
+      "content": {
+        "type": "SEQ",
+        "members": [
+          {
+            "type": "STRING",
+            "value": "copy"
+          },
+          {
+            "type": "FIELD",
+            "name": "operand",
+            "content": {
+              "type": "CHOICE",
+              "members": [
+                {
+                  "type": "SYMBOL",
+                  "name": "method_call_expression"
+                },
+                {
+                  "type": "SYMBOL",
+                  "name": "call_expression"
+                },
+                {
+                  "type": "SYMBOL",
+                  "name": "member_expression"
+                },
+                {
+                  "type": "SYMBOL",
+                  "name": "index_expression"
+                },
+                {
+                  "type": "SYMBOL",
+                  "name": "identifier"
+                }
+              ]
             }
           }
         ]

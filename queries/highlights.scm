@@ -52,6 +52,10 @@
 (integer_literal) @number
 (float_literal) @number
 (boolean_literal) @boolean
+(copy_expression
+  "copy" @keyword)
+(move_expression
+  "move" @keyword)
 (self_expression) @variable.builtin
 (comment) @comment
 
