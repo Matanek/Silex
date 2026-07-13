@@ -517,15 +517,16 @@ pub const Parser = struct {
     }
 
     fn parseUnary(self: *Parser, allow_line_breaks: bool) ParseError!*Ast.Expression {
-        if (self.isMoveOperator()) {
+        if (self.isCopyOperator() or self.isMoveOperator()) {
             const token = self.current;
+            const operator: Ast.UnaryOperator = if (self.isCopyOperator()) .copy else .move;
             try self.advance();
             if (self.current.tag != .identifier) return self.parseIdentifierExpressionAfterToken(token);
             const operand = try self.parseUnary(allow_line_breaks);
             return self.newExpression(.{
                 .position = token.position,
                 .value = .{ .unary = .{
-                    .operator = .move,
+                    .operator = operator,
                     .operator_position = token.position,
                     .operand = operand,
                 } },
@@ -851,6 +852,10 @@ pub const Parser = struct {
 
     fn isMoveOperator(self: *const Parser) bool {
         return self.current.tag == .identifier and std.mem.eql(u8, self.current.lexeme, "move");
+    }
+
+    fn isCopyOperator(self: *const Parser) bool {
+        return self.current.tag == .identifier and std.mem.eql(u8, self.current.lexeme, "copy");
     }
 
     fn advance(self: *Parser) !void {

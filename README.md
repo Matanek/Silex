@@ -62,6 +62,12 @@ une expression booléenne et peut être suivie d'un bloc `else`. Une boucle
 `for (value in values)` parcourt une collection avec un alias immuable ; la
 forme `for (var value in values)` permet de modifier directement ses éléments.
 `break` et `continue` ciblent la boucle englobante la plus proche.
+Les tableaux fixes et les listes dynamiques fournissent `clone()` pour créer
+une copie propriétaire indépendante, y compris de leurs sous-collections.
+L'opérateur `copy` rend cette duplication explicite à un passage de propriété ;
+`move` transfère plutôt une variable locale complète sans la copier.
+`append` accepte un élément ou une séquence compatible : une source ordinaire
+est copiée, tandis que `move` en transfère la propriété.
 Les fonctions et méthodes utilisent la signature `func name(param:type)
 return_type`. Les fonctions utilisateur peuvent être appelées avant leur
 définition.

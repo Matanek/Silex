@@ -20,6 +20,7 @@ pub const UnaryOperator = enum {
     numeric_negate,
     dereference,
     borrow,
+    copy,
     move,
 };
 

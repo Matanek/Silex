@@ -80,6 +80,14 @@
     ],
     "description": "Transfer a value"
   },
+  "Copy value": {
+    "prefix": "copy",
+    "body": [
+      "let ${1:destination} = copy ${2:source}",
+      "$0"
+    ],
+    "description": "Duplicate an owning value"
+  },
   "Default initialized variable": {
     "prefix": "vart",
     "body": [

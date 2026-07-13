@@ -281,6 +281,38 @@
     }
   },
   {
+    "type": "copy_expression",
+    "named": true,
+    "fields": {
+      "operand": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "call_expression",
+            "named": true
+          },
+          {
+            "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "index_expression",
+            "named": true
+          },
+          {
+            "type": "member_expression",
+            "named": true
+          },
+          {
+            "type": "method_call_expression",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "dereference_expression",
     "named": true,
     "fields": {
@@ -332,6 +364,10 @@
         },
         {
           "type": "conversion_expression",
+          "named": true
+        },
+        {
+          "type": "copy_expression",
           "named": true
         },
         {
@@ -1674,6 +1710,10 @@
   {
     "type": "continue_statement",
     "named": true
+  },
+  {
+    "type": "copy",
+    "named": false
   },
   {
     "type": "else",

@@ -59,6 +59,8 @@
   kind: ["&" "@"] @type)
 (borrow_expression
   operator: "&" @operator)
+(copy_expression
+  "copy" @keyword)
 (move_expression
   "move" @keyword)
 (self_expression) @variable.builtin
@@ -69,7 +71,6 @@
   "use"
   "pub"
   "as"
-  "move"
   "let"
   "var"
   "if"

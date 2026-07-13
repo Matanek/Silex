@@ -280,7 +280,35 @@ pub fn build(b: *std.Build) void {
     invalid_collection_copy_command.addArgs(&.{ "compile", "Tests/InvalidCollectionCopy.sx" });
     invalid_collection_copy_command.expectExitCode(1);
     invalid_collection_copy_command.expectStdErrEqual(
-        "Tests/InvalidCollectionCopy.sx:3:18: error: cannot copy an owning value; use 'move'\n",
+        "Tests/InvalidCollectionCopy.sx:3:18: error: cannot implicitly copy an owning value; use 'copy' or 'move'\n",
+    );
+
+    const invalid_move_reference_command = b.addRunArtifact(executable);
+    invalid_move_reference_command.addArgs(&.{ "compile", "Tests/InvalidMoveReference.sx" });
+    invalid_move_reference_command.expectExitCode(1);
+    invalid_move_reference_command.expectStdErrEqual(
+        "Tests/InvalidMoveReference.sx:6:13: error: cannot move a reference; borrowed values have no ownership to transfer\n",
+    );
+
+    const invalid_move_member_command = b.addRunArtifact(executable);
+    invalid_move_member_command.addArgs(&.{ "compile", "Tests/InvalidMoveMember.sx" });
+    invalid_move_member_command.expectExitCode(1);
+    invalid_move_member_command.expectStdErrEqual(
+        "Tests/InvalidMoveMember.sx:8:19: error: cannot move a field; only a complete local variable can be invalidated\n",
+    );
+
+    const invalid_move_element_command = b.addRunArtifact(executable);
+    invalid_move_element_command.addArgs(&.{ "compile", "Tests/InvalidMoveElement.sx" });
+    invalid_move_element_command.expectExitCode(1);
+    invalid_move_element_command.expectStdErrEqual(
+        "Tests/InvalidMoveElement.sx:3:17: error: cannot move an indexed element; use 'copy', 'replace', or 'take'\n",
+    );
+
+    const invalid_append_move_self_command = b.addRunArtifact(executable);
+    invalid_append_move_self_command.addArgs(&.{ "compile", "Tests/InvalidAppendMoveSelf.sx" });
+    invalid_append_move_self_command.expectExitCode(1);
+    invalid_append_move_self_command.expectStdErrEqual(
+        "Tests/InvalidAppendMoveSelf.sx:3:19: error: cannot move a collection into itself\n",
     );
 
     const invalid_fixed_array_length_command = b.addRunArtifact(executable);
@@ -329,7 +357,7 @@ pub fn build(b: *std.Build) void {
     invalid_owned_element_copy_command.addArgs(&.{ "compile", "Tests/InvalidOwnedElementCopy.sx" });
     invalid_owned_element_copy_command.expectExitCode(1);
     invalid_owned_element_copy_command.expectStdErrEqual(
-        "Tests/InvalidOwnedElementCopy.sx:3:28: error: cannot copy an owning place; borrow it, replace it, or take it from a list\n",
+        "Tests/InvalidOwnedElementCopy.sx:3:28: error: cannot implicitly copy an owning place; use 'copy', borrow it, replace it, or take it from a list\n",
     );
 
     const invalid_borrowed_element_mutation_command = b.addRunArtifact(executable);
@@ -449,7 +477,7 @@ pub fn build(b: *std.Build) void {
         "silex: native compilation failed for target 'x86_64-linux-musl'; target support, SDKs, or native sources may be unavailable or incomplete\n",
     );
     backend_discovered_target_failure_command.expectStdErrMatch(b.fmt(
-        "silex: backend details: .silex{c}cache{c}v15{c}x86_64-linux-musl{c}",
+        "silex: backend details: .silex{c}cache{c}v16{c}x86_64-linux-musl{c}",
         .{
             std.fs.path.sep,
             std.fs.path.sep,
@@ -559,6 +587,10 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&invalid_string_length_command.step);
     test_step.dependOn(&reserved_length_function_command.step);
     test_step.dependOn(&invalid_collection_copy_command.step);
+    test_step.dependOn(&invalid_move_reference_command.step);
+    test_step.dependOn(&invalid_move_member_command.step);
+    test_step.dependOn(&invalid_move_element_command.step);
+    test_step.dependOn(&invalid_append_move_self_command.step);
     test_step.dependOn(&invalid_fixed_array_length_command.step);
     test_step.dependOn(&invalid_empty_collection_literal_command.step);
     test_step.dependOn(&invalid_immutable_list_mutation_command.step);
@@ -647,7 +679,7 @@ pub fn build(b: *std.Build) void {
     const collections_command = b.addRunArtifact(executable);
     collections_command.step.dependOn(&strings_command.step);
     collections_command.addArgs(&.{ "run", "Smokes/Collections.sx" });
-    collections_command.expectStdOutEqual(hostText(b, "1\n3\n20\n20\n1\nfalse\ntrue\n15\n15\n10\n30\n20\n40\n50\n40\n0\ntrue\n2\n7\n9\n"));
+    collections_command.expectStdOutEqual(hostText(b, "1\n3\n20\n20\n1\nfalse\n1\n99\n3\n1\n3\n6\n2\n5\ntrue\n15\n15\n10\n30\n20\n40\n50\n40\n40\n500\n2\n3\n0\ntrue\n7\n17\n17\n7\n70\n2\n7\n9\n8\n17\n2\n17\n14\n11\n99\n"));
 
     const collection_take_last_empty_command = b.addRunArtifact(executable);
     collection_take_last_empty_command.step.dependOn(&collections_command.step);

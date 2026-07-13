@@ -216,6 +216,7 @@ module.exports = grammar({
         $.unary_expression,
         $.dereference_expression,
         $.borrow_expression,
+        $.copy_expression,
         $.move_expression,
         $.conversion_expression,
         $.call_expression,
@@ -400,6 +401,24 @@ module.exports = grammar({
       prec(PREC.unary, seq(field("operator", "*"), field("operand", $.expression))),
 
     borrow_expression: ($) => prec(PREC.unary, seq(field("operator", "&"), field("operand", $.expression))),
+
+    copy_expression: ($) =>
+      prec.right(
+        PREC.unary,
+        seq(
+          "copy",
+          field(
+            "operand",
+            choice(
+              $.method_call_expression,
+              $.call_expression,
+              $.member_expression,
+              $.index_expression,
+              $.identifier,
+            ),
+          ),
+        ),
+      ),
 
     move_expression: ($) => prec(PREC.unary, seq("move", field("operand", $.identifier))),
 

@@ -27,6 +27,7 @@ pub fn generateWithSources(
         \\#include <bit>
         \\#include <cmath>
         \\#include <iostream>
+        \\#include <iterator>
         \\#include <limits>
         \\#include <string>
         \\#include <type_traits>
@@ -147,6 +148,31 @@ pub fn generateWithSources(
         \\        std::exit(1);
         \\    }
         \\    return static_cast<std::int64_t>(value);
+        \\}
+        \\
+        \\template <typename T>
+        \\T silexClone(const T& value) {
+        \\    return value;
+        \\}
+        \\
+        \\template <typename T, typename Range>
+        \\void silexListAppendRange(std::vector<T>& values, Range&& source) {
+        \\    if constexpr (std::is_lvalue_reference_v<Range&&>) {
+        \\        std::vector<T> copied(source.begin(), source.end());
+        \\        values.reserve(values.size() + copied.size());
+        \\        values.insert(
+        \\            values.end(),
+        \\            std::make_move_iterator(copied.begin()),
+        \\            std::make_move_iterator(copied.end())
+        \\        );
+        \\    } else {
+        \\        values.reserve(values.size() + source.size());
+        \\        values.insert(
+        \\            values.end(),
+        \\            std::make_move_iterator(source.begin()),
+        \\            std::make_move_iterator(source.end())
+        \\        );
+        \\    }
         \\}
         \\
         \\std::size_t silexCollectionOffset(
@@ -670,9 +696,21 @@ fn generateExpression(allocator: Allocator, output: *std.ArrayList(u8), expressi
                     try generateExpression(allocator, output, method.object);
                     try output.appendSlice(allocator, ".empty()");
                 },
+                .clone => {
+                    try output.appendSlice(allocator, "silexClone(");
+                    try generateExpression(allocator, output, method.object);
+                    try output.append(allocator, ')');
+                },
                 .append => {
                     try generateExpression(allocator, output, method.object);
                     try output.appendSlice(allocator, ".push_back(");
+                    try generateExpression(allocator, output, method.arguments[0]);
+                    try output.append(allocator, ')');
+                },
+                .append_range => {
+                    try output.appendSlice(allocator, "silexListAppendRange(");
+                    try generateExpression(allocator, output, method.object);
+                    try output.appendSlice(allocator, ", ");
                     try generateExpression(allocator, output, method.arguments[0]);
                     try output.append(allocator, ')');
                 },
@@ -815,6 +853,9 @@ fn generateExpression(allocator: Allocator, output: *std.ArrayList(u8), expressi
                 try output.appendSlice(allocator, "(*");
             } else if (unary.operator == .borrow) {
                 try output.appendSlice(allocator, "(&");
+            } else if (unary.operator == .copy) {
+                try output.appendSlice(allocator, "silexClone(");
+                if (unary.operand.type == .reference) try output.append(allocator, '*');
             } else if (unary.operator == .move) {
                 try output.appendSlice(allocator, "std::move(");
             } else {
