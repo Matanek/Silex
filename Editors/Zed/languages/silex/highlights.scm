@@ -50,6 +50,12 @@
 (conversion_expression
   "as" @keyword
   type: (type) @type)
+(reference_type
+  kind: ["&" "@"] @type)
+(borrow_expression
+  operator: "&" @operator)
+(move_expression
+  "move" @keyword)
 (self_expression) @variable.builtin
 (comment) @comment
 
@@ -58,6 +64,7 @@
   "use"
   "pub"
   "as"
+  "move"
   "let"
   "var"
   "if"

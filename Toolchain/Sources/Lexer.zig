@@ -57,6 +57,8 @@ pub const TokenTag = enum {
     greater,
     greater_equal,
     amp_amp,
+    amp,
+    at,
     pipe_pipe,
     colon,
     comma,
@@ -120,7 +122,7 @@ pub const Lexer = struct {
         if (character == '!') return self.optionalDoubleToken(start, position, '=', .bang, .bang_equal);
         if (character == '<') return self.optionalDoubleToken(start, position, '=', .less, .less_equal);
         if (character == '>') return self.optionalDoubleToken(start, position, '=', .greater, .greater_equal);
-        if (character == '&') return self.requiredDoubleToken(start, position, '&', .amp_amp, "expected '&&'");
+        if (character == '&') return self.optionalDoubleToken(start, position, '&', .amp, .amp_amp);
         if (character == '|') return self.requiredDoubleToken(start, position, '|', .pipe_pipe, "expected '||'");
         if (character == '+') return self.arithmeticToken(start, position, '+', .plus, .plus_plus, .plus_equal);
         if (character == '-') return self.arithmeticToken(start, position, '-', .minus, .minus_minus, .minus_equal);
@@ -130,6 +132,7 @@ pub const Lexer = struct {
         self.advance();
         return switch (character) {
             ':' => self.token(.colon, start, position),
+            '@' => self.token(.at, start, position),
             ',' => self.token(.comma, start, position),
             '.' => self.token(.dot, start, position),
             '(' => self.token(.left_parenthesis, start, position),

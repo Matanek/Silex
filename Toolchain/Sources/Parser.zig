@@ -166,30 +166,30 @@ pub const Parser = struct {
     }
 
     fn parseReturnType(self: *Parser) ParseError!Ast.ReturnType {
-        if (self.current.tag == .identifier) {
-            return .{ .structure = try self.parseQualifiedName("expected function return type") };
+        if (self.current.tag == .keyword_void) {
+            try self.advance();
+            return .void;
         }
-        const result: Ast.ReturnType = switch (self.current.tag) {
-            .keyword_void => .void,
-            .keyword_int => .int,
-            .keyword_int8 => .int8,
-            .keyword_int16 => .int16,
-            .keyword_int32 => .int32,
-            .keyword_int64 => .int64,
-            .keyword_uint => .uint,
-            .keyword_uint8 => .uint8,
-            .keyword_uint16 => .uint16,
-            .keyword_uint32 => .uint32,
-            .keyword_uint64 => .uint64,
-            .keyword_float => .float,
-            .keyword_float32 => .float32,
-            .keyword_float64 => .float64,
-            .keyword_bool => .bool,
-            .keyword_str => .str,
-            else => return self.fail("expected function return type"),
+        const type_name = try self.parseTypeNameAfter("expected function return type");
+        return switch (type_name) {
+            .int => .int,
+            .int8 => .int8,
+            .int16 => .int16,
+            .int32 => .int32,
+            .int64 => .int64,
+            .uint => .uint,
+            .uint8 => .uint8,
+            .uint16 => .uint16,
+            .uint32 => .uint32,
+            .uint64 => .uint64,
+            .float => .float,
+            .float32 => .float32,
+            .float64 => .float64,
+            .bool => .bool,
+            .str => .str,
+            .structure => |name| .{ .structure = name },
+            .reference => |reference| .{ .reference = reference },
         };
-        try self.advance();
-        return result;
     }
 
     fn parseParameters(self: *Parser) ParseError![]const Ast.Parameter {
@@ -228,6 +228,7 @@ pub const Parser = struct {
             .keyword_while => self.parseWhile(),
             .keyword_return => self.parseReturn(),
             .identifier, .keyword_self => self.parseIdentifierStatement(),
+            .star => self.parseDereferenceAssignment(),
             else => self.fail("expected statement"),
         };
     }
@@ -280,10 +281,9 @@ pub const Parser = struct {
     }
 
     fn parseTypeNameAfter(self: *Parser, message: []const u8) ParseError!Ast.TypeName {
-        if (self.current.tag == .identifier) {
-            return .{ .structure = try self.parseQualifiedName(message) };
-        }
-        const type_name: Ast.TypeName = switch (self.current.tag) {
+        const type_name: Ast.TypeName = if (self.current.tag == .identifier)
+            .{ .structure = try self.parseQualifiedName(message) }
+        else switch (self.current.tag) {
             .keyword_int => .int,
             .keyword_int8 => .int8,
             .keyword_int16 => .int16,
@@ -301,7 +301,12 @@ pub const Parser = struct {
             .keyword_str => .str,
             else => return self.fail(message),
         };
-        try self.advance();
+        if (type_name != .structure) try self.advance();
+        if (self.current.tag == .amp or self.current.tag == .at) {
+            const mutable = self.current.tag == .amp;
+            try self.advance();
+            return .{ .reference = .{ .target = try self.newTypeName(type_name), .mutable = mutable } };
+        }
         return type_name;
     }
 
@@ -327,6 +332,17 @@ pub const Parser = struct {
             return .{ .expression_statement = target };
         }
         return self.fail("expected assignment or function call");
+    }
+
+    fn parseDereferenceAssignment(self: *Parser) ParseError!Ast.Statement {
+        const position = self.current.position;
+        const target = try self.parseUnary(false);
+        const operator = assignmentOperator(self.current.tag) orelse return self.fail("expected assignment after dereference");
+        try self.advance();
+        var value: ?*Ast.Expression = null;
+        if (operator != .increment and operator != .decrement) value = try self.parseExpression(false);
+        try self.expectStatementTerminator();
+        return .{ .assignment = .{ .position = position, .target = target, .operator = operator, .value = value } };
     }
 
     fn parseIf(self: *Parser) ParseError!Ast.Statement {
@@ -449,15 +465,37 @@ pub const Parser = struct {
     }
 
     fn parseUnary(self: *Parser, allow_line_breaks: bool) ParseError!*Ast.Expression {
-        if (self.current.tag != .bang and self.current.tag != .minus) return self.parseConversion();
+        if (self.isMoveOperator()) {
+            const token = self.current;
+            try self.advance();
+            if (self.current.tag != .identifier) return self.parseIdentifierExpressionAfterToken(token);
+            const operand = try self.parseUnary(allow_line_breaks);
+            return self.newExpression(.{
+                .position = token.position,
+                .value = .{ .unary = .{
+                    .operator = .move,
+                    .operator_position = token.position,
+                    .operand = operand,
+                } },
+            });
+        }
+        if (self.current.tag != .bang and self.current.tag != .minus and self.current.tag != .star and
+            self.current.tag != .amp) return self.parseConversion();
 
         const operator_token = self.current;
         try self.advance();
+        const operator: Ast.UnaryOperator = switch (operator_token.tag) {
+            .bang => .logical_not,
+            .minus => .numeric_negate,
+            .star => .dereference,
+            .amp => .borrow,
+            else => unreachable,
+        };
         const operand = try self.parseUnary(allow_line_breaks);
         return self.newExpression(.{
             .position = operator_token.position,
             .value = .{ .unary = .{
-                .operator = if (operator_token.tag == .bang) .logical_not else .numeric_negate,
+                .operator = operator,
                 .operator_position = operator_token.position,
                 .operand = operand,
             } },
@@ -520,6 +558,10 @@ pub const Parser = struct {
     fn parseIdentifierExpression(self: *Parser) ParseError!*Ast.Expression {
         const token = self.current;
         try self.advance();
+        return self.parseIdentifierExpressionAfterToken(token);
+    }
+
+    fn parseIdentifierExpressionAfterToken(self: *Parser, token: Token) ParseError!*Ast.Expression {
         var expression = if (token.tag == .keyword_self)
             try self.newExpression(.{ .position = token.position, .value = .self })
         else if (self.current.tag == .left_parenthesis)
@@ -685,6 +727,12 @@ pub const Parser = struct {
         return result;
     }
 
+    fn newTypeName(self: *Parser, type_name: Ast.TypeName) !*Ast.TypeName {
+        const result = try self.allocator.create(Ast.TypeName);
+        result.* = type_name;
+        return result;
+    }
+
     fn expect(self: *Parser, tag: TokenTag, message: []const u8) !void {
         if (self.current.tag != tag) return self.fail(message);
         try self.advance();
@@ -709,6 +757,10 @@ pub const Parser = struct {
 
     fn canContinueExpression(self: *const Parser, allow_line_breaks: bool) bool {
         return allow_line_breaks or self.current.position.line == self.previous.position.line;
+    }
+
+    fn isMoveOperator(self: *const Parser) bool {
+        return self.current.tag == .identifier and std.mem.eql(u8, self.current.lexeme, "move");
     }
 
     fn advance(self: *Parser) !void {

@@ -20,6 +20,7 @@ pub const Type = union(enum) {
     bool,
     str,
     structure: StructureType,
+    reference: ReferenceType,
 };
 
 pub const StructureType = struct {
@@ -27,9 +28,28 @@ pub const StructureType = struct {
     generated_name: []const u8,
 };
 
+pub const ReferenceType = struct {
+    target: *const Type,
+    mutable: bool,
+};
+
+const BindingState = struct {
+    moved: bool = false,
+    immutable_borrows: usize = 0,
+    mutable_borrow: bool = false,
+    reference: ?Borrow = null,
+};
+
+const Borrow = struct {
+    root: ?*BindingState,
+    mutable: bool,
+};
+
 pub const Expression = struct {
     type: Type,
     position: Source.Position,
+    borrow: ?Borrow = null,
+    owns_borrow: bool = false,
     value: union(enum) {
         integer: u64,
         floating: []const u8,
@@ -178,12 +198,23 @@ const Symbol = struct {
     generated_name: []const u8,
     type: Type,
     mutability: Ast.Mutability,
+    state: *BindingState,
 };
 
 const Scope = struct {
     parent: ?*const Scope,
     symbols: std.ArrayList(Symbol) = .empty,
+    borrows: std.ArrayList(Borrow) = .empty,
 };
+
+fn releaseBorrow(borrow: Borrow) void {
+    const root = borrow.root orelse return;
+    if (borrow.mutable) {
+        root.mutable_borrow = false;
+    } else {
+        root.immutable_borrows -= 1;
+    }
+}
 
 const FunctionSymbol = struct {
     source_name: []const u8,
@@ -302,6 +333,7 @@ pub const Analyzer = struct {
                     }
                 }
                 const field_type = try typeFromAnnotation(self, field.type, field.position);
+                if (field_type == .reference) return self.fail(field.position, "a struct field cannot have a reference type");
                 if (field_type == .structure) {
                     const dependency_index = self.findStructureIndex(field_type.structure.source_name).?;
                     if (dependency_index >= structure_index) {
@@ -335,10 +367,12 @@ pub const Analyzer = struct {
                 for (ast_method.parameters) |parameter| {
                     try parameter_types.append(self.allocator, try typeFromAnnotation(self, parameter.type, parameter.position));
                 }
+                const return_type = try typeFromReturn(self, ast_method.return_type, ast_method.position);
+                if (return_type == .reference) return self.fail(ast_method.position, "a method cannot return a reference");
                 try methods.append(self.allocator, .{
                     .source_name = ast_method.name,
                     .generated_name = try std.fmt.allocPrint(self.allocator, "method{d}", .{method_index}),
-                    .return_type = try typeFromReturn(self, ast_method.return_type, ast_method.position),
+                    .return_type = return_type,
                     .parameter_types = try parameter_types.toOwnedSlice(self.allocator),
                     .position = ast_method.name_position,
                 });
@@ -361,10 +395,12 @@ pub const Analyzer = struct {
             if (is_main) main_count += 1;
             var parameter_types: std.ArrayList(Type) = .empty;
             for (ast_function.parameters) |parameter| try parameter_types.append(self.allocator, try typeFromAnnotation(self, parameter.type, parameter.position));
+            const return_type = try typeFromReturn(self, ast_function.return_type, ast_function.position);
+            if (return_type == .reference) return self.fail(ast_function.position, "a function cannot return a reference");
             try self.functions.append(self.allocator, .{
                 .source_name = ast_function.name,
                 .generated_name = if (is_main) "main" else try std.fmt.allocPrint(self.allocator, "silexFunction{d}", .{index}),
-                .return_type = try typeFromReturn(self, ast_function.return_type, ast_function.position),
+                .return_type = return_type,
                 .parameter_types = try parameter_types.toOwnedSlice(self.allocator),
                 .position = ast_function.name_position,
                 .is_main = is_main,
@@ -406,6 +442,7 @@ pub const Analyzer = struct {
             .float, .float64 => ast.value == .integer or ast.value == .floating,
             .bool => ast.value == .boolean,
             .str => ast.value == .string,
+            .reference => false,
             .structure => |structure_type| structure_default: {
                 if (ast.value != .structure_initializer) break :structure_default false;
                 const initializer = ast.value.structure_initializer;
@@ -444,11 +481,12 @@ pub const Analyzer = struct {
             }
             const generated_name = try std.fmt.allocPrint(self.allocator, "silexValue{d}", .{self.next_symbol_id});
             self.next_symbol_id += 1;
-            try scope.symbols.append(self.allocator, .{ .source_name = parameter.name, .generated_name = generated_name, .type = parameter_type, .mutability = .immutable });
+            try scope.symbols.append(self.allocator, .{ .source_name = parameter.name, .generated_name = generated_name, .type = parameter_type, .mutability = .immutable, .state = try self.newBindingState(parameter_type) });
             try parameters.append(self.allocator, .{ .generated_name = generated_name, .type = parameter_type });
         }
         self.current_return_type = symbol.return_type;
         const function_statements = try self.statements(ast.statements, &scope);
+        self.releaseScopeBorrows(&scope);
         if (!typeEqual(symbol.return_type, .void) and !blockAlwaysReturns(function_statements)) {
             const message = try std.fmt.allocPrint(self.allocator, "function '{s}' must return '{s}' on every path", .{ ast.name, typeName(symbol.return_type) });
             return self.fail(ast.name_position, message);
@@ -482,12 +520,14 @@ pub const Analyzer = struct {
                 .generated_name = generated_name,
                 .type = parameter_type,
                 .mutability = .immutable,
+                .state = try self.newBindingState(parameter_type),
             });
             try parameters.append(self.allocator, .{ .generated_name = generated_name, .type = parameter_type });
         }
 
         self.current_return_type = symbol.return_type;
         const method_statements = try self.statements(ast.statements, &scope);
+        self.releaseScopeBorrows(&scope);
         if (!typeEqual(symbol.return_type, .void) and !blockAlwaysReturns(method_statements)) {
             const message = try std.fmt.allocPrint(self.allocator, "method '{s}' must return '{s}' on every path", .{ ast.name, typeName(symbol.return_type) });
             return self.fail(ast.name_position, message);
@@ -553,7 +593,7 @@ pub const Analyzer = struct {
         else
             null;
         var initializer = if (declaration.initializer) |ast_initializer|
-            try self.expression(ast_initializer, scope)
+            try self.expressionForBorrow(ast_initializer, scope, referenceMutability(declared_annotation_type))
         else
             try self.defaultExpression(declared_annotation_type.?, declaration.name_position);
         if (typeEqual(initializer.type, .void)) {
@@ -567,13 +607,31 @@ pub const Analyzer = struct {
             return self.fail(if (declaration.initializer) |value| value.position else declaration.name_position, message);
         }
 
+        if (declared_type == .reference and declaration.mutability == .mutable) {
+            return self.fail(declaration.name_position, "a reference must be declared with 'let'");
+        }
         const generated_name = try std.fmt.allocPrint(self.allocator, "silexValue{d}", .{self.next_symbol_id});
         self.next_symbol_id += 1;
+        const state = try self.newBindingState(declared_type);
+        if (declared_type == .reference) {
+            const borrow = initializer.borrow orelse return self.fail(declaration.name_position, "a reference initializer must borrow a place");
+            if (initializer.owns_borrow) {
+                try scope.borrows.append(self.allocator, borrow);
+                initializer.owns_borrow = false;
+                state.reference = borrow;
+            } else {
+                if (borrow.mutable) return self.fail(declaration.name_position, "cannot copy a mutable reference");
+                const copy = try self.copyBorrow(borrow);
+                try scope.borrows.append(self.allocator, copy);
+                state.reference = copy;
+            }
+        }
         try scope.symbols.append(self.allocator, .{
             .source_name = declaration.name,
             .generated_name = generated_name,
             .type = declared_type,
             .mutability = declaration.mutability,
+            .state = state,
         });
 
         return .{ .variable_declaration = .{
@@ -589,7 +647,18 @@ pub const Analyzer = struct {
         ast: Ast.Statement.Assignment,
         scope: *const Scope,
     ) AnalyzeError!Statement {
+        if (ast.target.value == .unary and ast.target.value.unary.operator == .dereference) {
+            const target = try self.expression(ast.target, scope);
+            const operand = target.value.unary.operand;
+            const reference = operand.type.reference;
+            if (!reference.mutable) return self.fail(ast.position, "cannot assign through an immutable reference");
+            var value: ?*Expression = null;
+            if (ast.value) |ast_value| value = try self.expression(ast_value, scope);
+            return self.checkedAssignment(ast, target, value);
+        }
+
         const root = assignmentRoot(ast.target) orelse return self.fail(ast.position, "invalid assignment target");
+        var reinitializing_state: ?*BindingState = null;
         switch (root) {
             .self => {
                 if (self.current_method_index == null) return self.fail(ast.position, "'self' is only available inside a method");
@@ -609,13 +678,35 @@ pub const Analyzer = struct {
                     );
                     return self.fail(ast.position, message);
                 }
+                if (symbol.state.immutable_borrows != 0 or symbol.state.mutable_borrow) {
+                    const message = try std.fmt.allocPrint(self.allocator, "cannot mutate borrowed variable '{s}'", .{root_name});
+                    return self.fail(ast.position, message);
+                }
+                if (symbol.state.moved) {
+                    if (ast.operator != .assign) {
+                        const message = try std.fmt.allocPrint(self.allocator, "cannot update moved variable '{s}'", .{root_name});
+                        return self.fail(ast.position, message);
+                    }
+                    reinitializing_state = symbol.state;
+                }
             },
         }
 
-        const target = try self.expression(ast.target, scope);
         var value: ?*Expression = null;
         if (ast.value) |ast_value| value = try self.expression(ast_value, scope);
+        if (reinitializing_state) |state| state.moved = false;
+        const target = try self.expression(ast.target, scope);
 
+        return self.checkedAssignment(ast, target, value);
+    }
+
+    fn checkedAssignment(
+        self: *Analyzer,
+        ast: Ast.Statement.Assignment,
+        target: *Expression,
+        initial_value: ?*Expression,
+    ) AnalyzeError!Statement {
+        var value = initial_value;
         switch (ast.operator) {
             .assign => {
                 value = try self.coerce(value.?, target.type);
@@ -674,11 +765,13 @@ pub const Analyzer = struct {
 
         var body_scope = Scope{ .parent = parent_scope };
         const body = try self.statements(ast.body, &body_scope);
+        self.releaseScopeBorrows(&body_scope);
 
         var else_body: ?[]const Statement = null;
         if (ast.else_body) |ast_else_body| {
             var else_scope = Scope{ .parent = parent_scope };
             else_body = try self.statements(ast_else_body, &else_scope);
+            self.releaseScopeBorrows(&else_scope);
         }
 
         return .{ .if_statement = .{
@@ -700,9 +793,11 @@ pub const Analyzer = struct {
         }
 
         var body_scope = Scope{ .parent = parent_scope };
+        const body = try self.statements(ast.body, &body_scope);
+        self.releaseScopeBorrows(&body_scope);
         return .{ .while_statement = .{
             .condition = condition,
-            .body = try self.statements(ast.body, &body_scope),
+            .body = body,
         } };
     }
 
@@ -729,6 +824,18 @@ pub const Analyzer = struct {
     }
 
     fn expression(self: *Analyzer, ast: *const Ast.Expression, scope: *const Scope) AnalyzeError!*Expression {
+        return self.expressionForBorrow(ast, scope, null);
+    }
+
+    fn expressionForBorrow(
+        self: *Analyzer,
+        ast: *const Ast.Expression,
+        scope: *const Scope,
+        expected_mutability: ?bool,
+    ) AnalyzeError!*Expression {
+        if (ast.value == .unary and ast.value.unary.operator == .borrow) {
+            return self.borrowExpression(ast.value.unary, scope, expected_mutability orelse false);
+        }
         return switch (ast.value) {
             .integer => |lexeme| self.integerExpression(ast.position, lexeme),
             .floating => |lexeme| self.floatExpression(ast.position, lexeme),
@@ -831,6 +938,7 @@ pub const Analyzer = struct {
             .float, .float64 => self.newExpression(.{ .type = type_value, .position = position, .value = .{ .floating = "0.0" } }),
             .bool => self.newExpression(.{ .type = .bool, .position = position, .value = .{ .boolean = false } }),
             .str => self.newExpression(.{ .type = .str, .position = position, .value = .{ .string = "" } }),
+            .reference => self.fail(position, "a reference requires an initializer"),
             .structure => |structure_type| structure_default: {
                 const structure = self.findStructureByGeneratedName(structure_type.generated_name).?;
                 var fields: std.ArrayList(*Expression) = .empty;
@@ -862,9 +970,18 @@ pub const Analyzer = struct {
             const message = try std.fmt.allocPrint(self.allocator, "unknown variable '{s}'", .{name});
             return self.fail(position, message);
         };
+        if (symbol.state.moved) {
+            const message = try std.fmt.allocPrint(self.allocator, "use of moved variable '{s}'", .{name});
+            return self.fail(position, message);
+        }
+        if (symbol.state.mutable_borrow) {
+            const message = try std.fmt.allocPrint(self.allocator, "cannot access variable '{s}' while it is mutably borrowed", .{name});
+            return self.fail(position, message);
+        }
         return self.newExpression(.{
             .type = symbol.type,
             .position = position,
+            .borrow = symbol.state.reference,
             .value = .{ .variable = symbol.generated_name },
         });
     }
@@ -988,13 +1105,14 @@ pub const Analyzer = struct {
         }
         var arguments: std.ArrayList(*Expression) = .empty;
         for (call.arguments, function_symbol.parameter_types, 0..) |argument, expected_type, index| {
-            var value = try self.expression(argument, scope);
+            var value = try self.expressionForBorrow(argument, scope, referenceMutability(expected_type));
             value = try self.coerce(value, expected_type);
             if (!typeEqual(value.type, expected_type)) {
                 const message = try std.fmt.allocPrint(self.allocator, "argument {d} of '{s}' expects '{s}', found '{s}'", .{ index + 1, call.name, typeName(expected_type), typeName(value.type) });
                 return self.fail(argument.position, message);
             }
             try arguments.append(self.allocator, value);
+            self.releaseTransientBorrow(value);
         }
         return self.newExpression(.{ .type = function_symbol.return_type, .position = call.name_position, .value = .{ .call = .{ .generated_name = function_symbol.generated_name, .arguments = try arguments.toOwnedSlice(self.allocator) } } });
     }
@@ -1047,7 +1165,7 @@ pub const Analyzer = struct {
         }
         var arguments: std.ArrayList(*Expression) = .empty;
         for (call.arguments, method_symbol.parameter_types, 0..) |argument, expected_type, index| {
-            var value = try self.expression(argument, scope);
+            var value = try self.expressionForBorrow(argument, scope, referenceMutability(expected_type));
             value = try self.coerce(value, expected_type);
             if (!typeEqual(value.type, expected_type)) {
                 const message = try std.fmt.allocPrint(self.allocator, "argument {d} of method '{s}' expects '{s}', found '{s}'", .{ index + 1, call.name, typeName(expected_type), typeName(value.type) });
@@ -1310,6 +1428,8 @@ pub const Analyzer = struct {
         unary: Ast.Expression.Unary,
         scope: *const Scope,
     ) AnalyzeError!*Expression {
+        if (unary.operator == .borrow) return self.borrowExpression(unary, scope, false);
+        if (unary.operator == .move) return self.moveExpression(unary, scope);
         const operand = try self.expression(unary.operand, scope);
         const result_type: Type = switch (unary.operator) {
             .logical_not => logical: {
@@ -1334,12 +1454,79 @@ pub const Analyzer = struct {
                 }
                 break :numeric operand.type;
             },
+            .dereference => dereference: {
+                const reference = switch (operand.type) {
+                    .reference => |value| value,
+                    else => return self.fail(unary.operator_position, "dereference requires a reference operand"),
+                };
+                break :dereference reference.target.*;
+            },
+            .borrow, .move => unreachable,
         };
         return self.newExpression(.{
             .type = result_type,
             .position = unary.operator_position,
             .value = .{ .unary = .{ .operator = unary.operator, .operand = operand } },
         });
+    }
+
+    fn borrowExpression(
+        self: *Analyzer,
+        unary: Ast.Expression.Unary,
+        scope: *const Scope,
+        mutable: bool,
+    ) AnalyzeError!*Expression {
+        const symbol = try self.placeRootSymbol(unary.operand, scope, unary.operator_position);
+        if (symbol.state.moved) {
+            const message = try std.fmt.allocPrint(self.allocator, "cannot borrow moved variable '{s}'", .{symbol.source_name});
+            return self.fail(unary.operator_position, message);
+        }
+        if (mutable) {
+            if (symbol.mutability != .mutable) {
+                const message = try std.fmt.allocPrint(self.allocator, "cannot mutably borrow immutable variable '{s}'", .{symbol.source_name});
+                return self.fail(unary.operator_position, message);
+            }
+            if (symbol.state.mutable_borrow or symbol.state.immutable_borrows != 0) {
+                const message = try std.fmt.allocPrint(self.allocator, "cannot mutably borrow '{s}' because it is already borrowed", .{symbol.source_name});
+                return self.fail(unary.operator_position, message);
+            }
+        } else if (symbol.state.mutable_borrow) {
+            const message = try std.fmt.allocPrint(self.allocator, "cannot immutably borrow '{s}' while it is mutably borrowed", .{symbol.source_name});
+            return self.fail(unary.operator_position, message);
+        }
+        const operand = try self.expression(unary.operand, scope);
+        const target = try self.allocator.create(Type);
+        target.* = operand.type;
+        const borrow = Borrow{ .root = symbol.state, .mutable = mutable };
+        if (mutable) symbol.state.mutable_borrow = true else symbol.state.immutable_borrows += 1;
+        return self.newExpression(.{
+            .type = .{ .reference = .{ .target = target, .mutable = mutable } },
+            .position = unary.operator_position,
+            .borrow = borrow,
+            .owns_borrow = true,
+            .value = .{ .unary = .{ .operator = unary.operator, .operand = operand } },
+        });
+    }
+
+    fn moveExpression(self: *Analyzer, unary: Ast.Expression.Unary, scope: *const Scope) AnalyzeError!*Expression {
+        if (unary.operand.value != .identifier) return self.fail(unary.operator_position, "'move' requires a complete local variable");
+        const name = unary.operand.value.identifier;
+        const symbol = findSymbol(scope, name) orelse {
+            const message = try std.fmt.allocPrint(self.allocator, "unknown variable '{s}'", .{name});
+            return self.fail(unary.operator_position, message);
+        };
+        if (symbol.type == .reference) return self.fail(unary.operator_position, "cannot move a reference");
+        if (symbol.state.moved) {
+            const message = try std.fmt.allocPrint(self.allocator, "variable '{s}' was already moved", .{name});
+            return self.fail(unary.operator_position, message);
+        }
+        if (symbol.state.mutable_borrow or symbol.state.immutable_borrows != 0) {
+            const message = try std.fmt.allocPrint(self.allocator, "cannot move borrowed variable '{s}'", .{name});
+            return self.fail(unary.operator_position, message);
+        }
+        const operand = try self.expression(unary.operand, scope);
+        symbol.state.moved = true;
+        return self.newExpression(.{ .type = operand.type, .position = unary.operator_position, .value = .{ .unary = .{ .operator = .move, .operand = operand } } });
     }
 
     fn requireBinaryOperands(
@@ -1431,6 +1618,51 @@ pub const Analyzer = struct {
         return result;
     }
 
+    fn newBindingState(self: *Analyzer, type_value: Type) !*BindingState {
+        const state = try self.allocator.create(BindingState);
+        state.* = .{};
+        if (type_value == .reference) {
+            state.reference = .{ .root = null, .mutable = type_value.reference.mutable };
+        }
+        return state;
+    }
+
+    fn copyBorrow(self: *Analyzer, borrow: Borrow) !Borrow {
+        _ = self;
+        if (borrow.mutable) return error.InvalidSource;
+        if (borrow.root) |root| root.immutable_borrows += 1;
+        return borrow;
+    }
+
+    fn releaseTransientBorrow(_: *Analyzer, expression_value: *Expression) void {
+        if (expression_value.owns_borrow) {
+            releaseBorrow(expression_value.borrow.?);
+            expression_value.owns_borrow = false;
+        }
+    }
+
+    fn releaseScopeBorrows(_: *Analyzer, scope: *Scope) void {
+        for (scope.borrows.items) |borrow| releaseBorrow(borrow);
+    }
+
+    fn placeRootSymbol(
+        self: *Analyzer,
+        ast_expression: *const Ast.Expression,
+        scope: *const Scope,
+        position: Source.Position,
+    ) AnalyzeError!*const Symbol {
+        const name = switch (ast_expression.value) {
+            .identifier => |value| value,
+            .member_access => |member| return self.placeRootSymbol(member.object, scope, position),
+            else => return self.fail(position, "a reference must borrow a variable or one of its fields"),
+        };
+        const symbol = findSymbol(scope, name) orelse {
+            const message = try std.fmt.allocPrint(self.allocator, "unknown variable '{s}'", .{name});
+            return self.fail(position, message);
+        };
+        return symbol;
+    }
+
     fn fail(self: *Analyzer, position: Source.Position, message: []const u8) Source.Error {
         self.diagnostic = .{ .position = position, .message = message };
         return error.InvalidSource;
@@ -1473,6 +1705,7 @@ fn typeFromAnnotation(
         .float64 => .float64,
         .bool => .bool,
         .str => .str,
+        .reference => |reference| try typeFromReference(self, reference, position),
         .structure => |name| structure_type: {
             const structure = self.findStructure(name) orelse {
                 const message = try std.fmt.allocPrint(self.allocator, "unknown type '{s}'", .{name});
@@ -1509,7 +1742,19 @@ fn typeFromReturn(
         .bool => .bool,
         .str => .str,
         .structure => |name| typeFromAnnotation(self, .{ .structure = name }, position),
+        .reference => |reference| typeFromReference(self, reference, position),
     };
+}
+
+fn typeFromReference(
+    self: *Analyzer,
+    reference: Ast.TypeName.Reference,
+    position: Source.Position,
+) AnalyzeError!Type {
+    const target = try self.allocator.create(Type);
+    target.* = try typeFromAnnotation(self, reference.target.*, position);
+    if (target.* == .reference) return self.fail(position, "a reference cannot target another reference");
+    return .{ .reference = .{ .target = target, .mutable = reference.mutable } };
 }
 
 fn blockAlwaysReturns(statements: []const Statement) bool {
@@ -1533,6 +1778,14 @@ fn typeMismatchMessage(allocator: Allocator, expected: Type, found: Type) ![]con
         "expected '{s}', found '{s}'",
         .{ typeName(expected), typeName(found) },
     );
+}
+
+fn referenceMutability(type_value: ?Type) ?bool {
+    const value = type_value orelse return null;
+    return switch (value) {
+        .reference => |reference| reference.mutable,
+        else => null,
+    };
 }
 
 fn normalizeNumericLiteral(allocator: Allocator, lexeme: []const u8) ![]const u8 {
@@ -1582,6 +1835,10 @@ fn typeEqual(left: Type, right: Type) bool {
         .float64 => right == .float64,
         .bool => right == .bool,
         .str => right == .str,
+        .reference => |left_reference| switch (right) {
+            .reference => |right_reference| left_reference.mutable == right_reference.mutable and typeEqual(left_reference.target.*, right_reference.target.*),
+            else => false,
+        },
         .structure => |left_structure| switch (right) {
             .structure => |right_structure| std.mem.eql(u8, left_structure.generated_name, right_structure.generated_name),
             else => false,
@@ -1604,6 +1861,7 @@ fn typeName(value: Type) []const u8 {
         .float64 => "float64",
         .bool => "bool",
         .str => "str",
+        .reference => |reference| if (reference.mutable) "reference&" else "reference@",
         .structure => |structure_type| structure_type.source_name,
     };
 }

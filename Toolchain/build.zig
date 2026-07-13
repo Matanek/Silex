@@ -56,6 +56,34 @@ pub fn build(b: *std.Build) void {
         "Tests/InvalidImmutableAssignment.sx:3:5: error: cannot assign to immutable variable 'count'\n",
     );
 
+    const borrowed_mutation_command = b.addRunArtifact(executable);
+    borrowed_mutation_command.addArgs(&.{ "compile", "Tests/InvalidBorrowedMutation.sx" });
+    borrowed_mutation_command.expectExitCode(1);
+    borrowed_mutation_command.expectStdErrEqual(
+        "Tests/InvalidBorrowedMutation.sx:4:5: error: cannot mutate borrowed variable 'count'\n",
+    );
+
+    const mutable_borrow_access_command = b.addRunArtifact(executable);
+    mutable_borrow_access_command.addArgs(&.{ "compile", "Tests/InvalidMutableBorrowAccess.sx" });
+    mutable_borrow_access_command.expectExitCode(1);
+    mutable_borrow_access_command.expectStdErrEqual(
+        "Tests/InvalidMutableBorrowAccess.sx:4:11: error: cannot access variable 'count' while it is mutably borrowed\n",
+    );
+
+    const moved_use_command = b.addRunArtifact(executable);
+    moved_use_command.addArgs(&.{ "compile", "Tests/InvalidMovedUse.sx" });
+    moved_use_command.expectExitCode(1);
+    moved_use_command.expectStdErrEqual(
+        "Tests/InvalidMovedUse.sx:4:11: error: use of moved variable 'count'\n",
+    );
+
+    const reference_return_command = b.addRunArtifact(executable);
+    reference_return_command.addArgs(&.{ "compile", "Tests/InvalidReferenceReturn.sx" });
+    reference_return_command.expectExitCode(1);
+    reference_return_command.expectStdErrEqual(
+        "Tests/InvalidReferenceReturn.sx:1:1: error: a function cannot return a reference\n",
+    );
+
     const invalid_condition_command = b.addRunArtifact(executable);
     invalid_condition_command.addArgs(&.{ "compile", "Tests/InvalidCondition.sx" });
     invalid_condition_command.expectExitCode(1);
@@ -369,6 +397,10 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&lsp_test_command.step);
     test_step.dependOn(&invalid_command.step);
     test_step.dependOn(&immutable_assignment_command.step);
+    test_step.dependOn(&borrowed_mutation_command.step);
+    test_step.dependOn(&mutable_borrow_access_command.step);
+    test_step.dependOn(&moved_use_command.step);
+    test_step.dependOn(&reference_return_command.step);
     test_step.dependOn(&invalid_condition_command.step);
     test_step.dependOn(&invalid_logical_command.step);
     test_step.dependOn(&invalid_while_command.step);
@@ -414,8 +446,13 @@ pub fn build(b: *std.Build) void {
     smoke_command.addArgs(&.{ "run", "Smokes/Main.sx" });
     smoke_command.expectStdOutEqual(hostText(b, "Hello from Silex smoke test\n50\nlogic works\ntrue\nfalse\n2\n1\n"));
 
+    const references_command = b.addRunArtifact(executable);
+    references_command.step.dependOn(&smoke_command.step);
+    references_command.addArgs(&.{ "run", "Smokes/References.sx" });
+    references_command.expectStdOutEqual(hostText(b, "1\n2\n4\n"));
+
     const boolean_condition_command = b.addRunArtifact(executable);
-    boolean_condition_command.step.dependOn(&smoke_command.step);
+    boolean_condition_command.step.dependOn(&references_command.step);
     boolean_condition_command.addArgs(&.{ "run", "Smokes/BooleanCondition.sx" });
     boolean_condition_command.expectStdOutEqual(hostText(b, "true branch\n"));
 

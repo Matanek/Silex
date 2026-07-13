@@ -233,7 +233,7 @@ pub fn generateWithSources(
         try output.appendSlice(allocator, " {\n");
         for (structure.fields) |field| {
             try output.appendSlice(allocator, "    ");
-            try output.appendSlice(allocator, cppType(field.type));
+            try appendCppType(allocator, &output, field.type);
             try output.append(allocator, ' ');
             try output.appendSlice(allocator, field.generated_name);
             try output.appendSlice(allocator, ";\n");
@@ -307,7 +307,7 @@ fn generateMethodSignature(
     owner_name: ?[]const u8,
     include_names: bool,
 ) !void {
-    try output.appendSlice(allocator, cppType(method.return_type));
+    try appendCppType(allocator, output, method.return_type);
     try output.append(allocator, ' ');
     if (owner_name) |name| {
         try output.appendSlice(allocator, name);
@@ -317,7 +317,7 @@ fn generateMethodSignature(
     try output.append(allocator, '(');
     for (method.parameters, 0..) |parameter, index| {
         if (index != 0) try output.appendSlice(allocator, ", ");
-        try output.appendSlice(allocator, cppType(parameter.type));
+        try appendCppType(allocator, output, parameter.type);
         if (include_names) {
             try output.append(allocator, ' ');
             try output.appendSlice(allocator, parameter.generated_name);
@@ -328,15 +328,17 @@ fn generateMethodSignature(
 }
 
 fn generateFunctionSignature(allocator: Allocator, output: *std.ArrayList(u8), function: Semantic.Function, include_names: bool) !void {
-    try output.appendSlice(allocator, if (function.is_main) "int silexMain(" else cppType(function.return_type));
-    if (!function.is_main) {
+    if (function.is_main) {
+        try output.appendSlice(allocator, "int silexMain(");
+    } else {
+        try appendCppType(allocator, output, function.return_type);
         try output.append(allocator, ' ');
         try output.appendSlice(allocator, function.generated_name);
         try output.append(allocator, '(');
     }
     for (function.parameters, 0..) |parameter, index| {
         if (index != 0) try output.appendSlice(allocator, ", ");
-        try output.appendSlice(allocator, cppType(parameter.type));
+        try appendCppType(allocator, output, parameter.type);
         if (include_names) {
             try output.append(allocator, ' ');
             try output.appendSlice(allocator, parameter.generated_name);
@@ -424,8 +426,8 @@ fn generateStatement(
         },
         .variable_declaration => |declaration| {
             try indent(allocator, output, indentation);
-            if (declaration.mutability == .immutable) try output.appendSlice(allocator, "const ");
-            try output.appendSlice(allocator, cppType(declaration.type));
+            if (declaration.mutability == .immutable and declaration.type != .reference) try output.appendSlice(allocator, "const ");
+            try appendCppType(allocator, output, declaration.type);
             try output.append(allocator, ' ');
             try output.appendSlice(allocator, declaration.generated_name);
             try output.appendSlice(allocator, " = ");
@@ -581,6 +583,12 @@ fn generateExpression(allocator: Allocator, output: *std.ArrayList(u8), expressi
                 return;
             } else if (unary.operator == .numeric_negate and isInteger(expression.type)) {
                 try output.appendSlice(allocator, "checkedNegate(");
+            } else if (unary.operator == .dereference) {
+                try output.appendSlice(allocator, "(*");
+            } else if (unary.operator == .borrow) {
+                try output.appendSlice(allocator, "(&");
+            } else if (unary.operator == .move) {
+                try output.appendSlice(allocator, "std::move(");
             } else {
                 try output.appendSlice(allocator, if (unary.operator == .logical_not) "(!" else "(-");
             }
@@ -715,7 +723,19 @@ fn cppType(type_name: Semantic.Type) []const u8 {
         .bool => "bool",
         .str => "std::string",
         .structure => |structure_type| structure_type.generated_name,
+        .reference => unreachable,
     };
+}
+
+fn appendCppType(allocator: Allocator, output: *std.ArrayList(u8), type_name: Semantic.Type) !void {
+    switch (type_name) {
+        .reference => |reference| {
+            if (!reference.mutable) try output.appendSlice(allocator, "const ");
+            try appendCppType(allocator, output, reference.target.*);
+            try output.append(allocator, '*');
+        },
+        else => try output.appendSlice(allocator, cppType(type_name)),
+    }
 }
 
 fn silexTypeName(type_name: Semantic.Type) []const u8 {
@@ -734,6 +754,7 @@ fn silexTypeName(type_name: Semantic.Type) []const u8 {
         .bool => "bool",
         .str => "str",
         .structure => |structure_type| structure_type.source_name,
+        .reference => |reference| if (reference.mutable) "reference&" else "reference@",
     };
 }
 

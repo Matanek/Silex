@@ -18,6 +18,9 @@ pub const BinaryOperator = enum {
 pub const UnaryOperator = enum {
     logical_not,
     numeric_negate,
+    dereference,
+    borrow,
+    move,
 };
 
 pub const TypeName = union(enum) {
@@ -37,6 +40,12 @@ pub const TypeName = union(enum) {
     bool,
     str,
     structure: []const u8,
+    reference: Reference,
+
+    pub const Reference = struct {
+        target: *TypeName,
+        mutable: bool,
+    };
 };
 
 pub const ReturnType = union(enum) {
@@ -57,6 +66,7 @@ pub const ReturnType = union(enum) {
     bool,
     str,
     structure: []const u8,
+    reference: TypeName.Reference,
 };
 
 pub const Mutability = enum {

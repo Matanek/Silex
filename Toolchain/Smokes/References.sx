@@ -1,0 +1,18 @@
+func increment(value:int&) void {
+    *value += 1
+}
+
+func main() void {
+    var count = 1
+
+    if (true) {
+        let view:int@ = &count
+        print(*view)
+    }
+
+    increment(&count)
+    let transferred = move count
+    print(transferred)
+    count = 4
+    print(count)
+}
