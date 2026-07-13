@@ -263,35 +263,43 @@ pub fn build(b: *std.Build) void {
     smoke_command.expectStdOutEqual(hostText(b, "Hello from Silex smoke test\n50\nlogic works\ntrue\nfalse\n2\n1\n"));
 
     const boolean_condition_command = b.addRunArtifact(executable);
+    boolean_condition_command.step.dependOn(&smoke_command.step);
     boolean_condition_command.addArgs(&.{ "run", "Smokes/BooleanCondition.sx" });
     boolean_condition_command.expectStdOutEqual(hostText(b, "true branch\n"));
 
     const compact_command = b.addRunArtifact(executable);
+    compact_command.step.dependOn(&boolean_condition_command.step);
     compact_command.addArgs(&.{ "run", "Smokes/Compact.sx" });
     compact_command.expectStdOutEqual(hostText(b, "50\n"));
 
     const structures_command = b.addRunArtifact(executable);
+    structures_command.step.dependOn(&compact_command.step);
     structures_command.addArgs(&.{ "run", "Smokes/Structures.sx" });
     structures_command.expectStdOutEqual(hostText(b, "Ada\n32\n0\n"));
 
     const defaults_command = b.addRunArtifact(executable);
+    defaults_command.step.dependOn(&structures_command.step);
     defaults_command.addArgs(&.{ "run", "Smokes/Defaults.sx" });
     defaults_command.expectStdOutEqual(hostText(b, "Ada\nfalse\n1\n7\n0\n\nBob\ntrue\n4\n5\n"));
 
     const floats_command = b.addRunArtifact(executable);
+    floats_command.step.dependOn(&defaults_command.step);
     floats_command.addArgs(&.{ "run", "Smokes/Floats.sx" });
     floats_command.expectStdOutEqual(hostText(b, "3\n-2.5\n2.5\n2.5\n2\n1.5\ntrue\n2\n"));
 
     const numeric_types_command = b.addRunArtifact(executable);
+    numeric_types_command.step.dependOn(&floats_command.step);
     numeric_types_command.addArgs(&.{ "run", "Smokes/NumericTypes.sx" });
     numeric_types_command.expectStdOutEqual(hostText(b, "-128\n32767\n2147483647\n-9223372036854775808\n255\n65535\n4294967295\n18446744073709551615\n42\n1.5\n2.25\n0\n12\n"));
 
     const integer_overflow_command = b.addRunArtifact(executable);
+    integer_overflow_command.step.dependOn(&numeric_types_command.step);
     integer_overflow_command.addArgs(&.{ "run", "Smokes/IntegerOverflow.sx" });
     integer_overflow_command.expectExitCode(1);
     integer_overflow_command.expectStdErrEqual(hostText(b, "silex: runtime error: integer overflow in addition\n"));
 
     const native_source_command = b.addRunArtifact(executable);
+    native_source_command.step.dependOn(&integer_overflow_command.step);
     native_source_command.addArgs(&.{
         "run",
         "Smokes/Native/Main.sx",
@@ -301,14 +309,6 @@ pub fn build(b: *std.Build) void {
     native_source_command.expectStdOutEqual(hostText(b, "Native wrapper initialized\nSilex with native source\n"));
 
     const smoke_step = b.step("smoke", "Compile and run the smoke program");
-    smoke_step.dependOn(&smoke_command.step);
-    smoke_step.dependOn(&boolean_condition_command.step);
-    smoke_step.dependOn(&compact_command.step);
-    smoke_step.dependOn(&structures_command.step);
-    smoke_step.dependOn(&defaults_command.step);
-    smoke_step.dependOn(&floats_command.step);
-    smoke_step.dependOn(&numeric_types_command.step);
-    smoke_step.dependOn(&integer_overflow_command.step);
     smoke_step.dependOn(&native_source_command.step);
 
     const cross_smoke_command = b.addRunArtifact(executable);
@@ -356,7 +356,7 @@ pub fn build(b: *std.Build) void {
         .root_module = distribution_module,
     });
     const host = b.graph.host.result;
-    const distribution_name = b.fmt("silex-0.6.3-{s}-{s}", .{
+    const distribution_name = b.fmt("silex-0.6.4-{s}-{s}", .{
         @tagName(host.cpu.arch),
         @tagName(host.os.tag),
     });
