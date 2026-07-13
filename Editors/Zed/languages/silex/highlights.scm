@@ -47,6 +47,9 @@
 (integer_literal) @number
 (float_literal) @number
 (boolean_literal) @boolean
+(conversion_expression
+  "as" @keyword
+  type: (type) @type)
 (self_expression) @variable.builtin
 (comment) @comment
 

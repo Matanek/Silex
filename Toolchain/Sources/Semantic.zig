@@ -35,6 +35,7 @@ pub const Expression = struct {
         floating: []const u8,
         boolean: bool,
         string: []const u8,
+        string_length: *Expression,
         variable: []const u8,
         self,
         call: Call,
@@ -349,6 +350,9 @@ pub const Analyzer = struct {
     fn collectFunctions(self: *Analyzer, ast_functions: []const Ast.Function) AnalyzeError!void {
         var main_count: usize = 0;
         for (ast_functions, 0..) |ast_function, index| {
+            if (std.mem.eql(u8, ast_function.name, "len")) {
+                return self.fail(ast_function.name_position, "'len' is a built-in function");
+            }
             if (self.findFunction(ast_function.name) != null) {
                 const message = try std.fmt.allocPrint(self.allocator, "function '{s}' is already declared", .{ast_function.name});
                 return self.fail(ast_function.name_position, message);
@@ -622,11 +626,20 @@ pub const Analyzer = struct {
             },
             .add, .subtract, .multiply, .divide => {
                 value = try self.coerce(value.?, target.type);
-                if (!isNumeric(target.type) or !typeEqual(target.type, value.?.type)) {
+                const supports_string_append = ast.operator == .add and typeEqual(target.type, .str);
+                if (!typeEqual(target.type, value.?.type)) {
                     const message = try std.fmt.allocPrint(
                         self.allocator,
-                        "operator '{s}' requires a numeric target and compatible value, found '{s}' and '{s}'",
+                        "operator '{s}' requires a compatible value, found '{s}' and '{s}'",
                         .{ assignmentOperatorText(ast.operator), typeName(target.type), typeName(value.?.type) },
+                    );
+                    return self.fail(ast.position, message);
+                }
+                if (!isNumeric(target.type) and !supports_string_append) {
+                    const message = try std.fmt.allocPrint(
+                        self.allocator,
+                        "operator '{s}' requires a numeric target, found '{s}'",
+                        .{ assignmentOperatorText(ast.operator), typeName(target.type) },
                     );
                     return self.fail(ast.position, message);
                 }
@@ -724,11 +737,7 @@ pub const Analyzer = struct {
                 .position = ast.position,
                 .value = .{ .boolean = value },
             }),
-            .string => |value| self.newExpression(.{
-                .type = .str,
-                .position = ast.position,
-                .value = .{ .string = value },
-            }),
+            .string => |value| self.stringExpression(ast.position, value),
             .identifier => |name| self.variableExpression(ast.position, name, scope),
             .self => self.selfExpression(ast.position),
             .call => |call| self.callExpression(call, scope),
@@ -736,12 +745,21 @@ pub const Analyzer = struct {
             .structure_initializer => |initializer| self.structureInitializerExpression(initializer, scope),
             .member_access => |member| self.memberAccessExpression(member, scope),
             .unary => |unary| self.unaryExpression(unary, scope),
+            .conversion => |conversion| self.conversionExpression(conversion, scope),
             .binary => |binary| self.binaryExpression(binary, scope),
         };
     }
 
     fn integerExpression(self: *Analyzer, position: Source.Position, lexeme: []const u8) AnalyzeError!*Expression {
-        const value = std.fmt.parseInt(u64, lexeme, 10) catch {
+        const normalized = try normalizeNumericLiteral(self.allocator, lexeme);
+        const base: u8 = if (normalized.len > 2 and normalized[0] == '0') switch (normalized[1]) {
+            'b', 'B' => 2,
+            'o', 'O' => 8,
+            'x', 'X' => 16,
+            else => 10,
+        } else 10;
+        const digits = if (base == 10) normalized else normalized[2..];
+        const value = std.fmt.parseInt(u64, digits, base) catch {
             return self.fail(position, "integer literal is outside the range of 'int'");
         };
         return self.newExpression(.{
@@ -752,15 +770,58 @@ pub const Analyzer = struct {
     }
 
     fn floatExpression(self: *Analyzer, position: Source.Position, lexeme: []const u8) AnalyzeError!*Expression {
-        const value = std.fmt.parseFloat(f64, lexeme) catch {
+        const normalized = try normalizeNumericLiteral(self.allocator, lexeme);
+        const value = std.fmt.parseFloat(f64, normalized) catch {
             return self.fail(position, "float literal is outside the range of 'float'");
         };
         if (!std.math.isFinite(value)) return self.fail(position, "float literal is outside the range of 'float'");
         return self.newExpression(.{
             .type = .float,
             .position = position,
-            .value = .{ .floating = lexeme },
+            .value = .{ .floating = normalized },
         });
+    }
+
+    fn stringExpression(self: *Analyzer, position: Source.Position, lexeme: []const u8) AnalyzeError!*Expression {
+        return self.newExpression(.{
+            .type = .str,
+            .position = position,
+            .value = .{ .string = try self.decodeStringLiteral(position, lexeme) },
+        });
+    }
+
+    fn decodeStringLiteral(self: *Analyzer, position: Source.Position, lexeme: []const u8) AnalyzeError![]const u8 {
+        var value: std.ArrayList(u8) = .empty;
+        var index: usize = 0;
+        while (index < lexeme.len) {
+            const character = lexeme[index];
+            if (character != '\\') {
+                try value.append(self.allocator, character);
+                index += 1;
+                continue;
+            }
+            index += 1;
+            if (index == lexeme.len) return self.fail(position, "unterminated string literal");
+            switch (lexeme[index]) {
+                '"' => try value.append(self.allocator, '"'),
+                '\\' => try value.append(self.allocator, '\\'),
+                'n' => try value.append(self.allocator, '\n'),
+                'r' => try value.append(self.allocator, '\r'),
+                't' => try value.append(self.allocator, '\t'),
+                '0' => try value.append(self.allocator, 0),
+                'u' => {
+                    index += 2;
+                    var scalar: u21 = 0;
+                    while (lexeme[index] != '}') : (index += 1) {
+                        scalar = scalar * 16 + (hexDigit(lexeme[index]) orelse unreachable);
+                    }
+                    try appendUnicodeScalar(self.allocator, &value, scalar);
+                },
+                else => unreachable,
+            }
+            index += 1;
+        }
+        return value.toOwnedSlice(self.allocator);
     }
 
     fn defaultExpression(self: *Analyzer, type_value: Type, position: Source.Position) AnalyzeError!*Expression {
@@ -832,6 +893,9 @@ pub const Analyzer = struct {
         if (isContextualIntegerLiteral(right) and isInteger(left.type)) right = try self.coerce(right, left.type);
         const result_type: Type = switch (binary.operator) {
             .add, .subtract, .multiply, .divide => arithmetic: {
+                if (binary.operator == .add and typeEqual(left.type, .str) and typeEqual(right.type, .str)) {
+                    break :arithmetic .str;
+                }
                 try self.requireNumericOperands(binary.operator_position, "arithmetic operator", left.type, right.type);
                 const common_type = commonNumericType(left.type, right.type) orelse {
                     const message = try std.fmt.allocPrint(
@@ -871,7 +935,7 @@ pub const Analyzer = struct {
                     };
                     left = try self.coerce(left, common_type);
                     right = try self.coerce(right, common_type);
-                } else if (!typeEqual(left.type, right.type) or isStructure(left.type)) {
+                } else if (!typeEqual(left.type, right.type)) {
                     const message = try std.fmt.allocPrint(
                         self.allocator,
                         "equality operator requires operands of the same type, found '{s}' and '{s}'",
@@ -889,7 +953,30 @@ pub const Analyzer = struct {
         });
     }
 
+    fn conversionExpression(
+        self: *Analyzer,
+        conversion: Ast.Expression.Conversion,
+        scope: *const Scope,
+    ) AnalyzeError!*Expression {
+        const operand = try self.expression(conversion.operand, scope);
+        const target_type = try typeFromAnnotation(self, conversion.target_type, conversion.as_position);
+        if (!isNumeric(operand.type) or !isNumeric(target_type)) {
+            const message = try std.fmt.allocPrint(
+                self.allocator,
+                "explicit conversion requires numeric source and target types, found '{s}' and '{s}'",
+                .{ typeName(operand.type), typeName(target_type) },
+            );
+            return self.fail(conversion.as_position, message);
+        }
+        return self.newExpression(.{
+            .type = target_type,
+            .position = conversion.as_position,
+            .value = .{ .conversion = .{ .operand = operand, .target_type = target_type } },
+        });
+    }
+
     fn callExpression(self: *Analyzer, call: Ast.Expression.Call, scope: *const Scope) AnalyzeError!*Expression {
+        if (std.mem.eql(u8, call.name, "len")) return self.stringLengthExpression(call, scope);
         const function_symbol = self.findFunction(call.name) orelse {
             const message = try std.fmt.allocPrint(self.allocator, "unknown function '{s}'", .{call.name});
             return self.fail(call.name_position, message);
@@ -910,6 +997,27 @@ pub const Analyzer = struct {
             try arguments.append(self.allocator, value);
         }
         return self.newExpression(.{ .type = function_symbol.return_type, .position = call.name_position, .value = .{ .call = .{ .generated_name = function_symbol.generated_name, .arguments = try arguments.toOwnedSlice(self.allocator) } } });
+    }
+
+    fn stringLengthExpression(
+        self: *Analyzer,
+        call: Ast.Expression.Call,
+        scope: *const Scope,
+    ) AnalyzeError!*Expression {
+        if (call.arguments.len != 1) {
+            const message = try std.fmt.allocPrint(self.allocator, "function 'len' expects 1 argument, found {d}", .{call.arguments.len});
+            return self.fail(call.name_position, message);
+        }
+        const argument = try self.expression(call.arguments[0], scope);
+        if (!typeEqual(argument.type, .str)) {
+            const message = try std.fmt.allocPrint(self.allocator, "argument 1 of 'len' expects 'str', found '{s}'", .{typeName(argument.type)});
+            return self.fail(call.arguments[0].position, message);
+        }
+        return self.newExpression(.{
+            .type = .int,
+            .position = call.name_position,
+            .value = .{ .string_length = argument },
+        });
     }
 
     fn methodCallExpression(
@@ -1159,6 +1267,7 @@ pub const Analyzer = struct {
                 if (!std.math.isFinite(value)) return self.fail(expression_value.position, "float literal is outside the range of 'float'");
             },
             .boolean, .string, .variable, .self => {},
+            .string_length => |argument| try self.validateExpression(argument),
             .call => |call| for (call.arguments) |argument| try self.validateExpression(argument),
             .method_call => |call| {
                 try self.validateExpression(call.object);
@@ -1426,6 +1535,38 @@ fn typeMismatchMessage(allocator: Allocator, expected: Type, found: Type) ![]con
     );
 }
 
+fn normalizeNumericLiteral(allocator: Allocator, lexeme: []const u8) ![]const u8 {
+    if (std.mem.indexOfScalar(u8, lexeme, '_') == null) return lexeme;
+    var normalized: std.ArrayList(u8) = .empty;
+    for (lexeme) |character| if (character != '_') try normalized.append(allocator, character);
+    return normalized.toOwnedSlice(allocator);
+}
+
+fn hexDigit(character: u8) ?u21 {
+    if (std.ascii.isDigit(character)) return character - '0';
+    if (character >= 'a' and character <= 'f') return character - 'a' + 10;
+    if (character >= 'A' and character <= 'F') return character - 'A' + 10;
+    return null;
+}
+
+fn appendUnicodeScalar(allocator: Allocator, output: *std.ArrayList(u8), scalar: u21) !void {
+    if (scalar <= 0x7F) {
+        try output.append(allocator, @intCast(scalar));
+    } else if (scalar <= 0x7FF) {
+        try output.append(allocator, @intCast(0xC0 | (scalar >> 6)));
+        try output.append(allocator, @intCast(0x80 | (scalar & 0x3F)));
+    } else if (scalar <= 0xFFFF) {
+        try output.append(allocator, @intCast(0xE0 | (scalar >> 12)));
+        try output.append(allocator, @intCast(0x80 | ((scalar >> 6) & 0x3F)));
+        try output.append(allocator, @intCast(0x80 | (scalar & 0x3F)));
+    } else {
+        try output.append(allocator, @intCast(0xF0 | (scalar >> 18)));
+        try output.append(allocator, @intCast(0x80 | ((scalar >> 12) & 0x3F)));
+        try output.append(allocator, @intCast(0x80 | ((scalar >> 6) & 0x3F)));
+        try output.append(allocator, @intCast(0x80 | (scalar & 0x3F)));
+    }
+}
+
 fn typeEqual(left: Type, right: Type) bool {
     return switch (left) {
         .void => right == .void,
@@ -1682,6 +1823,74 @@ test "reject incompatible type annotation" {
     try std.testing.expectEqualStrings("expected 'bool', found 'int'", analyzer.diagnostic.?.message);
 }
 
+test "resolve explicit numeric conversion" {
+    const Parser = @import("Parser.zig").Parser;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var parser = Parser.init(allocator, "func main() void { let source:int = 12; let target:uint8 = source as uint8; }");
+    var analyzer = Analyzer.init(allocator);
+    const program = try analyzer.analyze(try parser.parse());
+
+    const initializer = program.functions[0].statements[1].variable_declaration.initializer;
+    try std.testing.expectEqual(Type.uint8, initializer.type);
+    try std.testing.expectEqual(Type.uint8, initializer.value.conversion.target_type);
+}
+
+test "resolve numeric bases separators and exponents" {
+    const Parser = @import("Parser.zig").Parser;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var parser = Parser.init(
+        allocator,
+        "func main() void { let binary = 0b1010_0101; let hexadecimal = 0xCA_FE; let exponent = 1.25e+2; }",
+    );
+    var analyzer = Analyzer.init(allocator);
+    const program = try analyzer.analyze(try parser.parse());
+
+    try std.testing.expectEqual(@as(u64, 165), program.functions[0].statements[0].variable_declaration.initializer.value.integer);
+    try std.testing.expectEqual(@as(u64, 51966), program.functions[0].statements[1].variable_declaration.initializer.value.integer);
+    try std.testing.expectEqualStrings("1.25e+2", program.functions[0].statements[2].variable_declaration.initializer.value.floating);
+}
+
+test "resolve string escapes concatenation and length" {
+    const Parser = @import("Parser.zig").Parser;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var parser = Parser.init(
+        allocator,
+        "func main() void { var value = \"A\\u{00E9}\\0\"; value += \"!\"; let count = len(value); }",
+    );
+    var analyzer = Analyzer.init(allocator);
+    const program = try analyzer.analyze(try parser.parse());
+
+    const value = program.functions[0].statements[0].variable_declaration.initializer;
+    try std.testing.expectEqual(Type.str, value.type);
+    try std.testing.expectEqualSlices(u8, &.{ 'A', 0xC3, 0xA9, 0 }, value.value.string);
+    try std.testing.expectEqual(Type.str, program.functions[0].statements[1].assignment.value.type);
+    try std.testing.expectEqual(Type.int, program.functions[0].statements[2].variable_declaration.initializer.type);
+}
+
+test "reject explicit conversion from bool" {
+    const Parser = @import("Parser.zig").Parser;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var parser = Parser.init(allocator, "func main() void { let value = true as int; }");
+    var analyzer = Analyzer.init(allocator);
+    try std.testing.expectError(error.InvalidSource, analyzer.analyze(try parser.parse()));
+    try std.testing.expectEqualStrings(
+        "explicit conversion requires numeric source and target types, found 'bool' and 'int'",
+        analyzer.diagnostic.?.message,
+    );
+}
+
 test "reject arithmetic between str and int" {
     const Parser = @import("Parser.zig").Parser;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
@@ -1752,6 +1961,29 @@ test "reject equality between different types" {
         "equality operator requires operands of the same type, found 'int' and 'bool'",
         analyzer.diagnostic.?.message,
     );
+}
+
+test "resolve structural equality recursively" {
+    const Parser = @import("Parser.zig").Parser;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var parser = Parser.init(allocator,
+        \\struct Position { x:int y:int }
+        \\struct Player { name:str position:Position }
+        \\func main() void {
+        \\    let first = Player { name:"Ada", position:Position { x:10, y:20 } }
+        \\    let copy = Player { name:"Ada", position:Position { x:10, y:20 } }
+        \\    let equal = first == copy
+        \\    let different = first != Player { name:"Ada", position:Position { x:11, y:20 } }
+        \\}
+    );
+    var analyzer = Analyzer.init(allocator);
+    const program = try analyzer.analyze(try parser.parse());
+
+    try std.testing.expectEqual(Type.bool, program.functions[0].statements[2].variable_declaration.type);
+    try std.testing.expectEqual(Type.bool, program.functions[0].statements[3].variable_declaration.type);
 }
 
 test "if and else use separate scopes" {

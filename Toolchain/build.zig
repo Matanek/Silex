@@ -158,7 +158,7 @@ pub fn build(b: *std.Build) void {
     invalid_compound_assignment_command.addArgs(&.{ "compile", "Tests/InvalidCompoundAssignment.sx" });
     invalid_compound_assignment_command.expectExitCode(1);
     invalid_compound_assignment_command.expectStdErrEqual(
-        "Tests/InvalidCompoundAssignment.sx:3:5: error: operator '+=' requires a numeric target and compatible value, found 'str' and 'str'\n",
+        "Tests/InvalidCompoundAssignment.sx:3:5: error: operator '-=' requires a numeric target, found 'str'\n",
     );
 
     const invalid_float_narrowing_command = b.addRunArtifact(executable);
@@ -187,6 +187,76 @@ pub fn build(b: *std.Build) void {
     invalid_signed_unsigned_arithmetic_command.expectExitCode(1);
     invalid_signed_unsigned_arithmetic_command.expectStdErrEqual(
         "Tests/InvalidSignedUnsignedArithmetic.sx:4:18: error: arithmetic operator requires compatible numeric operands, found 'int8' and 'uint8'\n",
+    );
+
+    const invalid_explicit_conversion_command = b.addRunArtifact(executable);
+    invalid_explicit_conversion_command.addArgs(&.{ "compile", "Tests/InvalidExplicitConversion.sx" });
+    invalid_explicit_conversion_command.expectExitCode(1);
+    invalid_explicit_conversion_command.expectStdErrEqual(
+        "Tests/InvalidExplicitConversion.sx:2:22: error: explicit conversion requires numeric source and target types, found 'bool' and 'int'\n",
+    );
+
+    const invalid_numeric_prefix_command = b.addRunArtifact(executable);
+    invalid_numeric_prefix_command.addArgs(&.{ "compile", "Tests/InvalidNumericPrefix.sx" });
+    invalid_numeric_prefix_command.expectExitCode(1);
+    invalid_numeric_prefix_command.expectStdErrEqual(
+        "Tests/InvalidNumericPrefix.sx:2:17: error: expected digit after numeric base prefix\n",
+    );
+
+    const invalid_numeric_separator_command = b.addRunArtifact(executable);
+    invalid_numeric_separator_command.addArgs(&.{ "compile", "Tests/InvalidNumericSeparator.sx" });
+    invalid_numeric_separator_command.expectExitCode(1);
+    invalid_numeric_separator_command.expectStdErrEqual(
+        "Tests/InvalidNumericSeparator.sx:2:17: error: numeric separator must appear between digits\n",
+    );
+
+    const invalid_numeric_base_digit_command = b.addRunArtifact(executable);
+    invalid_numeric_base_digit_command.addArgs(&.{ "compile", "Tests/InvalidNumericBaseDigit.sx" });
+    invalid_numeric_base_digit_command.expectExitCode(1);
+    invalid_numeric_base_digit_command.expectStdErrEqual(
+        "Tests/InvalidNumericBaseDigit.sx:2:17: error: invalid digit in numeric literal\n",
+    );
+
+    const invalid_float_literal_range_command = b.addRunArtifact(executable);
+    invalid_float_literal_range_command.addArgs(&.{ "compile", "Tests/InvalidFloatLiteralRange.sx" });
+    invalid_float_literal_range_command.expectExitCode(1);
+    invalid_float_literal_range_command.expectStdErrEqual(
+        "Tests/InvalidFloatLiteralRange.sx:2:23: error: float literal is outside the range of 'float'\n",
+    );
+
+    const invalid_string_escape_command = b.addRunArtifact(executable);
+    invalid_string_escape_command.addArgs(&.{ "compile", "Tests/InvalidStringEscape.sx" });
+    invalid_string_escape_command.expectExitCode(1);
+    invalid_string_escape_command.expectStdErrEqual(
+        "Tests/InvalidStringEscape.sx:2:11: error: invalid escape sequence in string literal\n",
+    );
+
+    const invalid_unicode_escape_command = b.addRunArtifact(executable);
+    invalid_unicode_escape_command.addArgs(&.{ "compile", "Tests/InvalidUnicodeEscape.sx" });
+    invalid_unicode_escape_command.expectExitCode(1);
+    invalid_unicode_escape_command.expectStdErrEqual(
+        "Tests/InvalidUnicodeEscape.sx:2:11: error: invalid Unicode scalar in string literal\n",
+    );
+
+    const invalid_string_length_command = b.addRunArtifact(executable);
+    invalid_string_length_command.addArgs(&.{ "compile", "Tests/InvalidStringLength.sx" });
+    invalid_string_length_command.expectExitCode(1);
+    invalid_string_length_command.expectStdErrEqual(
+        "Tests/InvalidStringLength.sx:2:15: error: argument 1 of 'len' expects 'str', found 'int'\n",
+    );
+
+    const reserved_length_function_command = b.addRunArtifact(executable);
+    reserved_length_function_command.addArgs(&.{ "compile", "Tests/ReservedLengthFunction.sx" });
+    reserved_length_function_command.expectExitCode(1);
+    reserved_length_function_command.expectStdErrEqual(
+        "Tests/ReservedLengthFunction.sx:1:6: error: 'len' is a built-in function\n",
+    );
+
+    const invalid_structure_equality_command = b.addRunArtifact(executable);
+    invalid_structure_equality_command.addArgs(&.{ "compile", "Tests/InvalidStructureEquality.sx" });
+    invalid_structure_equality_command.expectExitCode(1);
+    invalid_structure_equality_command.expectStdErrEqual(
+        "Tests/InvalidStructureEquality.sx:10:28: error: equality operator requires operands of the same type, found 'Position' and 'Velocity'\n",
     );
 
     const invalid_target_command = b.addRunArtifact(executable);
@@ -318,6 +388,16 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&invalid_numeric_negation_command.step);
     test_step.dependOn(&invalid_integer_literal_range_command.step);
     test_step.dependOn(&invalid_signed_unsigned_arithmetic_command.step);
+    test_step.dependOn(&invalid_explicit_conversion_command.step);
+    test_step.dependOn(&invalid_numeric_prefix_command.step);
+    test_step.dependOn(&invalid_numeric_separator_command.step);
+    test_step.dependOn(&invalid_numeric_base_digit_command.step);
+    test_step.dependOn(&invalid_float_literal_range_command.step);
+    test_step.dependOn(&invalid_string_escape_command.step);
+    test_step.dependOn(&invalid_unicode_escape_command.step);
+    test_step.dependOn(&invalid_string_length_command.step);
+    test_step.dependOn(&reserved_length_function_command.step);
+    test_step.dependOn(&invalid_structure_equality_command.step);
     test_step.dependOn(&invalid_target_command.step);
     test_step.dependOn(&unavailable_cpp_target_command.step);
     test_step.dependOn(&backend_discovered_target_failure_command.step);
@@ -364,9 +444,29 @@ pub fn build(b: *std.Build) void {
     numeric_types_command.addArgs(&.{ "run", "Smokes/NumericTypes.sx" });
     numeric_types_command.expectStdOutEqual(hostText(b, "-128\n32767\n2147483647\n-9223372036854775808\n255\n65535\n4294967295\n18446744073709551615\n42\n1.5\n2.25\n0\n12\n"));
 
+    const conversions_command = b.addRunArtifact(executable);
+    conversions_command.step.dependOn(&numeric_types_command.step);
+    conversions_command.addArgs(&.{ "run", "Smokes/Conversions.sx" });
+    conversions_command.expectStdOutEqual(hostText(b, "-12\n255\n12\n-128\n1.5\n1.67772e+07\n"));
+
+    const numeric_literals_command = b.addRunArtifact(executable);
+    numeric_literals_command.step.dependOn(&conversions_command.step);
+    numeric_literals_command.addArgs(&.{ "run", "Smokes/NumericLiterals.sx" });
+    numeric_literals_command.expectStdOutEqual(hostText(b, "165\n493\n51966\n1000000\n125\n0.0025\n"));
+
+    const strings_command = b.addRunArtifact(executable);
+    strings_command.step.dependOn(&numeric_literals_command.step);
+    strings_command.addArgs(&.{ "run", "Smokes/Strings.sx" });
+    strings_command.expectStdOutEqual(hostText(b, "Hello, Silex\n\nAé!\n\"\\\n3\n3\ntrue\ntrue\n"));
+
+    const structure_equality_command = b.addRunArtifact(executable);
+    structure_equality_command.step.dependOn(&strings_command.step);
+    structure_equality_command.addArgs(&.{ "run", "Smokes/StructureEquality.sx" });
+    structure_equality_command.expectStdOutEqual(hostText(b, "true\ntrue\ntrue\ntrue\n"));
+
     const integer_semantics_output = "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n";
     const integer_semantics_command = b.addRunArtifact(executable);
-    integer_semantics_command.step.dependOn(&numeric_types_command.step);
+    integer_semantics_command.step.dependOn(&structure_equality_command.step);
     integer_semantics_command.addArgs(&.{ "run", "Smokes/IntegerSemantics.sx" });
     integer_semantics_command.expectStdOutEqual(hostText(b, integer_semantics_output));
 
@@ -458,6 +558,27 @@ pub fn build(b: *std.Build) void {
             b.fmt("{s}:{s}\n", .{ b.pathFromRoot(case.source), case.message }),
         ));
         previous_integer_error_step = &unoptimized_command.step;
+    }
+
+    const conversion_error_cases = [_]struct {
+        source: []const u8,
+        message: []const u8,
+    }{
+        .{ .source = "Smokes/ConversionErrors/IntegerRange.sx", .message = "3:17: runtime error: cannot convert 'int' to 'uint8': value 256 is outside the target range" },
+        .{ .source = "Smokes/ConversionErrors/FloatRange.sx", .message = "3:17: runtime error: cannot convert 'float' to 'int8': value 128 is not an exactly representable integer" },
+        .{ .source = "Smokes/ConversionErrors/Fraction.sx", .message = "3:17: runtime error: cannot convert 'float' to 'int': value 2.5 is not an exactly representable integer" },
+        .{ .source = "Smokes/ConversionErrors/Precision.sx", .message = "3:17: runtime error: cannot convert 'int' to 'float': value 16777217 loses precision" },
+    };
+    for (conversion_error_cases) |case| {
+        const command = b.addRunArtifact(executable);
+        command.step.dependOn(previous_integer_error_step);
+        command.addArgs(&.{ "run", case.source });
+        command.expectExitCode(1);
+        command.expectStdErrEqual(hostText(
+            b,
+            b.fmt("{s}:{s}\n", .{ b.pathFromRoot(case.source), case.message }),
+        ));
+        previous_integer_error_step = &command.step;
     }
 
     const modules_command = b.addRunArtifact(executable);

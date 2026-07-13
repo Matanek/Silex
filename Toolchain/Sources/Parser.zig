@@ -276,8 +276,12 @@ pub const Parser = struct {
     }
 
     fn parseTypeName(self: *Parser) ParseError!Ast.TypeName {
+        return self.parseTypeNameAfter("expected type name after ':'");
+    }
+
+    fn parseTypeNameAfter(self: *Parser, message: []const u8) ParseError!Ast.TypeName {
         if (self.current.tag == .identifier) {
-            return .{ .structure = try self.parseQualifiedName("expected type name after ':'") };
+            return .{ .structure = try self.parseQualifiedName(message) };
         }
         const type_name: Ast.TypeName = switch (self.current.tag) {
             .keyword_int => .int,
@@ -295,7 +299,7 @@ pub const Parser = struct {
             .keyword_float64 => .float64,
             .keyword_bool => .bool,
             .keyword_str => .str,
-            else => return self.fail("expected type name after ':'"),
+            else => return self.fail(message),
         };
         try self.advance();
         return type_name;
@@ -445,7 +449,7 @@ pub const Parser = struct {
     }
 
     fn parseUnary(self: *Parser, allow_line_breaks: bool) ParseError!*Ast.Expression {
-        if (self.current.tag != .bang and self.current.tag != .minus) return self.parsePrimary();
+        if (self.current.tag != .bang and self.current.tag != .minus) return self.parseConversion();
 
         const operator_token = self.current;
         try self.advance();
@@ -458,6 +462,24 @@ pub const Parser = struct {
                 .operand = operand,
             } },
         });
+    }
+
+    fn parseConversion(self: *Parser) ParseError!*Ast.Expression {
+        var expression = try self.parsePrimary();
+        while (self.current.tag == .keyword_as) {
+            const as_position = self.current.position;
+            try self.advance();
+            const target_type = try self.parseTypeNameAfter("expected scalar type after 'as'");
+            expression = try self.newExpression(.{
+                .position = expression.position,
+                .value = .{ .conversion = .{
+                    .operand = expression,
+                    .target_type = target_type,
+                    .as_position = as_position,
+                } },
+            });
+        }
+        return expression;
     }
 
     fn parsePrimary(self: *Parser) ParseError!*Ast.Expression {
@@ -742,6 +764,21 @@ test "multiplication binds tighter than addition" {
     const addition = program.functions[0].statements[0].print.argument.value.binary;
     try std.testing.expectEqual(Ast.BinaryOperator.add, addition.operator);
     try std.testing.expectEqual(Ast.BinaryOperator.multiply, addition.right.value.binary.operator);
+}
+
+test "parse explicit conversions before arithmetic" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(
+        arena.allocator(),
+        "func main() void { let value = 1 as uint8 + 2 as int; }",
+    );
+    const program = try parser.parse();
+
+    const addition = program.functions[0].statements[0].variable_declaration.initializer.?.value.binary;
+    try std.testing.expectEqual(Ast.BinaryOperator.add, addition.operator);
+    try std.testing.expectEqual(Ast.TypeName.uint8, addition.left.value.conversion.target_type);
+    try std.testing.expectEqual(Ast.TypeName.int, addition.right.value.conversion.target_type);
 }
 
 test "parse struct initialization and member assignment" {

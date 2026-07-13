@@ -22,10 +22,13 @@ pub fn generateWithSources(
         \\#include <cstddef>
         \\#include <cstdint>
         \\#include <cstdlib>
+        \\#include <bit>
+        \\#include <cmath>
         \\#include <iostream>
         \\#include <limits>
         \\#include <string>
         \\#include <type_traits>
+        \\#include <utility>
         \\
     );
     try output.appendSlice(allocator,
@@ -54,6 +57,84 @@ pub fn generateWithSources(
         \\    } else {
         \\        std::cerr << value;
         \\    }
+        \\}
+        \\
+        \\template <typename T> void printNumericValue(T value) {
+        \\    if constexpr (std::is_integral_v<T>) {
+        \\        printIntegerValue(value);
+        \\    } else {
+        \\        std::cerr << value;
+        \\    }
+        \\}
+        \\
+        \\template <typename Source>
+        \\[[noreturn, gnu::cold, gnu::noinline]] void conversionRuntimeError(
+        \\    SilexSourceLocation location,
+        \\    const char* sourceType,
+        \\    const char* targetType,
+        \\    const char* failure,
+        \\    Source value
+        \\) {
+        \\    std::cerr << silexSourcePath(location) << ':' << location.line << ':' << location.column
+        \\              << ": runtime error: cannot convert '" << sourceType << "' to '" << targetType
+        \\              << "': value ";
+        \\    printNumericValue(value);
+        \\    std::cerr << ' ' << failure << '\n';
+        \\    std::exit(1);
+        \\}
+        \\
+        \\template <typename Target, typename Source> bool integerIsExactlyRepresentable(Source value) {
+        \\    using Unsigned = std::make_unsigned_t<Source>;
+        \\    const Unsigned magnitude = [&] {
+        \\        if constexpr (std::is_signed_v<Source>) {
+        \\            return value < 0 ? static_cast<Unsigned>(-(value + 1)) + 1 : static_cast<Unsigned>(value);
+        \\        } else {
+        \\            return value;
+        \\        }
+        \\    }();
+        \\    if (magnitude == 0) return true;
+        \\    const auto bits = std::bit_width(static_cast<std::uintmax_t>(magnitude));
+        \\    constexpr auto precision = std::numeric_limits<Target>::digits;
+        \\    if (bits <= precision) return true;
+        \\    const auto discardedBits = bits - precision;
+        \\    const auto mask = (std::uintmax_t{1} << discardedBits) - 1;
+        \\    return (static_cast<std::uintmax_t>(magnitude) & mask) == 0;
+        \\}
+        \\
+        \\template <typename Target, typename Source>
+        \\Target checkedConvert(Source value, SilexSourceLocation location, const char* sourceType, const char* targetType) {
+        \\    if constexpr (std::is_integral_v<Source> && std::is_integral_v<Target>) {
+        \\        if (!std::in_range<Target>(value)) [[unlikely]] {
+        \\            conversionRuntimeError(location, sourceType, targetType, "is outside the target range", value);
+        \\        }
+        \\    } else if constexpr (std::is_floating_point_v<Source> && std::is_integral_v<Target>) {
+        \\        const auto numericValue = static_cast<long double>(value);
+        \\        const auto limit = std::ldexp(1.0L, std::numeric_limits<Target>::digits);
+        \\        const bool inRange = std::is_signed_v<Target>
+        \\            ? numericValue >= -limit && numericValue < limit
+        \\            : numericValue >= 0 && numericValue < limit;
+        \\        if (!std::isfinite(value) || std::trunc(value) != value || !inRange) [[unlikely]] {
+        \\            conversionRuntimeError(location, sourceType, targetType, "is not an exactly representable integer", value);
+        \\        }
+        \\    } else if constexpr (std::is_integral_v<Source> && std::is_floating_point_v<Target>) {
+        \\        if (!integerIsExactlyRepresentable<Target>(value)) [[unlikely]] {
+        \\            conversionRuntimeError(location, sourceType, targetType, "loses precision", value);
+        \\        }
+        \\    } else {
+        \\        const Target converted = static_cast<Target>(value);
+        \\        if (!std::isfinite(converted) || static_cast<Source>(converted) != value) [[unlikely]] {
+        \\            conversionRuntimeError(location, sourceType, targetType, "loses precision", value);
+        \\        }
+        \\    }
+        \\    return static_cast<Target>(value);
+        \\}
+        \\
+        \\std::int64_t silexStringLength(const std::string& value) {
+        \\    std::int64_t length = 0;
+        \\    for (unsigned char byte : value) {
+        \\        if ((byte & 0xC0) != 0x80) ++length;
+        \\    }
+        \\    return length;
         \\}
         \\
         \\template <typename T>
@@ -165,6 +246,26 @@ pub fn generateWithSources(
         }
         try output.appendSlice(allocator, "};\n\n");
     }
+    if (program.structures.len > 0) {
+        for (program.structures) |structure| {
+            try generateStructureEqualitySignature(allocator, &output, structure, false);
+            try output.appendSlice(allocator, ";\n");
+        }
+        try output.append(allocator, '\n');
+        for (program.structures) |structure| {
+            try generateStructureEqualitySignature(allocator, &output, structure, true);
+            try output.appendSlice(allocator, " {\n    return ");
+            if (structure.fields.len == 0) {
+                try output.appendSlice(allocator, "true");
+            } else {
+                for (structure.fields, 0..) |field, index| {
+                    if (index != 0) try output.appendSlice(allocator, " && ");
+                    try generateStructureFieldEquality(allocator, &output, field);
+                }
+            }
+            try output.appendSlice(allocator, ";\n}\n\n");
+        }
+    }
     for (program.functions) |function| {
         if (function.is_main) continue;
         try generateFunctionSignature(allocator, &output, function, false);
@@ -242,6 +343,53 @@ fn generateFunctionSignature(allocator: Allocator, output: *std.ArrayList(u8), f
         }
     }
     try output.append(allocator, ')');
+}
+
+fn generateStructureEqualitySignature(
+    allocator: Allocator,
+    output: *std.ArrayList(u8),
+    structure: Semantic.Structure,
+    include_names: bool,
+) !void {
+    try output.appendSlice(allocator, "bool ");
+    try generateStructureEqualityName(allocator, output, structure.generated_name);
+    try output.appendSlice(allocator, "(const ");
+    try output.appendSlice(allocator, structure.generated_name);
+    try output.appendSlice(allocator, "&");
+    if (include_names) try output.appendSlice(allocator, " left");
+    try output.appendSlice(allocator, ", const ");
+    try output.appendSlice(allocator, structure.generated_name);
+    try output.appendSlice(allocator, "&");
+    if (include_names) try output.appendSlice(allocator, " right");
+    try output.append(allocator, ')');
+}
+
+fn generateStructureEqualityName(allocator: Allocator, output: *std.ArrayList(u8), generated_name: []const u8) !void {
+    try output.appendSlice(allocator, "silexEqual");
+    try output.appendSlice(allocator, generated_name);
+}
+
+fn generateStructureFieldEquality(
+    allocator: Allocator,
+    output: *std.ArrayList(u8),
+    field: Semantic.StructureField,
+) !void {
+    switch (field.type) {
+        .structure => |structure_type| {
+            try generateStructureEqualityName(allocator, output, structure_type.generated_name);
+            try output.appendSlice(allocator, "(left.");
+            try output.appendSlice(allocator, field.generated_name);
+            try output.appendSlice(allocator, ", right.");
+            try output.appendSlice(allocator, field.generated_name);
+            try output.append(allocator, ')');
+        },
+        else => {
+            try output.appendSlice(allocator, "left.");
+            try output.appendSlice(allocator, field.generated_name);
+            try output.appendSlice(allocator, " == right.");
+            try output.appendSlice(allocator, field.generated_name);
+        },
+    }
 }
 
 fn generateStatements(
@@ -369,9 +517,14 @@ fn generateExpression(allocator: Allocator, output: *std.ArrayList(u8), expressi
         },
         .boolean => |value| try output.appendSlice(allocator, if (value) "true" else "false"),
         .string => |value| {
-            try output.appendSlice(allocator, "std::string{\"");
-            try output.appendSlice(allocator, value);
-            try output.appendSlice(allocator, "\"}");
+            try output.appendSlice(allocator, "std::string{");
+            try appendCppByteStringLiteral(allocator, output, value);
+            try output.appendSlice(allocator, try std.fmt.allocPrint(allocator, ", {d}}}", .{value.len}));
+        },
+        .string_length => |argument| {
+            try output.appendSlice(allocator, "silexStringLength(");
+            try generateExpression(allocator, output, argument);
+            try output.append(allocator, ')');
         },
         .variable => |generated_name| try output.appendSlice(allocator, generated_name),
         .self => try output.appendSlice(allocator, "*this"),
@@ -446,6 +599,15 @@ fn generateExpression(allocator: Allocator, output: *std.ArrayList(u8), expressi
                 try generateExpression(allocator, output, binary.right);
                 try generateRuntimeArguments(allocator, output, expression.position, expression.type);
                 try output.append(allocator, ')');
+            } else if ((binary.operator == .equal or binary.operator == .not_equal) and binary.left.type == .structure) {
+                const structure_type = binary.left.type.structure;
+                if (binary.operator == .not_equal) try output.append(allocator, '!');
+                try generateStructureEqualityName(allocator, output, structure_type.generated_name);
+                try output.append(allocator, '(');
+                try generateExpression(allocator, output, binary.left);
+                try output.appendSlice(allocator, ", ");
+                try generateExpression(allocator, output, binary.right);
+                try output.append(allocator, ')');
             } else {
                 try output.append(allocator, '(');
                 try generateExpression(allocator, output, binary.left);
@@ -455,11 +617,14 @@ fn generateExpression(allocator: Allocator, output: *std.ArrayList(u8), expressi
             }
         },
         .conversion => |conversion| {
-            try output.appendSlice(allocator, "static_cast<");
+            try output.appendSlice(allocator, "checkedConvert<");
             try output.appendSlice(allocator, cppType(conversion.target_type));
             try output.appendSlice(allocator, ">(");
             try generateExpression(allocator, output, conversion.operand);
-            try output.append(allocator, ')');
+            try generateRuntimeArguments(allocator, output, expression.position, conversion.operand.type);
+            try output.appendSlice(allocator, ", \"");
+            try output.appendSlice(allocator, silexTypeName(conversion.target_type));
+            try output.appendSlice(allocator, "\")");
         },
     }
 }
@@ -491,6 +656,26 @@ fn appendCppStringLiteral(allocator: Allocator, output: *std.ArrayList(u8), valu
         '\r' => try output.appendSlice(allocator, "\\r"),
         '\t' => try output.appendSlice(allocator, "\\t"),
         else => try output.append(allocator, character),
+    };
+    try output.append(allocator, '"');
+}
+
+fn appendCppByteStringLiteral(allocator: Allocator, output: *std.ArrayList(u8), value: []const u8) !void {
+    try output.append(allocator, '"');
+    for (value) |character| switch (character) {
+        '\\' => try output.appendSlice(allocator, "\\\\"),
+        '"' => try output.appendSlice(allocator, "\\\""),
+        else => if (character >= 0x20 and character <= 0x7E) {
+            try output.append(allocator, character);
+        } else {
+            const octal = [_]u8{
+                '\\',
+                '0' + (character >> 6),
+                '0' + ((character >> 3) & 7),
+                '0' + (character & 7),
+            };
+            try output.appendSlice(allocator, &octal);
+        },
     };
     try output.append(allocator, '"');
 }
@@ -653,6 +838,55 @@ test "generate typed variables and control flow" {
     try std.testing.expect(std.mem.indexOf(u8, cpp, "if ((!(silexValue0 < std::int64_t{3})))") != null);
     try std.testing.expect(std.mem.indexOf(u8, cpp, "} else {") != null);
     try std.testing.expect(std.mem.indexOf(u8, cpp, "std::string{\"yes\"}") != null);
+}
+
+test "generate checked explicit numeric conversion" {
+    const Parser = @import("Parser.zig").Parser;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var parser = Parser.init(allocator, "func main() void { let source:int = 12; print(source as uint8); }");
+    var analyzer = Semantic.Analyzer.init(allocator);
+    const cpp = try generate(allocator, try analyzer.analyze(try parser.parse()));
+
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "checkedConvert<std::uint8_t>(silexValue0, SilexSourceLocation{0, 1, 66}, \"int\", \"uint8\")") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "integerIsExactlyRepresentable") != null);
+}
+
+test "generate UTF-8 strings and their length" {
+    const Parser = @import("Parser.zig").Parser;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var parser = Parser.init(allocator, "func main() void { print(len(\"A\\u{00E9}\\0\")); }");
+    var analyzer = Semantic.Analyzer.init(allocator);
+    const cpp = try generate(allocator, try analyzer.analyze(try parser.parse()));
+
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "std::string{\"A\\303\\251\\000\", 4}") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "silexStringLength(std::string{") != null);
+}
+
+test "generate recursive structural equality" {
+    const Parser = @import("Parser.zig").Parser;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var parser = Parser.init(allocator,
+        \\struct Position { x:int y:int }
+        \\struct Player { name:str position:Position }
+        \\func main() void {
+        \\    print(Player { name:"Ada", position:Position { x:10, y:20 } } == Player { name:"Ada", position:Position { x:10, y:20 } })
+        \\}
+    );
+    var analyzer = Semantic.Analyzer.init(allocator);
+    const cpp = try generate(allocator, try analyzer.analyze(try parser.parse()));
+
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "bool silexEqualSilexStruct0(const SilexStruct0&, const SilexStruct0&);") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "return left.field0 == right.field0 && silexEqualSilexStruct0(left.field1, right.field1);") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "silexEqualSilexStruct1(SilexStruct1{") != null);
 }
 
 test "generate while loop" {

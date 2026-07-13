@@ -1,0 +1,4 @@
+func main() void {
+    let value:int = 16777217
+    print(value as float)
+}

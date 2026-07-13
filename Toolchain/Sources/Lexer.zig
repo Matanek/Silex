@@ -112,22 +112,7 @@ pub const Lexer = struct {
             return .{ .tag = keywordTag(lexeme) orelse .identifier, .lexeme = lexeme, .position = position };
         }
 
-        if (std.ascii.isDigit(character)) {
-            self.advance();
-            while (self.index < self.source.len and std.ascii.isDigit(self.source[self.index])) {
-                self.advance();
-            }
-            if (self.index + 1 < self.source.len and self.source[self.index] == '.' and
-                std.ascii.isDigit(self.source[self.index + 1]))
-            {
-                self.advance();
-                while (self.index < self.source.len and std.ascii.isDigit(self.source[self.index])) {
-                    self.advance();
-                }
-                return self.token(.floating, start, position);
-            }
-            return self.token(.integer, start, position);
-        }
+        if (std.ascii.isDigit(character)) return self.numericToken(start, position);
 
         if (character == '"') return self.stringToken(position);
 
@@ -163,6 +148,9 @@ pub const Lexer = struct {
             switch (self.source[self.index]) {
                 '"' => {
                     const lexeme = self.source[contents_start..self.index];
+                    if (!std.unicode.utf8ValidateSlice(lexeme)) {
+                        return self.fail(position, "string literal is not valid UTF-8");
+                    }
                     self.advance();
                     return .{ .tag = .string, .lexeme = lexeme, .position = position };
                 },
@@ -172,12 +160,121 @@ pub const Lexer = struct {
                     if (self.index == self.source.len) {
                         return self.fail(position, "unterminated string literal");
                     }
-                    self.advance();
+                    try self.stringEscape(position);
                 },
                 else => self.advance(),
             }
         }
         return self.fail(position, "unterminated string literal");
+    }
+
+    fn stringEscape(self: *Lexer, position: Source.Position) Source.Error!void {
+        switch (self.source[self.index]) {
+            '"', '\\', 'n', 'r', 't', '0' => self.advance(),
+            'u' => {
+                self.advance();
+                if (self.index == self.source.len or self.source[self.index] != '{') {
+                    return self.fail(position, "expected '{' after '\\u' in string escape");
+                }
+                self.advance();
+                var scalar: u21 = 0;
+                var digits: usize = 0;
+                while (self.index < self.source.len and self.source[self.index] != '}') {
+                    const digit = digitValue(self.source[self.index]) orelse {
+                        return self.fail(position, "invalid Unicode escape in string literal");
+                    };
+                    if (digits == 6 or digit >= 16) {
+                        return self.fail(position, "invalid Unicode escape in string literal");
+                    }
+                    scalar = scalar * 16 + digit;
+                    digits += 1;
+                    self.advance();
+                }
+                if (digits == 0 or self.index == self.source.len) {
+                    return self.fail(position, "invalid Unicode escape in string literal");
+                }
+                if (!isUnicodeScalar(scalar)) return self.fail(position, "invalid Unicode scalar in string literal");
+                self.advance();
+            },
+            else => return self.fail(position, "invalid escape sequence in string literal"),
+        }
+    }
+
+    fn numericToken(self: *Lexer, start: usize, position: Source.Position) Source.Error!Token {
+        if (self.source[start] == '0' and self.index + 1 < self.source.len) {
+            const prefix = self.source[self.index + 1];
+            const base: ?u8 = switch (prefix) {
+                'b', 'B' => 2,
+                'o', 'O' => 8,
+                'x', 'X' => 16,
+                else => null,
+            };
+            if (base) |value| {
+                self.advance();
+                self.advance();
+                try self.scanDigits(value, position, "expected digit after numeric base prefix");
+                if (self.index < self.source.len and isIdentifierContinue(self.source[self.index])) {
+                    return self.fail(position, "invalid digit in numeric literal");
+                }
+                return self.token(.integer, start, position);
+            }
+        }
+
+        try self.scanDigits(10, position, "expected digit in numeric literal");
+        var floating = false;
+        if (self.index + 1 < self.source.len and self.source[self.index] == '.' and
+            std.ascii.isDigit(self.source[self.index + 1]))
+        {
+            floating = true;
+            self.advance();
+            try self.scanDigits(10, position, "expected digit after decimal point");
+        }
+        if (self.index < self.source.len and (self.source[self.index] == 'e' or self.source[self.index] == 'E')) {
+            floating = true;
+            self.advance();
+            if (self.index < self.source.len and (self.source[self.index] == '+' or self.source[self.index] == '-')) {
+                self.advance();
+            }
+            try self.scanDigits(10, position, "expected exponent digit");
+        }
+        if (self.index < self.source.len and isIdentifierContinue(self.source[self.index])) {
+            return self.fail(position, "invalid digit in decimal literal");
+        }
+        return self.token(if (floating) .floating else .integer, start, position);
+    }
+
+    fn scanDigits(
+        self: *Lexer,
+        base: u8,
+        position: Source.Position,
+        empty_message: []const u8,
+    ) Source.Error!void {
+        var found_digit = false;
+        while (self.index < self.source.len) {
+            const character = self.source[self.index];
+            if (digitValue(character)) |value| {
+                if (value >= base) {
+                    if (std.ascii.isDigit(character)) return self.fail(position, "invalid digit in numeric literal");
+                    break;
+                }
+                found_digit = true;
+                self.advance();
+                continue;
+            }
+            if (character == '_') {
+                if (!found_digit or self.index + 1 == self.source.len) {
+                    return self.fail(position, "numeric separator must appear between digits");
+                }
+                const following_digit = digitValue(self.source[self.index + 1]) orelse {
+                    return self.fail(position, "numeric separator must appear between digits");
+                };
+                if (following_digit >= base) return self.fail(position, "invalid digit in numeric literal");
+                self.advance();
+                continue;
+            }
+            break;
+        }
+        if (!found_digit) return self.fail(position, empty_message);
     }
 
     fn optionalDoubleToken(
@@ -323,6 +420,17 @@ fn isIdentifierContinue(character: u8) bool {
     return isIdentifierStart(character) or std.ascii.isDigit(character);
 }
 
+fn digitValue(character: u8) ?u8 {
+    if (std.ascii.isDigit(character)) return character - '0';
+    if (character >= 'a' and character <= 'f') return character - 'a' + 10;
+    if (character >= 'A' and character <= 'F') return character - 'A' + 10;
+    return null;
+}
+
+fn isUnicodeScalar(value: u21) bool {
+    return value <= 0x10FFFF and (value < 0xD800 or value > 0xDFFF);
+}
+
 test "recognize declaration keywords" {
     var lexer = Lexer.init("let value:bool = true;");
     try std.testing.expectEqual(TokenTag.keyword_let, (try lexer.next()).tag);
@@ -369,8 +477,27 @@ test "recognize compound and update operators" {
     for (expected) |tag| try std.testing.expectEqual(tag, (try lexer.next()).tag);
 }
 
-test "distinguish integer and float literals" {
-    var lexer = Lexer.init("42 4.25");
-    try std.testing.expectEqual(TokenTag.integer, (try lexer.next()).tag);
-    try std.testing.expectEqual(TokenTag.floating, (try lexer.next()).tag);
+test "recognize numeric bases separators and exponents" {
+    var lexer = Lexer.init("0b1010_0101 0o7_55 0xCA_FE 1_000_000 1.25e-3");
+    const expected = [_]TokenTag{ .integer, .integer, .integer, .integer, .floating };
+    for (expected) |tag| try std.testing.expectEqual(tag, (try lexer.next()).tag);
+}
+
+test "reject invalid numeric separator" {
+    var lexer = Lexer.init("1__0");
+    try std.testing.expectError(error.InvalidSource, lexer.next());
+    try std.testing.expectEqualStrings("numeric separator must appear between digits", lexer.diagnostic.?.message);
+}
+
+test "recognize string escapes" {
+    var lexer = Lexer.init("\"line\\n\\u{00E9}\"");
+    const token = try lexer.next();
+    try std.testing.expectEqual(TokenTag.string, token.tag);
+    try std.testing.expectEqualStrings("line\\n\\u{00E9}", token.lexeme);
+}
+
+test "reject invalid string escape" {
+    var lexer = Lexer.init("\"\\q\"");
+    try std.testing.expectError(error.InvalidSource, lexer.next());
+    try std.testing.expectEqualStrings("invalid escape sequence in string literal", lexer.diagnostic.?.message);
 }

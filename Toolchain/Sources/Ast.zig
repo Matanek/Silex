@@ -88,6 +88,7 @@ pub const Expression = struct {
         structure_initializer: StructureInitializer,
         member_access: MemberAccess,
         unary: Unary,
+        conversion: Conversion,
         binary: Binary,
     },
 
@@ -126,6 +127,12 @@ pub const Expression = struct {
         object: *Expression,
         name: []const u8,
         name_position: Source.Position,
+    };
+
+    pub const Conversion = struct {
+        operand: *Expression,
+        target_type: TypeName,
+        as_position: Source.Position,
     };
 
     pub const Binary = struct {

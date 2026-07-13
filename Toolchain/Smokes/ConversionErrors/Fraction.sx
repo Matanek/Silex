@@ -1,0 +1,4 @@
+func main() void {
+    let value:float = 2.5
+    print(value as int)
+}

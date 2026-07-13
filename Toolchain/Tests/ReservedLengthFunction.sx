@@ -1,0 +1,5 @@
+func len(value:str) int {
+    return 0
+}
+
+func main() void {}
