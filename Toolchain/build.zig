@@ -211,7 +211,10 @@ pub fn build(b: *std.Build) void {
     backend_discovered_target_failure_command.expectStdErrMatch(
         "silex: native compilation failed for target 'x86_64-linux-musl'; target support, SDKs, or native sources may be unavailable or incomplete\n",
     );
-    backend_discovered_target_failure_command.expectStdErrMatch("silex: backend details: .silex/cache/x86_64-linux-musl/");
+    backend_discovered_target_failure_command.expectStdErrMatch(b.fmt(
+        "silex: backend details: .silex{c}cache{c}x86_64-linux-musl{c}",
+        .{ std.fs.path.sep, std.fs.path.sep, std.fs.path.sep },
+    ));
 
     const unsupported_native_target_command = b.addRunArtifact(executable);
     unsupported_native_target_command.addArgs(&.{
@@ -353,7 +356,7 @@ pub fn build(b: *std.Build) void {
         .root_module = distribution_module,
     });
     const host = b.graph.host.result;
-    const distribution_name = b.fmt("silex-0.6.1-{s}-{s}", .{
+    const distribution_name = b.fmt("silex-0.6.2-{s}-{s}", .{
         @tagName(host.cpu.arch),
         @tagName(host.os.tag),
     });

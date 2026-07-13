@@ -241,5 +241,10 @@ test "cache key follows generated content" {
 test "default output belongs to current project" {
     const output = try defaultOutputPath(std.testing.allocator, "", "Main");
     defer std.testing.allocator.free(output);
-    try std.testing.expectEqualStrings(".silex/bin/Main", output);
+    const expected = try std.fmt.allocPrint(std.testing.allocator, ".silex{c}bin{c}Main", .{
+        std.fs.path.sep,
+        std.fs.path.sep,
+    });
+    defer std.testing.allocator.free(expected);
+    try std.testing.expectEqualStrings(expected, output);
 }
