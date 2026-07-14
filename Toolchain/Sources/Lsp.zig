@@ -496,10 +496,8 @@ fn moduleExportCompletionItems(
         return try allocator.alloc(CompletionItem, 0);
     const project_root = std.fs.path.dirname(source_path) orelse
         return try allocator.alloc(CompletionItem, 0);
-    const module_root = if (StandardLibrary.isModule(module_path))
-        StandardLibrary.root(allocator, io) catch return try allocator.alloc(CompletionItem, 0)
-    else
-        project_root;
+    const module_root = try moduleCompletionRoot(allocator, io, project_root, module_path) orelse
+        return try allocator.alloc(CompletionItem, 0);
     const module_directory = try moduleDirectoryPath(allocator, module_root, module_path);
 
     var directory = Io.Dir.cwd().openDir(io, module_directory, .{ .iterate = true }) catch
@@ -558,6 +556,33 @@ fn moduleExportCompletionItems(
         }
     }.lessThan);
     return try items.toOwnedSlice(allocator);
+}
+
+fn moduleCompletionRoot(
+    allocator: Allocator,
+    io: Io,
+    project_root: []const u8,
+    module_path: []const u8,
+) !?[]const u8 {
+    const library_root = StandardLibrary.root(allocator, io) catch {
+        return if (StandardLibrary.isReservedModule(module_path)) null else project_root;
+    };
+    if (StandardLibrary.isReservedModule(module_path)) return library_root;
+
+    const local_directory = try moduleDirectoryPath(allocator, project_root, module_path);
+    if (try lspDirectoryExists(io, local_directory)) return project_root;
+    const distributed_directory = try moduleDirectoryPath(allocator, library_root, module_path);
+    if (try lspDirectoryExists(io, distributed_directory)) return library_root;
+    return project_root;
+}
+
+fn lspDirectoryExists(io: Io, path: []const u8) !bool {
+    var directory = Io.Dir.cwd().openDir(io, path, .{}) catch |err| switch (err) {
+        error.FileNotFound, error.NotDir => return false,
+        else => |other| return other,
+    };
+    directory.close(io);
+    return true;
 }
 
 fn appendModuleExportCompletion(

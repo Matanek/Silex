@@ -20,12 +20,12 @@ pub fn build(b: *std.Build) void {
         .root_module = module,
     });
     b.installArtifact(executable);
-    const install_standard_library = b.addInstallDirectory(.{
-        .source_dir = b.path("../Library/std"),
+    const install_library = b.addInstallDirectory(.{
+        .source_dir = b.path("../Library"),
         .install_dir = .prefix,
-        .install_subdir = "lib/silex/std",
+        .install_subdir = "lib/silex",
     });
-    b.getInstallStep().dependOn(&install_standard_library.step);
+    b.getInstallStep().dependOn(&install_library.step);
 
     const run_command = b.addRunArtifact(executable);
     run_command.step.dependOn(b.getInstallStep());
@@ -457,7 +457,7 @@ pub fn build(b: *std.Build) void {
         "silex: native compilation failed for target 'x86_64-linux-musl'; target support, SDKs, or native sources may be unavailable or incomplete\n",
     );
     backend_discovered_target_failure_command.expectStdErrMatch(b.fmt(
-        "silex: backend details: .silex{c}cache{c}v20{c}x86_64-linux-musl{c}",
+        "silex: backend details: .silex{c}cache{c}v21{c}x86_64-linux-musl{c}",
         .{
             std.fs.path.sep,
             std.fs.path.sep,
@@ -838,8 +838,34 @@ pub fn build(b: *std.Build) void {
     standard_library_manifest_command.addArgs(&.{ "run", "Smokes/StandardLibrary/silex.json" });
     standard_library_manifest_command.expectStdOutEqual(hostText(b, "true\ntrue\n"));
 
+    const distributed_native_runtime_command = b.addRunArtifact(executable);
+    distributed_native_runtime_command.step.dependOn(&standard_library_manifest_command.step);
+    distributed_native_runtime_command.addArgs(&.{ "run", "Smokes/DistributedNative/Main.sx" });
+    distributed_native_runtime_command.expectStdOutEqual(hostText(b, "Distributed native runtime linked\ntrue\n"));
+
+    const unsupported_distributed_native_target_command = b.addRunArtifact(executable);
+    unsupported_distributed_native_target_command.step.dependOn(&distributed_native_runtime_command.step);
+    unsupported_distributed_native_target_command.addArgs(&.{
+        "compile",
+        "Smokes/DistributedNative/Main.sx",
+        "--target",
+        "riscv64-linux-musl",
+    });
+    unsupported_distributed_native_target_command.expectExitCode(1);
+    unsupported_distributed_native_target_command.expectStdErrEqual(
+        "silex: native module 'NativeRuntime' does not support target 'riscv64-linux-musl'\n",
+    );
+
+    const distributed_module_collision_command = b.addRunArtifact(executable);
+    distributed_module_collision_command.step.dependOn(&unsupported_distributed_native_target_command.step);
+    distributed_module_collision_command.addArgs(&.{ "compile", "Tests/DistributedModules/Collision/Main.sx" });
+    distributed_module_collision_command.expectExitCode(1);
+    distributed_module_collision_command.expectStdErrEqual(
+        "Tests/DistributedModules/Collision/Main.sx:1:1: error: module 'NativeRuntime' has multiple providers\n",
+    );
+
     const native_source_command = b.addRunArtifact(executable);
-    native_source_command.step.dependOn(&standard_library_manifest_command.step);
+    native_source_command.step.dependOn(&distributed_module_collision_command.step);
     native_source_command.addArgs(&.{
         "run",
         "Smokes/Native/Main.sx",
@@ -962,11 +988,22 @@ pub fn build(b: *std.Build) void {
         ".silex/cross-native-smoke/Main-x86_64-linux",
     });
 
+    const cross_distributed_native_smoke_command = b.addRunArtifact(executable);
+    cross_distributed_native_smoke_command.step.dependOn(&cross_native_smoke_command.step);
+    cross_distributed_native_smoke_command.addArgs(&.{
+        "compile",
+        "Smokes/DistributedNative/Main.sx",
+        "--target",
+        "x86_64-linux-musl",
+        "-o",
+        ".silex/cross-native-smoke/DistributedNative-x86_64-linux",
+    });
+
     const cross_native_smoke_step = b.step(
         "cross-native-smoke",
         "Cross-compile the native source smoke program for x86_64 Linux",
     );
-    cross_native_smoke_step.dependOn(&cross_native_smoke_command.step);
+    cross_native_smoke_step.dependOn(&cross_distributed_native_smoke_command.step);
 
     const distribution_options = b.addOptions();
     distribution_options.addOption([]const u8, "developer_zig", "");
@@ -1004,17 +1041,17 @@ pub fn build(b: *std.Build) void {
         .install_dir = .prefix,
         .install_subdir = b.fmt("{s}/toolchain/zig/lib", .{distribution_root}),
     });
-    const install_distribution_standard_library = b.addInstallDirectory(.{
-        .source_dir = b.path("../Library/std"),
+    const install_distribution_library = b.addInstallDirectory(.{
+        .source_dir = b.path("../Library"),
         .install_dir = .prefix,
-        .install_subdir = b.fmt("{s}/lib/silex/std", .{distribution_root}),
+        .install_subdir = b.fmt("{s}/lib/silex", .{distribution_root}),
     });
 
     const distribution_step = b.step("dist", "Build a self-contained distribution for this host");
     distribution_step.dependOn(&install_silex.step);
     distribution_step.dependOn(&install_zig.step);
     distribution_step.dependOn(&install_zig_lib.step);
-    distribution_step.dependOn(&install_distribution_standard_library.step);
+    distribution_step.dependOn(&install_distribution_library.step);
 
     const distribution_check_files = b.addWriteFiles();
     _ = distribution_check_files.addCopyFile(b.path("Smokes/StandardLibrary/Main.sx"), "Main.sx");

@@ -1,0 +1,3 @@
+import NativeRuntime
+
+func main() {}

@@ -6,6 +6,8 @@ const Io = std.Io;
 pub const Module = struct {
     name: []const u8,
     sources: []const []const u8,
+    native_manifest_path: ?[]const u8 = null,
+    native_module_directory: ?[]const u8 = null,
 };
 
 pub const Project = struct {
@@ -66,8 +68,8 @@ pub fn load(allocator: Allocator, io: Io, input_path: []const u8) !Project {
             std.debug.print("silex: module '{s}' requires a valid name and at least one source\n", .{module.name});
             return error.Reported;
         }
-        if (isStandardModule(module.name)) {
-            std.debug.print("silex: module '{s}' is reserved for the standard library\n", .{module.name});
+        if (isReservedModule(module.name)) {
+            std.debug.print("silex: module '{s}' is reserved for the distributed library\n", .{module.name});
             return error.Reported;
         }
         for (modules.items) |existing| {
@@ -133,8 +135,13 @@ fn validModuleName(name: []const u8) bool {
     return !segment_start;
 }
 
-fn isStandardModule(name: []const u8) bool {
-    return std.mem.eql(u8, name, "std") or std.mem.startsWith(u8, name, "std.");
+fn isReservedModule(name: []const u8) bool {
+    return isReservedRoot(name, "std") or isReservedRoot(name, "Silex");
+}
+
+fn isReservedRoot(name: []const u8, root: []const u8) bool {
+    return std.mem.eql(u8, name, root) or
+        (std.mem.startsWith(u8, name, root) and name.len > root.len and name[root.len] == '.');
 }
 
 test "validate logical module names" {

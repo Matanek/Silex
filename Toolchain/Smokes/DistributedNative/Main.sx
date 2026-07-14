@@ -1,0 +1,5 @@
+import NativeRuntime
+
+func main() {
+    print(NativeRuntime.linked())
+}
