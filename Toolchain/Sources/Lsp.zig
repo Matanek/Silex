@@ -129,7 +129,7 @@ const Server = struct {
                 },
                 .serverInfo = .{
                     .name = "Silex",
-                    .version = "0.9.0",
+                    .version = "0.11.0",
                 },
             });
             return;
