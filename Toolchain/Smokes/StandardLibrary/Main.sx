@@ -1,0 +1,10 @@
+import std.Random
+
+func main() {
+    var left = std.Random.create(1)
+    var right = std.Random.create(1)
+    var random = std.Random.system()
+
+    print(left.next() == right.next())
+    print(random.next() > 0)
+}

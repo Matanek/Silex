@@ -36,6 +36,12 @@ pub fn generateWithSources(
         \\#include <vector>
         \\
     );
+    for (program.functions) |function| {
+        if (!function.is_native) continue;
+        try generateNativeFunctionSignature(allocator, &output, function, true);
+        try output.appendSlice(allocator, ";\n");
+    }
+    if (containsNativeFunction(program.functions)) try output.append(allocator, '\n');
     try output.appendSlice(allocator,
         \\
         \\namespace SilexGenerated {
@@ -425,7 +431,7 @@ pub fn generateWithSources(
         }
     }
     for (program.functions) |function| {
-        if (function.is_main) continue;
+        if (function.is_main or function.is_native) continue;
         try generateFunctionSignature(allocator, &output, function, false);
         try output.appendSlice(allocator, ";\n");
     }
@@ -439,6 +445,7 @@ pub fn generateWithSources(
         }
     }
     for (program.functions) |function| {
+        if (function.is_native) continue;
         try generateFunctionSignature(allocator, &output, function, true);
         try output.appendSlice(allocator, " {\n");
         try generateStatements(allocator, &output, function.statements, 1, function.is_main);
@@ -505,6 +512,33 @@ fn generateFunctionSignature(allocator: Allocator, output: *std.ArrayList(u8), f
         }
     }
     try output.append(allocator, ')');
+}
+
+fn generateNativeFunctionSignature(
+    allocator: Allocator,
+    output: *std.ArrayList(u8),
+    function: Semantic.Function,
+    include_names: bool,
+) !void {
+    try output.appendSlice(allocator, "extern \"C\" ");
+    try appendCppType(allocator, output, function.return_type);
+    try output.append(allocator, ' ');
+    try output.appendSlice(allocator, function.generated_name);
+    try output.append(allocator, '(');
+    for (function.parameters, 0..) |parameter, index| {
+        if (index != 0) try output.appendSlice(allocator, ", ");
+        try appendCppType(allocator, output, parameter.type);
+        if (include_names) {
+            try output.append(allocator, ' ');
+            try output.appendSlice(allocator, parameter.generated_name);
+        }
+    }
+    try output.append(allocator, ')');
+}
+
+fn containsNativeFunction(functions: []const Semantic.Function) bool {
+    for (functions) |function| if (function.is_native) return true;
+    return false;
 }
 
 fn generateStructureEqualitySignature(

@@ -1,0 +1,5 @@
+native func host_value() int
+
+func main() {
+    print(host_value())
+}

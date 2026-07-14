@@ -8,6 +8,7 @@ const NativeDependency = @import("NativeDependency.zig");
 const ProjectModule = @import("Project.zig");
 const Modules = @import("Modules.zig");
 const SourceGraph = @import("SourceGraph.zig");
+const StandardLibrary = @import("StandardLibrary.zig");
 
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
@@ -54,6 +55,7 @@ pub fn compile(
     const source_paths = loaded.source_paths;
     const source_contents = loaded.source_contents;
     const files = loaded.files;
+    const standard_runtime_sources = try StandardLibrary.runtimeSources(allocator, io, project.modules);
     const canonical_source_paths = try canonicalizeSourcePaths(allocator, io, source_paths);
     const ast = if (project.single_file)
         files[0].program
@@ -97,6 +99,7 @@ pub fn compile(
         source_contents,
         target,
         native_dependencies,
+        standard_runtime_sources,
         default_native_configuration,
     );
     const cache_root = try std.fs.path.join(allocator, &.{ artifact_root, ".silex", "cache" });
@@ -137,6 +140,7 @@ pub fn compile(
         try arguments.appendSlice(allocator, default_native_configuration.compilerFlags());
         try arguments.appendSlice(allocator, &.{ "-std=c++23", "-Wno-nullability-completeness", cpp_path });
         for (native_dependencies) |dependency| try arguments.appendSlice(allocator, dependency.sources);
+        try arguments.appendSlice(allocator, standard_runtime_sources);
         try arguments.appendSlice(allocator, &.{ "-o", temporary_executable_path });
 
         const result = try std.process.run(allocator, io, .{
@@ -233,6 +237,7 @@ fn cacheKey(
     source_contents: []const []const u8,
     target: TargetModule.Target,
     native_dependencies: []const NativeDependency.Dependency,
+    standard_runtime_sources: []const []const u8,
     native_configuration: NativeConfiguration,
 ) ![64]u8 {
     var hasher = std.crypto.hash.sha2.Sha256.init(.{});
@@ -272,6 +277,13 @@ fn cacheKey(
             hasher.update("\x00");
             hasher.update(source);
         }
+    }
+    for (standard_runtime_sources) |source_path| {
+        const source = try Io.Dir.cwd().readFileAlloc(io, source_path, allocator, .limited(16 * 1024 * 1024));
+        hasher.update("\x00standard-runtime\x00");
+        hasher.update(source_path);
+        hasher.update("\x00");
+        hasher.update(source);
     }
 
     var digest: [std.crypto.hash.sha2.Sha256.digest_length]u8 = undefined;
@@ -400,10 +412,10 @@ fn fileExists(io: Io, path: []const u8) !bool {
 test "cache key follows generated content" {
     const target = TargetModule.Target.native();
     const project = testProject();
-    const first = try cacheKey(std.testing.allocator, std.testing.io, "first", project, &.{"Test.sx"}, &.{"source"}, target, &.{}, .optimized);
-    const repeated = try cacheKey(std.testing.allocator, std.testing.io, "first", project, &.{"Test.sx"}, &.{"source"}, target, &.{}, .optimized);
-    const changed = try cacheKey(std.testing.allocator, std.testing.io, "second", project, &.{"Test.sx"}, &.{"source"}, target, &.{}, .optimized);
-    const changed_source = try cacheKey(std.testing.allocator, std.testing.io, "first", project, &.{"Test.sx"}, &.{"changed source"}, target, &.{}, .optimized);
+    const first = try cacheKey(std.testing.allocator, std.testing.io, "first", project, &.{"Test.sx"}, &.{"source"}, target, &.{}, &.{}, .optimized);
+    const repeated = try cacheKey(std.testing.allocator, std.testing.io, "first", project, &.{"Test.sx"}, &.{"source"}, target, &.{}, &.{}, .optimized);
+    const changed = try cacheKey(std.testing.allocator, std.testing.io, "second", project, &.{"Test.sx"}, &.{"source"}, target, &.{}, &.{}, .optimized);
+    const changed_source = try cacheKey(std.testing.allocator, std.testing.io, "first", project, &.{"Test.sx"}, &.{"changed source"}, target, &.{}, &.{}, .optimized);
     try std.testing.expectEqualSlices(u8, &first, &repeated);
     try std.testing.expect(!std.mem.eql(u8, &first, &changed));
     try std.testing.expect(!std.mem.eql(u8, &first, &changed_source));
@@ -412,8 +424,8 @@ test "cache key follows generated content" {
 test "cache key separates native configurations" {
     const target = TargetModule.Target.native();
     const project = testProject();
-    const optimized = try cacheKey(std.testing.allocator, std.testing.io, "program", project, &.{"Test.sx"}, &.{"source"}, target, &.{}, .optimized);
-    const unoptimized = try cacheKey(std.testing.allocator, std.testing.io, "program", project, &.{"Test.sx"}, &.{"source"}, target, &.{}, .unoptimized);
+    const optimized = try cacheKey(std.testing.allocator, std.testing.io, "program", project, &.{"Test.sx"}, &.{"source"}, target, &.{}, &.{}, .optimized);
+    const unoptimized = try cacheKey(std.testing.allocator, std.testing.io, "program", project, &.{"Test.sx"}, &.{"source"}, target, &.{}, &.{}, .unoptimized);
     try std.testing.expect(!std.mem.eql(u8, &optimized, &unoptimized));
 }
 

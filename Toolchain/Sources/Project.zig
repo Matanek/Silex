@@ -66,6 +66,10 @@ pub fn load(allocator: Allocator, io: Io, input_path: []const u8) !Project {
             std.debug.print("silex: module '{s}' requires a valid name and at least one source\n", .{module.name});
             return error.Reported;
         }
+        if (isStandardModule(module.name)) {
+            std.debug.print("silex: module '{s}' is reserved for the standard library\n", .{module.name});
+            return error.Reported;
+        }
         for (modules.items) |existing| {
             if (std.mem.eql(u8, existing.name, module.name)) {
                 std.debug.print("silex: module '{s}' has multiple providers\n", .{module.name});
@@ -127,6 +131,10 @@ fn validModuleName(name: []const u8) bool {
         } else if (!std.ascii.isAlphanumeric(character) and character != '_') return false;
     }
     return !segment_start;
+}
+
+fn isStandardModule(name: []const u8) bool {
+    return std.mem.eql(u8, name, "std") or std.mem.startsWith(u8, name, "std.");
 }
 
 test "validate logical module names" {

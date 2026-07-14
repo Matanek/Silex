@@ -48,8 +48,10 @@ pub const Parser = struct {
                 try structures.append(self.allocator, try self.parseStructure(false));
             } else if (self.current.tag == .keyword_func) {
                 try functions.append(self.allocator, try self.parseFunction(false));
+            } else if (self.current.tag == .identifier and std.mem.eql(u8, self.current.lexeme, "native")) {
+                try functions.append(self.allocator, try self.parseNativeFunction());
             } else {
-                return self.fail("expected import, use, struct, or func declaration");
+                return self.fail("expected import, use, struct, func, or native func declaration");
             }
         }
         return .{
@@ -165,6 +167,31 @@ pub const Parser = struct {
             .return_type = return_type,
             .parameters = parameters,
             .statements = try self.parseBlock(),
+        };
+    }
+
+    fn parseNativeFunction(self: *Parser) ParseError!Ast.Function {
+        const position = self.current.position;
+        if (self.current.tag != .identifier or !std.mem.eql(u8, self.current.lexeme, "native")) {
+            return self.fail("expected 'native'");
+        }
+        try self.advance();
+        try self.expect(.keyword_func, "expected 'func' after 'native'");
+        if (self.current.tag != .identifier) return self.fail("expected function name");
+        const name = self.current.lexeme;
+        const name_position = self.current.position;
+        try self.advance();
+        const parameters = try self.parseParameters();
+        const return_type = try self.parseReturnType();
+        try self.expectStatementTerminator();
+        return .{
+            .is_native = true,
+            .position = position,
+            .name = name,
+            .name_position = name_position,
+            .return_type = return_type,
+            .parameters = parameters,
+            .statements = &.{},
         };
     }
 

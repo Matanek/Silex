@@ -1,0 +1,19 @@
+native func native_next(state:int) int
+native func native_seed() int
+
+pub struct Generator {
+    state:int
+
+    func next() int {
+        self.state = native_next(self.state)
+        return self.state
+    }
+}
+
+pub func create(seed:int) Generator {
+    return Generator { state:seed }
+}
+
+pub func system() Generator {
+    return Generator { state:native_seed() }
+}

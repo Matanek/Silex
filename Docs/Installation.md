@@ -28,6 +28,9 @@ silex run hello.sx
 
 `compile` writes a native executable. `run` compiles and executes the program.
 The source layout and module model are in the [language reference](Language.md).
+The installed distribution also contains Silex's standard-library sources, so
+an import such as `import std.Random` works without cloning this repository or
+adding files to the project.
 
 ## Projects and manifests
 

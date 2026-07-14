@@ -1,7 +1,9 @@
 const std = @import("std");
+const Ast = @import("Ast.zig");
 const LexerModule = @import("Lexer.zig");
 const ParserModule = @import("Parser.zig");
 const Source = @import("Source.zig");
+const StandardLibrary = @import("StandardLibrary.zig");
 
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
@@ -71,6 +73,11 @@ const SemanticInfo = struct {
         self.variables.deinit(allocator);
         self.structures.deinit(allocator);
     }
+};
+
+const StandardFunctionLookup = struct {
+    name: []const u8,
+    result: ?[]const u8 = null,
 };
 
 const Position = struct {
@@ -199,7 +206,7 @@ const Server = struct {
                         }
                     }
                 }
-                break :completion try completionItems(self.allocator, source, position);
+                break :completion try completionItems(self.allocator, self.io, source, position);
             } else &[_]CompletionItem{};
             if (request.id) |id| try self.reply(id, .{
                 .isIncomplete = false,
@@ -375,11 +382,12 @@ fn diagnosticFromSource(diagnostic: Source.Diagnostic) Diagnostic {
 
 fn completionItems(
     allocator: Allocator,
+    io: Io,
     source: []const u8,
     position: ?Position,
 ) ![]const CompletionItem {
     if (position) |cursor| {
-        if (try memberCompletionItems(allocator, source, cursor)) |items| return items;
+        if (try memberCompletionItems(allocator, io, source, cursor)) |items| return items;
         if (isIncompleteCascadePrefix(source, cursor)) return try allocator.alloc(CompletionItem, 0);
     }
 
@@ -488,7 +496,11 @@ fn moduleExportCompletionItems(
         return try allocator.alloc(CompletionItem, 0);
     const project_root = std.fs.path.dirname(source_path) orelse
         return try allocator.alloc(CompletionItem, 0);
-    const module_directory = try moduleDirectoryPath(allocator, project_root, module_path);
+    const module_root = if (StandardLibrary.isModule(module_path))
+        StandardLibrary.root(allocator, io) catch return try allocator.alloc(CompletionItem, 0)
+    else
+        project_root;
+    const module_directory = try moduleDirectoryPath(allocator, module_root, module_path);
 
     var directory = Io.Dir.cwd().openDir(io, module_directory, .{ .iterate = true }) catch
         return try allocator.alloc(CompletionItem, 0);
@@ -587,7 +599,10 @@ fn localModuleCompletionItems(
         return try allocator.alloc(CompletionItem, 0);
 
     var items: std.ArrayList(CompletionItem) = .empty;
-    try collectLocalModules(allocator, io, project_root, "", prefix, &items);
+    try collectModules(allocator, io, project_root, "", prefix, "Silex local module", &items);
+    if (StandardLibrary.root(allocator, io) catch null) |standard_library_root| {
+        try collectModules(allocator, io, standard_library_root, "", prefix, "Silex standard module", &items);
+    }
     std.mem.sort(CompletionItem, items.items, {}, struct {
         fn lessThan(_: void, left: CompletionItem, right: CompletionItem) bool {
             return std.mem.lessThan(u8, left.label, right.label);
@@ -596,12 +611,13 @@ fn localModuleCompletionItems(
     return try items.toOwnedSlice(allocator);
 }
 
-fn collectLocalModules(
+fn collectModules(
     allocator: Allocator,
     io: Io,
     directory_path: []const u8,
     module_name: []const u8,
     prefix: []const u8,
+    detail: []const u8,
     items: *std.ArrayList(CompletionItem),
 ) !void {
     var directory = Io.Dir.cwd().openDir(io, directory_path, .{ .iterate = true }) catch return;
@@ -622,7 +638,7 @@ fn collectLocalModules(
         try items.append(allocator, .{
             .label = module_name,
             .kind = 9,
-            .detail = "Silex local module",
+            .detail = detail,
         });
     }
 
@@ -632,7 +648,7 @@ fn collectLocalModules(
             child_name
         else
             try std.fmt.allocPrint(allocator, "{s}.{s}", .{ module_name, child_name });
-        try collectLocalModules(allocator, io, child_path, child_module, prefix, items);
+        try collectModules(allocator, io, child_path, child_module, prefix, detail, items);
     }
 }
 
@@ -667,6 +683,7 @@ fn hexDigit(character: u8) ?u8 {
 
 fn memberCompletionItems(
     allocator: Allocator,
+    io: Io,
     source: []const u8,
     position: Position,
 ) !?[]const CompletionItem {
@@ -685,7 +702,7 @@ fn memberCompletionItems(
 
     var info: SemanticInfo = .{};
     defer info.deinit(allocator);
-    try collectSemanticInfo(allocator, source, tokens.items, &info);
+    try collectSemanticInfo(allocator, io, source, tokens.items, &info);
 
     var receiver_type = receiverType(info, receiver_path[0], cursor_offset) orelse
         return try allocator.alloc(CompletionItem, 0);
@@ -736,6 +753,7 @@ fn collectionCompletionItems(allocator: Allocator, dynamic: bool) ![]const Compl
 
 fn collectSemanticInfo(
     allocator: Allocator,
+    io: Io,
     source: []const u8,
     tokens: []const LexerModule.Token,
     info: *SemanticInfo,
@@ -818,12 +836,135 @@ fn collectSemanticInfo(
                     .type_name = tokens[index + 3].lexeme,
                     .offset = tokenOffset(source, tokens[index + 1]),
                 });
+            } else if (tokens[index + 2].tag == .equal and index + 6 < tokens.len and
+                tokens[index + 3].tag == .identifier and tokens[index + 4].tag == .dot and
+                tokens[index + 5].tag == .identifier and tokens[index + 6].tag == .left_parenthesis)
+            {
+                const qualifier = tokens[index + 3].lexeme;
+                const module_path = importedModulePath(source, qualifier) orelse continue;
+                const type_name = standardFunctionReturnStructure(
+                    allocator,
+                    io,
+                    module_path,
+                    tokens[index + 5].lexeme,
+                ) catch null orelse continue;
+                try info.variables.append(allocator, .{
+                    .name = tokens[index + 1].lexeme,
+                    .type_name = type_name,
+                    .offset = tokenOffset(source, tokens[index + 1]),
+                });
             }
         }
 
         if (tokens[index].tag == .keyword_func) {
             try collectParameters(allocator, source, tokens, index, &info.variables);
         }
+    }
+    try collectImportedStandardStructures(allocator, io, source, info);
+}
+
+fn collectImportedStandardStructures(
+    allocator: Allocator,
+    io: Io,
+    source: []const u8,
+    info: *SemanticInfo,
+) !void {
+    var lines = std.mem.splitScalar(u8, source, '\n');
+    while (lines.next()) |source_line| {
+        const line = std.mem.trim(u8, source_line, " \t\r");
+        if (!std.mem.startsWith(u8, line, "import") or line.len == "import".len or
+            !std.ascii.isWhitespace(line["import".len]))
+        {
+            continue;
+        }
+        const declaration = std.mem.trimStart(u8, line["import".len..], " \t");
+        const module_end = std.mem.indexOfAny(u8, declaration, " \t\r") orelse declaration.len;
+        const module_path = declaration[0..module_end];
+        if (!StandardLibrary.isModule(module_path)) continue;
+
+        try visitStandardModuleSources(
+            allocator,
+            io,
+            module_path,
+            collectStandardStructureMethods,
+            info,
+        );
+    }
+}
+
+fn standardFunctionReturnStructure(
+    allocator: Allocator,
+    io: Io,
+    module_path: []const u8,
+    function_name: []const u8,
+) !?[]const u8 {
+    if (!StandardLibrary.isModule(module_path)) return null;
+    var lookup: StandardFunctionLookup = .{ .name = function_name };
+    try visitStandardModuleSources(
+        allocator,
+        io,
+        module_path,
+        collectStandardFunctionReturn,
+        &lookup,
+    );
+    return lookup.result;
+}
+
+fn collectStandardStructureMethods(
+    allocator: Allocator,
+    program: Ast.Program,
+    info: *SemanticInfo,
+) !void {
+    for (program.structures) |structure| {
+        if (!structure.is_public) continue;
+        for (structure.methods) |method| try info.members.append(allocator, .{
+            .structure = structure.name,
+            .name = method.name,
+            .type_name = null,
+            .kind = 2,
+            .detail = "Silex standard-library method",
+        });
+    }
+}
+
+fn collectStandardFunctionReturn(
+    _: Allocator,
+    program: Ast.Program,
+    lookup: *StandardFunctionLookup,
+) !void {
+    if (lookup.result != null) return;
+    for (program.functions) |function| {
+        if (!function.is_public or !std.mem.eql(u8, function.name, lookup.name)) continue;
+        if (function.return_type == .structure) lookup.result = function.return_type.structure;
+        return;
+    }
+}
+
+fn visitStandardModuleSources(
+    allocator: Allocator,
+    io: Io,
+    module_path: []const u8,
+    comptime visit: anytype,
+    context: anytype,
+) !void {
+    const standard_library_root = StandardLibrary.root(allocator, io) catch return;
+    const module_directory = try moduleDirectoryPath(allocator, standard_library_root, module_path);
+    var directory = Io.Dir.cwd().openDir(io, module_directory, .{ .iterate = true }) catch return;
+    defer directory.close(io);
+
+    var iterator = directory.iterateAssumeFirstIteration();
+    while (try iterator.next(io)) |entry| {
+        if (entry.kind != .file or !std.mem.endsWith(u8, entry.name, ".sx")) continue;
+        const module_source_path = try std.fs.path.join(allocator, &.{ module_directory, entry.name });
+        const module_source = Io.Dir.cwd().readFileAlloc(
+            io,
+            module_source_path,
+            allocator,
+            .limited(max_message_size),
+        ) catch continue;
+        var parser = ParserModule.Parser.init(allocator, module_source);
+        const program = parser.parse() catch continue;
+        try visit(allocator, program, context);
     }
 }
 
@@ -1095,7 +1236,7 @@ const language_completions = [_]CompletionItem{
 };
 
 test "completion items include language terms and document identifiers" {
-    const items = try completionItems(std.testing.allocator, "func main() void { let total = 1 }", null);
+    const items = try completionItems(std.testing.allocator, std.testing.io, "func main() void { let total = 1 }", null);
     defer std.testing.allocator.free(items);
     try std.testing.expect(containsCompletion(items, "func"));
     try std.testing.expect(containsCompletion(items, "total"));
@@ -1139,6 +1280,45 @@ test "file URIs are decoded for local module discovery" {
     try std.testing.expectEqualStrings("/tmp/Silex Project/Main.sx", path);
 }
 
+test "standard library modules and exports complete" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const uri = "file:///Users/nekmata/Projects/Silex/Sandbox/Main.sx";
+    const modules = try localModuleCompletionItems(allocator, std.testing.io, uri, "std.R");
+    try std.testing.expect(containsCompletion(modules, "std.Random"));
+
+    const exports = try moduleExportCompletionItems(
+        allocator,
+        std.testing.io,
+        uri,
+        "std.Random",
+        .{ .qualifier = "std.Random", .prefix = "", .type_only = false },
+    );
+    try std.testing.expect(containsCompletion(exports, "std.Random.Generator"));
+    try std.testing.expect(containsCompletion(exports, "std.Random.create"));
+    try std.testing.expect(containsCompletion(exports, "std.Random.system"));
+}
+
+test "member completion infers an imported standard-library factory result" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source =
+        \\import std.Random as Random
+        \\func main() void {
+        \\    var rand = Random.system()
+        \\    print(rand.n)
+        \\}
+    ;
+    const items = try completionItems(
+        arena.allocator(),
+        std.testing.io,
+        source,
+        .{ .line = 3, .character = 16 },
+    );
+    try std.testing.expect(containsCompletion(items, "next"));
+}
+
 test "member completion only includes members of the receiver structure" {
     const source =
         \\struct Move {
@@ -1149,7 +1329,7 @@ test "member completion only includes members of the receiver structure" {
         \\    print(move.)
         \\}
     ;
-    const items = try completionItems(std.testing.allocator, source, .{ .line = 5, .character = 15 });
+    const items = try completionItems(std.testing.allocator, std.testing.io, source, .{ .line = 5, .character = 15 });
     defer std.testing.allocator.free(items);
     try std.testing.expectEqual(@as(usize, 1), items.len);
     try std.testing.expectEqualStrings("speed", items[0].label);
@@ -1166,7 +1346,7 @@ test "self completion resolves fields and methods of the enclosing structure" {
         \\    }
         \\}
     ;
-    const items = try completionItems(std.testing.allocator, source, .{ .line = 4, .character = 20 });
+    const items = try completionItems(std.testing.allocator, std.testing.io, source, .{ .line = 4, .character = 20 });
     defer std.testing.allocator.free(items);
     try std.testing.expect(containsCompletion(items, "value"));
     try std.testing.expect(containsCompletion(items, "current"));
@@ -1183,7 +1363,7 @@ test "cascade completion resolves a receiver on the preceding line" {
         \\        ..
         \\}
     ;
-    const items = try completionItems(std.testing.allocator, source, .{ .line = 6, .character = 10 });
+    const items = try completionItems(std.testing.allocator, std.testing.io, source, .{ .line = 6, .character = 10 });
     defer std.testing.allocator.free(items);
     try std.testing.expectEqual(@as(usize, 1), items.len);
     try std.testing.expectEqualStrings("speed", items[0].label);
@@ -1197,7 +1377,7 @@ test "first dot of an indented cascade does not offer global completions" {
         \\        .
         \\}
     ;
-    const items = try completionItems(std.testing.allocator, source, .{ .line = 3, .character = 9 });
+    const items = try completionItems(std.testing.allocator, std.testing.io, source, .{ .line = 3, .character = 9 });
     defer std.testing.allocator.free(items);
     try std.testing.expectEqual(@as(usize, 0), items.len);
 }
@@ -1213,7 +1393,7 @@ test "cascade completion resolves an inferred structure initializer" {
         \\        ..
         \\}
     ;
-    const items = try completionItems(std.testing.allocator, source, .{ .line = 6, .character = 10 });
+    const items = try completionItems(std.testing.allocator, std.testing.io, source, .{ .line = 6, .character = 10 });
     defer std.testing.allocator.free(items);
     try std.testing.expect(containsCompletion(items, "speed"));
     try std.testing.expect(containsCompletion(items, "stop"));
@@ -1228,7 +1408,7 @@ test "collection completion distinguishes lists and fixed arrays" {
         \\        ..
         \\}
     ;
-    const list_items = try completionItems(std.testing.allocator, list_source, .{ .line = 3, .character = 10 });
+    const list_items = try completionItems(std.testing.allocator, std.testing.io, list_source, .{ .line = 3, .character = 10 });
     defer std.testing.allocator.free(list_items);
     try std.testing.expect(containsCompletion(list_items, "append"));
     try std.testing.expect(containsCompletion(list_items, "reverse"));
@@ -1239,7 +1419,7 @@ test "collection completion distinguishes lists and fixed arrays" {
         \\    values..
         \\}
     ;
-    const fixed_items = try completionItems(std.testing.allocator, fixed_source, .{ .line = 2, .character = 12 });
+    const fixed_items = try completionItems(std.testing.allocator, std.testing.io, fixed_source, .{ .line = 2, .character = 12 });
     defer std.testing.allocator.free(fixed_items);
     try std.testing.expect(containsCompletion(fixed_items, "reverse"));
     try std.testing.expect(!containsCompletion(fixed_items, "append"));

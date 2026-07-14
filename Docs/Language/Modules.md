@@ -7,9 +7,16 @@ When compiling an entry file without a manifest, a directory defines a local
 module: `Math/` provides `Math`, and `Math/Geometry/` provides `Math.Geometry`.
 Only `.sx` files directly inside a directory contribute to that module.
 
+The standard library is distributed with Silex. Its modules use the reserved
+`std` namespace: `std/Random/` provides `std.Random`, while
+`std/Math/Geometry/` would provide `std.Math.Geometry`. Standard modules work
+from a single entry file and from a JSON manifest; do not list them in the
+manifest.
+
 ```sx
 import Math
 import NK.Rendering as Rendering
+import std.Random
 use Math.Vec3
 
 func create() NK.Window.Session {

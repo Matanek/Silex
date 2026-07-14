@@ -18,6 +18,10 @@ canonical. A non-void return type is never inferred. The compiler collects
 signatures before checking bodies, so functions may be called before their
 definition and may be recursive.
 
+`native func` declares a function implemented by the Silex runtime rather than
+by a Silex body. It is reserved for internal standard-library modules and is
+not available to application code.
+
 All arguments, return values, and return paths are checked statically. A
 non-void function must return a compatible value on every path. A void function
 may use `return` without a value.

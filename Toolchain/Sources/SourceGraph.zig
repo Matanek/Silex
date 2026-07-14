@@ -4,6 +4,7 @@ const Modules = @import("Modules.zig");
 const ParserModule = @import("Parser.zig");
 const ProjectModule = @import("Project.zig");
 const Source = @import("Source.zig");
+const StandardLibrary = @import("StandardLibrary.zig");
 
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
@@ -34,33 +35,36 @@ pub const Loader = struct {
 
     pub fn load(self: *Loader, input_path: []const u8) !Loaded {
         var project = try ProjectModule.load(self.allocator, self.io, input_path);
-        if (!project.single_file) {
-            for (project.modules, 0..) |module, module_index| for (module.sources) |source_path| {
-                try self.appendFile(source_path, module_index);
-            };
-            return self.finish(project);
-        }
-
         var modules: std.ArrayList(ModuleBuilder) = .empty;
-        var target_sources: std.ArrayList([]const u8) = .empty;
-        try target_sources.append(self.allocator, input_path);
-        try modules.append(self.allocator, .{
-            .name = project.modules[0].name,
-            .sources = target_sources,
-        });
-        try self.appendFile(input_path, 0);
+        for (project.modules) |module| {
+            var sources: std.ArrayList([]const u8) = .empty;
+            try sources.appendSlice(self.allocator, module.sources);
+            try modules.append(self.allocator, .{ .name = module.name, .sources = sources });
+        }
+        for (project.modules, 0..) |module, module_index| for (module.sources) |source_path| {
+            try self.appendFile(source_path, module_index);
+        };
 
+        const loads_local_modules = project.single_file;
         const project_root = std.fs.path.dirname(input_path) orelse ".";
         var file_index: usize = 0;
         while (file_index < self.files.items.len) : (file_index += 1) {
             const file = self.files.items[file_index];
             for (file.program.imports) |import_value| {
-                try self.loadLocalModule(&modules, project_root, import_value.path, import_value.position);
+                if (StandardLibrary.isModule(import_value.path)) {
+                    try self.loadStandardModule(&modules, import_value.path, import_value.position);
+                } else if (loads_local_modules) {
+                    try self.loadLocalModule(&modules, project_root, import_value.path, import_value.position);
+                }
             }
             for (file.program.uses) |use_value| {
                 if (useUsesImportAlias(file.program.imports, use_value.path)) continue;
                 const module_name = moduleNameFromUse(use_value.path) orelse continue;
-                try self.loadLocalModule(&modules, project_root, module_name, use_value.position);
+                if (StandardLibrary.isModule(module_name)) {
+                    try self.loadStandardModule(&modules, module_name, use_value.position);
+                } else if (loads_local_modules) {
+                    try self.loadLocalModule(&modules, project_root, module_name, use_value.position);
+                }
             }
         }
 
@@ -70,7 +74,7 @@ pub const Loader = struct {
             .sources = try module.sources.toOwnedSlice(self.allocator),
         });
         project.modules = try project_modules.toOwnedSlice(self.allocator);
-        project.single_file = self.files.items.len == 1;
+        project.single_file = loads_local_modules and self.files.items.len == 1;
         return self.finish(project);
     }
 
@@ -81,15 +85,43 @@ pub const Loader = struct {
         module_name: []const u8,
         position: Source.Position,
     ) !void {
+        try self.loadModule(modules, project_root, module_name, position, "local");
+    }
+
+    fn loadStandardModule(
+        self: *Loader,
+        modules: *std.ArrayList(ModuleBuilder),
+        module_name: []const u8,
+        position: Source.Position,
+    ) !void {
+        const standard_library_root = StandardLibrary.root(self.allocator, self.io) catch {
+            const message = try std.fmt.allocPrint(
+                self.allocator,
+                "standard library required by module '{s}' was not found; reinstall Silex",
+                .{module_name},
+            );
+            return self.fail(position, message);
+        };
+        try self.loadModule(modules, standard_library_root, module_name, position, "standard");
+    }
+
+    fn loadModule(
+        self: *Loader,
+        modules: *std.ArrayList(ModuleBuilder),
+        module_root: []const u8,
+        module_name: []const u8,
+        position: Source.Position,
+        module_kind: []const u8,
+    ) !void {
         if (findModule(modules.items, module_name) != null) return;
 
-        const directory_path = try localModulePath(self.allocator, project_root, module_name);
+        const directory_path = try localModulePath(self.allocator, module_root, module_name);
         var directory = Io.Dir.cwd().openDir(self.io, directory_path, .{ .iterate = true }) catch |err| switch (err) {
             error.FileNotFound, error.NotDir => {
                 const message = try std.fmt.allocPrint(
                     self.allocator,
-                    "local module '{s}' was not found at '{s}'",
-                    .{ module_name, directory_path },
+                    "{s} module '{s}' was not found at '{s}'",
+                    .{ module_kind, module_name, directory_path },
                 );
                 return self.fail(position, message);
             },
@@ -112,8 +144,8 @@ pub const Loader = struct {
         if (source_names.items.len == 0) {
             const message = try std.fmt.allocPrint(
                 self.allocator,
-                "local module '{s}' has no direct .sx source in '{s}'",
-                .{ module_name, directory_path },
+                "{s} module '{s}' has no direct .sx source in '{s}'",
+                .{ module_kind, module_name, directory_path },
             );
             return self.fail(position, message);
         }

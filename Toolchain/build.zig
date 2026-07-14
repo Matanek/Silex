@@ -6,6 +6,7 @@ pub fn build(b: *std.Build) void {
 
     const build_options = b.addOptions();
     build_options.addOption([]const u8, "developer_zig", b.graph.zig_exe);
+    build_options.addOption([]const u8, "developer_standard_library_root", b.getInstallPath(.prefix, "lib/silex"));
 
     const module = b.createModule(.{
         .root_source_file = b.path("Sources/Main.zig"),
@@ -19,6 +20,12 @@ pub fn build(b: *std.Build) void {
         .root_module = module,
     });
     b.installArtifact(executable);
+    const install_standard_library = b.addInstallDirectory(.{
+        .source_dir = b.path("../Library/std"),
+        .install_dir = .prefix,
+        .install_subdir = "lib/silex/std",
+    });
+    b.getInstallStep().dependOn(&install_standard_library.step);
 
     const run_command = b.addRunArtifact(executable);
     run_command.step.dependOn(b.getInstallStep());
@@ -37,6 +44,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    lsp_test_module.addOptions("build_options", build_options);
     const lsp_tests = b.addTest(.{
         .root_module = lsp_test_module,
     });
@@ -75,6 +83,13 @@ pub fn build(b: *std.Build) void {
     invalid_local_reference_command.expectExitCode(1);
     invalid_local_reference_command.expectStdErrEqual(
         "Tests/InvalidLocalReference.sx:3:21: error: '&' is only valid for an argument of a parameter declared with '&'\n",
+    );
+
+    const invalid_native_function_command = b.addRunArtifact(executable);
+    invalid_native_function_command.addArgs(&.{ "compile", "Tests/InvalidNativeFunction.sx" });
+    invalid_native_function_command.expectExitCode(1);
+    invalid_native_function_command.expectStdErrEqual(
+        "Tests/InvalidNativeFunction.sx:1:1: error: native functions are reserved for the standard library\n",
     );
 
     const invalid_reference_type_command = b.addRunArtifact(executable);
@@ -523,6 +538,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&invalid_mutable_reference_argument_command.step);
     test_step.dependOn(&missing_mutable_reference_argument_command.step);
     test_step.dependOn(&invalid_local_reference_command.step);
+    test_step.dependOn(&invalid_native_function_command.step);
     test_step.dependOn(&invalid_reference_type_command.step);
     test_step.dependOn(&invalid_condition_command.step);
     test_step.dependOn(&invalid_logical_command.step);
@@ -812,8 +828,18 @@ pub fn build(b: *std.Build) void {
     local_imports_command.addArgs(&.{ "run", "Smokes/LocalImports/Main.sx" });
     local_imports_command.expectStdOutEqual(hostText(b, "2\n3\n9\n3\n"));
 
+    const standard_library_command = b.addRunArtifact(executable);
+    standard_library_command.step.dependOn(&local_imports_command.step);
+    standard_library_command.addArgs(&.{ "run", "Smokes/StandardLibrary/Main.sx" });
+    standard_library_command.expectStdOutEqual(hostText(b, "true\ntrue\n"));
+
+    const standard_library_manifest_command = b.addRunArtifact(executable);
+    standard_library_manifest_command.step.dependOn(&standard_library_command.step);
+    standard_library_manifest_command.addArgs(&.{ "run", "Smokes/StandardLibrary/silex.json" });
+    standard_library_manifest_command.expectStdOutEqual(hostText(b, "true\ntrue\n"));
+
     const native_source_command = b.addRunArtifact(executable);
-    native_source_command.step.dependOn(&local_imports_command.step);
+    native_source_command.step.dependOn(&standard_library_manifest_command.step);
     native_source_command.addArgs(&.{
         "run",
         "Smokes/Native/Main.sx",
@@ -944,6 +970,7 @@ pub fn build(b: *std.Build) void {
 
     const distribution_options = b.addOptions();
     distribution_options.addOption([]const u8, "developer_zig", "");
+    distribution_options.addOption([]const u8, "developer_standard_library_root", "");
     const distribution_module = b.createModule(.{
         .root_source_file = b.path("Sources/Main.zig"),
         .target = b.graph.host,
@@ -977,19 +1004,25 @@ pub fn build(b: *std.Build) void {
         .install_dir = .prefix,
         .install_subdir = b.fmt("{s}/toolchain/zig/lib", .{distribution_root}),
     });
+    const install_distribution_standard_library = b.addInstallDirectory(.{
+        .source_dir = b.path("../Library/std"),
+        .install_dir = .prefix,
+        .install_subdir = b.fmt("{s}/lib/silex/std", .{distribution_root}),
+    });
 
     const distribution_step = b.step("dist", "Build a self-contained distribution for this host");
     distribution_step.dependOn(&install_silex.step);
     distribution_step.dependOn(&install_zig.step);
     distribution_step.dependOn(&install_zig_lib.step);
+    distribution_step.dependOn(&install_distribution_standard_library.step);
 
     const distribution_check_files = b.addWriteFiles();
-    _ = distribution_check_files.addCopyFile(b.path("Smokes/Main.sx"), "Main.sx");
+    _ = distribution_check_files.addCopyFile(b.path("Smokes/StandardLibrary/Main.sx"), "Main.sx");
     const installed_silex = b.getInstallPath(.prefix, b.fmt("{s}/bin/{s}", .{ distribution_root, silex_name }));
     const verify_distribution = b.addSystemCommand(&.{ installed_silex, "run", "Main.sx" });
     verify_distribution.setCwd(distribution_check_files.getDirectory());
     verify_distribution.setEnvironmentVariable("PATH", "");
-    verify_distribution.expectStdOutEqual(hostText(b, "Hello from Silex smoke test\n50\nlogic works\ntrue\nfalse\n2\n1\n"));
+    verify_distribution.expectStdOutEqual(hostText(b, "true\ntrue\n"));
     verify_distribution.step.dependOn(distribution_step);
 
     const distribution_check_step = b.step("dist-check", "Build and verify the self-contained host distribution");

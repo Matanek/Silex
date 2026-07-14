@@ -24,6 +24,12 @@
 (function_definition
   name: (identifier) @function.definition)
 
+(native_function_declaration
+  name: (identifier) @function.definition)
+
+(native_function_declaration
+  native: (identifier) @keyword)
+
 (print_statement
   function: (identifier) @function.call)
 

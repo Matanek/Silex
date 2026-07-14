@@ -238,6 +238,7 @@ pub const Function = struct {
     parameters: []const Parameter,
     statements: []const Statement,
     is_main: bool,
+    is_native: bool,
 };
 
 pub const Method = struct {
@@ -294,6 +295,7 @@ const FunctionSymbol = struct {
     parameter_is_mutable_references: []const bool,
     position: Source.Position,
     is_main: bool,
+    is_native: bool,
 };
 
 const StructureSymbol = struct {
@@ -467,6 +469,9 @@ pub const Analyzer = struct {
             }
             const is_main = std.mem.eql(u8, ast_function.name, "main");
             if (is_main) main_count += 1;
+            if (ast_function.is_native and !std.mem.startsWith(u8, ast_function.name, "std.")) {
+                return self.fail(ast_function.position, "native functions are reserved for the standard library");
+            }
             var parameter_types: std.ArrayList(Type) = .empty;
             var parameter_is_mutable_references: std.ArrayList(bool) = .empty;
             for (ast_function.parameters) |parameter| {
@@ -475,14 +480,28 @@ pub const Analyzer = struct {
             }
             const return_type = try typeFromReturn(self, ast_function.return_type, ast_function.position);
             if (return_type == .reference) return self.fail(ast_function.position, "a function cannot return a reference");
+            if (ast_function.is_native) {
+                if (!isNativeType(return_type)) return self.fail(ast_function.position, "native functions use only primitive value types");
+                for (parameter_types.items, parameter_is_mutable_references.items) |parameter_type, is_mutable_reference| {
+                    if (!isNativeType(parameter_type) or is_mutable_reference) {
+                        return self.fail(ast_function.position, "native functions use only primitive value parameters");
+                    }
+                }
+            }
             try self.functions.append(self.allocator, .{
                 .source_name = ast_function.name,
-                .generated_name = if (is_main) "main" else try std.fmt.allocPrint(self.allocator, "silexFunction{d}", .{index}),
+                .generated_name = if (is_main)
+                    "main"
+                else if (ast_function.is_native)
+                    try nativeSymbol(self.allocator, ast_function.name)
+                else
+                    try std.fmt.allocPrint(self.allocator, "silexFunction{d}", .{index}),
                 .return_type = return_type,
                 .parameter_types = try parameter_types.toOwnedSlice(self.allocator),
                 .parameter_is_mutable_references = try parameter_is_mutable_references.toOwnedSlice(self.allocator),
                 .position = ast_function.name_position,
                 .is_main = is_main,
+                .is_native = ast_function.is_native,
             });
         }
         if (main_count == 0) return self.fail(.{ .line = 1, .column = 1 }, "missing 'main' function");
@@ -573,11 +592,11 @@ pub const Analyzer = struct {
         self.current_return_type = symbol.return_type;
         const function_statements = try self.statements(ast.statements, &scope);
         self.releaseScopeBorrows(&scope);
-        if (!typeEqual(symbol.return_type, .void) and !blockAlwaysReturns(function_statements)) {
+        if (!ast.is_native and !typeEqual(symbol.return_type, .void) and !blockAlwaysReturns(function_statements)) {
             const message = try std.fmt.allocPrint(self.allocator, "function '{s}' must return '{s}' on every path", .{ ast.name, typeName(symbol.return_type) });
             return self.fail(ast.name_position, message);
         }
-        return .{ .generated_name = symbol.generated_name, .return_type = symbol.return_type, .parameters = try parameters.toOwnedSlice(self.allocator), .statements = function_statements, .is_main = symbol.is_main };
+        return .{ .generated_name = symbol.generated_name, .return_type = symbol.return_type, .parameters = try parameters.toOwnedSlice(self.allocator), .statements = function_statements, .is_main = symbol.is_main, .is_native = symbol.is_native };
     }
 
     fn method(
@@ -2472,6 +2491,22 @@ fn typeEqual(left: Type, right: Type) bool {
             else => false,
         },
     };
+}
+
+fn isNativeType(value: Type) bool {
+    return switch (value) {
+        .void, .int, .int8, .int16, .int32, .uint8, .uint16, .uint32, .uint64, .float, .float64, .bool => true,
+        .str, .structure, .list, .fixed_array, .reference => false,
+    };
+}
+
+fn nativeSymbol(allocator: Allocator, function_name: []const u8) Allocator.Error![]const u8 {
+    var result: std.ArrayList(u8) = .empty;
+    try result.appendSlice(allocator, "silexNative_");
+    for (function_name) |character| {
+        try result.append(allocator, if (character == '.') '_' else character);
+    }
+    return result.toOwnedSlice(allocator);
 }
 
 fn typeName(value: Type) []const u8 {

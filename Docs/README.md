@@ -5,6 +5,7 @@ This documentation covers the current Silex prototype and its toolchain.
 ## Guides
 
 - [Installation and command-line use](Installation.md)
+- [Standard library](Standard-library.md)
 - [Developing Silex](Development.md)
 
 ## Language reference

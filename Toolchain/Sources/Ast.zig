@@ -299,6 +299,7 @@ pub const Parameter = struct {
 
 pub const Function = struct {
     is_public: bool = false,
+    is_native: bool = false,
     position: Source.Position,
     name: []const u8,
     name_position: Source.Position,

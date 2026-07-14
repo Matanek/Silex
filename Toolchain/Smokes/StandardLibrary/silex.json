@@ -1,0 +1,9 @@
+{
+  "target": "StandardLibrary",
+  "modules": [
+    {
+      "name": "StandardLibrary",
+      "sources": ["Main.sx"]
+    }
+  ]
+}
