@@ -1,0 +1,8 @@
+pub struct Vec2 {
+    x:float
+    y:float
+
+    func length_squared() float {
+        return self.x * self.x + self.y * self.y
+    }
+}

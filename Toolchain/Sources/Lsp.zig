@@ -213,7 +213,14 @@ const Server = struct {
                         }
                     }
                 }
-                break :completion try completionItems(self.allocator, self.io, source, position);
+                const project_root = try documentProjectRoot(self.allocator, uri);
+                break :completion try completionItemsForProject(
+                    self.allocator,
+                    self.io,
+                    source,
+                    project_root,
+                    position,
+                );
             } else &[_]CompletionItem{};
             if (request.id) |id| try self.reply(id, .{
                 .isIncomplete = false,
@@ -494,8 +501,18 @@ fn completionItems(
     source: []const u8,
     position: ?Position,
 ) ![]const CompletionItem {
+    return completionItemsForProject(allocator, io, source, null, position);
+}
+
+fn completionItemsForProject(
+    allocator: Allocator,
+    io: Io,
+    source: []const u8,
+    project_root: ?[]const u8,
+    position: ?Position,
+) ![]const CompletionItem {
     if (position) |cursor| {
-        if (try memberCompletionItems(allocator, io, source, cursor)) |items| return items;
+        if (try memberCompletionItems(allocator, io, source, project_root, cursor)) |items| return items;
         if (isIncompleteCascadePrefix(source, cursor)) return try allocator.alloc(CompletionItem, 0);
     }
 
@@ -858,6 +875,11 @@ fn filePathFromUri(allocator: Allocator, uri: []const u8) !?[]const u8 {
     return try path.toOwnedSlice(allocator);
 }
 
+fn documentProjectRoot(allocator: Allocator, uri: []const u8) !?[]const u8 {
+    const source_path = try filePathFromUri(allocator, uri) orelse return null;
+    return std.fs.path.dirname(source_path);
+}
+
 fn hexDigit(character: u8) ?u8 {
     return switch (character) {
         '0'...'9' => character - '0',
@@ -871,6 +893,7 @@ fn memberCompletionItems(
     allocator: Allocator,
     io: Io,
     source: []const u8,
+    project_root: ?[]const u8,
     position: Position,
 ) !?[]const CompletionItem {
     const cursor_offset = byteOffsetAtPosition(source, position) orelse return null;
@@ -888,7 +911,7 @@ fn memberCompletionItems(
 
     var info: SemanticInfo = .{};
     defer info.deinit(allocator);
-    try collectSemanticInfo(allocator, io, source, tokens.items, &info);
+    try collectSemanticInfo(allocator, io, source, project_root, tokens.items, &info);
 
     var receiver_type = receiverType(info, receiver_path[0], cursor_offset) orelse
         return try allocator.alloc(CompletionItem, 0);
@@ -942,6 +965,7 @@ fn collectSemanticInfo(
     allocator: Allocator,
     io: Io,
     source: []const u8,
+    project_root: ?[]const u8,
     tokens: []const LexerModule.Token,
     info: *SemanticInfo,
 ) !void {
@@ -1047,7 +1071,7 @@ fn collectSemanticInfo(
             try collectParameters(allocator, source, tokens, index, &info.variables);
         }
     }
-    try collectImportedStandardStructures(allocator, io, source, tokens, info);
+    try collectImportedStructures(allocator, io, source, project_root, tokens, info);
 }
 
 fn structureInitializerType(tokens: []const LexerModule.Token, start: usize) ?[]const u8 {
@@ -1081,10 +1105,11 @@ fn structureInitializerPath(
     return result;
 }
 
-fn collectImportedStandardStructures(
+fn collectImportedStructures(
     allocator: Allocator,
     io: Io,
     source: []const u8,
+    project_root: ?[]const u8,
     tokens: []const LexerModule.Token,
     info: *SemanticInfo,
 ) !void {
@@ -1108,13 +1133,17 @@ fn collectImportedStandardStructures(
         else
             path;
         const module_path = try importedModulePath(allocator, source, qualifier) orelse continue;
-        if (!StandardLibrary.isStandardPath(module_path)) continue;
-
-        try visitStandardModuleSources(
+        const module_directory = try longestModuleSourceDirectory(
             allocator,
             io,
             module_path,
-            collectStandardStructureMethods,
+            project_root,
+        ) orelse continue;
+        try visitModuleSources(
+            allocator,
+            io,
+            module_directory,
+            collectPublicStructureMembers,
             info,
         );
     }
@@ -1123,38 +1152,53 @@ fn collectImportedStandardStructures(
         if (token.tag != .identifier) continue;
         const path = try structureInitializerPath(allocator, tokens, index) orelse continue;
         defer allocator.free(path);
-        const module_path = try standardModulePathFromQualifiedReference(
-            allocator,
-            io,
-            source,
-            path,
-        ) orelse continue;
-        try visitStandardModuleSources(
+        const module_path = try importedModulePath(allocator, source, path) orelse continue;
+        const module_directory = try longestModuleSourceDirectory(
             allocator,
             io,
             module_path,
-            collectStandardStructureMethods,
+            project_root,
+        ) orelse continue;
+        try visitModuleSources(
+            allocator,
+            io,
+            module_directory,
+            collectPublicStructureMembers,
             info,
         );
     }
 }
 
-fn standardModulePathFromQualifiedReference(
+fn longestModuleSourceDirectory(
     allocator: Allocator,
     io: Io,
-    source: []const u8,
-    path: []const u8,
+    module_path: []const u8,
+    project_root: ?[]const u8,
 ) !?[]const u8 {
-    const expanded = try importedModulePath(allocator, source, path) orelse return null;
-    if (!StandardLibrary.isStandardPath(expanded)) return null;
-    const standard_library_root = StandardLibrary.root(allocator, io) catch return null;
-    var candidate = expanded;
+    var candidate = module_path;
     while (true) {
-        const directory = try moduleDirectoryPath(allocator, standard_library_root, candidate);
-        if (try lspDirectoryExists(io, directory)) return candidate;
+        if (try moduleSourceDirectory(allocator, io, candidate, project_root)) |directory| return directory;
         const separator = std.mem.lastIndexOfScalar(u8, candidate, '.') orelse return null;
         candidate = candidate[0..separator];
     }
+}
+
+fn moduleSourceDirectory(
+    allocator: Allocator,
+    io: Io,
+    module_path: []const u8,
+    project_root: ?[]const u8,
+) !?[]const u8 {
+    if (!StandardLibrary.isReservedModule(module_path)) {
+        if (project_root) |root| {
+            const local_directory = try moduleDirectoryPath(allocator, root, module_path);
+            if (try lspDirectoryExists(io, local_directory)) return local_directory;
+        }
+    }
+
+    const library_root = StandardLibrary.root(allocator, io) catch return null;
+    const distributed_directory = try moduleDirectoryPath(allocator, library_root, module_path);
+    return if (try lspDirectoryExists(io, distributed_directory)) distributed_directory else null;
 }
 
 fn standardFunctionReturnStructure(
@@ -1175,21 +1219,62 @@ fn standardFunctionReturnStructure(
     return lookup.result;
 }
 
-fn collectStandardStructureMethods(
+fn collectPublicStructureMembers(
     allocator: Allocator,
     program: Ast.Program,
     info: *SemanticInfo,
 ) !void {
     for (program.structures) |structure| {
         if (!structure.is_public) continue;
+        for (structure.fields) |field| try info.members.append(allocator, .{
+            .structure = structure.name,
+            .name = field.name,
+            .type_name = astTypeName(field.type),
+            .collection = astCollectionKind(field.type),
+            .kind = 5,
+            .detail = "Silex module field",
+        });
         for (structure.methods) |method| try info.members.append(allocator, .{
             .structure = structure.name,
             .name = method.name,
             .type_name = null,
             .kind = 2,
-            .detail = "Silex standard-library method",
+            .detail = "Silex module method",
         });
     }
+}
+
+fn astTypeName(type_name: Ast.TypeName) []const u8 {
+    return switch (type_name) {
+        .int => "int",
+        .int8 => "int8",
+        .int16 => "int16",
+        .int32 => "int32",
+        .int64 => "int64",
+        .uint => "uint",
+        .uint8 => "uint8",
+        .uint16 => "uint16",
+        .uint32 => "uint32",
+        .uint64 => "uint64",
+        .float => "float",
+        .float32 => "float32",
+        .float64 => "float64",
+        .bool => "bool",
+        .str => "str",
+        .structure => |name| name,
+        .list => |element| astTypeName(element.*),
+        .fixed_array => |array| astTypeName(array.element.*),
+        .reference => |reference| astTypeName(reference.target.*),
+    };
+}
+
+fn astCollectionKind(type_name: Ast.TypeName) ?CollectionKind {
+    return switch (type_name) {
+        .list => .list,
+        .fixed_array => .fixed_array,
+        .reference => |reference| astCollectionKind(reference.target.*),
+        else => null,
+    };
 }
 
 fn collectStandardFunctionReturn(
@@ -1214,6 +1299,16 @@ fn visitStandardModuleSources(
 ) !void {
     const standard_library_root = StandardLibrary.root(allocator, io) catch return;
     const module_directory = try moduleDirectoryPath(allocator, standard_library_root, module_path);
+    try visitModuleSources(allocator, io, module_directory, visit, context);
+}
+
+fn visitModuleSources(
+    allocator: Allocator,
+    io: Io,
+    module_directory: []const u8,
+    comptime visit: anytype,
+    context: anytype,
+) !void {
     var directory = Io.Dir.cwd().openDir(io, module_directory, .{ .iterate = true }) catch return;
     defer directory.close(io);
 
@@ -1663,6 +1758,28 @@ test "member completion infers qualified standard-library structure initializers
     );
     try std.testing.expect(containsCompletion(canonical_items, "get_int"));
     try std.testing.expect(containsCompletion(canonical_items, "get_float"));
+}
+
+test "member completion loads local module structure fields and methods" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source =
+        \\import Math
+        \\func main() void {
+        \\    var vec = Math.Vec2 {}
+        \\    vec.
+        \\}
+    ;
+    const items = try completionItemsForProject(
+        arena.allocator(),
+        std.testing.io,
+        source,
+        "Tests/LspModules",
+        .{ .line = 3, .character = 8 },
+    );
+    try std.testing.expect(containsCompletion(items, "x"));
+    try std.testing.expect(containsCompletion(items, "y"));
+    try std.testing.expect(containsCompletion(items, "length_squared"));
 }
 
 test "member completion exposes STD Time clock methods" {
