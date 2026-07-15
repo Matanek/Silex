@@ -103,14 +103,17 @@ paused state, and makes the next tick return zero. Reset does not change the
 configured time scale.
 
 The implementation uses one native monotonic-microsecond reading inherited
-from `STD/Native.json`; both types and their duration calculations remain Silex
-code in `STD/Time/`.
+from the `native` section of `STD/Module.json`; both types and their duration
+calculations remain Silex code in `STD/Time/`.
 
-## Native module runtime
+## Optional module manifest
 
-A directory-backed local or distributed module may contain one `Native.json`.
-It supplies the native runtime for that module and its descendants. For example,
-this local module is compiled automatically by
+A directory-backed local or distributed module may contain one optional,
+exactly-cased `Module.json`. Pure Silex modules do not need it. The manifest
+currently accepts optional `author` and `description` strings, plus an optional
+`native` configuration.
+
+For example, this local module is compiled automatically by
 `silex run Sources/Main.sx` as soon as `Main.sx` loads `Math`:
 
 ```text
@@ -118,8 +121,8 @@ Sources/
 ├── Main.sx
 └── Math/
     ├── Runtime.sx
-    ├── Native.json
-    └── Runtime.cpp
+    ├── Module.json
+    └── Module.cpp
 ```
 
 The `.sx` source declares private `native func` entries and exposes ordinary
@@ -127,14 +130,35 @@ Silex functions around them. The C or C++ source defines the C symbols derived
 from the full module and function paths; `Math.native_length` becomes
 `silexNative_Math_native_length`.
 
+```json
+{
+  "author": "Ada Lovelace",
+  "description": "Local mathematics",
+  "native": {
+    "common": {
+      "sources": {
+        "cpp": ["Module.cpp"]
+      }
+    },
+    "targets": {
+      "aarch64-macos-none": {},
+      "x86_64-linux-musl": {}
+    }
+  }
+}
+```
+
 When a descendant is loaded, Silex checks its directory and then each parent
-directory; the closest manifest wins. Its `common` configuration is combined
-with the configuration selected by the requested target triple in `targets`.
-A missing target entry is an error. Native sources are listed explicitly under
-`c`, `cpp`, `objective_c`, or `objective_cpp`; relative source and include paths
-must remain inside the directory containing the manifest. The Zig toolchain
-distributed with Silex compiles C sources with its C driver and C++ sources
-with its C++ driver, then links their objects with the generated program.
+directory for the closest `Module.json` containing `native`. A metadata-only
+manifest does not mask a parent's native configuration. The `common`
+configuration is combined with the configuration selected by the requested
+target triple in `targets`. A missing target entry is an error. Native sources
+are listed explicitly under `c`, `cpp`, `objective_c`, or `objective_cpp`;
+relative source and include paths must remain inside the directory containing
+the manifest. `Module.cpp` is only a convention: every source remains explicit
+and may use another name. The Zig toolchain distributed with Silex compiles C
+sources with its C driver and C++ sources with its C++ driver, then links their
+objects with the generated program.
 
 The manifest may also list include directories, string defines, system-library
 names, and Apple frameworks. It cannot provide arbitrary compiler flags,

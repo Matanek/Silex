@@ -189,7 +189,7 @@ pub fn compile(
 fn nativeModuleNames(allocator: Allocator, project: ProjectModule.Project) ![]const []const u8 {
     var names: std.ArrayList([]const u8) = .empty;
     for (project.modules) |module| {
-        if (module.native_manifest_path != null) try names.append(allocator, module.name);
+        if (module.module_manifest_path != null) try names.append(allocator, module.name);
     }
     return names.toOwnedSlice(allocator);
 }
@@ -203,7 +203,7 @@ fn loadModuleRuntimes(
     var runtimes: std.ArrayList(NativeDependency.ModuleRuntime) = .empty;
     const target_name = try target.cacheName(allocator);
     for (project.modules) |module| {
-        const manifest_path = module.native_manifest_path orelse continue;
+        const manifest_path = module.module_manifest_path orelse continue;
         var already_loaded = false;
         for (runtimes.items) |runtime| {
             if (std.mem.eql(u8, runtime.manifest_path, manifest_path)) {
@@ -227,7 +227,7 @@ fn loadModuleRuntimes(
                 return error.Reported;
             },
             else => {
-                std.debug.print("silex: invalid native manifest for module '{s}' at '{s}': {t}\n", .{
+                std.debug.print("silex: invalid module manifest for module '{s}' at '{s}': {t}\n", .{
                     runtime_name,
                     manifest_path,
                     err,
@@ -601,8 +601,8 @@ test "native module headers invalidate the cache key" {
 
     try temporary.dir.createDir(std.testing.io, "NativeRuntime", .default_dir);
     try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "NativeRuntime/Native.json",
-        .data = "{\"common\":{},\"targets\":{}}",
+        .sub_path = "NativeRuntime/Module.json",
+        .data = "{\"native\":{\"common\":{},\"targets\":{}}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "NativeRuntime/Runtime.hpp",
@@ -618,7 +618,7 @@ test "native module headers invalidate the cache key" {
     const runtime = NativeDependency.ModuleRuntime{
         .module_name = "NativeRuntime",
         .module_directory = module_directory,
-        .manifest_path = try std.fs.path.join(std.testing.allocator, &.{ module_directory, "Native.json" }),
+        .manifest_path = try std.fs.path.join(std.testing.allocator, &.{ module_directory, "Module.json" }),
         .sources = &.{},
         .include_dirs = &.{},
         .defines = &.{},
@@ -640,7 +640,7 @@ test "native system linkage always reruns the final link" {
     const runtime = NativeDependency.ModuleRuntime{
         .module_name = "Example",
         .module_directory = "Example",
-        .manifest_path = "Example/Native.json",
+        .manifest_path = "Example/Module.json",
         .sources = &.{},
         .include_dirs = &.{},
         .defines = &.{},

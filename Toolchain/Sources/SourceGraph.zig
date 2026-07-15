@@ -1,6 +1,7 @@
 const std = @import("std");
 const Ast = @import("Ast.zig");
 const LexerModule = @import("Lexer.zig");
+const ModuleManifest = @import("ModuleManifest.zig");
 const Modules = @import("Modules.zig");
 const ParserModule = @import("Parser.zig");
 const ProjectModule = @import("Project.zig");
@@ -15,7 +16,7 @@ const ModuleBuilder = struct {
     sources: std.ArrayList([]const u8) = .empty,
     provider: Provider,
     native_runtime_name: ?[]const u8 = null,
-    native_manifest_path: ?[]const u8 = null,
+    module_manifest_path: ?[]const u8 = null,
     native_module_directory: ?[]const u8 = null,
 };
 
@@ -68,7 +69,7 @@ pub const Loader = struct {
                 .sources = sources,
                 .provider = .application,
                 .native_runtime_name = if (native_runtime) |runtime| runtime.module_name else null,
-                .native_manifest_path = if (native_runtime) |runtime| runtime.manifest_path else null,
+                .module_manifest_path = if (native_runtime) |runtime| runtime.manifest_path else null,
                 .native_module_directory = if (native_runtime) |runtime| runtime.module_directory else null,
             });
         }
@@ -122,7 +123,7 @@ pub const Loader = struct {
             .name = module.name,
             .sources = try module.sources.toOwnedSlice(self.allocator),
             .native_runtime_name = module.native_runtime_name,
-            .native_manifest_path = module.native_manifest_path,
+            .module_manifest_path = module.module_manifest_path,
             .native_module_directory = module.native_module_directory,
         });
         project.modules = try project_modules.toOwnedSlice(self.allocator);
@@ -346,7 +347,7 @@ pub const Loader = struct {
             .name = module_name,
             .provider = provider,
             .native_runtime_name = if (native_runtime) |runtime| runtime.module_name else null,
-            .native_manifest_path = if (native_runtime) |runtime| runtime.manifest_path else null,
+            .module_manifest_path = if (native_runtime) |runtime| runtime.manifest_path else null,
             .native_module_directory = if (native_runtime) |runtime| runtime.module_directory else null,
         });
         for (source_names.items) |source_name| {
@@ -519,7 +520,7 @@ fn findNativeRuntime(
     var candidate_name = module_name;
     while (true) {
         const candidate_directory = try localModulePath(allocator, module_root, candidate_name);
-        if (try nativeManifestPath(allocator, io, candidate_directory)) |manifest_path| {
+        if (try nativeModuleManifestPath(allocator, io, candidate_directory)) |manifest_path| {
             return .{
                 .module_name = candidate_name,
                 .module_directory = candidate_directory,
@@ -531,16 +532,21 @@ fn findNativeRuntime(
     }
 }
 
-fn nativeManifestPath(allocator: Allocator, io: Io, module_directory: []const u8) !?[]const u8 {
-    const path = try std.fs.path.join(allocator, &.{ module_directory, "Native.json" });
+fn nativeModuleManifestPath(allocator: Allocator, io: Io, module_directory: []const u8) !?[]const u8 {
+    const path = try std.fs.path.join(allocator, &.{ module_directory, "Module.json" });
     const stat = Io.Dir.cwd().statFile(io, path, .{}) catch |err| switch (err) {
         error.FileNotFound => return null,
         else => |other| return other,
     };
-    return if (stat.kind == .file) path else null;
+    if (stat.kind != .file) return null;
+    const manifest = ModuleManifest.load(allocator, io, path) catch |err| {
+        std.debug.print("silex: invalid module manifest at '{s}': {t}\n", .{ path, err });
+        return error.Reported;
+    };
+    return if (manifest.native != null) path else null;
 }
 
-test "native runtime is inherited from an exact-cased parent manifest" {
+test "native runtime ignores metadata-only and incorrectly cased child manifests" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -549,12 +555,16 @@ test "native runtime is inherited from an exact-cased parent manifest" {
 
     try temporary.dir.createDirPath(std.testing.io, "Library/Parent/Child");
     try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "Library/Parent/Child/native.json",
-        .data = "{}",
+        .sub_path = "Library/Parent/Child/module.json",
+        .data = "{\"native\":{}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "Library/Parent/Native.json",
-        .data = "{}",
+        .sub_path = "Library/Parent/Child/Module.json",
+        .data = "{\"author\":\"Child author\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Library/Parent/Module.json",
+        .data = "{\"native\":{}}",
     });
     const library_root = try std.fs.path.join(allocator, &.{
         ".zig-cache",
@@ -572,7 +582,31 @@ test "native runtime is inherited from an exact-cased parent manifest" {
 
     try std.testing.expectEqualStrings("Parent", runtime.module_name);
     try std.testing.expectEqualStrings(expected_directory, runtime.module_directory);
-    try std.testing.expect(std.mem.endsWith(u8, runtime.manifest_path, "Parent/Native.json"));
+    try std.testing.expect(std.mem.endsWith(u8, runtime.manifest_path, "Parent/Module.json"));
+
+    try temporary.dir.createDir(std.testing.io, "Library/Metadata", .default_dir);
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Library/Metadata/Module.json",
+        .data = "{\"description\":\"No native runtime\"}",
+    });
+    try std.testing.expect(try findNativeRuntime(
+        allocator,
+        std.testing.io,
+        library_root,
+        "Metadata",
+    ) == null);
+
+    try temporary.dir.createDir(std.testing.io, "Library/Legacy", .default_dir);
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Library/Legacy/Native.json",
+        .data = "{\"native\":{}}",
+    });
+    try std.testing.expect(try findNativeRuntime(
+        allocator,
+        std.testing.io,
+        library_root,
+        "Legacy",
+    ) == null);
 }
 
 test "local module paths follow their logical segments" {

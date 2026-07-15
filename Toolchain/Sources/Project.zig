@@ -7,7 +7,7 @@ pub const Module = struct {
     name: []const u8,
     sources: []const []const u8,
     native_runtime_name: ?[]const u8 = null,
-    native_manifest_path: ?[]const u8 = null,
+    module_manifest_path: ?[]const u8 = null,
     native_module_directory: ?[]const u8 = null,
 };
 

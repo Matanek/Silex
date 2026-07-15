@@ -107,7 +107,7 @@ pub fn build(b: *std.Build) void {
     invalid_native_function_command.addArgs(&.{ "compile", "Tests/InvalidNativeFunction.sx" });
     invalid_native_function_command.expectExitCode(1);
     invalid_native_function_command.expectStdErrEqual(
-        "Tests/InvalidNativeFunction.sx:1:1: error: native functions are only available in a named module with Native.json\n",
+        "Tests/InvalidNativeFunction.sx:1:1: error: native functions are only available in a named module with Module.json native configuration\n",
     );
 
     const invalid_public_native_function_command = b.addRunArtifact(executable);
@@ -123,6 +123,7 @@ pub fn build(b: *std.Build) void {
     invalid_native_type_command.expectStdErrMatch("native parameter 'values' cannot use 'list'\n");
 
     const missing_native_symbol_command = b.addRunArtifact(native_module_test_executable);
+    missing_native_symbol_command.step.dependOn(&invalid_native_type_command.step);
     missing_native_symbol_command.addArgs(&.{ "compile", "Tests/DistributedModules/NativeMissingSymbol/Main.sx" });
     missing_native_symbol_command.expectExitCode(1);
     missing_native_symbol_command.expectStdErrMatch(
@@ -130,6 +131,7 @@ pub fn build(b: *std.Build) void {
     );
 
     const native_exception_command = b.addRunArtifact(native_module_test_executable);
+    native_exception_command.step.dependOn(&missing_native_symbol_command.step);
     native_exception_command.addArgs(&.{ "run", "Tests/DistributedModules/NativeThrow/Main.sx" });
     native_exception_command.expectExitCode(1);
     native_exception_command.expectStdErrEqual(
@@ -137,6 +139,7 @@ pub fn build(b: *std.Build) void {
     );
 
     const inherited_native_runtime_command = b.addRunArtifact(native_module_test_executable);
+    inherited_native_runtime_command.step.dependOn(&native_exception_command.step);
     inherited_native_runtime_command.addArgs(&.{ "run", "Tests/DistributedModules/NativeInherited/Main.sx" });
     inherited_native_runtime_command.expectStdOutEqual(hostText(b, "42\n"));
 

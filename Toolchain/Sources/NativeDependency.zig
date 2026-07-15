@@ -1,4 +1,5 @@
 const std = @import("std");
+const ModuleManifest = @import("ModuleManifest.zig");
 const TargetModule = @import("Target.zig");
 
 const Allocator = std.mem.Allocator;
@@ -89,19 +90,19 @@ pub fn loadModuleRuntime(
     manifest_path: []const u8,
     target: TargetModule.Target,
 ) !ModuleRuntime {
-    const contents = try Io.Dir.cwd().readFileAlloc(io, manifest_path, allocator, .limited(1024 * 1024));
-    const value = try std.json.parseFromSliceLeaky(std.json.Value, allocator, contents, .{});
-    const root = switch (value) {
+    const manifest = try ModuleManifest.load(allocator, io, manifest_path);
+    const native_value = manifest.native orelse return error.InvalidModuleManifest;
+    const root = switch (native_value) {
         .object => |object| object,
-        else => return error.InvalidNativeModuleManifest,
+        else => return error.InvalidModuleManifest,
     };
     try requireOnlyFields(root, &.{ "common", "targets" });
-    const common_value = root.get("common") orelse return error.InvalidNativeModuleManifest;
-    const targets_value = root.get("targets") orelse return error.InvalidNativeModuleManifest;
+    const common_value = root.get("common") orelse return error.InvalidModuleManifest;
+    const targets_value = root.get("targets") orelse return error.InvalidModuleManifest;
     const common = try parseConfiguration(allocator, common_value);
     const targets = switch (targets_value) {
         .object => |object| object,
-        else => return error.InvalidNativeModuleManifest,
+        else => return error.InvalidModuleManifest,
     };
     const target_name = try target.cacheName(allocator);
     const target_value = targets.get(target_name) orelse return error.NativeModuleTargetUnsupported;
@@ -162,7 +163,7 @@ fn requireOnlyFields(object: std.json.ObjectMap, allowed: []const []const u8) !v
                 break;
             }
         }
-        if (!accepted) return error.InvalidNativeModuleManifest;
+        if (!accepted) return error.InvalidModuleManifest;
     }
 }
 
@@ -184,7 +185,7 @@ fn appendConfiguration(
     for (configuration.include_dirs) |path| {
         const resolved = try resolveModulePath(allocator, io, module_directory, path);
         const stat = try Io.Dir.cwd().statFile(io, resolved, .{});
-        if (stat.kind != .directory) return error.InvalidNativeModuleManifest;
+        if (stat.kind != .directory) return error.InvalidModuleManifest;
         try include_dirs.append(allocator, resolved);
     }
     try appendDefines(allocator, configuration.defines, defines);
@@ -203,7 +204,7 @@ fn appendSources(
     for (paths) |path| {
         const resolved = try resolveModulePath(allocator, io, module_directory, path);
         const stat = try Io.Dir.cwd().statFile(io, resolved, .{});
-        if (stat.kind != .file) return error.InvalidNativeModuleManifest;
+        if (stat.kind != .file) return error.InvalidModuleManifest;
         try sources.append(allocator, .{ .kind = kind, .path = resolved });
     }
 }
@@ -211,36 +212,36 @@ fn appendSources(
 fn appendDefines(allocator: Allocator, value: std.json.Value, defines: *std.ArrayList([]const u8)) !void {
     const object = switch (value) {
         .object => |object| object,
-        else => return error.InvalidNativeModuleManifest,
+        else => return error.InvalidModuleManifest,
     };
     var iterator = object.iterator();
     while (iterator.next()) |entry| {
         const define_value = switch (entry.value_ptr.*) {
             .string => |string| string,
-            else => return error.InvalidNativeModuleManifest,
+            else => return error.InvalidModuleManifest,
         };
-        if (!isLinkName(entry.key_ptr.*)) return error.InvalidNativeModuleManifest;
+        if (!isLinkName(entry.key_ptr.*)) return error.InvalidModuleManifest;
         try defines.append(allocator, try std.fmt.allocPrint(allocator, "{s}={s}", .{ entry.key_ptr.*, define_value }));
     }
 }
 
 fn appendLinkNames(allocator: Allocator, names: []const []const u8, result: *std.ArrayList([]const u8)) !void {
     for (names) |name| {
-        if (!isLinkName(name)) return error.InvalidNativeModuleManifest;
+        if (!isLinkName(name)) return error.InvalidModuleManifest;
         try result.append(allocator, name);
     }
 }
 
 fn resolveModulePath(allocator: Allocator, io: Io, module_directory: []const u8, path: []const u8) ![]const u8 {
-    if (path.len == 0 or std.fs.path.isAbsolute(path)) return error.InvalidNativeModuleManifest;
+    if (path.len == 0 or std.fs.path.isAbsolute(path)) return error.InvalidModuleManifest;
     var components = std.mem.tokenizeAny(u8, path, "/\\");
     while (components.next()) |component| {
-        if (std.mem.eql(u8, component, ".") or std.mem.eql(u8, component, "..")) return error.InvalidNativeModuleManifest;
+        if (std.mem.eql(u8, component, ".") or std.mem.eql(u8, component, "..")) return error.InvalidModuleManifest;
     }
     const joined = try std.fs.path.join(allocator, &.{ module_directory, path });
     const canonical_module_directory = try Io.Dir.cwd().realPathFileAlloc(io, module_directory, allocator);
     const canonical_path = try Io.Dir.cwd().realPathFileAlloc(io, joined, allocator);
-    if (!isPathWithin(canonical_module_directory, canonical_path)) return error.InvalidNativeModuleManifest;
+    if (!isPathWithin(canonical_module_directory, canonical_path)) return error.InvalidModuleManifest;
     return canonical_path;
 }
 
