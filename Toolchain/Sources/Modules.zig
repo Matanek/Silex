@@ -78,12 +78,15 @@ pub const Resolver = struct {
 
         var structures: std.ArrayList(Ast.Structure) = .empty;
         var functions: std.ArrayList(Ast.Function) = .empty;
-        for (self.file_infos) |file| {
-            for (file.program.structures) |structure| {
-                try structures.append(self.allocator, try self.transformStructure(structure));
-            }
-            for (file.program.functions) |function| {
-                try functions.append(self.allocator, try self.transformFunction(function));
+        for (order) |module_index| {
+            for (self.file_infos) |file| {
+                if (file.module_index != module_index) continue;
+                for (file.program.structures) |structure| {
+                    try structures.append(self.allocator, try self.transformStructure(structure));
+                }
+                for (file.program.functions) |function| {
+                    try functions.append(self.allocator, try self.transformFunction(function));
+                }
             }
         }
         return .{
@@ -135,6 +138,7 @@ pub const Resolver = struct {
     ) !void {
         for (self.declarations.items) |existing| {
             if (existing.module_index == module_index and std.mem.eql(u8, existing.source_name, source_name)) {
+                if (existing.kind == .function and kind == .function) continue;
                 const message = try std.fmt.allocPrint(self.allocator, "{s} '{s}' is already declared in module '{s}'", .{
                     @tagName(kind), source_name, self.project.modules[module_index].name,
                 });
@@ -267,15 +271,17 @@ pub const Resolver = struct {
             if (file.module_index != module_index) continue;
             for (file.program.uses) |use_value| {
                 if (use_value.is_public != is_public) continue;
-                const declaration = try self.resolveUse(file, use_value.path, use_value.position);
+                const declarations = try self.resolveUses(file, use_value.path, use_value.position);
                 const local_name = use_value.alias orelse lastSegment(use_value.path);
                 try self.validateLocalBinding(file, local_name, use_value.position);
-                try file.uses.append(self.allocator, .{
-                    .local_name = local_name,
-                    .declaration = declaration,
-                    .position = use_value.position,
-                });
-                if (is_public) try self.addExport(module_index, local_name, declaration, use_value.position);
+                for (declarations) |declaration| {
+                    try file.uses.append(self.allocator, .{
+                        .local_name = local_name,
+                        .declaration = declaration,
+                        .position = use_value.position,
+                    });
+                    if (is_public) try self.addExport(module_index, local_name, declaration, use_value.position);
+                }
             }
         }
     }
@@ -303,6 +309,7 @@ pub const Resolver = struct {
         for (self.exports.items) |existing| {
             if (existing.module_index == module_index and std.mem.eql(u8, existing.public_name, name)) {
                 if (existing.declaration == declaration) return;
+                if (existing.declaration.kind == .function and declaration.kind == .function) continue;
                 const message = try std.fmt.allocPrint(self.allocator, "public name '{s}' is ambiguous in module '{s}'", .{
                     name, self.project.modules[module_index].name,
                 });
@@ -386,6 +393,15 @@ pub const Resolver = struct {
     fn transformStatement(self: *Resolver, statement: Ast.Statement) anyerror!Ast.Statement {
         return switch (statement) {
             .print => |value| .{ .print = .{ .position = value.position, .argument = try self.transformExpression(value.argument) } },
+            .assertion => |value| .{ .assertion = .{
+                .position = value.position,
+                .condition = try self.transformExpression(value.condition),
+                .message = try self.transformExpression(value.message),
+            } },
+            .panic_statement => |value| .{ .panic_statement = .{
+                .position = value.position,
+                .message = try self.transformExpression(value.message),
+            } },
             .variable_declaration => |value| declaration: {
                 var copy = value;
                 if (value.annotation) |annotation| copy.annotation = try self.transformType(annotation, value.name_position);
@@ -437,11 +453,15 @@ pub const Resolver = struct {
         var result = try self.allocator.create(Ast.Expression);
         result.position = expression.position;
         result.value = switch (expression.value) {
-            .call => |call| .{ .call = .{
-                .name = (try self.resolveName(expression.position.file, call.name, .function, call.name_position)).canonical_name,
-                .name_position = call.name_position,
-                .arguments = try self.transformExpressions(call.arguments),
-            } },
+            .call => |call| call: {
+                const declarations = try self.visibleFunctionDeclarations(expression.position.file, call.name, call.name_position);
+                break :call .{ .call = .{
+                    .name = declarations[0].canonical_name,
+                    .name_position = call.name_position,
+                    .arguments = try self.transformExpressions(call.arguments),
+                    .visible_declarations = try declarationPositions(self.allocator, declarations),
+                } };
+            },
             .structure_initializer => |initializer| .{ .structure_initializer = .{
                 .name = (try self.resolveName(expression.position.file, initializer.name, .structure, initializer.name_position)).canonical_name,
                 .name_position = initializer.name_position,
@@ -451,11 +471,12 @@ pub const Resolver = struct {
                 if (try self.expressionPath(call.object)) |prefix| {
                     const path = try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ prefix, call.name });
                     if (self.looksQualified(expression.position.file, path)) {
-                        const declaration = try self.resolveName(expression.position.file, path, .function, call.name_position);
+                        const declarations = try self.visibleFunctionDeclarations(expression.position.file, path, call.name_position);
                         break :method .{ .call = .{
-                            .name = declaration.canonical_name,
+                            .name = declarations[0].canonical_name,
                             .name_position = call.name_position,
                             .arguments = try self.transformExpressions(call.arguments),
+                            .visible_declarations = try declarationPositions(self.allocator, declarations),
                         } };
                     }
                 }
@@ -511,22 +532,23 @@ pub const Resolver = struct {
         return self.findModule(path[0..separator]);
     }
 
-    fn resolveUse(
+    fn resolveUses(
         self: *Resolver,
         file: *const FileInfo,
         path: []const u8,
         position: Source.Position,
-    ) !*const Declaration {
+    ) ![]const *const Declaration {
         const separator = std.mem.lastIndexOfScalar(u8, path, '.') orelse {
-            if (self.findDirect(file.module_index, path, null)) |declaration| return declaration;
+            const declarations = try self.declarationsNamed(file.module_index, path, null, false);
+            if (declarations.len != 0) return declarations;
             const message = try std.fmt.allocPrint(self.allocator, "unknown declaration '{s}'", .{path});
             return self.fail(position, message);
         };
 
         const current_name = self.project.modules[file.module_index].name;
-        if (useHasQualifier(path, current_name)) return self.resolveQualified(file, path, null, position);
+        if (useHasQualifier(path, current_name)) return self.resolveQualifiedUses(file, path, position);
         for (file.imports) |import_value| {
-            if (useHasQualifier(path, import_value.qualifier)) return self.resolveQualified(file, path, null, position);
+            if (useHasQualifier(path, import_value.qualifier)) return self.resolveQualifiedUses(file, path, position);
         }
 
         const module_name = path[0..separator];
@@ -535,8 +557,9 @@ pub const Resolver = struct {
             const message = try std.fmt.allocPrint(self.allocator, "module '{s}' was not found", .{module_name});
             return self.fail(position, message);
         };
-        if (self.findExport(module_index, public_name, null)) |export_value| return export_value.declaration;
-        if (self.findDirect(module_index, public_name, null)) |_| {
+        const declarations = try self.declarationsNamed(module_index, public_name, null, true);
+        if (declarations.len != 0) return declarations;
+        if ((try self.declarationsNamed(module_index, public_name, null, false)).len != 0) {
             const message = try std.fmt.allocPrint(self.allocator, "declaration '{s}' is private in module '{s}'", .{
                 public_name, module_name,
             });
@@ -545,6 +568,34 @@ pub const Resolver = struct {
         const message = try std.fmt.allocPrint(self.allocator, "module '{s}' has no public declaration '{s}'", .{
             module_name, public_name,
         });
+        return self.fail(position, message);
+    }
+
+    fn resolveQualifiedUses(
+        self: *Resolver,
+        file: *const FileInfo,
+        path: []const u8,
+        position: Source.Position,
+    ) ![]const *const Declaration {
+        const current_name = self.project.modules[file.module_index].name;
+        if (useHasQualifier(path, current_name)) {
+            const name = path[current_name.len + 1 ..];
+            const declarations = try self.declarationsNamed(file.module_index, name, null, false);
+            if (declarations.len != 0) return declarations;
+        }
+        for (file.imports) |import_value| {
+            if (!useHasQualifier(path, import_value.qualifier)) continue;
+            const name = path[import_value.qualifier.len + 1 ..];
+            const declarations = try self.declarationsNamed(import_value.module_index, name, null, true);
+            if (declarations.len != 0) return declarations;
+            if ((try self.declarationsNamed(import_value.module_index, name, null, false)).len != 0) {
+                const message = try std.fmt.allocPrint(self.allocator, "declaration '{s}' is private in module '{s}'", .{
+                    name, self.project.modules[import_value.module_index].name,
+                });
+                return self.fail(position, message);
+            }
+        }
+        const message = try std.fmt.allocPrint(self.allocator, "unknown declaration '{s}'", .{path});
         return self.fail(position, message);
     }
 
@@ -565,6 +616,47 @@ pub const Resolver = struct {
             if (pathHasQualifier(path, import_value.qualifier)) return true;
         }
         return pathHasQualifier(path, self.project.modules[file.module_index].name);
+    }
+
+    fn visibleFunctionDeclarations(
+        self: *Resolver,
+        file_index: usize,
+        name: []const u8,
+        position: Source.Position,
+    ) ![]const *const Declaration {
+        const file = &self.file_infos[file_index];
+        if (std.mem.indexOfScalar(u8, name, '.') == null) {
+            const direct = try self.declarationsNamed(file.module_index, name, .function, false);
+            if (direct.len != 0) return direct;
+            var used: std.ArrayList(*const Declaration) = .empty;
+            for (file.uses.items) |binding| {
+                if (binding.declaration.kind == .function and std.mem.eql(u8, binding.local_name, name)) {
+                    try used.append(self.allocator, binding.declaration);
+                }
+            }
+            if (used.items.len != 0) return used.toOwnedSlice(self.allocator);
+            _ = try self.resolveName(file_index, name, .function, position);
+            unreachable;
+        }
+
+        const current_name = self.project.modules[file.module_index].name;
+        if (pathHasQualifier(name, current_name)) {
+            const public_name = name[current_name.len + 1 ..];
+            const direct = try self.declarationsNamed(file.module_index, public_name, .function, false);
+            if (direct.len != 0) return direct;
+        }
+        var matched_import: ?ImportBinding = null;
+        for (file.imports) |import_value| {
+            if (!pathHasQualifier(name, import_value.qualifier)) continue;
+            if (matched_import == null or import_value.qualifier.len > matched_import.?.qualifier.len) matched_import = import_value;
+        }
+        if (matched_import) |import_value| {
+            const public_name = name[import_value.qualifier.len + 1 ..];
+            const exports = try self.declarationsNamed(import_value.module_index, public_name, .function, true);
+            if (exports.len != 0) return exports;
+        }
+        _ = try self.resolveName(file_index, name, .function, position);
+        unreachable;
     }
 
     fn resolveName(self: *Resolver, file_index: usize, name: []const u8, kind: Kind, position: Source.Position) !*const Declaration {
@@ -631,6 +723,36 @@ pub const Resolver = struct {
         return null;
     }
 
+    fn declarationsNamed(
+        self: *Resolver,
+        module_index: usize,
+        name: []const u8,
+        kind: ?Kind,
+        public_only: bool,
+    ) ![]const *const Declaration {
+        var result: std.ArrayList(*const Declaration) = .empty;
+        if (public_only) {
+            for (self.exports.items) |*export_value| {
+                if (export_value.module_index == module_index and
+                    std.mem.eql(u8, export_value.public_name, name) and
+                    (kind == null or export_value.declaration.kind == kind.?))
+                {
+                    try result.append(self.allocator, export_value.declaration);
+                }
+            }
+        } else {
+            for (self.declarations.items) |*declaration| {
+                if (declaration.module_index == module_index and
+                    std.mem.eql(u8, declaration.source_name, name) and
+                    (kind == null or declaration.kind == kind.?))
+                {
+                    try result.append(self.allocator, declaration);
+                }
+            }
+        }
+        return result.toOwnedSlice(self.allocator);
+    }
+
     fn findDirect(self: *Resolver, module_index: usize, name: []const u8, kind: ?Kind) ?*const Declaration {
         for (self.declarations.items) |*declaration| {
             if (declaration.module_index == module_index and (kind == null or declaration.kind == kind.?) and
@@ -673,4 +795,10 @@ fn useHasQualifier(path: []const u8, qualifier: []const u8) bool {
 fn lastSegment(path: []const u8) []const u8 {
     const index = std.mem.lastIndexOfScalar(u8, path, '.') orelse return path;
     return path[index + 1 ..];
+}
+
+fn declarationPositions(allocator: Allocator, declarations: []const *const Declaration) ![]const Source.Position {
+    var positions: std.ArrayList(Source.Position) = .empty;
+    for (declarations) |declaration| try positions.append(allocator, declaration.position);
+    return positions.toOwnedSlice(allocator);
 }

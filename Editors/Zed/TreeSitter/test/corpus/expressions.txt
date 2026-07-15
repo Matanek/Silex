@@ -27,6 +27,79 @@ func main() {
                   (expression
                     (integer_literal)))))))))))
 
+====================
+Remainder precedence
+====================
+
+func main() {
+    print(20 + 17 % 5 * 3)
+}
+
+---
+
+(source_file
+  (function_definition
+    (identifier)
+    (parameter_list)
+    (block
+      (statement
+        (print_statement
+          (identifier)
+          (expression
+            (binary_expression
+              (expression
+                (integer_literal))
+              (expression
+                (binary_expression
+                  (expression
+                    (binary_expression
+                      (expression
+                        (integer_literal))
+                      (expression
+                        (integer_literal))))
+                  (expression
+                    (integer_literal)))))))))))
+
+==================
+Bitwise precedence
+==================
+
+func main() {
+    let value:uint8 = 1 + 1 << 2 & 7 ^ 3
+}
+
+---
+
+(source_file
+  (function_definition
+    (identifier)
+    (parameter_list)
+    (block
+      (statement
+        (variable_declaration
+          (identifier)
+          (type_annotation
+            (type
+              (builtin_type)))
+          (expression
+            (binary_expression
+              (expression
+                (binary_expression
+                  (expression
+                    (binary_expression
+                      (expression
+                        (binary_expression
+                          (expression
+                            (integer_literal))
+                          (expression
+                            (integer_literal))))
+                      (expression
+                        (integer_literal))))
+                  (expression
+                    (integer_literal))))
+              (expression
+                (integer_literal)))))))))
+
 ===============================
 Explicit numeric conversions
 ===============================
@@ -222,7 +295,55 @@ func main() {
                     (expression
                       (identifier))
                     (expression
-                      (integer_literal))))))))))))
+                (integer_literal))))))))))))
+
+============================
+Runtime assertion
+============================
+
+func main() {
+    assert(1 < 2, "must hold")
+}
+
+---
+
+(source_file
+  (function_definition
+    (identifier)
+    (parameter_list)
+    (block
+      (statement
+        (assert_statement
+          (identifier)
+          (expression
+            (binary_expression
+              (expression
+                (integer_literal))
+              (expression
+                (integer_literal))))
+          (expression
+            (string_literal)))))))
+
+===================
+Runtime panic
+===================
+
+func main() {
+    panic("stop")
+}
+
+---
+
+(source_file
+  (function_definition
+    (identifier)
+    (parameter_list)
+    (block
+      (statement
+        (panic_statement
+          (identifier)
+          (expression
+            (string_literal)))))))
 
 =====================
 Automatic terminators

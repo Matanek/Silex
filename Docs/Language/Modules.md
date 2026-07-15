@@ -38,6 +38,31 @@ access to private declarations are compile-time errors. Dependencies are never
 implicitly transitive. A project manifest can define this module layout
 explicitly; see [Installation and command-line use](../Installation.md).
 
+## std.Random
+
+`std.Random` provides a deterministic generator for games, simulations, and
+tests. It is not cryptographically secure. `create(seed)` builds a reproducible
+generator, while `system()` chooses an initial seed from the host.
+
+```sx
+var random = std.Random.create(42)
+
+let raw = random.get_int()
+let die = random.get_int(1, 7)
+let ratio = random.get_float()
+let temperature = random.get_float(-10.0, 40.0)
+let enabled = random.get_bool()
+```
+
+`get_int()` returns an `int` from `1` through `9223372036854775807`.
+`get_int(minimum, maximum)` returns an unbiased `int` in
+`[minimum, maximum)` and requires `minimum < maximum` with a positive `int`
+width. `get_float()` returns a `float` in `[0.0, 1.0)`; its bounded overload
+returns a `float` in `[minimum, maximum)` and requires finite, ordered bounds.
+`get_bool()` returns either boolean value. Every call advances only its own
+generator. Two generators with the same seed and sequence of calls return the
+same sequence of values.
+
 ## Native module runtime
 
 A distributed module may contain one `native.json` beside its direct `.sx`

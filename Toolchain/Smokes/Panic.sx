@@ -1,0 +1,8 @@
+func abort() int {
+    let prefix = "smoke"
+    panic(prefix + " panic")
+}
+
+func main() {
+    print(abort())
+}

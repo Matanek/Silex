@@ -1,0 +1,8 @@
+func abort() int {
+    let message = "computed panic"
+    panic(message)
+}
+
+func main() {
+    print(abort())
+}

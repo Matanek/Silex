@@ -34,6 +34,8 @@ pub const TokenTag = enum {
     keyword_bool,
     keyword_str,
     keyword_print,
+    keyword_assert,
+    keyword_panic,
     keyword_import,
     keyword_use,
     keyword_pub,
@@ -52,14 +54,17 @@ pub const TokenTag = enum {
     star_equal,
     slash,
     slash_equal,
+    percent,
     bang,
     equal,
     equal_equal,
     bang_equal,
     less,
     less_equal,
+    shift_left,
     greater,
     greater_equal,
+    shift_right,
     amp_amp,
     amp,
     at,
@@ -128,14 +133,18 @@ pub const Lexer = struct {
 
         if (character == '=') return self.optionalDoubleToken(start, position, '=', .equal, .equal_equal);
         if (character == '!') return self.optionalDoubleToken(start, position, '=', .bang, .bang_equal);
-        if (character == '<') return self.optionalDoubleToken(start, position, '=', .less, .less_equal);
-        if (character == '>') return self.optionalDoubleToken(start, position, '=', .greater, .greater_equal);
+        if (character == '<') return self.comparisonToken(start, position, .less, .less_equal, .shift_left);
+        if (character == '>') return self.comparisonToken(start, position, .greater, .greater_equal, .shift_right);
         if (character == '&') return self.optionalDoubleToken(start, position, '&', .amp, .amp_amp);
         if (character == '|') return self.requiredDoubleToken(start, position, '|', .pipe_pipe, "expected '||'");
         if (character == '+') return self.arithmeticToken(start, position, '+', .plus, .plus_plus, .plus_equal);
         if (character == '-') return self.arithmeticToken(start, position, '-', .minus, .minus_minus, .minus_equal);
         if (character == '*') return self.arithmeticToken(start, position, 0, .star, .star, .star_equal);
         if (character == '/') return self.arithmeticToken(start, position, 0, .slash, .slash, .slash_equal);
+        if (character == '%') {
+            self.advance();
+            return self.token(.percent, start, position);
+        }
         if (character == '.') return self.optionalDoubleToken(start, position, '.', .dot, .dot_dot);
 
         self.advance();
@@ -180,6 +189,26 @@ pub const Lexer = struct {
             }
         }
         return self.fail(position, "unterminated string literal");
+    }
+
+    fn comparisonToken(
+        self: *Lexer,
+        start: usize,
+        position: Source.Position,
+        single: TokenTag,
+        equal: TokenTag,
+        shift: TokenTag,
+    ) Source.Error!Token {
+        self.advance();
+        if (self.index < self.source.len and self.source[self.index] == '=') {
+            self.advance();
+            return self.token(equal, start, position);
+        }
+        if (self.index < self.source.len and self.source[self.index] == self.source[start]) {
+            self.advance();
+            return self.token(shift, start, position);
+        }
+        return self.token(single, start, position);
     }
 
     fn stringEscape(self: *Lexer, position: Source.Position) Source.Error!void {
@@ -419,6 +448,8 @@ fn keywordTag(lexeme: []const u8) ?TokenTag {
         .{ "bool", TokenTag.keyword_bool },
         .{ "str", TokenTag.keyword_str },
         .{ "print", TokenTag.keyword_print },
+        .{ "assert", TokenTag.keyword_assert },
+        .{ "panic", TokenTag.keyword_panic },
         .{ "import", TokenTag.keyword_import },
         .{ "use", TokenTag.keyword_use },
         .{ "pub", TokenTag.keyword_pub },
@@ -466,15 +497,17 @@ test "skip line comments" {
     try std.testing.expectEqual(@as(usize, 2), token.position.line);
 }
 
-test "recognize comparison and logical operators" {
-    var lexer = Lexer.init("!= == < <= > >= ! && ||");
+test "recognize comparison, shift, and logical operators" {
+    var lexer = Lexer.init("!= == < <= << > >= >> ! && ||");
     const expected = [_]TokenTag{
         .bang_equal,
         .equal_equal,
         .less,
         .less_equal,
+        .shift_left,
         .greater,
         .greater_equal,
+        .shift_right,
         .bang,
         .amp_amp,
         .pipe_pipe,
@@ -483,7 +516,7 @@ test "recognize comparison and logical operators" {
 }
 
 test "recognize compound and update operators" {
-    var lexer = Lexer.init("++ -- += -= *= /=");
+    var lexer = Lexer.init("++ -- += -= *= /= %");
     const expected = [_]TokenTag{
         .plus_plus,
         .minus_minus,
@@ -491,6 +524,7 @@ test "recognize compound and update operators" {
         .minus_equal,
         .star_equal,
         .slash_equal,
+        .percent,
     };
     for (expected) |tag| try std.testing.expectEqual(tag, (try lexer.next()).tag);
 }

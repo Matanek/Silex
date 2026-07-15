@@ -38,5 +38,6 @@ struct Counter {
 }
 ```
 
-Static methods, custom constructors, overloads, classes, inheritance,
-extensions, and partial declarations are not part of the current prototype.
+Static methods, custom constructors, classes, inheritance, extensions, and
+partial declarations are not part of the current prototype. Methods can be
+overloaded by parameter count, type, or `&` passing; see [Functions](Functions.md).

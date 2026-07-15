@@ -1,0 +1,11 @@
+pub struct Value {
+    count:int
+}
+
+pub func measure() int {
+    return 1
+}
+
+pub func measure(value:int) int {
+    return value
+}

@@ -169,6 +169,8 @@ pub const Expression = struct {
 
 pub const Statement = union(enum) {
     print: *Expression,
+    assertion: Assertion,
+    panic_statement: Panic,
     variable_declaration: VariableDeclaration,
     assignment: Assignment,
     if_statement: If,
@@ -178,6 +180,17 @@ pub const Statement = union(enum) {
     continue_statement,
     return_statement: ?*Expression,
     expression_statement: *Expression,
+
+    pub const Assertion = struct {
+        position: Source.Position,
+        condition: *Expression,
+        message: *Expression,
+    };
+
+    pub const Panic = struct {
+        position: Source.Position,
+        message: *Expression,
+    };
 
     pub const VariableDeclaration = struct {
         generated_name: []const u8,
@@ -325,6 +338,11 @@ const MethodSymbol = struct {
     is_mutating: bool = false,
 };
 
+const MethodCandidate = struct {
+    symbol: MethodSymbol,
+    index: usize,
+};
+
 const StructureFieldSymbol = struct {
     source_name: []const u8,
     generated_name: []const u8,
@@ -441,17 +459,22 @@ pub const Analyzer = struct {
 
             var methods: std.ArrayList(MethodSymbol) = .empty;
             for (ast_structure.methods, 0..) |ast_method, method_index| {
-                for (methods.items) |existing| {
-                    if (std.mem.eql(u8, existing.source_name, ast_method.name)) {
-                        const message = try std.fmt.allocPrint(self.allocator, "method '{s}' is already declared in struct '{s}'", .{ ast_method.name, ast_structure.name });
-                        return self.fail(ast_method.name_position, message);
-                    }
-                }
                 var parameter_types: std.ArrayList(Type) = .empty;
                 var parameter_is_mutable_references: std.ArrayList(bool) = .empty;
                 for (ast_method.parameters) |parameter| {
                     try parameter_types.append(self.allocator, try typeFromAnnotation(self, parameter.type, parameter.position));
                     try parameter_is_mutable_references.append(self.allocator, parameter.is_mutable_reference);
+                }
+                for (methods.items) |existing| {
+                    if (std.mem.eql(u8, existing.source_name, ast_method.name) and sameSignature(
+                        existing.parameter_types,
+                        existing.parameter_is_mutable_references,
+                        parameter_types.items,
+                        parameter_is_mutable_references.items,
+                    )) {
+                        const message = try std.fmt.allocPrint(self.allocator, "method '{s}' with this signature is already declared in struct '{s}'", .{ ast_method.name, ast_structure.name });
+                        return self.fail(ast_method.name_position, message);
+                    }
                 }
                 const return_type = try typeFromReturn(self, ast_method.return_type, ast_method.position);
                 if (return_type == .reference) return self.fail(ast_method.position, "a method cannot return a reference");
@@ -471,10 +494,6 @@ pub const Analyzer = struct {
     fn collectFunctions(self: *Analyzer, ast_functions: []const Ast.Function) AnalyzeError!void {
         var main_count: usize = 0;
         for (ast_functions, 0..) |ast_function, index| {
-            if (self.findFunction(ast_function.name) != null) {
-                const message = try std.fmt.allocPrint(self.allocator, "function '{s}' is already declared", .{ast_function.name});
-                return self.fail(ast_function.name_position, message);
-            }
             const is_main = std.mem.eql(u8, ast_function.name, "main");
             if (is_main) main_count += 1;
             const native_module_name = if (ast_function.is_native) moduleName(ast_function.name) else null;
@@ -502,6 +521,21 @@ pub const Analyzer = struct {
             for (ast_function.parameters) |parameter| {
                 try parameter_types.append(self.allocator, try typeFromAnnotation(self, parameter.type, parameter.position));
                 try parameter_is_mutable_references.append(self.allocator, parameter.is_mutable_reference);
+            }
+            for (self.functions.items) |existing| {
+                if (std.mem.eql(u8, existing.source_name, ast_function.name) and sameSignature(
+                    existing.parameter_types,
+                    existing.parameter_is_mutable_references,
+                    parameter_types.items,
+                    parameter_is_mutable_references.items,
+                )) {
+                    const message = try std.fmt.allocPrint(self.allocator, "function '{s}' with this signature is already declared", .{ast_function.name});
+                    return self.fail(ast_function.name_position, message);
+                }
+            }
+            if (ast_function.is_native and self.findFunction(ast_function.name) != null) {
+                const message = try std.fmt.allocPrint(self.allocator, "native function '{s}' is already declared", .{ast_function.name});
+                return self.fail(ast_function.name_position, message);
             }
             const return_type = try typeFromReturn(self, ast_function.return_type, ast_function.position);
             if (return_type == .reference) return self.fail(ast_function.position, "a function cannot return a reference");
@@ -544,6 +578,7 @@ pub const Analyzer = struct {
             });
         }
         if (main_count == 0) return self.fail(.{ .line = 1, .column = 1 }, "missing 'main' function");
+        if (main_count > 1) return self.fail(.{ .line = 1, .column = 1 }, "'main' cannot be overloaded");
         const main = self.findFunction("main").?;
         if (!typeEqual(main.return_type, .void) or main.parameter_types.len != 0) {
             return self.fail(main.position, "'main' must have return type 'void' and no parameters");
@@ -724,6 +759,8 @@ pub const Analyzer = struct {
                 }
                 break :print_statement .{ .print = argument };
             },
+            .assertion => |assertion_value| self.analyzeAssertion(assertion_value, scope),
+            .panic_statement => |panic_value| self.analyzePanic(panic_value, scope),
             .variable_declaration => |declaration| self.variableDeclaration(declaration, scope),
             .assignment => |ast_assignment| self.assignment(ast_assignment, scope),
             .if_statement => |if_statement| self.ifStatement(if_statement, scope),
@@ -740,6 +777,29 @@ pub const Analyzer = struct {
             .return_statement => |return_statement| self.returnStatement(return_statement, scope),
             .expression_statement => |expression_statement| .{ .expression_statement = try self.expression(expression_statement, scope) },
         };
+    }
+
+    fn analyzeAssertion(self: *Analyzer, ast: Ast.Statement.Assert, scope: *const Scope) AnalyzeError!Statement {
+        const condition = try self.expression(ast.condition, scope);
+        if (!typeEqual(condition.type, .bool)) {
+            const message = try typeMismatchMessage(self.allocator, .bool, condition.type);
+            return self.fail(ast.condition.position, message);
+        }
+        const message = try self.expression(ast.message, scope);
+        if (!typeEqual(message.type, .str)) {
+            const diagnostic = try typeMismatchMessage(self.allocator, .str, message.type);
+            return self.fail(ast.message.position, diagnostic);
+        }
+        return .{ .assertion = .{ .position = ast.position, .condition = condition, .message = message } };
+    }
+
+    fn analyzePanic(self: *Analyzer, ast: Ast.Statement.Panic, scope: *const Scope) AnalyzeError!Statement {
+        const message = try self.expression(ast.message, scope);
+        if (!typeEqual(message.type, .str)) {
+            const diagnostic = try typeMismatchMessage(self.allocator, .str, message.type);
+            return self.fail(ast.message.position, diagnostic);
+        }
+        return .{ .panic_statement = .{ .position = ast.position, .message = message } };
     }
 
     fn variableDeclaration(
@@ -1303,8 +1363,9 @@ pub const Analyzer = struct {
     ) AnalyzeError!*Expression {
         var left = try self.expression(binary.left, scope);
         var right = try self.expression(binary.right, scope);
-        if (isContextualIntegerLiteral(left) and isInteger(right.type)) left = try self.coerce(left, right.type);
-        if (isContextualIntegerLiteral(right) and isInteger(left.type)) right = try self.coerce(right, left.type);
+        const is_shift = binary.operator == .shift_left or binary.operator == .shift_right;
+        if (!is_shift and isContextualIntegerLiteral(left) and isInteger(right.type)) left = try self.coerce(left, right.type);
+        if (!is_shift and isContextualIntegerLiteral(right) and isInteger(left.type)) right = try self.coerce(right, left.type);
         const result_type: Type = switch (binary.operator) {
             .add, .subtract, .multiply, .divide => arithmetic: {
                 if (binary.operator == .add and typeEqual(left.type, .str) and typeEqual(right.type, .str)) {
@@ -1322,6 +1383,51 @@ pub const Analyzer = struct {
                 left = try self.coerce(left, common_type);
                 right = try self.coerce(right, common_type);
                 break :arithmetic common_type;
+            },
+            .remainder => remainder: {
+                if (!isInteger(left.type) or !isInteger(right.type)) {
+                    const message = try std.fmt.allocPrint(
+                        self.allocator,
+                        "remainder operator requires compatible integer operands, found '{s}' and '{s}'",
+                        .{ typeName(left.type), typeName(right.type) },
+                    );
+                    return self.fail(binary.operator_position, message);
+                }
+                const common_type = commonNumericType(left.type, right.type) orelse {
+                    const message = try std.fmt.allocPrint(
+                        self.allocator,
+                        "remainder operator requires compatible integer operands, found '{s}' and '{s}'",
+                        .{ typeName(left.type), typeName(right.type) },
+                    );
+                    return self.fail(binary.operator_position, message);
+                };
+                left = try self.coerce(left, common_type);
+                right = try self.coerce(right, common_type);
+                break :remainder common_type;
+            },
+            .bit_and, .bit_xor => bitwise: {
+                const common_type = commonUnsignedIntegerType(left.type, right.type) orelse {
+                    const message = try std.fmt.allocPrint(
+                        self.allocator,
+                        "bitwise operator requires compatible unsigned integer operands, found '{s}' and '{s}'",
+                        .{ typeName(left.type), typeName(right.type) },
+                    );
+                    return self.fail(binary.operator_position, message);
+                };
+                left = try self.coerce(left, common_type);
+                right = try self.coerce(right, common_type);
+                break :bitwise common_type;
+            },
+            .shift_left, .shift_right => shift: {
+                if (!isUnsignedInteger(left.type) or !isInteger(right.type)) {
+                    const message = try std.fmt.allocPrint(
+                        self.allocator,
+                        "shift operator requires an unsigned integer value and an integer count, found '{s}' and '{s}'",
+                        .{ typeName(left.type), typeName(right.type) },
+                    );
+                    return self.fail(binary.operator_position, message);
+                }
+                break :shift left.type;
             },
             .less, .less_equal, .greater, .greater_equal => comparison: {
                 try self.requireNumericOperands(binary.operator_position, "comparison operator", left.type, right.type);
@@ -1390,15 +1496,20 @@ pub const Analyzer = struct {
     }
 
     fn callExpression(self: *Analyzer, call: Ast.Expression.Call, scope: *const Scope) AnalyzeError!*Expression {
-        const function_symbol = self.findFunction(call.name) orelse {
+        if (std.mem.eql(u8, call.name, "main")) return self.fail(call.name_position, "'main' cannot be called");
+        var candidates: std.ArrayList(FunctionSymbol) = .empty;
+        for (self.functions.items) |function_symbol| {
+            if (std.mem.eql(u8, function_symbol.source_name, call.name) and !function_symbol.is_main and
+                (call.visible_declarations == null or containsPosition(call.visible_declarations.?, function_symbol.position)))
+            {
+                try candidates.append(self.allocator, function_symbol);
+            }
+        }
+        if (candidates.items.len == 0) {
             const message = try std.fmt.allocPrint(self.allocator, "unknown function '{s}'", .{call.name});
             return self.fail(call.name_position, message);
-        };
-        if (function_symbol.is_main) return self.fail(call.name_position, "'main' cannot be called");
-        if (call.arguments.len != function_symbol.parameter_types.len) {
-            const message = try std.fmt.allocPrint(self.allocator, "function '{s}' expects {d} arguments, found {d}", .{ call.name, function_symbol.parameter_types.len, call.arguments.len });
-            return self.fail(call.name_position, message);
         }
+        const function_symbol = try self.resolveFunctionOverload(call.name, call.name_position, call.arguments, scope, candidates.items);
         var arguments: std.ArrayList(*Expression) = .empty;
         for (call.arguments, function_symbol.parameter_types, function_symbol.parameter_is_mutable_references, 0..) |argument, expected_type, is_mutable_reference, index| {
             var value = if (is_mutable_reference)
@@ -1461,19 +1572,18 @@ pub const Analyzer = struct {
         const generated_structure_name = object.type.structure.generated_name;
         const structure_index = self.findStructureIndexByGeneratedName(generated_structure_name).?;
         const structure = self.structures.items[structure_index];
-        var method_index: ?usize = null;
+        var candidates: std.ArrayList(MethodCandidate) = .empty;
         for (structure.methods, 0..) |method_symbol, index| {
-            if (std.mem.eql(u8, method_symbol.source_name, call.name)) method_index = index;
+            if (std.mem.eql(u8, method_symbol.source_name, call.name)) {
+                try candidates.append(self.allocator, .{ .symbol = method_symbol, .index = index });
+            }
         }
-        const resolved_method_index = method_index orelse {
+        if (candidates.items.len == 0) {
             const message = try std.fmt.allocPrint(self.allocator, "struct '{s}' has no method '{s}'", .{ structure.source_name, call.name });
             return self.fail(call.name_position, message);
-        };
-        const method_symbol = structure.methods[resolved_method_index];
-        if (call.arguments.len != method_symbol.parameter_types.len) {
-            const message = try std.fmt.allocPrint(self.allocator, "method '{s}' expects {d} arguments, found {d}", .{ call.name, method_symbol.parameter_types.len, call.arguments.len });
-            return self.fail(call.name_position, message);
         }
+        const resolved = try self.resolveMethodOverload(call.name, call.name_position, call.arguments, scope, candidates.items);
+        const method_symbol = resolved.symbol;
         var arguments: std.ArrayList(*Expression) = .empty;
         for (call.arguments, method_symbol.parameter_types, method_symbol.parameter_is_mutable_references, 0..) |argument, expected_type, is_mutable_reference, index| {
             var value = if (is_mutable_reference)
@@ -1488,7 +1598,7 @@ pub const Analyzer = struct {
             try arguments.append(self.allocator, value);
             self.releaseTransientBorrow(value);
         }
-        const method_id = MethodId{ .structure_index = structure_index, .method_index = resolved_method_index };
+        const method_id = MethodId{ .structure_index = structure_index, .method_index = resolved.index };
         if (receiver == .self and self.current_method_index != null) {
             try self.current_method_dependencies.append(self.allocator, method_id);
         }
@@ -1787,6 +1897,138 @@ pub const Analyzer = struct {
         }
     }
 
+    fn resolveFunctionOverload(
+        self: *Analyzer,
+        name: []const u8,
+        position: Source.Position,
+        arguments: []const *Ast.Expression,
+        scope: *const Scope,
+        candidates: []const FunctionSymbol,
+    ) AnalyzeError!FunctionSymbol {
+        var best: ?FunctionSymbol = null;
+        var best_scores: ?[]const u8 = null;
+        var ambiguous: std.ArrayList(FunctionSymbol) = .empty;
+        for (candidates) |candidate| {
+            const scores = try self.overloadScores(arguments, scope, candidate.parameter_types, candidate.parameter_is_mutable_references);
+            if (scores == null) continue;
+            if (best == null) {
+                best = candidate;
+                best_scores = scores.?;
+                continue;
+            }
+            if (overloadBetter(scores.?, best_scores.?)) {
+                best = candidate;
+                best_scores = scores.?;
+                ambiguous.clearRetainingCapacity();
+            } else if (!overloadBetter(best_scores.?, scores.?)) {
+                if (ambiguous.items.len == 0) try ambiguous.append(self.allocator, best.?);
+                try ambiguous.append(self.allocator, candidate);
+            }
+        }
+        if (best == null) return self.noCompatibleFunctionOverload(name, position, candidates);
+        if (ambiguous.items.len != 0) return self.ambiguousFunctionOverload(name, position, ambiguous.items);
+        return best.?;
+    }
+
+    fn resolveMethodOverload(
+        self: *Analyzer,
+        name: []const u8,
+        position: Source.Position,
+        arguments: []const *Ast.Expression,
+        scope: *const Scope,
+        candidates: []const MethodCandidate,
+    ) AnalyzeError!MethodCandidate {
+        var best: ?MethodCandidate = null;
+        var best_scores: ?[]const u8 = null;
+        var ambiguous: std.ArrayList(MethodCandidate) = .empty;
+        for (candidates) |candidate| {
+            const scores = try self.overloadScores(arguments, scope, candidate.symbol.parameter_types, candidate.symbol.parameter_is_mutable_references);
+            if (scores == null) continue;
+            if (best == null) {
+                best = candidate;
+                best_scores = scores.?;
+                continue;
+            }
+            if (overloadBetter(scores.?, best_scores.?)) {
+                best = candidate;
+                best_scores = scores.?;
+                ambiguous.clearRetainingCapacity();
+            } else if (!overloadBetter(best_scores.?, scores.?)) {
+                if (ambiguous.items.len == 0) try ambiguous.append(self.allocator, best.?);
+                try ambiguous.append(self.allocator, candidate);
+            }
+        }
+        if (best == null) return self.noCompatibleMethodOverload(name, position, candidates);
+        if (ambiguous.items.len != 0) return self.ambiguousMethodOverload(name, position, ambiguous.items);
+        return best.?;
+    }
+
+    fn overloadScores(
+        self: *Analyzer,
+        arguments: []const *Ast.Expression,
+        scope: *const Scope,
+        parameter_types: []const Type,
+        parameter_is_mutable_references: []const bool,
+    ) AnalyzeError!?[]const u8 {
+        if (arguments.len != parameter_types.len) return null;
+        var scores: std.ArrayList(u8) = .empty;
+        for (arguments, parameter_types, parameter_is_mutable_references) |argument, parameter_type, is_mutable_reference| {
+            const is_borrow = argument.value == .unary and argument.value.unary.operator == .borrow;
+            if (is_borrow != is_mutable_reference) return null;
+            const argument_value = if (is_borrow)
+                try self.expression(argument.value.unary.operand, scope)
+            else
+                try self.expressionForExpected(argument, scope, null);
+            const score = overloadScore(argument_value.type, parameter_type) orelse literalOverloadScore(argument_value, parameter_type) orelse return null;
+            try scores.append(self.allocator, score);
+        }
+        return @as(?[]const u8, try scores.toOwnedSlice(self.allocator));
+    }
+
+    fn noCompatibleFunctionOverload(
+        self: *Analyzer,
+        name: []const u8,
+        position: Source.Position,
+        candidates: []const FunctionSymbol,
+    ) AnalyzeError {
+        const signatures = try functionSignatures(self.allocator, candidates);
+        const message = try std.fmt.allocPrint(self.allocator, "no compatible signature for function '{s}'; visible signatures: {s}", .{ name, signatures });
+        return self.fail(position, message);
+    }
+
+    fn ambiguousFunctionOverload(
+        self: *Analyzer,
+        name: []const u8,
+        position: Source.Position,
+        candidates: []const FunctionSymbol,
+    ) AnalyzeError {
+        const signatures = try functionSignatures(self.allocator, candidates);
+        const message = try std.fmt.allocPrint(self.allocator, "ambiguous call to function '{s}'; matching signatures: {s}", .{ name, signatures });
+        return self.fail(position, message);
+    }
+
+    fn noCompatibleMethodOverload(
+        self: *Analyzer,
+        name: []const u8,
+        position: Source.Position,
+        candidates: []const MethodCandidate,
+    ) AnalyzeError {
+        const signatures = try methodSignatures(self.allocator, candidates);
+        const message = try std.fmt.allocPrint(self.allocator, "no compatible signature for method '{s}'; visible signatures: {s}", .{ name, signatures });
+        return self.fail(position, message);
+    }
+
+    fn ambiguousMethodOverload(
+        self: *Analyzer,
+        name: []const u8,
+        position: Source.Position,
+        candidates: []const MethodCandidate,
+    ) AnalyzeError {
+        const signatures = try methodSignatures(self.allocator, candidates);
+        const message = try std.fmt.allocPrint(self.allocator, "ambiguous call to method '{s}'; matching signatures: {s}", .{ name, signatures });
+        return self.fail(position, message);
+    }
+
     fn findFunction(self: *const Analyzer, name: []const u8) ?FunctionSymbol {
         for (self.functions.items) |function_symbol| {
             if (std.mem.eql(u8, function_symbol.source_name, name)) return function_symbol;
@@ -1983,6 +2225,11 @@ pub const Analyzer = struct {
         for (statements_value) |statement_value| {
             switch (statement_value) {
                 .print => |expression_value| try self.validateExpression(expression_value),
+                .assertion => |assertion_value| {
+                    try self.validateExpression(assertion_value.condition);
+                    try self.validateExpression(assertion_value.message);
+                },
+                .panic_statement => |panic_value| try self.validateExpression(panic_value.message),
                 .variable_declaration => |declaration| try self.validateExpression(declaration.initializer),
                 .assignment => |assignment_value| {
                     try self.validateExpression(assignment_value.target);
@@ -2464,7 +2711,7 @@ fn parseFixedArrayLength(self: *Analyzer, lexeme: []const u8, position: Source.P
 fn blockAlwaysReturns(statements: []const Statement) bool {
     for (statements) |statement| {
         switch (statement) {
-            .return_statement => return true,
+            .return_statement, .panic_statement => return true,
             .if_statement => |if_statement| {
                 if (if_statement.else_body) |else_body| {
                     if (blockAlwaysReturns(if_statement.body) and blockAlwaysReturns(else_body)) return true;
@@ -2556,6 +2803,88 @@ fn typeEqual(left: Type, right: Type) bool {
             else => false,
         },
     };
+}
+
+fn sameSignature(
+    left_types: []const Type,
+    left_mutable_references: []const bool,
+    right_types: []const Type,
+    right_mutable_references: []const bool,
+) bool {
+    if (left_types.len != right_types.len) return false;
+    for (left_types, left_mutable_references, right_types, right_mutable_references) |left_type, left_mutable, right_type, right_mutable| {
+        if (left_mutable != right_mutable or !typeEqual(left_type, right_type)) return false;
+    }
+    return true;
+}
+
+fn containsPosition(positions: []const Source.Position, candidate: Source.Position) bool {
+    for (positions) |position| {
+        if (position.file == candidate.file and position.line == candidate.line and position.column == candidate.column) return true;
+    }
+    return false;
+}
+
+fn overloadScore(source: Type, target: Type) ?u8 {
+    if (typeEqual(source, target)) return 0;
+    if (isInteger(source) and isInteger(target) and
+        isUnsignedInteger(source) == isUnsignedInteger(target) and integerBits(source) < integerBits(target))
+    {
+        return 1;
+    }
+    if (source == .float and target == .float64) return 1;
+    if (isInteger(source) and (target == .float or target == .float64)) return 2;
+    return null;
+}
+
+fn literalOverloadScore(value: *const Expression, target: Type) ?u8 {
+    if (value.value == .integer and isInteger(target) and integerLiteralFits(value.value.integer, target)) return 1;
+    if (value.value == .floating and target == .float64) return 1;
+    return null;
+}
+
+fn overloadBetter(left: []const u8, right: []const u8) bool {
+    var strictly_better = false;
+    for (left, right) |left_score, right_score| {
+        if (left_score > right_score) return false;
+        if (left_score < right_score) strictly_better = true;
+    }
+    return strictly_better;
+}
+
+fn appendSignature(
+    allocator: Allocator,
+    output: *std.ArrayList(u8),
+    name: []const u8,
+    parameter_types: []const Type,
+    parameter_is_mutable_references: []const bool,
+) !void {
+    try output.appendSlice(allocator, name);
+    try output.append(allocator, '(');
+    for (parameter_types, parameter_is_mutable_references, 0..) |parameter_type, is_mutable_reference, index| {
+        if (index != 0) try output.appendSlice(allocator, ", ");
+        if (is_mutable_reference) try output.append(allocator, '&');
+        try output.appendSlice(allocator, typeName(parameter_type));
+    }
+    try output.append(allocator, ')');
+}
+
+fn functionSignatures(allocator: Allocator, candidates: []const FunctionSymbol) ![]const u8 {
+    var output: std.ArrayList(u8) = .empty;
+    for (candidates, 0..) |candidate, index| {
+        if (index != 0) try output.appendSlice(allocator, ", ");
+        try appendSignature(allocator, &output, lastNameSegment(candidate.source_name), candidate.parameter_types, candidate.parameter_is_mutable_references);
+    }
+    return output.toOwnedSlice(allocator);
+}
+
+fn methodSignatures(allocator: Allocator, candidates: []const MethodCandidate) ![]const u8 {
+    var output: std.ArrayList(u8) = .empty;
+    for (candidates, 0..) |candidate, index| {
+        if (index != 0) try output.appendSlice(allocator, ", ");
+        try appendSignature(allocator, &output, candidate.symbol.source_name, candidate.symbol.parameter_types, candidate.symbol.parameter_is_mutable_references);
+    }
+    return output.toOwnedSlice(allocator);
 }
 
 fn isNativeReturnType(value: Type) bool {
@@ -2652,6 +2981,11 @@ fn isUnsignedInteger(value: Type) bool {
         .uint8, .uint16, .uint32, .uint64 => true,
         else => false,
     };
+}
+
+fn commonUnsignedIntegerType(left: Type, right: Type) ?Type {
+    if (!isUnsignedInteger(left) or !isUnsignedInteger(right)) return null;
+    return if (integerBits(left) >= integerBits(right)) left else right;
 }
 
 fn integerBits(value: Type) u8 {

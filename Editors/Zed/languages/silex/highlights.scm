@@ -33,6 +33,12 @@
 (print_statement
   function: (identifier) @function.call)
 
+(assert_statement
+  function: (identifier) @keyword)
+
+(panic_statement
+  function: (identifier) @keyword)
+
 (call_expression
   function: (identifier) @function.call)
 
@@ -99,6 +105,8 @@
   "-"
   "*"
   "/"
+  "%"
+  "&"
   "="
   "+="
   "-="

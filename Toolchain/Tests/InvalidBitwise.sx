@@ -1,0 +1,5 @@
+func main() {
+    let value:int8 = 1
+    let other:uint8 = 1
+    print(value & other)
+}

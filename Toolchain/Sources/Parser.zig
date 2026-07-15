@@ -266,6 +266,8 @@ pub const Parser = struct {
     fn parseStatement(self: *Parser) ParseError!Ast.Statement {
         return switch (self.current.tag) {
             .keyword_print => self.parsePrint(),
+            .keyword_assert => self.parseAssert(),
+            .keyword_panic => self.parsePanic(),
             .keyword_let => self.parseVariableDeclaration(.immutable),
             .keyword_var => self.parseVariableDeclaration(.mutable),
             .keyword_if => self.parseIf(),
@@ -287,6 +289,28 @@ pub const Parser = struct {
         try self.expect(.right_parenthesis, "expected ')'");
         try self.expectStatementTerminator();
         return .{ .print = .{ .position = position, .argument = argument } };
+    }
+
+    fn parseAssert(self: *Parser) ParseError!Ast.Statement {
+        const position = self.current.position;
+        try self.advance();
+        try self.expect(.left_parenthesis, "expected '(' after 'assert'");
+        const condition = try self.parseExpression(true);
+        try self.expect(.comma, "expected ',' after assertion condition");
+        const message = try self.parseExpression(true);
+        try self.expect(.right_parenthesis, "expected ')' after assertion message");
+        try self.expectStatementTerminator();
+        return .{ .assertion = .{ .position = position, .condition = condition, .message = message } };
+    }
+
+    fn parsePanic(self: *Parser) ParseError!Ast.Statement {
+        const position = self.current.position;
+        try self.advance();
+        try self.expect(.left_parenthesis, "expected '(' after 'panic'");
+        const message = try self.parseExpression(true);
+        try self.expect(.right_parenthesis, "expected ')' after panic message");
+        try self.expectStatementTerminator();
+        return .{ .panic_statement = .{ .position = position, .message = message } };
     }
 
     fn parseVariableDeclaration(self: *Parser, mutability: Ast.Mutability) ParseError!Ast.Statement {
@@ -550,8 +574,43 @@ pub const Parser = struct {
     }
 
     fn parseComparison(self: *Parser, allow_line_breaks: bool) ParseError!*Ast.Expression {
-        var expression = try self.parseAdditive(allow_line_breaks);
+        var expression = try self.parseBitXor(allow_line_breaks);
         while (isComparisonOperator(self.current.tag) and self.canContinueExpression(allow_line_breaks)) {
+            const operator_token = self.current;
+            try self.advance();
+            const right = try self.parseBitXor(allow_line_breaks);
+            expression = try self.binaryExpression(expression, right, operator_token);
+        }
+        return expression;
+    }
+
+    fn parseBitXor(self: *Parser, allow_line_breaks: bool) ParseError!*Ast.Expression {
+        var expression = try self.parseBitAnd(allow_line_breaks);
+        while (self.current.tag == .caret and self.canContinueExpression(allow_line_breaks)) {
+            const operator_token = self.current;
+            try self.advance();
+            const right = try self.parseBitAnd(allow_line_breaks);
+            expression = try self.binaryExpression(expression, right, operator_token);
+        }
+        return expression;
+    }
+
+    fn parseBitAnd(self: *Parser, allow_line_breaks: bool) ParseError!*Ast.Expression {
+        var expression = try self.parseShift(allow_line_breaks);
+        while (self.current.tag == .amp and self.canContinueExpression(allow_line_breaks)) {
+            const operator_token = self.current;
+            try self.advance();
+            const right = try self.parseShift(allow_line_breaks);
+            expression = try self.binaryExpression(expression, right, operator_token);
+        }
+        return expression;
+    }
+
+    fn parseShift(self: *Parser, allow_line_breaks: bool) ParseError!*Ast.Expression {
+        var expression = try self.parseAdditive(allow_line_breaks);
+        while ((self.current.tag == .shift_left or self.current.tag == .shift_right) and
+            self.canContinueExpression(allow_line_breaks))
+        {
             const operator_token = self.current;
             try self.advance();
             const right = try self.parseAdditive(allow_line_breaks);
@@ -575,7 +634,7 @@ pub const Parser = struct {
 
     fn parseMultiplicative(self: *Parser, allow_line_breaks: bool) ParseError!*Ast.Expression {
         var expression = try self.parseUnary(allow_line_breaks);
-        while ((self.current.tag == .star or self.current.tag == .slash) and
+        while ((self.current.tag == .star or self.current.tag == .slash or self.current.tag == .percent) and
             self.canContinueExpression(allow_line_breaks))
         {
             const operator_token = self.current;
@@ -851,8 +910,13 @@ pub const Parser = struct {
             .greater_equal => .greater_equal,
             .plus => .add,
             .minus => .subtract,
+            .shift_left => .shift_left,
+            .shift_right => .shift_right,
+            .amp => .bit_and,
+            .caret => .bit_xor,
             .star => .multiply,
             .slash => .divide,
+            .percent => .remainder,
             else => unreachable,
         };
         return self.newExpression(.{
@@ -957,6 +1021,22 @@ test "multiplication binds tighter than addition" {
     const addition = program.functions[0].statements[0].print.argument.value.binary;
     try std.testing.expectEqual(Ast.BinaryOperator.add, addition.operator);
     try std.testing.expectEqual(Ast.BinaryOperator.multiply, addition.right.value.binary.operator);
+}
+
+test "bitwise operators follow shift precedence" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(
+        arena.allocator(),
+        "func main() void { let value:uint8 = 1 + 1 << 2 & 7 ^ 3; }",
+    );
+    const program = try parser.parse();
+
+    const bit_xor = program.functions[0].statements[0].variable_declaration.initializer.?.value.binary;
+    try std.testing.expectEqual(Ast.BinaryOperator.bit_xor, bit_xor.operator);
+    try std.testing.expectEqual(Ast.BinaryOperator.bit_and, bit_xor.left.value.binary.operator);
+    try std.testing.expectEqual(Ast.BinaryOperator.shift_left, bit_xor.left.value.binary.left.value.binary.operator);
+    try std.testing.expectEqual(Ast.BinaryOperator.add, bit_xor.left.value.binary.left.value.binary.left.value.binary.operator);
 }
 
 test "parse explicit conversions before arithmetic" {

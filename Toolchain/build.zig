@@ -93,7 +93,7 @@ pub fn build(b: *std.Build) void {
     missing_mutable_reference_argument_command.addArgs(&.{ "compile", "Tests/MissingMutableReferenceArgument.sx" });
     missing_mutable_reference_argument_command.expectExitCode(1);
     missing_mutable_reference_argument_command.expectStdErrEqual(
-        "Tests/MissingMutableReferenceArgument.sx:7:13: error: a parameter declared with '&' requires an argument written as '&place'\n",
+        "Tests/MissingMutableReferenceArgument.sx:7:5: error: no compatible signature for function 'replace'; visible signatures: replace(&int)\n",
     );
 
     const invalid_local_reference_command = b.addRunArtifact(executable);
@@ -150,6 +150,58 @@ pub fn build(b: *std.Build) void {
         "Tests/InvalidCondition.sx:2:9: error: expected 'bool', found 'int'\n",
     );
 
+    const invalid_assertion_condition_command = b.addRunArtifact(executable);
+    invalid_assertion_condition_command.addArgs(&.{ "compile", "Tests/InvalidAssertionCondition.sx" });
+    invalid_assertion_condition_command.expectExitCode(1);
+    invalid_assertion_condition_command.expectStdErrEqual(
+        "Tests/InvalidAssertionCondition.sx:2:12: error: expected 'bool', found 'int'\n",
+    );
+
+    const invalid_assertion_message_command = b.addRunArtifact(executable);
+    invalid_assertion_message_command.addArgs(&.{ "compile", "Tests/InvalidAssertionMessage.sx" });
+    invalid_assertion_message_command.expectExitCode(1);
+    invalid_assertion_message_command.expectStdErrEqual(
+        "Tests/InvalidAssertionMessage.sx:2:18: error: expected 'str', found 'int'\n",
+    );
+
+    const assertion_failure_command = b.addRunArtifact(executable);
+    assertion_failure_command.addArgs(&.{ "run", "Tests/AssertionFailure.sx" });
+    assertion_failure_command.expectExitCode(1);
+    assertion_failure_command.expectStdErrEqual(b.fmt(
+        "{s}:2:5: runtime error: assertion failed: planned failure\n",
+        .{b.pathFromRoot("Tests/AssertionFailure.sx")},
+    ));
+
+    const invalid_panic_message_command = b.addRunArtifact(executable);
+    invalid_panic_message_command.addArgs(&.{ "compile", "Tests/InvalidPanicMessage.sx" });
+    invalid_panic_message_command.expectExitCode(1);
+    invalid_panic_message_command.expectStdErrEqual(
+        "Tests/InvalidPanicMessage.sx:2:11: error: expected 'str', found 'int'\n",
+    );
+
+    const panic_literal_command = b.addRunArtifact(executable);
+    panic_literal_command.addArgs(&.{ "run", "Tests/PanicLiteral.sx" });
+    panic_literal_command.expectExitCode(1);
+    panic_literal_command.expectStdErrEqual(b.fmt(
+        "{s}:2:5: runtime error: literal panic\n",
+        .{b.pathFromRoot("Tests/PanicLiteral.sx")},
+    ));
+
+    const panic_computed_command = b.addRunArtifact(executable);
+    panic_computed_command.addArgs(&.{ "run", "Tests/PanicComputed.sx" });
+    panic_computed_command.expectExitCode(1);
+    panic_computed_command.expectStdErrEqual(b.fmt(
+        "{s}:3:5: runtime error: computed panic\n",
+        .{b.pathFromRoot("Tests/PanicComputed.sx")},
+    ));
+
+    const removed_random_next_command = b.addRunArtifact(executable);
+    removed_random_next_command.addArgs(&.{ "compile", "Tests/RemovedRandomNext.sx" });
+    removed_random_next_command.expectExitCode(1);
+    removed_random_next_command.expectStdErrEqual(
+        "Tests/RemovedRandomNext.sx:5:18: error: struct 'std.Random.Generator' has no method 'next'\n",
+    );
+
     const invalid_logical_command = b.addRunArtifact(executable);
     invalid_logical_command.addArgs(&.{ "compile", "Tests/InvalidLogical.sx" });
     invalid_logical_command.expectExitCode(1);
@@ -196,8 +248,33 @@ pub fn build(b: *std.Build) void {
     invalid_arguments_command.addArgs(&.{ "compile", "Tests/InvalidArguments.sx" });
     invalid_arguments_command.expectExitCode(1);
     invalid_arguments_command.expectStdErrEqual(
-        "Tests/InvalidArguments.sx:2:18: error: argument 2 of 'add' expects 'int', found 'bool'\n",
+        "Tests/InvalidArguments.sx:2:11: error: no compatible signature for function 'add'; visible signatures: add(int, int)\n",
     );
+
+    const duplicate_overload_alias_command = b.addRunArtifact(executable);
+    duplicate_overload_alias_command.addArgs(&.{ "compile", "Tests/DuplicateOverloadAlias.sx" });
+    duplicate_overload_alias_command.expectExitCode(1);
+    duplicate_overload_alias_command.expectStdErrEqual(
+        "Tests/DuplicateOverloadAlias.sx:5:6: error: function 'measure' with this signature is already declared\n",
+    );
+
+    const duplicate_overload_return_command = b.addRunArtifact(executable);
+    duplicate_overload_return_command.addArgs(&.{ "compile", "Tests/DuplicateOverloadReturn.sx" });
+    duplicate_overload_return_command.expectExitCode(1);
+    duplicate_overload_return_command.expectStdErrEqual(
+        "Tests/DuplicateOverloadReturn.sx:5:6: error: function 'measure' with this signature is already declared\n",
+    );
+
+    const ambiguous_overload_command = b.addRunArtifact(executable);
+    ambiguous_overload_command.addArgs(&.{ "compile", "Tests/AmbiguousOverload.sx" });
+    ambiguous_overload_command.expectExitCode(1);
+    ambiguous_overload_command.expectStdErrEqual(
+        "Tests/AmbiguousOverload.sx:10:11: error: ambiguous call to function 'measure'; matching signatures: measure(float), measure(float64)\n",
+    );
+
+    const module_overload_command = b.addRunArtifact(executable);
+    module_overload_command.addArgs(&.{ "run", "Tests/Modules/Overloads/project.json" });
+    module_overload_command.expectStdOutEqual(hostText(b, "1\n2\n3\n"));
 
     const unknown_struct_field_command = b.addRunArtifact(executable);
     unknown_struct_field_command.addArgs(&.{ "compile", "Tests/UnknownStructField.sx" });
@@ -288,6 +365,27 @@ pub fn build(b: *std.Build) void {
     invalid_signed_unsigned_arithmetic_command.expectExitCode(1);
     invalid_signed_unsigned_arithmetic_command.expectStdErrEqual(
         "Tests/InvalidSignedUnsignedArithmetic.sx:4:18: error: arithmetic operator requires compatible numeric operands, found 'int8' and 'uint8'\n",
+    );
+
+    const invalid_remainder_command = b.addRunArtifact(executable);
+    invalid_remainder_command.addArgs(&.{ "compile", "Tests/InvalidRemainder.sx" });
+    invalid_remainder_command.expectExitCode(1);
+    invalid_remainder_command.expectStdErrEqual(
+        "Tests/InvalidRemainder.sx:3:17: error: remainder operator requires compatible integer operands, found 'float' and 'int'\n",
+    );
+
+    const invalid_bitwise_command = b.addRunArtifact(executable);
+    invalid_bitwise_command.addArgs(&.{ "compile", "Tests/InvalidBitwise.sx" });
+    invalid_bitwise_command.expectExitCode(1);
+    invalid_bitwise_command.expectStdErrEqual(
+        "Tests/InvalidBitwise.sx:4:17: error: bitwise operator requires compatible unsigned integer operands, found 'int8' and 'uint8'\n",
+    );
+
+    const invalid_shift_command = b.addRunArtifact(executable);
+    invalid_shift_command.addArgs(&.{ "compile", "Tests/InvalidShift.sx" });
+    invalid_shift_command.expectExitCode(1);
+    invalid_shift_command.expectStdErrEqual(
+        "Tests/InvalidShift.sx:3:17: error: shift operator requires an unsigned integer value and an integer count, found 'uint8' and 'float'\n",
     );
 
     const invalid_explicit_conversion_command = b.addRunArtifact(executable);
@@ -589,6 +687,13 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&native_exception_command.step);
     test_step.dependOn(&invalid_reference_type_command.step);
     test_step.dependOn(&invalid_condition_command.step);
+    test_step.dependOn(&invalid_assertion_condition_command.step);
+    test_step.dependOn(&invalid_assertion_message_command.step);
+    test_step.dependOn(&assertion_failure_command.step);
+    test_step.dependOn(&invalid_panic_message_command.step);
+    test_step.dependOn(&panic_literal_command.step);
+    test_step.dependOn(&panic_computed_command.step);
+    test_step.dependOn(&removed_random_next_command.step);
     test_step.dependOn(&invalid_logical_command.step);
     test_step.dependOn(&invalid_while_command.step);
     test_step.dependOn(&missing_separator_command.step);
@@ -596,6 +701,10 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&missing_return_command.step);
     test_step.dependOn(&implicit_void_return_value_command.step);
     test_step.dependOn(&invalid_arguments_command.step);
+    test_step.dependOn(&duplicate_overload_alias_command.step);
+    test_step.dependOn(&duplicate_overload_return_command.step);
+    test_step.dependOn(&ambiguous_overload_command.step);
+    test_step.dependOn(&module_overload_command.step);
     test_step.dependOn(&unknown_struct_field_command.step);
     test_step.dependOn(&immutable_struct_field_command.step);
     test_step.dependOn(&immutable_cascade_command.step);
@@ -609,6 +718,9 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&invalid_numeric_negation_command.step);
     test_step.dependOn(&invalid_integer_literal_range_command.step);
     test_step.dependOn(&invalid_signed_unsigned_arithmetic_command.step);
+    test_step.dependOn(&invalid_remainder_command.step);
+    test_step.dependOn(&invalid_bitwise_command.step);
+    test_step.dependOn(&invalid_shift_command.step);
     test_step.dependOn(&invalid_explicit_conversion_command.step);
     test_step.dependOn(&invalid_numeric_prefix_command.step);
     test_step.dependOn(&invalid_numeric_separator_command.step);
@@ -656,8 +768,27 @@ pub fn build(b: *std.Build) void {
     references_command.addArgs(&.{ "run", "Smokes/References.sx" });
     references_command.expectStdOutEqual(hostText(b, "1\n2\n4\n11\n21\n13\n11\n10\n"));
 
+    const overloads_command = b.addRunArtifact(executable);
+    overloads_command.step.dependOn(&references_command.step);
+    overloads_command.addArgs(&.{ "run", "Smokes/Overloads.sx" });
+    overloads_command.expectStdOutEqual(hostText(b, "7\n8\n2.5\n3\n12\n9\n0\n0\n"));
+
+    const assertions_command = b.addRunArtifact(executable);
+    assertions_command.step.dependOn(&overloads_command.step);
+    assertions_command.addArgs(&.{ "run", "Smokes/Assertions.sx" });
+    assertions_command.expectStdOutEqual(hostText(b, "1\n"));
+
+    const panic_command = b.addRunArtifact(executable);
+    panic_command.step.dependOn(&assertions_command.step);
+    panic_command.addArgs(&.{ "run", "Smokes/Panic.sx" });
+    panic_command.expectExitCode(1);
+    panic_command.expectStdErrEqual(hostText(
+        b,
+        b.fmt("{s}:3:5: runtime error: smoke panic\n", .{b.pathFromRoot("Smokes/Panic.sx")}),
+    ));
+
     const boolean_condition_command = b.addRunArtifact(executable);
-    boolean_condition_command.step.dependOn(&references_command.step);
+    boolean_condition_command.step.dependOn(&panic_command.step);
     boolean_condition_command.addArgs(&.{ "run", "Smokes/BooleanCondition.sx" });
     boolean_condition_command.expectStdOutEqual(hostText(b, "true branch\n"));
 
@@ -755,8 +886,18 @@ pub fn build(b: *std.Build) void {
     integer_semantics_command.addArgs(&.{ "run", "Smokes/IntegerSemantics.sx" });
     integer_semantics_command.expectStdOutEqual(hostText(b, integer_semantics_output));
 
+    const bitwise_command = b.addRunArtifact(executable);
+    bitwise_command.step.dependOn(&integer_semantics_command.step);
+    bitwise_command.addArgs(&.{ "run", "Smokes/Bitwise.sx" });
+    bitwise_command.expectStdOutEqual(hostText(b, "true\ntrue\ntrue\ntrue\ntrue\n"));
+
+    const remainder_command = b.addRunArtifact(executable);
+    remainder_command.step.dependOn(&bitwise_command.step);
+    remainder_command.addArgs(&.{ "run", "Smokes/Remainder.sx" });
+    remainder_command.expectStdOutEqual(hostText(b, "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n"));
+
     const emit_integer_semantics = b.addRunArtifact(executable);
-    emit_integer_semantics.step.dependOn(&integer_semantics_command.step);
+    emit_integer_semantics.step.dependOn(&remainder_command.step);
     emit_integer_semantics.addArgs(&.{ "compile", "Smokes/IntegerSemantics.sx", "--emit-cpp" });
 
     const unoptimized_semantics_path = if (b.graph.host.result.os.tag == .windows)
@@ -801,9 +942,13 @@ pub fn build(b: *std.Build) void {
         .{ .source = "Smokes/IntegerErrors/MultiplyUnsigned.sx", .message = "3:5: runtime error: uint32 multiplication overflow: 4294967295 * 2" },
         .{ .source = "Smokes/IntegerErrors/DivideSigned.sx", .message = "3:5: runtime error: int division overflow: -9223372036854775808 / -1" },
         .{ .source = "Smokes/IntegerErrors/DivideUnsigned.sx", .message = "3:17: runtime error: uint64 division by zero: 1 / 0" },
+        .{ .source = "Smokes/IntegerErrors/RemainderSigned.sx", .message = "3:17: runtime error: int division overflow: -9223372036854775808 % -1" },
+        .{ .source = "Smokes/IntegerErrors/RemainderUnsigned.sx", .message = "3:17: runtime error: uint64 division by zero: 1 % 0" },
         .{ .source = "Smokes/IntegerErrors/NegateSigned.sx", .message = "3:11: runtime error: int8 negation overflow: -(-128)" },
         .{ .source = "Smokes/IntegerErrors/NegateUnsigned.sx", .message = "3:11: runtime error: uint8 negation underflow: -(1)" },
         .{ .source = "Smokes/IntegerErrors/MethodUnsigned.sx", .message = "5:9: runtime error: uint8 subtraction underflow: 10 - 255" },
+        .{ .source = "Smokes/IntegerErrors/ShiftNegative.sx", .message = "3:17: runtime error: uint8 left shift count out of range: -1" },
+        .{ .source = "Smokes/IntegerErrors/ShiftTooLarge.sx", .message = "3:17: runtime error: uint8 right shift count out of range: 8" },
     };
     const integer_error_suffix = if (b.graph.host.result.os.tag == .windows) ".exe" else "";
     var previous_integer_error_step: *std.Build.Step = &integer_overflow_command.step;
@@ -879,12 +1024,42 @@ pub fn build(b: *std.Build) void {
     const standard_library_command = b.addRunArtifact(executable);
     standard_library_command.step.dependOn(&local_imports_command.step);
     standard_library_command.addArgs(&.{ "run", "Smokes/StandardLibrary/Main.sx" });
-    standard_library_command.expectStdOutEqual(hostText(b, "true\ntrue\n"));
+    standard_library_command.expectStdOutEqual(hostText(
+        b,
+        "1065361344\n1152851127339773951\n508277857751731680\n6637030065269067181\n7345633470618427510\n8792660973527785782\n1082269761\n1152992998833853505\n1954144627577988649\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n1301891922867780472\ntrue\n",
+    ));
+
+    const random_generator_source = b.getInstallPath(.prefix, "lib/silex/std/Random/Generator.sx");
+    const random_error_cases = [_]struct {
+        source: []const u8,
+        message: []const u8,
+    }{
+        .{ .source = "Smokes/RandomErrors/IntOrder.sx", .message = "30:13: runtime error: get_int(minimum, maximum) requires minimum < maximum" },
+        .{ .source = "Smokes/RandomErrors/IntWidth.sx", .message = "35:17: runtime error: get_int(minimum, maximum) requires an interval width that fits in int" },
+        .{ .source = "Smokes/RandomErrors/FloatOrder.sx", .message = "59:13: runtime error: get_float(minimum, maximum) requires minimum < maximum" },
+        .{ .source = "Smokes/RandomErrors/FloatFinite.sx", .message = "56:13: runtime error: get_float(minimum, maximum) requires finite bounds" },
+        .{ .source = "Smokes/RandomErrors/FloatResolution.sx", .message = "66:13: runtime error: get_float(minimum, maximum) requires a representable value below maximum" },
+    };
+    var previous_random_error_step: *std.Build.Step = &standard_library_command.step;
+    for (random_error_cases) |case| {
+        const command = b.addRunArtifact(executable);
+        command.step.dependOn(previous_random_error_step);
+        command.addArgs(&.{ "run", case.source });
+        command.expectExitCode(1);
+        command.expectStdErrEqual(hostText(
+            b,
+            b.fmt("{s}:{s}\n", .{ random_generator_source, case.message }),
+        ));
+        previous_random_error_step = &command.step;
+    }
 
     const standard_library_manifest_command = b.addRunArtifact(executable);
-    standard_library_manifest_command.step.dependOn(&standard_library_command.step);
+    standard_library_manifest_command.step.dependOn(previous_random_error_step);
     standard_library_manifest_command.addArgs(&.{ "run", "Smokes/StandardLibrary/silex.json" });
-    standard_library_manifest_command.expectStdOutEqual(hostText(b, "true\ntrue\n"));
+    standard_library_manifest_command.expectStdOutEqual(hostText(
+        b,
+        "1065361344\n1152851127339773951\n508277857751731680\n6637030065269067181\n7345633470618427510\n8792660973527785782\n1082269761\n1152992998833853505\n1954144627577988649\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n1301891922867780472\ntrue\n",
+    ));
 
     const distributed_native_runtime_command = b.addRunArtifact(executable);
     distributed_native_runtime_command.step.dependOn(&standard_library_manifest_command.step);

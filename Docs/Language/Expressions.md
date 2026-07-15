@@ -3,9 +3,9 @@
 ## Operators
 
 The current precedence order, from highest to lowest, is explicit conversion
-(`as type`), prefix `!` and `-`, `*` and `/`, `+` and `-`, ordering
-comparisons, equality, `&&`, then `||`. Binary operators associate to the left.
-`&&` and `||` short-circuit.
+(`as type`), prefix `!` and `-`, `*`, `/`, and `%`, `+` and `-`, `<<` and `>>`,
+`&`, `^`, ordering comparisons, equality, `&&`, then `||`. Binary operators
+associate to the left. `&&` and `||` short-circuit.
 
 Arithmetic and ordering comparisons require compatible numeric operands, except
 that `+` also concatenates two strings. Equality uses the same numeric
@@ -15,6 +15,20 @@ same structure type recursively by their fields. `print` accepts numbers,
 
 Mutable numeric places support `+=`, `-=`, `*=`, `/=`, `++`, and `--`; `+=`
 also concatenates strings. `++` and `--` are postfix statements, not values.
+
+`%` computes the remainder of an integer division. Its operands use the same
+compatible integer widening as `/`, and its result has that common integer
+type. Signed division truncates toward zero, so `-17 % 5` is `-2`. A zero
+divisor and the signed minimum modulo `-1` stop execution with the same
+division runtime errors as `/`.
+
+`&` and `^` operate on compatible unsigned integers and widen to the wider
+unsigned operand type. `<<` and `>>` keep the type of their unsigned left
+operand; their count may be any integer, but must be at least zero and smaller
+than that type's width, otherwise execution stops with a runtime error. A left
+shift discards bits that leave its fixed-width value; a right shift fills with
+zeroes. Parentheses are the canonical form when combining shifts and bitwise
+operations.
 
 ## Statement endings
 

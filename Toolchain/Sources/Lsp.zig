@@ -24,6 +24,10 @@ const CompletionItem = struct {
     filterText: ?[]const u8 = null,
 };
 
+const SignatureInformation = struct {
+    label: []const u8,
+};
+
 const QualifiedCompletionContext = struct {
     qualifier: []const u8,
     prefix: []const u8,
@@ -133,6 +137,9 @@ const Server = struct {
                     .completionProvider = .{
                         .triggerCharacters = &.{"."},
                     },
+                    .signatureHelpProvider = .{
+                        .triggerCharacters = &.{ "(", "," },
+                    },
                 },
                 .serverInfo = .{
                     .name = "Silex",
@@ -211,6 +218,21 @@ const Server = struct {
             if (request.id) |id| try self.reply(id, .{
                 .isIncomplete = false,
                 .items = items,
+            });
+            return;
+        }
+
+        if (std.mem.eql(u8, request.method, "textDocument/signatureHelp")) {
+            const signatures = if (request.params) |params| signatures: {
+                const uri = textDocumentUri(params) orelse break :signatures &[_]SignatureInformation{};
+                const source = self.documentText(uri) orelse break :signatures &[_]SignatureInformation{};
+                const position = completionPosition(params) orelse break :signatures &[_]SignatureInformation{};
+                break :signatures try signatureHelpItems(self.allocator, source, position);
+            } else &[_]SignatureInformation{};
+            if (request.id) |id| try self.reply(id, .{
+                .signatures = signatures,
+                .activeSignature = @as(usize, 0),
+                .activeParameter = @as(usize, 0),
             });
         }
     }
@@ -378,6 +400,92 @@ fn diagnosticFromSource(diagnostic: Source.Diagnostic) Diagnostic {
         },
         .message = diagnostic.message,
     };
+}
+
+fn signatureHelpItems(
+    allocator: Allocator,
+    source: []const u8,
+    position: Position,
+) ![]const SignatureInformation {
+    const cursor = byteOffsetAtPosition(source, position) orelse return allocator.alloc(SignatureInformation, 0);
+    const name = signatureNameAt(source, cursor) orelse return allocator.alloc(SignatureInformation, 0);
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    var parser = ParserModule.Parser.init(arena.allocator(), source);
+    const program = parser.parse() catch return allocator.alloc(SignatureInformation, 0);
+    var result: std.ArrayList(SignatureInformation) = .empty;
+    for (program.functions) |function| {
+        if (std.mem.eql(u8, function.name, name)) try appendSignatureHelp(allocator, &result, function);
+    }
+    for (program.structures) |structure| for (structure.methods) |method| {
+        if (std.mem.eql(u8, method.name, name)) try appendSignatureHelp(allocator, &result, method);
+    };
+    return result.toOwnedSlice(allocator);
+}
+
+fn signatureNameAt(source: []const u8, cursor: usize) ?[]const u8 {
+    var index = @min(cursor, source.len);
+    while (index > 0 and source[index - 1] != '(') index -= 1;
+    if (index == 0) return null;
+    index -= 1;
+    while (index > 0 and std.ascii.isWhitespace(source[index - 1])) index -= 1;
+    const end = index;
+    while (index > 0 and isIdentifierContinue(source[index - 1])) index -= 1;
+    return if (index == end) null else source[index..end];
+}
+
+fn appendSignatureHelp(
+    allocator: Allocator,
+    signatures: *std.ArrayList(SignatureInformation),
+    function: Ast.Function,
+) !void {
+    var label: std.ArrayList(u8) = .empty;
+    try label.appendSlice(allocator, function.name);
+    try label.append(allocator, '(');
+    for (function.parameters, 0..) |parameter, index| {
+        if (index != 0) try label.appendSlice(allocator, ", ");
+        if (parameter.is_mutable_reference) try label.append(allocator, '&');
+        try appendAstTypeName(allocator, &label, parameter.type);
+    }
+    try label.append(allocator, ')');
+    const value = label.items;
+    for (signatures.items) |existing| if (std.mem.eql(u8, existing.label, value)) return;
+    try signatures.append(allocator, .{ .label = try label.toOwnedSlice(allocator) });
+}
+
+fn appendAstTypeName(allocator: Allocator, output: *std.ArrayList(u8), type_name: Ast.TypeName) !void {
+    switch (type_name) {
+        .int => try output.appendSlice(allocator, "int"),
+        .int8 => try output.appendSlice(allocator, "int8"),
+        .int16 => try output.appendSlice(allocator, "int16"),
+        .int32 => try output.appendSlice(allocator, "int32"),
+        .int64 => try output.appendSlice(allocator, "int64"),
+        .uint => try output.appendSlice(allocator, "uint"),
+        .uint8 => try output.appendSlice(allocator, "uint8"),
+        .uint16 => try output.appendSlice(allocator, "uint16"),
+        .uint32 => try output.appendSlice(allocator, "uint32"),
+        .uint64 => try output.appendSlice(allocator, "uint64"),
+        .float => try output.appendSlice(allocator, "float"),
+        .float32 => try output.appendSlice(allocator, "float32"),
+        .float64 => try output.appendSlice(allocator, "float64"),
+        .bool => try output.appendSlice(allocator, "bool"),
+        .str => try output.appendSlice(allocator, "str"),
+        .structure => |name| try output.appendSlice(allocator, name),
+        .list => |element| {
+            try appendAstTypeName(allocator, output, element.*);
+            try output.appendSlice(allocator, "[]");
+        },
+        .fixed_array => |array| {
+            try appendAstTypeName(allocator, output, array.element.*);
+            try output.append(allocator, '[');
+            try output.appendSlice(allocator, array.length);
+            try output.append(allocator, ']');
+        },
+        .reference => |reference| {
+            try output.append(allocator, if (reference.mutable) '&' else '@');
+            try appendAstTypeName(allocator, output, reference.target.*);
+        },
+    }
 }
 
 fn completionItems(
@@ -750,6 +858,7 @@ fn memberCompletionItems(
     const structure_name = receiver_type.structure;
     for (info.members.items) |member| {
         if (!std.mem.eql(u8, member.structure, structure_name)) continue;
+        if (containsCompletion(items.items, member.name)) continue;
         try items.append(allocator, .{
             .label = member.name,
             .kind = member.kind,
@@ -1228,6 +1337,8 @@ fn containsCompletion(items: []const CompletionItem, label: []const u8) bool {
 const language_completions = [_]CompletionItem{
     .{ .label = "func", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "struct", .kind = 14, .detail = "Silex keyword" },
+    .{ .label = "assert", .kind = 14, .detail = "Silex keyword" },
+    .{ .label = "panic", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "let", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "var", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "if", .kind = 14, .detail = "Silex keyword" },
@@ -1332,16 +1443,19 @@ test "member completion infers an imported standard-library factory result" {
         \\import std.Random as Random
         \\func main() void {
         \\    var rand = Random.system()
-        \\    print(rand.n)
+        \\    print(rand.get_)
         \\}
     ;
     const items = try completionItems(
         arena.allocator(),
         std.testing.io,
         source,
-        .{ .line = 3, .character = 16 },
+        .{ .line = 3, .character = 19 },
     );
-    try std.testing.expect(containsCompletion(items, "next"));
+    try std.testing.expect(containsCompletion(items, "get_int"));
+    try std.testing.expect(containsCompletion(items, "get_float"));
+    try std.testing.expect(containsCompletion(items, "get_bool"));
+    try std.testing.expect(!containsCompletion(items, "next"));
 }
 
 test "member completion only includes members of the receiver structure" {
@@ -1375,6 +1489,22 @@ test "self completion resolves fields and methods of the enclosing structure" {
     defer std.testing.allocator.free(items);
     try std.testing.expect(containsCompletion(items, "value"));
     try std.testing.expect(containsCompletion(items, "current"));
+}
+
+test "signature help lists overloaded functions once each" {
+    const source =
+        \\func measure() int { return 1 }
+        \\func measure(value:int) int { return value }
+        \\func measure(value:float) float { return value }
+        \\func main() { print(measure(1)) }
+    ;
+    const signatures = try signatureHelpItems(std.testing.allocator, source, .{ .line = 3, .character = 28 });
+    defer std.testing.allocator.free(signatures);
+    defer for (signatures) |signature| std.testing.allocator.free(signature.label);
+    try std.testing.expectEqual(@as(usize, 3), signatures.len);
+    try std.testing.expectEqualStrings("measure()", signatures[0].label);
+    try std.testing.expectEqualStrings("measure(int)", signatures[1].label);
+    try std.testing.expectEqualStrings("measure(float)", signatures[2].label);
 }
 
 test "cascade completion resolves a receiver on the preceding line" {

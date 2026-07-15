@@ -1,0 +1,10 @@
+func measure(value:int) int {
+    return value
+}
+
+func measure(value:int) float {
+    return value
+}
+
+func main() {
+}

@@ -1,0 +1,4 @@
+func main() {
+    let value:uint8 = 1
+    print(value << 1.0)
+}

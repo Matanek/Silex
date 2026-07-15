@@ -1,0 +1,70 @@
+func check_int8() bool {
+    let positive:int8 = 17
+    let negative:int8 = -17
+    let divisor:int8 = 5
+    return positive % divisor == 2 && negative % divisor == -2
+}
+
+func check_int16() bool {
+    let positive:int16 = 17
+    let negative:int16 = -17
+    let divisor:int16 = 5
+    return positive % divisor == 2 && negative % divisor == -2
+}
+
+func check_int32() bool {
+    let positive:int32 = 17
+    let negative:int32 = -17
+    let divisor:int32 = 5
+    return positive % divisor == 2 && negative % divisor == -2
+}
+
+func check_int64() bool {
+    let positive:int64 = 17
+    let negative:int64 = -17
+    let divisor:int64 = 5
+    return positive % divisor == 2 && negative % divisor == -2
+}
+
+func check_uint8() bool {
+    let value:uint8 = 17
+    let divisor:uint8 = 5
+    return value % divisor == 2
+}
+
+func check_uint16() bool {
+    let value:uint16 = 17
+    let divisor:uint16 = 5
+    return value % divisor == 2
+}
+
+func check_uint32() bool {
+    let value:uint32 = 17
+    let divisor:uint32 = 5
+    return value % divisor == 2
+}
+
+func check_uint64() bool {
+    let value:uint64 = 17
+    let divisor:uint64 = 5
+    return value % divisor == 2
+}
+
+func check_widening_and_precedence() bool {
+    let narrow:int8 = 17
+    let wide:int16 = 5
+    let widened:int16 = narrow % wide
+    return widened == 2 && 20 + 17 % 5 * 3 == 26 && 20 % 6 % 4 == 2
+}
+
+func main() {
+    print(check_int8())
+    print(check_int16())
+    print(check_int32())
+    print(check_int64())
+    print(check_uint8())
+    print(check_uint16())
+    print(check_uint32())
+    print(check_uint64())
+    print(check_widening_and_precedence())
+}

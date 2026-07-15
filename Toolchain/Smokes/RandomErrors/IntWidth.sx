@@ -1,0 +1,6 @@
+import std.Random
+
+func main() {
+    var random = std.Random.create(1)
+    print(random.get_int(-9223372036854775808, 1))
+}

@@ -1,0 +1,7 @@
+{
+  "target": "Main",
+  "modules": [
+    { "name": "Main", "sources": ["Main.sx"] },
+    { "name": "Library", "sources": ["Library.sx"] }
+  ]
+}

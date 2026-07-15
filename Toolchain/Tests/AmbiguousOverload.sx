@@ -1,0 +1,11 @@
+func measure(value:float) float {
+    return value
+}
+
+func measure(value:float64) float64 {
+    return value
+}
+
+func main() {
+    print(measure(1))
+}

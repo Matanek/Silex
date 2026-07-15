@@ -1,0 +1,30 @@
+func check_uint8() bool {
+    let value:uint8 = 0x81
+    let masked:uint8 = value & 0xF0
+    let mixed:uint8 = value ^ 0x3C
+    return masked == 0x80 && mixed == 0xBD && value << 1 == 2 && value >> 7 == 1
+}
+
+func check_uint16() bool {
+    let value:uint16 = 0x8001
+    return value & 0x00FF == 1 && value ^ 0x00FF == 0x80FE && value << 1 == 2 && value >> 15 == 1
+}
+
+func check_uint32() bool {
+    let value:uint32 = 0x80000001
+    return value & 0x0000FFFF == 1 && value ^ 0x0000FFFF == 0x8000FFFE && value << 1 == 2 && value >> 31 == 1
+}
+
+func check_uint64() bool {
+    let value:uint64 = 0x8000000000000001
+    return value & 0x00000000FFFFFFFF == 1 && value ^ 0x00000000FFFFFFFF == 0x80000000FFFFFFFE && value << 1 == 2 && value >> 63 == 1
+}
+
+func main() {
+    let priority:uint8 = (1 as uint8) + 1 << 2 & 7 ^ 3
+    print(check_uint8())
+    print(check_uint16())
+    print(check_uint32())
+    print(check_uint64())
+    print(priority == 3)
+}

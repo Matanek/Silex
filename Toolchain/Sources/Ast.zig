@@ -11,8 +11,13 @@ pub const BinaryOperator = enum {
     greater_equal,
     add,
     subtract,
+    shift_left,
+    shift_right,
+    bit_and,
+    bit_xor,
     multiply,
     divide,
+    remainder,
 };
 
 pub const UnaryOperator = enum {
@@ -123,6 +128,7 @@ pub const Expression = struct {
         name: []const u8,
         name_position: Source.Position,
         arguments: []const *Expression,
+        visible_declarations: ?[]const Source.Position = null,
     };
 
     pub const MethodCall = struct {
@@ -195,6 +201,8 @@ pub const Expression = struct {
 
 pub const Statement = union(enum) {
     print: Print,
+    assertion: Assert,
+    panic_statement: Panic,
     variable_declaration: VariableDeclaration,
     assignment: Assignment,
     if_statement: If,
@@ -208,6 +216,17 @@ pub const Statement = union(enum) {
     pub const Print = struct {
         position: Source.Position,
         argument: *Expression,
+    };
+
+    pub const Assert = struct {
+        position: Source.Position,
+        condition: *Expression,
+        message: *Expression,
+    };
+
+    pub const Panic = struct {
+        position: Source.Position,
+        message: *Expression,
     };
 
     pub const VariableDeclaration = struct {

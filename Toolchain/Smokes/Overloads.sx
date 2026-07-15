@@ -1,0 +1,52 @@
+struct Meter {
+    value:int
+
+    func measure() int {
+        return self.value
+    }
+
+    func measure(scale:int) int {
+        return self.value * scale
+    }
+
+    func reset(value:&int) {
+        value = 0
+    }
+
+    func reset(value:int) int {
+        return value
+    }
+}
+
+func measure() int {
+    return 7
+}
+
+func measure(value:int) int {
+    return value
+}
+
+func measure(value:float) float {
+    return value
+}
+
+func countdown(value:int) int {
+    if (value == 0) {
+        return 0
+    }
+    return countdown(value - 1)
+}
+
+func main() {
+    var value:int = 4
+    var meter = Meter { value:3 }
+    meter.reset(&value)
+    print(measure())
+    print(measure(8))
+    print(measure(2.5))
+    print(meter.measure())
+    print(meter.measure(4))
+    print(meter.reset(9))
+    print(value)
+    print(countdown(3))
+}

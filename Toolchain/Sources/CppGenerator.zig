@@ -26,6 +26,7 @@ pub fn generateWithSources(
         \\#include <exception>
         \\#include <array>
         \\#include <bit>
+        \\#include <climits>
         \\#include <cmath>
         \\#include <iostream>
         \\#include <iterator>
@@ -92,6 +93,24 @@ pub fn generateWithSources(
         \\              << "': value ";
         \\    printNumericValue(value);
         \\    std::cerr << ' ' << failure << '\n';
+        \\    std::exit(1);
+        \\}
+        \\
+        \\[[noreturn, gnu::cold, gnu::noinline]] void assertionRuntimeError(
+        \\    SilexSourceLocation location,
+        \\    const std::string& message
+        \\) {
+        \\    std::cerr << silexSourcePath(location) << ':' << location.line << ':' << location.column
+        \\              << ": runtime error: assertion failed: " << message << '\n';
+        \\    std::exit(1);
+        \\}
+        \\
+        \\[[noreturn, gnu::cold, gnu::noinline]] void panicRuntimeError(
+        \\    SilexSourceLocation location,
+        \\    const std::string& message
+        \\) {
+        \\    std::cerr << silexSourcePath(location) << ':' << location.line << ':' << location.column
+        \\              << ": runtime error: " << message << '\n';
         \\    std::exit(1);
         \\}
         \\
@@ -395,12 +414,58 @@ pub fn generateWithSources(
         \\    return left / right;
         \\}
         \\
+        \\template <typename T> inline T checkedRemainder(T left, T right, SilexSourceLocation location, const char* typeName) {
+        \\    if (right == 0) [[unlikely]] {
+        \\        binaryIntegerRuntimeError(location, typeName, "division", "by zero", left, "%", right);
+        \\    }
+        \\    if constexpr (std::is_signed_v<T>) {
+        \\        if (left == std::numeric_limits<T>::min() && right == T{-1}) [[unlikely]] {
+        \\            binaryIntegerRuntimeError(location, typeName, "division", "overflow", left, "%", right);
+        \\        }
+        \\    }
+        \\    return left % right;
+        \\}
+        \\
         \\template <typename T> inline T checkedNegate(T value, SilexSourceLocation location, const char* typeName) {
         \\    T result;
         \\    if (__builtin_sub_overflow(T{0}, value, &result)) [[unlikely]] {
         \\        unaryIntegerRuntimeError(location, typeName, std::is_unsigned_v<T> ? "underflow" : "overflow", value);
         \\    }
         \\    return result;
+        \\}
+        \\
+        \\template <typename Count>
+        \\[[noreturn, gnu::cold, gnu::noinline]] void shiftRuntimeError(
+        \\    SilexSourceLocation location,
+        \\    const char* typeName,
+        \\    const char* operation,
+        \\    Count count
+        \\) {
+        \\    std::cerr << silexSourcePath(location) << ':' << location.line << ':' << location.column
+        \\              << ": runtime error: " << typeName << ' ' << operation << " count out of range: ";
+        \\    printIntegerValue(count);
+        \\    std::cerr << '\n';
+        \\    std::exit(1);
+        \\}
+        \\
+        \\template <typename T, typename Count> inline T checkedShiftLeft(T value, Count count, SilexSourceLocation location, const char* typeName) {
+        \\    static_assert(std::is_unsigned_v<T>);
+        \\    if constexpr (std::is_signed_v<Count>) {
+        \\        if (count < 0) [[unlikely]] shiftRuntimeError(location, typeName, "left shift", count);
+        \\    }
+        \\    using UnsignedCount = std::make_unsigned_t<Count>;
+        \\    if (static_cast<UnsignedCount>(count) >= sizeof(T) * CHAR_BIT) [[unlikely]] shiftRuntimeError(location, typeName, "left shift", count);
+        \\    return static_cast<T>(value << count);
+        \\}
+        \\
+        \\template <typename T, typename Count> inline T checkedShiftRight(T value, Count count, SilexSourceLocation location, const char* typeName) {
+        \\    static_assert(std::is_unsigned_v<T>);
+        \\    if constexpr (std::is_signed_v<Count>) {
+        \\        if (count < 0) [[unlikely]] shiftRuntimeError(location, typeName, "right shift", count);
+        \\    }
+        \\    using UnsignedCount = std::make_unsigned_t<Count>;
+        \\    if (static_cast<UnsignedCount>(count) >= sizeof(T) * CHAR_BIT) [[unlikely]] shiftRuntimeError(location, typeName, "right shift", count);
+        \\    return static_cast<T>(value >> count);
         \\}
         \\
         \\// -----------------------------------------------------------------------------
@@ -690,6 +755,24 @@ fn generateStatement(
             if (argument.type == .int8 or argument.type == .uint8) try output.append(allocator, ')');
             if (argument.type == .bool) try output.appendSlice(allocator, " ? \"true\" : \"false\")");
             try output.appendSlice(allocator, " << '\\n';\n");
+        },
+        .assertion => |assertion| {
+            try indent(allocator, output, indentation);
+            try output.appendSlice(allocator, "if (!");
+            try generateCondition(allocator, output, assertion.condition);
+            try output.appendSlice(allocator, ") assertionRuntimeError(");
+            try appendCppSourceLocation(allocator, output, assertion.position);
+            try output.appendSlice(allocator, ", ");
+            try generateExpression(allocator, output, assertion.message);
+            try output.appendSlice(allocator, ");\n");
+        },
+        .panic_statement => |panic_value| {
+            try indent(allocator, output, indentation);
+            try output.appendSlice(allocator, "panicRuntimeError(");
+            try appendCppSourceLocation(allocator, output, panic_value.position);
+            try output.appendSlice(allocator, ", ");
+            try generateExpression(allocator, output, panic_value.message);
+            try output.appendSlice(allocator, ");\n");
         },
         .variable_declaration => |declaration| {
             try indent(allocator, output, indentation);
@@ -1040,6 +1123,14 @@ fn generateExpression(allocator: Allocator, output: *std.ArrayList(u8), expressi
                 try generateExpression(allocator, output, binary.right);
                 try generateRuntimeArguments(allocator, output, expression.position, expression.type);
                 try output.append(allocator, ')');
+            } else if (isShift(binary.operator)) {
+                try output.appendSlice(allocator, checkedShiftFunction(binary.operator));
+                try output.append(allocator, '(');
+                try generateExpression(allocator, output, binary.left);
+                try output.appendSlice(allocator, ", ");
+                try generateExpression(allocator, output, binary.right);
+                try generateRuntimeArguments(allocator, output, expression.position, expression.type);
+                try output.append(allocator, ')');
             } else if ((binary.operator == .equal or binary.operator == .not_equal) and binary.left.type == .structure) {
                 const structure_type = binary.left.type.structure;
                 if (binary.operator == .not_equal) try output.append(allocator, '!');
@@ -1228,7 +1319,14 @@ fn isUnsignedInteger(type_name: Semantic.Type) bool {
 
 fn isArithmetic(operator: Ast.BinaryOperator) bool {
     return switch (operator) {
-        .add, .subtract, .multiply, .divide => true,
+        .add, .subtract, .multiply, .divide, .remainder => true,
+        else => false,
+    };
+}
+
+fn isShift(operator: Ast.BinaryOperator) bool {
+    return switch (operator) {
+        .shift_left, .shift_right => true,
         else => false,
     };
 }
@@ -1239,6 +1337,15 @@ fn checkedBinaryFunction(operator: Ast.BinaryOperator) []const u8 {
         .subtract => "checkedSubtract",
         .multiply => "checkedMultiply",
         .divide => "checkedDivide",
+        .remainder => "checkedRemainder",
+        else => unreachable,
+    };
+}
+
+fn checkedShiftFunction(operator: Ast.BinaryOperator) []const u8 {
+    return switch (operator) {
+        .shift_left => "checkedShiftLeft",
+        .shift_right => "checkedShiftRight",
         else => unreachable,
     };
 }
@@ -1280,8 +1387,13 @@ fn operatorText(operator: Ast.BinaryOperator) []const u8 {
         .greater_equal => " >= ",
         .add => " + ",
         .subtract => " - ",
+        .shift_left => " << ",
+        .shift_right => " >> ",
+        .bit_and => " & ",
+        .bit_xor => " ^ ",
         .multiply => " * ",
         .divide => " / ",
+        .remainder => " % ",
     };
 }
 
@@ -1394,6 +1506,7 @@ test "generate checked integer operations with backend overflow primitives" {
         \\    value -= 1
         \\    value *= 2
         \\    value /= 2
+        \\    print(value % 2)
         \\    value++
         \\    value--
         \\    print(-value)
@@ -1412,6 +1525,7 @@ test "generate checked integer operations with backend overflow primitives" {
     try std.testing.expect(std.mem.indexOf(u8, cpp, "silexValue0 = checkedSubtract(silexValue0, std::int8_t{1}, SilexSourceLocation{") != null);
     try std.testing.expect(std.mem.indexOf(u8, cpp, "silexValue0 = checkedMultiply(silexValue0, std::int8_t{2}, SilexSourceLocation{") != null);
     try std.testing.expect(std.mem.indexOf(u8, cpp, "silexValue0 = checkedDivide(silexValue0, std::int8_t{2}, SilexSourceLocation{") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "checkedRemainder(silexValue0, std::int8_t{2}, SilexSourceLocation{") != null);
     try std.testing.expect(std.mem.indexOf(u8, cpp, "checkedNegate(silexValue0, SilexSourceLocation{") != null);
 }
 

@@ -18,6 +18,63 @@ canonical. A non-void return type is never inferred. The compiler collects
 signatures before checking bodies, so functions may be called before their
 definition and may be recursive.
 
+## Overloads
+
+Top-level functions and methods in the same structure may share a name when
+their ordered parameter lists differ by count, type, or `&` passing. The return
+type is not part of a signature: aliases such as `int` and `int64`, `uint` and
+`uint64`, or `float` and `float32` therefore do not create distinct overloads.
+
+```sx
+func measure() int {
+    return 0
+}
+
+func measure(value:int) int {
+    return value
+}
+```
+
+At a call site, Silex first keeps the signatures compatible with the argument
+count, types and `&` markers. It then prefers an exact type, a same-sign
+integer widening or `float` to `float64`, and finally an integer-to-float
+conversion. If no single signature is strictly better, the call is rejected as
+ambiguous and the remaining signatures are listed. Integer and decimal
+literals keep their default `int` and `float` types during this selection.
+
+`main` and every `native func` remain unique by name. A native C symbol does
+not encode parameters, so native overloads are not available.
+
+## Assertions
+
+`assert(condition, message)` verifies a runtime invariant. The condition must
+be `bool` and the message `str`. If the condition is false, Silex writes the
+source location and `assertion failed: <message>` to standard error, then ends
+the program with exit code 1. Assertions remain active in every build.
+
+```sx
+assert(index < values.count(), "index must address a value")
+```
+
+Assertions do not introduce recoverable errors or error propagation.
+
+## Panic
+
+`panic(message)` stops the current execution path. Its message must be `str`.
+Silex writes the location of `panic` and `runtime error: <message>` to standard
+error, then exits with code 1. A `panic` satisfies a non-`void` function's
+mandatory return path, but does not introduce recoverable errors, stack traces,
+or error propagation.
+
+```sx
+func require_positive(value:int) int {
+    if (value <= 0) {
+        panic("value must be positive")
+    }
+    return value
+}
+```
+
 `native func` declares a private, top-level function implemented by a
 distributed module's native runtime rather than by a Silex body. The module
 must contain `native.json`; applications cannot declare native functions, and

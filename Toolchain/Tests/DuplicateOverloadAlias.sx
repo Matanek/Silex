@@ -1,0 +1,10 @@
+func measure(value:int) int {
+    return value
+}
+
+func measure(value:int64) int {
+    return value
+}
+
+func main() {
+}
