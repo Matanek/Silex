@@ -30,9 +30,7 @@ func main() {
         name:"Ada"
     }
 
-    player.position
-        ..move(2, 0)
-        ..translate(0, 3)
+    player.position..move(2, 0)..translate(0, 3)
     print(player.name)
     print(player.position.total())
 

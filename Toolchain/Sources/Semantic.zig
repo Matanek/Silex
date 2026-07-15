@@ -73,6 +73,7 @@ pub const Expression = struct {
         structure_initializer: StructureInitializer,
         member_access: MemberAccess,
         index_access: IndexAccess,
+        slice_access: SliceAccess,
         unary: Unary,
         binary: Binary,
         conversion: Conversion,
@@ -152,7 +153,12 @@ pub const Expression = struct {
     pub const IndexAccess = struct {
         object: *Expression,
         index: *Expression,
-        from_end: bool,
+    };
+
+    pub const SliceAccess = struct {
+        object: *Expression,
+        start: *Expression,
+        end: *Expression,
     };
 
     pub const Binary = struct {
@@ -220,9 +226,23 @@ pub const Statement = union(enum) {
     pub const For = struct {
         generated_name: []const u8,
         element_type: Type,
-        mutable: bool,
-        iterable: *Expression,
+        mutability: Ast.Mutability,
+        source: IterationSource,
         body: []const Statement,
+
+        pub const IterationSource = union(enum) {
+            collection: *Expression,
+            integer_range: IntegerRange,
+        };
+
+        pub const IntegerRange = struct {
+            start: *Expression,
+            end: *Expression,
+            generated_start_name: []const u8,
+            generated_end_name: []const u8,
+            generated_step_name: []const u8,
+            generated_current_name: []const u8,
+        };
     };
 };
 
@@ -807,14 +827,7 @@ pub const Analyzer = struct {
         declaration: Ast.Statement.VariableDeclaration,
         scope: *Scope,
     ) AnalyzeError!Statement {
-        if (findInCurrentScope(scope, declaration.name) != null) {
-            const message = try std.fmt.allocPrint(
-                self.allocator,
-                "variable '{s}' is already declared in this scope",
-                .{declaration.name},
-            );
-            return self.fail(declaration.name_position, message);
-        }
+        try self.requireAvailableVariableName(scope, declaration.name, declaration.name_position);
 
         const declared_annotation_type = if (declaration.annotation) |annotation|
             try typeFromAnnotation(self, annotation, declaration.name_position)
@@ -868,6 +881,30 @@ pub const Analyzer = struct {
             .mutability = declaration.mutability,
             .initializer = initializer,
         } };
+    }
+
+    fn requireAvailableVariableName(
+        self: *Analyzer,
+        scope: *const Scope,
+        name: []const u8,
+        position: Source.Position,
+    ) AnalyzeError!void {
+        if (findInCurrentScope(scope, name) != null) {
+            const message = try std.fmt.allocPrint(
+                self.allocator,
+                "variable '{s}' is already declared in this scope",
+                .{name},
+            );
+            return self.fail(position, message);
+        }
+        const parent = scope.parent orelse return;
+        if (findSymbol(parent, name) == null) return;
+        const message = try std.fmt.allocPrint(
+            self.allocator,
+            "variable '{s}' is already declared in an enclosing scope",
+            .{name},
+        );
+        return self.fail(position, message);
     }
 
     fn assignment(
@@ -1031,53 +1068,84 @@ pub const Analyzer = struct {
         ast: Ast.Statement.For,
         parent_scope: *const Scope,
     ) AnalyzeError!Statement {
-        const iterable = try self.expression(ast.iterable, parent_scope);
-        const element_type: Type = switch (iterable.type) {
-            .list => |element| element.*,
-            .fixed_array => |array| array.element.*,
-            else => return self.fail(ast.iterable.position, "for source must be an array or list"),
-        };
-
-        const root = assignmentRoot(ast.iterable);
+        var body_scope = Scope{ .parent = parent_scope };
+        try self.requireAvailableVariableName(&body_scope, ast.name, ast.name_position);
+        const mutable = ast.mutability == .mutable;
+        const symbol_id = self.next_symbol_id;
+        var element_type: Type = undefined;
         var iteration_borrow: ?Borrow = null;
-        if (root) |resolved_root| {
-            const state: *BindingState = switch (resolved_root) {
-                .self => &self.current_self_state,
-                .variable => |name| (findSymbol(parent_scope, name) orelse return self.fail(ast.iterable.position, "unknown iteration source")).state,
-            };
-            if (ast.mutable) {
-                switch (resolved_root) {
-                    .self => self.current_method_direct_mutation = true,
-                    .variable => |name| {
-                        const symbol = findSymbol(parent_scope, name).?;
-                        if (symbol.mutability == .immutable) {
-                            const message = try std.fmt.allocPrint(self.allocator, "cannot iterate mutably over immutable variable '{s}'", .{name});
-                            return self.fail(ast.iterable.position, message);
+        const source: Statement.For.IterationSource = switch (ast.source) {
+            .collection => |ast_collection| source: {
+                const collection = try self.expression(ast_collection, parent_scope);
+                element_type = switch (collection.type) {
+                    .list => |element| element.*,
+                    .fixed_array => |array| array.element.*,
+                    else => return self.fail(ast_collection.position, "for source must be an array or list"),
+                };
+
+                const root = assignmentRoot(ast_collection);
+                if (root) |resolved_root| {
+                    const state: *BindingState = switch (resolved_root) {
+                        .self => &self.current_self_state,
+                        .variable => |name| (findSymbol(parent_scope, name) orelse return self.fail(ast_collection.position, "unknown iteration source")).state,
+                    };
+                    if (mutable) {
+                        switch (resolved_root) {
+                            .self => self.current_method_direct_mutation = true,
+                            .variable => |name| {
+                                const symbol = findSymbol(parent_scope, name).?;
+                                if (symbol.mutability == .immutable) {
+                                    const message = try std.fmt.allocPrint(self.allocator, "cannot iterate mutably over immutable variable '{s}'", .{name});
+                                    return self.fail(ast_collection.position, message);
+                                }
+                            },
                         }
-                    },
+                        if (state.mutable_borrow or state.immutable_borrows != 0) {
+                            return self.fail(ast_collection.position, "cannot iterate mutably over an already borrowed collection");
+                        }
+                        state.mutable_borrow = true;
+                    } else {
+                        if (state.mutable_borrow) return self.fail(ast_collection.position, "cannot iterate over a mutably borrowed collection");
+                        state.immutable_borrows += 1;
+                    }
+                    iteration_borrow = .{ .root = state, .mutable = mutable };
+                } else if (mutable) {
+                    return self.fail(ast_collection.position, "mutable iteration requires a mutable collection place");
                 }
-                if (state.mutable_borrow or state.immutable_borrows != 0) {
-                    return self.fail(ast.iterable.position, "cannot iterate mutably over an already borrowed collection");
+
+                break :source .{ .collection = collection };
+            },
+            .integer_range => |ast_range| source: {
+                const start = try self.expression(ast_range.start, parent_scope);
+                if (!typeEqual(start.type, .int)) {
+                    const message = try typeMismatchMessage(self.allocator, .int, start.type);
+                    return self.fail(ast_range.start.position, message);
                 }
-                state.mutable_borrow = true;
-            } else {
-                if (state.mutable_borrow) return self.fail(ast.iterable.position, "cannot iterate over a mutably borrowed collection");
-                state.immutable_borrows += 1;
-            }
-            iteration_borrow = .{ .root = state, .mutable = ast.mutable };
-        } else if (ast.mutable) {
-            return self.fail(ast.iterable.position, "mutable iteration requires a mutable collection place");
-        }
+                const end = try self.expression(ast_range.end, parent_scope);
+                if (!typeEqual(end.type, .int)) {
+                    const message = try typeMismatchMessage(self.allocator, .int, end.type);
+                    return self.fail(ast_range.end.position, message);
+                }
+                element_type = .int;
+                break :source .{ .integer_range = .{
+                    .start = start,
+                    .end = end,
+                    .generated_start_name = try std.fmt.allocPrint(self.allocator, "silexRangeStart{d}", .{symbol_id}),
+                    .generated_end_name = try std.fmt.allocPrint(self.allocator, "silexRangeEnd{d}", .{symbol_id}),
+                    .generated_step_name = try std.fmt.allocPrint(self.allocator, "silexRangeStep{d}", .{symbol_id}),
+                    .generated_current_name = try std.fmt.allocPrint(self.allocator, "silexRangeCurrent{d}", .{symbol_id}),
+                } };
+            },
+        };
         defer if (iteration_borrow) |borrow| releaseBorrow(borrow);
 
-        var body_scope = Scope{ .parent = parent_scope };
-        const generated_name = try std.fmt.allocPrint(self.allocator, "silexValue{d}", .{self.next_symbol_id});
+        const generated_name = try std.fmt.allocPrint(self.allocator, "silexValue{d}", .{symbol_id});
         self.next_symbol_id += 1;
         try body_scope.symbols.append(self.allocator, .{
             .source_name = ast.name,
             .generated_name = generated_name,
             .type = element_type,
-            .mutability = if (ast.mutable) .mutable else .immutable,
+            .mutability = ast.mutability,
             .state = try self.newBindingState(element_type),
         });
 
@@ -1088,8 +1156,8 @@ pub const Analyzer = struct {
         return .{ .for_statement = .{
             .generated_name = generated_name,
             .element_type = element_type,
-            .mutable = ast.mutable,
-            .iterable = iterable,
+            .mutability = ast.mutability,
+            .source = source,
             .body = body,
         } };
     }
@@ -1146,6 +1214,7 @@ pub const Analyzer = struct {
             .structure_initializer => |initializer| self.structureInitializerExpression(initializer, scope),
             .member_access => |member| self.memberAccessExpression(member, scope),
             .index_access => |access| self.indexAccessExpression(access, scope),
+            .slice_access => |access| self.sliceAccessExpression(access, scope),
             .unary => |unary| self.unaryExpression(unary, scope),
             .conversion => |conversion| self.conversionExpression(conversion, scope),
             .binary => |binary| self.binaryExpression(binary, scope),
@@ -2173,7 +2242,42 @@ pub const Analyzer = struct {
             .value = .{ .index_access = .{
                 .object = object,
                 .index = index,
-                .from_end = access.from_end,
+            } },
+        });
+    }
+
+    fn sliceAccessExpression(
+        self: *Analyzer,
+        access: Ast.Expression.SliceAccess,
+        scope: *const Scope,
+    ) AnalyzeError!*Expression {
+        const object = try self.expression(access.object, scope);
+        const element_type: Type = switch (object.type) {
+            .list => |element| element.*,
+            .fixed_array => |array| array.element.*,
+            else => return self.fail(access.bracket_position, "collection slice requires an array or list value"),
+        };
+        var start = try self.expressionForExpected(access.start, scope, .int);
+        start = try self.coerce(start, .int);
+        if (!typeEqual(start.type, .int)) {
+            const message = try std.fmt.allocPrint(self.allocator, "collection slice start expects 'int', found '{s}'", .{typeName(start.type)});
+            return self.fail(access.start.position, message);
+        }
+        var end = try self.expressionForExpected(access.end, scope, .int);
+        end = try self.coerce(end, .int);
+        if (!typeEqual(end.type, .int)) {
+            const message = try std.fmt.allocPrint(self.allocator, "collection slice end expects 'int', found '{s}'", .{typeName(end.type)});
+            return self.fail(access.end.position, message);
+        }
+        const element = try self.allocator.create(Type);
+        element.* = element_type;
+        return self.newExpression(.{
+            .type = .{ .list = element },
+            .position = access.bracket_position,
+            .value = .{ .slice_access = .{
+                .object = object,
+                .start = start,
+                .end = end,
             } },
         });
     }
@@ -2245,7 +2349,13 @@ pub const Analyzer = struct {
                     try self.validateStatements(while_value.body);
                 },
                 .for_statement => |for_value| {
-                    try self.validateExpression(for_value.iterable);
+                    switch (for_value.source) {
+                        .collection => |collection| try self.validateExpression(collection),
+                        .integer_range => |range| {
+                            try self.validateExpression(range.start);
+                            try self.validateExpression(range.end);
+                        },
+                    }
                     try self.validateStatements(for_value.body);
                 },
                 .break_statement, .continue_statement => {},
@@ -2306,6 +2416,11 @@ pub const Analyzer = struct {
             .index_access => |access| {
                 try self.validateExpression(access.object);
                 try self.validateExpression(access.index);
+            },
+            .slice_access => |access| {
+                try self.validateExpression(access.object);
+                try self.validateExpression(access.start);
+                try self.validateExpression(access.end);
             },
             .unary => |unary| {
                 if (unary.operator == .numeric_negate and unary.operand.value == .integer and isInteger(expression_value.type)) {
@@ -3047,6 +3162,7 @@ fn isCascadeOwnedTemporary(expression: *const Ast.Expression) bool {
         .call, .method_call, .structure_initializer, .sequence_literal => true,
         .member_access => |member| isCascadeOwnedTemporary(member.object),
         .index_access => |access| isCascadeOwnedTemporary(access.object),
+        .slice_access => true,
         else => false,
     };
 }
@@ -3088,6 +3204,18 @@ fn assignmentOperatorText(operator: Ast.AssignmentOperator) []const u8 {
         .increment => "++",
         .decrement => "--",
     };
+}
+
+fn expectSemanticError(source: []const u8, expected_message: []const u8) !void {
+    const Parser = @import("Parser.zig").Parser;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var parser = Parser.init(allocator, source);
+    var analyzer = Analyzer.init(allocator);
+    try std.testing.expectError(error.InvalidSource, analyzer.analyze(try parser.parse()));
+    try std.testing.expectEqualStrings(expected_message, analyzer.diagnostic.?.message);
 }
 
 test "infer variables and resolve nested scope" {
@@ -3152,27 +3280,132 @@ test "block variables do not escape their scope" {
     try std.testing.expectEqualStrings("unknown variable 'inside'", analyzer.diagnostic.?.message);
 }
 
-test "nested scope may shadow an outer variable" {
+test "reject lexical shadowing from enclosing scopes" {
+    try expectSemanticError(
+        "func read(value:int) int { if (true) { let value = 1; } return value; } func main() void {}",
+        "variable 'value' is already declared in an enclosing scope",
+    );
+    try expectSemanticError(
+        "func main() void { let value = 1; if (true) { let value = value + 1; } }",
+        "variable 'value' is already declared in an enclosing scope",
+    );
+    try expectSemanticError(
+        "func main() void { var count = 1; while (true) { var count = 2; } }",
+        "variable 'count' is already declared in an enclosing scope",
+    );
+    try expectSemanticError(
+        "func main() void { let values = [1]; for (let value in values) { if (true) { let value = 2; } } }",
+        "variable 'value' is already declared in an enclosing scope",
+    );
+    try expectSemanticError(
+        "func main() void { let values = [1]; let value = 0; for (let value in values) {} }",
+        "variable 'value' is already declared in an enclosing scope",
+    );
+    try expectSemanticError(
+        "func main() void { let values = [1]; for (let value in values) { for (let value in values) {} } }",
+        "variable 'value' is already declared in an enclosing scope",
+    );
+}
+
+test "separate scopes may reuse a local name" {
     const Parser = @import("Parser.zig").Parser;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var parser = Parser.init(
-        allocator,
-        "func main() void { let value = 1; if (true) { let value = 2; print(value); } print(value); }",
+    var parser = Parser.init(allocator,
+        \\func main() void {
+        \\    let values = [1]
+        \\    if (true) { let value = 1 } else { let value = 2 }
+        \\    for (let value in values) {}
+        \\    for (let value in values) {}
+        \\}
     );
     var analyzer = Analyzer.init(allocator);
     const program = try analyzer.analyze(try parser.parse());
 
-    const outer_name = program.functions[0].statements[0].variable_declaration.generated_name;
-    const inner_name = program.functions[0].statements[1].if_statement.body[0].variable_declaration.generated_name;
-    try std.testing.expect(!std.mem.eql(u8, outer_name, inner_name));
-    try std.testing.expectEqualStrings(
-        inner_name,
-        program.functions[0].statements[1].if_statement.body[1].print.value.variable,
+    try std.testing.expectEqual(@as(usize, 4), program.functions[0].statements.len);
+}
+
+test "local variable may share a structure field name" {
+    const Parser = @import("Parser.zig").Parser;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var parser = Parser.init(allocator,
+        \\struct Counter {
+        \\    value:int
+        \\    func combined() int {
+        \\        let value = 1
+        \\        return self.value + value
+        \\    }
+        \\}
+        \\func main() void {}
     );
-    try std.testing.expectEqualStrings(outer_name, program.functions[0].statements[2].print.value.variable);
+    var analyzer = Analyzer.init(allocator);
+    const program = try analyzer.analyze(try parser.parse());
+
+    try std.testing.expectEqual(@as(usize, 2), program.structures[0].methods[0].statements.len);
+}
+
+test "analyze compact and named integer ranges" {
+    const Parser = @import("Parser.zig").Parser;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var parser = Parser.init(allocator,
+        \\func main() void {
+        \\    for (let i in 0...3) {}
+        \\    for (var i in range(3, 0)) { i += 100 }
+        \\}
+    );
+    var analyzer = Analyzer.init(allocator);
+    const program = try analyzer.analyze(try parser.parse());
+
+    const compact = program.functions[0].statements[0].for_statement;
+    try std.testing.expectEqual(Ast.Mutability.immutable, compact.mutability);
+    try std.testing.expectEqual(Type.int, compact.source.integer_range.start.type);
+    const named = program.functions[0].statements[1].for_statement;
+    try std.testing.expectEqual(Ast.Mutability.mutable, named.mutability);
+    try std.testing.expectEqual(Type.int, named.source.integer_range.end.type);
+}
+
+test "analyze negative collection indexes and slices" {
+    const Parser = @import("Parser.zig").Parser;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var parser = Parser.init(allocator,
+        \\func main() {
+        \\    let values:int[3] = [10, 20, 30]
+        \\    let last = values[-1]
+        \\    let middle = values[1:-1]
+        \\}
+    );
+    var analyzer = Analyzer.init(allocator);
+    const program = try analyzer.analyze(try parser.parse());
+
+    const last = program.functions[0].statements[1].variable_declaration.initializer.?;
+    try std.testing.expectEqual(Type.int, last.type);
+    try std.testing.expect(last.value == .index_access);
+    const middle = program.functions[0].statements[2].variable_declaration.initializer.?;
+    try std.testing.expect(middle.type == .list);
+    try std.testing.expectEqual(Type.int, middle.type.list.*);
+    try std.testing.expect(middle.value == .slice_access);
+}
+
+test "reject non-int range bounds" {
+    try expectSemanticError(
+        "func main() void { for (let i in 0.0...3) {} }",
+        "expected 'int', found 'float'",
+    );
+    try expectSemanticError(
+        "func main() void { for (let i in range(0, true)) {} }",
+        "expected 'int', found 'bool'",
+    );
 }
 
 test "reject incompatible type annotation" {

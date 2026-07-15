@@ -482,8 +482,14 @@ pub const Resolver = struct {
                 .position = value.position,
                 .name = value.name,
                 .name_position = value.name_position,
-                .mutable = value.mutable,
-                .iterable = try self.transformExpression(value.iterable),
+                .mutability = value.mutability,
+                .source = switch (value.source) {
+                    .collection => |collection| .{ .collection = try self.transformExpression(collection) },
+                    .integer_range => |range| .{ .integer_range = .{
+                        .start = try self.transformExpression(range.start),
+                        .end = try self.transformExpression(range.end),
+                    } },
+                },
                 .body = try self.transformStatements(value.body),
             } },
             .break_statement => |position| .{ .break_statement = position },
@@ -544,6 +550,17 @@ pub const Resolver = struct {
                 .object = try self.transformExpression(member.object),
                 .name = member.name,
                 .name_position = member.name_position,
+            } },
+            .index_access => |access| .{ .index_access = .{
+                .object = try self.transformExpression(access.object),
+                .index = try self.transformExpression(access.index),
+                .bracket_position = access.bracket_position,
+            } },
+            .slice_access => |access| .{ .slice_access = .{
+                .object = try self.transformExpression(access.object),
+                .start = try self.transformExpression(access.start),
+                .end = try self.transformExpression(access.end),
+                .bracket_position = access.bracket_position,
             } },
             .unary => |unary| .{ .unary = .{
                 .operator = unary.operator,

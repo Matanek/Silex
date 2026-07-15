@@ -102,4 +102,7 @@ func main() {
     clock.reset()
     let clock_is_reset = clock.get_total_seconds() == 0.0 && !clock.is_paused()
     print(clock_is_reset && clock.get_time_scale() == 2.0 && clock.tick() == 0.0)
+
+    print(stopwatch..reset()..start().is_running())
+    stopwatch.stop()
 }

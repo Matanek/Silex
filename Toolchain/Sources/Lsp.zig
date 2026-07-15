@@ -11,6 +11,7 @@ const Io = std.Io;
 
 const protocol_version = "2.0";
 const max_message_size = 16 * 1024 * 1024;
+const completion_trigger_characters = [_][]const u8{"."};
 
 const Document = struct {
     uri: []const u8,
@@ -136,7 +137,7 @@ const Server = struct {
                 .capabilities = .{
                     .textDocumentSync = 1,
                     .completionProvider = .{
-                        .triggerCharacters = &.{"."},
+                        .triggerCharacters = &completion_trigger_characters,
                     },
                     .signatureHelpProvider = .{
                         .triggerCharacters = &.{ "(", "," },
@@ -1361,13 +1362,22 @@ fn memberReceiverPath(
 ) !?[][]const u8 {
     var prefix_start = cursor_offset;
     while (prefix_start > 0 and isIdentifierContinue(source[prefix_start - 1])) prefix_start -= 1;
-    if (prefix_start == 0 or source[prefix_start - 1] != '.') return null;
+    if (prefix_start == 0) return null;
 
-    const is_cascade = prefix_start >= 2 and source[prefix_start - 2] == '.';
-    const path_end = if (is_cascade)
+    if (source[prefix_start - 1] != '.') return null;
+    const is_cascade = prefix_start >= 2 and source[prefix_start - 2] == '.' and
+        (prefix_start < 3 or source[prefix_start - 3] != '.');
+    var path_end = if (is_cascade)
         cascadeReceiverEnd(source, prefix_start - 2) orelse return null
     else
         prefix_start - 1;
+    var is_cascade_receiver = is_cascade;
+    if (!is_cascade) {
+        if (terminalCascadeReceiverEnd(source, prefix_start - 1)) |receiver_end| {
+            path_end = receiver_end;
+            is_cascade_receiver = true;
+        }
+    }
     var path_start = path_end;
     while (path_start > 0 and
         (isIdentifierContinue(source[path_start - 1]) or source[path_start - 1] == '.'))
@@ -1376,7 +1386,7 @@ fn memberReceiverPath(
     }
     const path_source = source[path_start..path_end];
     if (path_source.len == 0) {
-        if (!is_cascade) return null;
+        if (!is_cascade_receiver) return null;
         const declaration_name = cascadeDeclarationName(source, path_end) orelse return null;
         const path = try allocator.alloc([]const u8, 1);
         path[0] = declaration_name;
@@ -1393,6 +1403,41 @@ fn memberReceiverPath(
         try path.append(allocator, segment);
     }
     return try path.toOwnedSlice(allocator);
+}
+
+fn terminalCascadeReceiverEnd(source: []const u8, member_operator_start: usize) ?usize {
+    const line_start = if (std.mem.lastIndexOfScalar(u8, source[0..member_operator_start], '\n')) |newline|
+        newline + 1
+    else
+        0;
+    const statement_start = if (std.mem.lastIndexOfScalar(u8, source[line_start..member_operator_start], ';')) |semicolon|
+        line_start + semicolon + 1
+    else
+        line_start;
+    const statement = source[statement_start..member_operator_start];
+    const operator_offset = lastCascadeOperator(statement) orelse return null;
+    return cascadeReceiverEnd(source, statement_start + operator_offset);
+}
+
+fn firstCascadeOperator(source: []const u8) ?usize {
+    var index: usize = 0;
+    while (index + 1 < source.len) : (index += 1) {
+        if (source[index] != '.' or source[index + 1] != '.') continue;
+        const preceded_by_dot = index > 0 and source[index - 1] == '.';
+        const followed_by_dot = index + 2 < source.len and source[index + 2] == '.';
+        if (!preceded_by_dot and !followed_by_dot) return index;
+    }
+    return null;
+}
+
+fn lastCascadeOperator(source: []const u8) ?usize {
+    var result: ?usize = null;
+    var search_start: usize = 0;
+    while (firstCascadeOperator(source[search_start..])) |offset| {
+        result = search_start + offset;
+        search_start += offset + 2;
+    }
+    return result;
 }
 
 fn cascadeDeclarationName(source: []const u8, anchor_end: usize) ?[]const u8 {
@@ -1418,9 +1463,16 @@ fn cascadeReceiverEnd(source: []const u8, operator_start: usize) ?usize {
         newline + 1
     else
         0;
-    const compact_receiver = std.mem.trim(u8, source[line_start..operator_start], " \t\r");
+    const statement_start = if (std.mem.lastIndexOfScalar(u8, source[line_start..operator_start], ';')) |semicolon|
+        line_start + semicolon + 1
+    else
+        line_start;
+    const compact_receiver = std.mem.trim(u8, source[statement_start..operator_start], " \t\r");
     if (compact_receiver.len != 0) {
-        return line_start + std.mem.trimEnd(u8, source[line_start..operator_start], " \t\r").len;
+        if (firstCascadeOperator(source[statement_start..operator_start])) |first_operator| {
+            return statement_start + first_operator;
+        }
+        return statement_start + std.mem.trimEnd(u8, source[statement_start..operator_start], " \t\r").len;
     }
 
     var search_end = line_start;
@@ -1433,6 +1485,9 @@ fn cascadeReceiverEnd(source: []const u8, operator_start: usize) ?usize {
         const line = source[previous_start..line_end];
         const trimmed = std.mem.trim(u8, line, " \t\r");
         if (trimmed.len != 0 and !std.mem.startsWith(u8, trimmed, "..")) {
+            if (firstCascadeOperator(line)) |first_operator| {
+                return previous_start + first_operator;
+            }
             return previous_start + std.mem.trimEnd(u8, line, " \t\r").len;
         }
         search_end = previous_start;
@@ -1895,6 +1950,46 @@ test "cascade completion resolves a receiver on the preceding line" {
     defer std.testing.allocator.free(items);
     try std.testing.expectEqual(@as(usize, 1), items.len);
     try std.testing.expectEqualStrings("speed", items[0].label);
+}
+
+test "compact cascade completion keeps the first receiver" {
+    const source =
+        \\struct Move {
+        \\    speed:float = 100
+        \\    func reset() void {}
+        \\}
+        \\func main() void {
+        \\    var move:Move
+        \\    move..reset()..
+        \\}
+    ;
+    const items = try completionItems(std.testing.allocator, std.testing.io, source, .{ .line = 6, .character = 19 });
+    defer std.testing.allocator.free(items);
+    try std.testing.expect(containsCompletion(items, "speed"));
+    try std.testing.expect(containsCompletion(items, "reset"));
+    try std.testing.expect(!containsCompletion(items, "return"));
+}
+
+test "terminal member dot after a compact cascade keeps the first receiver" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const source =
+        \\import STD
+        \\func main() void {
+        \\    var stopwatch = STD.Time.Stopwatch {}
+        \\    stopwatch..reset()..start().
+        \\}
+    ;
+    const items = try completionItems(allocator, std.testing.io, source, .{ .line = 3, .character = 32 });
+    try std.testing.expect(containsCompletion(items, "is_running"));
+    try std.testing.expect(containsCompletion(items, "reset"));
+    try std.testing.expect(!containsCompletion(items, "return"));
+}
+
+test "completion trigger includes members and cascades" {
+    try std.testing.expectEqual(@as(usize, 1), completion_trigger_characters.len);
+    try std.testing.expectEqualStrings(".", completion_trigger_characters[0]);
 }
 
 test "first dot of an indented cascade does not offer global completions" {

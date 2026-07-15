@@ -13,15 +13,29 @@ first element. An empty literal requires an explicit or expected collection
 type. An array literal must contain exactly `N` values.
 
 Both collection kinds have `count()`, `is_empty()`, indexed reads and writes,
-`swap`, `reverse`, and `replace`. Indexes have type `int`; `^1` names the last
-element, `^2` the one before it. Out-of-range access is a Silex runtime error.
+`swap`, `reverse`, and `replace`. Indexes have type `int`; negative indexes are
+relative to the end, so `-1` names the last element and `-2` the one before it.
+Out-of-range access is a Silex runtime error.
 
 ```sx
 var values:int[] = [10, 20, 30]
-let last:int = values[^1]
+let last:int = values[-1]
 values[1] = 25
 let previous:int = values.replace(1, 40)
 ```
+
+Both collection kinds can also copy a contiguous slice into a dynamic list:
+
+```sx
+let middle:int[] = values[1:3]
+let without_last:int[] = values[0:-1]
+```
+
+The start is included and the end is excluded. A negative bound is relative to
+the end, and each bound is clamped between zero and the collection count. If
+the normalized start is greater than or equal to the normalized end, the slice
+is empty. Both bounds are required and evaluated once from left to right. The
+result is an independent dynamic list; it is not a view into the source.
 
 Dynamic lists also provide `append`, `prepend`, `insert`, `take`,
 `take_first`, `take_last`, and `clear`. `append` accepts one compatible element

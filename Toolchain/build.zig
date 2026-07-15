@@ -1,5 +1,5 @@
 const std = @import("std");
-const silex_version = "0.13.1";
+const silex_version = "0.14.0";
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
@@ -572,7 +572,14 @@ pub fn build(b: *std.Build) void {
     invalid_for_source_command.addArgs(&.{ "compile", "Tests/InvalidForSource.sx" });
     invalid_for_source_command.expectExitCode(1);
     invalid_for_source_command.expectStdErrEqual(
-        "Tests/InvalidForSource.sx:2:19: error: for source must be an array or list\n",
+        "Tests/InvalidForSource.sx:2:23: error: for source must be an array or list\n",
+    );
+
+    const missing_for_binding_command = b.addRunArtifact(executable);
+    missing_for_binding_command.addArgs(&.{ "compile", "Tests/MissingForBinding.sx" });
+    missing_for_binding_command.expectExitCode(1);
+    missing_for_binding_command.expectStdErrEqual(
+        "Tests/MissingForBinding.sx:3:10: error: expected 'let' or 'var' after 'for ('\n",
     );
 
     const invalid_immutable_iteration_alias_command = b.addRunArtifact(executable);
@@ -926,6 +933,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&break_outside_loop_command.step);
     test_step.dependOn(&continue_outside_loop_command.step);
     test_step.dependOn(&invalid_for_source_command.step);
+    test_step.dependOn(&missing_for_binding_command.step);
     test_step.dependOn(&invalid_immutable_iteration_alias_command.step);
     test_step.dependOn(&invalid_mutable_iteration_source_command.step);
     test_step.dependOn(&invalid_iteration_mutation_command.step);
@@ -1040,15 +1048,20 @@ pub fn build(b: *std.Build) void {
     const collections_command = b.addRunArtifact(executable);
     collections_command.step.dependOn(&strings_command.step);
     collections_command.addArgs(&.{ "run", "Smokes/Collections.sx" });
-    collections_command.expectStdOutEqual(hostText(b, "1\n3\n20\n20\n1\nfalse\n1\n99\n3\n1\n3\n6\n2\n5\ntrue\n15\n15\n10\n30\n20\n40\n50\n40\n40\n500\n2\n3\n40\n600\n40\n700\n40\n800\n0\ntrue\n7\n17\n17\n7\n70\n7\n80\n2\n7\n9\n8\n17\n2\n17\n14\n11\n99\n11\n77\n2\n1\n"));
+    collections_command.expectStdOutEqual(hostText(b, "1\n3\n20\n20\n1\nfalse\n1\n99\n3\n1\n3\n6\n2\n5\ntrue\n15\n15\n10\n30\n20\n40\n50\n40\n40\n500\n2\n3\n40\n600\n40\n700\n40\n800\n0\ntrue\n7\n17\n17\n7\n70\n7\n80\n2\n7\n9\n8\n17\n2\n17\n14\n11\n99\n11\n77\n2\n1\n3\n"));
+
+    const slices_command = b.addRunArtifact(executable);
+    slices_command.step.dependOn(&collections_command.step);
+    slices_command.addArgs(&.{ "run", "Smokes/Slices.sx" });
+    slices_command.expectStdOutEqual(hostText(b, "50\n40\n3\n20\n40\n99\n20\n30\n77\n4\n40\n5\n0\n2\n2\n3\n3\n2\n20\n77\n"));
 
     const collection_take_last_empty_command = b.addRunArtifact(executable);
-    collection_take_last_empty_command.step.dependOn(&collections_command.step);
+    collection_take_last_empty_command.step.dependOn(&slices_command.step);
     collection_take_last_empty_command.addArgs(&.{ "run", "Smokes/CollectionErrors/TakeLastEmpty.sx" });
     collection_take_last_empty_command.expectExitCode(1);
     collection_take_last_empty_command.expectStdErrEqual(hostText(
         b,
-        b.fmt("{s}:3:12: runtime error: collection index ^1 is out of bounds for count 0\n", .{
+        b.fmt("{s}:3:12: runtime error: collection index -1 is out of bounds for count 0\n", .{
             b.pathFromRoot("Smokes/CollectionErrors/TakeLastEmpty.sx"),
         }),
     ));
@@ -1064,24 +1077,32 @@ pub fn build(b: *std.Build) void {
         }),
     ));
 
-    const collection_reverse_index_zero_command = b.addRunArtifact(executable);
-    collection_reverse_index_zero_command.step.dependOn(&collection_index_out_of_bounds_command.step);
-    collection_reverse_index_zero_command.addArgs(&.{ "run", "Smokes/CollectionErrors/ReverseIndexZero.sx" });
-    collection_reverse_index_zero_command.expectExitCode(1);
-    collection_reverse_index_zero_command.expectStdErrEqual(hostText(
+    const collection_negative_index_out_of_bounds_command = b.addRunArtifact(executable);
+    collection_negative_index_out_of_bounds_command.step.dependOn(&collection_index_out_of_bounds_command.step);
+    collection_negative_index_out_of_bounds_command.addArgs(&.{ "run", "Smokes/CollectionErrors/NegativeIndexOutOfBounds.sx" });
+    collection_negative_index_out_of_bounds_command.expectExitCode(1);
+    collection_negative_index_out_of_bounds_command.expectStdErrEqual(hostText(
         b,
-        b.fmt("{s}:3:17: runtime error: collection index ^0 is out of bounds for count 3\n", .{
-            b.pathFromRoot("Smokes/CollectionErrors/ReverseIndexZero.sx"),
+        b.fmt("{s}:3:17: runtime error: collection index -4 is out of bounds for count 3\n", .{
+            b.pathFromRoot("Smokes/CollectionErrors/NegativeIndexOutOfBounds.sx"),
         }),
     ));
 
     const iteration_command = b.addRunArtifact(executable);
-    iteration_command.step.dependOn(&collection_reverse_index_zero_command.step);
+    iteration_command.step.dependOn(&collection_negative_index_out_of_bounds_command.step);
     iteration_command.addArgs(&.{ "run", "Smokes/Iteration.sx" });
     iteration_command.expectStdOutEqual(hostText(b, "6\n2\n6\n2\n6\n3\n2\n1\n3\n8\n10\n"));
 
+    const integer_ranges_command = b.addRunArtifact(executable);
+    integer_ranges_command.step.dependOn(&iteration_command.step);
+    integer_ranges_command.addArgs(&.{ "run", "Smokes/IntegerRanges.sx" });
+    integer_ranges_command.expectStdOutEqual(hostText(
+        b,
+        "0\n1\n2\n3\n2\n1\n0\n1\n2\n3\n2\n1\n1\n2\n2\n3\n4\n0\n1\n2\n3\n12\n100\n101\n102\n",
+    ));
+
     const structure_equality_command = b.addRunArtifact(executable);
-    structure_equality_command.step.dependOn(&iteration_command.step);
+    structure_equality_command.step.dependOn(&integer_ranges_command.step);
     structure_equality_command.addArgs(&.{ "run", "Smokes/StructureEquality.sx" });
     structure_equality_command.expectStdOutEqual(hostText(b, "true\ntrue\ntrue\ntrue\n"));
 
@@ -1232,7 +1253,7 @@ pub fn build(b: *std.Build) void {
     standard_library_command.addArgs(&.{ "run", "Smokes/StandardLibrary/Main.sx" });
     standard_library_command.expectStdOutEqual(hostText(
         b,
-        standard_library_output,
+        standard_library_output ++ "true\n",
     ));
 
     const qualified_parent_alias_command = b.addRunArtifact(executable);

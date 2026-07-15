@@ -9,6 +9,7 @@ pub const TokenTag = enum {
     keyword_else,
     keyword_while,
     keyword_for,
+    keyword_range,
     keyword_in,
     keyword_break,
     keyword_continue,
@@ -74,6 +75,7 @@ pub const TokenTag = enum {
     comma,
     dot,
     dot_dot,
+    dot_dot_dot,
     left_parenthesis,
     right_parenthesis,
     left_brace,
@@ -145,7 +147,7 @@ pub const Lexer = struct {
             self.advance();
             return self.token(.percent, start, position);
         }
-        if (character == '.') return self.optionalDoubleToken(start, position, '.', .dot, .dot_dot);
+        if (character == '.') return self.dotToken(start, position);
 
         self.advance();
         return switch (character) {
@@ -336,6 +338,19 @@ pub const Lexer = struct {
         return self.token(single_tag, start, position);
     }
 
+    fn dotToken(self: *Lexer, start: usize, position: Source.Position) Token {
+        self.advance();
+        if (self.index == self.source.len or self.source[self.index] != '.') {
+            return self.token(.dot, start, position);
+        }
+        self.advance();
+        if (self.index == self.source.len or self.source[self.index] != '.') {
+            return self.token(.dot_dot, start, position);
+        }
+        self.advance();
+        return self.token(.dot_dot_dot, start, position);
+    }
+
     fn requiredDoubleToken(
         self: *Lexer,
         start: usize,
@@ -423,6 +438,7 @@ fn keywordTag(lexeme: []const u8) ?TokenTag {
         .{ "else", TokenTag.keyword_else },
         .{ "while", TokenTag.keyword_while },
         .{ "for", TokenTag.keyword_for },
+        .{ "range", TokenTag.keyword_range },
         .{ "in", TokenTag.keyword_in },
         .{ "break", TokenTag.keyword_break },
         .{ "continue", TokenTag.keyword_continue },
@@ -490,6 +506,11 @@ test "recognize declaration keywords" {
     try std.testing.expectEqual(TokenTag.keyword_true, (try lexer.next()).tag);
 }
 
+test "recognize reserved range keyword" {
+    var lexer = Lexer.init("range(0, 10)");
+    try std.testing.expectEqual(TokenTag.keyword_range, (try lexer.next()).tag);
+}
+
 test "skip line comments" {
     var lexer = Lexer.init("// comment\n42");
     const token = try lexer.next();
@@ -530,7 +551,7 @@ test "recognize compound and update operators" {
 }
 
 test "distinguish member and cascade operators" {
-    var lexer = Lexer.init("value.field value..method()");
+    var lexer = Lexer.init("value.field value..method() start...end name:type");
     const expected = [_]TokenTag{
         .identifier,
         .dot,
@@ -540,6 +561,12 @@ test "distinguish member and cascade operators" {
         .identifier,
         .left_parenthesis,
         .right_parenthesis,
+        .identifier,
+        .dot_dot_dot,
+        .identifier,
+        .identifier,
+        .colon,
+        .identifier,
     };
     for (expected) |tag| try std.testing.expectEqual(tag, (try lexer.next()).tag);
 }

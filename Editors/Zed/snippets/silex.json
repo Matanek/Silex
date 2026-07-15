@@ -64,6 +64,13 @@
     ],
     "description": "Apply operations to one receiver"
   },
+  "Collection slice": {
+    "prefix": "slice",
+    "body": [
+      "${1:values}[${2:start}:${3:end}]$0"
+    ],
+    "description": "Copy a collection slice with an exclusive end"
+  },
   "Default initialized variable": {
     "prefix": "vart",
     "body": [
@@ -104,11 +111,11 @@
   "For loop": {
     "prefix": "for",
     "body": [
-      "for (${1:value} in ${2:values}) {",
+      "for (let ${1:value} in ${2:values}) {",
       "    $0",
       "}"
     ],
-    "description": "Iterate through a collection with an immutable alias"
+    "description": "Iterate through a collection with an immutable binding"
   },
   "Mutable for loop": {
     "prefix": "forv",
@@ -117,7 +124,16 @@
       "    $0",
       "}"
     ],
-    "description": "Iterate through a collection with a mutable alias"
+    "description": "Iterate through a collection with a mutable binding"
+  },
+  "Integer range loop": {
+    "prefix": "forr",
+    "body": [
+      "for (let ${1:i} in ${2:0}...${3:10}) {",
+      "    $0",
+      "}"
+    ],
+    "description": "Iterate through an exclusive integer range"
   },
   "Function": {
     "prefix": "func",

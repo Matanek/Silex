@@ -263,36 +263,80 @@ pub fn generateWithSources(
         \\std::size_t silexCollectionOffset(
         \\    std::size_t count,
         \\    std::int64_t index,
-        \\    bool fromEnd,
         \\    bool allowEnd,
         \\    SilexSourceLocation location
         \\) {
-        \\    bool valid = false;
+        \\    bool valid = index >= 0 && static_cast<std::uint64_t>(index) <= count;
         \\    std::size_t offset = 0;
-        \\    if (fromEnd) {
-        \\        valid = index > 0 && static_cast<std::uint64_t>(index) <= count;
-        \\        if (valid) offset = count - static_cast<std::size_t>(index);
-        \\    } else {
-        \\        valid = index >= 0 && static_cast<std::uint64_t>(index) <= count;
-        \\        if (valid) {
-        \\            offset = static_cast<std::size_t>(index);
-        \\            valid = allowEnd || offset < count;
-        \\        }
+        \\    if (valid) {
+        \\        offset = static_cast<std::size_t>(index);
+        \\        valid = allowEnd || offset < count;
         \\    }
         \\    if (!valid) [[unlikely]] {
         \\        std::cerr << silexSourcePath(location) << ':' << location.line << ':' << location.column
-        \\                  << ": runtime error: collection index ";
-        \\        if (fromEnd) std::cerr << '^';
-        \\        std::cerr << index << " is out of bounds for count " << count << '\n';
+        \\                  << ": runtime error: collection index " << index
+        \\                  << " is out of bounds for count " << count << '\n';
         \\        std::exit(1);
         \\    }
         \\    return offset;
         \\}
         \\
+        \\std::size_t silexCollectionIndexOffset(
+        \\    std::size_t count,
+        \\    std::int64_t index,
+        \\    SilexSourceLocation location
+        \\) {
+        \\    bool valid = false;
+        \\    std::size_t offset = 0;
+        \\    if (index < 0) {
+        \\        const std::uint64_t distance = static_cast<std::uint64_t>(-(index + 1)) + 1;
+        \\        valid = distance <= count;
+        \\        if (valid) offset = count - static_cast<std::size_t>(distance);
+        \\    } else {
+        \\        valid = static_cast<std::uint64_t>(index) < count;
+        \\        if (valid) offset = static_cast<std::size_t>(index);
+        \\    }
+        \\    if (!valid) [[unlikely]] {
+        \\        std::cerr << silexSourcePath(location) << ':' << location.line << ':' << location.column
+        \\                  << ": runtime error: collection index " << index
+        \\                  << " is out of bounds for count " << count << '\n';
+        \\        std::exit(1);
+        \\    }
+        \\    return offset;
+        \\}
+        \\
+        \\std::size_t silexCollectionSliceBound(std::size_t count, std::int64_t bound) {
+        \\    if (bound < 0) {
+        \\        const std::uint64_t distance = static_cast<std::uint64_t>(-(bound + 1)) + 1;
+        \\        if (distance >= count) return 0;
+        \\        return count - static_cast<std::size_t>(distance);
+        \\    }
+        \\    const std::uint64_t offset = static_cast<std::uint64_t>(bound);
+        \\    if (offset >= count) return count;
+        \\    return static_cast<std::size_t>(offset);
+        \\}
+        \\
         \\template <typename Collection>
-        \\decltype(auto) silexCollectionAt(Collection&& values, std::int64_t index, bool fromEnd, SilexSourceLocation location) {
-        \\    const auto offset = silexCollectionOffset(values.size(), index, fromEnd, false, location);
+        \\decltype(auto) silexCollectionAt(Collection&& values, std::int64_t index, SilexSourceLocation location) {
+        \\    const auto offset = silexCollectionIndexOffset(values.size(), index, location);
         \\    return std::forward<Collection>(values)[offset];
+        \\}
+        \\
+        \\template <typename Collection>
+        \\SilexList<typename Collection::value_type> silexCollectionSlice(
+        \\    const Collection& values,
+        \\    std::int64_t start,
+        \\    std::int64_t end
+        \\) {
+        \\    const std::size_t startOffset = silexCollectionSliceBound(values.size(), start);
+        \\    const std::size_t endOffset = silexCollectionSliceBound(values.size(), end);
+        \\    SilexList<typename Collection::value_type> result;
+        \\    if (startOffset >= endOffset) return result;
+        \\    result.reserve(endOffset - startOffset);
+        \\    for (std::size_t index = startOffset; index < endOffset; ++index) {
+        \\        result.push_back(values[index]);
+        \\    }
+        \\    return result;
         \\}
         \\
         \\template <typename Collection, typename T>
@@ -302,14 +346,14 @@ pub fn generateWithSources(
         \\
         \\template <typename Collection, typename T>
         \\void silexListInsert(Collection& values, std::int64_t index, T value, SilexSourceLocation location) {
-        \\    const auto offset = silexCollectionOffset(values.size(), index, false, true, location);
+        \\    const auto offset = silexCollectionOffset(values.size(), index, true, location);
         \\    values.insert(values.begin() + static_cast<std::ptrdiff_t>(offset), std::move(value));
         \\}
         \\
         \\template <typename Collection>
         \\typename Collection::value_type silexListTake(Collection& values, std::int64_t index, SilexSourceLocation location) {
         \\    using T = typename Collection::value_type;
-        \\    const auto offset = silexCollectionOffset(values.size(), index, false, false, location);
+        \\    const auto offset = silexCollectionOffset(values.size(), index, false, location);
         \\    T value = std::move(values[offset]);
         \\    values.erase(values.begin() + static_cast<std::ptrdiff_t>(offset));
         \\    return value;
@@ -318,7 +362,7 @@ pub fn generateWithSources(
         \\template <typename Collection>
         \\typename Collection::value_type silexListTakeLast(Collection& values, SilexSourceLocation location) {
         \\    using T = typename Collection::value_type;
-        \\    const auto offset = silexCollectionOffset(values.size(), 1, true, false, location);
+        \\    const auto offset = silexCollectionIndexOffset(values.size(), -1, location);
         \\    T value = std::move(values[offset]);
         \\    values.pop_back();
         \\    return value;
@@ -326,14 +370,14 @@ pub fn generateWithSources(
         \\
         \\template <typename Collection, typename T>
         \\T silexCollectionReplace(Collection& values, std::int64_t index, T value, SilexSourceLocation location) {
-        \\    const auto offset = silexCollectionOffset(values.size(), index, false, false, location);
+        \\    const auto offset = silexCollectionOffset(values.size(), index, false, location);
         \\    return std::exchange(values[offset], std::move(value));
         \\}
         \\
         \\template <typename Collection>
         \\void silexCollectionSwap(Collection& values, std::int64_t left, std::int64_t right, SilexSourceLocation location) {
-        \\    const auto leftOffset = silexCollectionOffset(values.size(), left, false, false, location);
-        \\    const auto rightOffset = silexCollectionOffset(values.size(), right, false, false, location);
+        \\    const auto leftOffset = silexCollectionOffset(values.size(), left, false, location);
+        \\    const auto rightOffset = silexCollectionOffset(values.size(), right, false, location);
         \\    std::swap(values[leftOffset], values[rightOffset]);
         \\}
         \\
@@ -835,17 +879,29 @@ fn generateStatement(
             try output.appendSlice(allocator, "}\n");
         },
         .for_statement => |for_statement| {
-            try indent(allocator, output, indentation);
-            try output.appendSlice(allocator, "for (");
-            if (!for_statement.mutable) try output.appendSlice(allocator, "const ");
-            try output.appendSlice(allocator, "auto& ");
-            try output.appendSlice(allocator, for_statement.generated_name);
-            try output.appendSlice(allocator, " : ");
-            try generateExpression(allocator, output, for_statement.iterable);
-            try output.appendSlice(allocator, ") {\n");
-            try generateStatements(allocator, output, for_statement.body, indentation + 1, is_main);
-            try indent(allocator, output, indentation);
-            try output.appendSlice(allocator, "}\n");
+            switch (for_statement.source) {
+                .collection => |collection| {
+                    try indent(allocator, output, indentation);
+                    try output.appendSlice(allocator, "for (");
+                    if (for_statement.mutability == .immutable) try output.appendSlice(allocator, "const ");
+                    try output.appendSlice(allocator, "auto& ");
+                    try output.appendSlice(allocator, for_statement.generated_name);
+                    try output.appendSlice(allocator, " : ");
+                    try generateExpression(allocator, output, collection);
+                    try output.appendSlice(allocator, ") {\n");
+                    try generateStatements(allocator, output, for_statement.body, indentation + 1, is_main);
+                    try indent(allocator, output, indentation);
+                    try output.appendSlice(allocator, "}\n");
+                },
+                .integer_range => |range| try generateIntegerRangeStatement(
+                    allocator,
+                    output,
+                    for_statement,
+                    range,
+                    indentation,
+                    is_main,
+                ),
+            }
         },
         .break_statement => {
             try indent(allocator, output, indentation);
@@ -871,6 +927,64 @@ fn generateStatement(
             try output.appendSlice(allocator, ";\n");
         },
     }
+}
+
+fn generateIntegerRangeStatement(
+    allocator: Allocator,
+    output: *std.ArrayList(u8),
+    for_statement: Semantic.Statement.For,
+    range: Semantic.Statement.For.IntegerRange,
+    indentation: usize,
+    is_main: bool,
+) GenerateError!void {
+    try indent(allocator, output, indentation);
+    try output.appendSlice(allocator, "const std::int64_t ");
+    try output.appendSlice(allocator, range.generated_start_name);
+    try output.appendSlice(allocator, " = ");
+    try generateExpression(allocator, output, range.start);
+    try output.appendSlice(allocator, ";\n");
+
+    try indent(allocator, output, indentation);
+    try output.appendSlice(allocator, "const std::int64_t ");
+    try output.appendSlice(allocator, range.generated_end_name);
+    try output.appendSlice(allocator, " = ");
+    try generateExpression(allocator, output, range.end);
+    try output.appendSlice(allocator, ";\n");
+
+    try indent(allocator, output, indentation);
+    try output.appendSlice(allocator, "const std::int64_t ");
+    try output.appendSlice(allocator, range.generated_step_name);
+    try output.appendSlice(allocator, " = ");
+    try output.appendSlice(allocator, range.generated_start_name);
+    try output.appendSlice(allocator, " < ");
+    try output.appendSlice(allocator, range.generated_end_name);
+    try output.appendSlice(allocator, " ? 1 : -1;\n");
+
+    try indent(allocator, output, indentation);
+    try output.appendSlice(allocator, "for (std::int64_t ");
+    try output.appendSlice(allocator, range.generated_current_name);
+    try output.appendSlice(allocator, " = ");
+    try output.appendSlice(allocator, range.generated_start_name);
+    try output.appendSlice(allocator, "; ");
+    try output.appendSlice(allocator, range.generated_current_name);
+    try output.appendSlice(allocator, " != ");
+    try output.appendSlice(allocator, range.generated_end_name);
+    try output.appendSlice(allocator, "; ");
+    try output.appendSlice(allocator, range.generated_current_name);
+    try output.appendSlice(allocator, " += ");
+    try output.appendSlice(allocator, range.generated_step_name);
+    try output.appendSlice(allocator, ") {\n");
+
+    try indent(allocator, output, indentation + 1);
+    if (for_statement.mutability == .immutable) try output.appendSlice(allocator, "const ");
+    try output.appendSlice(allocator, "std::int64_t ");
+    try output.appendSlice(allocator, for_statement.generated_name);
+    try output.appendSlice(allocator, " = ");
+    try output.appendSlice(allocator, range.generated_current_name);
+    try output.appendSlice(allocator, ";\n");
+    try generateStatements(allocator, output, for_statement.body, indentation + 1, is_main);
+    try indent(allocator, output, indentation);
+    try output.appendSlice(allocator, "}\n");
 }
 
 fn generateCondition(allocator: Allocator, output: *std.ArrayList(u8), expression: *const Semantic.Expression) !void {
@@ -1037,9 +1151,18 @@ fn generateExpression(allocator: Allocator, output: *std.ArrayList(u8), expressi
             try generateExpression(allocator, output, access.object);
             try output.appendSlice(allocator, ", ");
             try generateExpression(allocator, output, access.index);
-            try output.appendSlice(allocator, if (access.from_end) ", true, " else ", false, ");
+            try output.appendSlice(allocator, ", ");
             try appendCppSourceLocation(allocator, output, expression.position);
             try output.append(allocator, ')');
+        },
+        .slice_access => |access| {
+            try output.appendSlice(allocator, "([&]() { const auto& silexSliceValues = ");
+            try generateExpression(allocator, output, access.object);
+            try output.appendSlice(allocator, "; const std::int64_t silexSliceStart = ");
+            try generateExpression(allocator, output, access.start);
+            try output.appendSlice(allocator, "; const std::int64_t silexSliceEnd = ");
+            try generateExpression(allocator, output, access.end);
+            try output.appendSlice(allocator, "; return silexCollectionSlice(silexSliceValues, silexSliceStart, silexSliceEnd); }())");
         },
         .variable => |generated_name| try output.appendSlice(allocator, generated_name),
         .self => try output.appendSlice(allocator, "*this"),
@@ -1425,6 +1548,25 @@ test "generate typed variables and control flow" {
     try std.testing.expect(std.mem.indexOf(u8, cpp, "if (!(silexValue0 < std::int64_t{3}))") != null);
     try std.testing.expect(std.mem.indexOf(u8, cpp, "} else {") != null);
     try std.testing.expect(std.mem.indexOf(u8, cpp, "std::string{\"yes\"}") != null);
+}
+
+test "generate negative collection indexes and ordered slices" {
+    const Parser = @import("Parser.zig").Parser;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var parser = Parser.init(
+        allocator,
+        "func main() { let values = [10, 20, 30]; let last = values[-1]; let middle = values[1:-1]; }",
+    );
+    var analyzer = Semantic.Analyzer.init(allocator);
+    const cpp = try generate(allocator, try analyzer.analyze(try parser.parse()));
+
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "silexCollectionAt(") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "const auto& silexSliceValues") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "const std::int64_t silexSliceStart") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "const std::int64_t silexSliceEnd") != null);
 }
 
 test "generate checked explicit numeric conversion" {

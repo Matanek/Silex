@@ -113,6 +113,7 @@ pub const Expression = struct {
         structure_initializer: StructureInitializer,
         member_access: MemberAccess,
         index_access: IndexAccess,
+        slice_access: SliceAccess,
         unary: Unary,
         conversion: Conversion,
         binary: Binary,
@@ -181,7 +182,13 @@ pub const Expression = struct {
     pub const IndexAccess = struct {
         object: *Expression,
         index: *Expression,
-        from_end: bool,
+        bracket_position: Source.Position,
+    };
+
+    pub const SliceAccess = struct {
+        object: *Expression,
+        start: *Expression,
+        end: *Expression,
         bracket_position: Source.Position,
     };
 
@@ -262,9 +269,19 @@ pub const Statement = union(enum) {
         position: Source.Position,
         name: []const u8,
         name_position: Source.Position,
-        mutable: bool,
-        iterable: *Expression,
+        mutability: Mutability,
+        source: IterationSource,
         body: []const Statement,
+
+        pub const IterationSource = union(enum) {
+            collection: *Expression,
+            integer_range: IntegerRange,
+        };
+
+        pub const IntegerRange = struct {
+            start: *Expression,
+            end: *Expression,
+        };
     };
 
     pub const Return = struct {

@@ -47,7 +47,8 @@ does not continue the previous statement, except for the cascade operator.
 
 `..` applies several operations to the same receiver. The receiver is evaluated
 once; every segment targets it directly, and ignored method results do not feed
-the next segment.
+the next segment. The distinct `...` operator is reserved for an integer range
+inside `for`.
 
 ```sx
 var values:int[] = []
@@ -59,3 +60,20 @@ var values:int[] = []
 A cascade accepts a method call or direct field assignment. Its receiver must
 be mutable whenever an operation writes to it. The two dots are one token and
 cannot be separated by whitespace; indentation is conventional only.
+
+A single `.` ends the cascade and resumes ordinary member access on its
+receiver. This makes it possible to mutate an object through several cascade
+segments, then use the result of a regular query:
+
+```sx
+let running = stopwatch..reset()..start().is_running()
+```
+
+A range whose second bound is a call remains unambiguous:
+
+```sx
+for (let i in start...compute_end()) {}
+```
+
+For long bounds, the named form `range(start, compute_end())` can remain easier
+to read.

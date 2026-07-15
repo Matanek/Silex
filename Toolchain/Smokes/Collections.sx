@@ -17,7 +17,7 @@ struct Player {
 func main() {
     var fixed:int[3] = [1, 2, 3]
     print(fixed[0])
-    print(fixed[^1])
+    print(fixed[-1])
     fixed[1] = 20
     print(fixed[1])
     print(fixed.replace(1, 2))
@@ -34,20 +34,20 @@ func main() {
     data.append(fixed)
     print(data.count())
     print(data[0])
-    print(data[^1])
+    print(data[-1])
     data.append(data)
     print(data.count())
     var literal_data:uint8[] = []
     literal_data.append([4, 5])
     print(literal_data.count())
-    print(literal_data[^1])
+    print(literal_data[-1])
 
     var values:int[] = []
     print(values.is_empty())
     values.append(20)
     values.prepend(10)
     values.insert(1, 15)
-    print(values[^2])
+    print(values[-2])
     print(values.take(1))
     print(values.take_first())
     values.append(30)
@@ -57,7 +57,7 @@ func main() {
     values.swap(0, 1)
     values.reverse()
     print(values[0])
-    print(values[^1])
+    print(values[-1])
     print_ref(&values[0])
     var values_copy:int[] = values
     values_copy[0] = 500
@@ -116,7 +116,7 @@ func main() {
     print(row[0])
     print(rows.count())
     print(nested[0][0])
-    print(nested[^1][0])
+    print(nested[-1][0])
 
     var source:uint[] = [11, 12]
     var player = Player { items:[] }
@@ -134,5 +134,6 @@ func main() {
         ..append(2)
         ..reverse()
     print(cascaded[0])
-    print(cascaded[^1])
+    print(cascaded[-1])
+    print(cascaded..append(3).count())
 }

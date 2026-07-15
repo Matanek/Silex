@@ -6,7 +6,7 @@ struct Bucket {
     }
 
     func inspect() void {
-        for (value in self.values) {
+        for (let value in self.values) {
             self.clear_values()
         }
     }

@@ -449,23 +449,47 @@ pub const Parser = struct {
         const position = self.current.position;
         try self.advance();
         try self.expect(.left_parenthesis, "expected '('");
-        const mutable = self.current.tag == .keyword_var;
-        if (mutable) try self.advance();
+        const mutability: Ast.Mutability = switch (self.current.tag) {
+            .keyword_let => .immutable,
+            .keyword_var => .mutable,
+            else => return self.fail("expected 'let' or 'var' after 'for ('"),
+        };
+        try self.advance();
         if (self.current.tag != .identifier) return self.fail("expected iteration variable name");
         const name = self.current.lexeme;
         const name_position = self.current.position;
         try self.advance();
         try self.expect(.keyword_in, "expected 'in' after iteration variable");
-        const iterable = try self.parseExpression(true);
+        const source = try self.parseForSource();
         try self.expect(.right_parenthesis, "expected ')' after for source");
         return .{ .for_statement = .{
             .position = position,
             .name = name,
             .name_position = name_position,
-            .mutable = mutable,
-            .iterable = iterable,
+            .mutability = mutability,
+            .source = source,
             .body = try self.parseBlock(),
         } };
+    }
+
+    fn parseForSource(self: *Parser) ParseError!Ast.Statement.For.IterationSource {
+        if (self.current.tag == .keyword_range) {
+            try self.advance();
+            try self.expect(.left_parenthesis, "expected '(' after 'range'");
+            const start = try self.parseExpression(true);
+            try self.expect(.comma, "expected ',' between range bounds");
+            const end = try self.parseExpression(true);
+            try self.expect(.right_parenthesis, "expected ')' after range bounds");
+            return .{ .integer_range = .{ .start = start, .end = end } };
+        }
+
+        const first = try self.parseExpression(true);
+        if (self.current.tag == .dot_dot_dot) {
+            try self.advance();
+            const end = try self.parseExpression(true);
+            return .{ .integer_range = .{ .start = first, .end = end } };
+        }
+        return .{ .collection = first };
     }
 
     fn parseLoopControl(self: *Parser, comptime tag: std.meta.Tag(Ast.Statement)) ParseError!Ast.Statement {
@@ -529,13 +553,14 @@ pub const Parser = struct {
             } });
         }
 
-        return self.newExpression(.{
+        const cascade = try self.newExpression(.{
             .position = object.position,
             .value = .{ .cascade = .{
                 .object = object,
                 .operations = try operations.toOwnedSlice(self.allocator),
             } },
         });
+        return if (self.current.tag == .dot) self.parsePostfix(cascade) else cascade;
     }
 
     fn parseLogicalOr(self: *Parser, allow_line_breaks: bool) ParseError!*Ast.Expression {
@@ -766,19 +791,31 @@ pub const Parser = struct {
             if (self.current.tag == .left_bracket) {
                 const bracket_position = self.current.position;
                 try self.advance();
-                const from_end = self.current.tag == .caret;
-                if (from_end) try self.advance();
-                const index = try self.parseExpression(true);
-                try self.expect(.right_bracket, "expected ']' after collection index");
-                expression = try self.newExpression(.{
-                    .position = expression.position,
-                    .value = .{ .index_access = .{
-                        .object = expression,
-                        .index = index,
-                        .from_end = from_end,
-                        .bracket_position = bracket_position,
-                    } },
-                });
+                const first = try self.parseExpression(true);
+                if (self.current.tag == .colon) {
+                    try self.advance();
+                    const end = try self.parseExpression(true);
+                    try self.expect(.right_bracket, "expected ']' after collection slice");
+                    expression = try self.newExpression(.{
+                        .position = expression.position,
+                        .value = .{ .slice_access = .{
+                            .object = expression,
+                            .start = first,
+                            .end = end,
+                            .bracket_position = bracket_position,
+                        } },
+                    });
+                } else {
+                    try self.expect(.right_bracket, "expected ']' after collection index");
+                    expression = try self.newExpression(.{
+                        .position = expression.position,
+                        .value = .{ .index_access = .{
+                            .object = expression,
+                            .index = first,
+                            .bracket_position = bracket_position,
+                        } },
+                    });
+                }
                 continue;
             }
             try self.advance();
@@ -1010,6 +1047,84 @@ fn assignmentOperator(tag: TokenTag) ?Ast.AssignmentOperator {
         .minus_minus => .decrement,
         else => null,
     };
+}
+
+test "parse explicit for bindings" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(),
+        \\func main() void {
+        \\    let values = [1]
+        \\    for (let value in values) {}
+        \\    for (var value in values) {}
+        \\}
+    );
+    const program = try parser.parse();
+
+    try std.testing.expectEqual(Ast.Mutability.immutable, program.functions[0].statements[1].for_statement.mutability);
+    try std.testing.expectEqual(Ast.Mutability.mutable, program.functions[0].statements[2].for_statement.mutability);
+}
+
+test "parse compact and named integer ranges" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(),
+        \\func main() void {
+        \\    let start = 0
+        \\    let end = 4
+        \\    for (let i in start + 1...end - 1) {}
+        \\    for (let j in start...compute_end()) {}
+        \\    for (var i in range(end, start)) {}
+        \\}
+    );
+    const program = try parser.parse();
+
+    const compact = program.functions[0].statements[2].for_statement.source.integer_range;
+    try std.testing.expect(compact.start.value == .binary);
+    try std.testing.expect(compact.end.value == .binary);
+    const called = program.functions[0].statements[3].for_statement.source.integer_range;
+    try std.testing.expect(called.end.value == .call);
+    const named = program.functions[0].statements[4].for_statement.source.integer_range;
+    try std.testing.expect(named.start.value == .identifier);
+    try std.testing.expect(named.end.value == .identifier);
+}
+
+test "preserve cascade as for collection source" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(),
+        \\func main() void {
+        \\    var values = [1]
+        \\    for (let value in values..reverse()) {}
+        \\}
+    );
+    const program = try parser.parse();
+
+    try std.testing.expect(program.functions[0].statements[1].for_statement.source.collection.value == .cascade);
+}
+
+test "reject for binding without let or var" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(
+        arena.allocator(),
+        "func main() void { let values = [1]; for (value in values) {} }",
+    );
+
+    try std.testing.expectError(error.InvalidSource, parser.parse());
+    try std.testing.expectEqualStrings(
+        "expected 'let' or 'var' after 'for ('",
+        parser.diagnostic.?.message,
+    );
+}
+
+test "reserve range intrinsic name" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(), "func range(start:int, end:int) int { return start + end } func main() void {}");
+
+    try std.testing.expectError(error.InvalidSource, parser.parse());
+    try std.testing.expectEqualStrings("expected function name", parser.diagnostic.?.message);
 }
 
 test "multiplication binds tighter than addition" {
@@ -1250,9 +1365,7 @@ test "parse method and field cascade operations" {
     var parser = Parser.init(arena.allocator(),
         \\struct Point { x:int }
         \\func main() void {
-        \\    var point = Point { x:0 }
-        \\        ..x = 10
-        \\        ..move(1, 2)
+        \\    var point = Point { x:0 }..x = 10..move(1, 2)
         \\}
     );
     const program = try parser.parse();
@@ -1262,6 +1375,21 @@ test "parse method and field cascade operations" {
     try std.testing.expectEqualStrings("10", cascade.operations[0].field_assignment.value.value.integer);
     try std.testing.expect(cascade.operations[1] == .method_call);
     try std.testing.expectEqualStrings("move", cascade.operations[1].method_call.name);
+}
+
+test "parse terminal member access after a cascade" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(),
+        \\func main() {
+        \\    let running = stopwatch..reset()..start().is_running()
+        \\}
+    );
+    const program = try parser.parse();
+    const call = program.functions[0].statements[0].variable_declaration.initializer.?.value.method_call;
+    try std.testing.expectEqualStrings("is_running", call.name);
+    try std.testing.expect(call.object.value == .cascade);
+    try std.testing.expectEqual(@as(usize, 2), call.object.value.cascade.operations.len);
 }
 
 test "parse functions parameters calls and returns" {
@@ -1305,4 +1433,23 @@ test "parse fixed arrays and lists" {
     try std.testing.expect(program.functions[0].parameters[0].type.list.* == .int);
     try std.testing.expect(program.functions[0].parameters[1].type == .fixed_array);
     try std.testing.expect(program.functions[0].parameters[1].type.fixed_array.element.* == .int);
+}
+
+test "parse negative collection indexes and slices" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(),
+        \\func main() {
+        \\    let values = [10, 20, 30]
+        \\    let last = values[-1]
+        \\    let middle = values[1:-1]
+        \\}
+    );
+    const program = try parser.parse();
+
+    const index = program.functions[0].statements[1].variable_declaration.initializer.?.value.index_access;
+    try std.testing.expectEqual(Ast.UnaryOperator.numeric_negate, index.index.value.unary.operator);
+    const slice = program.functions[0].statements[2].variable_declaration.initializer.?.value.slice_access;
+    try std.testing.expectEqualStrings("1", slice.start.value.integer);
+    try std.testing.expectEqual(Ast.UnaryOperator.numeric_negate, slice.end.value.unary.operator);
 }

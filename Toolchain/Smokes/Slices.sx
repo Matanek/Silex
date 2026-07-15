@@ -1,0 +1,46 @@
+func next_bound(cursor:&int) int {
+    let value = cursor
+    cursor++
+    return value
+}
+
+func main() {
+    var values:int[] = [10, 20, 30, 40, 50]
+    print(values[-1])
+    print(values[-2])
+
+    let middle:int[] = values[1:4]
+    print(middle.count())
+    print(middle[0])
+    print(middle[-1])
+
+    var copied:int[] = values[1:4]
+    copied[0] = 99
+    values[2] = 77
+    print(copied[0])
+    print(values[1])
+    print(copied[1])
+    print(values[2])
+
+    let without_last:int[] = values[0:-1]
+    print(without_last.count())
+    print(without_last[-1])
+
+    let clamped:int[] = values[-99:99]
+    print(clamped.count())
+    let empty:int[] = values[4:2]
+    print(empty.count())
+
+    let fixed:int[4] = [1, 2, 3, 4]
+    let fixed_slice:int[] = fixed[-3:-1]
+    print(fixed_slice.count())
+    print(fixed_slice[0])
+    print(fixed_slice[-1])
+
+    var cursor = 1
+    let ordered:int[] = values[next_bound(&cursor):next_bound(&cursor) + 1]
+    print(cursor)
+    print(ordered.count())
+    print(ordered[0])
+    print(ordered[-1])
+}

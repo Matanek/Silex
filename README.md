@@ -39,7 +39,7 @@ func main() {
     print(rover.name)
     print(before)
     print(after)
-    print(replay[^1])
+    print(replay[-1])
 }
 ```
 

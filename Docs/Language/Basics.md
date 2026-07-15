@@ -45,5 +45,7 @@ for `T[]`, recursively initialized arrays and structures, and declared field
 defaults where present. A declaration with neither type nor initializer is
 invalid.
 
-Assignments preserve the variable type. A nested block may shadow an outer
-name; two declarations in the same scope may not use the same name.
+Assignments preserve the variable type. A local declaration may not reuse the
+name of a parameter, variable, or iteration binding that remains visible in
+its scope or an enclosing scope. Separate scopes that are not nested, such as
+two sibling branches or successive loops, may reuse the same local name.
