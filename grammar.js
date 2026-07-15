@@ -3,11 +3,14 @@ const PREC = {
   logicalAnd: 2,
   equality: 3,
   comparison: 4,
-  additive: 5,
-  multiplicative: 6,
-  unary: 7,
-  conversion: 8,
-  member: 9,
+  bitXor: 5,
+  bitAnd: 6,
+  shift: 7,
+  additive: 8,
+  multiplicative: 9,
+  unary: 10,
+  conversion: 11,
+  member: 12,
 };
 
 module.exports = grammar({
@@ -140,6 +143,8 @@ module.exports = grammar({
             $.assignment_statement,
             $.update_statement,
             $.print_statement,
+            $.assert_statement,
+            $.panic_statement,
             $.return_statement,
             $.break_statement,
             $.continue_statement,
@@ -182,6 +187,24 @@ module.exports = grammar({
         field("function", alias("print", $.identifier)),
         "(",
         field("argument", $.expression),
+        ")",
+      ),
+
+    assert_statement: ($) =>
+      seq(
+        field("function", alias("assert", $.identifier)),
+        "(",
+        field("condition", $.expression),
+        ",",
+        field("message", $.expression),
+        ")",
+      ),
+
+    panic_statement: ($) =>
+      seq(
+        field("function", alias("panic", $.identifier)),
+        "(",
+        field("message", $.expression),
         ")",
       ),
 
@@ -350,6 +373,30 @@ module.exports = grammar({
           ),
         ),
         prec.left(
+          PREC.bitXor,
+          seq(
+            field("left", $._cascade_assignment_value),
+            field("operator", "^"),
+            field("right", $._cascade_assignment_value),
+          ),
+        ),
+        prec.left(
+          PREC.bitAnd,
+          seq(
+            field("left", $._cascade_assignment_value),
+            field("operator", "&"),
+            field("right", $._cascade_assignment_value),
+          ),
+        ),
+        prec.left(
+          PREC.shift,
+          seq(
+            field("left", $._cascade_assignment_value),
+            field("operator", choice("<<", ">>")),
+            field("right", $._cascade_assignment_value),
+          ),
+        ),
+        prec.left(
           PREC.additive,
           seq(
             field("left", $._cascade_assignment_value),
@@ -361,7 +408,7 @@ module.exports = grammar({
           PREC.multiplicative,
           seq(
             field("left", $._cascade_assignment_value),
-            field("operator", choice("*", "/")),
+            field("operator", choice("*", "/", "%")),
             field("right", $._cascade_assignment_value),
           ),
         ),
@@ -531,6 +578,30 @@ module.exports = grammar({
           ),
         ),
         prec.left(
+          PREC.bitXor,
+          seq(
+            field("left", $.expression),
+            field("operator", "^"),
+            field("right", $.expression),
+          ),
+        ),
+        prec.left(
+          PREC.bitAnd,
+          seq(
+            field("left", $.expression),
+            field("operator", "&"),
+            field("right", $.expression),
+          ),
+        ),
+        prec.left(
+          PREC.shift,
+          seq(
+            field("left", $.expression),
+            field("operator", choice("<<", ">>")),
+            field("right", $.expression),
+          ),
+        ),
+        prec.left(
           PREC.additive,
           seq(
             field("left", $.expression),
@@ -542,7 +613,7 @@ module.exports = grammar({
           PREC.multiplicative,
           seq(
             field("left", $.expression),
-            field("operator", choice("*", "/")),
+            field("operator", choice("*", "/", "%")),
             field("right", $.expression),
           ),
         ),
