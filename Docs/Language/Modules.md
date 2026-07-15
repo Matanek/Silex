@@ -5,33 +5,33 @@ share their structures and functions, and directories below it provide its
 submodules. A file does not contain a `module` declaration.
 
 When compiling an entry file without a manifest, a directory defines a local
-module: `Math/` provides `Math`, and `Math/Geometry/` provides `Math.Geometry`.
-A directory remains a module when it contains no direct `.sx` source and only
-groups submodules. Only `.sx` files directly inside a directory contribute
-declarations to that module.
+module by the same path rule as the installed standard library: `STD/` provides
+`STD`, `STD/Random/` provides `STD.Random`, and `STD/Time/` provides
+`STD.Time`. A directory remains a module when it contains no direct `.sx`
+source and only groups submodules. Only `.sx` files directly inside a directory
+contribute declarations to that module.
 
-The distributed library is installed with Silex. Its root modules `STD` and
-`Silex` are reserved: `STD/` provides `STD`, `STD/Random/` provides its
-`STD.Random` submodule, and `Silex/Window/` provides `Silex.Window`. Other
-distributed modules follow the same path rule: `SDL3/` provides `SDL3`.
-Distributed modules work from a single entry file and from a JSON manifest; do
-not list reserved modules in a manifest. If a local module and a distributed
-module provide the same imported name, compilation fails instead of choosing
-one implicitly.
+The distributed library is installed with Silex. Its currently available
+public root is `STD`; `STD.Random` and `STD.Time` are its existing submodules.
+The root names `STD` and `Silex` are reserved for distributed modules, so they
+must not be listed as dependencies in a manifest. Distributed modules work
+from a single entry file and from a JSON project manifest. If a local module
+and a distributed module provide the same imported name, compilation fails
+instead of choosing one implicitly.
 
 ```sx
-import Math
-import NK.Rendering as Rendering
-import STD
+import STD as Standard
 
-use STD.Random as Random
-use STD.Random.Generator as Generator
-use Math.Vec3
+use Standard.Random as Random
+use Standard.Random.Generator as Generator
+use Standard.Time.Stopwatch as Stopwatch
 
-func create() NK.Window.Session {
-    let direction:Vec3
-    let random:Generator = Random.create(42)
-    return Rendering.create_session()
+func create_generator(seed:int) Generator {
+    return Random.create(seed)
+}
+
+func create_stopwatch() Stopwatch {
+    return Stopwatch {}
 }
 ```
 
@@ -61,50 +61,8 @@ explicitly; parent modules of its dotted module names are inferred even when
 they have no sources of their own. See
 [Installation and command-line use](../Installation.md).
 
-## STD.Random
-
-`STD.Random` provides a deterministic generator for games, simulations, and
-tests. It is not cryptographically secure. `create(seed)` builds a reproducible
-generator, while `system()` chooses an initial seed from the host.
-
-```sx
-var random = STD.Random.create(42)
-
-let raw = random.get_int()
-let die = random.get_int(1, 7)
-let ratio = random.get_float()
-let temperature = random.get_float(-10.0, 40.0)
-let enabled = random.get_bool()
-```
-
-`get_int()` returns an `int` from `1` through `9223372036854775807`.
-`get_int(minimum, maximum)` returns an unbiased `int` in
-`[minimum, maximum)` and requires `minimum < maximum` with a positive `int`
-width. `get_float()` returns a `float` in `[0.0, 1.0)`; its bounded overload
-returns a `float` in `[minimum, maximum)` and requires finite, ordered bounds.
-`get_bool()` returns either boolean value. Every call advances only its own
-generator. Two generators with the same seed and sequence of calls return the
-same sequence of values.
-
-## STD.Time
-
-`STD.Time.Stopwatch` is initially stopped with a zero elapsed duration.
-`start()` starts or resumes without clearing, `stop()` freezes the accumulated
-duration, `reset()` clears and stops, and `restart()` clears and starts.
-Calling `start()` while running or `stop()` while stopped has no effect.
-
-`STD.Time.Clock` has no `start()` or `stop()`. The first `tick()` initializes
-its monotonic origin and returns zero. Every active tick after it returns the
-scaled interval since the preceding tick and adds that value to the logical
-total. A paused tick returns zero. Pausing or changing the scale preserves any
-partial interval so that the next active tick loses no active time and excludes
-all suspended time. `reset()` clears the total and partial interval, exits the
-paused state, and makes the next tick return zero. Reset does not change the
-configured time scale.
-
-The implementation uses one native monotonic-microsecond reading inherited
-from the `native` section of `STD/Module.json`; both types and their duration
-calculations remain Silex code in `STD/Time/`.
+The modules and public APIs currently provided under `STD` are documented in
+the [STD library reference](Libraries/STD.md).
 
 ## Optional module manifest
 
@@ -114,43 +72,35 @@ accepts optional `author`, `description`, `name`, `version`, `dependencies`, and
 `native` fields. `name` and `version` become mandatory only when another
 package references that directory.
 
-For example, this local module is compiled automatically by
-`silex run Sources/Main.sx` as soon as `Main.sx` loads `Math`:
+The installed `STD` module is the concrete native module currently shipped by
+the project:
 
 ```text
-Sources/
-├── Main.sx
-└── Math/
-    ├── Runtime.sx
-    ├── Module.json
-    └── Module.cpp
+Library/STD/
+├── Module.json
+├── Module.cpp
+├── Random/
+│   └── Generator.sx
+└── Time/
+    ├── Clock.sx
+    ├── Internal.sx
+    └── Stopwatch.sx
 ```
 
-The `.sx` source declares private `native func` entries and exposes ordinary
-Silex functions around them. The C or C++ source defines the C symbols derived
-from the full module and function paths; `Math.native_length` becomes
-`silexNative_Math_native_length`.
+`Generator.sx` and `Internal.sx` declare private `native func` entries and
+expose ordinary Silex functions or structures around them. `Module.cpp`
+defines the C symbols derived from their full module and function paths:
+`STD.Random.native_seed` becomes `silexNative_STD_Random_native_seed`, and
+`STD.Time.native_monotonic_microseconds` becomes
+`silexNative_STD_Time_native_monotonic_microseconds`.
 
 ```json
 {
-  "author": "Ada Lovelace",
-  "description": "Local mathematics",
   "native": {
     "sources": {
-      "cpp": ["Module.cpp"]
-    },
-    "targets": {
-      "macos": {
-        "sources": {
-          "objective_cpp": ["Platform/MacOS.mm"]
-        },
-        "frameworks": ["Foundation"]
-      },
-      "aarch64-macos-none": {
-        "defines": {
-          "MATH_ARM64": "1"
-        }
-      }
+      "cpp": [
+        "Module.cpp"
+      ]
     }
   }
 }
@@ -158,15 +108,17 @@ from the full module and function paths; `Math.native_length` becomes
 
 When a descendant is loaded, Silex checks its directory and then each parent
 directory for the closest `Module.json` containing `native`. A metadata-only
-manifest does not mask a parent's native configuration. The `compile` command
-selects one target for the whole application: the host target by default, or
-the triple supplied with `--target`. Every loaded native module inherits that
-same target. Its configuration is composed from the fields directly under
-`native`, then the optional `targets` entry named after the target OS, and
-finally the optional entry named after the exact Zig triple. With the example
-above, `aarch64-macos-none` receives `Module.cpp`, `Platform/MacOS.mm`, the
-Foundation framework, and `MATH_ARM64=1`. A target with no matching override
-uses the general configuration and is still compiled.
+manifest does not mask a parent's native configuration. This is why the one
+manifest at `Library/STD/Module.json` provides `Module.cpp` to both
+`STD.Random` and `STD.Time`.
+
+The `compile` command selects one target for the whole application: the host
+target by default, or the triple supplied with `--target`. Every loaded native
+module inherits that same target. Its configuration is composed from the
+fields directly under `native`, then an optional `targets` entry named after
+the target OS, and finally an optional entry named after the exact Zig triple.
+`STD` currently uses only the general configuration, so `Module.cpp` applies
+to every supported target.
 
 Native sources are listed explicitly under `c`, `cpp`, `objective_c`, or
 `objective_cpp`; relative source and include paths must remain inside the
@@ -190,25 +142,13 @@ source file or split it across several sources. Its files do not introduce
 Silex declarations beyond each module's `.sx` API.
 
 A package can vendor the source distribution of a native library under its
-root and make that ownership explicit. For example, an SDL3 package can keep a
-single copy under `Vendor/SDL/` while Foundation consumes its headers:
-
-```json
-{
-  "name": "SDL3",
-  "version": "1.2.4",
-  "native": {
-    "provides": ["SDL3"],
-    "sources": {
-      "c": ["Vendor/SDL/src/SDL.c"]
-    },
-    "public_include_dirs": ["Vendor/SDL/include"],
-    "public_defines": {
-      "SDL_STATIC": "1"
-    }
-  }
-}
-```
+root and make that ownership explicit. `STD` does not currently vendor a
+third-party library: `Module.cpp` only implements its private Silex
+`native func` declarations, so its manifest needs neither `provides` nor a
+public native interface. A future package that owns a native library can list
+its identity in `provides`, its source files in `sources`, and the headers or
+defines intended for direct consumers in `public_include_dirs` and
+`public_defines`.
 
 `provides` contains declared native identities, not inferred symbols. Two
 distinct resolved package identities cannot provide the same value; Silex
@@ -221,9 +161,9 @@ sources. `public_include_dirs` and `public_defines` also apply to the owner,
 then to native sources compiled by packages that declare the owner as a direct
 dependency. Public include paths are relative to and confined within the
 owner's package root. They do not create Silex imports. The interface is not
-transitive: Foundation can compile `#include <SDL3/SDL.h>` when it declares
-SDL3, but its consumer must declare SDL3 itself before compiling native source
-against that header.
+transitive: a direct consumer can include an owner's public header, but the
+consumer's own dependents must also declare that owner before compiling native
+source against the same header.
 
 Equal public define names and values are passed once. Conflicting values from
 two direct dependencies, or a contradictory private define in the consuming
@@ -257,14 +197,15 @@ The optional manifest can be initialized without changing the module's Silex
 sources:
 
 ```text
-silex module init Sources/Math
-silex module init Sources/Math --native
+silex module init PATH/TO/MODULE
+silex module init PATH/TO/MODULE --native
 ```
 
 The plain form creates `Module.json` containing `{}`. The native form creates
 or completes the manifest with `Module.cpp` as a portable C++ source and creates
 that file only when it is absent. Existing metadata, source files, and native
-configuration are never overwritten implicitly.
+configuration are never overwritten implicitly. `Library/STD` is already in
+the resulting native form: both its manifest entry and `Module.cpp` exist.
 
 ## Local packages
 
@@ -274,24 +215,29 @@ their existing filesystem resolution.
 
 A directory consumed as an external dependency is a declared package. Its
 `Module.json` names the root module, gives it a Semantic Version, and may list
-other packages required directly by its sources:
+other packages required directly by its sources. `STD` is not such a package:
+it is a reserved distributed module and must be imported directly without a
+`dependencies` entry. The repository does not currently ship a public external
+package, so the following fragments use explicit placeholders to describe the
+manifest shape rather than names of available modules:
 
 ```json
 {
-  "name": "Foundation",
-  "version": "0.3.0",
+  "name": "<package-name>",
+  "version": "<semantic-version>",
   "dependencies": {
-    "Utility": {
-      "path": "../Utility"
+    "<dependency-name>": {
+      "path": "<relative-directory>"
     }
   }
 }
 ```
 
-The package root above provides `Foundation`; its `Math/` directory provides
-`Foundation.Math`. A `path` is relative to the manifest that declares it and
-may leave that package directory. The destination is canonicalized and must be
-a directory containing `Module.json`. Its `name` must match the dependency key
+The package root provides the module named by `name`; a subdirectory adds its
+own segment below that root module, exactly as `Random/` provides `STD.Random`
+below `STD/`. A `path` is relative to the manifest that declares it and may
+leave that package directory. The destination is canonicalized and must be a
+directory containing `Module.json`. Its `name` must match the dependency key
 exactly and its `version` must be valid Semantic Versioning.
 
 A dependency can instead name a Git repository:
@@ -299,10 +245,10 @@ A dependency can instead name a Git repository:
 ```json
 {
   "dependencies": {
-    "Utility": {
-      "git": "https://example.com/Utility.silex.git",
-      "version": "^1.2",
-      "rev": "8e0f41c39f2c4be8a65e91a163f2f954af8ebf6d"
+    "<dependency-name>": {
+      "git": "<repository-url>",
+      "version": "<version-constraint>",
+      "rev": "<commit-id>"
     }
   }
 }
@@ -327,10 +273,10 @@ one canonical directory and one version; diamonds reuse that identity once.
 Cycles, missing paths, incomplete manifests, name mismatches, and multiple
 providers report the dependency chain that led to the error.
 
-Each package can import its own modules, the reserved Silex modules, and the
-packages it declares directly. Transitive dependencies are compiled for their
-parent but do not become importable by an application or sibling package that
-did not declare them.
+Each package can import its own modules, reserved distributed modules such as
+`STD`, and the packages it declares directly. Transitive dependencies are
+compiled for their parent but do not become importable by an application or
+sibling package that did not declare them.
 
 When the graph contains Git, Silex atomically writes the complete resolution to
 `Silex.lock` at the application root. Each transitive entry records its name,
@@ -338,9 +284,9 @@ version, canonical `path` or `git` origin, exact Git commit when applicable,
 and exact dependency identities. A dependent package's own lockfile is never
 consulted. A valid root lockfile prevents `compile` and `run` from following a
 moved remote branch. `silex update` recomputes all Git origins without `rev`;
-`silex update Utility` limits that refresh to the named package and necessary
-transitive changes. The existing lockfile is replaced only after the new graph
-has been fully validated.
+`silex update DEPENDENCY_NAME` limits that refresh to the named package and
+necessary transitive changes. The existing lockfile is replaced only after the
+new graph has been fully validated.
 
 Exact Git checkouts are content-addressed by canonical origin and commit in the
 user Silex cache: `~/.silex/packages/` on POSIX systems and the equivalent
