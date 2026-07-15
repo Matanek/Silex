@@ -1,0 +1,13 @@
+{
+  "target": "App",
+  "modules": [
+    {
+      "name": "App",
+      "sources": ["Main.sx"]
+    },
+    {
+      "name": "Math",
+      "sources": ["Math/Runtime.sx"]
+    }
+  ]
+}

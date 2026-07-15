@@ -1,0 +1,5 @@
+import Math
+
+func main() {
+    print(Math.half(84))
+}

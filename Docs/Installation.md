@@ -31,7 +31,7 @@ The source layout and module model are in the [language reference](Language.md).
 The installed distribution also contains Silex's distributed-library sources,
 so imports such as `import STD`, `import STD.Random`, and `import SDL3` work
 without cloning this repository or adding their module files to the project. A
-distributed module or one of its parents may bring a private native runtime
+directory-backed local or distributed module may bring a private native runtime
 described by `Native.json`; it is compiled and linked once when any module that
 inherits it is loaded.
 
@@ -73,7 +73,9 @@ are relative to the manifest. A source belongs to one module only, and each
 module name has one provider. Files in the same module share their declarations.
 Every dotted module name also makes its parent names available as source-less
 modules: declaring `NK.Window` makes `NK` importable without an artificial
-source entry. The manifest format is currently JSON.
+source entry. A module can discover `Native.json` from the directory matching
+its logical name relative to the manifest, such as `Math/Native.json` for
+`Math`. The manifest format is currently JSON.
 
 ## Command line
 
@@ -89,9 +91,10 @@ silex --version
 `compile` checks a program, prepares its intermediate output, and writes the
 executable into `.silex/bin/` unless `-o` selects a path. `--emit-cpp` keeps
 readable intermediate output in `.silex/generated/`. `--target` accepts a Zig
-architecture, operating system, and ABI triple. `--native` adds a
-JSON-described native dependency with `name`, `sources`, and supported
-`targets`.
+architecture, operating system, and ABI triple. `--native` adds a JSON-described
+link dependency with `name`, `sources`, and supported `targets`. It is separate
+from a module's automatically discovered `Native.json`, which authorizes that
+named module's private `native func` API.
 
 ## Build artifacts
 

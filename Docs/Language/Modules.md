@@ -108,16 +108,33 @@ code in `STD/Time/`.
 
 ## Native module runtime
 
-A distributed module may contain one `Native.json`. It supplies the native
-runtime for that module and its descendants. When a descendant is loaded,
-Silex checks its directory and then each parent directory; the closest manifest
-wins. Its `common` configuration is combined with the configuration selected
-by the requested target triple in `targets`. A missing target entry is an
-error. Native sources are listed explicitly under `c`, `cpp`, `objective_c`,
-or `objective_cpp`; relative source and include paths must remain inside the
-directory containing the manifest. Zig compiles C sources with its C driver and
-C++ sources with its C++ driver, then links their objects with the generated
-program.
+A directory-backed local or distributed module may contain one `Native.json`.
+It supplies the native runtime for that module and its descendants. For example,
+this local module is compiled automatically by
+`silex run Sources/Main.sx` as soon as `Main.sx` loads `Math`:
+
+```text
+Sources/
+├── Main.sx
+└── Math/
+    ├── Runtime.sx
+    ├── Native.json
+    └── Runtime.cpp
+```
+
+The `.sx` source declares private `native func` entries and exposes ordinary
+Silex functions around them. The C or C++ source defines the C symbols derived
+from the full module and function paths; `Math.native_length` becomes
+`silexNative_Math_native_length`.
+
+When a descendant is loaded, Silex checks its directory and then each parent
+directory; the closest manifest wins. Its `common` configuration is combined
+with the configuration selected by the requested target triple in `targets`.
+A missing target entry is an error. Native sources are listed explicitly under
+`c`, `cpp`, `objective_c`, or `objective_cpp`; relative source and include paths
+must remain inside the directory containing the manifest. The Zig toolchain
+distributed with Silex compiles C sources with its C driver and C++ sources
+with its C++ driver, then links their objects with the generated program.
 
 The manifest may also list include directories, string defines, system-library
 names, and Apple frameworks. It cannot provide arbitrary compiler flags,
@@ -125,4 +142,6 @@ commands, absolute paths, archives, or prebuilt native binaries. A runtime is
 compiled once per manifest when its module or one of its descendants is loaded.
 Headers are optional, and a runtime may keep all of its implementation in one
 source file or split it across several sources. Its files do not introduce
-Silex declarations beyond each module's `.sx` API.
+Silex declarations beyond each module's `.sx` API. The runtime sources, headers
+and manifest participate in the project cache key, so changing one of them
+recompiles the native module without rebuilding the `silex` command.

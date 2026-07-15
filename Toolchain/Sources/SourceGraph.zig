@@ -53,22 +53,29 @@ pub const Loader = struct {
 
     pub fn load(self: *Loader, input_path: []const u8) !Loaded {
         var project = try ProjectModule.load(self.allocator, self.io, input_path);
+        const project_root = std.fs.path.dirname(input_path) orelse ".";
+        const loads_local_modules = project.single_file;
         var modules: std.ArrayList(ModuleBuilder) = .empty;
         for (project.modules) |module| {
             var sources: std.ArrayList([]const u8) = .empty;
             try sources.appendSlice(self.allocator, module.sources);
+            const native_runtime = if (loads_local_modules)
+                null
+            else
+                try findNativeRuntime(self.allocator, self.io, project_root, module.name);
             try modules.append(self.allocator, .{
                 .name = module.name,
                 .sources = sources,
                 .provider = .application,
+                .native_runtime_name = if (native_runtime) |runtime| runtime.module_name else null,
+                .native_manifest_path = if (native_runtime) |runtime| runtime.manifest_path else null,
+                .native_module_directory = if (native_runtime) |runtime| runtime.module_directory else null,
             });
         }
         for (project.modules, 0..) |module, module_index| for (module.sources) |source_path| {
             try self.appendFile(source_path, module_index);
         };
 
-        const loads_local_modules = project.single_file;
-        const project_root = std.fs.path.dirname(input_path) orelse ".";
         var file_index: usize = 0;
         while (file_index < self.files.items.len) : (file_index += 1) {
             const file = self.files.items[file_index];
@@ -334,10 +341,7 @@ pub const Loader = struct {
         }.lessThan);
 
         const module_index = modules.items.len;
-        const native_runtime = if (provider == .distributed)
-            try findNativeRuntime(self.allocator, self.io, module_root, module_name)
-        else
-            null;
+        const native_runtime = try findNativeRuntime(self.allocator, self.io, module_root, module_name);
         try modules.append(self.allocator, .{
             .name = module_name,
             .provider = provider,

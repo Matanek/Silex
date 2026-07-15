@@ -107,7 +107,7 @@ pub fn build(b: *std.Build) void {
     invalid_native_function_command.addArgs(&.{ "compile", "Tests/InvalidNativeFunction.sx" });
     invalid_native_function_command.expectExitCode(1);
     invalid_native_function_command.expectStdErrEqual(
-        "Tests/InvalidNativeFunction.sx:1:1: error: native functions are only available in a distributed module with Native.json\n",
+        "Tests/InvalidNativeFunction.sx:1:1: error: native functions are only available in a named module with Native.json\n",
     );
 
     const invalid_public_native_function_command = b.addRunArtifact(executable);
@@ -1097,8 +1097,18 @@ pub fn build(b: *std.Build) void {
     distributed_native_runtime_command.addArgs(&.{ "run", "Smokes/DistributedNative/Main.sx" });
     distributed_native_runtime_command.expectStdOutEqual(hostText(b, "Distributed native runtime linked\ntrue\n10\n"));
 
+    const local_native_runtime_command = b.addRunArtifact(executable);
+    local_native_runtime_command.step.dependOn(&distributed_native_runtime_command.step);
+    local_native_runtime_command.addArgs(&.{ "run", "Smokes/LocalNative/Main.sx" });
+    local_native_runtime_command.expectStdOutEqual(hostText(b, "42\n"));
+
+    const local_native_manifest_command = b.addRunArtifact(executable);
+    local_native_manifest_command.step.dependOn(&local_native_runtime_command.step);
+    local_native_manifest_command.addArgs(&.{ "run", "Smokes/LocalNative/project.json" });
+    local_native_manifest_command.expectStdOutEqual(hostText(b, "42\n"));
+
     const unsupported_distributed_native_target_command = b.addRunArtifact(executable);
-    unsupported_distributed_native_target_command.step.dependOn(&distributed_native_runtime_command.step);
+    unsupported_distributed_native_target_command.step.dependOn(&local_native_manifest_command.step);
     unsupported_distributed_native_target_command.addArgs(&.{
         "compile",
         "Smokes/DistributedNative/Main.sx",
@@ -1253,11 +1263,22 @@ pub fn build(b: *std.Build) void {
         ".silex/cross-native-smoke/DistributedNative-x86_64-linux",
     });
 
+    const cross_local_native_smoke_command = b.addRunArtifact(executable);
+    cross_local_native_smoke_command.step.dependOn(&cross_distributed_native_smoke_command.step);
+    cross_local_native_smoke_command.addArgs(&.{
+        "compile",
+        "Smokes/LocalNative/Main.sx",
+        "--target",
+        "x86_64-linux-musl",
+        "-o",
+        ".silex/cross-native-smoke/LocalNative-x86_64-linux",
+    });
+
     const cross_native_smoke_step = b.step(
         "cross-native-smoke",
         "Cross-compile the native source smoke program for x86_64 Linux",
     );
-    cross_native_smoke_step.dependOn(&cross_distributed_native_smoke_command.step);
+    cross_native_smoke_step.dependOn(&cross_local_native_smoke_command.step);
 
     const distribution_options = b.addOptions();
     distribution_options.addOption([]const u8, "developer_zig", "");
