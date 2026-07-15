@@ -1,0 +1,3 @@
+pub func nested() int {
+    return 7
+}

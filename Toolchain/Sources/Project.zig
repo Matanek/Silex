@@ -63,7 +63,7 @@ pub fn load(allocator: Allocator, io: Io, input_path: []const u8) !Project {
     const manifest_dir = inputDirectory(input_path);
     var modules: std.ArrayList(Module) = .empty;
     var target_module: ?usize = null;
-    for (manifest.modules, 0..) |module, module_index| {
+    for (manifest.modules) |module| {
         if (!validModuleName(module.name) or module.sources.len == 0) {
             std.debug.print("silex: module '{s}' requires a valid name and at least one source\n", .{module.name});
             return error.Reported;
@@ -72,8 +72,8 @@ pub fn load(allocator: Allocator, io: Io, input_path: []const u8) !Project {
             std.debug.print("silex: module '{s}' is reserved for the distributed library\n", .{module.name});
             return error.Reported;
         }
-        for (modules.items) |existing| {
-            if (std.mem.eql(u8, existing.name, module.name)) {
+        if (findModule(modules.items, module.name)) |existing_index| {
+            if (modules.items[existing_index].sources.len != 0) {
                 std.debug.print("silex: module '{s}' has multiple providers\n", .{module.name});
                 return error.Reported;
             }
@@ -99,8 +99,17 @@ pub fn load(allocator: Allocator, io: Io, input_path: []const u8) !Project {
             }
             try sources.append(allocator, source_path);
         }
+        try appendModuleParents(allocator, &modules, module.name);
+        const module_sources = try sources.toOwnedSlice(allocator);
+        const module_index = if (findModule(modules.items, module.name)) |existing_index| block: {
+            modules.items[existing_index].sources = module_sources;
+            break :block existing_index;
+        } else block: {
+            const index = modules.items.len;
+            try modules.append(allocator, .{ .name = module.name, .sources = module_sources });
+            break :block index;
+        };
         if (std.mem.eql(u8, module.name, manifest.target)) target_module = module_index;
-        try modules.append(allocator, .{ .name = module.name, .sources = try sources.toOwnedSlice(allocator) });
     }
     if (target_module == null) {
         std.debug.print("silex: target module '{s}' has no provider\n", .{manifest.target});
@@ -113,6 +122,24 @@ pub fn load(allocator: Allocator, io: Io, input_path: []const u8) !Project {
         .modules = try modules.toOwnedSlice(allocator),
         .single_file = false,
     };
+}
+
+fn appendModuleParents(allocator: Allocator, modules: *std.ArrayList(Module), name: []const u8) !void {
+    var offset: usize = 0;
+    while (std.mem.indexOfScalarPos(u8, name, offset, '.')) |separator| {
+        const parent = name[0..separator];
+        if (findModule(modules.items, parent) == null) {
+            try modules.append(allocator, .{ .name = parent, .sources = &.{} });
+        }
+        offset = separator + 1;
+    }
+}
+
+fn findModule(modules: []const Module, name: []const u8) ?usize {
+    for (modules, 0..) |module, index| {
+        if (std.mem.eql(u8, module.name, name)) return index;
+    }
+    return null;
 }
 
 fn inputDirectory(input_path: []const u8) []const u8 {
@@ -155,4 +182,16 @@ test "manifest source paths follow the input directory" {
     try std.testing.expectEqualStrings("Sandbox", inputDirectory("Sandbox/silex.json"));
     try std.testing.expectEqualStrings("", inputDirectory("Main.sx"));
     try std.testing.expectEqualStrings("", inputDirectory("./Main.sx"));
+}
+
+test "module parents are inferred from dotted manifest names" {
+    var modules: std.ArrayList(Module) = .empty;
+    defer modules.deinit(std.testing.allocator);
+
+    try appendModuleParents(std.testing.allocator, &modules, "NK.Rendering.Window");
+
+    try std.testing.expectEqual(@as(usize, 2), modules.items.len);
+    try std.testing.expectEqualStrings("NK", modules.items[0].name);
+    try std.testing.expectEqualStrings("NK.Rendering", modules.items[1].name);
+    try std.testing.expectEqual(@as(usize, 0), modules.items[0].sources.len);
 }

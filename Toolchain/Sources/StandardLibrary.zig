@@ -9,7 +9,7 @@ pub fn isReservedModule(path: []const u8) bool {
     return isReservedRoot(path, "std") or isReservedRoot(path, "Silex");
 }
 
-pub fn isModule(path: []const u8) bool {
+pub fn isStandardPath(path: []const u8) bool {
     return isReservedRoot(path, "std");
 }
 
@@ -40,12 +40,12 @@ fn isDirectory(io: Io, path: []const u8) !bool {
     return true;
 }
 
-fn isReservedRoot(path: []const u8, namespace: []const u8) bool {
-    return std.mem.eql(u8, path, namespace) or
-        (std.mem.startsWith(u8, path, namespace) and path.len > namespace.len and path[namespace.len] == '.');
+fn isReservedRoot(path: []const u8, root_name: []const u8) bool {
+    return std.mem.eql(u8, path, root_name) or
+        (std.mem.startsWith(u8, path, root_name) and path.len > root_name.len and path[root_name.len] == '.');
 }
 
-test "recognize reserved distributed module namespaces" {
+test "recognize reserved distributed module roots" {
     try std.testing.expect(isReservedModule("std"));
     try std.testing.expect(isReservedModule("std.Random"));
     try std.testing.expect(isReservedModule("Silex.Window"));

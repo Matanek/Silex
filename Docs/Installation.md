@@ -29,16 +29,17 @@ silex run hello.sx
 `compile` writes a native executable. `run` compiles and executes the program.
 The source layout and module model are in the [language reference](Language.md).
 The installed distribution also contains Silex's distributed-library sources,
-so imports such as `import std.Random` and `import SDL3` work without cloning
-this repository or adding their module files to the project. A distributed
-module may bring a private native runtime described by its `native.json`; it is
-compiled and linked by its import alone.
+so imports such as `import std`, `import std.Random`, and `import SDL3` work
+without cloning this repository or adding their module files to the project. A
+distributed module may bring a private native runtime described by its
+`native.json`; it is compiled and linked when that exact module is loaded.
 
 ## Projects and manifests
 
 For a small program, pass its entry source file directly. Its directory is the
-local project root: each subdirectory that is imported becomes a module, and
-the `.sx` files directly inside that directory belong to it.
+local project root: each subdirectory is a module, including a parent that only
+contains submodules, and the `.sx` files directly inside that directory belong
+to it. Importing a parent does not recursively load all of its descendants.
 
 Pass a JSON manifest when the target program itself spans several source files,
 or when the project needs to assign files to modules explicitly:
@@ -69,7 +70,9 @@ silex run path/to/project.json
 `modules` has a logical `name` and a non-empty list of `sources`, whose paths
 are relative to the manifest. A source belongs to one module only, and each
 module name has one provider. Files in the same module share their declarations.
-The manifest format is currently JSON.
+Every dotted module name also makes its parent names available as source-less
+modules: declaring `NK.Window` makes `NK` importable without an artificial
+source entry. The manifest format is currently JSON.
 
 ## Command line
 

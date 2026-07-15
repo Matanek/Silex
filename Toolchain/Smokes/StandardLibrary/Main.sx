@@ -1,14 +1,17 @@
-import std.Random
+import std
+
+use std.Random as Random
+use std.Random.Generator as Generator
 
 func main() {
-    var negative = std.Random.create(-1)
-    var zero = std.Random.create(0)
-    var one = std.Random.create(1)
-    var left = std.Random.create(42)
-    var right = std.Random.create(42)
-    var ranges = std.Random.create(-1)
-    var rejected = std.Random.create(0)
-    var random = std.Random.system()
+    var negative:Generator = std.Random.create(-1)
+    var zero = Random.create(0)
+    var one = Random.create(1)
+    var left = Random.create(42)
+    var right = Random.create(42)
+    var ranges = Random.create(-1)
+    var rejected = Random.create(0)
+    var random = Random.system()
 
     print(negative.get_int())
     print(negative.get_int())

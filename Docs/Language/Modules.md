@@ -1,42 +1,60 @@
 # Modules
 
-A module is a logical namespace. Files assigned to the same module share their
-structures and functions. A file does not contain a `module` declaration.
+A module is a logical node in a hierarchy. Files assigned to the same module
+share their structures and functions, and directories below it provide its
+submodules. A file does not contain a `module` declaration.
 
 When compiling an entry file without a manifest, a directory defines a local
 module: `Math/` provides `Math`, and `Math/Geometry/` provides `Math.Geometry`.
-Only `.sx` files directly inside a directory contribute to that module.
+A directory remains a module when it contains no direct `.sx` source and only
+groups submodules. Only `.sx` files directly inside a directory contribute
+declarations to that module.
 
-The distributed library is installed with Silex. Its `std` and `Silex`
-namespaces are reserved: `std/Random/` provides `std.Random`, while
-`Silex/Window/` provides `Silex.Window`. Other distributed modules follow the
-same path rule: `SDL3/` provides `SDL3`. Distributed modules work from a single
-entry file and from a JSON manifest; do not list reserved modules in a
-manifest. If a local module and a distributed module provide the same imported
-name, compilation fails instead of choosing one implicitly.
+The distributed library is installed with Silex. Its root modules `std` and
+`Silex` are reserved: `std/` provides `std`, `std/Random/` provides its
+`std.Random` submodule, and `Silex/Window/` provides `Silex.Window`. Other
+distributed modules follow the same path rule: `SDL3/` provides `SDL3`.
+Distributed modules work from a single entry file and from a JSON manifest; do
+not list reserved modules in a manifest. If a local module and a distributed
+module provide the same imported name, compilation fails instead of choosing
+one implicitly.
 
 ```sx
 import Math
 import NK.Rendering as Rendering
-import std.Random
+import std
+
+use std.Random as Random
+use std.Random.Generator as Generator
 use Math.Vec3
 
 func create() NK.Window.Session {
     let direction:Vec3
+    let random:Generator = Random.create(42)
     return Rendering.create_session()
 }
 ```
 
 `import` names a module and makes it available through its full name or alias.
-`use` names one declaration and introduces its name into the current file; it
-can establish the dependency without a preceding `import`. Declarations are
-private by default. `pub` exposes a structure or function, while `pub use`
-re-exports an existing declaration under the current module namespace.
+It does not recursively load every submodule. A non-public `use` can name
+either one declaration or one submodule and introduce its name or alias into
+the current file. It can establish that exact dependency without a preceding
+`import`; the longest loaded prefix that names a module is selected. Thus
+`use std.Random as Random` introduces a module, while
+`use std.Random.Generator as Generator` introduces a structure. An import alias
+can also qualify a submodule, as in `import std as Standard` followed by
+`use Standard.Random as Random`.
+
+Declarations are private by default. `pub` exposes a structure or function,
+while `pub use` re-exports an existing declaration under the current module
+name. Modules cannot currently be re-exported with `pub use`.
 
 Duplicate providers, missing modules, dependency cycles, ambiguous aliases, and
 access to private declarations are compile-time errors. Dependencies are never
 implicitly transitive. A project manifest can define this module layout
-explicitly; see [Installation and command-line use](../Installation.md).
+explicitly; parent modules of its dotted module names are inferred even when
+they have no sources of their own. See
+[Installation and command-line use](../Installation.md).
 
 ## std.Random
 

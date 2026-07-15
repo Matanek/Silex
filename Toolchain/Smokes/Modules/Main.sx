@@ -1,9 +1,13 @@
-import NK.Plugins as Plugins
-import Prefix.Shared
-import Prefix.Shared.Deep
+import NK
+import Prefix
+
+use NK.Plugins as Plugins
+use NK.Window as Window
+use Prefix.Shared as Shared
+use Shared.Deep as Deep
 
 use Plugins.WindowSession
-use NK.Window.Session as NativeSession
+use Window.Session as NativeSession
 
 func main() {
     let session:WindowSession = Plugins.create_window()
@@ -12,7 +16,7 @@ func main() {
     print(session.active)
     print(raw.active)
     print(native.active)
-    print(Prefix.Shared.value())
-    print(Prefix.Shared.Deep.value())
+    print(Shared.value())
+    print(Deep.value())
     print(message())
 }

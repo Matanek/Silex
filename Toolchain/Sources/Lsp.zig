@@ -202,7 +202,7 @@ const Server = struct {
                         );
                     }
                     if (qualifiedCompletionContext(source, cursor)) |context| {
-                        if (importedModulePath(source, context.qualifier)) |module_path| {
+                        if (try importedModulePath(self.allocator, source, context.qualifier)) |module_path| {
                             break :completion try moduleExportCompletionItems(
                                 self.allocator,
                                 self.io,
@@ -568,29 +568,74 @@ fn qualifiedCompletionContext(source: []const u8, position: Position) ?Qualified
     };
 }
 
-fn importedModulePath(source: []const u8, qualifier: []const u8) ?[]const u8 {
+const VisibleModule = struct {
+    qualifier: []const u8,
+    module_path: []const u8,
+};
+
+fn importedModulePath(allocator: Allocator, source: []const u8, qualifier: []const u8) !?[]const u8 {
+    var modules: std.ArrayList(VisibleModule) = .empty;
     var lines = std.mem.splitScalar(u8, source, '\n');
     while (lines.next()) |source_line| {
         const line = std.mem.trim(u8, source_line, " \t\r");
-        if (!std.mem.startsWith(u8, line, "import") or line.len == "import".len or
-            !std.ascii.isWhitespace(line["import".len]))
-        {
+        const kind: enum { import_value, use_value } = if (directiveBody(line, "import") != null)
+            .import_value
+        else if (directiveBody(line, "use") != null)
+            .use_value
+        else
             continue;
-        }
 
-        const declaration = std.mem.trimStart(u8, line["import".len..], " \t");
+        const declaration = directiveBody(line, if (kind == .import_value) "import" else "use").?;
         const module_end = std.mem.indexOfAny(u8, declaration, " \t\r") orelse declaration.len;
-        const module_path = declaration[0..module_end];
-        if (module_path.len == 0) continue;
+        const path = declaration[0..module_end];
+        if (path.len == 0) continue;
 
         const remainder = std.mem.trimStart(u8, declaration[module_end..], " \t");
         const visible_qualifier = if (std.mem.startsWith(u8, remainder, "as "))
             std.mem.trim(u8, remainder["as ".len..], " \t\r")
+        else if (kind == .use_value)
+            lastPathSegment(path)
         else
-            module_path;
-        if (std.mem.eql(u8, visible_qualifier, qualifier)) return module_path;
+            path;
+        const module_path = try expandVisibleModulePath(allocator, modules.items, path) orelse path;
+        try modules.append(allocator, .{ .qualifier = visible_qualifier, .module_path = module_path });
     }
-    return null;
+    return expandVisibleModulePath(allocator, modules.items, qualifier);
+}
+
+fn directiveBody(line: []const u8, keyword: []const u8) ?[]const u8 {
+    if (!std.mem.startsWith(u8, line, keyword) or line.len == keyword.len or
+        !std.ascii.isWhitespace(line[keyword.len])) return null;
+    return std.mem.trimStart(u8, line[keyword.len..], " \t");
+}
+
+fn expandVisibleModulePath(
+    allocator: Allocator,
+    modules: []const VisibleModule,
+    path: []const u8,
+) !?[]const u8 {
+    var matched: ?VisibleModule = null;
+    for (modules) |module| {
+        if (!std.mem.eql(u8, path, module.qualifier) and !pathHasModuleQualifier(path, module.qualifier)) continue;
+        if (matched == null or module.qualifier.len > matched.?.qualifier.len) matched = module;
+    }
+    const module = matched orelse return null;
+    if (std.mem.eql(u8, path, module.qualifier)) return module.module_path;
+    const expanded: []const u8 = try std.fmt.allocPrint(allocator, "{s}.{s}", .{
+        module.module_path,
+        path[module.qualifier.len + 1 ..],
+    });
+    return expanded;
+}
+
+fn pathHasModuleQualifier(path: []const u8, qualifier: []const u8) bool {
+    return path.len > qualifier.len and std.mem.startsWith(u8, path, qualifier) and
+        path[qualifier.len] == '.';
+}
+
+fn lastPathSegment(path: []const u8) []const u8 {
+    const separator = std.mem.lastIndexOfScalar(u8, path, '.') orelse return path;
+    return path[separator + 1 ..];
 }
 
 fn moduleExportCompletionItems(
@@ -612,15 +657,26 @@ fn moduleExportCompletionItems(
         return try allocator.alloc(CompletionItem, 0);
     defer directory.close(io);
 
+    var items: std.ArrayList(CompletionItem) = .empty;
     var source_names: std.ArrayList([]const u8) = .empty;
     var iterator = directory.iterateAssumeFirstIteration();
     while (iterator.next(io) catch null) |entry| {
         if (entry.kind == .file and std.mem.endsWith(u8, entry.name, ".sx")) {
             try source_names.append(allocator, try allocator.dupe(u8, entry.name));
+        } else if (entry.kind == .directory and entry.name.len > 0 and entry.name[0] != '.' and
+            std.mem.startsWith(u8, entry.name, context.prefix))
+        {
+            try appendModuleExportCompletion(
+                allocator,
+                &items,
+                context.qualifier,
+                entry.name,
+                9,
+                "Silex submodule",
+            );
         }
     }
 
-    var items: std.ArrayList(CompletionItem) = .empty;
     for (source_names.items) |source_name| {
         const module_source_path = try std.fs.path.join(allocator, &.{ module_directory, source_name });
         const module_source = Io.Dir.cwd().readFileAlloc(
@@ -756,18 +812,15 @@ fn collectModules(
     var directory = Io.Dir.cwd().openDir(io, directory_path, .{ .iterate = true }) catch return;
     defer directory.close(io);
 
-    var has_direct_source = false;
     var child_directories: std.ArrayList([]const u8) = .empty;
     var iterator = directory.iterateAssumeFirstIteration();
     while (iterator.next(io) catch null) |entry| {
-        if (entry.kind == .file and std.mem.endsWith(u8, entry.name, ".sx")) {
-            has_direct_source = true;
-        } else if (entry.kind == .directory and entry.name.len > 0 and entry.name[0] != '.') {
+        if (entry.kind == .directory and entry.name.len > 0 and entry.name[0] != '.') {
             try child_directories.append(allocator, try allocator.dupe(u8, entry.name));
         }
     }
 
-    if (module_name.len > 0 and has_direct_source and std.mem.startsWith(u8, module_name, prefix)) {
+    if (module_name.len > 0 and std.mem.startsWith(u8, module_name, prefix)) {
         try items.append(allocator, .{
             .label = module_name,
             .kind = 9,
@@ -975,7 +1028,7 @@ fn collectSemanticInfo(
                 tokens[index + 5].tag == .identifier and tokens[index + 6].tag == .left_parenthesis)
             {
                 const qualifier = tokens[index + 3].lexeme;
-                const module_path = importedModulePath(source, qualifier) orelse continue;
+                const module_path = try importedModulePath(allocator, source, qualifier) orelse continue;
                 const type_name = standardFunctionReturnStructure(
                     allocator,
                     io,
@@ -1006,15 +1059,24 @@ fn collectImportedStandardStructures(
     var lines = std.mem.splitScalar(u8, source, '\n');
     while (lines.next()) |source_line| {
         const line = std.mem.trim(u8, source_line, " \t\r");
-        if (!std.mem.startsWith(u8, line, "import") or line.len == "import".len or
-            !std.ascii.isWhitespace(line["import".len]))
-        {
+        const kind: enum { import_value, use_value } = if (directiveBody(line, "import") != null)
+            .import_value
+        else if (directiveBody(line, "use") != null)
+            .use_value
+        else
             continue;
-        }
-        const declaration = std.mem.trimStart(u8, line["import".len..], " \t");
+        const declaration = directiveBody(line, if (kind == .import_value) "import" else "use").?;
         const module_end = std.mem.indexOfAny(u8, declaration, " \t\r") orelse declaration.len;
-        const module_path = declaration[0..module_end];
-        if (!StandardLibrary.isModule(module_path)) continue;
+        const path = declaration[0..module_end];
+        const remainder = std.mem.trimStart(u8, declaration[module_end..], " \t");
+        const qualifier = if (std.mem.startsWith(u8, remainder, "as "))
+            std.mem.trim(u8, remainder["as ".len..], " \t\r")
+        else if (kind == .use_value)
+            lastPathSegment(path)
+        else
+            path;
+        const module_path = try importedModulePath(allocator, source, qualifier) orelse continue;
+        if (!StandardLibrary.isStandardPath(module_path)) continue;
 
         try visitStandardModuleSources(
             allocator,
@@ -1032,7 +1094,7 @@ fn standardFunctionReturnStructure(
     module_path: []const u8,
     function_name: []const u8,
 ) !?[]const u8 {
-    if (!StandardLibrary.isModule(module_path)) return null;
+    if (!StandardLibrary.isStandardPath(module_path)) return null;
     var lookup: StandardFunctionLookup = .{ .name = function_name };
     try visitStandardModuleSources(
         allocator,
@@ -1394,6 +1456,9 @@ test "import completion recognizes only the module path context" {
 }
 
 test "qualified completion resolves an imported module and its typed prefix" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
     const source =
         \\import Math
         \\var pos:Math.V
@@ -1402,12 +1467,24 @@ test "qualified completion resolves an imported module and its typed prefix" {
     try std.testing.expectEqualStrings("Math", context.qualifier);
     try std.testing.expectEqualStrings("V", context.prefix);
     try std.testing.expect(context.type_only);
-    try std.testing.expectEqualStrings("Math", importedModulePath(source, context.qualifier).?);
+    try std.testing.expectEqualStrings("Math", (try importedModulePath(allocator, source, context.qualifier)).?);
 
     const aliased_source = "import Math as Algebra\nvar pos:Algebra.V";
     const aliased = qualifiedCompletionContext(aliased_source, .{ .line = 1, .character = 17 }).?;
     try std.testing.expectEqualStrings("Algebra", aliased.qualifier);
-    try std.testing.expectEqualStrings("Math", importedModulePath(aliased_source, aliased.qualifier).?);
+    try std.testing.expectEqualStrings("Math", (try importedModulePath(allocator, aliased_source, aliased.qualifier)).?);
+
+    const parent_source =
+        \\import std as Standard
+        \\use Standard.Random as Random
+        \\var pos:Random.G
+    ;
+    const parent = qualifiedCompletionContext(parent_source, .{ .line = 2, .character = 16 }).?;
+    try std.testing.expectEqualStrings("Random", parent.qualifier);
+    try std.testing.expectEqualStrings(
+        "std.Random",
+        (try importedModulePath(allocator, parent_source, parent.qualifier)).?,
+    );
 }
 
 test "file URIs are decoded for local module discovery" {
@@ -1421,8 +1498,19 @@ test "standard library modules and exports complete" {
     defer arena.deinit();
     const allocator = arena.allocator();
     const uri = "file:///Users/nekmata/Projects/Silex/Sandbox/Main.sx";
+    const roots = try localModuleCompletionItems(allocator, std.testing.io, uri, "std");
+    try std.testing.expect(containsCompletion(roots, "std"));
     const modules = try localModuleCompletionItems(allocator, std.testing.io, uri, "std.R");
     try std.testing.expect(containsCompletion(modules, "std.Random"));
+
+    const submodules = try moduleExportCompletionItems(
+        allocator,
+        std.testing.io,
+        uri,
+        "std",
+        .{ .qualifier = "std", .prefix = "R", .type_only = false },
+    );
+    try std.testing.expect(containsCompletion(submodules, "std.Random"));
 
     const exports = try moduleExportCompletionItems(
         allocator,
@@ -1440,7 +1528,8 @@ test "member completion infers an imported standard-library factory result" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const source =
-        \\import std.Random as Random
+        \\import std
+        \\use std.Random as Random
         \\func main() void {
         \\    var rand = Random.system()
         \\    print(rand.get_)
@@ -1450,7 +1539,7 @@ test "member completion infers an imported standard-library factory result" {
         arena.allocator(),
         std.testing.io,
         source,
-        .{ .line = 3, .character = 19 },
+        .{ .line = 4, .character = 19 },
     );
     try std.testing.expect(containsCompletion(items, "get_int"));
     try std.testing.expect(containsCompletion(items, "get_float"));

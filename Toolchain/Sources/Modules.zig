@@ -33,6 +33,12 @@ const ImportBinding = struct {
     module_index: usize,
     qualifier: []const u8,
     position: Source.Position,
+    from_use: bool = false,
+};
+
+const QualifiedTarget = struct {
+    module_index: usize,
+    public_name: []const u8,
 };
 
 const Dependency = struct {
@@ -185,6 +191,50 @@ pub const Resolver = struct {
                     .position = import_value.position,
                 });
             }
+            for (file.program.uses) |use_value| {
+                const module_index = try self.moduleIndexFromUsePath(imports.items, use_value.path) orelse continue;
+                if (use_value.is_public) {
+                    const message = try std.fmt.allocPrint(
+                        self.allocator,
+                        "module '{s}' cannot be re-exported with 'pub use'",
+                        .{self.project.modules[module_index].name},
+                    );
+                    return self.fail(use_value.position, message);
+                }
+                if (module_index == file.module_index) {
+                    const message = try std.fmt.allocPrint(
+                        self.allocator,
+                        "module '{s}' cannot use itself",
+                        .{self.project.modules[module_index].name},
+                    );
+                    return self.fail(use_value.position, message);
+                }
+                const qualifier = use_value.alias orelse lastSegment(use_value.path);
+                for (imports.items) |existing| {
+                    if (std.mem.eql(u8, existing.qualifier, qualifier)) {
+                        const message = try std.fmt.allocPrint(
+                            self.allocator,
+                            "module qualifier '{s}' is already declared",
+                            .{qualifier},
+                        );
+                        return self.fail(use_value.position, message);
+                    }
+                }
+                if (self.findDirect(file.module_index, qualifier, null) != null) {
+                    const message = try std.fmt.allocPrint(
+                        self.allocator,
+                        "module qualifier '{s}' collides with a module declaration",
+                        .{qualifier},
+                    );
+                    return self.fail(use_value.position, message);
+                }
+                try imports.append(self.allocator, .{
+                    .module_index = module_index,
+                    .qualifier = qualifier,
+                    .position = use_value.position,
+                    .from_use = true,
+                });
+            }
             infos[file_index] = .{
                 .module_index = file.module_index,
                 .program = file.program,
@@ -197,7 +247,9 @@ pub const Resolver = struct {
                 });
             }
             for (file.program.uses) |use_value| {
-                const module_index = self.directUseModule(&infos[file_index], use_value.path) orelse continue;
+                if (moduleUseAt(&infos[file_index], use_value.position)) continue;
+                const target = try self.qualifiedUseTarget(&infos[file_index], use_value.path) orelse continue;
+                const module_index = target.module_index;
                 if (module_index == file.module_index) continue;
                 try infos[file_index].dependencies.append(self.allocator, .{
                     .module_index = module_index,
@@ -271,6 +323,7 @@ pub const Resolver = struct {
             if (file.module_index != module_index) continue;
             for (file.program.uses) |use_value| {
                 if (use_value.is_public != is_public) continue;
+                if (moduleUseAt(file, use_value.position)) continue;
                 const declarations = try self.resolveUses(file, use_value.path, use_value.position);
                 const local_name = use_value.alias orelse lastSegment(use_value.path);
                 try self.validateLocalBinding(file, local_name, use_value.position);
@@ -524,78 +577,34 @@ pub const Resolver = struct {
         return result.toOwnedSlice(self.allocator);
     }
 
-    fn directUseModule(self: *const Resolver, file: *const FileInfo, path: []const u8) ?usize {
-        for (file.imports) |import_value| {
-            if (useHasQualifier(path, import_value.qualifier)) return import_value.module_index;
-        }
-        const separator = std.mem.lastIndexOfScalar(u8, path, '.') orelse return null;
-        return self.findModule(path[0..separator]);
-    }
-
     fn resolveUses(
         self: *Resolver,
         file: *const FileInfo,
         path: []const u8,
         position: Source.Position,
     ) ![]const *const Declaration {
-        const separator = std.mem.lastIndexOfScalar(u8, path, '.') orelse {
+        if (std.mem.lastIndexOfScalar(u8, path, '.') == null) {
             const declarations = try self.declarationsNamed(file.module_index, path, null, false);
             if (declarations.len != 0) return declarations;
             const message = try std.fmt.allocPrint(self.allocator, "unknown declaration '{s}'", .{path});
             return self.fail(position, message);
-        };
-
-        const current_name = self.project.modules[file.module_index].name;
-        if (useHasQualifier(path, current_name)) return self.resolveQualifiedUses(file, path, position);
-        for (file.imports) |import_value| {
-            if (useHasQualifier(path, import_value.qualifier)) return self.resolveQualifiedUses(file, path, position);
         }
-
-        const module_name = path[0..separator];
-        const public_name = path[separator + 1 ..];
-        const module_index = self.findModule(module_name) orelse {
-            const message = try std.fmt.allocPrint(self.allocator, "module '{s}' was not found", .{module_name});
+        const target = try self.qualifiedUseTarget(file, path) orelse {
+            const message = try std.fmt.allocPrint(self.allocator, "unknown declaration '{s}'", .{path});
             return self.fail(position, message);
         };
-        const declarations = try self.declarationsNamed(module_index, public_name, null, true);
+        const is_current = target.module_index == file.module_index;
+        const declarations = try self.declarationsNamed(target.module_index, target.public_name, null, !is_current);
         if (declarations.len != 0) return declarations;
-        if ((try self.declarationsNamed(module_index, public_name, null, false)).len != 0) {
+        if (!is_current and (try self.declarationsNamed(target.module_index, target.public_name, null, false)).len != 0) {
             const message = try std.fmt.allocPrint(self.allocator, "declaration '{s}' is private in module '{s}'", .{
-                public_name, module_name,
+                target.public_name, self.project.modules[target.module_index].name,
             });
             return self.fail(position, message);
         }
         const message = try std.fmt.allocPrint(self.allocator, "module '{s}' has no public declaration '{s}'", .{
-            module_name, public_name,
+            self.project.modules[target.module_index].name, target.public_name,
         });
-        return self.fail(position, message);
-    }
-
-    fn resolveQualifiedUses(
-        self: *Resolver,
-        file: *const FileInfo,
-        path: []const u8,
-        position: Source.Position,
-    ) ![]const *const Declaration {
-        const current_name = self.project.modules[file.module_index].name;
-        if (useHasQualifier(path, current_name)) {
-            const name = path[current_name.len + 1 ..];
-            const declarations = try self.declarationsNamed(file.module_index, name, null, false);
-            if (declarations.len != 0) return declarations;
-        }
-        for (file.imports) |import_value| {
-            if (!useHasQualifier(path, import_value.qualifier)) continue;
-            const name = path[import_value.qualifier.len + 1 ..];
-            const declarations = try self.declarationsNamed(import_value.module_index, name, null, true);
-            if (declarations.len != 0) return declarations;
-            if ((try self.declarationsNamed(import_value.module_index, name, null, false)).len != 0) {
-                const message = try std.fmt.allocPrint(self.allocator, "declaration '{s}' is private in module '{s}'", .{
-                    name, self.project.modules[import_value.module_index].name,
-                });
-                return self.fail(position, message);
-            }
-        }
-        const message = try std.fmt.allocPrint(self.allocator, "unknown declaration '{s}'", .{path});
         return self.fail(position, message);
     }
 
@@ -639,21 +648,15 @@ pub const Resolver = struct {
             unreachable;
         }
 
-        const current_name = self.project.modules[file.module_index].name;
-        if (pathHasQualifier(name, current_name)) {
-            const public_name = name[current_name.len + 1 ..];
-            const direct = try self.declarationsNamed(file.module_index, public_name, .function, false);
-            if (direct.len != 0) return direct;
-        }
-        var matched_import: ?ImportBinding = null;
-        for (file.imports) |import_value| {
-            if (!pathHasQualifier(name, import_value.qualifier)) continue;
-            if (matched_import == null or import_value.qualifier.len > matched_import.?.qualifier.len) matched_import = import_value;
-        }
-        if (matched_import) |import_value| {
-            const public_name = name[import_value.qualifier.len + 1 ..];
-            const exports = try self.declarationsNamed(import_value.module_index, public_name, .function, true);
-            if (exports.len != 0) return exports;
+        if (try self.qualifiedExpressionTarget(file, name)) |target| {
+            const is_current = target.module_index == file.module_index;
+            const declarations = try self.declarationsNamed(
+                target.module_index,
+                target.public_name,
+                .function,
+                !is_current,
+            );
+            if (declarations.len != 0) return declarations;
         }
         _ = try self.resolveName(file_index, name, .function, position);
         unreachable;
@@ -678,33 +681,26 @@ pub const Resolver = struct {
         kind: ?Kind,
         position: Source.Position,
     ) !*const Declaration {
-        const current_name = self.project.modules[file.module_index].name;
-        if (pathHasQualifier(path, current_name)) {
-            const public_name = path[current_name.len + 1 ..];
-            if (self.findDirect(file.module_index, public_name, kind)) |declaration| return declaration;
-        }
-        var matched_import: ?ImportBinding = null;
-        for (file.imports) |import_value| {
-            if (!pathHasQualifier(path, import_value.qualifier)) continue;
-            if (matched_import == null or import_value.qualifier.len > matched_import.?.qualifier.len) {
-                matched_import = import_value;
+        if (try self.qualifiedExpressionTarget(file, path)) |target| {
+            if (std.mem.indexOfScalar(u8, target.public_name, '.') != null) {
+                return self.fail(
+                    position,
+                    try std.fmt.allocPrint(self.allocator, "unknown qualified path '{s}'", .{path}),
+                );
             }
-        }
-        if (matched_import) |import_value| {
-            const public_name = path[import_value.qualifier.len + 1 ..];
-            if (std.mem.indexOfScalar(u8, public_name, '.') != null) {
-                const message = try std.fmt.allocPrint(self.allocator, "unknown qualified path '{s}'", .{path});
-                return self.fail(position, message);
+            if (target.module_index == file.module_index) {
+                if (self.findDirect(target.module_index, target.public_name, kind)) |declaration| return declaration;
+            } else if (self.findExport(target.module_index, target.public_name, kind)) |export_value| {
+                return export_value.declaration;
             }
-            if (self.findExport(import_value.module_index, public_name, kind)) |export_value| return export_value.declaration;
-            if (self.findDirect(import_value.module_index, public_name, kind)) |_| {
+            if (target.module_index != file.module_index and self.findDirect(target.module_index, target.public_name, kind) != null) {
                 const message = try std.fmt.allocPrint(self.allocator, "declaration '{s}' is private in module '{s}'", .{
-                    public_name, self.project.modules[import_value.module_index].name,
+                    target.public_name, self.project.modules[target.module_index].name,
                 });
                 return self.fail(position, message);
             }
             const message = try std.fmt.allocPrint(self.allocator, "module '{s}' has no public declaration '{s}'", .{
-                self.project.modules[import_value.module_index].name, public_name,
+                self.project.modules[target.module_index].name, target.public_name,
             });
             return self.fail(position, message);
         }
@@ -716,6 +712,69 @@ pub const Resolver = struct {
         }
         const message = try std.fmt.allocPrint(self.allocator, "unknown qualified path '{s}'", .{path});
         return self.fail(position, message);
+    }
+
+    fn moduleIndexFromUsePath(
+        self: *Resolver,
+        bindings: []const ImportBinding,
+        path: []const u8,
+    ) !?usize {
+        if (try self.canonicalPathFromBindings(bindings, path)) |canonical| {
+            return self.findModule(canonical);
+        }
+        return self.findModule(path);
+    }
+
+    fn qualifiedUseTarget(self: *Resolver, file: *const FileInfo, path: []const u8) !?QualifiedTarget {
+        if (try self.canonicalPathFromBindings(file.imports, path)) |canonical| {
+            if (self.longestModuleTarget(canonical)) |target| return target;
+        }
+        return self.longestModuleTarget(path);
+    }
+
+    fn qualifiedExpressionTarget(self: *Resolver, file: *const FileInfo, path: []const u8) !?QualifiedTarget {
+        const current_name = self.project.modules[file.module_index].name;
+        if (pathHasQualifier(path, current_name)) {
+            if (self.longestModuleTarget(path)) |target| return target;
+        }
+        if (try self.canonicalPathFromBindings(file.imports, path)) |canonical| {
+            return self.longestModuleTarget(canonical);
+        }
+        return null;
+    }
+
+    fn canonicalPathFromBindings(
+        self: *Resolver,
+        bindings: []const ImportBinding,
+        path: []const u8,
+    ) !?[]const u8 {
+        var matched: ?ImportBinding = null;
+        for (bindings) |binding| {
+            if (!pathHasQualifier(path, binding.qualifier)) continue;
+            if (matched == null or binding.qualifier.len > matched.?.qualifier.len) matched = binding;
+        }
+        const binding = matched orelse return null;
+        const canonical: []const u8 = try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{
+            self.project.modules[binding.module_index].name,
+            path[binding.qualifier.len + 1 ..],
+        });
+        return canonical;
+    }
+
+    fn longestModuleTarget(self: *const Resolver, canonical_path: []const u8) ?QualifiedTarget {
+        var matched_index: ?usize = null;
+        for (self.project.modules, 0..) |module, module_index| {
+            if (!pathHasQualifier(canonical_path, module.name)) continue;
+            if (matched_index == null or module.name.len > self.project.modules[matched_index.?].name.len) {
+                matched_index = module_index;
+            }
+        }
+        const module_index = matched_index orelse return null;
+        const module_name = self.project.modules[module_index].name;
+        return .{
+            .module_index = module_index,
+            .public_name = canonical_path[module_name.len + 1 ..],
+        };
     }
 
     fn findModule(self: *const Resolver, name: []const u8) ?usize {
@@ -787,14 +846,18 @@ fn pathHasQualifier(path: []const u8, qualifier: []const u8) bool {
     return path.len > qualifier.len and std.mem.startsWith(u8, path, qualifier) and path[qualifier.len] == '.';
 }
 
-fn useHasQualifier(path: []const u8, qualifier: []const u8) bool {
-    const separator = std.mem.lastIndexOfScalar(u8, path, '.') orelse return false;
-    return separator == qualifier.len and std.mem.startsWith(u8, path, qualifier);
-}
-
 fn lastSegment(path: []const u8) []const u8 {
     const index = std.mem.lastIndexOfScalar(u8, path, '.') orelse return path;
     return path[index + 1 ..];
+}
+
+fn moduleUseAt(file: *const FileInfo, position: Source.Position) bool {
+    for (file.imports) |binding| {
+        if (!binding.from_use) continue;
+        if (binding.position.file == position.file and binding.position.line == position.line and
+            binding.position.column == position.column) return true;
+    }
+    return false;
 }
 
 fn declarationPositions(allocator: Allocator, declarations: []const *const Declaration) ![]const Source.Position {

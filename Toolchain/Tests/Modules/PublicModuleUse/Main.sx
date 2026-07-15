@@ -1,0 +1,3 @@
+pub use Lib.Child
+
+func main() void {}

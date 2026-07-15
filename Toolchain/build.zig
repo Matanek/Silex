@@ -664,12 +664,23 @@ pub fn build(b: *std.Build) void {
         "Tests/Modules/UnknownPath/Main.sx:4:9: error: module 'Lib' has no public declaration 'Missing'\n",
     );
 
+    const public_module_use_command = b.addRunArtifact(executable);
+    public_module_use_command.addArgs(&.{ "compile", "Tests/Modules/PublicModuleUse/project.json" });
+    public_module_use_command.expectExitCode(1);
+    public_module_use_command.expectStdErrEqual(
+        "Tests/Modules/PublicModuleUse/Main.sx:1:5: error: module 'Lib.Child' cannot be re-exported with 'pub use'\n",
+    );
+
     const missing_local_import_command = b.addRunArtifact(executable);
     missing_local_import_command.addArgs(&.{ "compile", "Tests/LocalImports/Missing/Main.sx" });
     missing_local_import_command.expectExitCode(1);
     missing_local_import_command.expectStdErrEqual(
         "Tests/LocalImports/Missing/Main.sx:1:1: error: local module 'Math.Vec3' was not found at 'Tests/LocalImports/Missing/Math/Vec3'\n",
     );
+
+    const parent_only_import_command = b.addRunArtifact(executable);
+    parent_only_import_command.addArgs(&.{ "run", "Tests/LocalImports/ParentOnly/Main.sx" });
+    parent_only_import_command.expectStdOutEqual(hostText(b, "parent only\n"));
 
     const test_step = b.step("test", "Run the toolchain tests");
     test_step.dependOn(b.getInstallStep());
@@ -757,7 +768,9 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&module_alias_collision_command.step);
     test_step.dependOn(&multiple_module_providers_command.step);
     test_step.dependOn(&unknown_module_path_command.step);
+    test_step.dependOn(&public_module_use_command.step);
     test_step.dependOn(&missing_local_import_command.step);
+    test_step.dependOn(&parent_only_import_command.step);
 
     const smoke_command = b.addRunArtifact(executable);
     smoke_command.addArgs(&.{ "run", "Smokes/Main.sx" });
@@ -1019,7 +1032,7 @@ pub fn build(b: *std.Build) void {
     const local_imports_command = b.addRunArtifact(executable);
     local_imports_command.step.dependOn(&modules_command.step);
     local_imports_command.addArgs(&.{ "run", "Smokes/LocalImports/Main.sx" });
-    local_imports_command.expectStdOutEqual(hostText(b, "2\n3\n9\n3\n"));
+    local_imports_command.expectStdOutEqual(hostText(b, "2\n3\n9\n3\n7\n"));
 
     const standard_library_command = b.addRunArtifact(executable);
     standard_library_command.step.dependOn(&local_imports_command.step);

@@ -1,16 +1,19 @@
 # Standard library
 
-Silex distributes its standard-library sources with the compiler. Modules use
-the reserved `std` namespace and are compiled with the program that imports
-them. They are versioned with Silex itself; projects do not list them in a JSON
-manifest.
+Silex distributes its standard-library sources with the compiler. `std` is its
+reserved root module; directories below it provide submodules that are compiled
+with the program when explicitly imported or used. They are versioned with
+Silex itself; projects do not list them in a JSON manifest.
 
 ```sx
-import std.Random
+import std
+
+use std.Random as Random
+use std.Random.Generator as Generator
 
 func main() {
-    var random = std.Random.system()
-    let value = random.next()
+    var random:Generator = Random.system()
+    let value = random.get_int()
     print(value > 0)
 }
 ```
@@ -19,12 +22,11 @@ func main() {
 
 `std.Random.create(seed)` returns a deterministic `Generator`. Equal seeds
 produce equal sequences. `std.Random.system()` returns a generator initialized
-from the platform runtime. In both cases, `generator.next()` returns a positive
-random `int` and advances only that generator's state.
+from the platform runtime. `get_int()`, `get_float()`, and `get_bool()` produce
+typed values, while the overloads with minimum and maximum arguments produce a
+value in the requested half-open interval. Every call advances only that
+generator's state.
 
-The generator delegates its state transition and system seed to private native
-functions supplied by the standard-library runtime and linked automatically
-when the module is imported.
-
-The initial module deliberately does not provide bounded ranges, seeding, or
-concurrency APIs. Those contracts will be added separately.
+The deterministic transition is implemented in Silex. Only the system seed is
+provided by the private native runtime linked automatically when `std.Random`
+is loaded.

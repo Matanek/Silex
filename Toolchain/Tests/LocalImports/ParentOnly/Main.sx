@@ -1,0 +1,5 @@
+import Parent
+
+func main() void {
+    print("parent only")
+}

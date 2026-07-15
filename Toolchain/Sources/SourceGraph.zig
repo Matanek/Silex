@@ -19,6 +19,11 @@ const ModuleBuilder = struct {
 
 const Provider = enum { application, local, distributed };
 
+const ModuleAlias = struct {
+    qualifier: []const u8,
+    module_name: []const u8,
+};
+
 pub const Loaded = struct {
     project: ProjectModule.Project,
     source_paths: []const []const u8,
@@ -68,15 +73,25 @@ pub const Loader = struct {
                     try self.loadDistributedModule(&modules, import_value.path, import_value.position);
                 }
             }
+            var module_aliases: std.ArrayList(ModuleAlias) = .empty;
             for (file.program.uses) |use_value| {
-                if (useUsesImportAlias(file.program.imports, use_value.path)) continue;
-                const module_name = moduleNameFromUse(use_value.path) orelse continue;
-                if (StandardLibrary.isReservedModule(module_name)) {
-                    try self.loadDistributedModule(&modules, module_name, use_value.position);
-                } else if (loads_local_modules) {
-                    try self.loadLocalOrDistributedModule(&modules, project_root, module_name, use_value.position);
-                } else {
-                    try self.loadDistributedModule(&modules, module_name, use_value.position);
+                const canonical_path = try canonicalUsePath(
+                    self.allocator,
+                    file.program.imports,
+                    module_aliases.items,
+                    use_value.path,
+                );
+                if (try self.loadUseDependency(
+                    &modules,
+                    project_root,
+                    canonical_path,
+                    use_value.position,
+                    loads_local_modules,
+                )) |module_name| {
+                    try module_aliases.append(self.allocator, .{
+                        .qualifier = use_value.alias orelse lastSegment(use_value.path),
+                        .module_name = module_name,
+                    });
                 }
             }
         }
@@ -91,6 +106,61 @@ pub const Loader = struct {
         project.modules = try project_modules.toOwnedSlice(self.allocator);
         project.single_file = loads_local_modules and self.files.items.len == 1;
         return self.finish(project);
+    }
+
+    fn loadUseDependency(
+        self: *Loader,
+        modules: *std.ArrayList(ModuleBuilder),
+        project_root: []const u8,
+        canonical_path: []const u8,
+        position: Source.Position,
+        loads_local_modules: bool,
+    ) !?[]const u8 {
+        if (try self.moduleExists(modules.items, project_root, canonical_path, loads_local_modules)) {
+            try self.loadNamedModule(modules, project_root, canonical_path, position, loads_local_modules);
+            return canonical_path;
+        }
+        const module_name = moduleNameFromUse(canonical_path) orelse return null;
+        try self.loadNamedModule(modules, project_root, module_name, position, loads_local_modules);
+        return null;
+    }
+
+    fn moduleExists(
+        self: *Loader,
+        modules: []const ModuleBuilder,
+        project_root: []const u8,
+        module_name: []const u8,
+        loads_local_modules: bool,
+    ) !bool {
+        if (findModule(modules, module_name) != null) return true;
+        if (StandardLibrary.isReservedModule(module_name)) {
+            const library_root = StandardLibrary.root(self.allocator, self.io) catch return false;
+            return isDirectory(self.io, try localModulePath(self.allocator, library_root, module_name));
+        }
+        if (loads_local_modules and
+            try isDirectory(self.io, try localModulePath(self.allocator, project_root, module_name)))
+        {
+            return true;
+        }
+        const library_root = StandardLibrary.root(self.allocator, self.io) catch return false;
+        return isDirectory(self.io, try localModulePath(self.allocator, library_root, module_name));
+    }
+
+    fn loadNamedModule(
+        self: *Loader,
+        modules: *std.ArrayList(ModuleBuilder),
+        project_root: []const u8,
+        module_name: []const u8,
+        position: Source.Position,
+        loads_local_modules: bool,
+    ) !void {
+        if (StandardLibrary.isReservedModule(module_name)) {
+            return self.loadDistributedModule(modules, module_name, position);
+        }
+        if (loads_local_modules) {
+            return self.loadLocalOrDistributedModule(modules, project_root, module_name, position);
+        }
+        return self.loadDistributedModule(modules, module_name, position);
     }
 
     fn loadLocalOrDistributedModule(
@@ -177,15 +247,6 @@ pub const Loader = struct {
                 return std.mem.lessThan(u8, left, right);
             }
         }.lessThan);
-
-        if (source_names.items.len == 0) {
-            const message = try std.fmt.allocPrint(
-                self.allocator,
-                "module '{s}' has no direct .sx source in '{s}'",
-                .{ module_name, directory_path },
-            );
-            return self.fail(position, message);
-        }
 
         const module_index = modules.items.len;
         const native_manifest_path = if (provider == .distributed)
@@ -277,13 +338,44 @@ fn moduleNameFromUse(path: []const u8) ?[]const u8 {
     return path[0..separator];
 }
 
-fn useUsesImportAlias(imports: []const Ast.Import, path: []const u8) bool {
+fn canonicalUsePath(
+    allocator: Allocator,
+    imports: []const Ast.Import,
+    aliases: []const ModuleAlias,
+    path: []const u8,
+) ![]const u8 {
+    var matched_qualifier: ?[]const u8 = null;
+    var matched_module: ?[]const u8 = null;
     for (imports) |import_value| {
         const qualifier = import_value.alias orelse import_value.path;
-        const separator = std.mem.lastIndexOfScalar(u8, path, '.') orelse continue;
-        if (separator == qualifier.len and std.mem.startsWith(u8, path, qualifier)) return true;
+        if (!pathHasQualifier(path, qualifier)) continue;
+        if (matched_qualifier == null or qualifier.len > matched_qualifier.?.len) {
+            matched_qualifier = qualifier;
+            matched_module = import_value.path;
+        }
     }
-    return false;
+    for (aliases) |alias| {
+        if (!pathHasQualifier(path, alias.qualifier)) continue;
+        if (matched_qualifier == null or alias.qualifier.len > matched_qualifier.?.len) {
+            matched_qualifier = alias.qualifier;
+            matched_module = alias.module_name;
+        }
+    }
+    const qualifier = matched_qualifier orelse return path;
+    return std.fmt.allocPrint(allocator, "{s}.{s}", .{
+        matched_module.?,
+        path[qualifier.len + 1 ..],
+    });
+}
+
+fn pathHasQualifier(path: []const u8, qualifier: []const u8) bool {
+    return std.mem.startsWith(u8, path, qualifier) and
+        path.len > qualifier.len and path[qualifier.len] == '.';
+}
+
+fn lastSegment(path: []const u8) []const u8 {
+    const separator = std.mem.lastIndexOfScalar(u8, path, '.') orelse return path;
+    return path[separator + 1 ..];
 }
 
 fn localModulePath(allocator: Allocator, root: []const u8, module_name: []const u8) ![]const u8 {
@@ -323,4 +415,20 @@ test "local module paths follow their logical segments" {
 test "use paths select a declaration from their parent module" {
     try std.testing.expectEqualStrings("Math.Geometry", moduleNameFromUse("Math.Geometry.Ray").?);
     try std.testing.expect(moduleNameFromUse("Vec3") == null);
+}
+
+test "use paths expand import and module aliases" {
+    const imports = &[_]Ast.Import{.{
+        .path = "std",
+        .alias = "Standard",
+        .position = .{ .line = 1, .column = 1 },
+    }};
+    const aliases = &[_]ModuleAlias{.{ .qualifier = "Random", .module_name = "std.Random" }};
+
+    const imported = try canonicalUsePath(std.testing.allocator, imports, &.{}, "Standard.Random");
+    defer std.testing.allocator.free(imported);
+    try std.testing.expectEqualStrings("std.Random", imported);
+    const expanded = try canonicalUsePath(std.testing.allocator, imports, aliases, "Random.Generator");
+    defer std.testing.allocator.free(expanded);
+    try std.testing.expectEqualStrings("std.Random.Generator", expanded);
 }
