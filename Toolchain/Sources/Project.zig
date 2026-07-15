@@ -6,6 +6,7 @@ const Io = std.Io;
 pub const Module = struct {
     name: []const u8,
     sources: []const []const u8,
+    native_runtime_name: ?[]const u8 = null,
     native_manifest_path: ?[]const u8 = null,
     native_module_directory: ?[]const u8 = null,
 };
@@ -163,7 +164,7 @@ fn validModuleName(name: []const u8) bool {
 }
 
 fn isReservedModule(name: []const u8) bool {
-    return isReservedRoot(name, "std") or isReservedRoot(name, "Silex");
+    return isReservedRoot(name, "STD") or isReservedRoot(name, "Silex");
 }
 
 fn isReservedRoot(name: []const u8, root: []const u8) bool {

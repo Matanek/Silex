@@ -501,12 +501,12 @@ pub const Analyzer = struct {
             if (ast_function.is_native) {
                 const module_name = native_module_name orelse return self.fail(
                     ast_function.position,
-                    "native functions are only available in a distributed module with native.json",
+                    "native functions are only available in a distributed module with Native.json",
                 );
                 if (!self.isNativeModule(module_name)) {
                     const message = try std.fmt.allocPrint(
                         self.allocator,
-                        "native functions require module '{s}' to declare native.json",
+                        "native functions require module '{s}' or one of its parents to declare Native.json",
                         .{module_name},
                     );
                     return self.fail(ast_function.position, message);

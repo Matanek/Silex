@@ -6,11 +6,11 @@ const Allocator = std.mem.Allocator;
 const Io = std.Io;
 
 pub fn isReservedModule(path: []const u8) bool {
-    return isReservedRoot(path, "std") or isReservedRoot(path, "Silex");
+    return isReservedRoot(path, "STD") or isReservedRoot(path, "Silex");
 }
 
 pub fn isStandardPath(path: []const u8) bool {
-    return isReservedRoot(path, "std");
+    return isReservedRoot(path, "STD");
 }
 
 pub fn root(allocator: Allocator, io: Io) ![]const u8 {
@@ -46,9 +46,9 @@ fn isReservedRoot(path: []const u8, root_name: []const u8) bool {
 }
 
 test "recognize reserved distributed module roots" {
-    try std.testing.expect(isReservedModule("std"));
-    try std.testing.expect(isReservedModule("std.Random"));
+    try std.testing.expect(isReservedModule("STD"));
+    try std.testing.expect(isReservedModule("STD.Random"));
     try std.testing.expect(isReservedModule("Silex.Window"));
     try std.testing.expect(!isReservedModule("Random"));
-    try std.testing.expect(!isReservedModule("stdlib.Random"));
+    try std.testing.expect(!isReservedModule("std.Random"));
 }

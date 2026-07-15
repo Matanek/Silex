@@ -1,10 +1,10 @@
-import std
+import STD
 
-use std.Random as Random
-use std.Random.Generator as Generator
+use STD.Random as Random
+use STD.Random.Generator as Generator
 
 func main() {
-    var negative:Generator = std.Random.create(-1)
+    var negative:Generator = STD.Random.create(-1)
     var zero = Random.create(0)
     var one = Random.create(1)
     var left = Random.create(42)

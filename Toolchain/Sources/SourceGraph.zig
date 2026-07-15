@@ -13,8 +13,15 @@ const ModuleBuilder = struct {
     name: []const u8,
     sources: std.ArrayList([]const u8) = .empty,
     provider: Provider,
+    native_runtime_name: ?[]const u8 = null,
     native_manifest_path: ?[]const u8 = null,
     native_module_directory: ?[]const u8 = null,
+};
+
+const NativeRuntime = struct {
+    module_name: []const u8,
+    module_directory: []const u8,
+    manifest_path: []const u8,
 };
 
 const Provider = enum { application, local, distributed };
@@ -100,6 +107,7 @@ pub const Loader = struct {
         for (modules.items) |*module| try project_modules.append(self.allocator, .{
             .name = module.name,
             .sources = try module.sources.toOwnedSlice(self.allocator),
+            .native_runtime_name = module.native_runtime_name,
             .native_manifest_path = module.native_manifest_path,
             .native_module_directory = module.native_module_directory,
         });
@@ -249,15 +257,16 @@ pub const Loader = struct {
         }.lessThan);
 
         const module_index = modules.items.len;
-        const native_manifest_path = if (provider == .distributed)
-            try nativeManifestPath(self.allocator, self.io, directory_path)
+        const native_runtime = if (provider == .distributed)
+            try findNativeRuntime(self.allocator, self.io, module_root, module_name)
         else
             null;
         try modules.append(self.allocator, .{
             .name = module_name,
             .provider = provider,
-            .native_manifest_path = native_manifest_path,
-            .native_module_directory = if (native_manifest_path != null) directory_path else null,
+            .native_runtime_name = if (native_runtime) |runtime| runtime.module_name else null,
+            .native_manifest_path = if (native_runtime) |runtime| runtime.manifest_path else null,
+            .native_module_directory = if (native_runtime) |runtime| runtime.module_directory else null,
         });
         for (source_names.items) |source_name| {
             const source_path = try std.fs.path.join(self.allocator, &.{ directory_path, source_name });
@@ -395,13 +404,69 @@ fn isDirectory(io: Io, path: []const u8) !bool {
     return true;
 }
 
+fn findNativeRuntime(
+    allocator: Allocator,
+    io: Io,
+    module_root: []const u8,
+    module_name: []const u8,
+) !?NativeRuntime {
+    var candidate_name = module_name;
+    while (true) {
+        const candidate_directory = try localModulePath(allocator, module_root, candidate_name);
+        if (try nativeManifestPath(allocator, io, candidate_directory)) |manifest_path| {
+            return .{
+                .module_name = candidate_name,
+                .module_directory = candidate_directory,
+                .manifest_path = manifest_path,
+            };
+        }
+        const separator = std.mem.lastIndexOfScalar(u8, candidate_name, '.') orelse return null;
+        candidate_name = candidate_name[0..separator];
+    }
+}
+
 fn nativeManifestPath(allocator: Allocator, io: Io, module_directory: []const u8) !?[]const u8 {
-    const path = try std.fs.path.join(allocator, &.{ module_directory, "native.json" });
+    const path = try std.fs.path.join(allocator, &.{ module_directory, "Native.json" });
     const stat = Io.Dir.cwd().statFile(io, path, .{}) catch |err| switch (err) {
         error.FileNotFound => return null,
         else => |other| return other,
     };
     return if (stat.kind == .file) path else null;
+}
+
+test "native runtime is inherited from an exact-cased parent manifest" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{ .iterate = true });
+    defer temporary.cleanup();
+
+    try temporary.dir.createDirPath(std.testing.io, "Library/Parent/Child");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Library/Parent/Child/native.json",
+        .data = "{}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Library/Parent/Native.json",
+        .data = "{}",
+    });
+    const library_root = try std.fs.path.join(allocator, &.{
+        ".zig-cache",
+        "tmp",
+        &temporary.sub_path,
+        "Library",
+    });
+    const runtime = (try findNativeRuntime(
+        allocator,
+        std.testing.io,
+        library_root,
+        "Parent.Child",
+    )).?;
+    const expected_directory = try std.fs.path.join(allocator, &.{ library_root, "Parent" });
+
+    try std.testing.expectEqualStrings("Parent", runtime.module_name);
+    try std.testing.expectEqualStrings(expected_directory, runtime.module_directory);
+    try std.testing.expect(std.mem.endsWith(u8, runtime.manifest_path, "Parent/Native.json"));
 }
 
 test "local module paths follow their logical segments" {
@@ -419,16 +484,16 @@ test "use paths select a declaration from their parent module" {
 
 test "use paths expand import and module aliases" {
     const imports = &[_]Ast.Import{.{
-        .path = "std",
+        .path = "STD",
         .alias = "Standard",
         .position = .{ .line = 1, .column = 1 },
     }};
-    const aliases = &[_]ModuleAlias{.{ .qualifier = "Random", .module_name = "std.Random" }};
+    const aliases = &[_]ModuleAlias{.{ .qualifier = "Random", .module_name = "STD.Random" }};
 
     const imported = try canonicalUsePath(std.testing.allocator, imports, &.{}, "Standard.Random");
     defer std.testing.allocator.free(imported);
-    try std.testing.expectEqualStrings("std.Random", imported);
+    try std.testing.expectEqualStrings("STD.Random", imported);
     const expanded = try canonicalUsePath(std.testing.allocator, imports, aliases, "Random.Generator");
     defer std.testing.allocator.free(expanded);
-    try std.testing.expectEqualStrings("std.Random.Generator", expanded);
+    try std.testing.expectEqualStrings("STD.Random.Generator", expanded);
 }

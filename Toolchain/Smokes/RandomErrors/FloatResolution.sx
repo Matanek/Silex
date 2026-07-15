@@ -1,6 +1,6 @@
-import std.Random
+import STD.Random
 
 func main() {
-    var random = std.Random.create(1)
+    var random = STD.Random.create(1)
     print(random.get_float(1.0, 1.0000001))
 }

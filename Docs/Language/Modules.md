@@ -10,9 +10,9 @@ A directory remains a module when it contains no direct `.sx` source and only
 groups submodules. Only `.sx` files directly inside a directory contribute
 declarations to that module.
 
-The distributed library is installed with Silex. Its root modules `std` and
-`Silex` are reserved: `std/` provides `std`, `std/Random/` provides its
-`std.Random` submodule, and `Silex/Window/` provides `Silex.Window`. Other
+The distributed library is installed with Silex. Its root modules `STD` and
+`Silex` are reserved: `STD/` provides `STD`, `STD/Random/` provides its
+`STD.Random` submodule, and `Silex/Window/` provides `Silex.Window`. Other
 distributed modules follow the same path rule: `SDL3/` provides `SDL3`.
 Distributed modules work from a single entry file and from a JSON manifest; do
 not list reserved modules in a manifest. If a local module and a distributed
@@ -22,10 +22,10 @@ one implicitly.
 ```sx
 import Math
 import NK.Rendering as Rendering
-import std
+import STD
 
-use std.Random as Random
-use std.Random.Generator as Generator
+use STD.Random as Random
+use STD.Random.Generator as Generator
 use Math.Vec3
 
 func create() NK.Window.Session {
@@ -40,9 +40,9 @@ It does not recursively load every submodule. A non-public `use` can name
 either one declaration or one submodule and introduce its name or alias into
 the current file. It can establish that exact dependency without a preceding
 `import`; the longest loaded prefix that names a module is selected. Thus
-`use std.Random as Random` introduces a module, while
-`use std.Random.Generator as Generator` introduces a structure. An import alias
-can also qualify a submodule, as in `import std as Standard` followed by
+`use STD.Random as Random` introduces a module, while
+`use STD.Random.Generator as Generator` introduces a structure. An import alias
+can also qualify a submodule, as in `import STD as Standard` followed by
 `use Standard.Random as Random`.
 
 Declarations are private by default. `pub` exposes a structure or function,
@@ -56,14 +56,14 @@ explicitly; parent modules of its dotted module names are inferred even when
 they have no sources of their own. See
 [Installation and command-line use](../Installation.md).
 
-## std.Random
+## STD.Random
 
-`std.Random` provides a deterministic generator for games, simulations, and
+`STD.Random` provides a deterministic generator for games, simulations, and
 tests. It is not cryptographically secure. `create(seed)` builds a reproducible
 generator, while `system()` chooses an initial seed from the host.
 
 ```sx
-var random = std.Random.create(42)
+var random = STD.Random.create(42)
 
 let raw = random.get_int()
 let die = random.get_int(1, 7)
@@ -83,16 +83,21 @@ same sequence of values.
 
 ## Native module runtime
 
-A distributed module may contain one `native.json` beside its direct `.sx`
-sources. Its `common` configuration is combined with the configuration selected
+A distributed module may contain one `Native.json`. It supplies the native
+runtime for that module and its descendants. When a descendant is loaded,
+Silex checks its directory and then each parent directory; the closest manifest
+wins. Its `common` configuration is combined with the configuration selected
 by the requested target triple in `targets`. A missing target entry is an
 error. Native sources are listed explicitly under `c`, `cpp`, `objective_c`,
 or `objective_cpp`; relative source and include paths must remain inside the
-module. Zig compiles C sources with its C driver and C++ sources with its C++
-driver, then links their objects with the generated program.
+directory containing the manifest. Zig compiles C sources with its C driver and
+C++ sources with its C++ driver, then links their objects with the generated
+program.
 
 The manifest may also list include directories, string defines, system-library
 names, and Apple frameworks. It cannot provide arbitrary compiler flags,
 commands, absolute paths, archives, or prebuilt native binaries. A runtime is
-compiled once when its module is imported, including through another module.
-Its files do not introduce Silex declarations beyond the module's `.sx` API.
+compiled once per manifest when its module or one of its descendants is loaded.
+Headers are optional, and a runtime may keep all of its implementation in one
+source file or split it across several sources. Its files do not introduce
+Silex declarations beyond each module's `.sx` API.

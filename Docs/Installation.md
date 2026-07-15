@@ -29,10 +29,11 @@ silex run hello.sx
 `compile` writes a native executable. `run` compiles and executes the program.
 The source layout and module model are in the [language reference](Language.md).
 The installed distribution also contains Silex's distributed-library sources,
-so imports such as `import std`, `import std.Random`, and `import SDL3` work
+so imports such as `import STD`, `import STD.Random`, and `import SDL3` work
 without cloning this repository or adding their module files to the project. A
-distributed module may bring a private native runtime described by its
-`native.json`; it is compiled and linked when that exact module is loaded.
+distributed module or one of its parents may bring a private native runtime
+described by `Native.json`; it is compiled and linked once when any module that
+inherits it is loaded.
 
 ## Projects and manifests
 

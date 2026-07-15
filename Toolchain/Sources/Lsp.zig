@@ -1475,14 +1475,14 @@ test "qualified completion resolves an imported module and its typed prefix" {
     try std.testing.expectEqualStrings("Math", (try importedModulePath(allocator, aliased_source, aliased.qualifier)).?);
 
     const parent_source =
-        \\import std as Standard
+        \\import STD as Standard
         \\use Standard.Random as Random
         \\var pos:Random.G
     ;
     const parent = qualifiedCompletionContext(parent_source, .{ .line = 2, .character = 16 }).?;
     try std.testing.expectEqualStrings("Random", parent.qualifier);
     try std.testing.expectEqualStrings(
-        "std.Random",
+        "STD.Random",
         (try importedModulePath(allocator, parent_source, parent.qualifier)).?,
     );
 }
@@ -1498,38 +1498,38 @@ test "standard library modules and exports complete" {
     defer arena.deinit();
     const allocator = arena.allocator();
     const uri = "file:///Users/nekmata/Projects/Silex/Sandbox/Main.sx";
-    const roots = try localModuleCompletionItems(allocator, std.testing.io, uri, "std");
-    try std.testing.expect(containsCompletion(roots, "std"));
-    const modules = try localModuleCompletionItems(allocator, std.testing.io, uri, "std.R");
-    try std.testing.expect(containsCompletion(modules, "std.Random"));
+    const roots = try localModuleCompletionItems(allocator, std.testing.io, uri, "STD");
+    try std.testing.expect(containsCompletion(roots, "STD"));
+    const modules = try localModuleCompletionItems(allocator, std.testing.io, uri, "STD.R");
+    try std.testing.expect(containsCompletion(modules, "STD.Random"));
 
     const submodules = try moduleExportCompletionItems(
         allocator,
         std.testing.io,
         uri,
-        "std",
-        .{ .qualifier = "std", .prefix = "R", .type_only = false },
+        "STD",
+        .{ .qualifier = "STD", .prefix = "R", .type_only = false },
     );
-    try std.testing.expect(containsCompletion(submodules, "std.Random"));
+    try std.testing.expect(containsCompletion(submodules, "STD.Random"));
 
     const exports = try moduleExportCompletionItems(
         allocator,
         std.testing.io,
         uri,
-        "std.Random",
-        .{ .qualifier = "std.Random", .prefix = "", .type_only = false },
+        "STD.Random",
+        .{ .qualifier = "STD.Random", .prefix = "", .type_only = false },
     );
-    try std.testing.expect(containsCompletion(exports, "std.Random.Generator"));
-    try std.testing.expect(containsCompletion(exports, "std.Random.create"));
-    try std.testing.expect(containsCompletion(exports, "std.Random.system"));
+    try std.testing.expect(containsCompletion(exports, "STD.Random.Generator"));
+    try std.testing.expect(containsCompletion(exports, "STD.Random.create"));
+    try std.testing.expect(containsCompletion(exports, "STD.Random.system"));
 }
 
 test "member completion infers an imported standard-library factory result" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const source =
-        \\import std
-        \\use std.Random as Random
+        \\import STD
+        \\use STD.Random as Random
         \\func main() void {
         \\    var rand = Random.system()
         \\    print(rand.get_)

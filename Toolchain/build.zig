@@ -107,7 +107,7 @@ pub fn build(b: *std.Build) void {
     invalid_native_function_command.addArgs(&.{ "compile", "Tests/InvalidNativeFunction.sx" });
     invalid_native_function_command.expectExitCode(1);
     invalid_native_function_command.expectStdErrEqual(
-        "Tests/InvalidNativeFunction.sx:1:1: error: native functions are only available in a distributed module with native.json\n",
+        "Tests/InvalidNativeFunction.sx:1:1: error: native functions are only available in a distributed module with Native.json\n",
     );
 
     const invalid_public_native_function_command = b.addRunArtifact(executable);
@@ -135,6 +135,10 @@ pub fn build(b: *std.Build) void {
     native_exception_command.expectStdErrEqual(
         "runtime error: native function 'NativeChecks.Throw.native_fail' failed: planned native failure\n",
     );
+
+    const inherited_native_runtime_command = b.addRunArtifact(native_module_test_executable);
+    inherited_native_runtime_command.addArgs(&.{ "run", "Tests/DistributedModules/NativeInherited/Main.sx" });
+    inherited_native_runtime_command.expectStdOutEqual(hostText(b, "42\n"));
 
     const invalid_reference_type_command = b.addRunArtifact(executable);
     invalid_reference_type_command.addArgs(&.{ "compile", "Tests/InvalidReferenceType.sx" });
@@ -199,7 +203,7 @@ pub fn build(b: *std.Build) void {
     removed_random_next_command.addArgs(&.{ "compile", "Tests/RemovedRandomNext.sx" });
     removed_random_next_command.expectExitCode(1);
     removed_random_next_command.expectStdErrEqual(
-        "Tests/RemovedRandomNext.sx:5:18: error: struct 'std.Random.Generator' has no method 'next'\n",
+        "Tests/RemovedRandomNext.sx:5:18: error: struct 'STD.Random.Generator' has no method 'next'\n",
     );
 
     const invalid_logical_command = b.addRunArtifact(executable);
@@ -696,6 +700,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&invalid_native_type_command.step);
     test_step.dependOn(&missing_native_symbol_command.step);
     test_step.dependOn(&native_exception_command.step);
+    test_step.dependOn(&inherited_native_runtime_command.step);
     test_step.dependOn(&invalid_reference_type_command.step);
     test_step.dependOn(&invalid_condition_command.step);
     test_step.dependOn(&invalid_assertion_condition_command.step);
@@ -1042,7 +1047,7 @@ pub fn build(b: *std.Build) void {
         "1065361344\n1152851127339773951\n508277857751731680\n6637030065269067181\n7345633470618427510\n8792660973527785782\n1082269761\n1152992998833853505\n1954144627577988649\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n1301891922867780472\ntrue\n",
     ));
 
-    const random_generator_source = b.getInstallPath(.prefix, "lib/silex/std/Random/Generator.sx");
+    const random_generator_source = b.getInstallPath(.prefix, "lib/silex/STD/Random/Generator.sx");
     const random_error_cases = [_]struct {
         source: []const u8,
         message: []const u8,

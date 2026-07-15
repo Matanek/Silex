@@ -76,9 +76,10 @@ func require_positive(value:int) int {
 ```
 
 `native func` declares a private, top-level function implemented by a
-distributed module's native runtime rather than by a Silex body. The module
-must contain `native.json`; applications cannot declare native functions, and
-`pub native func` is invalid. Native function names begin with `native_`.
+distributed module's native runtime rather than by a Silex body. The module or
+one of its parents must contain `Native.json`; applications cannot declare
+native functions, and `pub native func` is invalid. Native function names begin
+with `native_`.
 
 Their ABI is intentionally narrow: scalar booleans and numbers may be passed
 or returned, while `str` may only be a parameter. A string is passed as UTF-8
