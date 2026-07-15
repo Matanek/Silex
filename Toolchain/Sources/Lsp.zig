@@ -1513,6 +1513,8 @@ test "standard library modules and exports complete" {
     try std.testing.expect(containsCompletion(roots, "STD"));
     const modules = try localModuleCompletionItems(allocator, std.testing.io, uri, "STD.R");
     try std.testing.expect(containsCompletion(modules, "STD.Random"));
+    const time_modules = try localModuleCompletionItems(allocator, std.testing.io, uri, "STD.T");
+    try std.testing.expect(containsCompletion(time_modules, "STD.Time"));
 
     const submodules = try moduleExportCompletionItems(
         allocator,
@@ -1533,6 +1535,15 @@ test "standard library modules and exports complete" {
     try std.testing.expect(containsCompletion(exports, "STD.Random.Generator"));
     try std.testing.expect(containsCompletion(exports, "STD.Random.create"));
     try std.testing.expect(containsCompletion(exports, "STD.Random.system"));
+
+    const time_exports = try moduleExportCompletionItems(
+        allocator,
+        std.testing.io,
+        uri,
+        "STD.Time",
+        .{ .qualifier = "STD.Time", .prefix = "", .type_only = false },
+    );
+    try std.testing.expect(containsCompletion(time_exports, "STD.Time.Clock"));
 }
 
 test "member completion infers an imported standard-library factory result" {
@@ -1593,6 +1604,27 @@ test "member completion infers qualified standard-library structure initializers
     );
     try std.testing.expect(containsCompletion(canonical_items, "get_int"));
     try std.testing.expect(containsCompletion(canonical_items, "get_float"));
+}
+
+test "member completion exposes STD Time clock methods" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source =
+        \\import STD.Time as Time
+        \\func main() void {
+        \\    var clock = Time.Clock {}
+        \\    clock.
+        \\}
+    ;
+    const items = try completionItems(
+        arena.allocator(),
+        std.testing.io,
+        source,
+        .{ .line = 3, .character = 10 },
+    );
+    try std.testing.expect(containsCompletion(items, "start"));
+    try std.testing.expect(containsCompletion(items, "pause"));
+    try std.testing.expect(containsCompletion(items, "get_elapsed_seconds"));
 }
 
 test "member completion only includes members of the receiver structure" {

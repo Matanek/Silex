@@ -81,6 +81,19 @@ returns a `float` in `[minimum, maximum)` and requires finite, ordered bounds.
 generator. Two generators with the same seed and sequence of calls return the
 same sequence of values.
 
+## STD.Time
+
+`STD.Time.Clock` is initially stopped. `start()` begins a new measurement,
+`stop()` freezes its total, and `pause()` with `resume()` excludes suspended
+time. `reset()` accumulates the current interval and begins the next one rather
+than clearing the total. The time scale is applied when an interval is
+accumulated or read. Interval getters return zero while paused or stopped;
+total getters retain the accumulated value.
+
+The implementation uses one native monotonic-microsecond reading inherited
+from `STD/Native.json`; clock state and duration calculations remain Silex
+code in `STD/Time/Clock.sx`.
+
 ## Native module runtime
 
 A distributed module may contain one `Native.json`. It supplies the native

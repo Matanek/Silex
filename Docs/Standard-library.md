@@ -30,3 +30,20 @@ generator's state.
 The deterministic transition is implemented in Silex. Only the system seed is
 provided by the private native runtime declared at the `STD` root and linked
 automatically when `STD.Random` is loaded.
+
+## Time
+
+`STD.Time.Clock` measures elapsed and total time with a monotonic platform
+clock. A new value is initially stopped; call `start()` to begin a measurement.
+`stop()` freezes its accumulated total, while `pause()` and `resume()` exclude a
+temporary suspension without starting a new measurement.
+
+`reset()` commits the current elapsed interval to the total and begins the next
+interval. This makes it suitable for a frame tick: read
+`get_elapsed_seconds()`, read `get_total_seconds()`, then call `reset()`.
+`set_time_scale(scale)` applies the previous scale to the interval already in
+progress before selecting the new scale. Seconds and milliseconds are
+available for both the current interval and the accumulated total.
+
+All state transitions and conversions are implemented in Silex. The shared
+native runtime only supplies a monotonic timestamp in microseconds.
