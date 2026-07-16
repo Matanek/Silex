@@ -1280,8 +1280,13 @@ pub fn build(b: *std.Build) void {
     classes_command.addArgs(&.{ "run", "Smokes/Classes.sx" });
     classes_command.expectStdOutEqual(hostText(b, "classes\n"));
 
+    const drop_command = b.addRunArtifact(executable);
+    drop_command.step.dependOn(&classes_command.step);
+    drop_command.addArgs(&.{ "run", "Smokes/Drop.sx" });
+    drop_command.expectStdOutEqual(hostText(b, "held\nsingle\ncycle\ncycle\nchild\nbase\ndrop\n"));
+
     const inheritance_command = b.addRunArtifact(executable);
-    inheritance_command.step.dependOn(&classes_command.step);
+    inheritance_command.step.dependOn(&drop_command.step);
     inheritance_command.addArgs(&.{ "run", "Smokes/Inheritance.sx" });
     inheritance_command.expectStdOutEqual(hostText(b, "inheritance\n"));
 

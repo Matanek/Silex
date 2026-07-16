@@ -311,6 +311,15 @@
     ],
     "description": "Declare a public constructor that initializes the immediate base"
   },
+  "Class drop block": {
+    "prefix": "drop",
+    "body": [
+      "drop {",
+      "    $0",
+      "}"
+    ],
+    "description": "Release class resources automatically at the end of instance lifetime"
+  },
   "Subclass class member": {
     "prefix": "sub",
     "body": [

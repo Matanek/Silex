@@ -435,6 +435,14 @@ pub const Resolver = struct {
         }
         result.fields = try fields.toOwnedSlice(self.allocator);
         result.constructors = try constructors.toOwnedSlice(self.allocator);
+        if (structure.drop) |drop| {
+            try self.pushLocalScope();
+            defer self.popLocalScope();
+            result.drop = .{
+                .position = drop.position,
+                .statements = try self.transformStatementsInCurrentScope(drop.statements),
+            };
+        }
         result.methods = try methods.toOwnedSlice(self.allocator);
         return result;
     }

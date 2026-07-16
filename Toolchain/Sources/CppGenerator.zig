@@ -214,6 +214,7 @@ pub fn generateWithSources(
         \\    std::size_t references = 1;
         \\    bool collecting = false;
         \\    virtual void silexTrace(const SilexTraceVisitor& visit) const = 0;
+        \\    virtual void silexDrop() {}
         \\    virtual void silexClear() = 0;
         \\    virtual ~SilexObject() { --silexLiveObjects; }
         \\};
@@ -226,6 +227,7 @@ pub fn generateWithSources(
         \\    if (object->collecting) return;
         \\    if (object->references == 0) {
         \\        object->collecting = true;
+        \\        object->silexDrop();
         \\        object->silexClear();
         \\        delete object;
         \\    } else if (!silexCollectingCycles) {
@@ -492,6 +494,7 @@ pub fn generateWithSources(
         \\    if (garbage.empty()) return;
         \\    silexCollectingCycles = true;
         \\    for (SilexObject* object : garbage) object->collecting = true;
+        \\    for (SilexObject* object : garbage) object->silexDrop();
         \\    for (SilexObject* object : garbage) object->silexClear();
         \\    for (SilexObject* object : garbage) delete object;
         \\    silexCollectingCycles = false;
@@ -844,6 +847,9 @@ pub fn generateWithSources(
             try generateConstructorSignature(allocator, &output, structure.generated_name, constructor, false);
             try output.appendSlice(allocator, ";\n");
         }
+        if (structure.drop != null) {
+            try output.appendSlice(allocator, "\n    void silexDrop() override;\n");
+        }
         if (structure.fields.len > 0 and (structure.constructors.len > 0 or structure.methods.len > 0)) try output.append(allocator, '\n');
         for (structure.methods) |method| {
             try output.appendSlice(allocator, "    ");
@@ -920,6 +926,19 @@ pub fn generateWithSources(
             try generateCapturedParameterBindings(allocator, &output, constructor.parameters, 1);
             try generateStatements(allocator, &output, constructor.statements, 1, false);
             try output.appendSlice(allocator, "}\n\n");
+        }
+        if (structure.drop) |drop| {
+            try output.appendSlice(allocator, "void ");
+            try output.appendSlice(allocator, structure.generated_name);
+            try output.appendSlice(allocator, "::silexDrop() {\n");
+            try generateStatements(allocator, &output, drop.statements, 1, false);
+            try output.appendSlice(allocator, "    ");
+            if (structure.base) |base| {
+                try output.appendSlice(allocator, base.generated_name);
+            } else {
+                try output.appendSlice(allocator, "SilexObject");
+            }
+            try output.appendSlice(allocator, "::silexDrop();\n}\n\n");
         }
         for (structure.methods) |method| {
             try generateMethodSignature(allocator, &output, method, structure.generated_name, true);
@@ -2661,6 +2680,26 @@ test "generate class references identity access and cycle tracing" {
     try std.testing.expect(std.mem.indexOf(u8, cpp, "silexValue1->method0_0()") != null);
     try std.testing.expect(std.mem.indexOf(u8, cpp, "(silexValue0 == silexValue1)") != null);
     try std.testing.expect(std.mem.indexOf(u8, cpp, "unreachable class graph was not collected") != null);
+}
+
+test "generate drop before field clearing with automatic base chaining" {
+    const Parser = @import("Parser.zig").Parser;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var parser = Parser.init(allocator,
+        \\class Base { drop { print("base") } }
+        \\class Child : Base { drop { print("child") } }
+        \\func main() { var child = Child() }
+    );
+    var analyzer = Semantic.Analyzer.init(allocator);
+    const cpp = try generate(allocator, try analyzer.analyze(try resolveSingleTestProgram(allocator, try parser.parse())));
+
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "object->silexDrop();\n        object->silexClear();") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "for (SilexObject* object : garbage) object->silexDrop();") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "SilexClass1::silexDrop()") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "SilexClass0::silexDrop();") != null);
 }
 
 test "generate inferred const and mutating methods" {

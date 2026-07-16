@@ -294,15 +294,45 @@ through optionals, structures, arrays, lists, and captured function values, and
 collects an unreachable cycle without requiring `weak`, manual destruction,
 or a public collector call.
 
+A class may declare one automatic `drop` block for native resources:
+
+```sx
+class Texture {
+    handle:SDL.Texture
+
+    pub init(renderer:Renderer) {
+        self.handle = SDL.create_texture(renderer.get_handle())
+    }
+
+    drop {
+        SDL.destroy_texture(self.handle)
+    }
+}
+```
+
+`drop` has no parameters, parentheses, return type, or visibility marker. It
+receives `self` implicitly, can read private state, cannot return, and cannot be
+called explicitly. Structures cannot declare it.
+
+The runtime calls `drop` exactly once before clearing the instance fields. An
+acyclic instance runs it when its last strong reference disappears. For an
+unreachable cycle, every instance runs its block while the graph fields are
+still intact, before the runtime breaks the internal references; the order
+between distinct instances in that graph is unspecified.
+
+Each class in an inheritance chain may declare its own block. The most-derived
+block runs first, followed automatically by each base block. This is not an
+override and requires no `super` call.
+
 A lambda still captures its outer binding under the ordinary lexical rules.
 When that binding contains a class, the runtime keeps the binding in the traced
 graph: mutation and reassignment inside the lambda remain visible through the
 outer `var`, and the lambda still cannot outlive its lexical scope.
 
 An object that is still reachable from program state remains alive even if the
-program will not use it again. Native resources therefore keep an explicit,
-idempotent operation such as `close()` for deterministic release; cycle
-collection is not an observable Silex destructor or finalizer.
+program will not use it again. A native wrapper may therefore also expose an
+explicit, idempotent operation such as `close()` when its resource must be
+released before the instance itself becomes unreachable. `drop` remains the
+automatic final guarantee and must tolerate that earlier release.
 
-Interfaces, weak references, user destructors, and finalizers are not part of
-the current language.
+Interfaces and weak references are not part of the current language.

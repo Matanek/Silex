@@ -349,6 +349,7 @@ pub const Structure = struct {
     implicit_base_initializer: ?BaseInitializer,
     fields: []const StructureField,
     constructors: []const Constructor,
+    drop: ?Drop,
     methods: []Method,
 };
 
@@ -369,6 +370,10 @@ pub const Constructor = struct {
     base_initializer: ?BaseInitializer,
     statements: []const Statement,
     visibility: Ast.MemberVisibility,
+};
+
+pub const Drop = struct {
+    statements: []const Statement,
 };
 
 pub const Parameter = struct {
@@ -558,6 +563,7 @@ pub const Analyzer = struct {
     current_structure_index: ?usize = null,
     current_method_index: ?usize = null,
     current_constructor: bool = false,
+    current_drop: bool = false,
     current_method_direct_mutation: bool = false,
     current_method_dependencies: std.ArrayList(MethodId) = .empty,
     current_self_state: BindingState = .{},
@@ -592,6 +598,10 @@ pub const Analyzer = struct {
             for (ast_structure.constructors, symbol.constructors) |ast_constructor, constructor_symbol| {
                 try constructors.append(self.allocator, try self.constructor(ast_constructor, constructor_symbol, structure_index));
             }
+            const drop = if (ast_structure.drop) |ast_drop|
+                try self.dropBlock(ast_drop, structure_index)
+            else
+                null;
             var methods: std.ArrayList(Method) = .empty;
             for (ast_structure.methods, symbol.methods, 0..) |ast_method, method_symbol, method_index| {
                 try methods.append(self.allocator, try self.method(ast_method, method_symbol, structure_index, method_index));
@@ -608,6 +618,7 @@ pub const Analyzer = struct {
                 .implicit_base_initializer = implicit_base.initializer,
                 .fields = try fields.toOwnedSlice(self.allocator),
                 .constructors = try constructors.toOwnedSlice(self.allocator),
+                .drop = drop,
                 .methods = try methods.toOwnedSlice(self.allocator),
             });
         }
@@ -1048,6 +1059,7 @@ pub const Analyzer = struct {
         self.current_structure_index = null;
         self.current_method_index = null;
         self.current_constructor = false;
+        self.current_drop = false;
         self.current_self_state = .{};
         self.loop_depth = 0;
         var scope = Scope{ .parent = null, .depth = 1 };
@@ -1098,6 +1110,7 @@ pub const Analyzer = struct {
         self.current_structure_index = structure_index;
         self.current_method_index = method_index;
         self.current_constructor = false;
+        self.current_drop = false;
         self.current_method_direct_mutation = false;
         self.current_method_dependencies = .empty;
         self.current_self_state = .{};
@@ -1159,6 +1172,7 @@ pub const Analyzer = struct {
         self.current_structure_index = structure_index;
         self.current_method_index = null;
         self.current_constructor = true;
+        self.current_drop = false;
         defer self.current_constructor = false;
         self.current_method_direct_mutation = false;
         self.current_method_dependencies = .empty;
@@ -1203,6 +1217,29 @@ pub const Analyzer = struct {
             .statements = constructor_statements,
             .visibility = symbol.visibility,
         };
+    }
+
+    fn dropBlock(
+        self: *Analyzer,
+        ast: Ast.Drop,
+        structure_index: usize,
+    ) AnalyzeError!Drop {
+        self.current_structure_index = structure_index;
+        self.current_method_index = null;
+        self.current_constructor = false;
+        self.current_drop = true;
+        defer self.current_drop = false;
+        self.current_method_direct_mutation = false;
+        self.current_method_dependencies = .empty;
+        self.current_self_state = .{};
+        self.loop_depth = 0;
+
+        var scope = Scope{ .parent = null, .depth = 1 };
+        self.function_scope_depth = scope.depth;
+        self.current_return_type = .void;
+        const drop_statements = try self.statements(ast.statements, &scope);
+        self.releaseScopeBorrows(&scope);
+        return .{ .statements = drop_statements };
     }
 
     fn constructorBaseInitialization(
@@ -1668,7 +1705,7 @@ pub const Analyzer = struct {
         const root = assignmentRoot(ast.target) orelse return self.fail(ast.position, "invalid assignment target");
         switch (root) {
             .self => {
-                if (self.current_method_index == null and !self.current_constructor) return self.fail(ast.position, "'self' is only available inside a method or constructor");
+                if (self.current_method_index == null and !self.current_constructor and !self.current_drop) return self.fail(ast.position, "'self' is only available inside a method, constructor, or drop block");
                 if (ast.target.value == .self) return self.fail(ast.position, "cannot assign to 'self'");
                 if (self.current_self_state.mutable_borrow or self.current_self_state.immutable_borrows != 0) {
                     return self.fail(ast.position, "cannot mutate 'self' while one of its collections is iterated");
@@ -2044,6 +2081,7 @@ pub const Analyzer = struct {
         ast: Ast.Statement.Return,
         scope: *const Scope,
     ) AnalyzeError!Statement {
+        if (self.current_drop) return self.fail(ast.position, "'drop' cannot return");
         if (ast.value) |ast_value| {
             if (typeEqual(self.current_return_type, .void)) return self.fail(ast.position, "void function cannot return a value");
             var value = try self.expressionForExpected(ast_value, scope, self.current_return_type);
@@ -4104,6 +4142,7 @@ pub const Analyzer = struct {
     fn validateMethodCalls(self: *Analyzer, program: Program) AnalyzeError!void {
         for (program.structures) |structure| {
             for (structure.constructors) |constructor_value| try self.validateStatements(constructor_value.statements);
+            if (structure.drop) |drop| try self.validateStatements(drop.statements);
             for (structure.methods) |method_value| try self.validateStatements(method_value.statements);
         }
         for (program.functions) |function_value| try self.validateStatements(function_value.statements);
@@ -4312,7 +4351,7 @@ pub const Analyzer = struct {
         };
         switch (root) {
             .self => {
-                if (self.current_method_index == null and !self.current_constructor) return self.fail(unary.operator_position, "'self' is only available inside a method or constructor");
+                if (self.current_method_index == null and !self.current_constructor and !self.current_drop) return self.fail(unary.operator_position, "'self' is only available inside a method, constructor, or drop block");
                 self.current_method_direct_mutation = true;
             },
             .variable => |name| {
@@ -5666,6 +5705,29 @@ test "class constructors require complete initialization on every path" {
     try expectResolvedSemanticError(
         "class Player {} class Match { owner:Player; pub init(owner:Player) { var alias = self; self.owner = owner } } func main() {}",
         "'self' cannot escape before every class field is initialized",
+    );
+}
+
+test "class drop can read private state but cannot return" {
+    const Parser = @import("Parser.zig").Parser;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var parser = Parser.init(allocator,
+        \\class Texture {
+        \\    handle:int = 1
+        \\    drop { print(self.handle) }
+        \\}
+        \\func main() { var texture = Texture() }
+    );
+    var analyzer = Analyzer.init(allocator);
+    const program = try analyzer.analyze(try resolveSingleTestProgram(allocator, try parser.parse()));
+    try std.testing.expect(program.structures[0].drop != null);
+
+    try expectResolvedSemanticError(
+        "class Texture { drop { return } } func main() {}",
+        "'drop' cannot return",
     );
 }
 

@@ -130,6 +130,7 @@ pub const Parser = struct {
         try self.expect(.left_brace, "expected '{'");
         var fields: std.ArrayList(Ast.StructureField) = .empty;
         var constructors: std.ArrayList(Ast.Constructor) = .empty;
+        var drop: ?Ast.Drop = null;
         var methods: std.ArrayList(Ast.Function) = .empty;
         while (self.current.tag != .right_brace and self.current.tag != .end) {
             const is_override = self.current.tag == .keyword_override;
@@ -138,7 +139,8 @@ pub const Parser = struct {
                 try self.advance();
             }
             var visibility: Ast.MemberVisibility = if (is_class) .private_access else .public_access;
-            if (self.current.tag == .keyword_pub or self.current.tag == .keyword_sub) {
+            const has_visibility = self.current.tag == .keyword_pub or self.current.tag == .keyword_sub;
+            if (has_visibility) {
                 if (!is_class) return self.fail("struct members are already public and do not accept visibility modifiers");
                 visibility = if (self.current.tag == .keyword_pub) .public_access else .subclass;
                 try self.advance();
@@ -149,6 +151,20 @@ pub const Parser = struct {
                 method.member_visibility = visibility;
                 method.is_override = is_override;
                 try methods.append(self.allocator, method);
+                continue;
+            }
+            if (self.current.tag == .keyword_drop) {
+                if (is_override) return self.fail("'override' cannot apply to 'drop'");
+                if (!is_class) return self.fail("'drop' is available only in classes");
+                if (has_visibility) return self.fail("'drop' does not accept a visibility modifier");
+                if (drop != null) return self.fail("a class can declare only one 'drop' block");
+                const drop_position = self.current.position;
+                try self.advance();
+                if (self.current.tag != .left_brace) return self.fail("'drop' must be followed by a block");
+                drop = .{
+                    .position = drop_position,
+                    .statements = try self.parseBlock(),
+                };
                 continue;
             }
             if (is_override) return self.fail("'override' must declare a class method");
@@ -210,6 +226,7 @@ pub const Parser = struct {
             .base = base,
             .fields = try fields.toOwnedSlice(self.allocator),
             .constructors = try constructors.toOwnedSlice(self.allocator),
+            .drop = drop,
             .methods = try methods.toOwnedSlice(self.allocator),
         };
     }
@@ -1749,6 +1766,40 @@ test "parse visible overloaded class constructors" {
     try std.testing.expectEqual(Ast.MemberVisibility.public_access, program.structures[0].constructors[0].visibility);
     try std.testing.expectEqual(Ast.MemberVisibility.subclass, program.structures[0].constructors[1].visibility);
     try std.testing.expectEqual(@as(usize, 1), program.structures[0].constructors[1].parameters.len);
+}
+
+test "parse one class drop block" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(),
+        \\class Texture {
+        \\    handle:int = 1
+        \\    drop { print(self.handle) }
+        \\}
+        \\func main() {}
+    );
+    const program = try parser.parse();
+    try std.testing.expect(program.structures[0].drop != null);
+    try std.testing.expectEqual(@as(usize, 1), program.structures[0].drop.?.statements.len);
+}
+
+test "reject invalid drop declarations and explicit calls" {
+    const cases = [_]struct { source: []const u8, message: []const u8 }{
+        .{ .source = "struct Value { drop {} } func main() {}", .message = "'drop' is available only in classes" },
+        .{ .source = "class Value { drop {} drop {} } func main() {}", .message = "a class can declare only one 'drop' block" },
+        .{ .source = "class Value { pub drop {} } func main() {}", .message = "'drop' does not accept a visibility modifier" },
+        .{ .source = "class Value { sub drop {} } func main() {}", .message = "'drop' does not accept a visibility modifier" },
+        .{ .source = "class Value { override drop {} } func main() {}", .message = "'override' cannot apply to 'drop'" },
+        .{ .source = "class Value { drop() {} } func main() {}", .message = "'drop' must be followed by a block" },
+        .{ .source = "class Value {} func main() { var value = Value(); value.drop() }", .message = "expected field name after '.'" },
+    };
+    for (cases) |case| {
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+        var parser = Parser.init(arena.allocator(), case.source);
+        try std.testing.expectError(error.InvalidSource, parser.parse());
+        try std.testing.expectEqualStrings(case.message, parser.diagnostic.?.message);
+    }
 }
 
 test "parse class base and constructor super call" {

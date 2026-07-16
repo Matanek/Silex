@@ -397,6 +397,7 @@ pub const Structure = struct {
     base: ?BaseClass = null,
     fields: []const StructureField,
     constructors: []const Constructor = &.{},
+    drop: ?Drop = null,
     methods: []const Function,
 };
 
@@ -411,6 +412,11 @@ pub const Constructor = struct {
     parameters: []const Parameter,
     super_arguments: ?[]const *Expression = null,
     super_position: ?Source.Position = null,
+    statements: []const Statement,
+};
+
+pub const Drop = struct {
+    position: Source.Position,
     statements: []const Statement,
 };
 

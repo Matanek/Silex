@@ -1,0 +1,55 @@
+class Probe {
+    label:str
+
+    pub init(label:str) {
+        self.label = label
+    }
+
+    drop {
+        print(self.label)
+    }
+}
+
+class CycleProbe {
+    pub next:CycleProbe? = null
+
+    drop {
+        print("cycle")
+    }
+}
+
+class BaseProbe {
+    drop {
+        print("base")
+    }
+}
+
+class ChildProbe : BaseProbe {
+    drop {
+        print("child")
+    }
+}
+
+func verify_alias() {
+    var first = Probe("single")
+    var alias = first
+    print("held")
+}
+
+func verify_cycle() {
+    var first = CycleProbe()
+    var second = CycleProbe()
+    first.next = second
+    second.next = first
+}
+
+func verify_inheritance() {
+    var child = ChildProbe()
+}
+
+func main() {
+    verify_alias()
+    verify_cycle()
+    verify_inheritance()
+    print("drop")
+}
