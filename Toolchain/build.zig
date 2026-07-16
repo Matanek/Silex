@@ -258,7 +258,7 @@ pub fn build(b: *std.Build) void {
     const invalid_conditional_binding_source_command = b.addRunArtifact(executable);
     invalid_conditional_binding_source_command.addArgs(&.{ "compile", "Tests/InvalidConditionalBindingSource.sx" });
     invalid_conditional_binding_source_command.expectExitCode(1);
-    invalid_conditional_binding_source_command.expectStdErrEqual("Tests/InvalidConditionalBindingSource.sx:2:20: error: conditional binding source must have an optional type\n");
+    invalid_conditional_binding_source_command.expectStdErrEqual("Tests/InvalidConditionalBindingSource.sx:2:16: error: conditional binding source must have an optional type\n");
 
     const invalid_safe_access_command = b.addRunArtifact(executable);
     invalid_safe_access_command.addArgs(&.{ "compile", "Tests/InvalidSafeAccess.sx" });
@@ -330,15 +330,15 @@ pub fn build(b: *std.Build) void {
     invalid_let_function_field_command.expectExitCode(1);
     invalid_let_function_field_command.expectStdErrEqual("Tests/InvalidLetFunctionField.sx:6:9: error: type 'Handler' is not an independent value because field 'callback' reaches 'func'; use 'var'\n");
 
-    const invalid_let_conditional_function_command = b.addRunArtifact(executable);
-    invalid_let_conditional_function_command.addArgs(&.{ "compile", "Tests/InvalidLetConditionalFunction.sx" });
-    invalid_let_conditional_function_command.expectExitCode(1);
-    invalid_let_conditional_function_command.expectStdErrEqual("Tests/InvalidLetConditionalFunction.sx:3:12: error: type 'func' is not an independent value and cannot be bound with 'let'; use 'var'\n");
+    const invalid_implicit_conditional_function_command = b.addRunArtifact(executable);
+    invalid_implicit_conditional_function_command.addArgs(&.{ "compile", "Tests/InvalidImplicitConditionalFunction.sx" });
+    invalid_implicit_conditional_function_command.expectExitCode(1);
+    invalid_implicit_conditional_function_command.expectStdErrEqual("Tests/InvalidImplicitConditionalFunction.sx:3:8: error: type 'func' is not an independent value and cannot be bound with 'let'; use 'var'\n");
 
-    const invalid_let_function_iteration_command = b.addRunArtifact(executable);
-    invalid_let_function_iteration_command.addArgs(&.{ "compile", "Tests/InvalidLetFunctionIteration.sx" });
-    invalid_let_function_iteration_command.expectExitCode(1);
-    invalid_let_function_iteration_command.expectStdErrEqual("Tests/InvalidLetFunctionIteration.sx:3:13: error: type 'func' is not an independent value and cannot be bound with 'let'; use 'var'\n");
+    const invalid_implicit_function_iteration_command = b.addRunArtifact(executable);
+    invalid_implicit_function_iteration_command.addArgs(&.{ "compile", "Tests/InvalidImplicitFunctionIteration.sx" });
+    invalid_implicit_function_iteration_command.expectExitCode(1);
+    invalid_implicit_function_iteration_command.expectStdErrEqual("Tests/InvalidImplicitFunctionIteration.sx:3:9: error: type 'func' is not an independent value and cannot be bound with 'let'; use 'var'\n");
 
     const invalid_assertion_condition_command = b.addRunArtifact(executable);
     invalid_assertion_condition_command.addArgs(&.{ "compile", "Tests/InvalidAssertionCondition.sx" });
@@ -728,18 +728,18 @@ pub fn build(b: *std.Build) void {
         "Tests/InvalidForSource.sx:2:23: error: for source must be an array or list\n",
     );
 
-    const missing_for_binding_command = b.addRunArtifact(executable);
-    missing_for_binding_command.addArgs(&.{ "compile", "Tests/MissingForBinding.sx" });
-    missing_for_binding_command.expectExitCode(1);
-    missing_for_binding_command.expectStdErrEqual(
-        "Tests/MissingForBinding.sx:3:10: error: expected 'let' or 'var' after 'for ('\n",
+    const missing_for_binding_name_command = b.addRunArtifact(executable);
+    missing_for_binding_name_command.addArgs(&.{ "compile", "Tests/MissingForBindingName.sx" });
+    missing_for_binding_name_command.expectExitCode(1);
+    missing_for_binding_name_command.expectStdErrEqual(
+        "Tests/MissingForBindingName.sx:3:10: error: expected iteration variable name\n",
     );
 
     const invalid_immutable_iteration_alias_command = b.addRunArtifact(executable);
     invalid_immutable_iteration_alias_command.addArgs(&.{ "compile", "Tests/InvalidImmutableIterationAlias.sx" });
     invalid_immutable_iteration_alias_command.expectExitCode(1);
     invalid_immutable_iteration_alias_command.expectStdErrEqual(
-        "Tests/InvalidImmutableIterationAlias.sx:4:9: error: cannot assign to immutable variable 'value'\n",
+        "Tests/InvalidImmutableIterationAlias.sx:4:9: error: cannot assign to immutable control binding 'value'; use 'var' in the header\n",
     );
 
     const invalid_mutable_iteration_source_command = b.addRunArtifact(executable);
@@ -1055,8 +1055,8 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&invalidated_optional_lambda_reduction_command.step);
     test_step.dependOn(&invalid_let_function_command.step);
     test_step.dependOn(&invalid_let_function_field_command.step);
-    test_step.dependOn(&invalid_let_conditional_function_command.step);
-    test_step.dependOn(&invalid_let_function_iteration_command.step);
+    test_step.dependOn(&invalid_implicit_conditional_function_command.step);
+    test_step.dependOn(&invalid_implicit_function_iteration_command.step);
     test_step.dependOn(&invalid_assertion_condition_command.step);
     test_step.dependOn(&invalid_assertion_message_command.step);
     test_step.dependOn(&assertion_failure_command.step);
@@ -1113,7 +1113,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&break_outside_loop_command.step);
     test_step.dependOn(&continue_outside_loop_command.step);
     test_step.dependOn(&invalid_for_source_command.step);
-    test_step.dependOn(&missing_for_binding_command.step);
+    test_step.dependOn(&missing_for_binding_name_command.step);
     test_step.dependOn(&invalid_immutable_iteration_alias_command.step);
     test_step.dependOn(&invalid_mutable_iteration_source_command.step);
     test_step.dependOn(&invalid_iteration_mutation_command.step);

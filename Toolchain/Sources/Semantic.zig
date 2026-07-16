@@ -356,7 +356,10 @@ pub const Receiver = union(enum) {
     self,
     borrowed_self,
     mutable,
-    immutable: []const u8,
+    immutable: struct {
+        name: []const u8,
+        control_binding: bool,
+    },
     borrowed: []const u8,
     temporary,
     cascade_temporary,
@@ -369,6 +372,7 @@ const Symbol = struct {
     mutability: Ast.Mutability,
     state: *BindingState,
     scope_depth: usize,
+    control_binding: bool = false,
     unwrap_optional: bool = false,
     original_type: ?Type = null,
 };
@@ -1043,11 +1047,18 @@ pub const Analyzer = struct {
                     return self.fail(ast.position, message);
                 };
                 if (symbol.mutability == .immutable) {
-                    const message = try std.fmt.allocPrint(
-                        self.allocator,
-                        "cannot assign to immutable variable '{s}'",
-                        .{root_name},
-                    );
+                    const message = if (symbol.control_binding)
+                        try std.fmt.allocPrint(
+                            self.allocator,
+                            "cannot assign to immutable control binding '{s}'; use 'var' in the header",
+                            .{root_name},
+                        )
+                    else
+                        try std.fmt.allocPrint(
+                            self.allocator,
+                            "cannot assign to immutable variable '{s}'",
+                            .{root_name},
+                        );
                     return self.fail(ast.position, message);
                 }
                 if (symbol.state.immutable_borrows != 0 or symbol.state.mutable_borrow) {
@@ -1241,6 +1252,7 @@ pub const Analyzer = struct {
                     .mutability = binding.mutability,
                     .state = try self.newBindingState(source.type.optional.*),
                     .scope_depth = body_scope.depth,
+                    .control_binding = true,
                 });
                 break :binding_condition .{ .binding = .{
                     .source = source,
@@ -1373,6 +1385,7 @@ pub const Analyzer = struct {
             .mutability = ast.mutability,
             .state = try self.newBindingState(element_type),
             .scope_depth = body_scope.depth,
+            .control_binding = true,
         });
 
         self.loop_depth += 1;
@@ -2278,7 +2291,10 @@ pub const Analyzer = struct {
             .variable => |name| {
                 const symbol = findSymbol(scope, name) orelse return self.fail(position, "unknown cascade receiver");
                 if (symbol.mutability == .immutable) {
-                    const message = try std.fmt.allocPrint(self.allocator, "cannot assign through cascade on immutable value '{s}'", .{name});
+                    const message = if (symbol.control_binding)
+                        try std.fmt.allocPrint(self.allocator, "cannot mutate immutable control binding '{s}'; use 'var' in the header", .{name})
+                    else
+                        try std.fmt.allocPrint(self.allocator, "cannot assign through cascade on immutable value '{s}'", .{name});
                     return self.fail(position, message);
                 }
                 if (symbol.state.immutable_borrows != 0 or symbol.state.mutable_borrow) {
@@ -2459,7 +2475,10 @@ pub const Analyzer = struct {
             .variable => |name| {
                 const symbol = findSymbol(scope, name) orelse return self.fail(position, "unknown collection receiver");
                 if (symbol.mutability == .immutable) {
-                    const message = try std.fmt.allocPrint(self.allocator, "cannot call mutating method '{s}' on immutable value '{s}'", .{ method_name, name });
+                    const message = if (symbol.control_binding)
+                        try std.fmt.allocPrint(self.allocator, "cannot mutate immutable control binding '{s}'; use 'var' in the header", .{name})
+                    else
+                        try std.fmt.allocPrint(self.allocator, "cannot call mutating method '{s}' on immutable value '{s}'", .{ method_name, name });
                     return self.fail(position, message);
                 }
                 if (symbol.state.immutable_borrows != 0 or symbol.state.mutable_borrow) {
@@ -3076,8 +3095,11 @@ pub const Analyzer = struct {
                 switch (call.receiver) {
                     .self, .mutable, .cascade_temporary => {},
                     .borrowed_self => return self.fail(call.position, "cannot mutate 'self' while one of its collections is iterated"),
-                    .immutable => |name| {
-                        const message = try std.fmt.allocPrint(self.allocator, "cannot call mutating method '{s}' on immutable value '{s}'", .{ call.source_name, name });
+                    .immutable => |receiver| {
+                        const message = if (receiver.control_binding)
+                            try std.fmt.allocPrint(self.allocator, "cannot mutate immutable control binding '{s}'; use 'var' in the header", .{receiver.name})
+                        else
+                            try std.fmt.allocPrint(self.allocator, "cannot call mutating method '{s}' on immutable value '{s}'", .{ call.source_name, receiver.name });
                         return self.fail(call.position, message);
                     },
                     .borrowed => |name| {
@@ -3194,7 +3216,10 @@ pub const Analyzer = struct {
                     return self.fail(unary.operator_position, message);
                 };
                 if (symbol.mutability != .mutable) {
-                    const message = try std.fmt.allocPrint(self.allocator, "cannot pass immutable variable '{s}' with '&'", .{name});
+                    const message = if (symbol.control_binding)
+                        try std.fmt.allocPrint(self.allocator, "cannot mutate immutable control binding '{s}'; use 'var' in the header", .{name})
+                    else
+                        try std.fmt.allocPrint(self.allocator, "cannot pass immutable variable '{s}' with '&'", .{name});
                     return self.fail(unary.operator_position, message);
                 }
             },
@@ -3228,7 +3253,10 @@ pub const Analyzer = struct {
         const symbol = try self.placeRootSymbol(unary.operand, scope, unary.operator_position);
         if (mutable) {
             if (symbol.mutability != .mutable) {
-                const message = try std.fmt.allocPrint(self.allocator, "cannot mutably borrow immutable variable '{s}'", .{symbol.source_name});
+                const message = if (symbol.control_binding)
+                    try std.fmt.allocPrint(self.allocator, "cannot mutate immutable control binding '{s}'; use 'var' in the header", .{symbol.source_name})
+                else
+                    try std.fmt.allocPrint(self.allocator, "cannot mutably borrow immutable variable '{s}'", .{symbol.source_name});
                 return self.fail(unary.operator_position, message);
             }
             if (symbol.state.mutable_borrow or symbol.state.immutable_borrows != 0) {
@@ -4124,7 +4152,7 @@ fn receiverFor(expression: *const Ast.Expression, scope: *const Scope, self_borr
             break :receiver if (symbol.mutability == .mutable)
                 .mutable
             else
-                .{ .immutable = name };
+                .{ .immutable = .{ .name = name, .control_binding = symbol.control_binding } };
         },
         .member_access => |member| receiverFor(member.object, scope, self_borrowed),
         .index_access => |access| receiverFor(access.object, scope, self_borrowed),
@@ -4685,6 +4713,21 @@ test "reject while condition that is not bool" {
     var analyzer = Analyzer.init(allocator);
     try std.testing.expectError(error.InvalidSource, analyzer.analyze(try parser.parse()));
     try std.testing.expectEqualStrings("expected 'bool', found 'int'", analyzer.diagnostic.?.message);
+}
+
+test "implicit control bindings keep let semantics" {
+    try expectSemanticError(
+        "func main() { var source:int? = 1; if value = source { value = 2 } }",
+        "cannot assign to immutable control binding 'value'; use 'var' in the header",
+    );
+    try expectSemanticError(
+        "func main() { var callbacks:func()[] = [func() {}]; for callback in callbacks {} }",
+        "type 'func' is not an independent value and cannot be bound with 'let'; use 'var'",
+    );
+    try expectResolvedSemanticError(
+        "struct Counter { value:int; func bump() { self.value += 1 } } func main() { var source:Counter? = Counter(value:0); if counter = source { counter.bump() } }",
+        "cannot mutate immutable control binding 'counter'; use 'var' in the header",
+    );
 }
 
 test "resolve forward and recursive function calls" {

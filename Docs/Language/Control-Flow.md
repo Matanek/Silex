@@ -17,21 +17,23 @@ while count > 0 {
 ```
 
 An `if`, `elif`, `else if`, or `while` header may instead extract an optional
-value with `let name = source` or `var name = source`. The source is evaluated
-once per reached `if` branch and once before each `while` attempt. Parentheses
-may wrap the complete binding; the unparenthesized form is canonical.
+value with `name = source`. Omitting the marker means `let`: the extracted
+value is immutable. An explicit `let` remains accepted, while `var` is required
+when the local copy must be mutable. The source is evaluated once per reached
+`if` branch and once before each `while` attempt. Parentheses may wrap the
+complete binding; the unparenthesized form is canonical.
 
 `let` requires the extracted type to be an independent value. Function values
 and future class references, including values that contain them, use `var`.
 
 ```sx
-if let position = find_position() {
+if position = find_position() {
     print(position.x)
 } elif (var fallback = find_fallback()) {
     fallback.translate(1)
 }
 
-while let item = next_item() {
+while item = next_item() {
     print(item)
 }
 ```
@@ -76,12 +78,13 @@ Newlines and comments may separate two branches, including between `else` and
 initial condition. `elif` is reserved and cannot be used as an identifier.
 
 `for` iterates through a fixed array, dynamic list, or exclusive integer range.
-Every iteration binding starts with `let` or `var`: `let` creates an immutable
-binding for an independent element type, while `var` creates a mutable binding
-and is required for non-independent element types such as callbacks.
+Without a marker, its iteration binding is an implicit `let`: it is immutable
+and requires an independent element type. An explicit `let` expresses the same
+guarantee. `var` creates a mutable binding and is required for non-independent
+element types such as callbacks.
 
 ```sx
-for let value in values {
+for value in values {
     print(value)
 }
 
@@ -90,10 +93,10 @@ for var value in values {
 }
 ```
 
-The historical forms `for (let value in values) {}` and
-`for (var value in values) {}` remain accepted. Here the parentheses wrap the
-whole iteration binding rather than an expression. The form without them is
-canonical.
+The forms `for (value in values) {}`, `for (let value in values) {}` and
+`for (var value in values) {}` are also accepted. Here the parentheses wrap
+the whole iteration binding rather than an expression. The form without them
+is canonical.
 
 For a collection, the source is evaluated once and held for the duration of
 each loop body. An immutable loop allows other reads but no mutation of the
@@ -105,11 +108,11 @@ An integer range can use `start...end` or the equivalent intrinsic
 first bound is produced and the second bound is never produced:
 
 ```sx
-for let i in 0...3 {
+for i in 0...3 {
     print(i)
 }
 
-for let i in range(3, 0) {
+for i in range(3, 0) {
     print(i)
 }
 ```

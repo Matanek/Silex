@@ -2085,3 +2085,18 @@ test "syntax diagnostics use zero-based LSP positions" {
     try std.testing.expectEqual(@as(usize, 2), diagnostic.range.start.line);
     try std.testing.expectEqual(@as(usize, 0), diagnostic.range.start.character);
 }
+
+test "syntax diagnostics accept implicit control bindings" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source =
+        \\func next() int? { return null }
+        \\func main() {
+        \\    if value = next() {}
+        \\    while (value = next()) {}
+        \\    for value in [1] {}
+        \\    for (value in [1]) {}
+        \\}
+    ;
+    try std.testing.expect(syntaxDiagnostic(arena.allocator(), source) == null);
+}

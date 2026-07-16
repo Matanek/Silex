@@ -1,4 +1,4 @@
 func main() {
     var callback:(func())? = func() {}
-    if let operation = callback {}
+    if operation = callback {}
 }

@@ -11,7 +11,7 @@ struct Numbers {
 func main() {
     let fixed:int[3] = [1, 2, 3]
     var total = 0
-    for let value in fixed {
+    for value in fixed {
         total += value
     }
     print(total)
@@ -23,7 +23,7 @@ func main() {
     print(values[0])
     print(values[-1])
 
-    for let value in values {
+    for value in values {
         if value == 4 {
             continue
         }
@@ -37,7 +37,7 @@ func main() {
     for var row in grid {
         row.append(9)
     }
-    for let row in grid {
+    for row in grid {
         print(row.count())
     }
 

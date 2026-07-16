@@ -78,7 +78,7 @@ let running = stopwatch..reset()..start().is_running()
 A range whose second bound is a call remains unambiguous:
 
 ```sx
-for let i in start...compute_end() {}
+for i in start...compute_end() {}
 ```
 
 For long bounds, the named form `range(start, compute_end())` can remain easier

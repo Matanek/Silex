@@ -784,7 +784,7 @@
     "fields": {
       "mutability": {
         "multiple": false,
-        "required": true,
+        "required": false,
         "types": [
           {
             "type": "let",
@@ -1083,7 +1083,7 @@
       },
       "mutability": {
         "multiple": false,
-        "required": true,
+        "required": false,
         "types": [
           {
             "type": "let",

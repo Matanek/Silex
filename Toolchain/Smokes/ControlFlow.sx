@@ -47,10 +47,10 @@ func main() {
 
     let holder = Holder(values:[1, 2])
     var total = 0
-    for let value in holder.values {
+    for value in holder.values {
         total += value
     }
-    for (let value in [3]) {
+    for (value in [3]) {
         total += value
     }
     for let index in range(0, 2) {
@@ -59,12 +59,12 @@ func main() {
     for (let index in 2...3) {
         total += index
     }
-    for let index in 0...
+    for index in 0...
         1 {
         total += index
     }
     for (
-        let value in holder.values
+        value in holder.values
     ) {
         total += value
     }
@@ -75,7 +75,7 @@ func main() {
     }
     assert(mutable[0] == 2, "mutable for binding")
 
-    for let configuration in [Configuration(strict:true)] {
+    for configuration in [Configuration(strict:true)] {
         assert(configuration.strict, "initialized collection source")
     }
 

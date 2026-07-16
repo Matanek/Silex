@@ -43,13 +43,15 @@ subsequent uses again have type `T?`.
 ## Conditional bindings
 
 `if`, `elif`, `else if`, and `while` can extract a present value. The binding
-contains exactly one unannotated name. `let` creates an immutable local copy;
-`var` creates a mutable local copy. `let` is available only when the extracted
-type is an independent value; an optional function and, in the future, an
-optional class use `var`. The binding is visible only in the associated body.
+contains exactly one unannotated name. Without a marker it is an implicit
+`let`, hence an immutable local copy. An explicit `let` remains accepted;
+`var` creates a mutable local copy. The implicit form and `let` are available
+only when the extracted type is an independent value; an optional function
+and, in the future, an optional class use `var`. The binding is visible only
+in the associated body.
 
 ```sx
-if let position = find_position() {
+if position = find_position() {
     print(position.x)
 }
 

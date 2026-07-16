@@ -525,17 +525,29 @@ pub const Parser = struct {
     }
 
     fn parseCondition(self: *Parser) ParseError!Ast.Statement.Condition {
-        const following_tag = if (self.current.tag == .left_parenthesis) try self.peekTag() else .end;
-        const parenthesized_binding = self.current.tag == .left_parenthesis and
-            (following_tag == .keyword_let or following_tag == .keyword_var);
-        if (parenthesized_binding) try self.advance();
-        if (self.current.tag != .keyword_let and self.current.tag != .keyword_var) {
+        const parenthesized_binding = if (self.current.tag == .left_parenthesis)
+            try self.parenthesizedConditionStartsBinding()
+        else
+            false;
+        const unparenthesized_binding = self.current.tag == .keyword_let or
+            self.current.tag == .keyword_var or
+            (self.current.tag == .identifier and (try self.peekTag()) == .equal);
+        if (!parenthesized_binding and !unparenthesized_binding) {
             return .{ .expression = try self.parseExpression(false) };
         }
+
+        if (parenthesized_binding) try self.advance();
         const position = self.current.position;
-        const mutability: Ast.Mutability = if (self.current.tag == .keyword_let) .immutable else .mutable;
-        try self.advance();
-        if (self.current.tag != .identifier) return self.fail("expected binding name after 'let' or 'var'");
+        var mutability: Ast.Mutability = .immutable;
+        const explicit_mutability = self.current.tag == .keyword_let or self.current.tag == .keyword_var;
+        if (explicit_mutability) {
+            mutability = if (self.current.tag == .keyword_let) .immutable else .mutable;
+            try self.advance();
+        }
+        if (self.current.tag != .identifier) return self.fail(if (explicit_mutability)
+            "expected binding name after 'let' or 'var'"
+        else
+            "expected conditional binding name");
         const name = self.current.lexeme;
         const name_position = self.current.position;
         try self.advance();
@@ -551,20 +563,24 @@ pub const Parser = struct {
         } };
     }
 
+    fn parenthesizedConditionStartsBinding(self: *const Parser) Source.Error!bool {
+        var lexer = self.lexer;
+        const first = try lexer.next();
+        if (first.tag == .keyword_let or first.tag == .keyword_var) return true;
+        if (first.tag != .identifier) return false;
+        return (try lexer.next()).tag == .equal;
+    }
+
     fn parseFor(self: *Parser) ParseError!Ast.Statement {
         const position = self.current.position;
         try self.advance();
         const parenthesized = self.current.tag == .left_parenthesis;
         if (parenthesized) try self.advance();
-        const mutability: Ast.Mutability = switch (self.current.tag) {
-            .keyword_let => .immutable,
-            .keyword_var => .mutable,
-            else => return self.fail(if (parenthesized)
-                "expected 'let' or 'var' after 'for ('"
-            else
-                "expected 'let' or 'var' after 'for'"),
-        };
-        try self.advance();
+        var mutability: Ast.Mutability = .immutable;
+        if (self.current.tag == .keyword_let or self.current.tag == .keyword_var) {
+            mutability = if (self.current.tag == .keyword_let) .immutable else .mutable;
+            try self.advance();
+        }
         if (self.current.tag != .identifier) return self.fail("expected iteration variable name");
         const name = self.current.lexeme;
         const name_position = self.current.position;
@@ -1263,6 +1279,8 @@ test "control flow parentheses do not change the compiler AST" {
         \\    while enabled { break }
         \\    for (let value in values) {}
         \\    for let value in values {}
+        \\    for (value in values) {}
+        \\    for value in values {}
         \\}
     );
     const program = try parser.parse();
@@ -1282,6 +1300,33 @@ test "control flow parentheses do not change the compiler AST" {
         statements[6].for_statement.source.collection.value.identifier,
         statements[7].for_statement.source.collection.value.identifier,
     );
+    try std.testing.expectEqual(statements[8].for_statement.mutability, statements[9].for_statement.mutability);
+    try std.testing.expectEqual(Ast.Mutability.immutable, statements[8].for_statement.mutability);
+    try std.testing.expectEqualStrings(statements[8].for_statement.name, statements[9].for_statement.name);
+}
+
+test "implicit conditional bindings match explicit let bindings" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(),
+        \\func find() int? { return 1 }
+        \\func main() {
+        \\    if let first = find() {}
+        \\    if second = find() {}
+        \\    if (third = find()) {}
+        \\    if false {} elif fourth = find() {} else if (fifth = find()) {}
+        \\    while sixth = find() { break }
+        \\}
+    );
+    const program = try parser.parse();
+    const statements = program.functions[1].statements;
+
+    try std.testing.expectEqual(Ast.Mutability.immutable, statements[0].if_statement.condition.binding.mutability);
+    try std.testing.expectEqual(Ast.Mutability.immutable, statements[1].if_statement.condition.binding.mutability);
+    try std.testing.expectEqual(Ast.Mutability.immutable, statements[2].if_statement.condition.binding.mutability);
+    try std.testing.expectEqual(Ast.Mutability.immutable, statements[3].if_statement.alternatives[0].condition.binding.mutability);
+    try std.testing.expectEqual(Ast.Mutability.immutable, statements[3].if_statement.alternatives[1].condition.binding.mutability);
+    try std.testing.expectEqual(Ast.Mutability.immutable, statements[4].while_statement.condition.binding.mutability);
 }
 
 test "parse control flow expressions and continuations without wrapper parentheses" {
@@ -1347,9 +1392,9 @@ test "reject incomplete control flow headers" {
     try std.testing.expectError(error.InvalidSource, conditional.parse());
     try std.testing.expectEqualStrings("expected expression", conditional.diagnostic.?.message);
 
-    var iteration = Parser.init(arena.allocator(), "func main() void { for value in [1] {} }");
+    var iteration = Parser.init(arena.allocator(), "func main() void { for in [1] {} }");
     try std.testing.expectError(error.InvalidSource, iteration.parse());
-    try std.testing.expectEqualStrings("expected 'let' or 'var' after 'for'", iteration.diagnostic.?.message);
+    try std.testing.expectEqualStrings("expected iteration variable name", iteration.diagnostic.?.message);
 }
 
 test "diagnose malformed optional control flow headers" {
@@ -1377,7 +1422,7 @@ test "diagnose malformed optional control flow headers" {
     }
 }
 
-test "parse explicit for bindings" {
+test "parse explicit and implicit for bindings" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     var parser = Parser.init(arena.allocator(),
@@ -1385,12 +1430,16 @@ test "parse explicit for bindings" {
         \\    let values = [1]
         \\    for (let value in values) {}
         \\    for (var value in values) {}
+        \\    for value in values {}
+        \\    for (value in values) {}
         \\}
     );
     const program = try parser.parse();
 
     try std.testing.expectEqual(Ast.Mutability.immutable, program.functions[0].statements[1].for_statement.mutability);
     try std.testing.expectEqual(Ast.Mutability.mutable, program.functions[0].statements[2].for_statement.mutability);
+    try std.testing.expectEqual(Ast.Mutability.immutable, program.functions[0].statements[3].for_statement.mutability);
+    try std.testing.expectEqual(Ast.Mutability.immutable, program.functions[0].statements[4].for_statement.mutability);
 }
 
 test "parse compact and named integer ranges" {
@@ -1431,7 +1480,7 @@ test "preserve cascade as for collection source" {
     try std.testing.expect(program.functions[0].statements[1].for_statement.source.collection.value == .cascade);
 }
 
-test "reject for binding without let or var" {
+test "parse for binding without let or var" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     var parser = Parser.init(
@@ -1439,11 +1488,8 @@ test "reject for binding without let or var" {
         "func main() void { let values = [1]; for (value in values) {} }",
     );
 
-    try std.testing.expectError(error.InvalidSource, parser.parse());
-    try std.testing.expectEqualStrings(
-        "expected 'let' or 'var' after 'for ('",
-        parser.diagnostic.?.message,
-    );
+    const program = try parser.parse();
+    try std.testing.expectEqual(Ast.Mutability.immutable, program.functions[0].statements[1].for_statement.mutability);
 }
 
 test "reserve range intrinsic name" {

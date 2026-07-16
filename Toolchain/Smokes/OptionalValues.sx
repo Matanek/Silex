@@ -61,7 +61,7 @@ func main() {
     assert(select(5) == 1, "exact overload wins over optional promotion")
     assert(select(count) == 2, "optional overload accepts optional values")
 
-    if let position = find_position(true) {
+    if position = find_position(true) {
         assert(position.x == 10, "conditional binding extracts the value")
     } else {
         panic("present value must select the body")
@@ -73,18 +73,22 @@ func main() {
         print("missing")
     }
 
+    if (position = find_position(true)) {
+        assert(position.y == 20, "parenthesized implicit binding")
+    }
+
     if false {
         panic("unexpected initial branch")
-    } elif let fallback = find_position(true) {
+    } elif fallback = find_position(true) {
         assert(fallback.y == 20, "elif accepts an optional binding")
-    } else if let unused = find_position(true) {
+    } else if unused = find_position(true) {
         print(unused.x)
         panic("later alternative must stay lazy")
     }
 
     var translated:Position? = Position(x:1, y:2)
     translated?.translate(3)
-    if let value = translated {
+    if value = translated {
         assert(value.x == 4, "safe mutating call updates contained value")
     }
 
@@ -116,8 +120,11 @@ func main() {
         assert(apply(4, operation) == 5, "optional function extraction")
     }
 
-    while let position = find_position(false) {
+    while position = find_position(false) {
         print(position.x)
+    }
+    while (position = find_position(false)) {
+        print(position.y)
     }
     while (var position = find_position(true)) {
         position.translate(1)

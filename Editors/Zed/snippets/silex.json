@@ -109,7 +109,7 @@
   "If optional binding": {
     "prefix": "iflet",
     "body": [
-      "if let ${1:value} = ${2:optional} {",
+      "if ${1:value} = ${2:optional} {",
       "    $0",
       "}"
     ],
@@ -140,7 +140,7 @@
   "While optional binding": {
     "prefix": "whilelet",
     "body": [
-      "while let ${1:value} = ${2:optional} {",
+      "while ${1:value} = ${2:optional} {",
       "    $0",
       "}"
     ],
@@ -149,7 +149,7 @@
   "For loop": {
     "prefix": "for",
     "body": [
-      "for let ${1:value} in ${2:values} {",
+      "for ${1:value} in ${2:values} {",
       "    $0",
       "}"
     ],
@@ -167,7 +167,7 @@
   "Integer range loop": {
     "prefix": "forr",
     "body": [
-      "for let ${1:i} in ${2:0}...${3:10} {",
+      "for ${1:i} in ${2:0}...${3:10} {",
       "    $0",
       "}"
     ],
