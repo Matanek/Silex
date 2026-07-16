@@ -947,12 +947,12 @@ func find() Profile? {
 func main() {
     let values:int?[] = [null, 1]
     let callback:(func(int))? = null
-    if let profile = find() {
+    if profile = find() {
         print(profile.value)
     } elif (var fallback = find()) {
         fallback?.value
     }
-    while let profile = find() {
+    while profile = find() {
         print(profile.value)
     }
     let value:int? = find()?.value

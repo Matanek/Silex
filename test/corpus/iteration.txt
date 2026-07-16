@@ -4,7 +4,7 @@ Collection iteration
 
 func main() {
     let values:int[] = [1, 2, 3]
-    for let value in values {
+    for value in values {
         if value == 2 {
             continue
         }
@@ -87,7 +87,7 @@ func main() {
                   (integer_literal))))))))))
 
 =============================
-Missing explicit binding
+Parenthesized implicit binding
 =============================
 
 func main() {
@@ -109,9 +109,12 @@ func main() {
             (sequence_literal
               (expression
                 (integer_literal))))))
-      (ERROR
-        (identifier)
-        (identifier)))))
+      (statement
+        (for_statement
+          (identifier)
+          (expression
+            (identifier))
+          (block))))))
 
 =============================
 Integer ranges and cascade source
@@ -178,7 +181,8 @@ func main() {
     if (enabled) {}
     while enabled {}
     while (enabled) {}
-    for let value in values {}
+    for value in values {}
+    for (value in values) {}
     for (let value in values) {}
 }
 
@@ -224,6 +228,12 @@ func main() {
             (parenthesized_expression
               (expression
                 (identifier))))
+          (block)))
+      (statement
+        (for_statement
+          (identifier)
+          (expression
+            (identifier))
           (block)))
       (statement
         (for_statement

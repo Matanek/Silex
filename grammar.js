@@ -273,7 +273,7 @@ module.exports = grammar({
 
     conditional_binding: ($) =>
       seq(
-        field("mutability", choice("let", "var")),
+        optional(field("mutability", choice("let", "var"))),
         field("name", $.identifier),
         "=",
         field("source", $.expression),
@@ -288,7 +288,7 @@ module.exports = grammar({
 
     _for_binding: ($) =>
       seq(
-        field("mutability", choice("let", "var")),
+        optional(field("mutability", choice("let", "var"))),
         field("name", $.identifier),
         "in",
         field("iterable", choice($.integer_range, $.expression)),
