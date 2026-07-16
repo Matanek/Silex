@@ -1,0 +1,10 @@
+func main() {
+    var value:int? = 1
+    if value != null {
+        let clear = func() {
+            value = null
+        }
+        print(value + 1)
+        clear()
+    }
+}

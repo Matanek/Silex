@@ -48,6 +48,7 @@ pub const TypeName = union(enum) {
     fixed_array: FixedArray,
     reference: Reference,
     function: FunctionType,
+    optional: *TypeName,
 
     pub const FixedArray = struct {
         element: *TypeName,
@@ -88,6 +89,7 @@ pub const ReturnType = union(enum) {
     fixed_array: TypeName.FixedArray,
     reference: TypeName.Reference,
     function: TypeName.FunctionType,
+    optional: *TypeName,
 };
 
 pub const Mutability = enum {
@@ -111,6 +113,7 @@ pub const Expression = struct {
         integer: []const u8,
         floating: []const u8,
         boolean: bool,
+        null,
         string: []const u8,
         sequence_literal: []const *Expression,
         identifier: []const u8,
@@ -122,6 +125,7 @@ pub const Expression = struct {
         cascade: Cascade,
         structure_initializer: StructureInitializer,
         member_access: MemberAccess,
+        safe_member_access: SafeMemberAccess,
         index_access: IndexAccess,
         slice_access: SliceAccess,
         unary: Unary,
@@ -204,6 +208,14 @@ pub const Expression = struct {
         name_position: Source.Position,
     };
 
+    pub const SafeMemberAccess = struct {
+        object: *Expression,
+        name: []const u8,
+        name_position: Source.Position,
+        arguments: ?[]const *Expression = null,
+        named_fields: ?[]const FieldInitializer = null,
+    };
+
     pub const IndexAccess = struct {
         object: *Expression,
         index: *Expression,
@@ -279,15 +291,34 @@ pub const Statement = union(enum) {
 
     pub const If = struct {
         position: Source.Position,
-        condition: *Expression,
+        condition: Condition,
         body: []const Statement,
+        alternatives: []const Alternative,
         else_body: ?[]const Statement,
+
+        pub const Alternative = struct {
+            condition: Condition,
+            body: []const Statement,
+        };
     };
 
     pub const While = struct {
         position: Source.Position,
-        condition: *Expression,
+        condition: Condition,
         body: []const Statement,
+    };
+
+    pub const Condition = union(enum) {
+        expression: *Expression,
+        binding: ConditionalBinding,
+    };
+
+    pub const ConditionalBinding = struct {
+        position: Source.Position,
+        name: []const u8,
+        name_position: Source.Position,
+        mutability: Mutability,
+        source: *Expression,
     };
 
     pub const For = struct {

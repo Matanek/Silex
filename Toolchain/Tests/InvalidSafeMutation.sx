@@ -1,0 +1,12 @@
+struct Position {
+    x:int
+
+    func translate(delta:int) {
+        self.x += delta
+    }
+}
+
+func main() {
+    let value:Position? = Position(x:1)
+    value?.translate(1)
+}

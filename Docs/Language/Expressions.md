@@ -16,6 +16,12 @@ same structure type recursively by their fields. `print` accepts numbers,
 Mutable numeric places support `+=`, `-=`, `*=`, `/=`, `++`, and `--`; `+=`
 also concatenates strings. `++` and `--` are postfix statements, not values.
 
+Optional values only support `==` and `!=` directly. They may be compared with
+`null`, with a compatible optional, or with a plain value promoted to an
+optional. `?.` performs safe member or method access and evaluates its receiver
+once; a missing receiver skips the access and all call arguments. See
+[Optional values](Optional-Values.md).
+
 `%` computes the remainder of an integer division. Its operands use the same
 compatible integer widening as `/`, and its result has that common integer
 type. Signed division truncates toward zero, so `-17 % 5` is `-2`. A zero

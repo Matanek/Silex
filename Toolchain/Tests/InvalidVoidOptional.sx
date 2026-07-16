@@ -1,0 +1,3 @@
+func invalid() void? {}
+
+func main() {}

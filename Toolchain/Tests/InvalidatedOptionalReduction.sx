@@ -1,0 +1,7 @@
+func main() {
+    var value:int? = 1
+    if value != null {
+        value = null
+        print(value + 1)
+    }
+}

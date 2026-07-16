@@ -51,3 +51,14 @@ implicitly convert to one.
 
 `func(&int)` has a mutable-reference parameter. Its calls use `&place`, exactly
 like calls to a named function whose parameter is written `value:&int`.
+
+## Type suffixes and grouping
+
+`?`, `[]`, and `[N]` are type suffixes applied from left to right. Thus
+`Position?[]` is a list of optional positions, `Position[]?` is an optional
+list, and `int?[3]` is an array of optional integers. Parentheses may group any
+complete type; `(func(int))?` is an optional function value, while
+`func(int) Position?` is a function returning an optional position.
+
+See [Optional values](Optional-Values.md) for `null`, presence checks,
+conditional bindings, and safe access.

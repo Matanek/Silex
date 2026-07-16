@@ -171,7 +171,7 @@ pub fn build(b: *std.Build) void {
     const invalid_native_type_command = b.addRunArtifact(native_module_test_executable);
     invalid_native_type_command.addArgs(&.{ "compile", "Tests/DistributedModules/NativeInvalidType/Main.sx" });
     invalid_native_type_command.expectExitCode(1);
-    invalid_native_type_command.expectStdErrMatch("native parameter 'values' cannot use 'list'\n");
+    invalid_native_type_command.expectStdErrMatch("native parameter 'values' cannot use 'int[]'\n");
 
     const missing_native_symbol_command = b.addRunArtifact(native_module_test_executable);
     missing_native_symbol_command.step.dependOn(&invalid_native_type_command.step);
@@ -216,6 +216,109 @@ pub fn build(b: *std.Build) void {
     invalid_condition_command.expectStdErrEqual(
         "Tests/InvalidCondition.sx:2:9: error: expected 'bool', found 'int'\n",
     );
+
+    const isolated_elif_command = b.addRunArtifact(executable);
+    isolated_elif_command.addArgs(&.{ "compile", "Tests/IsolatedElif.sx" });
+    isolated_elif_command.expectExitCode(1);
+    isolated_elif_command.expectStdErrEqual(
+        "Tests/IsolatedElif.sx:2:5: error: 'elif' must directly continue an if chain\n",
+    );
+
+    const invalid_alternative_condition_command = b.addRunArtifact(executable);
+    invalid_alternative_condition_command.addArgs(&.{ "compile", "Tests/InvalidAlternativeCondition.sx" });
+    invalid_alternative_condition_command.expectExitCode(1);
+    invalid_alternative_condition_command.expectStdErrEqual(
+        "Tests/InvalidAlternativeCondition.sx:2:22: error: expected 'bool', found 'int'\n",
+    );
+
+    const invalid_else_continuation_command = b.addRunArtifact(executable);
+    invalid_else_continuation_command.addArgs(&.{ "compile", "Tests/InvalidElseContinuation.sx" });
+    invalid_else_continuation_command.expectExitCode(1);
+    invalid_else_continuation_command.expectStdErrEqual(
+        "Tests/InvalidElseContinuation.sx:2:22: error: expected '{' or 'if' after 'else'\n",
+    );
+
+    const reserved_elif_identifier_command = b.addRunArtifact(executable);
+    reserved_elif_identifier_command.addArgs(&.{ "compile", "Tests/ReservedElifIdentifier.sx" });
+    reserved_elif_identifier_command.expectExitCode(1);
+    reserved_elif_identifier_command.expectStdErrEqual(
+        "Tests/ReservedElifIdentifier.sx:2:9: error: 'elif' is reserved; rename this identifier\n",
+    );
+
+    const invalid_optional_inference_command = b.addRunArtifact(executable);
+    invalid_optional_inference_command.addArgs(&.{ "compile", "Tests/InvalidOptionalInference.sx" });
+    invalid_optional_inference_command.expectExitCode(1);
+    invalid_optional_inference_command.expectStdErrEqual("Tests/InvalidOptionalInference.sx:2:17: error: 'null' requires an expected optional type\n");
+
+    const invalid_optional_condition_command = b.addRunArtifact(executable);
+    invalid_optional_condition_command.addArgs(&.{ "compile", "Tests/InvalidOptionalCondition.sx" });
+    invalid_optional_condition_command.expectExitCode(1);
+    invalid_optional_condition_command.expectStdErrEqual("Tests/InvalidOptionalCondition.sx:3:8: error: expected 'bool', found 'int?'\n");
+
+    const invalid_conditional_binding_source_command = b.addRunArtifact(executable);
+    invalid_conditional_binding_source_command.addArgs(&.{ "compile", "Tests/InvalidConditionalBindingSource.sx" });
+    invalid_conditional_binding_source_command.expectExitCode(1);
+    invalid_conditional_binding_source_command.expectStdErrEqual("Tests/InvalidConditionalBindingSource.sx:2:20: error: conditional binding source must have an optional type\n");
+
+    const invalid_safe_access_command = b.addRunArtifact(executable);
+    invalid_safe_access_command.addArgs(&.{ "compile", "Tests/InvalidSafeAccess.sx" });
+    invalid_safe_access_command.expectExitCode(1);
+    invalid_safe_access_command.expectStdErrEqual("Tests/InvalidSafeAccess.sx:7:18: error: safe access requires an optional receiver\n");
+
+    const invalid_safe_mutation_command = b.addRunArtifact(executable);
+    invalid_safe_mutation_command.addArgs(&.{ "compile", "Tests/InvalidSafeMutation.sx" });
+    invalid_safe_mutation_command.expectExitCode(1);
+    invalid_safe_mutation_command.expectStdErrEqual("Tests/InvalidSafeMutation.sx:11:12: error: cannot call mutating method 'translate' on immutable value 'value'\n");
+
+    const invalid_optional_demotion_command = b.addRunArtifact(executable);
+    invalid_optional_demotion_command.addArgs(&.{ "compile", "Tests/InvalidOptionalDemotion.sx" });
+    invalid_optional_demotion_command.expectExitCode(1);
+    invalid_optional_demotion_command.expectStdErrEqual("Tests/InvalidOptionalDemotion.sx:6:21: error: expected 'int', found 'int?'\n");
+
+    const invalid_null_comparison_command = b.addRunArtifact(executable);
+    invalid_null_comparison_command.addArgs(&.{ "compile", "Tests/InvalidNullComparison.sx" });
+    invalid_null_comparison_command.expectExitCode(1);
+    invalid_null_comparison_command.expectStdErrEqual("Tests/InvalidNullComparison.sx:2:17: error: 'null' cannot be compared without an expected optional type\n");
+
+    const invalid_nested_optional_command = b.addRunArtifact(executable);
+    invalid_nested_optional_command.addArgs(&.{ "compile", "Tests/InvalidNestedOptional.sx" });
+    invalid_nested_optional_command.expectExitCode(1);
+    invalid_nested_optional_command.expectStdErrEqual("Tests/InvalidNestedOptional.sx:2:19: error: an optional type cannot be optional again\n");
+
+    const invalid_void_optional_command = b.addRunArtifact(executable);
+    invalid_void_optional_command.addArgs(&.{ "compile", "Tests/InvalidVoidOptional.sx" });
+    invalid_void_optional_command.expectExitCode(1);
+    invalid_void_optional_command.expectStdErrEqual("Tests/InvalidVoidOptional.sx:1:20: error: type 'void' cannot be optional\n");
+
+    const reserved_null_identifier_command = b.addRunArtifact(executable);
+    reserved_null_identifier_command.addArgs(&.{ "compile", "Tests/ReservedNullIdentifier.sx" });
+    reserved_null_identifier_command.expectExitCode(1);
+    reserved_null_identifier_command.expectStdErrEqual("Tests/ReservedNullIdentifier.sx:2:9: error: expected variable name\n");
+
+    const ambiguous_null_overload_command = b.addRunArtifact(executable);
+    ambiguous_null_overload_command.addArgs(&.{ "compile", "Tests/AmbiguousNullOverload.sx" });
+    ambiguous_null_overload_command.expectExitCode(1);
+    ambiguous_null_overload_command.expectStdErrEqual("Tests/AmbiguousNullOverload.sx:10:11: error: ambiguous call to function 'select'; matching signatures: select(int?), select(str?)\n");
+
+    const invalid_untyped_null_sequence_command = b.addRunArtifact(executable);
+    invalid_untyped_null_sequence_command.addArgs(&.{ "compile", "Tests/InvalidUntypedNullSequence.sx" });
+    invalid_untyped_null_sequence_command.expectExitCode(1);
+    invalid_untyped_null_sequence_command.expectStdErrEqual("Tests/InvalidUntypedNullSequence.sx:2:19: error: 'null' in a sequence literal requires an expected collection element type\n");
+
+    const invalidated_optional_reduction_command = b.addRunArtifact(executable);
+    invalidated_optional_reduction_command.addArgs(&.{ "compile", "Tests/InvalidatedOptionalReduction.sx" });
+    invalidated_optional_reduction_command.expectExitCode(1);
+    invalidated_optional_reduction_command.expectStdErrEqual("Tests/InvalidatedOptionalReduction.sx:5:21: error: arithmetic operator requires numeric operands, found 'int?' and 'int'\n");
+
+    const invalidated_optional_alias_reduction_command = b.addRunArtifact(executable);
+    invalidated_optional_alias_reduction_command.addArgs(&.{ "compile", "Tests/InvalidatedOptionalAliasReduction.sx" });
+    invalidated_optional_alias_reduction_command.expectExitCode(1);
+    invalidated_optional_alias_reduction_command.expectStdErrEqual("Tests/InvalidatedOptionalAliasReduction.sx:9:21: error: arithmetic operator requires numeric operands, found 'int?' and 'int'\n");
+
+    const invalidated_optional_lambda_reduction_command = b.addRunArtifact(executable);
+    invalidated_optional_lambda_reduction_command.addArgs(&.{ "compile", "Tests/InvalidatedOptionalLambdaReduction.sx" });
+    invalidated_optional_lambda_reduction_command.expectExitCode(1);
+    invalidated_optional_lambda_reduction_command.expectStdErrEqual("Tests/InvalidatedOptionalLambdaReduction.sx:7:21: error: arithmetic operator requires numeric operands, found 'int?' and 'int'\n");
 
     const invalid_assertion_condition_command = b.addRunArtifact(executable);
     invalid_assertion_condition_command.addArgs(&.{ "compile", "Tests/InvalidAssertionCondition.sx" });
@@ -911,6 +1014,25 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&inherited_native_runtime_command.step);
     test_step.dependOn(&invalid_reference_type_command.step);
     test_step.dependOn(&invalid_condition_command.step);
+    test_step.dependOn(&isolated_elif_command.step);
+    test_step.dependOn(&invalid_alternative_condition_command.step);
+    test_step.dependOn(&invalid_else_continuation_command.step);
+    test_step.dependOn(&reserved_elif_identifier_command.step);
+    test_step.dependOn(&invalid_optional_inference_command.step);
+    test_step.dependOn(&invalid_optional_condition_command.step);
+    test_step.dependOn(&invalid_conditional_binding_source_command.step);
+    test_step.dependOn(&invalid_safe_access_command.step);
+    test_step.dependOn(&invalid_safe_mutation_command.step);
+    test_step.dependOn(&invalid_optional_demotion_command.step);
+    test_step.dependOn(&invalid_null_comparison_command.step);
+    test_step.dependOn(&invalid_nested_optional_command.step);
+    test_step.dependOn(&invalid_void_optional_command.step);
+    test_step.dependOn(&reserved_null_identifier_command.step);
+    test_step.dependOn(&ambiguous_null_overload_command.step);
+    test_step.dependOn(&invalid_untyped_null_sequence_command.step);
+    test_step.dependOn(&invalidated_optional_reduction_command.step);
+    test_step.dependOn(&invalidated_optional_alias_reduction_command.step);
+    test_step.dependOn(&invalidated_optional_lambda_reduction_command.step);
     test_step.dependOn(&invalid_assertion_condition_command.step);
     test_step.dependOn(&invalid_assertion_message_command.step);
     test_step.dependOn(&assertion_failure_command.step);
@@ -1015,8 +1137,21 @@ pub fn build(b: *std.Build) void {
     control_flow_command.addArgs(&.{ "run", "Smokes/ControlFlow.sx" });
     control_flow_command.expectStdOutEqual(hostText(b, "if\nflow\n"));
 
+    const alternative_branches_command = b.addRunArtifact(executable);
+    alternative_branches_command.step.dependOn(&control_flow_command.step);
+    alternative_branches_command.addArgs(&.{ "run", "Smokes/AlternativeBranches.sx" });
+    alternative_branches_command.expectStdOutEqual(hostText(
+        b,
+        "1\n2\n3\nthird\nelif\nelse if\nnone\none\n2\n4\nnested\ntrivia\n2\n",
+    ));
+
+    const optional_values_command = b.addRunArtifact(executable);
+    optional_values_command.step.dependOn(&alternative_branches_command.step);
+    optional_values_command.addArgs(&.{ "run", "Smokes/OptionalValues.sx" });
+    optional_values_command.expectStdOutEqual(hostText(b, "missing\noptionals\n"));
+
     const functions_command = b.addRunArtifact(executable);
-    functions_command.step.dependOn(&control_flow_command.step);
+    functions_command.step.dependOn(&optional_values_command.step);
     functions_command.addArgs(&.{ "run", "Smokes/Functions.sx" });
     functions_command.expectStdOutEqual(hostText(b, "8\n2\n85\n6\n84\n82\n1\n3\n77\n0\n1\n"));
 

@@ -52,6 +52,8 @@ pub const Parser = struct {
                 try functions.append(self.allocator, try self.parseFunction(false));
             } else if (self.current.tag == .identifier and std.mem.eql(u8, self.current.lexeme, "native")) {
                 try functions.append(self.allocator, try self.parseNativeFunction());
+            } else if (self.current.tag == .keyword_elif) {
+                return self.fail("'elif' must directly continue an if chain");
             } else {
                 return self.fail("expected import, use, struct, func, or native func declaration");
             }
@@ -203,6 +205,7 @@ pub const Parser = struct {
     fn parseReturnType(self: *Parser) ParseError!Ast.ReturnType {
         if (self.current.tag == .keyword_void) {
             try self.advance();
+            if (self.current.tag == .question) return self.fail("type 'void' cannot be optional");
             return .void;
         }
         const type_name = try self.parseTypeNameAfter("expected function return type");
@@ -227,6 +230,7 @@ pub const Parser = struct {
             .fixed_array => |array| .{ .fixed_array = array },
             .reference => |reference| .{ .reference = reference },
             .function => |function| .{ .function = function },
+            .optional => |contained| .{ .optional = contained },
         };
     }
 
@@ -272,6 +276,8 @@ pub const Parser = struct {
             .keyword_let => self.parseVariableDeclaration(.immutable),
             .keyword_var => self.parseVariableDeclaration(.mutable),
             .keyword_if => self.parseIf(),
+            .keyword_elif => self.fail("'elif' must directly continue an if chain"),
+            .keyword_else => self.fail("'else' must directly continue an if chain with '{' or 'if'"),
             .keyword_while => self.parseWhile(),
             .keyword_for => self.parseFor(),
             .keyword_break => self.parseLoopControl(.break_statement),
@@ -318,6 +324,7 @@ pub const Parser = struct {
         const position = self.current.position;
         try self.advance();
 
+        if (self.current.tag == .keyword_elif) return self.fail("'elif' is reserved; rename this identifier");
         if (self.current.tag != .identifier) return self.fail("expected variable name");
         const name = self.current.lexeme;
         const name_position = self.current.position;
@@ -352,7 +359,12 @@ pub const Parser = struct {
     }
 
     fn parseTypeNameAfter(self: *Parser, message: []const u8) ParseError!Ast.TypeName {
-        const type_name: Ast.TypeName = if (self.current.tag == .keyword_func)
+        const type_name: Ast.TypeName = if (self.current.tag == .left_parenthesis) grouped: {
+            try self.advance();
+            const grouped_type = try self.parseTypeNameAfter(message);
+            try self.expect(.right_parenthesis, "expected ')' after grouped type");
+            break :grouped grouped_type;
+        } else if (self.current.tag == .keyword_func)
             try self.parseFunctionType()
         else if (self.current.tag == .identifier)
             .{ .structure = try self.parseQualifiedName(message) }
@@ -376,7 +388,14 @@ pub const Parser = struct {
         };
         if (type_name != .structure and type_name != .function) try self.advance();
         var result = type_name;
-        while (self.current.tag == .left_bracket) {
+        while (self.current.tag == .left_bracket or self.current.tag == .question) {
+            if (self.current.tag == .question) {
+                if (result == .optional) return self.fail("an optional type cannot be optional again");
+                try self.advance();
+                const contained = try self.newTypeName(result);
+                result = .{ .optional = contained };
+                continue;
+            }
             try self.advance();
             if (self.current.tag == .right_bracket) {
                 try self.advance();
@@ -424,7 +443,7 @@ pub const Parser = struct {
 
     fn isTypeStart(self: *const Parser) bool {
         return switch (self.current.tag) {
-            .keyword_func, .keyword_int, .keyword_int8, .keyword_int16, .keyword_int32, .keyword_int64, .keyword_uint, .keyword_uint8, .keyword_uint16, .keyword_uint32, .keyword_uint64, .keyword_float, .keyword_float32, .keyword_float64, .keyword_bool, .keyword_str, .identifier => true,
+            .left_parenthesis, .keyword_func, .keyword_int, .keyword_int8, .keyword_int16, .keyword_int32, .keyword_int64, .keyword_uint, .keyword_uint8, .keyword_uint16, .keyword_uint32, .keyword_uint64, .keyword_float, .keyword_float32, .keyword_float64, .keyword_bool, .keyword_str, .identifier => true,
             else => false,
         };
     }
@@ -446,7 +465,7 @@ pub const Parser = struct {
                 .value = value,
             } };
         }
-        if (target.value == .call or target.value == .value_call or target.value == .method_call or target.value == .cascade) {
+        if (target.value == .call or target.value == .value_call or target.value == .method_call or target.value == .safe_member_access or target.value == .cascade) {
             try self.expectStatementTerminator();
             return .{ .expression_statement = target };
         }
@@ -456,27 +475,80 @@ pub const Parser = struct {
     fn parseIf(self: *Parser) ParseError!Ast.Statement {
         const position = self.current.position;
         try self.advance();
-        const condition = try self.parseExpression(false);
+        const condition = try self.parseCondition();
         const body = try self.parseBlock();
+        var alternatives: std.ArrayList(Ast.Statement.If.Alternative) = .empty;
         var else_body: ?[]const Ast.Statement = null;
-        if (self.current.tag == .keyword_else) {
+        while (true) {
+            if (self.current.tag == .keyword_elif) {
+                try self.advance();
+                try alternatives.append(self.allocator, try self.parseIfAlternative());
+                continue;
+            }
+            if (self.current.tag != .keyword_else) break;
+
             try self.advance();
+            if (self.current.tag == .keyword_if) {
+                try self.advance();
+                try alternatives.append(self.allocator, try self.parseIfAlternative());
+                continue;
+            }
+            if (self.current.tag != .left_brace) return self.fail("expected '{' or 'if' after 'else'");
             else_body = try self.parseBlock();
+            if (self.current.tag == .keyword_elif or self.current.tag == .keyword_else) {
+                return self.fail("conditional branch cannot follow final 'else'");
+            }
+            break;
         }
         return .{ .if_statement = .{
             .position = position,
             .condition = condition,
             .body = body,
+            .alternatives = try alternatives.toOwnedSlice(self.allocator),
             .else_body = else_body,
         } };
+    }
+
+    fn parseIfAlternative(self: *Parser) ParseError!Ast.Statement.If.Alternative {
+        return .{
+            .condition = try self.parseCondition(),
+            .body = try self.parseBlock(),
+        };
     }
 
     fn parseWhile(self: *Parser) ParseError!Ast.Statement {
         const position = self.current.position;
         try self.advance();
-        const condition = try self.parseExpression(false);
+        const condition = try self.parseCondition();
         const body = try self.parseBlock();
         return .{ .while_statement = .{ .position = position, .condition = condition, .body = body } };
+    }
+
+    fn parseCondition(self: *Parser) ParseError!Ast.Statement.Condition {
+        const following_tag = if (self.current.tag == .left_parenthesis) try self.peekTag() else .end;
+        const parenthesized_binding = self.current.tag == .left_parenthesis and
+            (following_tag == .keyword_let or following_tag == .keyword_var);
+        if (parenthesized_binding) try self.advance();
+        if (self.current.tag != .keyword_let and self.current.tag != .keyword_var) {
+            return .{ .expression = try self.parseExpression(false) };
+        }
+        const position = self.current.position;
+        const mutability: Ast.Mutability = if (self.current.tag == .keyword_let) .immutable else .mutable;
+        try self.advance();
+        if (self.current.tag != .identifier) return self.fail("expected binding name after 'let' or 'var'");
+        const name = self.current.lexeme;
+        const name_position = self.current.position;
+        try self.advance();
+        try self.expect(.equal, "expected '=' after conditional binding name");
+        const source = try self.parseExpression(parenthesized_binding);
+        if (parenthesized_binding) try self.expect(.right_parenthesis, "expected ')' after conditional binding");
+        return .{ .binding = .{
+            .position = position,
+            .name = name,
+            .name_position = name_position,
+            .mutability = mutability,
+            .source = source,
+        } };
     }
 
     fn parseFor(self: *Parser) ParseError!Ast.Statement {
@@ -767,6 +839,10 @@ pub const Parser = struct {
                     .value = .{ .boolean = token.tag == .keyword_true },
                 }));
             },
+            .keyword_null => {
+                try self.advance();
+                return self.parsePostfix(try self.newExpression(.{ .position = token.position, .value = .null }));
+            },
             .string => {
                 try self.advance();
                 return self.parsePostfix(try self.newExpression(.{ .position = token.position, .value = .{ .string = token.lexeme } }));
@@ -841,7 +917,7 @@ pub const Parser = struct {
 
     fn parsePostfix(self: *Parser, initial: *Ast.Expression) ParseError!*Ast.Expression {
         var expression = initial;
-        while (self.current.tag == .dot or self.current.tag == .left_bracket or self.current.tag == .left_parenthesis) {
+        while (self.current.tag == .dot or self.current.tag == .question_dot or self.current.tag == .left_bracket or self.current.tag == .left_parenthesis) {
             if (self.current.tag == .left_parenthesis) {
                 const position = self.current.position;
                 const arguments = try self.parseCallArguments();
@@ -885,17 +961,37 @@ pub const Parser = struct {
                 }
                 continue;
             }
+            const safe = self.current.tag == .question_dot;
             try self.advance();
-            if (self.current.tag != .identifier) return self.fail("expected field name after '.'");
+            if (self.current.tag != .identifier) return self.fail(if (safe) "expected member name after '?.'" else "expected field name after '.'");
             const name = self.current.lexeme;
             const position = self.current.position;
             try self.advance();
             if (self.current.tag == .left_parenthesis) {
-                expression = try self.parseMethodCall(expression, name, position);
+                if (safe) {
+                    const invocation = try self.parseInvocationArguments();
+                    expression = try self.newExpression(.{ .position = expression.position, .value = .{ .safe_member_access = .{
+                        .object = expression,
+                        .name = name,
+                        .name_position = position,
+                        .arguments = switch (invocation) {
+                            .positional => |values| values,
+                            .named => &.{},
+                        },
+                        .named_fields = switch (invocation) {
+                            .positional => null,
+                            .named => |fields| fields,
+                        },
+                    } } });
+                } else expression = try self.parseMethodCall(expression, name, position);
             } else {
                 expression = try self.newExpression(.{
                     .position = expression.position,
-                    .value = .{ .member_access = .{
+                    .value = if (safe) .{ .safe_member_access = .{
+                        .object = expression,
+                        .name = name,
+                        .name_position = position,
+                    } } else .{ .member_access = .{
                         .object = expression,
                         .name = name,
                         .name_position = position,
@@ -1084,6 +1180,11 @@ pub const Parser = struct {
         try self.advance();
     }
 
+    fn peekTag(self: *const Parser) Source.Error!TokenTag {
+        var lexer = self.lexer;
+        return (try lexer.next()).tag;
+    }
+
     fn expectIdentifier(self: *Parser, expected: []const u8, message: []const u8) !void {
         if (self.current.tag != .identifier or !std.mem.eql(u8, self.current.lexeme, expected)) {
             return self.fail(message);
@@ -1168,12 +1269,12 @@ test "control flow parentheses do not change the compiler AST" {
     const statements = program.functions[0].statements;
 
     try std.testing.expectEqualStrings(
-        statements[2].if_statement.condition.value.identifier,
-        statements[3].if_statement.condition.value.identifier,
+        statements[2].if_statement.condition.expression.value.identifier,
+        statements[3].if_statement.condition.expression.value.identifier,
     );
     try std.testing.expectEqualStrings(
-        statements[4].while_statement.condition.value.identifier,
-        statements[5].while_statement.condition.value.identifier,
+        statements[4].while_statement.condition.expression.value.identifier,
+        statements[5].while_statement.condition.expression.value.identifier,
     );
     try std.testing.expectEqual(statements[6].for_statement.mutability, statements[7].for_statement.mutability);
     try std.testing.expectEqualStrings(statements[6].for_statement.name, statements[7].for_statement.name);
@@ -1207,11 +1308,11 @@ test "parse control flow expressions and continuations without wrapper parenthes
     const program = try parser.parse();
     const statements = program.functions[0].statements;
 
-    try std.testing.expect(statements[2].if_statement.condition.value == .binary);
-    try std.testing.expect(statements[3].if_statement.condition.value == .binary);
-    try std.testing.expect(statements[4].if_statement.condition.value == .binary);
-    try std.testing.expect(statements[5].if_statement.condition.value == .value_call);
-    try std.testing.expect(statements[6].while_statement.condition.value == .binary);
+    try std.testing.expect(statements[2].if_statement.condition.expression.value == .binary);
+    try std.testing.expect(statements[3].if_statement.condition.expression.value == .binary);
+    try std.testing.expect(statements[4].if_statement.condition.expression.value == .binary);
+    try std.testing.expect(statements[5].if_statement.condition.expression.value == .value_call);
+    try std.testing.expect(statements[6].while_statement.condition.expression.value == .binary);
     try std.testing.expect(statements[7].for_statement.source == .integer_range);
 }
 
@@ -1505,7 +1606,92 @@ test "parse else block" {
         "func main() void { if (true) { print(1); } else { print(2); } }",
     );
     const program = try parser.parse();
+    try std.testing.expectEqual(@as(usize, 0), program.functions[0].statements[0].if_statement.alternatives.len);
     try std.testing.expectEqual(@as(usize, 1), program.functions[0].statements[0].if_statement.else_body.?.len);
+}
+
+test "normalize elif and else if into the same AST" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(),
+        \\func main() void {
+        \\    if false {} elif true { print(1) } elif (false) {} else {}
+        \\    if false {} else if true { print(1) } else if (false) {} else {}
+        \\    if false {} elif true {} else if false {} elif true {}
+        \\}
+    );
+    const program = try parser.parse();
+    const statements = program.functions[0].statements;
+    const canonical = statements[0].if_statement;
+    const compatible = statements[1].if_statement;
+
+    try std.testing.expectEqual(@as(usize, 2), canonical.alternatives.len);
+    try std.testing.expectEqual(canonical.alternatives.len, compatible.alternatives.len);
+    for (canonical.alternatives, compatible.alternatives) |left, right| {
+        try std.testing.expectEqual(left.condition.expression.value.boolean, right.condition.expression.value.boolean);
+        try std.testing.expectEqual(left.body.len, right.body.len);
+    }
+    try std.testing.expect(canonical.else_body != null);
+    try std.testing.expect(compatible.else_body != null);
+    try std.testing.expectEqual(@as(usize, 3), statements[2].if_statement.alternatives.len);
+}
+
+test "allow trivia inside an alternative chain" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(),
+        \\func main() void {
+        \\    if false {}
+        \\    // before else
+        \\    else
+        \\    // before if
+        \\    if true {}
+        \\    // before elif
+        \\    elif false {}
+        \\}
+    );
+    const program = try parser.parse();
+    try std.testing.expectEqual(@as(usize, 2), program.functions[0].statements[0].if_statement.alternatives.len);
+}
+
+test "preserve explicit else block with nested if" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(
+        arena.allocator(),
+        "func main() void { if false {} else { if true {} } }",
+    );
+    const program = try parser.parse();
+    const outer = program.functions[0].statements[0].if_statement;
+    try std.testing.expectEqual(@as(usize, 0), outer.alternatives.len);
+    try std.testing.expect(outer.else_body.?[0] == .if_statement);
+}
+
+test "diagnose malformed alternative chains" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const cases = [_]struct {
+        source: []const u8,
+        message: []const u8,
+    }{
+        .{ .source = "func main() void { elif true {} }", .message = "'elif' must directly continue an if chain" },
+        .{ .source = "func main() void { else {} }", .message = "'else' must directly continue an if chain with '{' or 'if'" },
+        .{ .source = "func main() void { if false {} else elif true {} }", .message = "expected '{' or 'if' after 'else'" },
+        .{ .source = "func main() void { if false {} else while true {} }", .message = "expected '{' or 'if' after 'else'" },
+        .{ .source = "func main() void { if false {} else {} elif true {} }", .message = "conditional branch cannot follow final 'else'" },
+        .{ .source = "func main() void { if false {} else {} else {} }", .message = "conditional branch cannot follow final 'else'" },
+        .{ .source = "func main() void { if false {} elif {} }", .message = "expected expression" },
+        .{ .source = "func main() void { if false {} elif true }", .message = "expected '{'" },
+        .{ .source = "func main() void { if false {} else }", .message = "expected '{' or 'if' after 'else'" },
+        .{ .source = "func main() void { let elif = 1 }", .message = "'elif' is reserved; rename this identifier" },
+    };
+
+    for (cases) |case| {
+        var parser = Parser.init(arena.allocator(), case.source);
+        try std.testing.expectError(error.InvalidSource, parser.parse());
+        try std.testing.expectEqualStrings(case.message, parser.diagnostic.?.message);
+    }
 }
 
 test "parse while loop" {
@@ -1516,7 +1702,7 @@ test "parse while loop" {
         "func main() void { var count = 2; while (count > 0) { count = count - 1; } }",
     );
     const program = try parser.parse();
-    try std.testing.expectEqual(Ast.BinaryOperator.greater, program.functions[0].statements[1].while_statement.condition.value.binary.operator);
+    try std.testing.expectEqual(Ast.BinaryOperator.greater, program.functions[0].statements[1].while_statement.condition.expression.value.binary.operator);
     try std.testing.expectEqual(@as(usize, 1), program.functions[0].statements[1].while_statement.body.len);
 }
 
@@ -1690,6 +1876,38 @@ test "parse fixed arrays and lists" {
     try std.testing.expect(program.functions[0].parameters[0].type.list.* == .int);
     try std.testing.expect(program.functions[0].parameters[1].type == .fixed_array);
     try std.testing.expect(program.functions[0].parameters[1].type.fixed_array.element.* == .int);
+}
+
+test "parse optional type composition and conditional bindings" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(),
+        \\func main(entries:int?[], cache:int[]?, callback:(func(int))?) {
+        \\    if let value = entries[0] {}
+        \\    if (let value = entries[0]) {}
+        \\    while var value = entries[0] { break }
+        \\    let missing = null
+        \\    cache?.count()
+        \\}
+    );
+    const program = try parser.parse();
+    const parameters = program.functions[0].parameters;
+    try std.testing.expect(parameters[0].type == .list);
+    try std.testing.expect(parameters[0].type.list.* == .optional);
+    try std.testing.expect(parameters[1].type == .optional);
+    try std.testing.expect(parameters[1].type.optional.* == .list);
+    try std.testing.expect(parameters[2].type == .optional);
+    try std.testing.expect(parameters[2].type.optional.* == .function);
+    const statements = program.functions[0].statements;
+    try std.testing.expect(statements[0].if_statement.condition == .binding);
+    try std.testing.expect(statements[1].if_statement.condition == .binding);
+    try std.testing.expectEqualStrings(
+        statements[0].if_statement.condition.binding.name,
+        statements[1].if_statement.condition.binding.name,
+    );
+    try std.testing.expect(statements[2].while_statement.condition == .binding);
+    try std.testing.expect(statements[3].variable_declaration.initializer.?.value == .null);
+    try std.testing.expect(statements[4].expression_statement.value == .safe_member_access);
 }
 
 test "parse negative collection indexes and slices" {

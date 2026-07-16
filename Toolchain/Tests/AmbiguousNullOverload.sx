@@ -1,0 +1,11 @@
+func select(value:int?) int {
+    return 1
+}
+
+func select(value:str?) int {
+    return 2
+}
+
+func main() {
+    print(select(null))
+}

@@ -1,0 +1,129 @@
+struct Position {
+    x:int
+    y:int
+
+    func translate(delta:int) {
+        self.x += delta
+        self.y += delta
+    }
+
+    func sum(delta:int) int {
+        return self.x + self.y + delta
+    }
+}
+
+struct Probe {
+    evaluations:int
+
+    func receive(present:bool) Position? {
+        self.evaluations += 1
+        return find_position(present)
+    }
+
+    func argument() int {
+        self.evaluations += 100
+        return 5
+    }
+}
+
+struct Profile {
+    position:Position?
+}
+
+func find_position(present:bool) Position? {
+    if present {
+        return Position(x:10, y:20)
+    }
+    return null
+}
+
+func apply(value:int, callback:func(int) int) int {
+    return callback(value)
+}
+
+func select(value:int) int {
+    return 1
+}
+
+func select(value:int?) int {
+    return 2
+}
+
+func main() {
+    let absent:int?
+    assert(absent == null, "optional intrinsic value is null")
+
+    let count:int? = 4
+    assert(count != null, "plain values promote to optionals")
+    if count != null {
+        assert(count == 4, "presence comparison narrows immutable bindings")
+    }
+    assert(select(5) == 1, "exact overload wins over optional promotion")
+    assert(select(count) == 2, "optional overload accepts optional values")
+
+    if let position = find_position(true) {
+        assert(position.x == 10, "conditional binding extracts the value")
+    } else {
+        panic("present value must select the body")
+    }
+
+    if (let position = find_position(false)) {
+        panic("null must skip the body")
+    } else {
+        print("missing")
+    }
+
+    if false {
+        panic("unexpected initial branch")
+    } elif let fallback = find_position(true) {
+        assert(fallback.y == 20, "elif accepts an optional binding")
+    } else if let unused = find_position(true) {
+        print(unused.x)
+        panic("later alternative must stay lazy")
+    }
+
+    var translated:Position? = Position(x:1, y:2)
+    translated?.translate(3)
+    if let value = translated {
+        assert(value.x == 4, "safe mutating call updates contained value")
+    }
+
+    let profile:Profile? = Profile(position:Position(x:7, y:8))
+    let x:int? = profile?.position?.x
+    if let value = x {
+        assert(value == 7, "safe access chains and flattens optionals")
+    }
+    let same_position:Position? = Position(x:7, y:8)
+    assert(profile?.position == same_position, "optional structures use structural equality")
+
+    var probe = Probe(evaluations:0)
+    let skipped:int? = probe.receive(false)?.sum(probe.argument())
+    assert(skipped == null, "safe call returns null for a missing receiver")
+    assert(probe.evaluations == 1, "safe call evaluates receiver once and skips arguments")
+    let total:int? = probe.receive(true)?.sum(probe.argument())
+    assert(total == 35, "safe call returns an optional result")
+    assert(probe.evaluations == 102, "present safe call evaluates each expression once")
+
+    let entries:Position?[] = [null, Position(x:2, y:3)]
+    let cache:Position[]?
+    let samples:int?[3] = [1, null, 3]
+    assert(entries.count() == 2, "optional collection elements")
+    assert(cache == null, "optional collection")
+    assert(samples[1] == null, "optional array elements")
+
+    let callback:(func(int) int)? = func(value:int) int { return value + 1 }
+    if let operation = callback {
+        assert(apply(4, operation) == 5, "optional function extraction")
+    }
+
+    while let position = find_position(false) {
+        print(position.x)
+    }
+    while (var position = find_position(true)) {
+        position.translate(1)
+        assert(position.x == 11, "mutable while binding is a local copy")
+        break
+    }
+
+    print("optionals")
+}

@@ -1,0 +1,98 @@
+struct Probe {
+    count:int
+
+    func check(result:bool) bool {
+        self.count += 1
+        print(self.count)
+        return result
+    }
+}
+
+func choose(value:int) int {
+    if value == 0 {
+        return 0
+    } elif value == 1 {
+        return 1
+    } else if value == 2 {
+        return 2
+    } else {
+        return 3
+    }
+}
+
+func main() {
+    var probe = Probe(count:0)
+    if probe.check(false) {
+        panic("unexpected first branch")
+    } elif probe.check(false) {
+        panic("unexpected second branch")
+    } else if probe.check(true) {
+        print("third")
+    } elif probe.check(true) {
+        panic("unreachable condition")
+    } else {
+        panic("unexpected fallback")
+    }
+    assert(probe.count == 3, "alternative conditions stop after first success")
+
+    if false {
+        panic("unexpected canonical branch")
+    } elif (true) {
+        print("elif")
+    } elif true {
+        panic("unreachable canonical condition")
+    }
+
+    if false {
+        panic("unexpected compatible branch")
+    } else if false {
+        panic("unexpected compatible alternative")
+    } else if (true) {
+        print("else if")
+    } else {
+        panic("unexpected compatible fallback")
+    }
+
+    if true {
+        print("none")
+    }
+
+    if false {
+        panic("unexpected single branch")
+    } elif true {
+        print("one")
+    }
+
+    if false {
+        let branch_value = 1
+        print(branch_value)
+    } elif true {
+        let branch_value = 2
+        print(branch_value)
+    } else {
+        let branch_value = 3
+        print(branch_value)
+    }
+    let branch_value = 4
+    print(branch_value)
+
+    if false {
+        panic("unexpected nested branch")
+    } else {
+        if true {
+            print("nested")
+        }
+    }
+
+    if false {}
+    // Between the body and the compatible branch.
+    else
+    // Between the two compatible keywords.
+    if false {}
+    // Before a canonical branch in the same chain.
+    elif true {
+        print("trivia")
+    }
+
+    print(choose(2))
+}

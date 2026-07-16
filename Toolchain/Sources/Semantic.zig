@@ -24,6 +24,8 @@ pub const Type = union(enum) {
     fixed_array: FixedArrayType,
     reference: ReferenceType,
     function: FunctionType,
+    optional: *const Type,
+    null,
 };
 
 pub const FunctionType = struct {
@@ -53,6 +55,7 @@ const BindingState = struct {
     mutable_borrow: bool = false,
     reference: ?Borrow = null,
     lifetime_depth: usize = 0,
+    narrowed_valid: bool = true,
 };
 
 const Borrow = struct {
@@ -70,6 +73,7 @@ pub const Expression = struct {
         integer: u64,
         floating: []const u8,
         boolean: bool,
+        null,
         string: []const u8,
         string_length: *Expression,
         sequence_literal: []const *Expression,
@@ -87,6 +91,9 @@ pub const Expression = struct {
         member_access: MemberAccess,
         bound_function: MemberAccess,
         adapt_function: *Expression,
+        optional_wrap: *Expression,
+        optional_unwrap: []const u8,
+        safe_access: SafeAccess,
         index_access: IndexAccess,
         slice_access: SliceAccess,
         unary: Unary,
@@ -200,6 +207,11 @@ pub const Expression = struct {
         operand: *Expression,
         target_type: Type,
     };
+
+    pub const SafeAccess = struct {
+        receiver: *Expression,
+        end: *Expression,
+    };
 };
 
 pub const Statement = union(enum) {
@@ -242,14 +254,33 @@ pub const Statement = union(enum) {
     };
 
     pub const If = struct {
-        condition: *Expression,
+        condition: Condition,
         body: []const Statement,
+        alternatives: []const Alternative,
         else_body: ?[]const Statement,
+
+        pub const Alternative = struct {
+            condition: Condition,
+            body: []const Statement,
+        };
     };
 
     pub const While = struct {
-        condition: *Expression,
+        condition: Condition,
         body: []const Statement,
+    };
+
+    pub const Condition = union(enum) {
+        expression: *Expression,
+        binding: ConditionalBinding,
+    };
+
+    pub const ConditionalBinding = struct {
+        source: *Expression,
+        temporary_name: []const u8,
+        generated_name: []const u8,
+        type: Type,
+        mutability: Ast.Mutability,
     };
 
     pub const For = struct {
@@ -338,6 +369,8 @@ const Symbol = struct {
     mutability: Ast.Mutability,
     state: *BindingState,
     scope_depth: usize,
+    unwrap_optional: bool = false,
+    original_type: ?Type = null,
 };
 
 const Scope = struct {
@@ -616,19 +649,21 @@ pub const Analyzer = struct {
             if (return_type == .reference) return self.fail(ast_function.position, "a function cannot return a reference");
             if (ast_function.is_native) {
                 if (!isNativeReturnType(return_type)) {
+                    const return_name = try allocatedTypeName(self.allocator, return_type);
                     const message = try std.fmt.allocPrint(
                         self.allocator,
                         "native functions cannot return '{s}'",
-                        .{typeName(return_type)},
+                        .{return_name},
                     );
                     return self.fail(ast_function.position, message);
                 }
                 for (ast_function.parameters, parameter_types.items, parameter_is_mutable_references.items) |parameter, parameter_type, is_mutable_reference| {
                     if (!isNativeParameterType(parameter_type) or is_mutable_reference) {
+                        const parameter_name = try allocatedTypeName(self.allocator, parameter_type);
                         const message = try std.fmt.allocPrint(
                             self.allocator,
                             "native parameter '{s}' cannot use '{s}'",
-                            .{ parameter.name, typeName(parameter_type) },
+                            .{ parameter.name, parameter_name },
                         );
                         return self.fail(parameter.position, message);
                     }
@@ -693,6 +728,8 @@ pub const Analyzer = struct {
             .list, .fixed_array => false,
             .reference => false,
             .function => false,
+            .optional => ast.value == .null,
+            .null => false,
             .structure => |structure_type| structure_default: {
                 if (ast.value != .structure_initializer) break :structure_default false;
                 const initializer = ast.value.structure_initializer;
@@ -1017,7 +1054,18 @@ pub const Analyzer = struct {
             },
         }
 
-        const target = if (ast.target.value == .member_access)
+        const target = if (ast.target.value == .identifier and findSymbol(scope, ast.target.value.identifier) != null and
+            findSymbol(scope, ast.target.value.identifier).?.unwrap_optional)
+        narrowed_assignment: {
+            const symbol = findSymbol(scope, ast.target.value.identifier).?;
+            try self.recordSymbolCapture(symbol);
+            symbol.state.narrowed_valid = false;
+            break :narrowed_assignment try self.newExpression(.{
+                .type = symbol.original_type.?,
+                .position = ast.target.position,
+                .value = .{ .variable = symbol.generated_name },
+            });
+        } else if (ast.target.value == .member_access)
             try self.memberAccessExpressionRaw(ast.target.value.member_access, scope, false)
         else
             try self.expression(ast.target, scope);
@@ -1104,19 +1152,29 @@ pub const Analyzer = struct {
         ast: Ast.Statement.If,
         parent_scope: *const Scope,
     ) AnalyzeError!Statement {
-        const condition = try self.expression(ast.condition, parent_scope);
-        if (!typeEqual(condition.type, .bool)) {
-            const message = try typeMismatchMessage(self.allocator, .bool, condition.type);
-            return self.fail(ast.condition.position, message);
-        }
-
         var body_scope = Scope{ .parent = parent_scope, .depth = parent_scope.depth + 1 };
+        const condition = try self.analyzeCondition(ast.condition, parent_scope, &body_scope);
+        if (condition == .expression) try self.applyPresenceReduction(ast.condition.expression, &body_scope, true);
         const body = try self.statements(ast.body, &body_scope);
         self.releaseScopeBorrows(&body_scope);
+
+        var alternatives: std.ArrayList(Statement.If.Alternative) = .empty;
+        for (ast.alternatives) |ast_alternative| {
+            var alternative_scope = Scope{ .parent = parent_scope, .depth = parent_scope.depth + 1 };
+            const alternative_condition = try self.analyzeCondition(ast_alternative.condition, parent_scope, &alternative_scope);
+            if (alternative_condition == .expression) try self.applyPresenceReduction(ast_alternative.condition.expression, &alternative_scope, true);
+            const alternative_body = try self.statements(ast_alternative.body, &alternative_scope);
+            self.releaseScopeBorrows(&alternative_scope);
+            try alternatives.append(self.allocator, .{
+                .condition = alternative_condition,
+                .body = alternative_body,
+            });
+        }
 
         var else_body: ?[]const Statement = null;
         if (ast.else_body) |ast_else_body| {
             var else_scope = Scope{ .parent = parent_scope, .depth = parent_scope.depth + 1 };
+            if (ast.condition == .expression) try self.applyPresenceReduction(ast.condition.expression, &else_scope, false);
             else_body = try self.statements(ast_else_body, &else_scope);
             self.releaseScopeBorrows(&else_scope);
         }
@@ -1124,6 +1182,7 @@ pub const Analyzer = struct {
         return .{ .if_statement = .{
             .condition = condition,
             .body = body,
+            .alternatives = try alternatives.toOwnedSlice(self.allocator),
             .else_body = else_body,
         } };
     }
@@ -1133,13 +1192,9 @@ pub const Analyzer = struct {
         ast: Ast.Statement.While,
         parent_scope: *const Scope,
     ) AnalyzeError!Statement {
-        const condition = try self.expression(ast.condition, parent_scope);
-        if (!typeEqual(condition.type, .bool)) {
-            const message = try typeMismatchMessage(self.allocator, .bool, condition.type);
-            return self.fail(ast.condition.position, message);
-        }
-
         var body_scope = Scope{ .parent = parent_scope, .depth = parent_scope.depth + 1 };
+        const condition = try self.analyzeCondition(ast.condition, parent_scope, &body_scope);
+        if (condition == .expression) try self.applyPresenceReduction(ast.condition.expression, &body_scope, true);
         self.loop_depth += 1;
         defer self.loop_depth -= 1;
         const body = try self.statements(ast.body, &body_scope);
@@ -1148,6 +1203,79 @@ pub const Analyzer = struct {
             .condition = condition,
             .body = body,
         } };
+    }
+
+    fn analyzeCondition(
+        self: *Analyzer,
+        ast: Ast.Statement.Condition,
+        parent_scope: *const Scope,
+        body_scope: *Scope,
+    ) AnalyzeError!Statement.Condition {
+        return switch (ast) {
+            .expression => |ast_expression| expression_condition: {
+                const value = try self.expression(ast_expression, parent_scope);
+                if (!typeEqual(value.type, .bool)) {
+                    const message = try typeMismatchMessage(self.allocator, .bool, value.type);
+                    return self.fail(ast_expression.position, message);
+                }
+                break :expression_condition .{ .expression = value };
+            },
+            .binding => |binding| binding_condition: {
+                try self.requireAvailableVariableName(body_scope, binding.name, binding.name_position);
+                const source = try self.expression(binding.source, parent_scope);
+                if (source.type != .optional) return self.fail(binding.source.position, "conditional binding source must have an optional type");
+                const generated_name = try std.fmt.allocPrint(self.allocator, "silexValue{d}", .{self.next_symbol_id});
+                self.next_symbol_id += 1;
+                const temporary_name = try std.fmt.allocPrint(self.allocator, "silexOptional{d}", .{self.next_symbol_id});
+                self.next_symbol_id += 1;
+                try body_scope.symbols.append(self.allocator, .{
+                    .source_name = binding.name,
+                    .generated_name = generated_name,
+                    .type = source.type.optional.*,
+                    .mutability = binding.mutability,
+                    .state = try self.newBindingState(source.type.optional.*),
+                    .scope_depth = body_scope.depth,
+                });
+                break :binding_condition .{ .binding = .{
+                    .source = source,
+                    .temporary_name = temporary_name,
+                    .generated_name = generated_name,
+                    .type = source.type.optional.*,
+                    .mutability = binding.mutability,
+                } };
+            },
+        };
+    }
+
+    fn applyPresenceReduction(
+        self: *Analyzer,
+        ast: *const Ast.Expression,
+        scope: *Scope,
+        branch_is_true: bool,
+    ) AnalyzeError!void {
+        if (ast.value != .binary) return;
+        const binary = ast.value.binary;
+        if (binary.operator != .equal and binary.operator != .not_equal) return;
+        const name = if (binary.left.value == .identifier and binary.right.value == .null)
+            binary.left.value.identifier
+        else if (binary.right.value == .identifier and binary.left.value == .null)
+            binary.right.value.identifier
+        else
+            return;
+        const proves_presence = if (binary.operator == .not_equal) branch_is_true else !branch_is_true;
+        if (!proves_presence) return;
+        const original = findSymbol(scope.parent.?, name) orelse return;
+        if (original.type != .optional) return;
+        try scope.symbols.append(self.allocator, .{
+            .source_name = original.source_name,
+            .generated_name = original.generated_name,
+            .type = original.type.optional.*,
+            .mutability = original.mutability,
+            .state = try self.newBindingState(original.type.optional.*),
+            .scope_depth = scope.depth,
+            .unwrap_optional = true,
+            .original_type = original.type,
+        });
     }
 
     fn forStatement(
@@ -1295,6 +1423,7 @@ pub const Analyzer = struct {
                 .position = ast.position,
                 .value = .{ .boolean = value },
             }),
+            .null => self.newExpression(.{ .type = .null, .position = ast.position, .value = .null }),
             .string => |value| self.stringExpression(ast.position, value),
             .sequence_literal => |values| self.sequenceLiteralExpression(values, ast.position, scope, null),
             .identifier => |name| self.variableExpression(ast.position, name, scope),
@@ -1306,6 +1435,7 @@ pub const Analyzer = struct {
             .cascade => |cascade| self.cascadeExpression(cascade, scope, null),
             .structure_initializer => |initializer| self.structureInitializerExpression(initializer, scope),
             .member_access => |member| self.memberAccessExpression(member, scope),
+            .safe_member_access => |member| self.safeMemberAccessExpression(member, scope),
             .index_access => |access| self.indexAccessExpression(access, scope),
             .slice_access => |access| self.sliceAccessExpression(access, scope),
             .unary => |unary| self.unaryExpression(unary, scope),
@@ -1320,6 +1450,23 @@ pub const Analyzer = struct {
         scope: *const Scope,
         expected_type: ?Type,
     ) AnalyzeError!*Expression {
+        if (ast.value == .null) {
+            const optional_type = expected_type orelse return self.fail(ast.position, "'null' requires an expected optional type");
+            if (optional_type != .optional) return self.fail(ast.position, "'null' requires an expected optional type");
+            return self.newExpression(.{ .type = optional_type, .position = ast.position, .value = .null });
+        }
+        if (expected_type != null and expected_type.? == .optional and
+            (ast.value == .sequence_literal or ast.value == .cascade or ast.value == .lambda))
+        {
+            const contained = expected_type.?.optional.*;
+            const value = if (ast.value == .sequence_literal)
+                try self.sequenceLiteralExpression(ast.value.sequence_literal, ast.position, scope, contained)
+            else if (ast.value == .cascade)
+                try self.cascadeExpression(ast.value.cascade, scope, contained)
+            else
+                try self.lambdaExpression(ast.value.lambda, scope, contained);
+            return self.coerce(value, expected_type.?);
+        }
         if (ast.value == .sequence_literal) return self.sequenceLiteralExpression(ast.value.sequence_literal, ast.position, scope, expected_type);
         if (ast.value == .cascade) return self.cascadeExpression(ast.value.cascade, scope, expected_type);
         if (ast.value == .lambda) return self.lambdaExpression(ast.value.lambda, scope, expected_type);
@@ -1391,6 +1538,7 @@ pub const Analyzer = struct {
             .void => {
                 if (ast_values.len == 0) return self.fail(position, "empty sequence literal requires a collection type");
                 const first = try self.expression(ast_values[0], scope);
+                if (first.type == .null) return self.fail(ast_values[0].position, "'null' in a sequence literal requires an expected collection element type");
                 element_type = first.type;
                 const element = try self.allocator.create(Type);
                 element.* = element_type;
@@ -1466,6 +1614,8 @@ pub const Analyzer = struct {
             .list, .fixed_array => self.newExpression(.{ .type = type_value, .position = position, .value = .{ .sequence_literal = &.{} } }),
             .reference => self.fail(position, "a reference requires an initializer"),
             .function => self.fail(position, "a function value requires an initializer"),
+            .optional => self.newExpression(.{ .type = type_value, .position = position, .value = .null }),
+            .null => unreachable,
             .structure => |structure_type| structure_default: {
                 const structure = self.findStructureByGeneratedName(structure_type.generated_name).?;
                 var fields: std.ArrayList(*Expression) = .empty;
@@ -1497,23 +1647,21 @@ pub const Analyzer = struct {
             const message = try std.fmt.allocPrint(self.allocator, "unknown variable '{s}'", .{name});
             return self.fail(position, message);
         };
-        var lambda_context = self.current_lambda;
-        while (lambda_context) |lambda| : (lambda_context = lambda.parent) {
-            if (symbol.scope_depth < lambda.local_depth) {
-                try self.recordLambdaCapture(lambda, symbol.generated_name);
-                lambda.lifetime_depth = @max(lambda.lifetime_depth, symbol.scope_depth);
-            }
-        }
+        try self.recordSymbolCapture(symbol);
         if (symbol.state.mutable_borrow) {
             const message = try std.fmt.allocPrint(self.allocator, "cannot access variable '{s}' while it is mutably borrowed", .{name});
             return self.fail(position, message);
         }
+        const narrowed = symbol.unwrap_optional and symbol.state.narrowed_valid;
         return self.newExpression(.{
-            .type = symbol.type,
+            .type = if (narrowed) symbol.type else symbol.original_type orelse symbol.type,
             .position = position,
             .borrow = symbol.state.reference,
             .lifetime_depth = symbol.state.lifetime_depth,
-            .value = .{ .variable = symbol.generated_name },
+            .value = if (narrowed)
+                .{ .optional_unwrap = symbol.generated_name }
+            else
+                .{ .variable = symbol.generated_name },
         });
     }
 
@@ -1644,6 +1792,38 @@ pub const Analyzer = struct {
                 .bool,
             ),
             .equal, .not_equal => equality: {
+                if (left.type == .null and right.type == .null) {
+                    return self.fail(binary.operator_position, "'null' cannot be compared without an expected optional type");
+                }
+                if (left.type == .null or right.type == .null) {
+                    if (left.type == .null and right.type == .optional) left = try self.coerce(left, right.type);
+                    if (right.type == .null and left.type == .optional) right = try self.coerce(right, left.type);
+                    if (left.type != .optional or right.type != .optional) {
+                        return self.fail(binary.operator_position, "'null' can only be compared with an optional value");
+                    }
+                    break :equality .bool;
+                }
+                if (left.type == .optional or right.type == .optional) {
+                    if (left.type == .optional and right.type != .optional) right = try self.coerce(right, left.type);
+                    if (right.type == .optional and left.type != .optional) left = try self.coerce(left, right.type);
+                    if (left.type != .optional or right.type != .optional) {
+                        return self.fail(binary.operator_position, "equality operator requires compatible optional operands");
+                    }
+                    if (!self.isEqualityComparable(left.type) or !self.isEqualityComparable(right.type)) {
+                        return self.fail(binary.operator_position, "optional function values are only comparable to 'null'");
+                    }
+                    if (!typeEqual(left.type, right.type)) {
+                        const left_contained = left.type.optional.*;
+                        const right_contained = right.type.optional.*;
+                        const common = commonNumericType(left_contained, right_contained) orelse {
+                            return self.fail(binary.operator_position, "equality operator requires compatible optional operands");
+                        };
+                        const common_optional = try self.optionalType(common);
+                        left = try self.coerce(left, common_optional);
+                        right = try self.coerce(right, common_optional);
+                    }
+                    break :equality .bool;
+                }
                 if (!self.isEqualityComparable(left.type) or !self.isEqualityComparable(right.type)) {
                     return self.fail(binary.operator_position, "function values and values containing them are not comparable");
                 }
@@ -2358,7 +2538,17 @@ pub const Analyzer = struct {
         for (arguments, parameter_types, parameter_is_mutable_references) |argument, parameter_type, is_mutable_reference| {
             const is_borrow = argument.value == .unary and argument.value.unary.operator == .borrow;
             if (is_borrow != is_mutable_reference) return null;
-            const argument_value = if (is_borrow)
+            const argument_value = if (argument.value == .null)
+                try self.newExpression(.{ .type = .null, .position = argument.position, .value = .null })
+            else if (is_borrow and argument.value.unary.operand.value == .identifier and
+                findSymbol(scope, argument.value.unary.operand.value.identifier) != null and
+                findSymbol(scope, argument.value.unary.operand.value.identifier).?.unwrap_optional)
+                try self.newExpression(.{
+                    .type = findSymbol(scope, argument.value.unary.operand.value.identifier).?.original_type.?,
+                    .position = argument.position,
+                    .value = .{ .variable = findSymbol(scope, argument.value.unary.operand.value.identifier).?.generated_name },
+                })
+            else if (is_borrow)
                 try self.expression(argument.value.unary.operand, scope)
             else
                 try self.expressionForExpected(argument, scope, null);
@@ -2524,6 +2714,16 @@ pub const Analyzer = struct {
         bind_function: bool,
     ) AnalyzeError!*Expression {
         const object = try self.expression(member.object, scope);
+        return self.memberAccessExpressionWithObject(member, object, scope, bind_function);
+    }
+
+    fn memberAccessExpressionWithObject(
+        self: *Analyzer,
+        member: Ast.Expression.MemberAccess,
+        object: *Expression,
+        scope: *const Scope,
+        bind_function: bool,
+    ) AnalyzeError!*Expression {
         const generated_structure_name = switch (object.type) {
             .structure => |structure_type| structure_type.generated_name,
             else => return self.fail(member.name_position, "member access requires a struct value"),
@@ -2557,6 +2757,45 @@ pub const Analyzer = struct {
         }
         const message = try std.fmt.allocPrint(self.allocator, "struct '{s}' has no field '{s}'", .{ structure.source_name, member.name });
         return self.fail(member.name_position, message);
+    }
+
+    fn safeMemberAccessExpression(
+        self: *Analyzer,
+        member: Ast.Expression.SafeMemberAccess,
+        scope: *const Scope,
+    ) AnalyzeError!*Expression {
+        if (member.named_fields != null) return self.fail(member.name_position, "safe method calls do not accept named fields");
+        const receiver = try self.expression(member.object, scope);
+        if (receiver.type != .optional) return self.fail(member.name_position, "safe access requires an optional receiver");
+        const unwrapped = try self.newExpression(.{
+            .type = receiver.type.optional.*,
+            .position = member.object.position,
+            .lifetime_depth = receiver.lifetime_depth,
+            .value = .{ .optional_unwrap = "silexOptionalValue" },
+        });
+        const end = if (member.arguments) |arguments|
+            try self.methodCallExpressionWithObject(.{
+                .object = member.object,
+                .name = member.name,
+                .name_position = member.name_position,
+                .arguments = arguments,
+            }, unwrapped, scope, receiverFor(member.object, scope, false), false)
+        else
+            try self.memberAccessExpressionWithObject(.{
+                .object = member.object,
+                .name = member.name,
+                .name_position = member.name_position,
+            }, unwrapped, scope, true);
+        const result_type = if (end.type == .void or end.type == .optional)
+            end.type
+        else
+            try self.optionalType(end.type);
+        return self.newExpression(.{
+            .type = result_type,
+            .position = member.name_position,
+            .lifetime_depth = receiver.lifetime_depth,
+            .value = .{ .safe_access = .{ .receiver = receiver, .end = end } },
+        });
     }
 
     fn indexAccessExpression(
@@ -2632,7 +2871,8 @@ pub const Analyzer = struct {
 
     fn isEqualityComparable(self: *const Analyzer, type_value: Type) bool {
         return switch (type_value) {
-            .function, .reference, .void => false,
+            .function, .reference, .void, .null => false,
+            .optional => |contained| self.isEqualityComparable(contained.*),
             .list => |element| self.isEqualityComparable(element.*),
             .fixed_array => |array| self.isEqualityComparable(array.element.*),
             .structure => |structure_type| comparable: {
@@ -2695,12 +2935,16 @@ pub const Analyzer = struct {
                     if (assignment_value.value) |value| try self.validateExpression(value);
                 },
                 .if_statement => |if_value| {
-                    try self.validateExpression(if_value.condition);
+                    try self.validateCondition(if_value.condition);
                     try self.validateStatements(if_value.body);
+                    for (if_value.alternatives) |alternative| {
+                        try self.validateCondition(alternative.condition);
+                        try self.validateStatements(alternative.body);
+                    }
                     if (if_value.else_body) |else_body| try self.validateStatements(else_body);
                 },
                 .while_statement => |while_value| {
-                    try self.validateExpression(while_value.condition);
+                    try self.validateCondition(while_value.condition);
                     try self.validateStatements(while_value.body);
                 },
                 .for_statement => |for_value| {
@@ -2720,6 +2964,13 @@ pub const Analyzer = struct {
         }
     }
 
+    fn validateCondition(self: *Analyzer, condition_value: Statement.Condition) AnalyzeError!void {
+        switch (condition_value) {
+            .expression => |value| try self.validateExpression(value),
+            .binding => |binding| try self.validateExpression(binding.source),
+        }
+    }
+
     fn validateExpression(self: *Analyzer, expression_value: *const Expression) AnalyzeError!void {
         switch (expression_value.value) {
             .integer => |value| if (!integerLiteralFits(value, expression_value.type)) {
@@ -2730,7 +2981,12 @@ pub const Analyzer = struct {
                 const value = std.fmt.parseFloat(f32, lexeme) catch return self.fail(expression_value.position, "float literal is outside the range of 'float'");
                 if (!std.math.isFinite(value)) return self.fail(expression_value.position, "float literal is outside the range of 'float'");
             },
-            .boolean, .string, .variable, .self, .owner_self, .cascade_target => {},
+            .boolean, .string, .null, .variable, .self, .owner_self, .cascade_target, .optional_unwrap => {},
+            .optional_wrap => |value| try self.validateExpression(value),
+            .safe_access => |access| {
+                try self.validateExpression(access.receiver);
+                try self.validateExpression(access.end);
+            },
             .string_length => |argument| try self.validateExpression(argument),
             .sequence_literal => |values| for (values) |value| try self.validateExpression(value),
             .collection_method => |collection_method| {
@@ -2874,7 +3130,18 @@ pub const Analyzer = struct {
                 }
             },
         }
-        const operand = try self.expression(unary.operand, scope);
+        const operand = if (unary.operand.value == .identifier and findSymbol(scope, unary.operand.value.identifier) != null and
+            findSymbol(scope, unary.operand.value.identifier).?.unwrap_optional)
+        narrowed_operand: {
+            const symbol = findSymbol(scope, unary.operand.value.identifier).?;
+            try self.recordSymbolCapture(symbol);
+            symbol.state.narrowed_valid = false;
+            break :narrowed_operand try self.newExpression(.{
+                .type = symbol.original_type.?,
+                .position = unary.operand.position,
+                .value = .{ .variable = symbol.generated_name },
+            });
+        } else try self.expression(unary.operand, scope);
         if (!typeEqual(operand.type, expected_type)) return operand;
         return self.newExpression(.{
             .type = operand.type,
@@ -2959,7 +3226,7 @@ pub const Analyzer = struct {
         const message = try std.fmt.allocPrint(
             self.allocator,
             "{s} requires numeric operands, found '{s}' and '{s}'",
-            .{ operator_name, typeName(left_type), typeName(right_type) },
+            .{ operator_name, try allocatedTypeName(self.allocator, left_type), try allocatedTypeName(self.allocator, right_type) },
         );
         return self.fail(position, message);
     }
@@ -2977,6 +3244,29 @@ pub const Analyzer = struct {
                 if (!std.math.isFinite(value)) return self.fail(expression_value.position, "float literal is outside the range of 'float'");
             }
             return expression_value;
+        }
+        if (target_type == .optional) {
+            if (expression_value.type == .null) {
+                expression_value.type = target_type;
+                return expression_value;
+            }
+            if (expression_value.type == .optional and canWiden(expression_value.type.optional.*, target_type.optional.*)) {
+                return self.newExpression(.{
+                    .type = target_type,
+                    .position = expression_value.position,
+                    .lifetime_depth = expression_value.lifetime_depth,
+                    .value = .{ .optional_wrap = expression_value },
+                });
+            }
+            const contained_value = try self.coerce(expression_value, target_type.optional.*);
+            if (typeEqual(contained_value.type, target_type.optional.*)) {
+                return self.newExpression(.{
+                    .type = target_type,
+                    .position = contained_value.position,
+                    .lifetime_depth = contained_value.lifetime_depth,
+                    .value = .{ .optional_wrap = contained_value },
+                });
+            }
         }
         if (expression_value.value == .integer and isInteger(target_type)) {
             const value = expression_value.value.integer;
@@ -3013,6 +3303,12 @@ pub const Analyzer = struct {
         return expression_value;
     }
 
+    fn optionalType(self: *Analyzer, contained_type: Type) Allocator.Error!Type {
+        const contained = try self.allocator.create(Type);
+        contained.* = contained_type;
+        return .{ .optional = contained };
+    }
+
     fn newExpression(self: *Analyzer, value: Expression) !*Expression {
         const result = try self.allocator.create(Expression);
         result.* = value;
@@ -3024,6 +3320,16 @@ pub const Analyzer = struct {
             if (std.mem.eql(u8, capture, generated_name)) return;
         }
         try lambda.captures.append(self.allocator, generated_name);
+    }
+
+    fn recordSymbolCapture(self: *Analyzer, symbol: *const Symbol) !void {
+        var lambda_context = self.current_lambda;
+        while (lambda_context) |lambda| : (lambda_context = lambda.parent) {
+            if (symbol.scope_depth < lambda.local_depth) {
+                try self.recordLambdaCapture(lambda, symbol.generated_name);
+                lambda.lifetime_depth = @max(lambda.lifetime_depth, symbol.scope_depth);
+            }
+        }
     }
 
     fn newBindingState(self: *Analyzer, type_value: Type) !*BindingState {
@@ -3129,6 +3435,14 @@ fn typeFromAnnotation(
         },
         .reference => |reference| try typeFromReference(self, reference, position),
         .function => |function| try typeFromFunction(self, function, position),
+        .optional => |contained_annotation| optional_type: {
+            const contained = try self.allocator.create(Type);
+            contained.* = try typeFromAnnotation(self, contained_annotation.*, position);
+            if (contained.* == .void or contained.* == .optional or contained.* == .null) {
+                return self.fail(position, "an optional type requires a non-optional, non-void contained type");
+            }
+            break :optional_type .{ .optional = contained };
+        },
         .structure => |name| structure_type: {
             const structure = self.findStructure(name) orelse {
                 const message = try std.fmt.allocPrint(self.allocator, "unknown type '{s}'", .{name});
@@ -3169,6 +3483,7 @@ fn typeFromReturn(
         .structure => |name| typeFromAnnotation(self, .{ .structure = name }, position),
         .reference => |reference| typeFromReference(self, reference, position),
         .function => |function| typeFromFunction(self, function, position),
+        .optional => |contained| typeFromAnnotation(self, .{ .optional = contained }, position),
     };
 }
 
@@ -3228,7 +3543,11 @@ fn blockAlwaysReturns(statements: []const Statement) bool {
             .return_statement, .panic_statement => return true,
             .if_statement => |if_statement| {
                 if (if_statement.else_body) |else_body| {
-                    if (blockAlwaysReturns(if_statement.body) and blockAlwaysReturns(else_body)) return true;
+                    var all_branches_return = blockAlwaysReturns(if_statement.body);
+                    for (if_statement.alternatives) |alternative| {
+                        all_branches_return = all_branches_return and blockAlwaysReturns(alternative.body);
+                    }
+                    if (all_branches_return and blockAlwaysReturns(else_body)) return true;
                 }
             },
             else => {},
@@ -3252,6 +3571,9 @@ fn parameterStored(statements: []const Ast.Statement, name: []const u8) bool {
         },
         .if_statement => |if_value| {
             if (parameterStored(if_value.body, name)) return true;
+            for (if_value.alternatives) |alternative| {
+                if (parameterStored(alternative.body, name)) return true;
+            }
             if (if_value.else_body) |else_body| if (parameterStored(else_body, name)) return true;
         },
         .while_statement => |while_value| if (parameterStored(while_value.body, name)) return true,
@@ -3315,10 +3637,12 @@ fn astExpressionUsesIdentifier(expression_value: *const Ast.Expression, name: []
 }
 
 fn typeMismatchMessage(allocator: Allocator, expected: Type, found: Type) ![]const u8 {
+    const expected_name = try allocatedTypeName(allocator, expected);
+    const found_name = try allocatedTypeName(allocator, found);
     return std.fmt.allocPrint(
         allocator,
         "expected '{s}', found '{s}'",
-        .{ typeName(expected), typeName(found) },
+        .{ expected_name, found_name },
     );
 }
 
@@ -3404,6 +3728,11 @@ fn typeEqual(left: Type, right: Type) bool {
             .structure => |right_structure| std.mem.eql(u8, left_structure.generated_name, right_structure.generated_name),
             else => false,
         },
+        .optional => |left_contained| switch (right) {
+            .optional => |right_contained| typeEqual(left_contained.*, right_contained.*),
+            else => false,
+        },
+        .null => right == .null,
     };
 }
 
@@ -3429,6 +3758,15 @@ fn containsPosition(positions: []const Source.Position, candidate: Source.Positi
 
 fn overloadScore(source: Type, target: Type) ?u8 {
     if (typeEqual(source, target)) return 0;
+    if (target == .optional) {
+        if (source == .null) return 3;
+        if (source == .optional) {
+            const score = overloadScore(source.optional.*, target.optional.*) orelse return null;
+            return score;
+        }
+        const score = overloadScore(source, target.optional.*) orelse return null;
+        return score + 3;
+    }
     if (isInteger(source) and isInteger(target) and
         isUnsignedInteger(source) == isUnsignedInteger(target) and integerBits(source) < integerBits(target))
     {
@@ -3440,6 +3778,10 @@ fn overloadScore(source: Type, target: Type) ?u8 {
 }
 
 fn literalOverloadScore(value: *const Expression, target: Type) ?u8 {
+    if (target == .optional) {
+        const score = literalOverloadScore(value, target.optional.*) orelse return null;
+        return score + 3;
+    }
     if (value.value == .integer and isInteger(target) and integerLiteralFits(value.value.integer, target)) return 1;
     if (value.value == .floating and target == .float64) return 1;
     return null;
@@ -3466,7 +3808,7 @@ fn appendSignature(
     for (parameter_types, parameter_is_mutable_references, 0..) |parameter_type, is_mutable_reference, index| {
         if (index != 0) try output.appendSlice(allocator, ", ");
         if (is_mutable_reference) try output.append(allocator, '&');
-        try output.appendSlice(allocator, typeName(parameter_type));
+        try output.appendSlice(allocator, try allocatedTypeName(allocator, parameter_type));
     }
     try output.append(allocator, ')');
 }
@@ -3492,7 +3834,7 @@ fn methodSignatures(allocator: Allocator, candidates: []const MethodCandidate) !
 fn isNativeReturnType(value: Type) bool {
     return switch (value) {
         .void, .int, .int8, .int16, .int32, .uint8, .uint16, .uint32, .uint64, .float, .float64, .bool => true,
-        .str, .structure, .list, .fixed_array, .reference, .function => false,
+        .str, .structure, .list, .fixed_array, .reference, .function, .optional, .null => false,
     };
 }
 
@@ -3538,7 +3880,18 @@ fn typeName(value: Type) []const u8 {
         .fixed_array => "array",
         .reference => |reference| if (reference.mutable) "reference&" else "reference@",
         .function => "func",
+        .optional => "optional",
+        .null => "null",
         .structure => |structure_type| structure_type.source_name,
+    };
+}
+
+fn allocatedTypeName(allocator: Allocator, value: Type) Allocator.Error![]const u8 {
+    return switch (value) {
+        .optional => |contained| std.fmt.allocPrint(allocator, "{s}?", .{try allocatedTypeName(allocator, contained.*)}),
+        .list => |element| std.fmt.allocPrint(allocator, "{s}[]", .{try allocatedTypeName(allocator, element.*)}),
+        .fixed_array => |array| std.fmt.allocPrint(allocator, "{s}[{d}]", .{ try allocatedTypeName(allocator, array.element.*), array.length }),
+        else => typeName(value),
     };
 }
 
@@ -3744,6 +4097,36 @@ fn resolveSingleTestProgram(allocator: Allocator, program: Ast.Program) !Ast.Pro
     };
     var resolver = Modules.Resolver.init(allocator, project, &.{.{ .module_index = 0, .program = program }});
     return resolver.resolve();
+}
+
+test "native ABI rejects optional returns" {
+    const Parser = @import("Parser.zig").Parser;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var parser = Parser.init(allocator, "native func native_lookup() int?\n");
+    const program = try parser.parse();
+    @constCast(program.functions)[0].name = "Math.native_lookup";
+    var analyzer = Analyzer.init(allocator);
+    analyzer.native_module_names = &.{"Math"};
+    try std.testing.expectError(error.InvalidSource, analyzer.analyze(program));
+    try std.testing.expectEqualStrings("native functions cannot return 'int?'", analyzer.diagnostic.?.message);
+}
+
+test "native ABI rejects optional parameters" {
+    const Parser = @import("Parser.zig").Parser;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var parser = Parser.init(allocator, "native func native_lookup(value:int?) int\n");
+    const program = try parser.parse();
+    @constCast(program.functions)[0].name = "Math.native_lookup";
+    var analyzer = Analyzer.init(allocator);
+    analyzer.native_module_names = &.{"Math"};
+    try std.testing.expectError(error.InvalidSource, analyzer.analyze(program));
+    try std.testing.expectEqualStrings("native parameter 'value' cannot use 'int?'", analyzer.diagnostic.?.message);
 }
 
 test "infer variables and resolve nested scope" {
@@ -4111,7 +4494,7 @@ test "resolve structural equality recursively" {
     try std.testing.expectEqual(Type.bool, program.functions[0].statements[3].variable_declaration.type);
 }
 
-test "if and else use separate scopes" {
+test "if alternatives and else use separate scopes" {
     const Parser = @import("Parser.zig").Parser;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -4119,11 +4502,25 @@ test "if and else use separate scopes" {
 
     var parser = Parser.init(
         allocator,
-        "func main() void { if (true) { let value = 1; } else { let value = 2; } }",
+        "func main() void { if false { let value = 1 } elif true { let value = 2 } else if false { let value = 3 } else { let value = 4 } }",
     );
     var analyzer = Analyzer.init(allocator);
     const program = try analyzer.analyze(try parser.parse());
-    try std.testing.expectEqual(@as(usize, 1), program.functions[0].statements[0].if_statement.else_body.?.len);
+    const if_statement = program.functions[0].statements[0].if_statement;
+    try std.testing.expectEqual(@as(usize, 2), if_statement.alternatives.len);
+    try std.testing.expectEqual(@as(usize, 1), if_statement.else_body.?.len);
+}
+
+test "alternative conditions require bool" {
+    const Parser = @import("Parser.zig").Parser;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var parser = Parser.init(allocator, "func main() void { if false {} elif 1 {} }");
+    var analyzer = Analyzer.init(allocator);
+    try std.testing.expectError(error.InvalidSource, analyzer.analyze(try parser.parse()));
+    try std.testing.expectEqualStrings("expected 'bool', found 'int'", analyzer.diagnostic.?.message);
 }
 
 test "while requires bool condition and creates a scope" {
@@ -4138,7 +4535,7 @@ test "while requires bool condition and creates a scope" {
     );
     var analyzer = Analyzer.init(allocator);
     const program = try analyzer.analyze(try parser.parse());
-    try std.testing.expectEqual(Type.bool, program.functions[0].statements[1].while_statement.condition.type);
+    try std.testing.expectEqual(Type.bool, program.functions[0].statements[1].while_statement.condition.expression.type);
     try std.testing.expectEqual(@as(usize, 2), program.functions[0].statements[1].while_statement.body.len);
 }
 

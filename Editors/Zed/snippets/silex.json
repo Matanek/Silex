@@ -106,6 +106,28 @@
     ],
     "description": "Conditional block with alternative"
   },
+  "If optional binding": {
+    "prefix": "iflet",
+    "body": [
+      "if let ${1:value} = ${2:optional} {",
+      "    $0",
+      "}"
+    ],
+    "description": "Extract a present optional value in an if body"
+  },
+  "If elif statement": {
+    "prefix": "ifel",
+    "body": [
+      "if ${1:first_condition} {",
+      "    ${2}",
+      "} elif ${3:second_condition} {",
+      "    ${4}",
+      "} else {",
+      "    $0",
+      "}"
+    ],
+    "description": "Conditional chain with an elif branch"
+  },
   "While loop": {
     "prefix": "while",
     "body": [
@@ -114,6 +136,15 @@
       "}"
     ],
     "description": "Loop while a condition is true"
+  },
+  "While optional binding": {
+    "prefix": "whilelet",
+    "body": [
+      "while let ${1:value} = ${2:optional} {",
+      "    $0",
+      "}"
+    ],
+    "description": "Extract optional values until the source is null"
   },
   "For loop": {
     "prefix": "for",

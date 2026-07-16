@@ -1,0 +1,4 @@
+func main() {
+    let values = [null]
+    print(values.count())
+}

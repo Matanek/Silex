@@ -456,6 +456,7 @@ pub const Resolver = struct {
                     .return_type = if (function.return_type) |return_type| try self.transformTypePointer(return_type.*, position) else null,
                 } };
             },
+            .optional => |contained| .{ .optional = try self.transformTypePointer(contained.*, position) },
             else => value,
         };
     }
@@ -470,6 +471,7 @@ pub const Resolver = struct {
         return switch (value) {
             .structure => |name| .{ .structure = (try self.resolveName(position.file, name, .structure, position)).canonical_name },
             .function => |function| .{ .function = (try self.transformType(.{ .function = function }, position)).function },
+            .optional => |contained| .{ .optional = try self.transformTypePointer(contained.*, position) },
             else => value,
         };
     }
@@ -501,14 +503,22 @@ pub const Resolver = struct {
             } },
             .if_statement => |value| .{ .if_statement = .{
                 .position = value.position,
-                .condition = try self.transformExpression(value.condition),
-                .body = try self.transformStatements(value.body),
+                .condition = try self.transformCondition(value.condition),
+                .body = try self.transformConditionalBody(value.body, value.condition),
+                .alternatives = alternatives: {
+                    var alternatives: std.ArrayList(Ast.Statement.If.Alternative) = .empty;
+                    for (value.alternatives) |alternative| try alternatives.append(self.allocator, .{
+                        .condition = try self.transformCondition(alternative.condition),
+                        .body = try self.transformConditionalBody(alternative.body, alternative.condition),
+                    });
+                    break :alternatives try alternatives.toOwnedSlice(self.allocator);
+                },
                 .else_body = if (value.else_body) |body| try self.transformStatements(body) else null,
             } },
             .while_statement => |value| .{ .while_statement = .{
                 .position = value.position,
-                .condition = try self.transformExpression(value.condition),
-                .body = try self.transformStatements(value.body),
+                .condition = try self.transformCondition(value.condition),
+                .body = try self.transformConditionalBody(value.body, value.condition),
             } },
             .for_statement => |value| .{ .for_statement = .{
                 .position = value.position,
@@ -537,6 +547,30 @@ pub const Resolver = struct {
     fn transformStatements(self: *Resolver, statements: []const Ast.Statement) anyerror![]const Ast.Statement {
         try self.pushLocalScope();
         defer self.popLocalScope();
+        return self.transformStatementsInCurrentScope(statements);
+    }
+
+    fn transformCondition(self: *Resolver, condition: Ast.Statement.Condition) anyerror!Ast.Statement.Condition {
+        return switch (condition) {
+            .expression => |expression| .{ .expression = try self.transformExpression(expression) },
+            .binding => |binding| .{ .binding = .{
+                .position = binding.position,
+                .name = binding.name,
+                .name_position = binding.name_position,
+                .mutability = binding.mutability,
+                .source = try self.transformExpression(binding.source),
+            } },
+        };
+    }
+
+    fn transformConditionalBody(
+        self: *Resolver,
+        statements: []const Ast.Statement,
+        condition: Ast.Statement.Condition,
+    ) anyerror![]const Ast.Statement {
+        try self.pushLocalScope();
+        defer self.popLocalScope();
+        if (condition == .binding) try self.declareLocal(condition.binding.name);
         return self.transformStatementsInCurrentScope(statements);
     }
 
@@ -699,6 +733,13 @@ pub const Resolver = struct {
                 .object = try self.transformExpression(member.object),
                 .name = member.name,
                 .name_position = member.name_position,
+            } },
+            .safe_member_access => |member| .{ .safe_member_access = .{
+                .object = try self.transformExpression(member.object),
+                .name = member.name,
+                .name_position = member.name_position,
+                .arguments = if (member.arguments) |arguments| try self.transformExpressions(arguments) else null,
+                .named_fields = if (member.named_fields) |fields| try self.transformFieldInitializers(fields) else null,
             } },
             .index_access => |access| .{ .index_access = .{
                 .object = try self.transformExpression(access.object),

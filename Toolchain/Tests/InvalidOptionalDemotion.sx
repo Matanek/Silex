@@ -1,0 +1,8 @@
+func maybe() int? {
+    return null
+}
+
+func main() {
+    let value:int = maybe()
+    print(value)
+}

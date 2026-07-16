@@ -1,0 +1,4 @@
+func main() {
+    let value:int? = 1
+    if value {}
+}

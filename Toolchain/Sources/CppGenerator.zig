@@ -33,6 +33,7 @@ pub fn generateWithSources(
         \\#include <iterator>
         \\#include <limits>
         \\#include <memory>
+        \\#include <optional>
         \\#include <string>
         \\#include <type_traits>
         \\#include <utility>
@@ -763,6 +764,28 @@ fn generateStructureFieldEquality(
             try output.appendSlice(allocator, field.generated_name);
             try output.append(allocator, ')');
         },
+        .optional => |contained| if (contained.* == .structure) {
+            try output.appendSlice(allocator, "((!left.");
+            try output.appendSlice(allocator, field.generated_name);
+            try output.appendSlice(allocator, ".has_value() && !right.");
+            try output.appendSlice(allocator, field.generated_name);
+            try output.appendSlice(allocator, ".has_value()) || (left.");
+            try output.appendSlice(allocator, field.generated_name);
+            try output.appendSlice(allocator, ".has_value() && right.");
+            try output.appendSlice(allocator, field.generated_name);
+            try output.appendSlice(allocator, ".has_value() && ");
+            try generateStructureEqualityName(allocator, output, contained.*.structure.generated_name);
+            try output.appendSlice(allocator, "(*left.");
+            try output.appendSlice(allocator, field.generated_name);
+            try output.appendSlice(allocator, ", *right.");
+            try output.appendSlice(allocator, field.generated_name);
+            try output.appendSlice(allocator, ")))");
+        } else {
+            try output.appendSlice(allocator, "left.");
+            try output.appendSlice(allocator, field.generated_name);
+            try output.appendSlice(allocator, " == right.");
+            try output.appendSlice(allocator, field.generated_name);
+        },
         else => {
             try output.appendSlice(allocator, "left.");
             try output.appendSlice(allocator, field.generated_name);
@@ -805,7 +828,7 @@ fn generateStatement(
         .assertion => |assertion| {
             try indent(allocator, output, indentation);
             try output.appendSlice(allocator, "if (!");
-            try generateCondition(allocator, output, assertion.condition);
+            try generateCondition(allocator, output, .{ .expression = assertion.condition });
             try output.appendSlice(allocator, ") assertionRuntimeError(");
             try appendCppSourceLocation(allocator, output, assertion.position);
             try output.appendSlice(allocator, ", ");
@@ -862,8 +885,17 @@ fn generateStatement(
             try output.appendSlice(allocator, "if ");
             try generateCondition(allocator, output, if_statement.condition);
             try output.appendSlice(allocator, " {\n");
+            try generateConditionalBindingDeclaration(allocator, output, if_statement.condition, indentation + 1);
             try generateStatements(allocator, output, if_statement.body, indentation + 1, is_main);
             try indent(allocator, output, indentation);
+            for (if_statement.alternatives) |alternative| {
+                try output.appendSlice(allocator, "} else if ");
+                try generateCondition(allocator, output, alternative.condition);
+                try output.appendSlice(allocator, " {\n");
+                try generateConditionalBindingDeclaration(allocator, output, alternative.condition, indentation + 1);
+                try generateStatements(allocator, output, alternative.body, indentation + 1, is_main);
+                try indent(allocator, output, indentation);
+            }
             if (if_statement.else_body) |else_body| {
                 try output.appendSlice(allocator, "} else {\n");
                 try generateStatements(allocator, output, else_body, indentation + 1, is_main);
@@ -872,6 +904,26 @@ fn generateStatement(
             try output.appendSlice(allocator, "}\n");
         },
         .while_statement => |while_statement| {
+            if (while_statement.condition == .binding) {
+                const binding = while_statement.condition.binding;
+                try indent(allocator, output, indentation);
+                try output.appendSlice(allocator, "while (true) {\n");
+                try indent(allocator, output, indentation + 1);
+                try output.appendSlice(allocator, "auto ");
+                try output.appendSlice(allocator, binding.temporary_name);
+                try output.appendSlice(allocator, " = ");
+                try generateExpression(allocator, output, binding.source);
+                try output.appendSlice(allocator, ";\n");
+                try indent(allocator, output, indentation + 1);
+                try output.appendSlice(allocator, "if (!");
+                try output.appendSlice(allocator, binding.temporary_name);
+                try output.appendSlice(allocator, ".has_value()) break;\n");
+                try generateConditionalBindingDeclaration(allocator, output, while_statement.condition, indentation + 1);
+                try generateStatements(allocator, output, while_statement.body, indentation + 1, is_main);
+                try indent(allocator, output, indentation);
+                try output.appendSlice(allocator, "}\n");
+                return;
+            }
             try indent(allocator, output, indentation);
             try output.appendSlice(allocator, "while ");
             try generateCondition(allocator, output, while_statement.condition);
@@ -989,11 +1041,41 @@ fn generateIntegerRangeStatement(
     try output.appendSlice(allocator, "}\n");
 }
 
-fn generateCondition(allocator: Allocator, output: *std.ArrayList(u8), expression: *const Semantic.Expression) !void {
+fn generateCondition(allocator: Allocator, output: *std.ArrayList(u8), condition: Semantic.Statement.Condition) !void {
+    if (condition == .binding) {
+        const binding = condition.binding;
+        try output.appendSlice(allocator, "(auto ");
+        try output.appendSlice(allocator, binding.temporary_name);
+        try output.appendSlice(allocator, " = ");
+        try generateExpression(allocator, output, binding.source);
+        try output.appendSlice(allocator, "; ");
+        try output.appendSlice(allocator, binding.temporary_name);
+        try output.appendSlice(allocator, ".has_value())");
+        return;
+    }
+    const expression = condition.expression;
     const already_parenthesized = expression.value == .binary or expression.value == .unary;
     if (!already_parenthesized) try output.append(allocator, '(');
     try generateExpression(allocator, output, expression);
     if (!already_parenthesized) try output.append(allocator, ')');
+}
+
+fn generateConditionalBindingDeclaration(
+    allocator: Allocator,
+    output: *std.ArrayList(u8),
+    condition: Semantic.Statement.Condition,
+    indentation: usize,
+) !void {
+    if (condition != .binding) return;
+    const binding = condition.binding;
+    try indent(allocator, output, indentation);
+    if (binding.mutability == .immutable) try output.appendSlice(allocator, "const ");
+    try appendCppType(allocator, output, binding.type);
+    try output.append(allocator, ' ');
+    try output.appendSlice(allocator, binding.generated_name);
+    try output.appendSlice(allocator, " = *");
+    try output.appendSlice(allocator, binding.temporary_name);
+    try output.appendSlice(allocator, ";\n");
 }
 
 fn generateExpression(allocator: Allocator, output: *std.ArrayList(u8), expression: *const Semantic.Expression) !void {
@@ -1012,6 +1094,7 @@ fn generateExpression(allocator: Allocator, output: *std.ArrayList(u8), expressi
             try output.appendSlice(allocator, if (expression.type == .float) "F}" else "}");
         },
         .boolean => |value| try output.appendSlice(allocator, if (value) "true" else "false"),
+        .null => try output.appendSlice(allocator, "std::nullopt"),
         .string => |value| {
             try output.appendSlice(allocator, "std::string{");
             try appendCppByteStringLiteral(allocator, output, value);
@@ -1291,6 +1374,35 @@ fn generateExpression(allocator: Allocator, output: *std.ArrayList(u8), expressi
             }
             try output.appendSlice(allocator, "); }");
         },
+        .optional_wrap => |value| {
+            try appendCppType(allocator, output, expression.type);
+            try output.append(allocator, '{');
+            try generateExpression(allocator, output, value);
+            try output.append(allocator, '}');
+        },
+        .optional_unwrap => |name| {
+            try output.appendSlice(allocator, "(*");
+            try output.appendSlice(allocator, name);
+            try output.append(allocator, ')');
+        },
+        .safe_access => |access| {
+            try output.appendSlice(allocator, "[&]()");
+            if (expression.type != .void) {
+                try output.appendSlice(allocator, " -> ");
+                try appendCppType(allocator, output, expression.type);
+            }
+            try output.appendSlice(allocator, " { auto&& silexOptionalValue = ");
+            try generateExpression(allocator, output, access.receiver);
+            if (expression.type == .void) {
+                try output.appendSlice(allocator, "; if (silexOptionalValue.has_value()) { ");
+                try generateExpression(allocator, output, access.end);
+                try output.appendSlice(allocator, "; } }()");
+            } else {
+                try output.appendSlice(allocator, "; if (!silexOptionalValue.has_value()) return std::nullopt; return ");
+                try generateExpression(allocator, output, access.end);
+                try output.appendSlice(allocator, "; }()");
+            }
+        },
         .unary => |unary| {
             if (unary.operator == .numeric_negate and isInteger(expression.type) and unary.operand.value == .integer) {
                 const magnitude = unary.operand.value.integer;
@@ -1337,6 +1449,19 @@ fn generateExpression(allocator: Allocator, output: *std.ArrayList(u8), expressi
                 try generateExpression(allocator, output, binary.right);
                 try generateRuntimeArguments(allocator, output, expression.position, expression.type);
                 try output.append(allocator, ')');
+            } else if ((binary.operator == .equal or binary.operator == .not_equal) and binary.left.type == .optional and
+                binary.right.type == .optional and binary.left.value != .null and binary.right.value != .null and
+                binary.left.type.optional.* == .structure)
+            {
+                try output.append(allocator, '(');
+                if (binary.operator == .not_equal) try output.append(allocator, '!');
+                try output.appendSlice(allocator, "[&]() { const auto& silexOptionalLeft = ");
+                try generateExpression(allocator, output, binary.left);
+                try output.appendSlice(allocator, "; const auto& silexOptionalRight = ");
+                try generateExpression(allocator, output, binary.right);
+                try output.appendSlice(allocator, "; return (!silexOptionalLeft.has_value() && !silexOptionalRight.has_value()) || (silexOptionalLeft.has_value() && silexOptionalRight.has_value() && ");
+                try generateStructureEqualityName(allocator, output, binary.left.type.optional.*.structure.generated_name);
+                try output.appendSlice(allocator, "(*silexOptionalLeft, *silexOptionalRight)); }())");
             } else if ((binary.operator == .equal or binary.operator == .not_equal) and binary.left.type == .structure) {
                 const structure_type = binary.left.type.structure;
                 try output.append(allocator, '(');
@@ -1465,6 +1590,7 @@ fn cppType(type_name: Semantic.Type) []const u8 {
         .list, .fixed_array => unreachable,
         .structure => |structure_type| structure_type.generated_name,
         .reference => unreachable,
+        .optional, .null => unreachable,
     };
 }
 
@@ -1503,6 +1629,12 @@ fn appendCppType(allocator: Allocator, output: *std.ArrayList(u8), type_name: Se
             }
             try output.appendSlice(allocator, ")>");
         },
+        .optional => |contained| {
+            try output.appendSlice(allocator, "std::optional<");
+            try appendCppType(allocator, output, contained.*);
+            try output.append(allocator, '>');
+        },
+        .null => unreachable,
         else => try output.appendSlice(allocator, cppType(type_name)),
     }
 }
@@ -1527,6 +1659,8 @@ fn silexTypeName(type_name: Semantic.Type) []const u8 {
         .structure => |structure_type| structure_type.source_name,
         .reference => |reference| if (reference.mutable) "reference&" else "reference@",
         .function => "func",
+        .optional => "optional",
+        .null => "null",
     };
 }
 

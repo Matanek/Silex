@@ -7,6 +7,7 @@ files use the `.sx` extension; `silex` is the compiler command.
 
 - [Basics](Language/Basics.md)
 - [Types and conversions](Language/Types.md)
+- [Optional values](Language/Optional-Values.md)
 - [Collections](Language/Collections.md)
 - [Values and references](Language/Values-and-References.md)
 - [Expressions and statements](Language/Expressions.md)

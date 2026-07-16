@@ -6,6 +6,7 @@ pub const TokenTag = enum {
     keyword_let,
     keyword_var,
     keyword_if,
+    keyword_elif,
     keyword_else,
     keyword_while,
     keyword_for,
@@ -19,6 +20,7 @@ pub const TokenTag = enum {
     keyword_self,
     keyword_true,
     keyword_false,
+    keyword_null,
     keyword_int,
     keyword_int8,
     keyword_int16,
@@ -70,6 +72,8 @@ pub const TokenTag = enum {
     amp,
     at,
     caret,
+    question,
+    question_dot,
     pipe_pipe,
     colon,
     comma,
@@ -148,6 +152,14 @@ pub const Lexer = struct {
             return self.token(.percent, start, position);
         }
         if (character == '.') return self.dotToken(start, position);
+        if (character == '?') {
+            self.advance();
+            if (self.index < self.source.len and self.source[self.index] == '.') {
+                self.advance();
+                return self.token(.question_dot, start, position);
+            }
+            return self.token(.question, start, position);
+        }
 
         self.advance();
         return switch (character) {
@@ -435,6 +447,7 @@ fn keywordTag(lexeme: []const u8) ?TokenTag {
         .{ "let", TokenTag.keyword_let },
         .{ "var", TokenTag.keyword_var },
         .{ "if", TokenTag.keyword_if },
+        .{ "elif", TokenTag.keyword_elif },
         .{ "else", TokenTag.keyword_else },
         .{ "while", TokenTag.keyword_while },
         .{ "for", TokenTag.keyword_for },
@@ -448,6 +461,7 @@ fn keywordTag(lexeme: []const u8) ?TokenTag {
         .{ "self", TokenTag.keyword_self },
         .{ "true", TokenTag.keyword_true },
         .{ "false", TokenTag.keyword_false },
+        .{ "null", TokenTag.keyword_null },
         .{ "int", TokenTag.keyword_int },
         .{ "int8", TokenTag.keyword_int8 },
         .{ "int16", TokenTag.keyword_int16 },
@@ -532,6 +546,27 @@ test "recognize comparison, shift, and logical operators" {
         .bang,
         .amp_amp,
         .pipe_pipe,
+    };
+    for (expected) |tag| try std.testing.expectEqual(tag, (try lexer.next()).tag);
+}
+
+test "reserve elif keyword" {
+    var lexer = Lexer.init("elif elif_value");
+    try std.testing.expectEqual(TokenTag.keyword_elif, (try lexer.next()).tag);
+    try std.testing.expectEqual(TokenTag.identifier, (try lexer.next()).tag);
+}
+
+test "recognize optional tokens and reserve null" {
+    var lexer = Lexer.init("Position? value?.x null ? .");
+    const expected = [_]TokenTag{
+        .identifier,
+        .question,
+        .identifier,
+        .question_dot,
+        .identifier,
+        .keyword_null,
+        .question,
+        .dot,
     };
     for (expected) |tag| try std.testing.expectEqual(tag, (try lexer.next()).tag);
 }

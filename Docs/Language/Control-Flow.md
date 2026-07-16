@@ -16,6 +16,27 @@ while count > 0 {
 }
 ```
 
+An `if`, `elif`, `else if`, or `while` header may instead extract an optional
+value with `let name = source` or `var name = source`. The source is evaluated
+once per reached `if` branch and once before each `while` attempt. Parentheses
+may wrap the complete binding; the unparenthesized form is canonical.
+
+```sx
+if let position = find_position() {
+    print(position.x)
+} elif (var fallback = find_fallback()) {
+    fallback.translate(1)
+}
+
+while let item = next_item() {
+    print(item)
+}
+```
+
+The extracted value is a local copy visible only in its body. A `while`
+re-evaluates its source after the body or `continue`; `break` exits without
+another evaluation. See [Optional values](Optional-Values.md).
+
 Existing sources may still group the whole condition, as in `if (enabled) {}`
 or `while (count > 0) {}`. These parentheses are the ordinary expression
 grouping and do not change the compiler AST. They may instead group only a
@@ -25,6 +46,31 @@ Outside parentheses, an operator at the end of a line continues the condition
 on the next line. An operator that appears only at the beginning of the next
 line does not. Newlines remain free inside a parenthesized expression, and the
 opening brace may follow a completed condition on the next line.
+
+An `if` may continue with any number of conditional branches and one final
+`else`. The canonical spelling of a conditional branch is `elif`:
+
+```sx
+if first_condition {
+    print("first")
+} elif second_condition {
+    print("second")
+} elif third_condition {
+    print("third")
+} else {
+    print("fallback")
+}
+```
+
+`else if` is accepted as an equivalent spelling and may be mixed with `elif`
+in one chain. Conditions are evaluated from top to bottom and stop at the first
+successful branch. Every branch body has its own lexical scope. An explicit
+`else { if condition {} }` remains a nested `if` inside a separate `else`
+block; it is not another spelling of `elif`.
+
+Newlines and comments may separate two branches, including between `else` and
+`if`. Parentheses around an alternative condition follow the same rules as the
+initial condition. `elif` is reserved and cannot be used as an identifier.
 
 `for` iterates through a fixed array, dynamic list, or exclusive integer range.
 Every iteration binding starts with `let` or `var`: `let` creates an immutable

@@ -507,6 +507,10 @@ fn appendAstTypeName(allocator: Allocator, output: *std.ArrayList(u8), type_name
                 try appendAstTypeName(allocator, output, return_type.*);
             }
         },
+        .optional => |contained| {
+            try appendAstTypeName(allocator, output, contained.*);
+            try output.append(allocator, '?');
+        },
     }
 }
 
@@ -1292,6 +1296,7 @@ fn astTypeName(type_name: Ast.TypeName) []const u8 {
         .fixed_array => |array| astTypeName(array.element.*),
         .reference => |reference| astTypeName(reference.target.*),
         .function => "func",
+        .optional => |contained| astTypeName(contained.*),
     };
 }
 
@@ -1649,6 +1654,7 @@ const language_completions = [_]CompletionItem{
     .{ .label = "let", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "var", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "if", .kind = 14, .detail = "Silex keyword" },
+    .{ .label = "elif", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "else", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "while", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "return", .kind = 14, .detail = "Silex keyword" },
@@ -1682,6 +1688,7 @@ test "completion items include language terms and document identifiers" {
     const items = try completionItems(std.testing.allocator, std.testing.io, "func main() void { let total = 1 }", null);
     defer std.testing.allocator.free(items);
     try std.testing.expect(containsCompletion(items, "func"));
+    try std.testing.expect(containsCompletion(items, "elif"));
     try std.testing.expect(containsCompletion(items, "total"));
 }
 

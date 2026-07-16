@@ -1,0 +1,11 @@
+func clear(value:&int?) {
+    value = null
+}
+
+func main() {
+    var value:int? = 1
+    if value != null {
+        clear(&value)
+        print(value + 1)
+    }
+}

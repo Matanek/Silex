@@ -17,6 +17,8 @@
 
 (member_expression
   field: (identifier) @property)
+(safe_member_expression
+  field: (identifier) @property)
 
 (function_definition
   name: (identifier) @function.definition)
@@ -66,6 +68,8 @@
 
 (for_statement
   name: (identifier) @variable)
+(conditional_binding
+  name: (identifier) @variable)
 
 [(break_statement) (continue_statement)] @keyword
 
@@ -77,6 +81,7 @@
 (integer_literal) @number
 (float_literal) @number
 (boolean_literal) @boolean
+(null_literal) @constant.builtin
 (conversion_expression
   "as" @keyword
   type: (type) @type)
@@ -95,6 +100,7 @@
   "let"
   "var"
   "if"
+  "elif"
   "else"
   "while"
   "for"
@@ -129,6 +135,8 @@
   "&&"
   "||"
   "^"
+  "?"
+  "?."
 ] @operator
 
 [
