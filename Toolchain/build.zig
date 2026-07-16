@@ -380,6 +380,21 @@ pub fn build(b: *std.Build) void {
     invalid_missing_class_constructor_command.expectExitCode(1);
     invalid_missing_class_constructor_command.expectStdErrEqual("Tests/InvalidMissingClassConstructor.sx:10:19: error: no compatible constructor for 'Session'; visible constructors: Session(str)\n");
 
+    const invalid_inheritance_cycle_command = b.addRunArtifact(executable);
+    invalid_inheritance_cycle_command.addArgs(&.{ "compile", "Tests/InvalidInheritanceCycle.sx" });
+    invalid_inheritance_cycle_command.expectExitCode(1);
+    invalid_inheritance_cycle_command.expectStdErrEqual("Tests/InvalidInheritanceCycle.sx:1:7: error: inheritance cycle involving class 'First'\n");
+
+    const invalid_private_super_constructor_command = b.addRunArtifact(executable);
+    invalid_private_super_constructor_command.addArgs(&.{ "compile", "Tests/InvalidPrivateSuperConstructor.sx" });
+    invalid_private_super_constructor_command.expectExitCode(1);
+    invalid_private_super_constructor_command.expectStdErrEqual("Tests/InvalidPrivateSuperConstructor.sx:6:18: error: constructor of base class 'Base' is private\n");
+
+    const invalid_class_collection_covariance_command = b.addRunArtifact(executable);
+    invalid_class_collection_covariance_command.addArgs(&.{ "compile", "Tests/InvalidClassCollectionCovariance.sx" });
+    invalid_class_collection_covariance_command.expectExitCode(1);
+    invalid_class_collection_covariance_command.expectStdErrEqual("Tests/InvalidClassCollectionCovariance.sx:6:29: error: expected 'Entity[]', found 'Player[]'\n");
+
     const invalid_private_class_field_command = b.addRunArtifact(executable);
     invalid_private_class_field_command.addArgs(&.{ "compile", "Tests/InvalidPrivateClassField.sx" });
     invalid_private_class_field_command.expectExitCode(1);
@@ -1130,6 +1145,9 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&invalid_class_missing_field_command.step);
     test_step.dependOn(&invalid_class_default_variable_command.step);
     test_step.dependOn(&invalid_missing_class_constructor_command.step);
+    test_step.dependOn(&invalid_inheritance_cycle_command.step);
+    test_step.dependOn(&invalid_private_super_constructor_command.step);
+    test_step.dependOn(&invalid_class_collection_covariance_command.step);
     test_step.dependOn(&invalid_private_class_field_command.step);
     test_step.dependOn(&invalid_private_class_method_command.step);
     test_step.dependOn(&invalid_sub_class_field_command.step);
@@ -1262,8 +1280,13 @@ pub fn build(b: *std.Build) void {
     classes_command.addArgs(&.{ "run", "Smokes/Classes.sx" });
     classes_command.expectStdOutEqual(hostText(b, "classes\n"));
 
+    const inheritance_command = b.addRunArtifact(executable);
+    inheritance_command.step.dependOn(&classes_command.step);
+    inheritance_command.addArgs(&.{ "run", "Smokes/Inheritance.sx" });
+    inheritance_command.expectStdOutEqual(hostText(b, "inheritance\n"));
+
     const functions_command = b.addRunArtifact(executable);
-    functions_command.step.dependOn(&classes_command.step);
+    functions_command.step.dependOn(&inheritance_command.step);
     functions_command.addArgs(&.{ "run", "Smokes/Functions.sx" });
     functions_command.expectStdOutEqual(hostText(b, "8\n2\n85\n6\n84\n82\n1\n3\n77\n0\n1\n"));
 
@@ -1531,7 +1554,7 @@ pub fn build(b: *std.Build) void {
     const modules_command = b.addRunArtifact(executable);
     modules_command.step.dependOn(previous_integer_error_step);
     modules_command.addArgs(&.{ "run", "Smokes/Modules/silex.json" });
-    modules_command.expectStdOutEqual(hostText(b, "true\ntrue\ntrue\n1\n4\n1\n2\nmodules\n"));
+    modules_command.expectStdOutEqual(hostText(b, "true\ntrue\ntrue\n1\n4\n5\n1\n2\nmodules\n"));
 
     const local_imports_command = b.addRunArtifact(executable);
     local_imports_command.step.dependOn(&modules_command.step);

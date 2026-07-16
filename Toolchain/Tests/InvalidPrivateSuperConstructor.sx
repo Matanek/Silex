@@ -1,0 +1,9 @@
+class Base {
+    init() {}
+}
+
+class Child : Base {
+    pub init() : super() {}
+}
+
+func main() {}

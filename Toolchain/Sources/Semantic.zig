@@ -337,9 +337,17 @@ pub const Program = struct {
 pub const Structure = struct {
     generated_name: []const u8,
     is_class: bool,
+    base: ?StructureType,
+    implicit_constructor_available: bool,
+    implicit_base_initializer: ?BaseInitializer,
     fields: []const StructureField,
     constructors: []const Constructor,
     methods: []Method,
+};
+
+pub const BaseInitializer = struct {
+    generated_name: []const u8,
+    arguments: []const *Expression,
 };
 
 pub const StructureField = struct {
@@ -351,6 +359,7 @@ pub const StructureField = struct {
 
 pub const Constructor = struct {
     parameters: []const Parameter,
+    base_initializer: ?BaseInitializer,
     statements: []const Statement,
     visibility: Ast.MemberVisibility,
 };
@@ -455,6 +464,7 @@ const StructureSymbol = struct {
     source_name: []const u8,
     generated_name: []const u8,
     is_class: bool,
+    base_index: ?usize,
     fields: []StructureFieldSymbol,
     constructors: []ConstructorSymbol,
     methods: []MethodSymbol,
@@ -474,6 +484,11 @@ const ConstructorCandidate = struct {
     index: usize,
 };
 
+const ImplicitBaseInitialization = struct {
+    available: bool,
+    initializer: ?BaseInitializer,
+};
+
 const MethodSymbol = struct {
     source_name: []const u8,
     generated_name: []const u8,
@@ -490,7 +505,13 @@ const MethodSymbol = struct {
 
 const MethodCandidate = struct {
     symbol: MethodSymbol,
+    structure_index: usize,
     index: usize,
+};
+
+const FieldCandidate = struct {
+    symbol: StructureFieldSymbol,
+    structure_index: usize,
 };
 
 const StructureFieldSymbol = struct {
@@ -551,9 +572,16 @@ pub const Analyzer = struct {
             for (ast_structure.methods, symbol.methods, 0..) |ast_method, method_symbol, method_index| {
                 try methods.append(self.allocator, try self.method(ast_method, method_symbol, structure_index, method_index));
             }
+            const implicit_base = if (symbol.constructors.len == 0)
+                try self.implicitBaseInitialization(structure_index)
+            else
+                ImplicitBaseInitialization{ .available = false, .initializer = null };
             try structures.append(self.allocator, .{
                 .generated_name = symbol.generated_name,
                 .is_class = symbol.is_class,
+                .base = if (symbol.base_index) |base_index| self.structureType(base_index) else null,
+                .implicit_constructor_available = symbol.constructors.len == 0 and implicit_base.available,
+                .implicit_base_initializer = implicit_base.initializer,
                 .fields = try fields.toOwnedSlice(self.allocator),
                 .constructors = try constructors.toOwnedSlice(self.allocator),
                 .methods = try methods.toOwnedSlice(self.allocator),
@@ -590,12 +618,28 @@ pub const Analyzer = struct {
                 else
                     try std.fmt.allocPrint(self.allocator, "SilexStruct{d}", .{structure_index}),
                 .is_class = ast_structure.is_class,
+                .base_index = null,
                 .fields = &.{},
                 .constructors = &.{},
                 .methods = &.{},
                 .position = ast_structure.name_position,
             });
         }
+
+        for (ast_structures, 0..) |ast_structure, structure_index| {
+            const base = ast_structure.base orelse continue;
+            if (!ast_structure.is_class) return self.fail(base.position, "only a class can declare a base class");
+            const base_index = self.findStructureIndex(base.name) orelse {
+                const message = try std.fmt.allocPrint(self.allocator, "unknown base class '{s}'", .{base.name});
+                return self.fail(base.position, message);
+            };
+            if (!self.structures.items[base_index].is_class) {
+                const message = try std.fmt.allocPrint(self.allocator, "base type '{s}' is not a class", .{base.name});
+                return self.fail(base.position, message);
+            }
+            self.structures.items[structure_index].base_index = base_index;
+        }
+        try self.validateInheritanceCycles();
 
         for (ast_structures, 0..) |ast_structure, structure_index| {
             var fields: std.ArrayList(StructureFieldSymbol) = .empty;
@@ -631,7 +675,10 @@ pub const Analyzer = struct {
                 }
                 try fields.append(self.allocator, .{
                     .source_name = field.name,
-                    .generated_name = try std.fmt.allocPrint(self.allocator, "field{d}", .{field_index}),
+                    .generated_name = if (ast_structure.is_class)
+                        try std.fmt.allocPrint(self.allocator, "field{d}_{d}", .{ structure_index, field_index })
+                    else
+                        try std.fmt.allocPrint(self.allocator, "field{d}", .{field_index}),
                     .type = field_type,
                     .position = field.position,
                     .ast_initializer = field.initializer,
@@ -650,7 +697,11 @@ pub const Analyzer = struct {
                     try self.rejectClassMutableReference(parameter_type, parameter.is_mutable_reference, parameter.position);
                     try parameter_types.append(self.allocator, parameter_type);
                     try parameter_is_mutable_references.append(self.allocator, parameter.is_mutable_reference);
-                    try parameter_stored_values.append(self.allocator, parameterStored(ast_constructor.statements, parameter.name));
+                    var stored = parameterStored(ast_constructor.statements, parameter.name);
+                    if (ast_constructor.super_arguments) |arguments| {
+                        for (arguments) |argument| stored = stored or astExpressionUsesIdentifier(argument, parameter.name);
+                    }
+                    try parameter_stored_values.append(self.allocator, stored);
                 }
                 for (constructors.items) |existing| {
                     if (sameSignature(
@@ -697,7 +748,10 @@ pub const Analyzer = struct {
                 if (return_type == .reference) return self.fail(ast_method.position, "a method cannot return a reference");
                 try methods.append(self.allocator, .{
                     .source_name = ast_method.name,
-                    .generated_name = try std.fmt.allocPrint(self.allocator, "method{d}", .{method_index}),
+                    .generated_name = if (ast_structure.is_class)
+                        try std.fmt.allocPrint(self.allocator, "method{d}_{d}", .{ structure_index, method_index })
+                    else
+                        try std.fmt.allocPrint(self.allocator, "method{d}", .{method_index}),
                     .return_type = return_type,
                     .parameter_types = try parameter_types.toOwnedSlice(self.allocator),
                     .parameter_is_mutable_references = try parameter_is_mutable_references.toOwnedSlice(self.allocator),
@@ -707,6 +761,53 @@ pub const Analyzer = struct {
                 });
             }
             self.structures.items[structure_index].methods = try methods.toOwnedSlice(self.allocator);
+        }
+        try self.validateInheritedMembers();
+    }
+
+    fn validateInheritanceCycles(self: *Analyzer) AnalyzeError!void {
+        for (self.structures.items, 0..) |structure, start_index| {
+            if (!structure.is_class) continue;
+            var cursor = structure.base_index;
+            while (cursor) |index| {
+                if (index == start_index) {
+                    const message = try std.fmt.allocPrint(self.allocator, "inheritance cycle involving class '{s}'", .{structure.source_name});
+                    return self.fail(structure.position, message);
+                }
+                cursor = self.structures.items[index].base_index;
+            }
+        }
+    }
+
+    fn validateInheritedMembers(self: *Analyzer) AnalyzeError!void {
+        for (self.structures.items) |structure| {
+            if (!structure.is_class) continue;
+            var base_index = structure.base_index;
+            while (base_index) |index| {
+                const base = self.structures.items[index];
+                for (structure.fields) |field| {
+                    for (base.fields) |base_field| {
+                        if (std.mem.eql(u8, field.source_name, base_field.source_name)) {
+                            const message = try std.fmt.allocPrint(self.allocator, "field '{s}' in class '{s}' collides with an inherited field", .{ field.source_name, structure.source_name });
+                            return self.fail(field.position, message);
+                        }
+                    }
+                }
+                for (structure.methods) |method_symbol| {
+                    for (base.methods) |base_method| {
+                        if (base_method.visibility != .private_access and std.mem.eql(u8, method_symbol.source_name, base_method.source_name) and sameSignature(
+                            method_symbol.parameter_types,
+                            method_symbol.parameter_is_mutable_references,
+                            base_method.parameter_types,
+                            base_method.parameter_is_mutable_references,
+                        )) {
+                            const message = try std.fmt.allocPrint(self.allocator, "method '{s}' in class '{s}' matches an inherited signature; method overriding is not available yet", .{ method_symbol.source_name, structure.source_name });
+                            return self.fail(method_symbol.position, message);
+                        }
+                    }
+                }
+                base_index = base.base_index;
+            }
         }
     }
 
@@ -1019,15 +1120,85 @@ pub const Analyzer = struct {
             });
         }
 
+        const base_initializer = try self.constructorBaseInitialization(ast, structure_index, &scope);
         self.current_return_type = .void;
         const constructor_statements = try self.statements(ast.statements, &scope);
         self.releaseScopeBorrows(&scope);
         try self.validateConstructorInitialization(structure_index, constructor_statements, ast.position);
         return .{
             .parameters = try parameters.toOwnedSlice(self.allocator),
+            .base_initializer = base_initializer,
             .statements = constructor_statements,
             .visibility = symbol.visibility,
         };
+    }
+
+    fn constructorBaseInitialization(
+        self: *Analyzer,
+        ast: Ast.Constructor,
+        structure_index: usize,
+        scope: *const Scope,
+    ) AnalyzeError!?BaseInitializer {
+        const structure = self.structures.items[structure_index];
+        const position = ast.super_position orelse ast.position;
+        const base_index = structure.base_index orelse {
+            if (ast.super_arguments != null) return self.fail(position, "constructor 'super' call requires a base class");
+            return null;
+        };
+        const base = self.structures.items[base_index];
+        const ast_arguments = ast.super_arguments orelse &.{};
+
+        if (base.constructors.len == 0) {
+            if (ast_arguments.len != 0) {
+                const message = try std.fmt.allocPrint(self.allocator, "base class '{s}' has no custom constructor accepting arguments", .{base.source_name});
+                return self.fail(position, message);
+            }
+            const implicit = try self.implicitBaseInitialization(structure_index);
+            if (!implicit.available) {
+                const message = try std.fmt.allocPrint(self.allocator, "base class '{s}' cannot be constructed with 'super()'", .{base.source_name});
+                return self.fail(position, message);
+            }
+            return implicit.initializer;
+        }
+
+        var candidates: std.ArrayList(ConstructorCandidate) = .empty;
+        var inaccessible: ?ConstructorSymbol = null;
+        for (base.constructors, 0..) |constructor_symbol, index| {
+            if (self.memberVisibleFrom(structure_index, base_index, constructor_symbol.visibility)) {
+                try candidates.append(self.allocator, .{ .symbol = constructor_symbol, .index = index });
+            } else {
+                inaccessible = constructor_symbol;
+            }
+        }
+        if (candidates.items.len == 0) {
+            const constructor_symbol = inaccessible.?;
+            const message = switch (constructor_symbol.visibility) {
+                .private_access => try std.fmt.allocPrint(self.allocator, "constructor of base class '{s}' is private", .{base.source_name}),
+                .subclass => unreachable,
+                .public_access => unreachable,
+            };
+            return self.fail(position, message);
+        }
+
+        const resolved = try self.resolveConstructorOverload(base.source_name, position, ast_arguments, scope, candidates.items);
+        var arguments: std.ArrayList(*Expression) = .empty;
+        for (ast_arguments, resolved.symbol.parameter_types, resolved.symbol.parameter_is_mutable_references, resolved.symbol.parameter_stored, 0..) |argument, expected_type, is_mutable_reference, is_stored, index| {
+            var value = if (is_mutable_reference)
+                try self.mutableReferenceArgument(argument, scope, expected_type)
+            else
+                try self.expressionForExpected(argument, scope, expected_type);
+            value = try self.coerce(value, expected_type);
+            if (!typeEqual(value.type, expected_type)) {
+                const message = try std.fmt.allocPrint(self.allocator, "argument {d} of base constructor '{s}' expects '{s}', found '{s}'", .{ index + 1, base.source_name, typeName(expected_type), typeName(value.type) });
+                return self.fail(argument.position, message);
+            }
+            if (is_stored and value.lifetime_depth != 0) {
+                return self.fail(argument.position, "capturing callback cannot be passed to a base constructor parameter whose value escapes the call");
+            }
+            try arguments.append(self.allocator, value);
+            self.releaseTransientBorrow(value);
+        }
+        return .{ .generated_name = base.generated_name, .arguments = try arguments.toOwnedSlice(self.allocator) };
     }
 
     fn validateConstructorInitialization(
@@ -2270,9 +2441,14 @@ pub const Analyzer = struct {
                     if (!typeEqual(left.type, right.type)) {
                         const left_contained = left.type.optional.*;
                         const right_contained = right.type.optional.*;
-                        const common = commonNumericType(left_contained, right_contained) orelse {
-                            return self.fail(binary.operator_position, "equality operator requires compatible optional operands");
-                        };
+                        const common = if (self.classUpcastDistance(left_contained, right_contained) != null)
+                            right_contained
+                        else if (self.classUpcastDistance(right_contained, left_contained) != null)
+                            left_contained
+                        else
+                            commonNumericType(left_contained, right_contained) orelse {
+                                return self.fail(binary.operator_position, "equality operator requires compatible optional operands");
+                            };
                         const common_optional = try self.optionalType(common);
                         left = try self.coerce(left, common_optional);
                         right = try self.coerce(right, common_optional);
@@ -2289,6 +2465,10 @@ pub const Analyzer = struct {
                     };
                     left = try self.coerce(left, common_type);
                     right = try self.coerce(right, common_type);
+                } else if (self.classUpcastDistance(left.type, right.type) != null) {
+                    left = try self.coerce(left, right.type);
+                } else if (self.classUpcastDistance(right.type, left.type) != null) {
+                    right = try self.coerce(right, left.type);
                 } else if (!typeEqual(left.type, right.type)) {
                     const message = try std.fmt.allocPrint(
                         self.allocator,
@@ -2527,11 +2707,12 @@ pub const Analyzer = struct {
     ) AnalyzeError!*Expression {
         const object = try self.expression(call.object, scope);
         if (object.type == .structure) {
-            const structure = self.findStructureByGeneratedName(object.type.structure.generated_name).?;
             const structure_index = self.findStructureIndexByGeneratedName(object.type.structure.generated_name).?;
-            for (structure.fields) |field| {
-                if (std.mem.eql(u8, field.source_name, call.name) and field.type == .function) {
-                    try self.requireFieldAccess(structure_index, structure, field, call.name_position);
+            if (self.findFieldInHierarchy(structure_index, call.name)) |field_candidate| {
+                const declaring_structure = &self.structures.items[field_candidate.structure_index];
+                const field = field_candidate.symbol;
+                if (field.type == .function) {
+                    try self.requireFieldAccess(field_candidate.structure_index, declaring_structure, field, call.name_position);
                     if (call.object.value == .self and self.current_method_index != null) self.current_method_direct_mutation = true;
                     const callee = try self.newExpression(.{
                         .type = field.type,
@@ -2575,19 +2756,26 @@ pub const Analyzer = struct {
         const structure_index = self.findStructureIndexByGeneratedName(generated_structure_name).?;
         const structure = &self.structures.items[structure_index];
         var candidates: std.ArrayList(MethodCandidate) = .empty;
-        var inaccessible: ?MethodSymbol = null;
-        for (structure.methods, 0..) |method_symbol, index| {
-            if (std.mem.eql(u8, method_symbol.source_name, call.name)) {
-                if (self.memberVisibleFromCurrentContext(structure_index, method_symbol.visibility)) {
-                    try candidates.append(self.allocator, .{ .symbol = method_symbol, .index = index });
-                } else {
-                    inaccessible = method_symbol;
+        var inaccessible: ?MethodCandidate = null;
+        var declaring_index: ?usize = structure_index;
+        while (declaring_index) |index| {
+            const declaring_structure = self.structures.items[index];
+            for (declaring_structure.methods, 0..) |method_symbol, method_index| {
+                if (std.mem.eql(u8, method_symbol.source_name, call.name)) {
+                    const candidate = MethodCandidate{ .symbol = method_symbol, .structure_index = index, .index = method_index };
+                    if (self.memberVisibleFromCurrentContext(index, method_symbol.visibility)) {
+                        try candidates.append(self.allocator, candidate);
+                    } else {
+                        inaccessible = candidate;
+                    }
                 }
             }
+            declaring_index = declaring_structure.base_index;
         }
         if (candidates.items.len == 0) {
-            if (inaccessible) |method_symbol| {
-                return self.failMemberAccess("method", structure, method_symbol.source_name, method_symbol.visibility, call.name_position);
+            if (inaccessible) |candidate| {
+                const declaring_structure = &self.structures.items[candidate.structure_index];
+                return self.failMemberAccess("method", declaring_structure, candidate.symbol.source_name, candidate.symbol.visibility, call.name_position);
             }
             const message = try std.fmt.allocPrint(self.allocator, "{s} '{s}' has no method '{s}'", .{ if (structure.is_class) "class" else "struct", structure.source_name, call.name });
             return self.fail(call.name_position, message);
@@ -2612,7 +2800,7 @@ pub const Analyzer = struct {
             try arguments.append(self.allocator, value);
             self.releaseTransientBorrow(value);
         }
-        const method_id = MethodId{ .structure_index = structure_index, .method_index = resolved.index };
+        const method_id = MethodId{ .structure_index = resolved.structure_index, .method_index = resolved.index };
         if (receiver == .self and self.current_method_index != null) {
             try self.current_method_dependencies.append(self.allocator, method_id);
         }
@@ -2681,11 +2869,8 @@ pub const Analyzer = struct {
                     else => return self.fail(field_assignment.name_position, "cascade field assignment requires a struct or class value"),
                 };
                 const structure = self.findStructureByGeneratedName(structure_type.generated_name).?;
-                var resolved_field: ?StructureFieldSymbol = null;
-                for (structure.fields) |field| {
-                    if (std.mem.eql(u8, field.source_name, field_assignment.name)) resolved_field = field;
-                }
-                const field = resolved_field orelse {
+                const structure_index = self.findStructureIndexByGeneratedName(structure_type.generated_name).?;
+                const field_candidate = self.findFieldInHierarchy(structure_index, field_assignment.name) orelse {
                     const message = try std.fmt.allocPrint(
                         self.allocator,
                         "{s} '{s}' has no field '{s}'",
@@ -2693,8 +2878,9 @@ pub const Analyzer = struct {
                     );
                     return self.fail(field_assignment.name_position, message);
                 };
-                const structure_index = self.findStructureIndexByGeneratedName(structure_type.generated_name).?;
-                try self.requireFieldAccess(structure_index, structure, field, field_assignment.name_position);
+                const declaring_structure = &self.structures.items[field_candidate.structure_index];
+                const field = field_candidate.symbol;
+                try self.requireFieldAccess(field_candidate.structure_index, declaring_structure, field, field_assignment.name_position);
                 var value = try self.expressionForExpected(field_assignment.value, scope, field.type);
                 value = try self.coerce(value, field.type);
                 if (!typeEqual(value.type, field.type)) {
@@ -3079,7 +3265,7 @@ pub const Analyzer = struct {
                 try self.expression(argument.value.unary.operand, scope)
             else
                 try self.expressionForExpected(argument, scope, null);
-            const score = overloadScore(argument_value.type, parameter_type) orelse literalOverloadScore(argument_value, parameter_type) orelse return null;
+            const score = self.implicitConversionScore(argument_value.type, parameter_type) orelse literalOverloadScore(argument_value, parameter_type) orelse return null;
             try scores.append(self.allocator, score);
         }
         return @as(?[]const u8, try scores.toOwnedSlice(self.allocator));
@@ -3164,12 +3350,99 @@ pub const Analyzer = struct {
         return null;
     }
 
+    fn structureType(self: *const Analyzer, structure_index: usize) StructureType {
+        const structure = self.structures.items[structure_index];
+        return .{
+            .source_name = structure.source_name,
+            .generated_name = structure.generated_name,
+            .is_class = structure.is_class,
+        };
+    }
+
+    fn findFieldInHierarchy(self: *const Analyzer, structure_index: usize, name: []const u8) ?FieldCandidate {
+        var declaring_index: ?usize = structure_index;
+        while (declaring_index) |index| {
+            const structure = self.structures.items[index];
+            for (structure.fields) |field| {
+                if (std.mem.eql(u8, field.source_name, name)) return .{
+                    .symbol = field,
+                    .structure_index = index,
+                };
+            }
+            declaring_index = structure.base_index;
+        }
+        return null;
+    }
+
+    fn implicitBaseInitialization(self: *Analyzer, structure_index: usize) AnalyzeError!ImplicitBaseInitialization {
+        const structure = self.structures.items[structure_index];
+        const base_index = structure.base_index orelse return .{ .available = true, .initializer = null };
+        const base = self.structures.items[base_index];
+
+        if (base.constructors.len != 0) {
+            for (base.constructors) |constructor_symbol| {
+                if (constructor_symbol.parameter_types.len == 0 and
+                    self.memberVisibleFrom(structure_index, base_index, constructor_symbol.visibility))
+                {
+                    return .{
+                        .available = true,
+                        .initializer = .{ .generated_name = base.generated_name, .arguments = &.{} },
+                    };
+                }
+            }
+            return .{ .available = false, .initializer = null };
+        }
+
+        const base_chain = try self.implicitBaseInitialization(base_index);
+        if (!base_chain.available) return .{ .available = false, .initializer = null };
+
+        var arguments: std.ArrayList(*Expression) = .empty;
+        for (base.fields) |field| {
+            const value = if (field.default_value) |default_value|
+                default_value
+            else
+                try self.intrinsicDefaultExpression(field.type, field.position) orelse
+                    return .{ .available = false, .initializer = null };
+            try arguments.append(self.allocator, value);
+        }
+        return .{
+            .available = true,
+            .initializer = .{
+                .generated_name = base.generated_name,
+                .arguments = try arguments.toOwnedSlice(self.allocator),
+            },
+        };
+    }
+
     fn memberVisibleFromCurrentContext(
         self: *const Analyzer,
         structure_index: usize,
         visibility: Ast.MemberVisibility,
     ) bool {
-        return visibility == .public_access or self.current_structure_index == structure_index;
+        const current_index = self.current_structure_index orelse return visibility == .public_access;
+        return self.memberVisibleFrom(current_index, structure_index, visibility);
+    }
+
+    fn memberVisibleFrom(
+        self: *const Analyzer,
+        current_index: usize,
+        declaring_index: usize,
+        visibility: Ast.MemberVisibility,
+    ) bool {
+        return switch (visibility) {
+            .public_access => true,
+            .private_access => current_index == declaring_index,
+            .subclass => current_index == declaring_index or self.isDescendantOf(current_index, declaring_index),
+        };
+    }
+
+    fn isDescendantOf(self: *const Analyzer, candidate_index: usize, ancestor_index: usize) bool {
+        var base_index = self.structures.items[candidate_index].base_index;
+        while (base_index) |index| {
+            if (index == ancestor_index) return true;
+            base_index = self.structures.items[index].base_index;
+        }
+        return false;
     }
 
     fn requireFieldAccess(
@@ -3224,6 +3497,18 @@ pub const Analyzer = struct {
                 .{structure.source_name},
             );
             return self.fail(initializer.name_position, message);
+        }
+        if (structure.is_class) {
+            const implicit = try self.implicitBaseInitialization(structure_index);
+            if (!implicit.available) {
+                const base = self.structures.items[structure.base_index.?];
+                const message = try std.fmt.allocPrint(
+                    self.allocator,
+                    "class '{s}' cannot use its named initializer because base class '{s}' has no accessible 'super()' construction",
+                    .{ structure.source_name, base.source_name },
+                );
+                return self.fail(initializer.name_position, message);
+            }
         }
         for (initializer.fields, 0..) |field, field_index| {
             var known: ?StructureFieldSymbol = null;
@@ -3396,32 +3681,32 @@ pub const Analyzer = struct {
         };
         const structure = self.findStructureByGeneratedName(generated_structure_name).?;
         const structure_index = self.findStructureIndexByGeneratedName(generated_structure_name).?;
-        for (structure.fields) |field| {
-            if (std.mem.eql(u8, field.source_name, member.name)) {
-                try self.requireFieldAccess(structure_index, structure, field, member.name_position);
-                if (bind_function and field.type == .function and field.type.function.owner != null) {
-                    var bound_type = field.type;
-                    bound_type.function.owner = null;
-                    return self.newExpression(.{
-                        .type = bound_type,
-                        .position = member.name_position,
-                        .lifetime_depth = expressionScopeDepth(member.object, scope),
-                        .value = .{ .bound_function = .{
-                            .object = object,
-                            .generated_name = field.generated_name,
-                        } },
-                    });
-                }
+        if (self.findFieldInHierarchy(structure_index, member.name)) |field_candidate| {
+            const declaring_structure = &self.structures.items[field_candidate.structure_index];
+            const field = field_candidate.symbol;
+            try self.requireFieldAccess(field_candidate.structure_index, declaring_structure, field, member.name_position);
+            if (bind_function and field.type == .function and field.type.function.owner != null) {
+                var bound_type = field.type;
+                bound_type.function.owner = null;
                 return self.newExpression(.{
-                    .type = field.type,
+                    .type = bound_type,
                     .position = member.name_position,
-                    .lifetime_depth = object.lifetime_depth,
-                    .value = .{ .member_access = .{
+                    .lifetime_depth = expressionScopeDepth(member.object, scope),
+                    .value = .{ .bound_function = .{
                         .object = object,
                         .generated_name = field.generated_name,
                     } },
                 });
             }
+            return self.newExpression(.{
+                .type = field.type,
+                .position = member.name_position,
+                .lifetime_depth = object.lifetime_depth,
+                .value = .{ .member_access = .{
+                    .object = object,
+                    .generated_name = field.generated_name,
+                } },
+            });
         }
         const message = try std.fmt.allocPrint(self.allocator, "{s} '{s}' has no field '{s}'", .{ if (structure.is_class) "class" else "struct", structure.source_name, member.name });
         return self.fail(member.name_position, message);
@@ -4000,12 +4285,20 @@ pub const Analyzer = struct {
             }
             return expression_value;
         }
+        if (self.classUpcastDistance(expression_value.type, target_type) != null) {
+            return self.newExpression(.{
+                .type = target_type,
+                .position = expression_value.position,
+                .lifetime_depth = expression_value.lifetime_depth,
+                .value = .{ .conversion = .{ .operand = expression_value, .target_type = target_type } },
+            });
+        }
         if (target_type == .optional) {
             if (expression_value.type == .null) {
                 expression_value.type = target_type;
                 return expression_value;
             }
-            if (expression_value.type == .optional and canWiden(expression_value.type.optional.*, target_type.optional.*)) {
+            if (expression_value.type == .optional and self.implicitConversionScore(expression_value.type.optional.*, target_type.optional.*) != null) {
                 return self.newExpression(.{
                     .type = target_type,
                     .position = expression_value.position,
@@ -4056,6 +4349,32 @@ pub const Analyzer = struct {
             });
         }
         return expression_value;
+    }
+
+    fn classUpcastDistance(self: *const Analyzer, source: Type, target: Type) ?u8 {
+        if (source != .structure or target != .structure or !source.structure.is_class or !target.structure.is_class) return null;
+        const source_index = self.findStructureIndexByGeneratedName(source.structure.generated_name) orelse return null;
+        const target_index = self.findStructureIndexByGeneratedName(target.structure.generated_name) orelse return null;
+        var distance: u8 = 0;
+        var cursor: ?usize = source_index;
+        while (cursor) |index| {
+            if (index == target_index) return distance;
+            distance +|= 1;
+            cursor = self.structures.items[index].base_index;
+        }
+        return null;
+    }
+
+    fn implicitConversionScore(self: *const Analyzer, source: Type, target: Type) ?u8 {
+        if (typeEqual(source, target)) return 0;
+        if (target == .optional) {
+            if (source == .null) return 3;
+            if (source == .optional) return self.implicitConversionScore(source.optional.*, target.optional.*);
+            const score = self.implicitConversionScore(source, target.optional.*) orelse return null;
+            return score +| 3;
+        }
+        if (self.classUpcastDistance(source, target)) |distance| return distance;
+        return overloadScore(source, target);
     }
 
     fn optionalType(self: *Analyzer, contained_type: Type) Allocator.Error!Type {
@@ -5181,6 +5500,86 @@ test "class constructors require complete initialization on every path" {
     try expectResolvedSemanticError(
         "class Player {} class Match { owner:Player; pub init(owner:Player) { var alias = self; self.owner = owner } } func main() {}",
         "'self' cannot escape before every class field is initialized",
+    );
+}
+
+test "class inheritance constructs one base and converts references upward" {
+    const Parser = @import("Parser.zig").Parser;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var parser = Parser.init(allocator,
+        \\class Entity {
+        \\    id:int
+        \\    sub position:int
+        \\    sub init(id:int, position:int) { self.id = id; self.position = position }
+        \\    pub func move(delta:int) { self.position += delta }
+        \\}
+        \\class Player : Entity {
+        \\    name:str
+        \\    pub init(id:int, name:str, position:int) : super(id, position) { self.name = name }
+        \\    pub func copy_position(other:Entity) { self.position = other.position }
+        \\}
+        \\func update(entity:Entity) { entity.move(1) }
+        \\func main() {
+        \\    var player = Player(1, "Ada", 2)
+        \\    var entity:Entity = player
+        \\    var optional:Entity? = player
+        \\    var entities:Entity[] = [player]
+        \\    update(player)
+        \\    assert(entity == player, "upcast keeps identity")
+        \\}
+    );
+    var analyzer = Analyzer.init(allocator);
+    const program = try analyzer.analyze(try resolveSingleTestProgram(allocator, try parser.parse()));
+    try std.testing.expectEqualStrings(program.structures[0].generated_name, program.structures[1].base.?.generated_name);
+    try std.testing.expect(program.structures[1].constructors[0].base_initializer != null);
+    try std.testing.expect(program.functions[1].statements[1].variable_declaration.initializer.value == .conversion);
+
+    try expectResolvedSemanticError(
+        "class Base { value:int; sub init() {} } class Child : Base { value:int; pub init() : super() {} } func main() {}",
+        "field 'value' in class 'Child' collides with an inherited field",
+    );
+    try expectResolvedSemanticError(
+        "class Base { func hidden() {} } class Child : Base { pub init() {} pub func reveal() { self.hidden() } } func main() {}",
+        "method 'hidden' is private in class 'Base'",
+    );
+    try expectResolvedSemanticError(
+        "class Base { hidden:int } class Child : Base { pub init() {} pub func reveal() int { return self.hidden } } func main() {}",
+        "field 'hidden' is private in class 'Base'",
+    );
+    try expectResolvedSemanticError(
+        "class Base { init() {} } class Child : Base { pub init() : super() {} } func main() {}",
+        "constructor of base class 'Base' is private",
+    );
+    try expectResolvedSemanticError(
+        "class First : Second {} class Second : First {} func main() {}",
+        "inheritance cycle involving class 'First'",
+    );
+    try expectResolvedSemanticError(
+        "class Base { pub func act() {} } class Child : Base { pub func act() {} } func main() {}",
+        "method 'act' in class 'Child' matches an inherited signature; method overriding is not available yet",
+    );
+    try expectResolvedSemanticError(
+        "class Base {} class Child : Base {} func main() { var children:Child[] = []; var bases:Base[] = children }",
+        "expected 'Base[]', found 'Child[]'",
+    );
+    try expectResolvedSemanticError(
+        "class Base {} class Child : Base {} func main() { var base = Base(); var child:Child = base }",
+        "expected 'Child', found 'Base'",
+    );
+    try expectResolvedSemanticError(
+        "struct Value {} class Child : Value {} func main() {}",
+        "base type 'Value' is not a class",
+    );
+    try expectResolvedSemanticError(
+        "class Dependency {} class Base { dependency:Dependency } class Child : Base { pub init() {} } func main() {}",
+        "base class 'Base' cannot be constructed with 'super()'",
+    );
+    try expectResolvedSemanticError(
+        "class Root { pub init() : super() {} } func main() {}",
+        "constructor 'super' call requires a base class",
     );
 }
 

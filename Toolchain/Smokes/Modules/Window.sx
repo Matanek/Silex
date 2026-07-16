@@ -2,10 +2,10 @@ pub struct Session {
     active:bool = true
 }
 
-pub class Counter {
+pub class Meter {
     value:int
 
-    pub init(value:int) {
+    sub init(value:int) {
         self.value = value
     }
 
@@ -16,6 +16,10 @@ pub class Counter {
     pub func current() int {
         return self.value
     }
+}
+
+pub class Counter : Meter {
+    pub init(value:int) : super(value) {}
 }
 
 pub func create_session() Session {

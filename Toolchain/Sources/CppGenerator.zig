@@ -238,6 +238,8 @@ pub fn generateWithSources(
         \\public:
         \\    SilexRef() = default;
         \\    SilexRef(const SilexRef& other) : object_(other.object_) { retain(); }
+        \\    template <typename U> requires std::is_base_of_v<T, U>
+        \\    SilexRef(const SilexRef<U>& other) : object_(other.base()) { retain(); }
         \\    SilexRef(SilexRef&& other) noexcept : object_(std::exchange(other.object_, nullptr)) {}
         \\    ~SilexRef() { reset(); }
         \\
@@ -254,12 +256,19 @@ pub fn generateWithSources(
         \\        object_ = std::exchange(other.object_, nullptr);
         \\        return *this;
         \\    }
+        \\    template <typename U> requires std::is_base_of_v<T, U>
+        \\    SilexRef& operator=(const SilexRef<U>& other) {
+        \\        reset();
+        \\        object_ = other.base();
+        \\        retain();
+        \\        return *this;
+        \\    }
         \\
         \\    T* operator->() const { return static_cast<T*>(object_); }
         \\    T& operator*() const { return *static_cast<T*>(object_); }
         \\    explicit operator bool() const { return object_ != nullptr; }
-        \\    bool operator==(const SilexRef& other) const { return object_ == other.object_; }
-        \\    bool operator!=(const SilexRef& other) const { return object_ != other.object_; }
+        \\    template <typename U> bool operator==(const SilexRef<U>& other) const { return object_ == other.base(); }
+        \\    template <typename U> bool operator!=(const SilexRef<U>& other) const { return object_ != other.base(); }
         \\    SilexObject* base() const { return object_; }
         \\    void reset() {
         \\        SilexObject* previous = std::exchange(object_, nullptr);
@@ -772,10 +781,20 @@ pub fn generateWithSources(
         try output.appendSlice(allocator, ";\n");
     }
     if (program.structures.len > 0) try output.append(allocator, '\n');
-    for (program.structures) |structure| {
+    const structure_order = try structureDefinitionOrder(allocator, program.structures);
+    for (structure_order) |structure_index| {
+        const structure = program.structures[structure_index];
         try output.appendSlice(allocator, "struct ");
         try output.appendSlice(allocator, structure.generated_name);
-        if (structure.is_class) try output.appendSlice(allocator, " final : SilexObject");
+        if (structure.is_class) {
+            try output.appendSlice(allocator, " : ");
+            if (structure.base) |base| {
+                try output.appendSlice(allocator, "public ");
+                try output.appendSlice(allocator, base.generated_name);
+            } else {
+                try output.appendSlice(allocator, "SilexObject");
+            }
+        }
         try output.appendSlice(allocator, " {\n");
         for (structure.fields) |field| {
             try output.appendSlice(allocator, "    ");
@@ -792,7 +811,7 @@ pub fn generateWithSources(
             }
             try output.appendSlice(allocator, ";\n");
         }
-        if (structure.is_class and structure.constructors.len == 0) {
+        if (structure.is_class and structure.constructors.len == 0 and structure.implicit_constructor_available) {
             try output.appendSlice(allocator, "\n    ");
             try output.appendSlice(allocator, structure.generated_name);
             try output.append(allocator, '(');
@@ -802,14 +821,20 @@ pub fn generateWithSources(
                 try output.appendSlice(allocator, try std.fmt.allocPrint(allocator, " silexField{d}", .{index}));
             }
             try output.append(allocator, ')');
-            if (structure.fields.len == 0) {
+            if (structure.fields.len == 0 and structure.implicit_base_initializer == null) {
                 try output.appendSlice(allocator, " = default;\n");
             } else {
                 try output.appendSlice(allocator, " : ");
+                var initializer_count: usize = 0;
+                if (structure.implicit_base_initializer) |base_initializer| {
+                    try generateBaseInitializer(allocator, &output, base_initializer);
+                    initializer_count += 1;
+                }
                 for (structure.fields, 0..) |field, index| {
-                    if (index != 0) try output.appendSlice(allocator, ", ");
+                    if (initializer_count != 0 or index != 0) try output.appendSlice(allocator, ", ");
                     try output.appendSlice(allocator, field.generated_name);
                     try output.appendSlice(allocator, try std.fmt.allocPrint(allocator, "(std::move(silexField{d}))", .{index}));
+                    initializer_count += 1;
                 }
                 try output.appendSlice(allocator, " {}\n");
             }
@@ -828,6 +853,11 @@ pub fn generateWithSources(
         try output.appendSlice(allocator, "\n    void silexTrace(const SilexTraceVisitor& visit) const");
         if (structure.is_class) try output.appendSlice(allocator, " override");
         try output.appendSlice(allocator, " {\n");
+        if (structure.base) |base| {
+            try output.appendSlice(allocator, "        ");
+            try output.appendSlice(allocator, base.generated_name);
+            try output.appendSlice(allocator, "::silexTrace(visit);\n");
+        }
         for (structure.fields) |field| {
             try output.appendSlice(allocator, "        silexTraceValue(");
             try output.appendSlice(allocator, field.generated_name);
@@ -836,6 +866,11 @@ pub fn generateWithSources(
         try output.appendSlice(allocator, "    }\n    void silexClear()");
         if (structure.is_class) try output.appendSlice(allocator, " override");
         try output.appendSlice(allocator, " {\n");
+        if (structure.base) |base| {
+            try output.appendSlice(allocator, "        ");
+            try output.appendSlice(allocator, base.generated_name);
+            try output.appendSlice(allocator, "::silexClear();\n");
+        }
         for (structure.fields) |field| {
             try output.appendSlice(allocator, "        silexClearValue(");
             try output.appendSlice(allocator, field.generated_name);
@@ -875,6 +910,10 @@ pub fn generateWithSources(
     for (program.structures) |structure| {
         for (structure.constructors) |constructor| {
             try generateConstructorSignature(allocator, &output, structure.generated_name, constructor, true);
+            if (constructor.base_initializer) |base_initializer| {
+                try output.appendSlice(allocator, " : ");
+                try generateBaseInitializer(allocator, &output, base_initializer);
+            }
             try output.appendSlice(allocator, " {\n");
             try generateCapturedParameterBindings(allocator, &output, constructor.parameters, 1);
             try generateStatements(allocator, &output, constructor.statements, 1, false);
@@ -942,6 +981,44 @@ fn generateMethodSignature(
     }
     try output.append(allocator, ')');
     if (!method.is_mutating) try output.appendSlice(allocator, " const");
+}
+
+fn generateBaseInitializer(
+    allocator: Allocator,
+    output: *std.ArrayList(u8),
+    initializer: Semantic.BaseInitializer,
+) !void {
+    try output.appendSlice(allocator, initializer.generated_name);
+    try output.append(allocator, '(');
+    for (initializer.arguments, 0..) |argument, index| {
+        if (index != 0) try output.appendSlice(allocator, ", ");
+        try generateExpression(allocator, output, argument);
+    }
+    try output.append(allocator, ')');
+}
+
+fn structureDefinitionOrder(allocator: Allocator, structures: []const Semantic.Structure) ![]const usize {
+    const emitted = try allocator.alloc(bool, structures.len);
+    @memset(emitted, false);
+    var order: std.ArrayList(usize) = .empty;
+    while (order.items.len != structures.len) {
+        var progressed = false;
+        for (structures, 0..) |structure, index| {
+            if (emitted[index]) continue;
+            if (structure.base) |base| {
+                var base_index: ?usize = null;
+                for (structures, 0..) |candidate, candidate_index| {
+                    if (std.mem.eql(u8, candidate.generated_name, base.generated_name)) base_index = candidate_index;
+                }
+                if (base_index == null or !emitted[base_index.?]) continue;
+            }
+            emitted[index] = true;
+            try order.append(allocator, index);
+            progressed = true;
+        }
+        if (!progressed) unreachable;
+    }
+    return order.toOwnedSlice(allocator);
 }
 
 fn generateConstructorSignature(
@@ -1958,6 +2035,10 @@ fn generateExpression(allocator: Allocator, output: *std.ArrayList(u8), expressi
             }
         },
         .conversion => |conversion| {
+            if (isClassType(conversion.target_type)) {
+                try generateExpression(allocator, output, conversion.operand);
+                return;
+            }
             try output.appendSlice(allocator, "checkedConvert<");
             try output.appendSlice(allocator, cppType(conversion.target_type));
             try output.appendSlice(allocator, ">(");
@@ -2561,10 +2642,10 @@ test "generate class references identity access and cycle tracing" {
     var analyzer = Semantic.Analyzer.init(allocator);
     const cpp = try generate(allocator, try analyzer.analyze(try resolveSingleTestProgram(allocator, try parser.parse())));
 
-    try std.testing.expect(std.mem.indexOf(u8, cpp, "struct SilexClass0 final : SilexObject") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "struct SilexClass0 : SilexObject") != null);
     try std.testing.expect(std.mem.indexOf(u8, cpp, "SilexRef<SilexClass0>") != null);
     try std.testing.expect(std.mem.indexOf(u8, cpp, "silexMake<SilexClass0>") != null);
-    try std.testing.expect(std.mem.indexOf(u8, cpp, "silexValue1->method0()") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "silexValue1->method0_0()") != null);
     try std.testing.expect(std.mem.indexOf(u8, cpp, "(silexValue0 == silexValue1)") != null);
     try std.testing.expect(std.mem.indexOf(u8, cpp, "unreachable class graph was not collected") != null);
 }

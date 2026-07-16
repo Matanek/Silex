@@ -9,6 +9,10 @@ use Shared.Deep as Deep
 use Plugins.WindowSession
 use Window.Session as NativeSession
 
+class LocalCounter : Window.Meter {
+    pub init(value:int) : super(value) {}
+}
+
 func main() {
     let session:WindowSession = Plugins.create_window()
     let raw:WindowSession = Plugins.raw_create()
@@ -21,6 +25,8 @@ func main() {
     print(counter.current())
     var initialized_counter = Window.Counter(4)
     print(initialized_counter.current())
+    var local_counter = LocalCounter(5)
+    print(local_counter.current())
     print(Shared.value())
     print(Deep.value())
     print(message())

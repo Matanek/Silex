@@ -252,6 +252,15 @@
     ],
     "description": "Declare a shared-identity type"
   },
+  "Subclass": {
+    "prefix": "subclass",
+    "body": [
+      "class ${1:Child} : ${2:Base} {",
+      "    $0",
+      "}"
+    ],
+    "description": "Declare a class with one base class"
+  },
   "Public class member": {
     "prefix": "pub",
     "body": [
@@ -276,6 +285,15 @@
       "}"
     ],
     "description": "Declare a public class constructor"
+  },
+  "Public class constructor with base": {
+    "prefix": "initsuper",
+    "body": [
+      "pub init(${1}) : super(${2}) {",
+      "    $0",
+      "}"
+    ],
+    "description": "Declare a public constructor that initializes the immediate base"
   },
   "Subclass class member": {
     "prefix": "sub",

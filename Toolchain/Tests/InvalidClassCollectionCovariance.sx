@@ -1,0 +1,7 @@
+class Entity {}
+class Player : Entity {}
+
+func main() {
+    var players:Player[] = []
+    var entities:Entity[] = players
+}

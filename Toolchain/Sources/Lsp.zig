@@ -1690,6 +1690,7 @@ const language_completions = [_]CompletionItem{
     .{ .label = "struct", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "class", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "init", .kind = 14, .detail = "Silex keyword" },
+    .{ .label = "super", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "assert", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "panic", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "let", .kind = 14, .detail = "Silex keyword" },
@@ -1732,6 +1733,7 @@ test "completion items include language terms and document identifiers" {
     try std.testing.expect(containsCompletion(items, "func"));
     try std.testing.expect(containsCompletion(items, "class"));
     try std.testing.expect(containsCompletion(items, "init"));
+    try std.testing.expect(containsCompletion(items, "super"));
     try std.testing.expect(containsCompletion(items, "sub"));
     try std.testing.expect(containsCompletion(items, "elif"));
     try std.testing.expect(containsCompletion(items, "total"));

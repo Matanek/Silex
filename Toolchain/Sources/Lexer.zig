@@ -18,6 +18,7 @@ pub const TokenTag = enum {
     keyword_struct,
     keyword_class,
     keyword_init,
+    keyword_super,
     keyword_func,
     keyword_self,
     keyword_true,
@@ -462,6 +463,7 @@ fn keywordTag(lexeme: []const u8) ?TokenTag {
         .{ "struct", TokenTag.keyword_struct },
         .{ "class", TokenTag.keyword_class },
         .{ "init", TokenTag.keyword_init },
+        .{ "super", TokenTag.keyword_super },
         .{ "func", TokenTag.keyword_func },
         .{ "self", TokenTag.keyword_self },
         .{ "true", TokenTag.keyword_true },
@@ -540,6 +542,11 @@ test "reserve sub keyword" {
 test "reserve init keyword" {
     var lexer = Lexer.init("init");
     try std.testing.expectEqual(TokenTag.keyword_init, (try lexer.next()).tag);
+}
+
+test "reserve super keyword" {
+    var lexer = Lexer.init("super");
+    try std.testing.expectEqual(TokenTag.keyword_super, (try lexer.next()).tag);
 }
 
 test "recognize reserved range keyword" {

@@ -114,6 +114,19 @@ pub const Parser = struct {
         const name = self.current.lexeme;
         const name_position = self.current.position;
         try self.advance();
+        var base: ?Ast.BaseClass = null;
+        if (self.current.tag == .colon) {
+            if (!is_class) return self.fail("only a class can declare a base class");
+            try self.advance();
+            const base_position = self.current.position;
+            base = .{
+                .name = try self.parseQualifiedName("expected base class name after ':'"),
+                .position = base_position,
+            };
+            if (self.current.tag == .comma or self.current.tag == .colon) {
+                return self.fail("a class can declare only one base class");
+            }
+        }
         try self.expect(.left_brace, "expected '{'");
         var fields: std.ArrayList(Ast.StructureField) = .empty;
         var constructors: std.ArrayList(Ast.Constructor) = .empty;
@@ -136,11 +149,22 @@ pub const Parser = struct {
                 const constructor_position = self.current.position;
                 try self.advance();
                 const parameters = try self.parseParameters();
+                var super_arguments: ?[]const *Ast.Expression = null;
+                var super_position: ?Source.Position = null;
+                if (self.current.tag == .colon) {
+                    try self.advance();
+                    if (self.current.tag != .keyword_super) return self.fail("expected 'super' after constructor ':'");
+                    super_position = self.current.position;
+                    try self.advance();
+                    super_arguments = try self.parseCallArguments();
+                }
                 if (self.current.tag != .left_brace) return self.fail("constructor 'init' cannot declare a return type");
                 try constructors.append(self.allocator, .{
                     .visibility = visibility,
                     .position = constructor_position,
                     .parameters = parameters,
+                    .super_arguments = super_arguments,
+                    .super_position = super_position,
                     .statements = try self.parseBlock(),
                 });
                 continue;
@@ -175,6 +199,7 @@ pub const Parser = struct {
             .position = position,
             .name = name,
             .name_position = name_position,
+            .base = base,
             .fields = try fields.toOwnedSlice(self.allocator),
             .constructors = try constructors.toOwnedSlice(self.allocator),
             .methods = try methods.toOwnedSlice(self.allocator),
@@ -1687,6 +1712,29 @@ test "parse visible overloaded class constructors" {
     try std.testing.expectEqual(Ast.MemberVisibility.public_access, program.structures[0].constructors[0].visibility);
     try std.testing.expectEqual(Ast.MemberVisibility.subclass, program.structures[0].constructors[1].visibility);
     try std.testing.expectEqual(@as(usize, 1), program.structures[0].constructors[1].parameters.len);
+}
+
+test "parse class base and constructor super call" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(),
+        \\class Entity { sub init(id:int) {} }
+        \\class Player : Entity {
+        \\    pub init(id:int, name:str) : super(id) {}
+        \\}
+        \\func main() {}
+    );
+    const program = try parser.parse();
+    try std.testing.expectEqualStrings("Entity", program.structures[1].base.?.name);
+    try std.testing.expectEqual(@as(usize, 1), program.structures[1].constructors[0].super_arguments.?.len);
+}
+
+test "reject a second base class" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(), "class Player : Entity, Actor {} func main() {}");
+    try std.testing.expectError(error.InvalidSource, parser.parse());
+    try std.testing.expectEqualStrings("a class can declare only one base class", parser.diagnostic.?.message);
 }
 
 test "reject constructors on structs" {

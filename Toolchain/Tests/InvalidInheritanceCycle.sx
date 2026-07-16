@@ -1,0 +1,4 @@
+class First : Second {}
+class Second : First {}
+
+func main() {}

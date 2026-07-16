@@ -385,15 +385,23 @@ pub const Structure = struct {
     position: Source.Position,
     name: []const u8,
     name_position: Source.Position,
+    base: ?BaseClass = null,
     fields: []const StructureField,
     constructors: []const Constructor = &.{},
     methods: []const Function,
+};
+
+pub const BaseClass = struct {
+    name: []const u8,
+    position: Source.Position,
 };
 
 pub const Constructor = struct {
     visibility: MemberVisibility,
     position: Source.Position,
     parameters: []const Parameter,
+    super_arguments: ?[]const *Expression = null,
+    super_position: ?Source.Position = null,
     statements: []const Statement,
 };
 

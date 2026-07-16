@@ -91,6 +91,81 @@ A class without any `init` keeps its existing named field initializer,
 including `Type()` when its fields permit it. Structures do not have custom
 constructors.
 
+## Single inheritance
+
+A class may name one immediate base class after `:`. The base is part of the
+same shared-identity instance; it is not a copied or separately allocated
+object:
+
+```sx
+class Entity {
+    sub position:int
+
+    sub init(position:int) {
+        self.position = position
+    }
+
+    pub func move(delta:int) {
+        self.position += delta
+    }
+}
+
+class Player : Entity {
+    name:str
+
+    pub init(name:str, position:int) : super(position) {
+        self.name = name
+    }
+}
+
+var player = Player("Ada", 1)
+player.move(2)
+```
+
+Inheritance is transitive but always single. The base must be a visible class;
+structures, multiple bases and inheritance cycles are rejected.
+
+The `: super(...)` suffix selects a `sub` or `pub` constructor of the immediate
+base with positional overload rules. A private base constructor is not
+accessible. Omitting the suffix means `: super()` and is valid only when the
+base has an accessible zero-argument construction. The complete base is built
+before the child's declared field values and constructor body. Base
+constructors are never inherited as constructors of the child.
+
+When a base has no custom constructor, `super()` uses its historical field
+construction only if every required base field has a declared or intrinsic
+value. A child without custom constructors keeps the named initializer for its
+own `pub` fields when that same base construction is available. Inherited
+fields never become named arguments of the child initializer.
+
+An inherited `pub` method remains available through the child. Code in a child
+may also use `sub` fields and methods declared anywhere in its base chain,
+including through another instance from that hierarchy. Private members remain
+exclusive to their declaring class. A child field cannot reuse an inherited
+field name. An identical inherited method signature is rejected until explicit
+overriding and dynamic dispatch are introduced.
+
+A child reference converts implicitly to any base reference for a binding,
+argument, return value or optional promotion. The conversion keeps a strong
+reference to the complete instance, so related references compare by the same
+identity:
+
+```sx
+func update(entity:Entity) {
+    entity.move(1)
+}
+
+var player = Player("Ada", 1)
+var entity:Entity = player
+update(player)
+print(entity == player) // true
+```
+
+The reverse conversion is not implicit. Mutable collections are invariant:
+`Player[]` does not convert to `Entity[]`. A new `Entity[]` may nevertheless be
+built from player expressions because each element is converted while the new
+collection is created.
+
 ## Member visibility
 
 Every class field and method is private by default. A private member is
@@ -98,7 +173,7 @@ accessible from methods of its declaring class, including through another
 instance of that same class, but not from other code in the module.
 
 `pub` exposes a member everywhere the class is visible. `sub` reserves a member
-for its declaring class and its future descendants:
+for its declaring class and descendants:
 
 ```sx
 pub class Session {
@@ -113,9 +188,8 @@ pub class Session {
 }
 ```
 
-Inheritance is not currently part of Silex, so a `sub` member can presently be
-used only by its declaring class. There is no explicit `private` keyword: the
-absence of a marker is the canonical private form.
+There is no explicit `private` keyword: the absence of a marker is the
+canonical private form.
 
 A named initializer is also an external member access. It can name only `pub`
 fields, while private and `sub` fields must obtain their declared defaults:
@@ -161,18 +235,21 @@ replace that place with another player or with `null`.
 replacement through `&Player?`. Extracting or copying a present optional keeps
 the instance identity.
 
-Two values of the same class compare equal only when they designate the same
-instance. Their field contents do not participate in equality. Two optionals
-of that class compare equal when both are `null` or both contain the same
-instance. Different class types are not comparable.
+Two class references compare equal only when they designate the same instance.
+Their field contents do not participate in equality. References from the same
+inheritance chain are compared after conversion to their common related type;
+unrelated class types are not comparable. Two optionals compare equal when both
+are `null` or both contain the same instance under those rules.
 
 ## Automatic lifetime
 
-Class memory is automatic. Dropping the last reference releases an acyclic
-instance immediately. The runtime also traces class references stored through
-optionals, structures, arrays, lists, and captured function values, and
-collects an unreachable cycle without requiring `weak`, manual destruction, or
-a public collector call.
+Class memory is automatic. An upcast keeps one strong reference to the entire
+most-derived instance; base parts are never released separately. Dropping the
+last reference releases an acyclic instance immediately. The runtime also
+traces fields from every class in the base chain and class references stored
+through optionals, structures, arrays, lists, and captured function values, and
+collects an unreachable cycle without requiring `weak`, manual destruction,
+or a public collector call.
 
 A lambda still captures its outer binding under the ordinary lexical rules.
 When that binding contains a class, the runtime keeps the binding in the traced
@@ -184,5 +261,5 @@ program will not use it again. Native resources therefore keep an explicit,
 idempotent operation such as `close()` for deterministic release; cycle
 collection is not an observable Silex destructor or finalizer.
 
-Inheritance, interfaces, virtual methods, weak references, user destructors,
-and finalizers are not part of the current language.
+Method overriding and dynamic dispatch, interfaces, weak references, user
+destructors, and finalizers are not part of the current language.

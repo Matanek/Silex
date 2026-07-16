@@ -1,0 +1,157 @@
+class Entity {
+    id:int
+    sub position:int
+
+    sub init(id:int, position:int) {
+        self.id = id
+        self.position = position
+    }
+
+    pub func move(delta:int) {
+        self.position += delta
+    }
+
+    pub func get_position() int {
+        return self.position
+    }
+
+    pub func classify(value:int) int {
+        return value
+    }
+}
+
+class Player : Entity {
+    name:str
+
+    pub init(id:int, name:str, position:int) : super(id, position) {
+        self.name = name
+    }
+
+    pub func copy_position(other:Entity) {
+        self.position = other.position
+    }
+
+    pub func classify(value:str) int {
+        return 2
+    }
+}
+
+class ElitePlayer : Player {
+    rank:int
+
+    pub init(id:int, name:str, position:int, rank:int) : super(id, name, position) {
+        self.rank = rank
+    }
+}
+
+class DefaultBase {
+    sub generation:int = 7
+
+    pub func get_generation() int {
+        return self.generation
+    }
+}
+
+class DefaultChild : DefaultBase {
+    pub label:str
+}
+
+class IntrinsicBase {
+    sub count:int
+
+    pub func get_count() int {
+        return self.count
+    }
+}
+
+class IntrinsicChild : IntrinsicBase {
+    pub init() : super() {}
+}
+
+class ForwardChild : ForwardBase {
+    pub init() : super() {}
+}
+
+class ForwardBase {
+    sub init() {}
+
+    pub func ready() bool {
+        return true
+    }
+}
+
+class OrderedBase {
+    sub init(order:&int) {
+        order = 1
+    }
+}
+
+class OrderedChild : OrderedBase {
+    pub init(order:&int) : super(&order) {
+        assert(order == 1, "base constructor runs first")
+        order = 2
+    }
+}
+
+class NodeBase {
+    next:NodeBase? = null
+
+    sub init() {}
+
+    pub func connect(other:NodeBase) {
+        self.next = other
+    }
+}
+
+class DerivedNode : NodeBase {
+    pub init() {}
+}
+
+func update(entity:Entity) {
+    entity.move(1)
+}
+
+func make_entity(player:Player) Entity {
+    return player
+}
+
+func main() {
+    var player = Player(1, "Ada", 2)
+    var entity:Entity = player
+    update(player)
+    assert(entity == player, "upcast keeps identity")
+    assert(entity.get_position() == 3, "inherited method mutates the same instance")
+    assert(player.classify(4) == 4, "base overload remains visible")
+    assert(player.classify("ok") == 2, "child overload joins the inherited set")
+
+    var elite = ElitePlayer(2, "Lin", 4, 9)
+    var transitive:Entity = elite
+    assert(transitive.get_position() == 4, "upcast is transitive")
+    assert(make_entity(elite) == elite, "return conversion keeps identity")
+
+    var optional:Entity? = player
+    assert(optional == player, "optional promotion converts to the base")
+    var optional_player:Player? = player
+    var optional_entity:Entity? = optional_player
+    assert(optional_entity == player, "optional upcast keeps identity")
+    var entities:Entity[] = [player, elite]
+    assert(entities.count() == 2, "a new base collection converts each element")
+
+    var defaults = DefaultChild(label:"ready")
+    assert(defaults.get_generation() == 7, "implicit child construction initializes its base")
+    var intrinsic = IntrinsicChild()
+    assert(intrinsic.get_count() == 0, "super uses intrinsic base field values")
+    var forward = ForwardChild()
+    assert(forward.ready(), "the generator orders a base declared after its child")
+
+    var order = 0
+    var ordered = OrderedChild(&order)
+    assert(order == 2, "child body runs after the base")
+
+    var first = DerivedNode()
+    var second = DerivedNode()
+    first.connect(second)
+    second.connect(first)
+
+    print("inheritance")
+}

@@ -420,11 +420,19 @@ pub const Resolver = struct {
                 .visibility = constructor.visibility,
                 .position = constructor.position,
                 .parameters = try parameters.toOwnedSlice(self.allocator),
+                .super_arguments = if (constructor.super_arguments) |arguments| try self.transformExpressions(arguments) else null,
+                .super_position = constructor.super_position,
                 .statements = try self.transformStatementsInCurrentScope(constructor.statements),
             });
         }
         var result = structure;
         result.name = declaration.canonical_name;
+        if (structure.base) |base| {
+            result.base = .{
+                .name = (try self.resolveName(structure.position.file, base.name, .structure, base.position)).canonical_name,
+                .position = base.position,
+            };
+        }
         result.fields = try fields.toOwnedSlice(self.allocator);
         result.constructors = try constructors.toOwnedSlice(self.allocator);
         result.methods = try methods.toOwnedSlice(self.allocator);
