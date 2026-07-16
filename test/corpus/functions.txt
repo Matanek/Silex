@@ -43,8 +43,8 @@ func use_mutable(callback:func(&int)) {
       (statement
         (return_statement
           value: (expression
-            (call_expression
-              function: (identifier)
+            (invocation_expression
+              target: (identifier)
               (expression
                 (identifier))))))))
   (function_definition
@@ -84,8 +84,8 @@ func use_mutable(callback:func(&int)) {
         (print_statement
           function: (identifier)
           argument: (expression
-            (call_expression
-              function: (identifier)
+            (invocation_expression
+              target: (identifier)
               (expression
                 (integer_literal))
               (expression
@@ -108,8 +108,8 @@ func use_mutable(callback:func(&int)) {
             (integer_literal))))
       (statement
         (expression_statement
-          (call_expression
-            function: (identifier)
+          (invocation_expression
+            target: (identifier)
             (expression
               (borrow_expression
                 operand: (expression

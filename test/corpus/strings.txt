@@ -35,6 +35,7 @@ func main() {
         (print_statement
           function: (identifier)
           argument: (expression
-            (method_call_expression
-              object: (identifier)
-              method: (identifier))))))))
+            (invocation_expression
+              target: (member_expression
+                object: (identifier)
+                field: (identifier)))))))))

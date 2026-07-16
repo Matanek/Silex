@@ -224,14 +224,12 @@ module.exports = grammar({
     return_statement: ($) => seq("return", optional(field("value", $.expression))),
 
     expression_statement: ($) =>
-      choice($.call_expression, $.method_call_expression, $.cascade_expression),
+      choice($.invocation_expression, $.cascade_expression),
 
     if_statement: ($) =>
       seq(
         "if",
-        "(",
         field("condition", $.expression),
-        ")",
         field("body", $.block),
         optional(seq("else", field("alternative", $.block))),
       ),
@@ -239,22 +237,23 @@ module.exports = grammar({
     while_statement: ($) =>
       seq(
         "while",
-        "(",
         field("condition", $.expression),
-        ")",
         field("body", $.block),
       ),
 
     for_statement: ($) =>
       seq(
         "for",
-        "(",
+        choice($._for_binding, seq("(", $._for_binding, ")")),
+        field("body", $.block),
+      ),
+
+    _for_binding: ($) =>
+      seq(
         field("mutability", choice("let", "var")),
         field("name", $.identifier),
         "in",
         field("iterable", choice($.integer_range, $.expression)),
-        ")",
-        field("body", $.block),
       ),
 
     integer_range: ($) =>
@@ -285,10 +284,8 @@ module.exports = grammar({
         $.borrow_expression,
         $.conversion_expression,
         $.lambda_expression,
-        $.call_expression,
-        $.method_call_expression,
+        $.invocation_expression,
         $.cascade_expression,
-        $.structure_initializer,
         $.sequence_literal,
         $.member_expression,
         $.index_expression,
@@ -330,12 +327,10 @@ module.exports = grammar({
       choice(
         $.identifier,
         $.self_expression,
-        $.call_expression,
-        $.structure_initializer,
+        $.invocation_expression,
         $.member_expression,
         $.index_expression,
         $.slice_expression,
-        $.method_call_expression,
         $.sequence_literal,
         $.string_literal,
         $.float_literal,
@@ -387,9 +382,7 @@ module.exports = grammar({
         alias($.cascade_unary_expression, $.unary_expression),
         alias($.cascade_borrow_expression, $.borrow_expression),
         alias($.cascade_conversion_expression, $.conversion_expression),
-        $.call_expression,
-        $.method_call_expression,
-        $.structure_initializer,
+        $.invocation_expression,
         $.sequence_literal,
         $.member_expression,
         $.index_expression,
@@ -500,14 +493,6 @@ module.exports = grammar({
         seq(field("value", $._cascade_assignment_value), "as", field("type", $.type)),
       ),
 
-    structure_initializer: ($) =>
-      seq(
-        field("type", choice($.identifier, $.qualified_name)),
-        "{",
-        optional(seq($.field_initializer, repeat(seq(",", $.field_initializer)), optional(","))),
-        "}",
-      ),
-
     sequence_literal: ($) =>
       seq("[", optional(seq($.expression, repeat(seq(",", $.expression)), optional(","))), "]"),
 
@@ -523,12 +508,10 @@ module.exports = grammar({
             choice(
               $.identifier,
               $.self_expression,
-              $.call_expression,
-              $.structure_initializer,
+              $.invocation_expression,
               $.member_expression,
               $.index_expression,
               $.slice_expression,
-              $.method_call_expression,
               $.sequence_literal,
               $.string_literal,
               $.float_literal,
@@ -542,43 +525,27 @@ module.exports = grammar({
         ),
       ),
 
-    call_expression: ($) =>
+    invocation_expression: ($) =>
       seq(
-        field("function", choice($.identifier, $.qualified_name, $.parenthesized_expression, $.lambda_expression)),
-        "(",
-        optional(seq($.expression, repeat(seq(",", $.expression)))),
-        ")",
-      ),
-
-    method_call_expression: ($) =>
-      prec.left(
-        PREC.member,
-        seq(
-          field(
-            "object",
-            choice(
-              $.identifier,
-              $.self_expression,
-              $.call_expression,
-              $.structure_initializer,
-              $.member_expression,
-              $.index_expression,
-              $.slice_expression,
-              $.method_call_expression,
-              $.sequence_literal,
-              $.string_literal,
-              $.float_literal,
-              $.integer_literal,
-              $.boolean_literal,
-              $.parenthesized_expression,
-            ),
+        field(
+          "target",
+          choice(
+            $.identifier,
+            $.qualified_name,
+            $.parenthesized_expression,
+            $.lambda_expression,
+            $.member_expression,
+            $.index_expression,
           ),
-          ".",
-          field("method", $.identifier),
-          "(",
-          optional(seq($.expression, repeat(seq(",", $.expression)))),
-          ")",
         ),
+        "(",
+        optional(
+          choice(
+            seq($.expression, repeat(seq(",", $.expression))),
+            seq($.field_initializer, repeat(seq(",", $.field_initializer)), optional(",")),
+          ),
+        ),
+        ")",
       ),
 
     index_expression: ($) =>
@@ -590,12 +557,10 @@ module.exports = grammar({
             choice(
               $.identifier,
               $.self_expression,
-              $.call_expression,
-              $.structure_initializer,
+              $.invocation_expression,
               $.member_expression,
               $.index_expression,
               $.slice_expression,
-              $.method_call_expression,
               $.sequence_literal,
               $.string_literal,
               $.float_literal,
@@ -619,12 +584,10 @@ module.exports = grammar({
             choice(
               $.identifier,
               $.self_expression,
-              $.call_expression,
-              $.structure_initializer,
+              $.invocation_expression,
               $.member_expression,
               $.index_expression,
               $.slice_expression,
-              $.method_call_expression,
               $.sequence_literal,
               $.string_literal,
               $.float_literal,
