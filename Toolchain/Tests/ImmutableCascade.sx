@@ -3,7 +3,7 @@ struct Point {
 }
 
 func main() void {
-    let point = Point { x:0 }
+    let point = Point(x:0)
     point
         ..x = 1
 }

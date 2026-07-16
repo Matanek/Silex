@@ -12,9 +12,6 @@
 (structure_field
   name: (identifier) @property)
 
-(structure_initializer
-  type: [(identifier) (qualified_name)] @type)
-
 (field_initializer
   name: (identifier) @property)
 
@@ -42,12 +39,6 @@
 
 (panic_statement
   function: (identifier) @keyword)
-
-(call_expression
-  function: (identifier) @function.call)
-
-(method_call_expression
-  method: (identifier) @function.method.call)
 
 (cascade_operation
   operator: ".." @operator)

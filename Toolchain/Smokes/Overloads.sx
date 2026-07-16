@@ -31,7 +31,7 @@ func measure(value:float) float {
 }
 
 func countdown(value:int) int {
-    if (value == 0) {
+    if value == 0 {
         return 0
     }
     return countdown(value - 1)
@@ -39,7 +39,7 @@ func countdown(value:int) int {
 
 func main() {
     var value:int = 4
-    var meter = Meter { value:3 }
+    var meter = Meter(value:3)
     meter.reset(&value)
     print(measure())
     print(measure(8))

@@ -119,7 +119,7 @@ func main() {
     print(nested[-1][0])
 
     var source:uint[] = [11, 12]
-    var player = Player { items:[] }
+    var player = Player(items:[])
     player.add_items(&source)
     source[0] = 99
     print(player.items[0])

@@ -71,14 +71,10 @@ pub fn compile(
     );
     const native_module_names = try nativeModuleNames(allocator, project);
     const canonical_source_paths = try canonicalizeSourcePaths(allocator, io, source_paths);
-    const ast = if (project.single_file)
-        files[0].program
-    else resolved: {
-        var resolver = Modules.Resolver.init(allocator, project, files);
-        break :resolved resolver.resolve() catch |err| switch (err) {
-            error.InvalidSource => return report(source_paths, resolver.diagnostic.?),
-            else => |other| return other,
-        };
+    var resolver = Modules.Resolver.init(allocator, project, files);
+    const ast = resolver.resolve() catch |err| switch (err) {
+        error.InvalidSource => return report(source_paths, resolver.diagnostic.?),
+        else => |other| return other,
     };
 
     var analyzer = Semantic.Analyzer.init(allocator);

@@ -3734,6 +3734,18 @@ fn expectSemanticError(source: []const u8, expected_message: []const u8) !void {
     try std.testing.expectEqualStrings(expected_message, analyzer.diagnostic.?.message);
 }
 
+fn resolveSingleTestProgram(allocator: Allocator, program: Ast.Program) !Ast.Program {
+    const Modules = @import("Modules.zig");
+    const project = @import("Project.zig").Project{
+        .program_name = "Test",
+        .target_module = 0,
+        .modules = &.{.{ .name = "Test", .sources = &.{"Test.sx"} }},
+        .single_file = true,
+    };
+    var resolver = Modules.Resolver.init(allocator, project, &.{.{ .module_index = 0, .program = program }});
+    return resolver.resolve();
+}
+
 test "infer variables and resolve nested scope" {
     const Parser = @import("Parser.zig").Parser;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
@@ -4086,14 +4098,14 @@ test "resolve structural equality recursively" {
         \\struct Position { x:int; y:int }
         \\struct Player { name:str; position:Position }
         \\func main() void {
-        \\    let first = Player { name:"Ada", position:Position { x:10, y:20 } }
-        \\    let copy = Player { name:"Ada", position:Position { x:10, y:20 } }
+        \\    let first = Player(name:"Ada", position:Position(x:10, y:20))
+        \\    let copy = Player(name:"Ada", position:Position(x:10, y:20))
         \\    let equal = first == copy
-        \\    let different = first != Player { name:"Ada", position:Position { x:11, y:20 } }
+        \\    let different = first != Player(name:"Ada", position:Position(x:11, y:20))
         \\}
     );
     var analyzer = Analyzer.init(allocator);
-    const program = try analyzer.analyze(try parser.parse());
+    const program = try analyzer.analyze(try resolveSingleTestProgram(allocator, try parser.parse()));
 
     try std.testing.expectEqual(Type.bool, program.functions[0].statements[2].variable_declaration.type);
     try std.testing.expectEqual(Type.bool, program.functions[0].statements[3].variable_declaration.type);
@@ -4175,20 +4187,31 @@ test "reject returning a capturing lambda" {
 }
 
 test "reject storing a callback beyond a captured block" {
-    try expectSemanticError(
+    const Parser = @import("Parser.zig").Parser;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var parser = Parser.init(allocator,
         \\struct Foo {
         \\    callback:func()
         \\    func set_callback(callback:func()) { self.callback = callback }
         \\}
         \\func main() {
-        \\    var foo = Foo { callback:func() {} }
+        \\    var foo = Foo(callback:func() {})
         \\    if (true) {
         \\        var count = 1
         \\        foo.set_callback(func() { count += 1 })
         \\    }
         \\}
-    ,
+    );
+    var analyzer = Analyzer.init(allocator);
+    try std.testing.expectError(
+        error.InvalidSource,
+        analyzer.analyze(try resolveSingleTestProgram(allocator, try parser.parse())),
+    );
+    try std.testing.expectEqualStrings(
         "capturing callback cannot be stored in a receiver that outlives one of its captures",
+        analyzer.diagnostic.?.message,
     );
 }
 

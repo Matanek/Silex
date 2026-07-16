@@ -4,7 +4,7 @@ pub struct Stopwatch {
     running:bool
 
     func start() {
-        if (self.running) {
+        if self.running {
             return
         }
         self.last_microseconds = native_monotonic_microseconds()
@@ -12,7 +12,7 @@ pub struct Stopwatch {
     }
 
     func stop() {
-        if (!self.running) {
+        if !self.running {
             return
         }
         let now = native_monotonic_microseconds()
@@ -38,7 +38,7 @@ pub struct Stopwatch {
     }
 
     func get_elapsed_seconds() float {
-        if (!self.running) {
+        if !self.running {
             return self.elapsed_seconds
         }
         return self.elapsed_seconds + seconds_between(self.last_microseconds, native_monotonic_microseconds())

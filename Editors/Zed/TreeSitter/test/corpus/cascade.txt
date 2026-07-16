@@ -51,7 +51,7 @@ Struct configuration cascade
 ==================
 
 func make() Point {
-    return Point { x:0, y:0 }
+    return Point(x:0, y:0)
         ..x = 10
         ..move(1, 2)
 }
@@ -70,8 +70,8 @@ func make() Point {
         (return_statement
           value: (expression
             (cascade_expression
-              receiver: (structure_initializer
-                type: (identifier)
+              receiver: (invocation_expression
+                target: (identifier)
                 (field_initializer
                   name: (identifier)
                   value: (expression

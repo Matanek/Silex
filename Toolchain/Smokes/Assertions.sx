@@ -8,7 +8,7 @@ struct Probe {
 }
 
 func main() {
-    var probe = Probe { count:0 }
+    var probe = Probe(count:0)
     assert(probe.check(), "probe must be checked once")
     print(probe.count)
 }

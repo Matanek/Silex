@@ -1,33 +1,49 @@
 # Control flow
 
 `if` and `while` conditions must have type `bool`. Each branch and loop body
-opens a lexical scope.
+opens a lexical scope. Their canonical form places the condition directly
+between the keyword and the block:
 
 ```sx
-if (enabled) {
+if enabled {
     print("enabled")
 } else {
     print("disabled")
 }
 
-while (count > 0) {
+while count > 0 {
     count -= 1
 }
 ```
+
+Existing sources may still group the whole condition, as in `if (enabled) {}`
+or `while (count > 0) {}`. These parentheses are the ordinary expression
+grouping and do not change the compiler AST. They may instead group only a
+subexpression: `if (enabled) && count > 0 {}`.
+
+Outside parentheses, an operator at the end of a line continues the condition
+on the next line. An operator that appears only at the beginning of the next
+line does not. Newlines remain free inside a parenthesized expression, and the
+opening brace may follow a completed condition on the next line.
 
 `for` iterates through a fixed array, dynamic list, or exclusive integer range.
 Every iteration binding starts with `let` or `var`: `let` creates an immutable
 binding, while `var` creates a mutable binding.
 
 ```sx
-for (let value in values) {
+for let value in values {
     print(value)
 }
 
-for (var value in values) {
+for var value in values {
     value += 1
 }
 ```
+
+The historical forms `for (let value in values) {}` and
+`for (var value in values) {}` remain accepted. Here the parentheses wrap the
+whole iteration binding rather than an expression. The form without them is
+canonical.
 
 For a collection, the source is evaluated once and held for the duration of
 each loop body. An immutable loop allows other reads but no mutation of the
@@ -39,14 +55,18 @@ An integer range can use `start...end` or the equivalent intrinsic
 first bound is produced and the second bound is never produced:
 
 ```sx
-for (let i in 0...3) {
+for let i in 0...3 {
     print(i)
 }
 
-for (let i in range(3, 0)) {
+for let i in range(3, 0) {
     print(i)
 }
 ```
+
+Without the binding parentheses, `...` at the end of a line continues its
+range on the next line; `...` appearing only at the beginning of the next line
+does not. Newlines are free throughout a parenthesized binding.
 
 These loops print `0`, `1`, `2`, then `3`, `2`, `1`. The direction follows the
 order of the bounds; equal bounds produce no value. Both bounds have type

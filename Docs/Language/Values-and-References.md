@@ -59,7 +59,7 @@ struct Rover {
     energy:int
 }
 
-var rover = Rover { energy:10 }
+var rover = Rover(energy:10)
 var values:int[] = [1]
 increment(&rover.energy)
 increment(&values[0])

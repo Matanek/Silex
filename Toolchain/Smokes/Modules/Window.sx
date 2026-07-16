@@ -3,7 +3,7 @@ pub struct Session {
 }
 
 pub func create_session() Session {
-    return Session {}
+    return Session()
 }
 
 func validate_session(session:Session) bool {

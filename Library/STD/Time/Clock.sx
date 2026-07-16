@@ -7,11 +7,11 @@ pub struct Clock {
     paused:bool
 
     func tick() float {
-        if (self.paused) {
+        if self.paused {
             return 0.0
         }
         let now = native_monotonic_microseconds()
-        if (!self.initialized) {
+        if !self.initialized {
             self.last_microseconds = now
             self.initialized = true
             return 0.0
@@ -32,10 +32,10 @@ pub struct Clock {
     }
 
     func pause() {
-        if (self.paused) {
+        if self.paused {
             return
         }
-        if (self.initialized) {
+        if self.initialized {
             let now = native_monotonic_microseconds()
             self.pending_seconds += seconds_between(self.last_microseconds, now) * self.time_scale
             self.last_microseconds = now
@@ -44,10 +44,10 @@ pub struct Clock {
     }
 
     func resume() {
-        if (!self.paused) {
+        if !self.paused {
             return
         }
-        if (self.initialized) {
+        if self.initialized {
             self.last_microseconds = native_monotonic_microseconds()
         }
         self.paused = false
@@ -58,7 +58,7 @@ pub struct Clock {
     }
 
     func set_time_scale(scale:float) {
-        if (self.initialized && !self.paused) {
+        if self.initialized && !self.paused {
             let now = native_monotonic_microseconds()
             self.pending_seconds += seconds_between(self.last_microseconds, now) * self.time_scale
             self.last_microseconds = now
@@ -71,7 +71,7 @@ pub struct Clock {
     }
 
     func get_total_seconds() float {
-        if (!self.initialized || self.paused) {
+        if !self.initialized || self.paused {
             return self.total_seconds + self.pending_seconds
         }
         let active = seconds_between(self.last_microseconds, native_monotonic_microseconds()) * self.time_scale

@@ -1339,13 +1339,14 @@ fn generateExpression(allocator: Allocator, output: *std.ArrayList(u8), expressi
                 try output.append(allocator, ')');
             } else if ((binary.operator == .equal or binary.operator == .not_equal) and binary.left.type == .structure) {
                 const structure_type = binary.left.type.structure;
+                try output.append(allocator, '(');
                 if (binary.operator == .not_equal) try output.append(allocator, '!');
                 try generateStructureEqualityName(allocator, output, structure_type.generated_name);
                 try output.append(allocator, '(');
                 try generateExpression(allocator, output, binary.left);
                 try output.appendSlice(allocator, ", ");
                 try generateExpression(allocator, output, binary.right);
-                try output.append(allocator, ')');
+                try output.appendSlice(allocator, "))");
             } else {
                 try output.append(allocator, '(');
                 try generateExpression(allocator, output, binary.left);
@@ -1634,6 +1635,18 @@ fn assignmentOperatorText(operator: Ast.AssignmentOperator) []const u8 {
     };
 }
 
+fn resolveSingleTestProgram(allocator: Allocator, program: Ast.Program) !Ast.Program {
+    const Modules = @import("Modules.zig");
+    const project = @import("Project.zig").Project{
+        .program_name = "Test",
+        .target_module = 0,
+        .modules = &.{.{ .name = "Test", .sources = &.{"Test.sx"} }},
+        .single_file = true,
+    };
+    var resolver = Modules.Resolver.init(allocator, project, &.{.{ .module_index = 0, .program = program }});
+    return resolver.resolve();
+}
+
 test "generate typed variables and control flow" {
     const Parser = @import("Parser.zig").Parser;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
@@ -1710,11 +1723,11 @@ test "generate recursive structural equality" {
         \\struct Position { x:int y:int }
         \\struct Player { name:str position:Position }
         \\func main() void {
-        \\    print(Player { name:"Ada", position:Position { x:10, y:20 } } == Player { name:"Ada", position:Position { x:10, y:20 } })
+        \\    print(Player(name:"Ada", position:Position(x:10, y:20)) == Player(name:"Ada", position:Position(x:10, y:20)))
         \\}
     );
     var analyzer = Semantic.Analyzer.init(allocator);
-    const cpp = try generate(allocator, try analyzer.analyze(try parser.parse()));
+    const cpp = try generate(allocator, try analyzer.analyze(try resolveSingleTestProgram(allocator, try parser.parse())));
 
     try std.testing.expect(std.mem.indexOf(u8, cpp, "bool silexEqualSilexStruct0(const SilexStruct0&, const SilexStruct0&);") != null);
     try std.testing.expect(std.mem.indexOf(u8, cpp, "return left.field0 == right.field0 && silexEqualSilexStruct0(left.field1, right.field1);") != null);
@@ -1898,10 +1911,10 @@ test "generate value structs and member access" {
 
     var parser = Parser.init(allocator,
         \\struct Position { x:int; y:int }
-        \\func main() void { var position = Position { y:20, x:10 }; position.x = 12; print(position.x) }
+        \\func main() void { var position = Position(y:20, x:10); position.x = 12; print(position.x) }
     );
     var analyzer = Semantic.Analyzer.init(allocator);
-    const cpp = try generate(allocator, try analyzer.analyze(try parser.parse()));
+    const cpp = try generate(allocator, try analyzer.analyze(try resolveSingleTestProgram(allocator, try parser.parse())));
 
     try std.testing.expect(std.mem.indexOf(u8, cpp, "struct SilexStruct0 {") != null);
     try std.testing.expect(std.mem.indexOf(u8, cpp, "SilexStruct0{std::int64_t{10}, std::int64_t{20}}") != null);
@@ -1923,10 +1936,10 @@ test "generate inferred const and mutating methods" {
         \\    func current() int { return self.value }
         \\    func increment() void { self.value = self.value + 1 }
         \\}
-        \\func main() void { var counter = Counter { value:1 }; counter.increment(); print(counter.current()) }
+        \\func main() void { var counter = Counter(value:1); counter.increment(); print(counter.current()) }
     );
     var analyzer = Semantic.Analyzer.init(allocator);
-    const cpp = try generate(allocator, try analyzer.analyze(try parser.parse()));
+    const cpp = try generate(allocator, try analyzer.analyze(try resolveSingleTestProgram(allocator, try parser.parse())));
 
     try std.testing.expect(std.mem.indexOf(u8, cpp, "std::int64_t method0() const;") != null);
     try std.testing.expect(std.mem.indexOf(u8, cpp, "void method1();") != null);

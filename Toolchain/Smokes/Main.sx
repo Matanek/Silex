@@ -6,14 +6,14 @@ func main() {
 
     announce(message)
 
-    if (hit && is_positive(a) && a < b) {
+    if hit && is_positive(a) && a < b {
         print(multiply(a, b))
     } else {
         print("unexpected branch")
     }
 
     hit = false
-    if (!hit || a == b) {
+    if !hit || a == b {
         print("logic works")
     } else {
         print("unexpected branch")
@@ -23,7 +23,7 @@ func main() {
     print(hit)
 
     var countdown = 2
-    while (countdown > 0) {
+    while countdown > 0 {
         print(countdown)
         countdown = countdown - 1
     }

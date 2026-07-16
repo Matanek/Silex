@@ -7,5 +7,5 @@ struct Velocity {
 }
 
 func main() void {
-    print(Position { x:0 } == Velocity { x:0 })
+    print(Position(x:0) == Velocity(x:0))
 }

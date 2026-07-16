@@ -984,6 +984,7 @@ fn collectSemanticInfo(
     tokens: []const LexerModule.Token,
     info: *SemanticInfo,
 ) !void {
+    try collectImportedStructures(allocator, io, source, project_root, tokens, info);
     var index: usize = 0;
     while (index < tokens.len) : (index += 1) {
         if (tokens[index].tag == .keyword_struct and index + 2 < tokens.len and
@@ -1055,7 +1056,7 @@ fn collectSemanticInfo(
                     .offset = tokenOffset(source, tokens[index + 1]),
                 });
             } else if (tokens[index + 2].tag == .equal) {
-                if (structureInitializerType(tokens, index + 3)) |type_name| {
+                if (structureInitializerType(info, tokens, index + 3)) |type_name| {
                     try info.variables.append(allocator, .{
                         .name = tokens[index + 1].lexeme,
                         .type_name = type_name,
@@ -1086,10 +1087,9 @@ fn collectSemanticInfo(
             try collectParameters(allocator, source, tokens, index, &info.variables);
         }
     }
-    try collectImportedStructures(allocator, io, source, project_root, tokens, info);
 }
 
-fn structureInitializerType(tokens: []const LexerModule.Token, start: usize) ?[]const u8 {
+fn structureInitializerType(info: *const SemanticInfo, tokens: []const LexerModule.Token, start: usize) ?[]const u8 {
     if (start >= tokens.len or tokens[start].tag != .identifier) return null;
     var type_name = tokens[start].lexeme;
     var index = start + 1;
@@ -1097,7 +1097,18 @@ fn structureInitializerType(tokens: []const LexerModule.Token, start: usize) ?[]
         type_name = tokens[index + 1].lexeme;
         index += 2;
     }
-    return if (index < tokens.len and tokens[index].tag == .left_brace) type_name else null;
+    if (index >= tokens.len or tokens[index].tag != .left_parenthesis) return null;
+    if (index + 2 < tokens.len and tokens[index + 1].tag == .identifier and tokens[index + 2].tag == .colon) {
+        return type_name;
+    }
+    if (index + 1 >= tokens.len or tokens[index + 1].tag != .right_parenthesis) return null;
+    for (info.structures.items) |structure| {
+        if (std.mem.eql(u8, structure.name, type_name)) return type_name;
+    }
+    for (info.members.items) |member| {
+        if (std.mem.eql(u8, member.structure, type_name)) return type_name;
+    }
+    return null;
 }
 
 fn structureInitializerPath(
@@ -1115,7 +1126,7 @@ fn structureInitializerPath(
         try path.appendSlice(allocator, tokens[index + 1].lexeme);
         index += 2;
     }
-    if (index >= tokens.len or tokens[index].tag != .left_brace) return null;
+    if (index >= tokens.len or tokens[index].tag != .left_parenthesis) return null;
     const result: []const u8 = try path.toOwnedSlice(allocator);
     return result;
 }
@@ -1800,7 +1811,7 @@ test "member completion infers qualified standard-library structure initializers
     const aliased_source =
         \\import STD.Random as Random
         \\func main() void {
-        \\    var generator = Random.Generator { state:1 }
+        \\    var generator = Random.Generator(state:1)
         \\    generator.
         \\}
     ;
@@ -1816,7 +1827,7 @@ test "member completion infers qualified standard-library structure initializers
     const canonical_source =
         \\import STD.Random
         \\func main() void {
-        \\    var generator = STD.Random.Generator { state:1 }
+        \\    var generator = STD.Random.Generator(state:1)
         \\    generator.
         \\}
     ;
@@ -1836,7 +1847,7 @@ test "member completion loads local module structure fields and methods" {
     const source =
         \\import Math
         \\func main() void {
-        \\    var vec = Math.Vec2 {}
+        \\    var vec = Math.Vec2()
         \\    vec.
         \\}
     ;
@@ -1858,7 +1869,7 @@ test "member completion exposes STD Time clock methods" {
     const source =
         \\import STD.Time as Time
         \\func main() void {
-        \\    var clock = Time.Clock {}
+        \\    var clock = Time.Clock()
         \\    clock.
         \\}
     ;
@@ -1881,7 +1892,7 @@ test "member completion exposes STD Time stopwatch methods" {
     const source =
         \\import STD
         \\func main() void {
-        \\    var stopwatch = STD.Time.Stopwatch {}
+        \\    var stopwatch = STD.Time.Stopwatch()
         \\    stopwatch.
         \\}
     ;
@@ -1991,7 +2002,7 @@ test "terminal member dot after a compact cascade keeps the first receiver" {
     const source =
         \\import STD
         \\func main() void {
-        \\    var stopwatch = STD.Time.Stopwatch {}
+        \\    var stopwatch = STD.Time.Stopwatch()
         \\    stopwatch..reset()..start().
         \\}
     ;
@@ -2026,7 +2037,7 @@ test "cascade completion resolves an inferred structure initializer" {
         \\    func stop() void {}
         \\}
         \\func main() void {
-        \\    var move = Move { speed:10 }
+        \\    var move = Move(speed:10)
         \\        ..
         \\}
     ;

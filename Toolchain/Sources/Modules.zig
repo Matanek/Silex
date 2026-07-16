@@ -109,8 +109,9 @@ pub const Resolver = struct {
                 try self.addDeclaration(file.module_index, module_name, structure.name, .structure, structure.is_public, structure.name_position);
             }
             for (file.program.functions) |function| {
-                const canonical = if (file.module_index == self.project.target_module and std.mem.eql(u8, function.name, "main"))
-                    "main"
+                const canonical = if (self.project.single_file or
+                    (file.module_index == self.project.target_module and std.mem.eql(u8, function.name, "main")))
+                    function.name
                 else
                     try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ module_name, function.name });
                 try self.addDeclarationWithCanonical(file.module_index, function.name, canonical, .function, function.is_public, function.name_position);
@@ -130,7 +131,10 @@ pub const Resolver = struct {
         is_public: bool,
         position: Source.Position,
     ) !void {
-        const canonical = try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ module_name, source_name });
+        const canonical = if (self.project.single_file)
+            source_name
+        else
+            try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ module_name, source_name });
         try self.addDeclarationWithCanonical(module_index, source_name, canonical, kind, is_public, position);
     }
 
@@ -554,6 +558,18 @@ pub const Resolver = struct {
         result.position = expression.position;
         result.value = switch (expression.value) {
             .call => |call| call: {
+                if (call.named_fields) |fields| {
+                    if ((try self.visibleDeclarationKind(expression.position.file, call.name)) == .function) {
+                        const message = try std.fmt.allocPrint(self.allocator, "function '{s}' does not accept named arguments; named fields initialize a struct", .{call.name});
+                        return self.fail(call.name_position, message);
+                    }
+                    const declaration = try self.resolveName(expression.position.file, call.name, .structure, call.name_position);
+                    break :call .{ .structure_initializer = .{
+                        .name = declaration.canonical_name,
+                        .name_position = call.name_position,
+                        .fields = try self.transformFieldInitializers(fields),
+                    } };
+                }
                 const arguments = try self.transformExpressions(call.arguments);
                 if (self.findLocal(call.name)) {
                     break :call .{ .call = .{
@@ -561,6 +577,18 @@ pub const Resolver = struct {
                         .name_position = call.name_position,
                         .arguments = arguments,
                         .visible_declarations = null,
+                    } };
+                }
+                if ((try self.visibleDeclarationKind(expression.position.file, call.name)) == .structure) {
+                    const declaration = try self.resolveName(expression.position.file, call.name, .structure, call.name_position);
+                    if (arguments.len != 0) {
+                        const message = try std.fmt.allocPrint(self.allocator, "struct '{s}' requires named fields such as 'field:value'", .{call.name});
+                        return self.fail(call.name_position, message);
+                    }
+                    break :call .{ .structure_initializer = .{
+                        .name = declaration.canonical_name,
+                        .name_position = call.name_position,
+                        .fields = &.{},
                     } };
                 }
                 const declarations = try self.visibleFunctionDeclarations(expression.position.file, call.name, call.name_position);
@@ -603,6 +631,30 @@ pub const Resolver = struct {
                 if (try self.expressionPath(call.object)) |prefix| {
                     const path = try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ prefix, call.name });
                     if (self.looksQualified(expression.position.file, path)) {
+                        if (call.named_fields) |fields| {
+                            if ((try self.visibleDeclarationKind(expression.position.file, path)) == .function) {
+                                const message = try std.fmt.allocPrint(self.allocator, "function '{s}' does not accept named arguments; named fields initialize a struct", .{path});
+                                return self.fail(call.name_position, message);
+                            }
+                            const declaration = try self.resolveName(expression.position.file, path, .structure, call.name_position);
+                            break :method .{ .structure_initializer = .{
+                                .name = declaration.canonical_name,
+                                .name_position = call.name_position,
+                                .fields = try self.transformFieldInitializers(fields),
+                            } };
+                        }
+                        if ((try self.visibleDeclarationKind(expression.position.file, path)) == .structure) {
+                            const declaration = try self.resolveName(expression.position.file, path, .structure, call.name_position);
+                            if (call.arguments.len != 0) {
+                                const message = try std.fmt.allocPrint(self.allocator, "struct '{s}' requires named fields such as 'field:value'", .{path});
+                                return self.fail(call.name_position, message);
+                            }
+                            break :method .{ .structure_initializer = .{
+                                .name = declaration.canonical_name,
+                                .name_position = call.name_position,
+                                .fields = &.{},
+                            } };
+                        }
                         const declarations = try self.visibleFunctionDeclarations(expression.position.file, path, call.name_position);
                         break :method .{ .call = .{
                             .name = declarations[0].canonical_name,
@@ -612,11 +664,35 @@ pub const Resolver = struct {
                         } };
                     }
                 }
+                if (call.named_fields != null) {
+                    return self.fail(call.name_position, "named arguments require a struct invocation");
+                }
                 break :method .{ .method_call = .{
                     .object = try self.transformExpression(call.object),
                     .name = call.name,
                     .name_position = call.name_position,
                     .arguments = try self.transformExpressions(call.arguments),
+                } };
+            },
+            .cascade => |cascade| cascade_expression: {
+                var operations: std.ArrayList(Ast.Expression.Cascade.Operation) = .empty;
+                for (cascade.operations) |operation| {
+                    try operations.append(self.allocator, switch (operation) {
+                        .method_call => |call| .{ .method_call = .{
+                            .name = call.name,
+                            .name_position = call.name_position,
+                            .arguments = try self.transformExpressions(call.arguments),
+                        } },
+                        .field_assignment => |assignment| .{ .field_assignment = .{
+                            .name = assignment.name,
+                            .name_position = assignment.name_position,
+                            .value = try self.transformExpression(assignment.value),
+                        } },
+                    });
+                }
+                break :cascade_expression .{ .cascade = .{
+                    .object = try self.transformExpression(cascade.object),
+                    .operations = try operations.toOwnedSlice(self.allocator),
                 } };
             },
             .member_access => |member| .{ .member_access = .{
@@ -715,6 +791,20 @@ pub const Resolver = struct {
             if (pathHasQualifier(path, import_value.qualifier)) return true;
         }
         return pathHasQualifier(path, self.project.modules[file.module_index].name);
+    }
+
+    fn visibleDeclarationKind(self: *Resolver, file_index: usize, name: []const u8) !?Kind {
+        const file = &self.file_infos[file_index];
+        if (std.mem.indexOfScalar(u8, name, '.') == null) {
+            if (self.findDirect(file.module_index, name, null)) |declaration| return declaration.kind;
+            for (file.uses.items) |binding| {
+                if (std.mem.eql(u8, binding.local_name, name)) return binding.declaration.kind;
+            }
+            return null;
+        }
+        const target = try self.qualifiedExpressionTarget(file, name) orelse return null;
+        if (self.findDirect(target.module_index, target.public_name, null)) |declaration| return declaration.kind;
+        return null;
     }
 
     fn visibleFunctionDeclarations(

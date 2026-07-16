@@ -35,7 +35,7 @@ func main() {
     increment_both(&values[left], &values[right])
     print(values[0])
 
-    var rover = Rover { energy:10 }
+    var rover = Rover(energy:10)
     increment(&rover.energy)
     print(rover.energy)
 

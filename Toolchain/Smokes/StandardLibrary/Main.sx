@@ -37,24 +37,24 @@ func main() {
     print(rejected.get_int(0, 4611686018427387904))
     print(random.get_int() > 0)
 
-    var stopwatch = STD.Time.Stopwatch {}
+    var stopwatch = STD.Time.Stopwatch()
     print(!stopwatch.is_running())
     print(stopwatch.get_elapsed_seconds() == 0.0)
     stopwatch.start()
     print(stopwatch.is_running())
-    while (stopwatch.get_elapsed_seconds() <= 0.001) {}
+    while stopwatch.get_elapsed_seconds() <= 0.001 {}
     stopwatch.stop()
     let first_measurement = stopwatch.get_elapsed_seconds()
     print(!stopwatch.is_running() && first_measurement > 0.0)
 
-    var wait = STD.Time.Stopwatch {}
+    var wait = STD.Time.Stopwatch()
     wait.start()
-    while (wait.get_elapsed_seconds() <= 0.001) {}
+    while wait.get_elapsed_seconds() <= 0.001 {}
     wait.stop()
     print(stopwatch.get_elapsed_seconds() == first_measurement)
 
     stopwatch.start()
-    while (stopwatch.get_elapsed_seconds() <= first_measurement + 0.001) {}
+    while stopwatch.get_elapsed_seconds() <= first_measurement + 0.001 {}
     stopwatch.stop()
     let resumed_measurement = stopwatch.get_elapsed_seconds()
     print(resumed_measurement > first_measurement)
@@ -63,38 +63,38 @@ func main() {
     print(!stopwatch.is_running() && stopwatch.get_elapsed_seconds() == 0.0)
     stopwatch.restart()
     print(stopwatch.is_running())
-    while (stopwatch.get_elapsed_seconds() <= 0.001) {}
+    while stopwatch.get_elapsed_seconds() <= 0.001 {}
     stopwatch.stop()
     let restarted_measurement = stopwatch.get_elapsed_seconds()
     let restarted_milliseconds = stopwatch.get_elapsed_milliseconds()
     print(restarted_measurement > 0.0 && restarted_milliseconds == restarted_measurement * 1_000.0)
 
-    var clock = STD.Time.Clock {}
+    var clock = STD.Time.Clock()
     let clock_is_initial = clock.get_total_seconds() == 0.0 && !clock.is_paused()
     print(clock_is_initial && clock.get_time_scale() == 1.0)
     print(clock.tick() == 0.0)
-    while (clock.get_total_seconds() <= 0.001) {}
+    while clock.get_total_seconds() <= 0.001 {}
     let first_tick = clock.tick()
     print(first_tick > 0.0 && clock.get_total_seconds() >= first_tick)
 
     clock.pause()
     let paused_total = clock.get_total_seconds()
     wait.restart()
-    while (wait.get_elapsed_seconds() <= 0.001) {}
+    while wait.get_elapsed_seconds() <= 0.001 {}
     wait.stop()
     let paused_clock_is_frozen = clock.is_paused() && clock.get_total_seconds() == paused_total
     print(paused_clock_is_frozen && clock.tick() == 0.0)
 
     clock.resume()
     print(!clock.is_paused())
-    while (clock.get_total_seconds() <= paused_total + 0.001) {}
+    while clock.get_total_seconds() <= paused_total + 0.001 {}
     let resumed_tick = clock.tick()
     print(resumed_tick > 0.0 && clock.get_total_seconds() > paused_total)
 
     clock.set_time_scale(2.0)
     print(clock.get_time_scale() == 2.0)
     let before_scaled_tick = clock.get_total_seconds()
-    while (clock.get_total_seconds() <= before_scaled_tick + 0.002) {}
+    while clock.get_total_seconds() <= before_scaled_tick + 0.002 {}
     print(clock.tick() > 0.002)
     let clock_total = clock.get_total_seconds()
     print(clock.get_total_milliseconds() == clock_total * 1_000.0)

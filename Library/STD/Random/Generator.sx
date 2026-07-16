@@ -5,20 +5,20 @@ pub struct Generator {
 
     func get_int() int {
         var value:uint
-        if (self.state < 0) {
+        if self.state < 0 {
             let minimum:int = -9223372036854775808
             value = ((self.state - minimum) as uint) + 0x8000000000000000
         } else {
             value = self.state as uint
         }
-        if (value == 0) {
+        if value == 0 {
             value = 0x9E3779B97F4A7C15
         }
         value = value ^ (value << 13)
         value = value ^ (value >> 7)
         value = value ^ (value << 17)
         value = value & 0x7FFF_FFFF_FFFF_FFFF
-        if (value == 0) {
+        if value == 0 {
             value = 1
         }
         self.state = value as int
@@ -26,20 +26,20 @@ pub struct Generator {
     }
 
     func get_int(minimum:int, maximum:int) int {
-        if (minimum >= maximum) {
+        if minimum >= maximum {
             panic("get_int(minimum, maximum) requires minimum < maximum")
         }
-        if (minimum < 0) {
+        if minimum < 0 {
             let maximum_int:int = 9223372036854775807
-            if (maximum > maximum_int + minimum) {
+            if maximum > maximum_int + minimum {
                 panic("get_int(minimum, maximum) requires an interval width that fits in int")
             }
         }
         let width = maximum - minimum
         let limit = (9223372036854775807 / width) * width
-        while (true) {
+        while true {
             let value = self.get_int()
-            if (value <= limit) {
+            if value <= limit {
                 return minimum + (value - 1) % width
             }
         }
@@ -52,22 +52,22 @@ pub struct Generator {
     }
 
     func get_float(minimum:float, maximum:float) float {
-        if (minimum - minimum != 0.0 || maximum - maximum != 0.0) {
+        if minimum - minimum != 0.0 || maximum - maximum != 0.0 {
             panic("get_float(minimum, maximum) requires finite bounds")
         }
-        if (minimum >= maximum) {
+        if minimum >= maximum {
             panic("get_float(minimum, maximum) requires minimum < maximum")
         }
         let interval = maximum - minimum
-        if (interval - interval != 0.0) {
+        if interval - interval != 0.0 {
             panic("get_float(minimum, maximum) requires a finite interval")
         }
-        if (maximum - interval / 16777216.0 == maximum) {
+        if maximum - interval / 16777216.0 == maximum {
             panic("get_float(minimum, maximum) requires a representable value below maximum")
         }
-        while (true) {
+        while true {
             let value = minimum + self.get_float() * interval
-            if (value < maximum) {
+            if value < maximum {
                 return value
             }
         }
@@ -80,9 +80,9 @@ pub struct Generator {
 }
 
 pub func create(seed:int) Generator {
-    return Generator { state:seed }
+    return Generator(state:seed)
 }
 
 pub func system() Generator {
-    return Generator { state:native_seed() }
+    return Generator(state:native_seed())
 }

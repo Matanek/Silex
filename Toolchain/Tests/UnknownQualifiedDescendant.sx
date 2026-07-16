@@ -1,5 +1,5 @@
 import STD
 
 func main() {
-    var value = STD.Unknown.Value {}
+    var value = STD.Unknown.Value()
 }

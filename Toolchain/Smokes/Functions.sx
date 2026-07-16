@@ -5,7 +5,7 @@ func apply(value:int, callback:func(int) int) int {
 }
 
 func visit(values:int[], callback:func(int)) {
-    for (let value in values) {
+    for let value in values {
         callback(value)
     }
 }
@@ -84,19 +84,19 @@ func main() {
     print(health)
 
     visit([1, -2, 3], func(value:int) {
-        if (value > 0) {
+        if value > 0 {
             print(value)
         }
     })
 
-    var damage = Damage { callback:func(amount:int) {} }
+    var damage = Damage(callback:func(amount:int) {})
     damage.set_callback(func(amount:int) {
         health -= amount
     })
     damage.callback(5)
     print(health)
 
-    var first = Counter { count:0, callback:func() {} }
+    var first = Counter(count:0, callback:func() {})
     first.bind()
     var second = first
     second.callback()

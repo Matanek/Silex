@@ -456,9 +456,7 @@ pub const Parser = struct {
     fn parseIf(self: *Parser) ParseError!Ast.Statement {
         const position = self.current.position;
         try self.advance();
-        try self.expect(.left_parenthesis, "expected '('");
-        const condition = try self.parseExpression(true);
-        try self.expect(.right_parenthesis, "expected ')'");
+        const condition = try self.parseExpression(false);
         const body = try self.parseBlock();
         var else_body: ?[]const Ast.Statement = null;
         if (self.current.tag == .keyword_else) {
@@ -476,9 +474,7 @@ pub const Parser = struct {
     fn parseWhile(self: *Parser) ParseError!Ast.Statement {
         const position = self.current.position;
         try self.advance();
-        try self.expect(.left_parenthesis, "expected '('");
-        const condition = try self.parseExpression(true);
-        try self.expect(.right_parenthesis, "expected ')'");
+        const condition = try self.parseExpression(false);
         const body = try self.parseBlock();
         return .{ .while_statement = .{ .position = position, .condition = condition, .body = body } };
     }
@@ -486,11 +482,15 @@ pub const Parser = struct {
     fn parseFor(self: *Parser) ParseError!Ast.Statement {
         const position = self.current.position;
         try self.advance();
-        try self.expect(.left_parenthesis, "expected '('");
+        const parenthesized = self.current.tag == .left_parenthesis;
+        if (parenthesized) try self.advance();
         const mutability: Ast.Mutability = switch (self.current.tag) {
             .keyword_let => .immutable,
             .keyword_var => .mutable,
-            else => return self.fail("expected 'let' or 'var' after 'for ('"),
+            else => return self.fail(if (parenthesized)
+                "expected 'let' or 'var' after 'for ('"
+            else
+                "expected 'let' or 'var' after 'for'"),
         };
         try self.advance();
         if (self.current.tag != .identifier) return self.fail("expected iteration variable name");
@@ -498,8 +498,8 @@ pub const Parser = struct {
         const name_position = self.current.position;
         try self.advance();
         try self.expect(.keyword_in, "expected 'in' after iteration variable");
-        const source = try self.parseForSource();
-        try self.expect(.right_parenthesis, "expected ')' after for source");
+        const source = try self.parseForSource(parenthesized);
+        if (parenthesized) try self.expect(.right_parenthesis, "expected ')' after for source");
         return .{ .for_statement = .{
             .position = position,
             .name = name,
@@ -510,7 +510,7 @@ pub const Parser = struct {
         } };
     }
 
-    fn parseForSource(self: *Parser) ParseError!Ast.Statement.For.IterationSource {
+    fn parseForSource(self: *Parser, allow_line_breaks: bool) ParseError!Ast.Statement.For.IterationSource {
         if (self.current.tag == .keyword_range) {
             try self.advance();
             try self.expect(.left_parenthesis, "expected '(' after 'range'");
@@ -521,10 +521,10 @@ pub const Parser = struct {
             return .{ .integer_range = .{ .start = start, .end = end } };
         }
 
-        const first = try self.parseExpression(true);
-        if (self.current.tag == .dot_dot_dot) {
+        const first = try self.parseExpression(allow_line_breaks);
+        if (self.current.tag == .dot_dot_dot and self.canContinueExpression(allow_line_breaks)) {
             try self.advance();
-            const end = try self.parseExpression(true);
+            const end = try self.parseExpression(allow_line_breaks);
             return .{ .integer_range = .{ .start = first, .end = end } };
         }
         return .{ .collection = first };
@@ -829,16 +829,12 @@ pub const Parser = struct {
             try self.newExpression(.{ .position = token.position, .value = .self })
         else if (self.current.tag == .left_parenthesis)
             try self.parseCallAfterName(token.lexeme, token.position)
-        else if (self.current.tag == .left_brace)
-            try self.parseStructureInitializer(token.lexeme, token.position)
         else
             try self.newExpression(.{ .position = token.position, .value = .{ .identifier = token.lexeme } });
 
         expression = try self.parsePostfix(expression);
-        if (self.current.tag == .left_brace) {
-            if (try self.expressionPath(expression)) |path| {
-                return self.parseStructureInitializer(path, token.position);
-            }
+        if (self.current.tag == .left_brace and try self.looksLikeLegacyStructureInitializer()) {
+            return self.fail("structure initializers use 'Type(...)', not 'Type { ... }'");
         }
         return expression;
     }
@@ -910,63 +906,91 @@ pub const Parser = struct {
         return expression;
     }
 
-    fn expressionPath(self: *Parser, expression: *const Ast.Expression) !?[]const u8 {
-        return switch (expression.value) {
-            .identifier => |name| name,
-            .member_access => |member| if (try self.expressionPath(member.object)) |prefix|
-                try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ prefix, member.name })
-            else
-                null,
-            else => null,
-        };
-    }
-
-    fn parseStructureInitializer(
-        self: *Parser,
-        name: []const u8,
-        position: Source.Position,
-    ) ParseError!*Ast.Expression {
-        try self.expect(.left_brace, "expected '{'");
-        var fields: std.ArrayList(Ast.Expression.FieldInitializer) = .empty;
-        while (self.current.tag != .right_brace) {
-            if (self.current.tag != .identifier) return self.fail("expected field name");
-            const field_name = self.current.lexeme;
-            const field_position = self.current.position;
-            try self.advance();
-            try self.expect(.colon, "expected ':' after field name");
-            try fields.append(self.allocator, .{
-                .name = field_name,
-                .position = field_position,
-                .value = try self.parseExpression(true),
-            });
-            if (self.current.tag != .comma) break;
-            try self.advance();
-        }
-        try self.expect(.right_brace, "expected '}'");
-        return self.newExpression(.{
-            .position = position,
-            .value = .{ .structure_initializer = .{
-                .name = name,
-                .name_position = position,
-                .fields = try fields.toOwnedSlice(self.allocator),
-            } },
-        });
-    }
-
     fn parseCallAfterName(
         self: *Parser,
         name: []const u8,
         position: Source.Position,
     ) ParseError!*Ast.Expression {
-        const arguments = try self.parseCallArguments();
+        const arguments = try self.parseInvocationArguments();
         return self.newExpression(.{
             .position = position,
             .value = .{ .call = .{
                 .name = name,
                 .name_position = position,
-                .arguments = arguments,
+                .arguments = switch (arguments) {
+                    .positional => |values| values,
+                    .named => &.{},
+                },
+                .named_fields = switch (arguments) {
+                    .positional => null,
+                    .named => |fields| fields,
+                },
             } },
         });
+    }
+
+    const InvocationArguments = union(enum) {
+        positional: []const *Ast.Expression,
+        named: []const Ast.Expression.FieldInitializer,
+    };
+
+    fn parseInvocationArguments(self: *Parser) ParseError!InvocationArguments {
+        try self.expect(.left_parenthesis, "expected '('");
+        if (self.current.tag == .right_parenthesis) {
+            try self.advance();
+            return .{ .positional = &.{} };
+        }
+
+        if (try self.currentStartsNamedField()) {
+            var fields: std.ArrayList(Ast.Expression.FieldInitializer) = .empty;
+            while (true) {
+                if (!(try self.currentStartsNamedField())) {
+                    return self.fail("cannot mix positional arguments and named fields");
+                }
+                const field_name = self.current.lexeme;
+                const field_position = self.current.position;
+                try self.advance();
+                try self.expect(.colon, "expected ':' after field name");
+                if (self.current.tag == .comma or self.current.tag == .right_parenthesis) {
+                    return self.fail("expected value after ':'");
+                }
+                try fields.append(self.allocator, .{
+                    .name = field_name,
+                    .position = field_position,
+                    .value = try self.parseExpression(true),
+                });
+                if (self.current.tag != .comma) break;
+                try self.advance();
+                if (self.current.tag == .right_parenthesis) break;
+            }
+            try self.expect(.right_parenthesis, "expected ')' after invocation");
+            return .{ .named = try fields.toOwnedSlice(self.allocator) };
+        }
+
+        var values: std.ArrayList(*Ast.Expression) = .empty;
+        while (true) {
+            try values.append(self.allocator, try self.parseExpression(true));
+            if (self.current.tag != .comma) break;
+            try self.advance();
+            if (try self.currentStartsNamedField()) {
+                return self.fail("cannot mix positional arguments and named fields");
+            }
+        }
+        try self.expect(.right_parenthesis, "expected ')' after invocation");
+        return .{ .positional = try values.toOwnedSlice(self.allocator) };
+    }
+
+    fn currentStartsNamedField(self: *const Parser) ParseError!bool {
+        if (self.current.tag != .identifier) return false;
+        var lexer = self.lexer;
+        return (try lexer.next()).tag == .colon;
+    }
+
+    fn looksLikeLegacyStructureInitializer(self: *const Parser) ParseError!bool {
+        if (self.current.tag != .left_brace) return false;
+        var lexer = self.lexer;
+        if ((try lexer.next()).tag != .identifier) return false;
+        return (try lexer.next()).tag == .colon;
     }
 
     fn parseCallArguments(self: *Parser) ParseError![]const *Ast.Expression {
@@ -987,21 +1011,21 @@ pub const Parser = struct {
         name: []const u8,
         position: Source.Position,
     ) ParseError!*Ast.Expression {
-        try self.expect(.left_parenthesis, "expected '('");
-        var arguments: std.ArrayList(*Ast.Expression) = .empty;
-        while (self.current.tag != .right_parenthesis) {
-            try arguments.append(self.allocator, try self.parseExpression(true));
-            if (self.current.tag != .comma) break;
-            try self.advance();
-        }
-        try self.expect(.right_parenthesis, "expected ')'");
+        const arguments = try self.parseInvocationArguments();
         return self.newExpression(.{
             .position = object.position,
             .value = .{ .method_call = .{
                 .object = object,
                 .name = name,
                 .name_position = position,
-                .arguments = try arguments.toOwnedSlice(self.allocator),
+                .arguments = switch (arguments) {
+                    .positional => |values| values,
+                    .named => &.{},
+                },
+                .named_fields = switch (arguments) {
+                    .positional => null,
+                    .named => |fields| fields,
+                },
             } },
         });
     }
@@ -1125,6 +1149,133 @@ fn assignmentOperator(tag: TokenTag) ?Ast.AssignmentOperator {
     };
 }
 
+test "control flow parentheses do not change the compiler AST" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(),
+        \\func main() void {
+        \\    let enabled = true
+        \\    let values = [1]
+        \\    if (enabled) {}
+        \\    if enabled {}
+        \\    while (enabled) { break }
+        \\    while enabled { break }
+        \\    for (let value in values) {}
+        \\    for let value in values {}
+        \\}
+    );
+    const program = try parser.parse();
+    const statements = program.functions[0].statements;
+
+    try std.testing.expectEqualStrings(
+        statements[2].if_statement.condition.value.identifier,
+        statements[3].if_statement.condition.value.identifier,
+    );
+    try std.testing.expectEqualStrings(
+        statements[4].while_statement.condition.value.identifier,
+        statements[5].while_statement.condition.value.identifier,
+    );
+    try std.testing.expectEqual(statements[6].for_statement.mutability, statements[7].for_statement.mutability);
+    try std.testing.expectEqualStrings(statements[6].for_statement.name, statements[7].for_statement.name);
+    try std.testing.expectEqualStrings(
+        statements[6].for_statement.source.collection.value.identifier,
+        statements[7].for_statement.source.collection.value.identifier,
+    );
+}
+
+test "parse control flow expressions and continuations without wrapper parentheses" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(),
+        \\func main() void {
+        \\    let enabled = true
+        \\    let count = 2
+        \\    if enabled &&
+        \\        count > 0 {}
+        \\    if (enabled) && count > 0 {}
+        \\    if (
+        \\        enabled
+        \\        && count > 0
+        \\    ) {}
+        \\    if func() bool { return true }() {}
+        \\    while enabled &&
+        \\        count > 0 { break }
+        \\    for let index in 0...
+        \\        count {}
+        \\}
+    );
+    const program = try parser.parse();
+    const statements = program.functions[0].statements;
+
+    try std.testing.expect(statements[2].if_statement.condition.value == .binary);
+    try std.testing.expect(statements[3].if_statement.condition.value == .binary);
+    try std.testing.expect(statements[4].if_statement.condition.value == .binary);
+    try std.testing.expect(statements[5].if_statement.condition.value == .value_call);
+    try std.testing.expect(statements[6].while_statement.condition.value == .binary);
+    try std.testing.expect(statements[7].for_statement.source == .integer_range);
+}
+
+test "reject operators that only begin an unparenthesized control header line" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var conditional = Parser.init(arena.allocator(),
+        \\func main() void {
+        \\    if true
+        \\        && false {}
+        \\}
+    );
+    try std.testing.expectError(error.InvalidSource, conditional.parse());
+    try std.testing.expectEqualStrings("expected '{'", conditional.diagnostic.?.message);
+
+    var iteration = Parser.init(arena.allocator(),
+        \\func main() void {
+        \\    for let index in 0
+        \\        ...3 {}
+        \\}
+    );
+    try std.testing.expectError(error.InvalidSource, iteration.parse());
+    try std.testing.expectEqualStrings("expected '{'", iteration.diagnostic.?.message);
+}
+
+test "reject incomplete control flow headers" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var conditional = Parser.init(arena.allocator(), "func main() void { if {} }");
+    try std.testing.expectError(error.InvalidSource, conditional.parse());
+    try std.testing.expectEqualStrings("expected expression", conditional.diagnostic.?.message);
+
+    var iteration = Parser.init(arena.allocator(), "func main() void { for value in [1] {} }");
+    try std.testing.expectError(error.InvalidSource, iteration.parse());
+    try std.testing.expectEqualStrings("expected 'let' or 'var' after 'for'", iteration.diagnostic.?.message);
+}
+
+test "diagnose malformed optional control flow headers" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const cases = [_]struct {
+        source: []const u8,
+        message: []const u8,
+    }{
+        .{ .source = "func main() void { if (true {} }", .message = "expected ')'" },
+        .{ .source = "func main() void { if true) {} }", .message = "expected '{'" },
+        .{ .source = "func main() void { if true false {} }", .message = "expected '{'" },
+        .{ .source = "func main() void { if true && {} }", .message = "expected expression" },
+        .{ .source = "func main() void { for let in [1] {} }", .message = "expected iteration variable name" },
+        .{ .source = "func main() void { for let value [1] {} }", .message = "expected 'in' after iteration variable" },
+        .{ .source = "func main() void { for let value in {} }", .message = "expected expression" },
+        .{ .source = "func main() void { for (let value in [1] {} }", .message = "expected ')' after for source" },
+    };
+
+    for (cases) |case| {
+        var parser = Parser.init(arena.allocator(), case.source);
+        try std.testing.expectError(error.InvalidSource, parser.parse());
+        try std.testing.expectEqualStrings(case.message, parser.diagnostic.?.message);
+    }
+}
+
 test "parse explicit for bindings" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -1245,20 +1396,50 @@ test "parse explicit conversions before arithmetic" {
     try std.testing.expectEqual(Ast.TypeName.int, addition.right.value.conversion.target_type);
 }
 
-test "parse struct initialization and member assignment" {
+test "parse named invocation and member assignment" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     var parser = Parser.init(arena.allocator(),
         \\struct Position { x:int; y:int }
-        \\func main() void { var position = Position { y:20, x:10 }; position.x = 12 }
+        \\func main() void { var position = Position(y:20, x:10); position.x = 12 }
     );
     const program = try parser.parse();
 
     try std.testing.expectEqual(@as(usize, 1), program.structures.len);
     try std.testing.expectEqualStrings("Position", program.structures[0].name);
     try std.testing.expectEqual(@as(usize, 2), program.structures[0].fields.len);
-    try std.testing.expect(program.functions[0].statements[0].variable_declaration.initializer.?.value == .structure_initializer);
+    const invocation = program.functions[0].statements[0].variable_declaration.initializer.?.value.call;
+    try std.testing.expectEqual(@as(usize, 0), invocation.arguments.len);
+    try std.testing.expectEqual(@as(usize, 2), invocation.named_fields.?.len);
     try std.testing.expect(program.functions[0].statements[1].assignment.target.value == .member_access);
+}
+
+test "reject invalid invocation argument forms" {
+    const cases = [_]struct { source: []const u8, message: []const u8 }{
+        .{
+            .source = "struct Position { x:int } func main() { let value = Position(1, x:2) }",
+            .message = "cannot mix positional arguments and named fields",
+        },
+        .{
+            .source = "struct Position { x:int } func main() { let value = Position(x:) }",
+            .message = "expected value after ':'",
+        },
+        .{
+            .source = "struct Position { x:int } func main() { let value = Position(x:1 }",
+            .message = "expected ')' after invocation",
+        },
+        .{
+            .source = "struct Position { x:int } func main() { let value = Position { x:1 } }",
+            .message = "structure initializers use 'Type(...)', not 'Type { ... }'",
+        },
+    };
+    for (cases) |case| {
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+        var parser = Parser.init(arena.allocator(), case.source);
+        try std.testing.expectError(error.InvalidSource, parser.parse());
+        try std.testing.expectEqualStrings(case.message, parser.diagnostic.?.message);
+    }
 }
 
 test "parse defaults and compound assignments" {
@@ -1441,7 +1622,7 @@ test "parse method and field cascade operations" {
     var parser = Parser.init(arena.allocator(),
         \\struct Point { x:int }
         \\func main() void {
-        \\    var point = Point { x:0 }..x = 10..move(1, 2)
+        \\    var point = Point(x:0)..x = 10..move(1, 2)
         \\}
     );
     const program = try parser.parse();

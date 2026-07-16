@@ -21,24 +21,35 @@ struct Player {
     position:Position
 }
 
+struct Signal {
+    value:int = 7
+}
+
 func main() {
-    var player = Player {
-        position:Position {
+    var player = Player(
+        position:Position(
             y:20,
             x:10
-        },
-        name:"Ada"
-    }
+        ),
+        name:"Ada",
+    )
 
     player.position..move(2, 0)..translate(0, 3)
     print(player.name)
     print(player.position.total())
 
-    let origin = Position { x:0, y:0 }
+    let origin = Position(x:0, y:0)
     print(origin.total())
 
-    var configured = Position { x:0, y:0 }
+    var configured = Position(x:0, y:0)
         ..x = 7
         ..move(1, 2)
     print(configured.total())
+
+    let empty = Position()
+    print(empty.total())
+
+    let Signal = func() int { return 9 }
+    print(Signal())
+    print(Signal(value:3).value)
 }

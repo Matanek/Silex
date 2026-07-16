@@ -22,11 +22,11 @@ func recharge(energy:&int, amount:int) int {
 }
 
 func main() {
-    var rover = Rover {
+    var rover = Rover(
         name:"Silex",
         energy:12,
         trail:[]
-    }
+    )
         ..travel(2)
         ..travel(3)
 

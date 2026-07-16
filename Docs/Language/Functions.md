@@ -68,7 +68,7 @@ or error propagation.
 
 ```sx
 func require_positive(value:int) int {
-    if (value <= 0) {
+    if value <= 0 {
         panic("value must be positive")
     }
     return value

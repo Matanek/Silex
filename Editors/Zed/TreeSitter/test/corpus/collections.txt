@@ -47,9 +47,10 @@ func main() {
             (sequence_literal))))
       (statement
         (expression_statement
-          (method_call_expression
-            (identifier)
-            (identifier)
+          (invocation_expression
+            (member_expression
+              (identifier)
+              (identifier))
             (expression
               (index_expression
                 (identifier)
@@ -96,13 +97,15 @@ func main() {
                     (integer_literal))))))))
       (statement
         (expression_statement
-          (method_call_expression
-            (identifier)
-            (identifier))))
+          (invocation_expression
+            (member_expression
+              (identifier)
+              (identifier)))))
       (statement
         (print_statement
           (identifier)
           (expression
-            (method_call_expression
-              (string_literal)
-              (identifier))))))))
+            (invocation_expression
+              (member_expression
+                (string_literal)
+                (identifier)))))))))

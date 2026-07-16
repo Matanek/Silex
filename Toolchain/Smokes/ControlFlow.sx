@@ -1,0 +1,84 @@
+struct Configuration {
+    strict:bool
+}
+
+struct Holder {
+    values:int[]
+}
+
+func accepts(configuration:Configuration) bool {
+    return configuration.strict
+}
+
+func main() {
+    let enabled = true
+    let expected = Configuration(strict:true)
+
+    if enabled {}
+    if (enabled) {}
+    if expected.strict {}
+    if accepts(Configuration(strict:true)) {}
+    if Configuration(strict:true) == expected {}
+    if enabled &&
+        expected.strict {}
+    if (
+        enabled
+        && expected.strict
+    ) {}
+
+    var lambda_called = false
+    if func() bool { return true }() {
+        lambda_called = true
+    }
+    assert(lambda_called, "directly called lambda condition")
+
+    if false {
+        panic("unexpected branch")
+    } else {
+        print("if")
+    }
+
+    var count = 2
+    while count > 0 {
+        count -= 1
+    }
+    while (count > 0) {}
+    assert(count == 0, "while forms")
+
+    let holder = Holder(values:[1, 2])
+    var total = 0
+    for let value in holder.values {
+        total += value
+    }
+    for (let value in [3]) {
+        total += value
+    }
+    for let index in range(0, 2) {
+        total += index
+    }
+    for (let index in 2...3) {
+        total += index
+    }
+    for let index in 0...
+        1 {
+        total += index
+    }
+    for (
+        let value in holder.values
+    ) {
+        total += value
+    }
+
+    var mutable = [1]
+    for var value in mutable {
+        value += 1
+    }
+    assert(mutable[0] == 2, "mutable for binding")
+
+    for let configuration in [Configuration(strict:true)] {
+        assert(configuration.strict, "initialized collection source")
+    }
+
+    assert(total == 12, "for forms")
+    print("flow")
+}

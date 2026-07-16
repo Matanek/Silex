@@ -31,14 +31,14 @@ func create_generator(seed:int) Generator {
 }
 
 func create_stopwatch() Stopwatch {
-    return Stopwatch {}
+    return Stopwatch()
 }
 ```
 
 `import` names a module and makes it available through its full name or alias.
 It does not recursively load every submodule. A fully qualified reference under
 that import loads only its longest prefix that names an existing module. Thus
-`import STD` permits `STD.Time.Stopwatch {}` and loads `STD.Time` on demand.
+`import STD` permits `STD.Time.Stopwatch()` and loads `STD.Time` on demand.
 The same rule applies through an import alias such as `Standard.Time.Stopwatch`
 after `import STD as Standard`.
 

@@ -9,14 +9,28 @@ struct Position {
     y:int = 10
 }
 
-let position = Position { x:10 }
+let origin = Position()
+let position = Position(x:10)
 ```
 
-An initializer uses named fields in any order. Omitted fields use an explicit
-default first, then the intrinsic value of their type. Unknown, repeated, and
-incompatible field values are rejected. Explicit defaults are currently limited
-to primitive literals and structure initializers; they cannot refer to `self`,
-another field, a variable, or a function.
+An initializer uses parentheses and named fields in any order. A final comma is
+allowed, including in a multiline initializer, and a field value may itself be
+another initializer. `Position()` supplies no field explicitly. Omitted fields
+use an explicit default first, then the intrinsic value of their type. Unknown,
+repeated, and incompatible field values are rejected.
+
+Arguments are either all positional or all named. Positional arguments invoke a
+function or callable value and cannot initialize a structure; named fields
+select a structure and are not function arguments. For an empty invocation, a
+visible callable local has priority; otherwise the module declaration determines
+whether `Name()` is a function call or a structure initializer. The same rules
+apply to qualified names such as `Geometry.Position(x:10)`, without relying on
+letter case.
+
+Explicit defaults are currently limited to primitive literals and structure
+initializers; they cannot refer to `self`, another field, a variable, or a
+function. Braces delimit declarations and blocks; `Position { x:10 }` is not an
+initializer.
 
 Fields of a `var` structure may be changed, including through nested paths. A
 `let` structure is fully immutable. Structures compare by value when they have

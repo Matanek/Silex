@@ -139,6 +139,7 @@ pub const Expression = struct {
         name: []const u8,
         name_position: Source.Position,
         arguments: []const *Expression,
+        named_fields: ?[]const FieldInitializer = null,
         visible_declarations: ?[]const Source.Position = null,
     };
 
@@ -160,6 +161,7 @@ pub const Expression = struct {
         name: []const u8,
         name_position: Source.Position,
         arguments: []const *Expression,
+        named_fields: ?[]const FieldInitializer = null,
     };
 
     pub const Cascade = struct {

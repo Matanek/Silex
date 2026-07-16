@@ -11,6 +11,6 @@ struct Counter {
 }
 
 func main() void {
-    let counter = Counter { value:2 }
+    let counter = Counter(value:2)
     counter.increment()
 }

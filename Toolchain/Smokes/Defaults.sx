@@ -6,7 +6,7 @@ struct Position {
 struct Player {
     name:str = "Ada"
     active:bool
-    position:Position = Position { x:3 }
+    position:Position = Position(x:3)
 
     func update() {
         self.position.x += 4
@@ -32,11 +32,11 @@ func main() {
     print(zero)
     print(empty)
 
-    let custom = Player {
+    let custom = Player(
         name:"Bob",
         active:true,
-        position:Position { x:4, y:5 }
-    }
+        position:Position(x:4, y:5)
+    )
     print(custom.name)
     print(custom.active)
     print(custom.position.x)

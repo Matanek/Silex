@@ -5,35 +5,35 @@ struct Component {
 
     func update() {
         self.velocity += self.acceleration
-        if (self.velocity > 1000) {
+        if self.velocity > 1000 {
             self.acceleration = -3
         }
-        if (self.velocity < -1000) {
+        if self.velocity < -1000 {
             self.acceleration = 3
         }
 
         self.position += self.velocity
-        if (self.position > 1000000) {
+        if self.position > 1000000 {
             self.position -= 1000000
         }
-        if (self.position < -1000000) {
+        if self.position < -1000000 {
             self.position += 1000000
         }
     }
 }
 
 func main() {
-    var component0 = Component { position:0, velocity:-1000, acceleration:3 }
-    var component1 = Component { position:100, velocity:-750, acceleration:-3 }
-    var component2 = Component { position:200, velocity:-500, acceleration:3 }
-    var component3 = Component { position:300, velocity:-250, acceleration:-3 }
-    var component4 = Component { position:400, velocity:0, acceleration:3 }
-    var component5 = Component { position:500, velocity:250, acceleration:-3 }
-    var component6 = Component { position:600, velocity:500, acceleration:3 }
-    var component7 = Component { position:700, velocity:750, acceleration:-3 }
+    var component0 = Component(position:0, velocity:-1000, acceleration:3)
+    var component1 = Component(position:100, velocity:-750, acceleration:-3)
+    var component2 = Component(position:200, velocity:-500, acceleration:3)
+    var component3 = Component(position:300, velocity:-250, acceleration:-3)
+    var component4 = Component(position:400, velocity:0, acceleration:3)
+    var component5 = Component(position:500, velocity:250, acceleration:-3)
+    var component6 = Component(position:600, velocity:500, acceleration:3)
+    var component7 = Component(position:700, velocity:750, acceleration:-3)
     var batch:int64 = 0
 
-    while (batch < 2500000) {
+    while batch < 2500000 {
         component0.update()
         component1.update()
         component2.update()

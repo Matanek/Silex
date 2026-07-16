@@ -6,7 +6,7 @@ struct Holder {
 }
 
 func main() {
-    let holder = Holder { value:Library.Value { count:3 } }
+    let holder = Holder(value:Library.Value(count:3))
     print(measure())
     print(Library.measure(2))
     print(holder.value.count)

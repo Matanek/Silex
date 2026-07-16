@@ -9,7 +9,7 @@ pub use Window.Event as WindowEvent
 pub struct Session {}
 
 pub func create() Window.Session {
-    return Window.Session {}
+    return Window.Session()
 }
 
 ---
@@ -45,7 +45,7 @@ pub func create() Window.Session {
         (statement
           (return_statement
             value: (expression
-              (structure_initializer
-                type: (qualified_name
-                  (identifier)
-                  (identifier))))))))))
+              (invocation_expression
+                target: (member_expression
+                  object: (identifier)
+                  field: (identifier))))))))))

@@ -347,7 +347,7 @@ pub fn build(b: *std.Build) void {
     unknown_struct_field_command.addArgs(&.{ "compile", "Tests/UnknownStructField.sx" });
     unknown_struct_field_command.expectExitCode(1);
     unknown_struct_field_command.expectStdErrEqual(
-        "Tests/UnknownStructField.sx:7:37: error: unknown field 'depth' in struct 'Position'\n",
+        "Tests/UnknownStructField.sx:7:35: error: unknown field 'depth' in struct 'Position'\n",
     );
 
     const immutable_struct_field_command = b.addRunArtifact(executable);
@@ -368,14 +368,35 @@ pub fn build(b: *std.Build) void {
     duplicate_struct_field_command.addArgs(&.{ "compile", "Tests/DuplicateStructField.sx" });
     duplicate_struct_field_command.expectExitCode(1);
     duplicate_struct_field_command.expectStdErrEqual(
-        "Tests/DuplicateStructField.sx:7:37: error: field 'x' is initialized more than once\n",
+        "Tests/DuplicateStructField.sx:7:35: error: field 'x' is initialized more than once\n",
     );
 
     const invalid_struct_field_type_command = b.addRunArtifact(executable);
     invalid_struct_field_type_command.addArgs(&.{ "compile", "Tests/InvalidStructFieldType.sx" });
     invalid_struct_field_type_command.expectExitCode(1);
     invalid_struct_field_type_command.expectStdErrEqual(
-        "Tests/InvalidStructFieldType.sx:7:33: error: expected 'int', found 'str'\n",
+        "Tests/InvalidStructFieldType.sx:7:31: error: expected 'int', found 'str'\n",
+    );
+
+    const legacy_struct_initializer_command = b.addRunArtifact(executable);
+    legacy_struct_initializer_command.addArgs(&.{ "compile", "Tests/LegacyStructInitializer.sx" });
+    legacy_struct_initializer_command.expectExitCode(1);
+    legacy_struct_initializer_command.expectStdErrEqual(
+        "Tests/LegacyStructInitializer.sx:4:29: error: structure initializers use 'Type(...)', not 'Type { ... }'\n",
+    );
+
+    const positional_struct_initializer_command = b.addRunArtifact(executable);
+    positional_struct_initializer_command.addArgs(&.{ "compile", "Tests/PositionalStructInitializer.sx" });
+    positional_struct_initializer_command.expectExitCode(1);
+    positional_struct_initializer_command.expectStdErrEqual(
+        "Tests/PositionalStructInitializer.sx:4:20: error: struct 'Position' requires named fields such as 'field:value'\n",
+    );
+
+    const named_function_arguments_command = b.addRunArtifact(executable);
+    named_function_arguments_command.addArgs(&.{ "compile", "Tests/NamedFunctionArguments.sx" });
+    named_function_arguments_command.expectExitCode(1);
+    named_function_arguments_command.expectStdErrEqual(
+        "Tests/NamedFunctionArguments.sx:6:17: error: function 'compute' does not accept named arguments; named fields initialize a struct\n",
     );
 
     const immutable_method_call_command = b.addRunArtifact(executable);
@@ -637,7 +658,7 @@ pub fn build(b: *std.Build) void {
     invalid_structure_equality_command.addArgs(&.{ "compile", "Tests/InvalidStructureEquality.sx" });
     invalid_structure_equality_command.expectExitCode(1);
     invalid_structure_equality_command.expectStdErrEqual(
-        "Tests/InvalidStructureEquality.sx:10:28: error: equality operator requires operands of the same type, found 'Position' and 'Velocity'\n",
+        "Tests/InvalidStructureEquality.sx:10:25: error: equality operator requires operands of the same type, found 'Position' and 'Velocity'\n",
     );
 
     const invalid_target_command = b.addRunArtifact(executable);
@@ -742,7 +763,7 @@ pub fn build(b: *std.Build) void {
     unknown_qualified_descendant_command.addArgs(&.{ "compile", "Tests/UnknownQualifiedDescendant.sx" });
     unknown_qualified_descendant_command.expectExitCode(1);
     unknown_qualified_descendant_command.expectStdErrEqual(
-        "Tests/UnknownQualifiedDescendant.sx:4:17: error: unknown struct 'STD.Unknown.Value'\n",
+        "Tests/UnknownQualifiedDescendant.sx:4:29: error: unknown qualified path 'STD.Unknown.Value'\n",
     );
 
     const public_module_use_command = b.addRunArtifact(executable);
@@ -913,6 +934,9 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&immutable_cascade_command.step);
     test_step.dependOn(&duplicate_struct_field_command.step);
     test_step.dependOn(&invalid_struct_field_type_command.step);
+    test_step.dependOn(&legacy_struct_initializer_command.step);
+    test_step.dependOn(&positional_struct_initializer_command.step);
+    test_step.dependOn(&named_function_arguments_command.step);
     test_step.dependOn(&immutable_method_call_command.step);
     test_step.dependOn(&untyped_declaration_command.step);
     test_step.dependOn(&invalid_field_default_command.step);
@@ -986,8 +1010,13 @@ pub fn build(b: *std.Build) void {
     smoke_command.addArgs(&.{ "run", "Smokes/Main.sx" });
     smoke_command.expectStdOutEqual(hostText(b, "Hello from Silex smoke test\n50\nlogic works\ntrue\nfalse\n2\n1\n"));
 
+    const control_flow_command = b.addRunArtifact(executable);
+    control_flow_command.step.dependOn(&smoke_command.step);
+    control_flow_command.addArgs(&.{ "run", "Smokes/ControlFlow.sx" });
+    control_flow_command.expectStdOutEqual(hostText(b, "if\nflow\n"));
+
     const functions_command = b.addRunArtifact(executable);
-    functions_command.step.dependOn(&smoke_command.step);
+    functions_command.step.dependOn(&control_flow_command.step);
     functions_command.addArgs(&.{ "run", "Smokes/Functions.sx" });
     functions_command.expectStdOutEqual(hostText(b, "8\n2\n85\n6\n84\n82\n1\n3\n77\n0\n1\n"));
 
@@ -1028,7 +1057,7 @@ pub fn build(b: *std.Build) void {
     const structures_command = b.addRunArtifact(executable);
     structures_command.step.dependOn(&compact_command.step);
     structures_command.addArgs(&.{ "run", "Smokes/Structures.sx" });
-    structures_command.expectStdOutEqual(hostText(b, "Ada\n35\n0\n10\n"));
+    structures_command.expectStdOutEqual(hostText(b, "Ada\n35\n0\n10\n0\n9\n3\n"));
 
     const defaults_command = b.addRunArtifact(executable);
     defaults_command.step.dependOn(&structures_command.step);
