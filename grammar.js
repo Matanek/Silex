@@ -46,8 +46,17 @@ module.exports = grammar({
       seq(
         optional(field("visibility", "pub")),
         "use",
-        field("declaration", $.qualified_name),
-        optional(seq("as", field("alias", $.identifier))),
+        choice(
+          prec(1, seq(
+            field("declaration", choice($.qualified_name, $.identifier)),
+            optional(seq("as", field("alias", $.identifier))),
+          )),
+          seq(
+            field("type", $.type),
+            "as",
+            field("alias", $.identifier),
+          ),
+        ),
         choice(";", $._automatic_semicolon),
       ),
 
@@ -64,6 +73,7 @@ module.exports = grammar({
       seq(
         choice("struct", "class"),
         field("name", $.identifier),
+        optional(field("type_parameters", $.type_parameter_list)),
         optional(seq(":", field("base", $.named_type))),
         "{",
         repeat(
@@ -104,6 +114,7 @@ module.exports = grammar({
       seq(
         "func",
         field("name", $.identifier),
+        optional(field("type_parameters", $.type_parameter_list)),
         $.parameter_list,
         optional(field("return_type", choice($.void_type, $.type))),
         field("body", $.block),
@@ -138,7 +149,26 @@ module.exports = grammar({
         "bool",
         "str",
       ),
-    named_type: ($) => alias(choice($.identifier, $.qualified_name), $.type_identifier),
+    type_parameter_list: ($) =>
+      seq(
+        "<",
+        $.type_parameter,
+        repeat(seq(",", $.type_parameter)),
+        ">",
+      ),
+    type_parameter: ($) => field("name", $.identifier),
+    type_argument_list: ($) =>
+      seq("<", $.type, repeat(seq(",", $.type)), ">"),
+    generic_type: ($) =>
+      prec(
+        PREC.member,
+        seq(
+          field("name", alias(choice($.identifier, $.qualified_name), $.type_identifier)),
+          field("arguments", $.type_argument_list),
+        ),
+      ),
+    named_type: ($) =>
+      choice(alias(choice($.identifier, $.qualified_name), $.type_identifier), $.generic_type),
     function_type: ($) =>
       seq(
         "func",
@@ -641,6 +671,7 @@ module.exports = grammar({
           choice(
             $.identifier,
             $.qualified_name,
+            $.generic_type,
             $.parenthesized_expression,
             $.lambda_expression,
             $.member_expression,
