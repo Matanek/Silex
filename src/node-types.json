@@ -1663,6 +1663,10 @@
             "named": true
           },
           {
+            "type": "generic_type",
+            "named": true
+          },
+          {
             "type": "identifier",
             "named": true
           },
@@ -2322,6 +2326,16 @@
         "types": [
           {
             "type": "override",
+            "named": false
+          }
+        ]
+      },
+      "static": {
+        "multiple": true,
+        "required": false,
+        "types": [
+          {
+            "type": "static",
             "named": false
           }
         ]
@@ -3122,6 +3136,10 @@
   {
     "type": "self_expression",
     "named": true
+  },
+  {
+    "type": "static",
+    "named": false
   },
   {
     "type": "str",
