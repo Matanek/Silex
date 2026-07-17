@@ -1,7 +1,7 @@
 # Modules
 
 A module is a logical node in a hierarchy. Files assigned to the same module
-share their structures, classes, and functions, and directories below it
+share their enums, structures, classes, and functions, and directories below it
 provide its submodules. A file does not contain a `module` declaration.
 
 When compiling an entry file without a manifest, a directory defines a local
@@ -46,7 +46,7 @@ A non-public `use` can name either one declaration or one submodule and
 introduce its name or alias into the current file. It can establish that exact
 dependency without a preceding `import`; the longest loaded prefix that names
 a module is selected. Thus `use STD.Random as Random` introduces a module,
-while `use STD.Random.Generator as Generator` introduces a structure. An import
+while `use STD.Random.Generator as Generator` introduces a named type. An import
 alias can also qualify a `use`, as in `import STD as Standard` followed by
 `use Standard.Random as Random`.
 
@@ -77,8 +77,8 @@ let ordinary:int[] = values
 
 Aliases may name other aliases. Their chains resolve to one underlying type;
 cycles are rejected. A type alias cannot be called or used as a runtime value,
-except that an alias whose underlying type is a structure or class can use that
-type's ordinary initializer.
+except that an alias whose underlying type is a structure, class, or enum can
+use that type's ordinary initializer or variant constructors.
 
 `pub use <type> as <name>` exports the transparent alias. A consumer may
 qualify, import, rename, or re-export it like another public type declaration.
@@ -86,10 +86,10 @@ The source type is resolved in the file declaring the alias and is not
 reinterpreted in the consumer. Type aliases cannot currently declare their own
 type parameters.
 
-Declarations are private by default. `pub` exposes a structure, class, or
-function, while `pub use` re-exports an existing declaration or type alias
-under the current module name. Modules cannot currently be re-exported with
-`pub use`.
+Declarations are private by default. `pub` exposes an enum, structure, class,
+or function, while `pub use` re-exports an existing declaration or type alias
+under the current module name. Every variant of a public enum follows the
+visibility of its enum. Modules cannot currently be re-exported with `pub use`.
 
 For a class, declaration and member visibility are independent: `pub class`
 exposes the type outside its module, while only its `pub` members are accessible

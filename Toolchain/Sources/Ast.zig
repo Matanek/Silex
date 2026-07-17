@@ -152,6 +152,7 @@ pub const Expression = struct {
         unary: Unary,
         conversion: Conversion,
         binary: Binary,
+        match_expression: Match,
     };
 
     pub const Unary = struct {
@@ -295,6 +296,29 @@ pub const Expression = struct {
         left: *Expression,
         right: *Expression,
     };
+
+    pub const Match = struct {
+        subject: *Expression,
+        branches: []const Branch,
+
+        pub const Branch = struct {
+            variant: ?[]const u8,
+            variant_position: Source.Position,
+            bindings: []const Binding,
+            body: Body,
+        };
+
+        pub const Binding = struct {
+            name: []const u8,
+            position: Source.Position,
+            mutability: Mutability,
+        };
+
+        pub const Body = union(enum) {
+            expression: *Expression,
+            statements: []const Statement,
+        };
+    };
 };
 
 pub const Statement = union(enum) {
@@ -403,8 +427,30 @@ pub const Statement = union(enum) {
 pub const Program = struct {
     imports: []const Import = &.{},
     uses: []const Use = &.{},
+    enums: []const Enum = &.{},
     structures: []const Structure,
     functions: []const Function,
+};
+
+pub const Enum = struct {
+    is_public: bool = false,
+    position: Source.Position,
+    name: []const u8,
+    name_position: Source.Position,
+    raw_type: ?RawEnumType = null,
+    variants: []const EnumVariant,
+};
+
+pub const RawEnumType = enum {
+    int,
+    str,
+};
+
+pub const EnumVariant = struct {
+    name: []const u8,
+    position: Source.Position,
+    associated_types: []const TypeName,
+    raw_value: ?*Expression = null,
 };
 
 pub const Import = struct {

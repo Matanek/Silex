@@ -1,0 +1,65 @@
+enum Connection {
+    waiting
+    connected(str)
+    closed(str)
+}
+
+enum Direction:int {
+    north = 1
+    south = 2
+}
+
+enum DirectionName:str {
+    north = "north"
+    south = "south"
+}
+
+struct Runtime {
+    static var connection:Connection = Connection.waiting()
+}
+
+func describe(connection:Connection) str {
+    return match connection {
+        waiting => "waiting"
+        connected(name) => name
+        closed(reason) => reason
+    }
+}
+
+func describeSelected(connection:Connection) str {
+    return match connection {
+        waiting => "waiting only"
+        else => "another connection"
+    }
+}
+
+func describeAny(connection:Connection) str {
+    return match connection {
+        else => "any connection"
+    }
+}
+
+func main() void {
+    let waiting = Connection.waiting()
+    let connected = Connection.connected("server")
+    print(describe(waiting))
+    print(describe(connected))
+    print(describe(Runtime.connection))
+    Runtime.connection = connected
+    print(describe(Runtime.connection))
+    print(describeSelected(connected))
+    print(describeAny(waiting))
+    let direction = Direction.south()
+    let direction_copy = direction
+    print(direction.raw_value)
+    print(direction_copy.raw_value)
+    print(DirectionName.south().raw_value)
+
+    match connected {
+        connected(var name) => {
+            name += "!"
+            print(name)
+        }
+        else => { print("unexpected") }
+    }
+}

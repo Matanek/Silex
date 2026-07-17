@@ -40,6 +40,45 @@
     ],
     "description": "Expose a module declaration"
   },
+  "Enum": {
+    "prefix": "enum",
+    "body": [
+      "enum ${1:Name} {",
+      "    ${2:variant}",
+      "    $0",
+      "}"
+    ],
+    "description": "Declare a closed enum"
+  },
+  "Raw enum": {
+    "prefix": "enumraw",
+    "body": [
+      "enum ${1:Name}:${2|int,str|} {",
+      "    ${3:variant} = ${4:value}",
+      "    $0",
+      "}"
+    ],
+    "description": "Declare an enum with fixed raw values"
+  },
+  "Match expression": {
+    "prefix": "match",
+    "body": [
+      "match ${1:value} {",
+      "    ${2:variant} => $0",
+      "}"
+    ],
+    "description": "Exhaustively match an enum value"
+  },
+  "Match with else": {
+    "prefix": "matchelse",
+    "body": [
+      "match ${1:value} {",
+      "    ${2:variant} => ${3:result}",
+      "    else => $0",
+      "}"
+    ],
+    "description": "Match selected enum variants with a default branch"
+  },
   "Print": {
     "prefix": "print",
     "body": [

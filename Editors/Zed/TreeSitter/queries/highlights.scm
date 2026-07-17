@@ -9,6 +9,20 @@
 (structure_definition
   name: (identifier) @type.definition)
 
+(enum_definition
+  name: (identifier) @type.definition)
+
+(raw_enum_type) @type.builtin
+
+(enum_variant
+  name: (identifier) @constant)
+
+(match_branch
+  variant: (identifier) @constant)
+
+(match_binding
+  name: (identifier) @variable)
+
 (type_parameter
   name: (identifier) @type)
 
@@ -121,6 +135,8 @@
   "in"
   "return"
   "struct"
+  "enum"
+  "match"
   "class"
   "init"
   "drop"
@@ -156,4 +172,5 @@
   "^"
   "?"
   "?."
+  "=>"
 ] @operator

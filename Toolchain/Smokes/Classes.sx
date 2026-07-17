@@ -170,8 +170,8 @@ func main() {
     assert(session.get_token() == "abc" && session.get_attempts() == 1, "constructors apply intrinsic and declared field values")
     assert(retried_session.get_token() == "def" && retried_session.get_attempts() == 3, "constructors overload by signature")
 
-    var match = Match(Player())
-    assert(match.get_owner().health == 100, "constructors initialize required class fields")
+    var game = Match(Player())
+    assert(game.get_owner().health == 100, "constructors initialize required class fields")
 
     var vault = Vault()
     assert(vault.read() == 42, "public methods can use private and sub members")

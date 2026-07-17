@@ -61,9 +61,10 @@ guarantee.
 An uninitialized typed declaration receives the intrinsic value of its type:
 zero for numbers, `false` for `bool`, an empty string for `str`, an empty list
 for `T[]`, recursively initialized arrays and structures, and declared field
-defaults where present. A class has no intrinsic instance: `var player:Player`
-is invalid and construction must be explicit. A declaration with neither type
-nor initializer is invalid.
+defaults where present. A class has no intrinsic instance and an enum has no
+intrinsic variant: `var player:Player` and `var state:State` are invalid, so
+their construction must be explicit. A declaration with neither type nor
+initializer is invalid.
 
 Assignments preserve the variable type. A local declaration may not reuse the
 name of a parameter, variable, or iteration binding that remains visible in

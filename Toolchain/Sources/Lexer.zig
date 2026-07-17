@@ -17,6 +17,8 @@ pub const TokenTag = enum {
     keyword_return,
     keyword_struct,
     keyword_class,
+    keyword_enum,
+    keyword_match,
     keyword_init,
     keyword_drop,
     keyword_super,
@@ -68,6 +70,7 @@ pub const TokenTag = enum {
     bang,
     equal,
     equal_equal,
+    fat_arrow,
     bang_equal,
     less,
     less_equal,
@@ -144,7 +147,7 @@ pub const Lexer = struct {
 
         if (character == '"') return self.stringToken(position);
 
-        if (character == '=') return self.optionalDoubleToken(start, position, '=', .equal, .equal_equal);
+        if (character == '=') return self.equalToken(start, position);
         if (character == '!') return self.optionalDoubleToken(start, position, '=', .bang, .bang_equal);
         if (character == '<') return self.comparisonToken(start, position, .less, .less_equal, .shift_left);
         if (character == '>') return self.comparisonToken(start, position, .greater, .greater_equal, .shift_right);
@@ -210,6 +213,21 @@ pub const Lexer = struct {
             }
         }
         return self.fail(position, "unterminated string literal");
+    }
+
+    fn equalToken(self: *Lexer, start: usize, position: Source.Position) Token {
+        self.advance();
+        if (self.index < self.source.len) {
+            if (self.source[self.index] == '=') {
+                self.advance();
+                return self.token(.equal_equal, start, position);
+            }
+            if (self.source[self.index] == '>') {
+                self.advance();
+                return self.token(.fat_arrow, start, position);
+            }
+        }
+        return self.token(.equal, start, position);
     }
 
     fn comparisonToken(
@@ -465,6 +483,8 @@ fn keywordTag(lexeme: []const u8) ?TokenTag {
         .{ "return", TokenTag.keyword_return },
         .{ "struct", TokenTag.keyword_struct },
         .{ "class", TokenTag.keyword_class },
+        .{ "enum", TokenTag.keyword_enum },
+        .{ "match", TokenTag.keyword_match },
         .{ "init", TokenTag.keyword_init },
         .{ "drop", TokenTag.keyword_drop },
         .{ "super", TokenTag.keyword_super },

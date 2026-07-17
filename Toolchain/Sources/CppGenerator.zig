@@ -452,6 +452,55 @@ pub fn generateWithSources(
         \\    if constexpr (requires { value.silexClear(); }) value.silexClear();
         \\}
         \\
+        \\struct SilexEnumValue {
+        \\    virtual std::unique_ptr<SilexEnumValue> clone() const = 0;
+        \\    virtual void trace(const SilexTraceVisitor& visit) const = 0;
+        \\    virtual void clear() = 0;
+        \\    virtual ~SilexEnumValue() = default;
+        \\};
+        \\
+        \\template <typename T>
+        \\struct SilexTypedEnumValue final : SilexEnumValue {
+        \\    T value;
+        \\    explicit SilexTypedEnumValue(T input) : value(std::move(input)) {}
+        \\    std::unique_ptr<SilexEnumValue> clone() const override {
+        \\        return std::make_unique<SilexTypedEnumValue<T>>(value);
+        \\    }
+        \\    void trace(const SilexTraceVisitor& visit) const override { silexTraceValue(value, visit); }
+        \\    void clear() override { silexClearValue(value); }
+        \\};
+        \\
+        \\struct SilexEnumStorage {
+        \\    std::size_t variant;
+        \\    std::vector<std::unique_ptr<SilexEnumValue>> values;
+        \\    template <typename... Values>
+        \\    explicit SilexEnumStorage(std::size_t inputVariant, Values&&... inputs) : variant(inputVariant) {
+        \\        (values.push_back(std::make_unique<SilexTypedEnumValue<std::decay_t<Values>>>(std::forward<Values>(inputs))), ...);
+        \\    }
+        \\    SilexEnumStorage(const SilexEnumStorage& other) : variant(other.variant) {
+        \\        values.reserve(other.values.size());
+        \\        for (const auto& value : other.values) values.push_back(value->clone());
+        \\    }
+        \\    SilexEnumStorage(SilexEnumStorage&&) noexcept = default;
+        \\    SilexEnumStorage& operator=(const SilexEnumStorage& other) {
+        \\        if (this == &other) return *this;
+        \\        SilexEnumStorage copy(other);
+        \\        *this = std::move(copy);
+        \\        return *this;
+        \\    }
+        \\    SilexEnumStorage& operator=(SilexEnumStorage&&) noexcept = default;
+        \\    template <typename T> const T& get(std::size_t index) const {
+        \\        return static_cast<const SilexTypedEnumValue<T>&>(*values[index]).value;
+        \\    }
+        \\    void silexTrace(const SilexTraceVisitor& visit) const {
+        \\        for (const auto& value : values) value->trace(visit);
+        \\    }
+        \\    void silexClear() {
+        \\        for (auto& value : values) value->clear();
+        \\        values.clear();
+        \\    }
+        \\};
+        \\
         \\void silexCollectCycles(SilexObject* candidate) {
         \\    std::vector<SilexObject*> graph;
         \\    std::unordered_map<SilexObject*, std::size_t> indexes;
@@ -778,12 +827,34 @@ pub fn generateWithSources(
         \\
     );
     try output.append(allocator, '\n');
+    for (program.enums) |enum_value| {
+        try output.appendSlice(allocator, "struct ");
+        try output.appendSlice(allocator, enum_value.generated_name);
+        try output.appendSlice(allocator, ";\n");
+    }
     for (program.structures) |structure| {
         try output.appendSlice(allocator, "struct ");
         try output.appendSlice(allocator, structure.generated_name);
         try output.appendSlice(allocator, ";\n");
     }
-    if (program.structures.len > 0) try output.append(allocator, '\n');
+    if (program.enums.len > 0 or program.structures.len > 0) try output.append(allocator, '\n');
+    for (program.enums) |enum_value| {
+        try output.appendSlice(allocator, "struct ");
+        try output.appendSlice(allocator, enum_value.generated_name);
+        try output.appendSlice(allocator, " : SilexEnumStorage {\n    using SilexEnumStorage::SilexEnumStorage;\n");
+        if (enum_value.raw_type) |raw_type| {
+            try output.appendSlice(allocator, "    ");
+            try appendCppType(allocator, &output, raw_type);
+            try output.appendSlice(allocator, " rawValue() const {\n        switch (variant) {\n");
+            for (enum_value.variants, 0..) |variant, variant_index| {
+                try output.appendSlice(allocator, try std.fmt.allocPrint(allocator, "            case {d}: return ", .{variant_index}));
+                try generateExpression(allocator, &output, variant.raw_value.?);
+                try output.appendSlice(allocator, ";\n");
+            }
+            try output.appendSlice(allocator, "        }\n        std::abort();\n    }\n");
+        }
+        try output.appendSlice(allocator, "};\n\n");
+    }
     const structure_order = try structureDefinitionOrder(allocator, program.structures);
     for (structure_order) |structure_index| {
         const structure = program.structures[structure_index];
@@ -1492,11 +1563,84 @@ fn generateStatement(
             }
         },
         .expression_statement => |expression| {
+            if (expression.value == .match_expression and expression.type == .void) {
+                try generateImperativeMatch(allocator, output, expression.value.match_expression, indentation, is_main);
+                return;
+            }
             try indent(allocator, output, indentation);
             try generateExpression(allocator, output, expression);
             try output.appendSlice(allocator, ";\n");
         },
     }
+}
+
+fn generateMatchBindings(
+    allocator: Allocator,
+    output: *std.ArrayList(u8),
+    match_value: Semantic.Expression.Match,
+    branch: Semantic.Expression.Match.Branch,
+    multiline: bool,
+    indentation: usize,
+) GenerateError!void {
+    for (branch.bindings, 0..) |binding, binding_index| {
+        if (multiline) try indent(allocator, output, indentation);
+        if (binding.capture_box.*) {
+            try output.appendSlice(allocator, "auto ");
+            try output.appendSlice(allocator, binding.generated_name);
+            try output.appendSlice(allocator, " = silexMake<SilexBinding<");
+            try appendCppType(allocator, output, binding.type);
+            try output.appendSlice(allocator, ">>(");
+        } else {
+            if (binding.mutability == .immutable) try output.appendSlice(allocator, "const ");
+            try appendCppType(allocator, output, binding.type);
+            try output.append(allocator, ' ');
+            try output.appendSlice(allocator, binding.generated_name);
+            try output.appendSlice(allocator, " = ");
+        }
+        try output.appendSlice(allocator, match_value.temporary_name);
+        try output.appendSlice(allocator, ".get<");
+        try appendCppType(allocator, output, binding.type);
+        try output.appendSlice(allocator, try std.fmt.allocPrint(allocator, ">({d})", .{binding_index}));
+        if (binding.capture_box.*) try output.append(allocator, ')');
+        try output.appendSlice(allocator, if (multiline) ";\n" else "; ");
+    }
+}
+
+fn generateImperativeMatch(
+    allocator: Allocator,
+    output: *std.ArrayList(u8),
+    match_value: Semantic.Expression.Match,
+    indentation: usize,
+    is_main: bool,
+) GenerateError!void {
+    try indent(allocator, output, indentation);
+    try output.appendSlice(allocator, "{\n");
+    try indent(allocator, output, indentation + 1);
+    try output.appendSlice(allocator, "const auto ");
+    try output.appendSlice(allocator, match_value.temporary_name);
+    try output.appendSlice(allocator, " = ");
+    try generateExpression(allocator, output, match_value.subject);
+    try output.appendSlice(allocator, ";\n");
+    for (match_value.branches, 0..) |branch, branch_index| {
+        try indent(allocator, output, indentation + 1);
+        if (branch.variant_index) |variant_index| {
+            if (branch_index != 0) try output.appendSlice(allocator, "else ");
+            try output.appendSlice(allocator, "if (");
+            try output.appendSlice(allocator, match_value.temporary_name);
+            try output.appendSlice(allocator, try std.fmt.allocPrint(allocator, ".variant == {d}) {{\n", .{variant_index}));
+        } else {
+            try output.appendSlice(allocator, if (branch_index == 0) "{\n" else "else {\n");
+        }
+        try generateMatchBindings(allocator, output, match_value, branch, true, indentation + 2);
+        switch (branch.body) {
+            .statements => |statements| try generateStatements(allocator, output, statements, indentation + 2, is_main),
+            .expression => unreachable,
+        }
+        try indent(allocator, output, indentation + 1);
+        try output.appendSlice(allocator, "}\n");
+    }
+    try indent(allocator, output, indentation);
+    try output.appendSlice(allocator, "}\n");
 }
 
 fn generateIntegerRangeStatement(
@@ -1930,6 +2074,47 @@ fn generateExpression(allocator: Allocator, output: *std.ArrayList(u8), expressi
             }
             try output.append(allocator, if (isClassType(expression.type)) ')' else '}');
         },
+        .enum_initializer => |initializer| {
+            try output.appendSlice(allocator, initializer.enum_generated_name);
+            try output.append(allocator, '{');
+            try output.appendSlice(allocator, try std.fmt.allocPrint(allocator, "std::size_t{{{d}}}", .{initializer.variant_index}));
+            for (initializer.arguments) |argument| {
+                try output.appendSlice(allocator, ", ");
+                try generateExpression(allocator, output, argument);
+            }
+            try output.append(allocator, '}');
+        },
+        .enum_raw_value => |value| {
+            try generateExpression(allocator, output, value);
+            try output.appendSlice(allocator, ".rawValue()");
+        },
+        .match_expression => |match_value| {
+            try output.appendSlice(allocator, "([&]() { const auto ");
+            try output.appendSlice(allocator, match_value.temporary_name);
+            try output.appendSlice(allocator, " = ");
+            try generateExpression(allocator, output, match_value.subject);
+            try output.appendSlice(allocator, "; ");
+            for (match_value.branches, 0..) |branch, branch_index| {
+                if (branch.variant_index) |variant_index| {
+                    if (branch_index != 0) try output.appendSlice(allocator, " else ");
+                    try output.appendSlice(allocator, "if (");
+                    try output.appendSlice(allocator, match_value.temporary_name);
+                    try output.appendSlice(allocator, try std.fmt.allocPrint(allocator, ".variant == {d}) {{ ", .{variant_index}));
+                } else {
+                    try output.appendSlice(allocator, if (branch_index == 0) "{ " else " else { ");
+                }
+                try generateMatchBindings(allocator, output, match_value, branch, false, 0);
+                switch (branch.body) {
+                    .expression => |value| {
+                        try output.appendSlice(allocator, "return ");
+                        try generateExpression(allocator, output, value);
+                        try output.appendSlice(allocator, "; }");
+                    },
+                    .statements => unreachable,
+                }
+            }
+            try output.appendSlice(allocator, " std::abort(); }())");
+        },
         .member_access => |member| {
             if (member.object.value == .owner_self) {
                 try output.appendSlice(allocator, "silexOwner.");
@@ -2221,6 +2406,7 @@ fn cppType(type_name: Semantic.Type) []const u8 {
         .function => unreachable,
         .list, .fixed_array => unreachable,
         .structure => |structure_type| if (structure_type.is_class) unreachable else structure_type.generated_name,
+        .enumeration => |enum_type| enum_type.generated_name,
         .reference => unreachable,
         .optional, .null => unreachable,
     };
@@ -2275,6 +2461,7 @@ fn appendCppType(allocator: Allocator, output: *std.ArrayList(u8), type_name: Se
                 try output.appendSlice(allocator, structure_type.generated_name);
             }
         },
+        .enumeration => |enum_type| try output.appendSlice(allocator, enum_type.generated_name),
         .null => unreachable,
         else => try output.appendSlice(allocator, cppType(type_name)),
     }
@@ -2302,6 +2489,7 @@ fn silexTypeName(type_name: Semantic.Type) []const u8 {
         .list => "list",
         .fixed_array => "array",
         .structure => |structure_type| structure_type.source_name,
+        .enumeration => |enum_type| enum_type.source_name,
         .reference => |reference| if (reference.mutable) "reference&" else "reference@",
         .function => "func",
         .optional => "optional",

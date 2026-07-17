@@ -87,11 +87,15 @@ pub const Resolver = struct {
         try self.validateTypeAliases();
         try self.validatePublicModuleCollisions();
 
+        var enums: std.ArrayList(Ast.Enum) = .empty;
         var structures: std.ArrayList(Ast.Structure) = .empty;
         var functions: std.ArrayList(Ast.Function) = .empty;
         for (order) |module_index| {
             for (self.file_infos) |file| {
                 if (file.module_index != module_index) continue;
+                for (file.program.enums) |enum_value| {
+                    try enums.append(self.allocator, try self.transformEnum(enum_value));
+                }
                 for (file.program.structures) |structure| {
                     try structures.append(self.allocator, try self.transformStructure(structure));
                 }
@@ -101,6 +105,7 @@ pub const Resolver = struct {
             }
         }
         return .{
+            .enums = try enums.toOwnedSlice(self.allocator),
             .structures = try structures.toOwnedSlice(self.allocator),
             .functions = try functions.toOwnedSlice(self.allocator),
         };
@@ -109,6 +114,9 @@ pub const Resolver = struct {
     fn collectDeclarations(self: *Resolver) !void {
         for (self.files) |file| {
             const module_name = self.project.modules[file.module_index].name;
+            for (file.program.enums) |enum_value| {
+                try self.addDeclaration(file.module_index, module_name, enum_value.name, .structure, enum_value.is_public, enum_value.name_position);
+            }
             for (file.program.structures) |structure| {
                 try self.addDeclaration(file.module_index, module_name, structure.name, .structure, structure.is_public, structure.name_position);
             }
@@ -537,6 +545,27 @@ pub const Resolver = struct {
             };
         }
         result.methods = try methods.toOwnedSlice(self.allocator);
+        return result;
+    }
+
+    fn transformEnum(self: *Resolver, enum_value: Ast.Enum) !Ast.Enum {
+        const declaration = self.findDirectByPosition(enum_value.name_position, .structure).?;
+        var variants: std.ArrayList(Ast.EnumVariant) = .empty;
+        for (enum_value.variants) |variant| {
+            var associated_types: std.ArrayList(Ast.TypeName) = .empty;
+            for (variant.associated_types) |associated_type| {
+                try associated_types.append(self.allocator, try self.transformType(associated_type, variant.position));
+            }
+            try variants.append(self.allocator, .{
+                .name = variant.name,
+                .position = variant.position,
+                .associated_types = try associated_types.toOwnedSlice(self.allocator),
+                .raw_value = if (variant.raw_value) |raw_value| try self.transformExpression(raw_value) else null,
+            });
+        }
+        var result = enum_value;
+        result.name = declaration.canonical_name;
+        result.variants = try variants.toOwnedSlice(self.allocator);
         return result;
     }
 
@@ -1118,6 +1147,27 @@ pub const Resolver = struct {
                 .left = try self.transformExpression(binary.left),
                 .right = try self.transformExpression(binary.right),
             } },
+            .match_expression => |match_value| match_expression: {
+                var branches: std.ArrayList(Ast.Expression.Match.Branch) = .empty;
+                for (match_value.branches) |branch| {
+                    try self.pushLocalScope();
+                    defer self.popLocalScope();
+                    for (branch.bindings) |binding| try self.declareLocal(binding.name);
+                    try branches.append(self.allocator, .{
+                        .variant = branch.variant,
+                        .variant_position = branch.variant_position,
+                        .bindings = branch.bindings,
+                        .body = switch (branch.body) {
+                            .expression => |body| .{ .expression = try self.transformExpression(body) },
+                            .statements => |body| .{ .statements = try self.transformStatementsInCurrentScope(body) },
+                        },
+                    });
+                }
+                break :match_expression .{ .match_expression = .{
+                    .subject = try self.transformExpression(match_value.subject),
+                    .branches = try branches.toOwnedSlice(self.allocator),
+                } };
+            },
             else => expression.value,
         };
         return result;

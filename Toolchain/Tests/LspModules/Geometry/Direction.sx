@@ -1,0 +1,9 @@
+pub enum Direction {
+    north
+    south
+}
+
+pub enum DirectionName:str {
+    north = "north"
+    south = "south"
+}

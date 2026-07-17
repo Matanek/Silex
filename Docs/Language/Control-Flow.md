@@ -129,4 +129,6 @@ it does not affect either bound or the next value produced.
 
 `break` exits the nearest loop and `continue` starts its next iteration.
 
-Pattern matching and string iteration are not part of the current language.
+Exhaustive pattern matching over enums is described in
+[Enums and exhaustive match](Enums-and-Match.md). String iteration is not part
+of the current language.

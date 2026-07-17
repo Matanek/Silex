@@ -11,6 +11,8 @@ use Plugins.WindowPair as Pair
 use Plugins.WindowIntPair as IntPair
 use Plugins.WindowIntegers as Integers
 use Plugins.WindowIdentity as identity
+use Plugins.WindowStatus as Status
+use Plugins.WindowWireStatus as WireStatus
 use Window.Session as NativeSession
 
 class LocalCounter : Window.Meter {
@@ -46,5 +48,8 @@ func main() {
     print(local_counter.current())
     print(Shared.value())
     print(Deep.value())
+    let status = Status.ready("enum module")
+    print(match status { idle => "idle"; ready(message) => message })
+    print(WireStatus.ready().raw_value)
     print(message())
 }

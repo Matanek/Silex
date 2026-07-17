@@ -1,5 +1,5 @@
 const std = @import("std");
-const silex_version = "0.16.0";
+const silex_version = "0.17.0";
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
@@ -1011,7 +1011,7 @@ pub fn build(b: *std.Build) void {
         "silex: native compilation failed for target 'x86_64-linux-musl'; target support, SDKs, or native sources may be unavailable or incomplete\n",
     );
     backend_discovered_target_failure_command.expectStdErrMatch(b.fmt(
-        "silex: backend details: .silex{c}build{c}v27{c}x86_64-linux-musl{c}",
+        "silex: backend details: .silex{c}build{c}v30{c}x86_64-linux-musl{c}",
         .{
             std.fs.path.sep,
             std.fs.path.sep,
@@ -1538,8 +1538,13 @@ pub fn build(b: *std.Build) void {
     optional_values_command.addArgs(&.{ "run", "Smokes/OptionalValues.sx" });
     optional_values_command.expectStdOutEqual(hostText(b, "missing\noptionals\n"));
 
+    const enums_command = b.addRunArtifact(executable);
+    enums_command.step.dependOn(&optional_values_command.step);
+    enums_command.addArgs(&.{ "run", "Smokes/Enums.sx" });
+    enums_command.expectStdOutEqual(hostText(b, "waiting\nserver\nwaiting\nserver\nanother connection\nany connection\n2\n2\nsouth\nserver!\n"));
+
     const independent_let_values_command = b.addRunArtifact(executable);
-    independent_let_values_command.step.dependOn(&optional_values_command.step);
+    independent_let_values_command.step.dependOn(&enums_command.step);
     independent_let_values_command.addArgs(&.{ "run", "Smokes/IndependentLetValues.sx" });
     independent_let_values_command.expectStdOutEqual(hostText(b, "independent let\n"));
 
@@ -1854,7 +1859,7 @@ pub fn build(b: *std.Build) void {
     const modules_command = b.addRunArtifact(executable);
     modules_command.step.dependOn(previous_integer_error_step);
     modules_command.addArgs(&.{ "run", "Smokes/Modules/silex.json" });
-    modules_command.expectStdOutEqual(hostText(b, "true\ntrue\ntrue\nfalse\n7\n16\n11\n3\ngeneric module\n1\n2\n4\n5\n1\n2\nmodules\n"));
+    modules_command.expectStdOutEqual(hostText(b, "true\ntrue\ntrue\nfalse\n7\n16\n11\n3\ngeneric module\n1\n2\n4\n5\n1\n2\nenum module\n20\nmodules\n"));
 
     const local_imports_command = b.addRunArtifact(executable);
     local_imports_command.step.dependOn(&modules_command.step);

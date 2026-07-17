@@ -24,6 +24,7 @@ const CompletionItem = struct {
     detail: []const u8,
     insertText: ?[]const u8 = null,
     filterText: ?[]const u8 = null,
+    insertTextFormat: ?u8 = null,
 };
 
 const SignatureInformation = struct {
@@ -60,6 +61,17 @@ const DeclaredTypeAlias = struct {
     collection: ?CollectionKind = null,
 };
 
+const DeclaredEnum = struct {
+    name: []const u8,
+    has_raw_value: bool,
+};
+
+const DeclaredEnumVariant = struct {
+    enumeration: []const u8,
+    name: []const u8,
+    has_associated_values: bool,
+};
+
 const CollectionKind = enum {
     list,
     fixed_array,
@@ -67,6 +79,7 @@ const CollectionKind = enum {
 
 const ReceiverType = union(enum) {
     structure: []const u8,
+    enumeration: []const u8,
     list,
     fixed_array,
 };
@@ -89,12 +102,16 @@ const SemanticInfo = struct {
     variables: std.ArrayList(DeclaredVariable) = .empty,
     structures: std.ArrayList(StructureRange) = .empty,
     aliases: std.ArrayList(DeclaredTypeAlias) = .empty,
+    enums: std.ArrayList(DeclaredEnum) = .empty,
+    enum_variants: std.ArrayList(DeclaredEnumVariant) = .empty,
 
     fn deinit(self: *SemanticInfo, allocator: Allocator) void {
         self.members.deinit(allocator);
         self.variables.deinit(allocator);
         self.structures.deinit(allocator);
         self.aliases.deinit(allocator);
+        self.enums.deinit(allocator);
+        self.enum_variants.deinit(allocator);
     }
 };
 
@@ -801,6 +818,17 @@ fn moduleExportCompletionItems(
                 "Silex public structure",
             );
         }
+        for (program.enums) |enumeration| {
+            if (!enumeration.is_public or !std.mem.startsWith(u8, enumeration.name, context.prefix)) continue;
+            try appendModuleExportCompletion(
+                allocator,
+                &items,
+                context.qualifier,
+                enumeration.name,
+                13,
+                "Silex public enum",
+            );
+        }
         for (program.uses) |use_value| {
             if (!use_value.is_public or use_value.target != .type) continue;
             const alias = use_value.alias.?;
@@ -995,8 +1023,8 @@ fn memberCompletionItems(
     position: Position,
 ) !?[]const CompletionItem {
     const cursor_offset = byteOffsetAtPosition(source, position) orelse return null;
-    const receiver_path = try memberReceiverPath(allocator, source, cursor_offset) orelse return null;
-    defer allocator.free(receiver_path);
+    const receiver_path = try memberReceiverPath(allocator, source, cursor_offset);
+    defer if (receiver_path) |path| allocator.free(path);
 
     var tokens: std.ArrayList(LexerModule.Token) = .empty;
     defer tokens.deinit(allocator);
@@ -1011,22 +1039,33 @@ fn memberCompletionItems(
     defer info.deinit(allocator);
     try collectSemanticInfo(allocator, io, source, project_root, tokens.items, &info);
 
+    if (receiver_path == null) {
+        const enum_name = enumConstructorBeforeMember(info, tokens.items, source, cursor_offset) orelse return null;
+        return try enumCompletionItems(allocator, info, enum_name, false);
+    }
+    const path = receiver_path.?;
+
     var static_selection = false;
-    var receiver_type = receiverType(info, receiver_path[0], cursor_offset) orelse type_receiver: {
-        const resolved = resolveNamedType(info, receiver_path[receiver_path.len - 1], null).name;
+    var receiver_type = receiverType(info, path[0], cursor_offset) orelse type_receiver: {
+        const resolved = resolveNamedType(info, path[path.len - 1], null).name;
         for (info.structures.items) |structure| {
             if (!std.mem.eql(u8, structure.name, resolved)) continue;
             static_selection = true;
             break :type_receiver ReceiverType{ .structure = resolved };
         }
+        for (info.enums.items) |enumeration| {
+            if (!std.mem.eql(u8, enumeration.name, resolved)) continue;
+            static_selection = true;
+            break :type_receiver ReceiverType{ .enumeration = resolved };
+        }
         return try allocator.alloc(CompletionItem, 0);
     };
     const enclosing_structure = enclosingStructureName(info, cursor_offset);
-    for (receiver_path[1..]) |field_name| {
+    for (path[1..]) |field_name| {
         if (static_selection) break;
         const structure_name = switch (receiver_type) {
             .structure => |name| name,
-            .list, .fixed_array => return try allocator.alloc(CompletionItem, 0),
+            .enumeration, .list, .fixed_array => return try allocator.alloc(CompletionItem, 0),
         };
         receiver_type = fieldType(info, structure_name, field_name, enclosing_structure) orelse
             return try allocator.alloc(CompletionItem, 0);
@@ -1035,6 +1074,7 @@ fn memberCompletionItems(
     switch (receiver_type) {
         .list => return try collectionCompletionItems(allocator, true),
         .fixed_array => return try collectionCompletionItems(allocator, false),
+        .enumeration => |name| return try enumCompletionItems(allocator, info, name, static_selection),
         .structure => {},
     }
 
@@ -1055,6 +1095,45 @@ fn memberCompletionItems(
             });
         }
         current_structure = if (static_selection) null else structureBase(info, structure_name);
+    }
+    return try items.toOwnedSlice(allocator);
+}
+
+fn enumCompletionItems(
+    allocator: Allocator,
+    info: SemanticInfo,
+    enum_name: []const u8,
+    static_selection: bool,
+) ![]const CompletionItem {
+    var items: std.ArrayList(CompletionItem) = .empty;
+    if (static_selection) {
+        for (info.enum_variants.items) |variant| {
+            if (!std.mem.eql(u8, variant.enumeration, enum_name) or
+                containsCompletion(items.items, variant.name)) continue;
+            const insertion = if (variant.has_associated_values)
+                try std.fmt.allocPrint(allocator, "{s}($0)", .{variant.name})
+            else
+                try std.fmt.allocPrint(allocator, "{s}()", .{variant.name});
+            try items.append(allocator, .{
+                .label = variant.name,
+                .kind = 20,
+                .detail = "Silex enum variant",
+                .insertText = insertion,
+                .filterText = variant.name,
+                .insertTextFormat = if (variant.has_associated_values) 2 else null,
+            });
+        }
+        return try items.toOwnedSlice(allocator);
+    }
+
+    for (info.enums.items) |enumeration| {
+        if (!std.mem.eql(u8, enumeration.name, enum_name) or !enumeration.has_raw_value) continue;
+        try items.append(allocator, .{
+            .label = "raw_value",
+            .kind = 10,
+            .detail = "Silex raw enum value",
+        });
+        break;
     }
     return try items.toOwnedSlice(allocator);
 }
@@ -1086,6 +1165,7 @@ fn collectSemanticInfo(
 ) !void {
     try collectImportedStructures(allocator, io, source, project_root, tokens, info);
     try collectLocalTypeAliases(allocator, tokens, info);
+    try collectLocalEnums(allocator, tokens, info);
     var index: usize = 0;
     while (index < tokens.len) : (index += 1) {
         if ((tokens[index].tag == .keyword_struct or tokens[index].tag == .keyword_class) and
@@ -1211,6 +1291,12 @@ fn collectSemanticInfo(
                         .type_name = type_name,
                         .offset = tokenOffset(source, tokens[index + 1]),
                     });
+                } else if (enumVariantInitializerType(info.*, tokens, index + 3)) |type_name| {
+                    try info.variables.append(allocator, .{
+                        .name = tokens[index + 1].lexeme,
+                        .type_name = type_name,
+                        .offset = tokenOffset(source, tokens[index + 1]),
+                    });
                 } else if (staticCallResultType(info.*, tokens, index + 3)) |type_name| {
                     try info.variables.append(allocator, .{
                         .name = tokens[index + 1].lexeme,
@@ -1241,6 +1327,59 @@ fn collectSemanticInfo(
         if (tokens[index].tag == .keyword_func) {
             try collectParameters(allocator, source, tokens, index, &info.variables);
         }
+    }
+}
+
+fn collectLocalEnums(
+    allocator: Allocator,
+    tokens: []const LexerModule.Token,
+    info: *SemanticInfo,
+) !void {
+    var index: usize = 0;
+    while (index + 2 < tokens.len) : (index += 1) {
+        if (tokens[index].tag != .keyword_enum or tokens[index + 1].tag != .identifier) continue;
+        const enum_name = tokens[index + 1].lexeme;
+        var body_index = index + 2;
+        var has_raw_value = false;
+        if (tokens[body_index].tag == .colon) {
+            body_index += 1;
+            if (body_index >= tokens.len) continue;
+            has_raw_value = tokens[body_index].tag == .keyword_int or tokens[body_index].tag == .keyword_str;
+            body_index += 1;
+        }
+        if (body_index >= tokens.len or tokens[body_index].tag != .left_brace) continue;
+        try info.enums.append(allocator, .{ .name = enum_name, .has_raw_value = has_raw_value });
+
+        var depth: usize = 1;
+        var parentheses: usize = 0;
+        var variant_index = body_index + 1;
+        while (variant_index < tokens.len and depth != 0) : (variant_index += 1) {
+            const token = tokens[variant_index];
+            if (token.tag == .left_brace) {
+                depth += 1;
+                continue;
+            }
+            if (token.tag == .right_brace) {
+                depth -= 1;
+                continue;
+            }
+            if (depth == 1 and token.tag == .left_parenthesis) {
+                parentheses += 1;
+                continue;
+            }
+            if (depth == 1 and token.tag == .right_parenthesis) {
+                parentheses -|= 1;
+                continue;
+            }
+            if (depth != 1 or parentheses != 0 or token.tag != .identifier) continue;
+            try info.enum_variants.append(allocator, .{
+                .enumeration = enum_name,
+                .name = token.lexeme,
+                .has_associated_values = variant_index + 1 < tokens.len and
+                    tokens[variant_index + 1].tag == .left_parenthesis,
+            });
+        }
+        index = if (variant_index == 0) index else variant_index - 1;
     }
 }
 
@@ -1322,6 +1461,84 @@ fn structureInitializerType(info: *const SemanticInfo, tokens: []const LexerModu
         if (std.mem.eql(u8, member.structure, type_name)) return type_name;
     }
     return null;
+}
+
+fn enumVariantInitializerType(info: SemanticInfo, tokens: []const LexerModule.Token, start: usize) ?[]const u8 {
+    if (start >= tokens.len or tokens[start].tag != .identifier) return null;
+    var current_name = tokens[start].lexeme;
+    var enum_candidate: ?[]const u8 = null;
+    var index = start + 1;
+    while (index + 1 < tokens.len and tokens[index].tag == .dot and
+        tokens[index + 1].tag == .identifier)
+    {
+        enum_candidate = current_name;
+        current_name = tokens[index + 1].lexeme;
+        index += 2;
+    }
+    if (enum_candidate == null or index >= tokens.len or tokens[index].tag != .left_parenthesis) return null;
+    const enum_name = resolveNamedType(info, enum_candidate.?, null).name;
+    var enum_exists = false;
+    for (info.enums.items) |enumeration| {
+        if (std.mem.eql(u8, enumeration.name, enum_name)) {
+            enum_exists = true;
+            break;
+        }
+    }
+    if (!enum_exists) return null;
+    for (info.enum_variants.items) |variant| {
+        if (std.mem.eql(u8, variant.enumeration, enum_name) and
+            std.mem.eql(u8, variant.name, current_name)) return enum_name;
+    }
+    return null;
+}
+
+fn enumConstructorBeforeMember(
+    info: SemanticInfo,
+    tokens: []const LexerModule.Token,
+    source: []const u8,
+    cursor_offset: usize,
+) ?[]const u8 {
+    var prefix_start = cursor_offset;
+    while (prefix_start > 0 and isIdentifierContinue(source[prefix_start - 1])) prefix_start -= 1;
+    if (prefix_start == 0 or source[prefix_start - 1] != '.') return null;
+    const member_operator = prefix_start - 1;
+
+    var dot_index: ?usize = null;
+    for (tokens, 0..) |token, index| {
+        if (token.tag == .dot and tokenOffset(source, token) == member_operator) {
+            dot_index = index;
+            break;
+        }
+    }
+    var index = dot_index orelse return null;
+    if (index == 0 or tokens[index - 1].tag != .right_parenthesis) return null;
+
+    index -= 1;
+    var depth: usize = 0;
+    var call_start: ?usize = null;
+    while (true) {
+        if (tokens[index].tag == .right_parenthesis) {
+            depth += 1;
+        } else if (tokens[index].tag == .left_parenthesis) {
+            if (depth == 0) return null;
+            depth -= 1;
+            if (depth == 0) {
+                call_start = index;
+                break;
+            }
+        }
+        if (index == 0) break;
+        index -= 1;
+    }
+    const left_parenthesis = call_start orelse return null;
+    if (left_parenthesis == 0 or tokens[left_parenthesis - 1].tag != .identifier) return null;
+    var callee_start = left_parenthesis - 1;
+    while (callee_start >= 2 and tokens[callee_start - 1].tag == .dot and
+        tokens[callee_start - 2].tag == .identifier)
+    {
+        callee_start -= 2;
+    }
+    return enumVariantInitializerType(info, tokens, callee_start);
 }
 
 fn structureInitializerPath(
@@ -1561,6 +1778,20 @@ fn collectPublicStructureMembers(
     program: Ast.Program,
     info: *SemanticInfo,
 ) !void {
+    for (program.enums) |enumeration| {
+        if (!enumeration.is_public) continue;
+        try info.enums.append(allocator, .{
+            .name = enumeration.name,
+            .has_raw_value = enumeration.raw_type != null,
+        });
+        for (enumeration.variants) |variant| {
+            try info.enum_variants.append(allocator, .{
+                .enumeration = enumeration.name,
+                .name = variant.name,
+                .has_associated_values = variant.associated_types.len != 0,
+            });
+        }
+    }
     for (program.structures) |structure| {
         if (!structure.is_public) continue;
         try info.structures.append(allocator, .{
@@ -1903,7 +2134,7 @@ fn receiverType(info: SemanticInfo, receiver: []const u8, cursor_offset: usize) 
             result = if (resolved.collection) |collection| switch (collection) {
                 .list => .list,
                 .fixed_array => .fixed_array,
-            } else .{ .structure = resolved.name };
+            } else receiverTypeForNamed(info, resolved.name);
             result_offset = variable.offset;
         }
     }
@@ -1938,12 +2169,19 @@ fn fieldType(
                     .list => .list,
                     .fixed_array => .fixed_array,
                 };
-                return .{ .structure = resolved.name };
+                return receiverTypeForNamed(info, resolved.name);
             }
         }
         current_structure = structureBase(info, structure_name);
     }
     return null;
+}
+
+fn receiverTypeForNamed(info: SemanticInfo, name: []const u8) ReceiverType {
+    for (info.enums.items) |enumeration| {
+        if (std.mem.eql(u8, enumeration.name, name)) return .{ .enumeration = name };
+    }
+    return .{ .structure = name };
 }
 
 fn structureBase(info: SemanticInfo, structure_name: []const u8) ?[]const u8 {
@@ -2062,10 +2300,16 @@ fn containsCompletion(items: []const CompletionItem, label: []const u8) bool {
     return false;
 }
 
+fn findCompletion(items: []const CompletionItem, label: []const u8) ?CompletionItem {
+    for (items) |item| if (std.mem.eql(u8, item.label, label)) return item;
+    return null;
+}
+
 const language_completions = [_]CompletionItem{
     .{ .label = "func", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "struct", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "class", .kind = 14, .detail = "Silex keyword" },
+    .{ .label = "enum", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "init", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "drop", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "super", .kind = 14, .detail = "Silex keyword" },
@@ -2079,6 +2323,7 @@ const language_completions = [_]CompletionItem{
     .{ .label = "elif", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "else", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "while", .kind = 14, .detail = "Silex keyword" },
+    .{ .label = "match", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "return", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "import", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "use", .kind = 14, .detail = "Silex keyword" },
@@ -2112,6 +2357,7 @@ test "completion items include language terms and document identifiers" {
     defer std.testing.allocator.free(items);
     try std.testing.expect(containsCompletion(items, "func"));
     try std.testing.expect(containsCompletion(items, "class"));
+    try std.testing.expect(containsCompletion(items, "enum"));
     try std.testing.expect(containsCompletion(items, "init"));
     try std.testing.expect(containsCompletion(items, "drop"));
     try std.testing.expect(containsCompletion(items, "override"));
@@ -2119,6 +2365,7 @@ test "completion items include language terms and document identifiers" {
     try std.testing.expect(containsCompletion(items, "super"));
     try std.testing.expect(containsCompletion(items, "sub"));
     try std.testing.expect(containsCompletion(items, "elif"));
+    try std.testing.expect(containsCompletion(items, "match"));
     try std.testing.expect(containsCompletion(items, "total"));
 }
 
@@ -2610,6 +2857,94 @@ test "member completion recognizes generic and imported static type receivers" {
     try std.testing.expect(containsCompletion(imported_items, "creations"));
     try std.testing.expect(!containsCompletion(imported_items, "x"));
     try std.testing.expect(!containsCompletion(imported_items, "length_squared"));
+}
+
+test "enum completion inserts local variant constructors" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source =
+        \\enum Direction {
+        \\    north
+        \\    connected(str)
+        \\}
+        \\func main() {
+        \\    Direction.nor
+        \\}
+    ;
+    const items = try completionItems(arena.allocator(), std.testing.io, source, .{ .line = 5, .character = 17 });
+    const north = findCompletion(items, "north").?;
+    try std.testing.expectEqual(@as(u8, 20), north.kind);
+    try std.testing.expectEqualStrings("north()", north.insertText.?);
+    try std.testing.expect(north.insertTextFormat == null);
+    const connected = findCompletion(items, "connected").?;
+    try std.testing.expectEqualStrings("connected($0)", connected.insertText.?);
+    try std.testing.expectEqual(@as(?u8, 2), connected.insertTextFormat);
+    try std.testing.expectEqual(@as(usize, 2), items.len);
+}
+
+test "enum instance completion exposes only declared raw values" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source =
+        \\enum Direction { north; south }
+        \\enum DirectionName:str { north = "north"; south = "south" }
+        \\func main() {
+        \\    let direction = Direction.north()
+        \\    direction.
+        \\    let name = DirectionName.north()
+        \\    name.
+        \\    DirectionName.north().
+        \\}
+    ;
+    const direction_items = try completionItems(arena.allocator(), std.testing.io, source, .{ .line = 4, .character = 14 });
+    try std.testing.expect(!containsCompletion(direction_items, "raw_value"));
+    const name_items = try completionItems(arena.allocator(), std.testing.io, source, .{ .line = 6, .character = 9 });
+    const raw_value = findCompletion(name_items, "raw_value").?;
+    try std.testing.expectEqual(@as(u8, 10), raw_value.kind);
+    const direct_items = try completionItems(arena.allocator(), std.testing.io, source, .{ .line = 7, .character = 26 });
+    try std.testing.expect(containsCompletion(direct_items, "raw_value"));
+}
+
+test "enum completion resolves public imported types and module exports" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const source =
+        \\import Geometry
+        \\use Geometry.Direction as Heading
+        \\func main() {
+        \\    Geometry.Direction.
+        \\    Heading.
+        \\}
+    ;
+    const items = try completionItemsForProject(
+        allocator,
+        std.testing.io,
+        source,
+        "Tests/LspModules",
+        .{ .line = 3, .character = 23 },
+    );
+    try std.testing.expect(containsCompletion(items, "north"));
+    try std.testing.expect(containsCompletion(items, "south"));
+    const alias_items = try completionItemsForProject(
+        allocator,
+        std.testing.io,
+        source,
+        "Tests/LspModules",
+        .{ .line = 4, .character = 12 },
+    );
+    try std.testing.expect(containsCompletion(alias_items, "north"));
+    try std.testing.expect(containsCompletion(alias_items, "south"));
+
+    const exports = try moduleExportCompletionItems(
+        allocator,
+        std.testing.io,
+        "file:///Users/nekmata/Projects/Silex/Repository/Toolchain/Tests/LspModules/Main.sx",
+        "Geometry",
+        .{ .qualifier = "Geometry", .prefix = "Direction", .type_only = true },
+    );
+    try std.testing.expect(containsCompletion(exports, "Geometry.Direction"));
+    try std.testing.expect(containsCompletion(exports, "Geometry.DirectionName"));
 }
 
 test "cascade completion after a static factory stays instance-only" {

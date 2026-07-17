@@ -28,6 +28,7 @@ pub const Parser = struct {
         try self.advance();
         var imports: std.ArrayList(Ast.Import) = .empty;
         var uses: std.ArrayList(Ast.Use) = .empty;
+        var enums: std.ArrayList(Ast.Enum) = .empty;
         var structures: std.ArrayList(Ast.Structure) = .empty;
         var functions: std.ArrayList(Ast.Function) = .empty;
         while (self.current.tag != .end) {
@@ -39,13 +40,17 @@ pub const Parser = struct {
                 try self.advance();
                 if (self.current.tag == .keyword_use) {
                     try uses.append(self.allocator, try self.parseUse(true));
+                } else if (self.current.tag == .keyword_enum) {
+                    try enums.append(self.allocator, try self.parseEnum(true));
                 } else if (self.current.tag == .keyword_struct or self.current.tag == .keyword_class) {
                     try structures.append(self.allocator, try self.parseStructure(true));
                 } else if (self.current.tag == .keyword_func) {
                     try functions.append(self.allocator, try self.parseFunction(true));
                 } else if (self.current.tag == .identifier and std.mem.eql(u8, self.current.lexeme, "native")) {
                     return self.fail("native functions cannot be public");
-                } else return self.fail("expected 'struct', 'class', 'func', or 'use' after 'pub'");
+                } else return self.fail("expected 'enum', 'struct', 'class', 'func', or 'use' after 'pub'");
+            } else if (self.current.tag == .keyword_enum) {
+                try enums.append(self.allocator, try self.parseEnum(false));
             } else if (self.current.tag == .keyword_struct or self.current.tag == .keyword_class) {
                 try structures.append(self.allocator, try self.parseStructure(false));
             } else if (self.current.tag == .keyword_func) {
@@ -55,14 +60,83 @@ pub const Parser = struct {
             } else if (self.current.tag == .keyword_elif) {
                 return self.fail("'elif' must directly continue an if chain");
             } else {
-                return self.fail("expected import, use, struct, class, func, or native func declaration");
+                return self.fail("expected import, use, enum, struct, class, func, or native func declaration");
             }
         }
         return .{
             .imports = try imports.toOwnedSlice(self.allocator),
             .uses = try uses.toOwnedSlice(self.allocator),
+            .enums = try enums.toOwnedSlice(self.allocator),
             .structures = try structures.toOwnedSlice(self.allocator),
             .functions = try functions.toOwnedSlice(self.allocator),
+        };
+    }
+
+    fn parseEnum(self: *Parser, is_public: bool) ParseError!Ast.Enum {
+        const position = self.current.position;
+        try self.expect(.keyword_enum, "expected 'enum'");
+        if (self.current.tag != .identifier) return self.fail("expected enum name");
+        const name = self.current.lexeme;
+        const name_position = self.current.position;
+        try self.advance();
+        if (self.current.tag == .less) return self.fail("generic enums are not supported");
+        const raw_type: ?Ast.RawEnumType = if (self.current.tag == .colon) raw_type: {
+            try self.advance();
+            const result: Ast.RawEnumType = switch (self.current.tag) {
+                .keyword_int => .int,
+                .keyword_str => .str,
+                else => return self.fail("an enum raw type must be 'int' or 'str'"),
+            };
+            try self.advance();
+            break :raw_type result;
+        } else null;
+        try self.expect(.left_brace, "expected '{' after enum name");
+        var variants: std.ArrayList(Ast.EnumVariant) = .empty;
+        while (self.current.tag != .right_brace and self.current.tag != .end) {
+            if (self.current.tag != .identifier) return self.fail("expected enum variant name");
+            const variant_name = self.current.lexeme;
+            const variant_position = self.current.position;
+            try self.advance();
+            var associated_types: std.ArrayList(Ast.TypeName) = .empty;
+            if (self.current.tag == .left_parenthesis) {
+                if (raw_type != null) return self.fail("a raw enum variant cannot declare associated values");
+                try self.advance();
+                if (self.current.tag == .right_parenthesis) {
+                    return self.fail("an empty enum variant does not use parentheses");
+                }
+                while (true) {
+                    try associated_types.append(self.allocator, try self.parseTypeNameAfter("expected associated value type"));
+                    if (self.current.tag != .comma) break;
+                    try self.advance();
+                    if (self.current.tag == .right_parenthesis) return self.fail("expected associated value type after ','");
+                }
+                try self.expect(.right_parenthesis, "expected ')' after associated value types");
+            }
+            var raw_value: ?*Ast.Expression = null;
+            if (self.current.tag == .equal) {
+                if (raw_type == null) return self.fail("an enum without a raw type cannot assign variant values");
+                try self.advance();
+                raw_value = try self.parseExpression(false);
+            } else if (raw_type != null) {
+                return self.fail("a raw enum variant requires a value");
+            }
+            try variants.append(self.allocator, .{
+                .name = variant_name,
+                .position = variant_position,
+                .associated_types = try associated_types.toOwnedSlice(self.allocator),
+                .raw_value = raw_value,
+            });
+            try self.expectStatementTerminator();
+        }
+        try self.expect(.right_brace, "expected '}' after enum variants");
+        if (variants.items.len == 0) return self.failAt(name_position, "an enum requires at least one variant");
+        return .{
+            .is_public = is_public,
+            .position = position,
+            .name = name,
+            .name_position = name_position,
+            .raw_type = raw_type,
+            .variants = try variants.toOwnedSlice(self.allocator),
         };
     }
 
@@ -400,9 +474,18 @@ pub const Parser = struct {
             .keyword_break => self.parseLoopControl(.break_statement),
             .keyword_continue => self.parseLoopControl(.continue_statement),
             .keyword_return => self.parseReturn(),
+            .keyword_match => self.parseMatchStatement(),
             .identifier, .keyword_self, .keyword_super => self.parseIdentifierStatement(),
             else => self.fail("expected statement"),
         };
+    }
+
+    fn parseMatchStatement(self: *Parser) ParseError!Ast.Statement {
+        const expression = try self.parseMatchExpression();
+        for (expression.value.match_expression.branches) |branch| {
+            if (branch.body != .statements) return self.failAt(expression.position, "an imperative match requires a block in every branch");
+        }
+        return .{ .expression_statement = expression };
     }
 
     fn parsePrint(self: *Parser) ParseError!Ast.Statement {
@@ -990,6 +1073,7 @@ pub const Parser = struct {
             .left_bracket => return self.parsePostfix(try self.parseSequenceLiteral()),
             .keyword_func => return self.parsePostfix(try self.parseLambda()),
             .keyword_super => return self.parseSuperMethodCall(),
+            .keyword_match => return self.parsePostfix(try self.parseMatchExpression()),
             .identifier, .keyword_self => {
                 return self.parseIdentifierExpression();
             },
@@ -1001,6 +1085,78 @@ pub const Parser = struct {
             },
             else => return self.fail("expected expression"),
         }
+    }
+
+    fn parseMatchExpression(self: *Parser) ParseError!*Ast.Expression {
+        const position = self.current.position;
+        try self.expect(.keyword_match, "expected 'match'");
+        const subject = try self.parseExpression(false);
+        try self.expect(.left_brace, "expected '{' after match expression");
+        var branches: std.ArrayList(Ast.Expression.Match.Branch) = .empty;
+        var statement_bodies: ?bool = null;
+        while (self.current.tag != .right_brace and self.current.tag != .end) {
+            const is_else = self.current.tag == .keyword_else;
+            if (!is_else and self.current.tag != .identifier) return self.fail("expected enum variant or 'else' in match");
+            const variant: ?[]const u8 = if (is_else) null else self.current.lexeme;
+            const variant_position = self.current.position;
+            try self.advance();
+            var bindings: std.ArrayList(Ast.Expression.Match.Binding) = .empty;
+            if (self.current.tag == .left_parenthesis) {
+                if (is_else) return self.fail("an else match branch cannot bind associated values");
+                try self.advance();
+                if (self.current.tag == .right_parenthesis) return self.fail("a variant without associated values does not use parentheses in match");
+                while (true) {
+                    const mutability: Ast.Mutability = if (self.current.tag == .keyword_var) mutability: {
+                        try self.advance();
+                        break :mutability .mutable;
+                    } else if (self.current.tag == .keyword_let) mutability: {
+                        try self.advance();
+                        break :mutability .immutable;
+                    } else .immutable;
+                    if (self.current.tag != .identifier) return self.fail("expected associated value binding");
+                    try bindings.append(self.allocator, .{
+                        .name = self.current.lexeme,
+                        .position = self.current.position,
+                        .mutability = mutability,
+                    });
+                    try self.advance();
+                    if (self.current.tag != .comma) break;
+                    try self.advance();
+                    if (self.current.tag == .right_parenthesis) return self.fail("expected associated value binding after ','");
+                }
+                try self.expect(.right_parenthesis, "expected ')' after match bindings");
+            }
+            try self.expect(.fat_arrow, "expected '=>' after match pattern");
+            const uses_statements = self.current.tag == .left_brace;
+            if (statement_bodies) |expected| {
+                if (expected != uses_statements) return self.fail("match branches cannot mix expressions and blocks");
+            } else statement_bodies = uses_statements;
+            const body: Ast.Expression.Match.Body = if (uses_statements) block_body: {
+                const statements = try self.parseBlock();
+                try self.expectStatementTerminator();
+                break :block_body .{ .statements = statements };
+            } else expression_body: {
+                const value = try self.parseExpression(false);
+                try self.expectStatementTerminator();
+                break :expression_body .{ .expression = value };
+            };
+            try branches.append(self.allocator, .{
+                .variant = variant,
+                .variant_position = variant_position,
+                .bindings = try bindings.toOwnedSlice(self.allocator),
+                .body = body,
+            });
+            if (is_else and self.current.tag != .right_brace) return self.fail("else must be the last match branch");
+        }
+        try self.expect(.right_brace, "expected '}' after match branches");
+        if (branches.items.len == 0) return self.failAt(position, "a match requires at least one branch");
+        return self.newExpression(.{
+            .position = position,
+            .value = .{ .match_expression = .{
+                .subject = subject,
+                .branches = try branches.toOwnedSlice(self.allocator),
+            } },
+        });
     }
 
     fn parseSuperMethodCall(self: *Parser) ParseError!*Ast.Expression {
@@ -2574,6 +2730,113 @@ test "parse transparent type aliases with use" {
     try std.testing.expect(program.uses[0].target.type == .generic_structure);
     try std.testing.expectEqualStrings("Vec3i", program.uses[0].alias.?);
     try std.testing.expect(program.uses[1].target.type == .list);
+}
+
+test "parse enums and expression and imperative matches" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(),
+        \\enum Result { idle; value(int, str); failed(str) }
+        \\func main() {
+        \\    let result = Result.value(7, "ok")
+        \\    let text = match result { idle => "idle"; value(number, text) => text; failed(error) => error }
+        \\    match result { idle => {}; value(var number, let text) => { print(text) }; failed(error) => {} }
+        \\}
+    );
+    const program = try parser.parse();
+    try std.testing.expectEqual(@as(usize, 1), program.enums.len);
+    try std.testing.expectEqualStrings("Result", program.enums[0].name);
+    try std.testing.expectEqual(@as(usize, 2), program.enums[0].variants[1].associated_types.len);
+    const expression_match = program.functions[0].statements[1].variable_declaration.initializer.?.value.match_expression;
+    try std.testing.expectEqual(@as(usize, 3), expression_match.branches.len);
+    try std.testing.expect(expression_match.branches[1].body == .expression);
+    const imperative_match = program.functions[0].statements[2].expression_statement.value.match_expression;
+    try std.testing.expect(imperative_match.branches[1].body == .statements);
+    try std.testing.expectEqual(Ast.Mutability.mutable, imperative_match.branches[1].bindings[0].mutability);
+}
+
+test "parse terminal else match branches" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(),
+        \\enum State { idle; ready; failed(str) }
+        \\func main() {
+        \\    let state = State.idle()
+        \\    let text = match state { idle => "idle"; else => "other" }
+        \\    match state { failed(message) => { print(message) }; else => {} }
+        \\}
+    );
+    const program = try parser.parse();
+    const expression_match = program.functions[0].statements[1].variable_declaration.initializer.?.value.match_expression;
+    try std.testing.expect(expression_match.branches[0].variant != null);
+    try std.testing.expect(expression_match.branches[1].variant == null);
+    const imperative_match = program.functions[0].statements[2].expression_statement.value.match_expression;
+    try std.testing.expect(imperative_match.branches[1].variant == null);
+}
+
+test "reject misplaced and binding else match branches" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var misplaced = Parser.init(arena.allocator(),
+        \\enum State { idle; ready }
+        \\func main() { let state = State.idle(); match state { else => {}; ready => {} } }
+    );
+    try std.testing.expectError(error.InvalidSource, misplaced.parse());
+    try std.testing.expectEqualStrings("else must be the last match branch", misplaced.diagnostic.?.message);
+
+    var binding = Parser.init(arena.allocator(),
+        \\enum State { idle; ready }
+        \\func main() { let state = State.idle(); match state { idle => {}; else(value) => {} } }
+    );
+    try std.testing.expectError(error.InvalidSource, binding.parse());
+    try std.testing.expectEqualStrings("an else match branch cannot bind associated values", binding.diagnostic.?.message);
+}
+
+test "reject mixed enum match branch forms" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(),
+        \\enum State { idle; ready }
+        \\func main() { let state = State.idle(); let value = match state { idle => 0; ready => {} } }
+    );
+    try std.testing.expectError(error.InvalidSource, parser.parse());
+    try std.testing.expectEqualStrings("match branches cannot mix expressions and blocks", parser.diagnostic.?.message);
+}
+
+test "parse int and string raw enums" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(),
+        \\enum Direction:int { north = 1; unknown = -1 }
+        \\enum DirectionName:str { north = "north"; south = "south" }
+        \\func main() { print(Direction.north().raw_value) }
+    );
+    const program = try parser.parse();
+    try std.testing.expectEqual(Ast.RawEnumType.int, program.enums[0].raw_type.?);
+    try std.testing.expect(program.enums[0].variants[0].raw_value.?.value == .integer);
+    try std.testing.expect(program.enums[0].variants[1].raw_value.?.value == .unary);
+    try std.testing.expectEqual(Ast.RawEnumType.str, program.enums[1].raw_type.?);
+    try std.testing.expect(program.enums[1].variants[0].raw_value.?.value == .string);
+}
+
+test "reject invalid raw enum declaration shapes" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var invalid_type = Parser.init(arena.allocator(), "enum State:bool { ready = true }");
+    try std.testing.expectError(error.InvalidSource, invalid_type.parse());
+    try std.testing.expectEqualStrings("an enum raw type must be 'int' or 'str'", invalid_type.diagnostic.?.message);
+
+    var missing_value = Parser.init(arena.allocator(), "enum State:int { ready }");
+    try std.testing.expectError(error.InvalidSource, missing_value.parse());
+    try std.testing.expectEqualStrings("a raw enum variant requires a value", missing_value.diagnostic.?.message);
+
+    var associated_value = Parser.init(arena.allocator(), "enum State:int { ready(str) = 1 }");
+    try std.testing.expectError(error.InvalidSource, associated_value.parse());
+    try std.testing.expectEqualStrings("a raw enum variant cannot declare associated values", associated_value.diagnostic.?.message);
+
+    var missing_type = Parser.init(arena.allocator(), "enum State { ready = 1 }");
+    try std.testing.expectError(error.InvalidSource, missing_type.parse());
+    try std.testing.expectEqualStrings("an enum without a raw type cannot assign variant values", missing_type.diagnostic.?.message);
 }
 
 test "require a name for a type alias" {

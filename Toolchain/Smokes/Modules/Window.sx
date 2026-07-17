@@ -1,3 +1,13 @@
+pub enum Status {
+    idle
+    ready(str)
+}
+
+pub enum WireStatus:int {
+    idle = 10
+    ready = 20
+}
+
 pub struct Session {
     var active:bool = true
 

@@ -38,6 +38,10 @@ pub const Specializer = struct {
     }
 
     pub fn specialize(self: *Specializer) SpecializeError!Ast.Program {
+        var enums: std.ArrayList(Ast.Enum) = .empty;
+        for (self.program.enums) |enum_value| {
+            try enums.append(self.allocator, try self.rewriteEnum(enum_value));
+        }
         for (self.program.structures) |structure| {
             if (structure.type_parameters.len != 0) continue;
             const concrete = try self.rewriteStructure(structure, &.{});
@@ -50,9 +54,29 @@ pub const Specializer = struct {
         }
 
         return .{
+            .enums = try enums.toOwnedSlice(self.allocator),
             .structures = try self.structures.toOwnedSlice(self.allocator),
             .functions = try self.functions.toOwnedSlice(self.allocator),
         };
+    }
+
+    fn rewriteEnum(self: *Specializer, enum_value: Ast.Enum) SpecializeError!Ast.Enum {
+        var variants: std.ArrayList(Ast.EnumVariant) = .empty;
+        for (enum_value.variants) |variant| {
+            var associated_types: std.ArrayList(Ast.TypeName) = .empty;
+            for (variant.associated_types) |associated_type| {
+                try associated_types.append(self.allocator, try self.rewriteType(associated_type, &.{}, variant.position));
+            }
+            try variants.append(self.allocator, .{
+                .name = variant.name,
+                .position = variant.position,
+                .associated_types = try associated_types.toOwnedSlice(self.allocator),
+                .raw_value = if (variant.raw_value) |raw_value| try self.rewriteExpression(raw_value, &.{}) else null,
+            });
+        }
+        var result = enum_value;
+        result.variants = try variants.toOwnedSlice(self.allocator);
+        return result;
     }
 
     fn rewriteStructure(
@@ -539,6 +563,24 @@ pub const Specializer = struct {
                 .left = try self.rewriteExpression(binary.left, bindings),
                 .right = try self.rewriteExpression(binary.right, bindings),
             } },
+            .match_expression => |match_value| match_expression: {
+                var branches: std.ArrayList(Ast.Expression.Match.Branch) = .empty;
+                for (match_value.branches) |branch| {
+                    try branches.append(self.allocator, .{
+                        .variant = branch.variant,
+                        .variant_position = branch.variant_position,
+                        .bindings = branch.bindings,
+                        .body = switch (branch.body) {
+                            .expression => |body| .{ .expression = try self.rewriteExpression(body, bindings) },
+                            .statements => |body| .{ .statements = try self.rewriteStatements(body, bindings) },
+                        },
+                    });
+                }
+                break :match_expression .{ .match_expression = .{
+                    .subject = try self.rewriteExpression(match_value.subject, bindings),
+                    .branches = try branches.toOwnedSlice(self.allocator),
+                } };
+            },
             else => expression.value,
         };
         return result;

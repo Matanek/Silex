@@ -1,8 +1,8 @@
 # Values and mutation
 
-Primitive values, strings, fixed arrays, lists, and structures have value
-semantics. Assignment, an ordinary function argument, a return value, a field,
-and an indexed element never create observable shared mutable state.
+Primitive values, strings, fixed arrays, lists, structures, and enums have
+value semantics. Assignment, an ordinary function argument, a return value, a
+field, and an indexed element never create observable shared mutable state.
 
 Function values are copied as values too, but a capturing lambda contains
 lexical borrows of the bindings it uses. Copying it copies those borrows, not

@@ -21,6 +21,7 @@ pub const Type = union(enum) {
     bool,
     str,
     structure: StructureType,
+    enumeration: EnumType,
     list: *const Type,
     fixed_array: FixedArrayType,
     reference: ReferenceType,
@@ -40,6 +41,11 @@ pub const StructureType = struct {
     source_name: []const u8,
     generated_name: []const u8,
     is_class: bool,
+};
+
+pub const EnumType = struct {
+    source_name: []const u8,
+    generated_name: []const u8,
 };
 
 pub const ReferenceType = struct {
@@ -95,6 +101,9 @@ pub const Expression = struct {
         super_method_call: SuperMethodCall,
         class_initializer: ClassInitializer,
         structure_initializer: StructureInitializer,
+        enum_initializer: EnumInitializer,
+        enum_raw_value: *Expression,
+        match_expression: Match,
         member_access: MemberAccess,
         bound_function: MemberAccess,
         adapt_function: *Expression,
@@ -214,6 +223,36 @@ pub const Expression = struct {
     pub const StructureInitializer = struct {
         generated_name: []const u8,
         fields: []const *Expression,
+    };
+
+    pub const EnumInitializer = struct {
+        enum_generated_name: []const u8,
+        variant_index: usize,
+        arguments: []const *Expression,
+    };
+
+    pub const Match = struct {
+        subject: *Expression,
+        temporary_name: []const u8,
+        branches: []const Branch,
+
+        pub const Branch = struct {
+            variant_index: ?usize,
+            bindings: []const Binding,
+            body: Body,
+        };
+
+        pub const Binding = struct {
+            generated_name: []const u8,
+            type: Type,
+            mutability: Ast.Mutability,
+            capture_box: *const bool,
+        };
+
+        pub const Body = union(enum) {
+            expression: *Expression,
+            statements: []const Statement,
+        };
     };
 
     pub const ClassInitializer = struct {
@@ -350,8 +389,20 @@ pub const Statement = union(enum) {
 };
 
 pub const Program = struct {
+    enums: []const Enum,
     structures: []const Structure,
     functions: []const Function,
+};
+
+pub const Enum = struct {
+    generated_name: []const u8,
+    raw_type: ?Type,
+    variants: []const EnumVariant,
+};
+
+pub const EnumVariant = struct {
+    associated_types: []const Type,
+    raw_value: ?*Expression,
 };
 
 pub const Structure = struct {
@@ -503,6 +554,21 @@ const StructureSymbol = struct {
     position: Source.Position,
 };
 
+const EnumSymbol = struct {
+    source_name: []const u8,
+    generated_name: []const u8,
+    raw_type: ?Type,
+    variants: []const EnumVariantSymbol,
+    position: Source.Position,
+};
+
+const EnumVariantSymbol = struct {
+    source_name: []const u8,
+    associated_types: []const Type,
+    raw_value: ?*Expression,
+    position: Source.Position,
+};
+
 const ConstructorSymbol = struct {
     parameter_types: []const Type,
     parameter_is_mutable_references: []const bool,
@@ -585,6 +651,7 @@ pub const Analyzer = struct {
     native_module_names: []const []const u8 = &.{},
     next_symbol_id: usize = 0,
     functions: std.ArrayList(FunctionSymbol) = .empty,
+    enums: std.ArrayList(EnumSymbol) = .empty,
     structures: std.ArrayList(StructureSymbol) = .empty,
     current_return_type: Type = .void,
     current_structure_index: ?usize = null,
@@ -605,9 +672,24 @@ pub const Analyzer = struct {
     }
 
     pub fn analyze(self: *Analyzer, program: Ast.Program) !Program {
+        try self.collectEnumNames(program.enums);
         try self.collectStructures(program.structures);
+        try self.collectEnumVariants(program.enums);
         try self.collectFunctions(program.functions);
         try self.validateStructureDefaults();
+        var enums: std.ArrayList(Enum) = .empty;
+        for (self.enums.items) |symbol| {
+            var variants: std.ArrayList(EnumVariant) = .empty;
+            for (symbol.variants) |variant| try variants.append(self.allocator, .{
+                .associated_types = variant.associated_types,
+                .raw_value = variant.raw_value,
+            });
+            try enums.append(self.allocator, .{
+                .generated_name = symbol.generated_name,
+                .raw_type = symbol.raw_type,
+                .variants = try variants.toOwnedSlice(self.allocator),
+            });
+        }
         var structures: std.ArrayList(Structure) = .empty;
         for (program.structures, self.structures.items, 0..) |ast_structure, symbol, structure_index| {
             var fields: std.ArrayList(StructureField) = .empty;
@@ -627,7 +709,8 @@ pub const Analyzer = struct {
             });
             var static_fields: std.ArrayList(StructureField) = .empty;
             for (symbol.static_fields) |field| {
-                const intrinsic = try self.intrinsicDefaultExpression(field.type, field.position) orelse {
+                const intrinsic = try self.intrinsicDefaultExpression(field.type, field.position);
+                const reset_value = intrinsic orelse field.default_value orelse {
                     const field_type_name = try allocatedTypeName(self.allocator, field.type);
                     const message = try std.fmt.allocPrint(self.allocator, "static field '{s}' of type '{s}' has no intrinsic value", .{ field.source_name, field_type_name });
                     return self.fail(field.position, message);
@@ -637,8 +720,8 @@ pub const Analyzer = struct {
                     .type = field.type,
                     .visibility = field.visibility,
                     .mutability = field.mutability,
-                    .initializer = field.default_value orelse intrinsic,
-                    .reset_value = intrinsic,
+                    .initializer = field.default_value orelse intrinsic.?,
+                    .reset_value = reset_value,
                 });
             }
             var constructors: std.ArrayList(Constructor) = .empty;
@@ -681,6 +764,7 @@ pub const Analyzer = struct {
             }
         }
         const result = Program{
+            .enums = try enums.toOwnedSlice(self.allocator),
             .structures = try structures.toOwnedSlice(self.allocator),
             .functions = try functions.toOwnedSlice(self.allocator),
         };
@@ -688,9 +772,95 @@ pub const Analyzer = struct {
         return result;
     }
 
+    fn collectEnumNames(self: *Analyzer, ast_enums: []const Ast.Enum) AnalyzeError!void {
+        for (ast_enums, 0..) |ast_enum, enum_index| {
+            if (self.findEnum(ast_enum.name) != null) {
+                const message = try std.fmt.allocPrint(self.allocator, "type '{s}' is already declared", .{ast_enum.name});
+                return self.fail(ast_enum.name_position, message);
+            }
+            try self.enums.append(self.allocator, .{
+                .source_name = ast_enum.name,
+                .generated_name = try std.fmt.allocPrint(self.allocator, "SilexEnum{d}", .{enum_index}),
+                .raw_type = if (ast_enum.raw_type) |raw_type| switch (raw_type) {
+                    .int => .int,
+                    .str => .str,
+                } else null,
+                .variants = &.{},
+                .position = ast_enum.name_position,
+            });
+        }
+    }
+
+    fn collectEnumVariants(self: *Analyzer, ast_enums: []const Ast.Enum) AnalyzeError!void {
+        for (ast_enums, 0..) |ast_enum, enum_index| {
+            var variants: std.ArrayList(EnumVariantSymbol) = .empty;
+            for (ast_enum.variants) |ast_variant| {
+                for (variants.items) |existing| {
+                    if (std.mem.eql(u8, existing.source_name, ast_variant.name)) {
+                        const message = try std.fmt.allocPrint(self.allocator, "variant '{s}' is already declared in enum '{s}'", .{ ast_variant.name, ast_enum.name });
+                        return self.fail(ast_variant.position, message);
+                    }
+                }
+                var associated_types: std.ArrayList(Type) = .empty;
+                for (ast_variant.associated_types) |annotation| {
+                    const associated_type = try typeFromAnnotation(self, annotation, ast_variant.position);
+                    if (associated_type == .void or associated_type == .reference) {
+                        return self.fail(ast_variant.position, "an enum associated value cannot have this type");
+                    }
+                    try associated_types.append(self.allocator, associated_type);
+                }
+                const raw_value = if (ast_variant.raw_value) |ast_raw_value|
+                    try self.enumRawValue(ast_raw_value, self.enums.items[enum_index].raw_type.?, ast_variant.position)
+                else
+                    null;
+                if (raw_value) |value| {
+                    for (variants.items) |existing| if (existing.raw_value) |existing_value| {
+                        if (rawEnumValuesEqual(value, existing_value)) {
+                            const message = try std.fmt.allocPrint(
+                                self.allocator,
+                                "raw enum value is already used by variant '{s}'",
+                                .{existing.source_name},
+                            );
+                            return self.fail(ast_variant.position, message);
+                        }
+                    };
+                }
+                try variants.append(self.allocator, .{
+                    .source_name = ast_variant.name,
+                    .associated_types = try associated_types.toOwnedSlice(self.allocator),
+                    .raw_value = raw_value,
+                    .position = ast_variant.position,
+                });
+            }
+            self.enums.items[enum_index].variants = try variants.toOwnedSlice(self.allocator);
+        }
+    }
+
+    fn enumRawValue(
+        self: *Analyzer,
+        ast_value: *const Ast.Expression,
+        raw_type: Type,
+        position: Source.Position,
+    ) AnalyzeError!*Expression {
+        const valid_shape = if (raw_type == .str)
+            ast_value.value == .string
+        else
+            ast_value.value == .integer or
+                (ast_value.value == .unary and ast_value.value.unary.operator == .numeric_negate and ast_value.value.unary.operand.value == .integer);
+        if (!valid_shape) {
+            const message = try std.fmt.allocPrint(self.allocator, "raw enum value must be a '{s}' literal", .{typeName(raw_type)});
+            return self.fail(position, message);
+        }
+        var empty_scope = Scope{ .parent = null, .depth = 0 };
+        var value = try self.expressionForExpected(ast_value, &empty_scope, raw_type);
+        value = try self.coerce(value, raw_type);
+        try self.validateExpression(value);
+        return value;
+    }
+
     fn collectStructures(self: *Analyzer, ast_structures: []const Ast.Structure) AnalyzeError!void {
         for (ast_structures, 0..) |ast_structure, structure_index| {
-            if (self.findStructure(ast_structure.name) != null) {
+            if (self.findStructure(ast_structure.name) != null or self.findEnum(ast_structure.name) != null) {
                 const message = try std.fmt.allocPrint(self.allocator, "type '{s}' is already declared", .{ast_structure.name});
                 return self.fail(ast_structure.name_position, message);
             }
@@ -1107,6 +1277,19 @@ pub const Analyzer = struct {
             .fixed_array => false,
             .reference => false,
             .function => false,
+            .enumeration => |enum_type| enum_default: {
+                if (ast.value != .static_method_call) break :enum_default false;
+                const call = ast.value.static_method_call;
+                if (call.owner != .structure or !std.mem.eql(u8, call.owner.structure, enum_type.source_name)) break :enum_default false;
+                const enum_symbol = self.findEnumByGeneratedName(enum_type.generated_name) orelse break :enum_default false;
+                const variant_index = findEnumVariant(enum_symbol, call.name) orelse break :enum_default false;
+                const variant = enum_symbol.variants[variant_index];
+                if (call.arguments.len != variant.associated_types.len) break :enum_default false;
+                for (call.arguments, variant.associated_types) |argument, associated_type| {
+                    try self.validateDefaultShape(argument, associated_type);
+                }
+                break :enum_default true;
+            },
             .optional => ast.value == .null,
             .null => false,
             .structure => |structure_type| structure_default: {
@@ -1594,6 +1777,15 @@ pub const Analyzer = struct {
             .super_method_call => return self.fail(expression_value.position, "'super.method(...)' is only available inside a class method"),
             .class_initializer => |initializer| for (initializer.arguments) |argument| try self.validateConstructorExpression(structure, argument, initialized),
             .structure_initializer => |initializer| for (initializer.fields) |field| try self.validateConstructorExpression(structure, field, initialized),
+            .enum_initializer => |initializer| for (initializer.arguments) |argument| try self.validateConstructorExpression(structure, argument, initialized),
+            .enum_raw_value => |value| try self.validateConstructorExpression(structure, value, initialized),
+            .match_expression => |match_value| {
+                try self.validateConstructorExpression(structure, match_value.subject, initialized);
+                for (match_value.branches) |branch| switch (branch.body) {
+                    .expression => |value| try self.validateConstructorExpression(structure, value, initialized),
+                    .statements => |values| _ = try self.validateConstructorStatements(structure, values, try self.allocator.dupe(FieldInitialization, initialized)),
+                };
+            },
             .member_access, .bound_function => |member| {
                 if (member.object.value == .self) {
                     const field_index = generatedFieldIndex(structure, member.generated_name) orelse return;
@@ -1871,6 +2063,8 @@ pub const Analyzer = struct {
             try self.memberAccessExpressionRaw(ast.target.value.member_access, scope, false)
         else
             try self.expression(ast.target, scope);
+
+        if (target.value == .enum_raw_value) return self.fail(ast.position, "enum property 'raw_value' is read-only");
 
         if (self.immutableFieldInPlace(target)) |field_candidate| {
             const direct_constructor_initialization = self.current_constructor and
@@ -2283,6 +2477,7 @@ pub const Analyzer = struct {
             .unary => |unary| self.unaryExpression(unary, scope),
             .conversion => |conversion| self.conversionExpression(conversion, scope),
             .binary => |binary| self.binaryExpression(binary, scope),
+            .match_expression => |match_value| self.matchExpression(match_value, scope),
         };
     }
 
@@ -2456,6 +2651,10 @@ pub const Analyzer = struct {
             .list, .fixed_array => self.newExpression(.{ .type = type_value, .position = position, .value = .{ .sequence_literal = &.{} } }),
             .reference => self.fail(position, "a reference requires an initializer"),
             .function => self.fail(position, "a function value requires an initializer"),
+            .enumeration => |enum_type| default_enum: {
+                const message = try std.fmt.allocPrint(self.allocator, "enum '{s}' requires an initializer", .{enum_type.source_name});
+                break :default_enum self.fail(position, message);
+            },
             .optional => self.newExpression(.{ .type = type_value, .position = position, .value = .null }),
             .null => unreachable,
             .structure => |structure_type| structure_default: {
@@ -2498,7 +2697,7 @@ pub const Analyzer = struct {
 
     fn hasIntrinsicDefault(self: *const Analyzer, type_value: Type) bool {
         return switch (type_value) {
-            .void, .reference, .function, .null => false,
+            .void, .reference, .function, .enumeration, .null => false,
             .int, .int8, .int16, .int32, .uint8, .uint16, .uint32, .uint64, .float, .float64, .bool, .str, .list, .fixed_array, .optional => true,
             .structure => |structure_type| intrinsic: {
                 if (structure_type.is_class) break :intrinsic false;
@@ -3089,6 +3288,14 @@ pub const Analyzer = struct {
         access: Ast.Expression.StaticFieldAccess,
     ) AnalyzeError!*Expression {
         const owner_type = try typeFromAnnotation(self, access.owner, access.owner_position);
+        if (owner_type == .enumeration) {
+            const enum_symbol = self.findEnumByGeneratedName(owner_type.enumeration.generated_name).?;
+            if (findEnumVariant(enum_symbol, access.name) != null) {
+                return self.fail(access.name_position, "an enum variant must be constructed with parentheses");
+            }
+            const message = try std.fmt.allocPrint(self.allocator, "enum '{s}' has no variant '{s}'", .{ enum_symbol.source_name, access.name });
+            return self.fail(access.name_position, message);
+        }
         if (owner_type != .structure) return self.fail(access.owner_position, "a static field must be selected through a struct or class type");
         const structure_index = self.findStructureIndexByGeneratedName(owner_type.structure.generated_name).?;
         const structure = &self.structures.items[structure_index];
@@ -3120,6 +3327,7 @@ pub const Analyzer = struct {
     ) AnalyzeError!*Expression {
         if (call.named_fields != null) return self.fail(call.name_position, "static methods do not accept named arguments");
         const owner_type = try typeFromAnnotation(self, call.owner, call.owner_position);
+        if (owner_type == .enumeration) return self.enumInitializerExpression(owner_type.enumeration, call, scope);
         if (owner_type != .structure) return self.fail(call.owner_position, "a static method must be selected through a struct or class type");
         const structure_index = self.findStructureIndexByGeneratedName(owner_type.structure.generated_name).?;
         const structure = &self.structures.items[structure_index];
@@ -3176,6 +3384,192 @@ pub const Analyzer = struct {
                 .owner_generated_name = structure.generated_name,
                 .generated_name = method_symbol.generated_name,
                 .arguments = try arguments.toOwnedSlice(self.allocator),
+            } },
+        });
+    }
+
+    fn enumInitializerExpression(
+        self: *Analyzer,
+        enum_type: EnumType,
+        call: Ast.Expression.StaticMethodCall,
+        scope: *const Scope,
+    ) AnalyzeError!*Expression {
+        const enum_symbol = self.findEnumByGeneratedName(enum_type.generated_name).?;
+        const variant_index = findEnumVariant(enum_symbol, call.name) orelse {
+            const message = try std.fmt.allocPrint(self.allocator, "enum '{s}' has no variant '{s}'", .{ enum_symbol.source_name, call.name });
+            return self.fail(call.name_position, message);
+        };
+        const variant = enum_symbol.variants[variant_index];
+        if (call.arguments.len != variant.associated_types.len) {
+            const message = try std.fmt.allocPrint(
+                self.allocator,
+                "variant '{s}.{s}' expects {d} associated values, found {d}",
+                .{ enum_symbol.source_name, variant.source_name, variant.associated_types.len, call.arguments.len },
+            );
+            return self.fail(call.name_position, message);
+        }
+        var arguments: std.ArrayList(*Expression) = .empty;
+        var lifetime_depth: usize = 0;
+        for (call.arguments, variant.associated_types, 0..) |argument, expected_type, index| {
+            var value = try self.expressionForExpected(argument, scope, expected_type);
+            value = try self.coerce(value, expected_type);
+            if (!typeEqual(value.type, expected_type)) {
+                const message = try std.fmt.allocPrint(
+                    self.allocator,
+                    "associated value {d} of variant '{s}.{s}' expects '{s}', found '{s}'",
+                    .{ index + 1, enum_symbol.source_name, variant.source_name, typeName(expected_type), typeName(value.type) },
+                );
+                return self.fail(argument.position, message);
+            }
+            try arguments.append(self.allocator, value);
+            lifetime_depth = @max(lifetime_depth, value.lifetime_depth);
+            self.releaseTransientBorrow(value);
+        }
+        return self.newExpression(.{
+            .type = .{ .enumeration = enum_type },
+            .position = call.name_position,
+            .lifetime_depth = lifetime_depth,
+            .value = .{ .enum_initializer = .{
+                .enum_generated_name = enum_type.generated_name,
+                .variant_index = variant_index,
+                .arguments = try arguments.toOwnedSlice(self.allocator),
+            } },
+        });
+    }
+
+    fn matchExpression(
+        self: *Analyzer,
+        ast_match: Ast.Expression.Match,
+        parent_scope: *const Scope,
+    ) AnalyzeError!*Expression {
+        const subject = try self.expression(ast_match.subject, parent_scope);
+        if (subject.type != .enumeration) {
+            const message = try std.fmt.allocPrint(self.allocator, "match requires an enum value, found '{s}'", .{typeName(subject.type)});
+            return self.fail(ast_match.subject.position, message);
+        }
+        const enum_symbol = self.findEnumByGeneratedName(subject.type.enumeration.generated_name).?;
+        const temporary_name = try std.fmt.allocPrint(self.allocator, "silexMatch{d}", .{self.next_symbol_id});
+        self.next_symbol_id += 1;
+        const seen = try self.allocator.alloc(bool, enum_symbol.variants.len);
+        @memset(seen, false);
+        var branches: std.ArrayList(Expression.Match.Branch) = .empty;
+        var result_type: ?Type = null;
+        var expression_form: ?bool = null;
+        var lifetime_depth = subject.lifetime_depth;
+        var has_else = false;
+
+        for (ast_match.branches, 0..) |ast_branch, branch_index| {
+            var associated_types: []const Type = &.{};
+            const variant_index: ?usize = if (ast_branch.variant) |variant_name| variant: {
+                const index = findEnumVariant(enum_symbol, variant_name) orelse {
+                    const message = try std.fmt.allocPrint(self.allocator, "enum '{s}' has no variant '{s}'", .{ enum_symbol.source_name, variant_name });
+                    return self.fail(ast_branch.variant_position, message);
+                };
+                if (seen[index]) {
+                    const message = try std.fmt.allocPrint(self.allocator, "variant '{s}' is matched more than once", .{variant_name});
+                    return self.fail(ast_branch.variant_position, message);
+                }
+                seen[index] = true;
+                associated_types = enum_symbol.variants[index].associated_types;
+                break :variant index;
+            } else else_branch: {
+                if (has_else) return self.fail(ast_branch.variant_position, "a match can contain only one else branch");
+                if (branch_index + 1 != ast_match.branches.len) return self.fail(ast_branch.variant_position, "else must be the last match branch");
+                has_else = true;
+                var covers_variant = false;
+                for (seen) |was_seen| covers_variant = covers_variant or !was_seen;
+                if (!covers_variant) return self.fail(ast_branch.variant_position, "else match branch does not cover any remaining variant");
+                if (ast_branch.bindings.len != 0) return self.fail(ast_branch.variant_position, "an else match branch cannot bind associated values");
+                break :else_branch null;
+            };
+            if (variant_index != null and ast_branch.bindings.len != associated_types.len) {
+                const message = try std.fmt.allocPrint(
+                    self.allocator,
+                    "variant '{s}.{s}' exposes {d} associated values, but the pattern binds {d}",
+                    .{ enum_symbol.source_name, ast_branch.variant.?, associated_types.len, ast_branch.bindings.len },
+                );
+                return self.fail(ast_branch.variant_position, message);
+            }
+
+            var branch_scope = Scope{ .parent = parent_scope, .depth = parent_scope.depth + 1 };
+            var bindings: std.ArrayList(Expression.Match.Binding) = .empty;
+            for (ast_branch.bindings, associated_types) |ast_binding, binding_type| {
+                try self.requireAvailableVariableName(&branch_scope, ast_binding.name, ast_binding.position);
+                if (ast_binding.mutability == .immutable) try self.requireIndependentLetType(binding_type, ast_binding.position);
+                const generated_name = try std.fmt.allocPrint(self.allocator, "silexValue{d}", .{self.next_symbol_id});
+                self.next_symbol_id += 1;
+                const state = try self.newBindingState(binding_type);
+                try branch_scope.symbols.append(self.allocator, .{
+                    .source_name = ast_binding.name,
+                    .generated_name = generated_name,
+                    .type = binding_type,
+                    .mutability = ast_binding.mutability,
+                    .state = state,
+                    .scope_depth = branch_scope.depth,
+                    .control_binding = true,
+                });
+                try bindings.append(self.allocator, .{
+                    .generated_name = generated_name,
+                    .type = binding_type,
+                    .mutability = ast_binding.mutability,
+                    .capture_box = &state.capture_box,
+                });
+            }
+
+            const body: Expression.Match.Body = switch (ast_branch.body) {
+                .expression => |ast_expression| expression_body: {
+                    if (expression_form == false) return self.fail(ast_expression.position, "match cannot mix expression branches and block branches");
+                    expression_form = true;
+                    const value = try self.expression(ast_expression, &branch_scope);
+                    if (result_type) |expected| {
+                        if (!typeEqual(expected, value.type)) {
+                            const message = try std.fmt.allocPrint(
+                                self.allocator,
+                                "match branches must have the same type; expected '{s}', found '{s}'",
+                                .{ typeName(expected), typeName(value.type) },
+                            );
+                            return self.fail(ast_expression.position, message);
+                        }
+                    } else {
+                        result_type = value.type;
+                    }
+                    lifetime_depth = @max(lifetime_depth, value.lifetime_depth);
+                    break :expression_body .{ .expression = value };
+                },
+                .statements => |ast_statements| block_body: {
+                    if (expression_form == true) return self.fail(ast_branch.variant_position, "match cannot mix expression branches and block branches");
+                    expression_form = false;
+                    break :block_body .{ .statements = try self.statements(ast_statements, &branch_scope) };
+                },
+            };
+            self.releaseScopeBorrows(&branch_scope);
+            try branches.append(self.allocator, .{
+                .variant_index = variant_index,
+                .bindings = try bindings.toOwnedSlice(self.allocator),
+                .body = body,
+            });
+        }
+
+        for (seen, enum_symbol.variants) |was_seen, variant| {
+            if (has_else) break;
+            if (!was_seen) {
+                const message = try std.fmt.allocPrint(
+                    self.allocator,
+                    "match on enum '{s}' is not exhaustive; missing variant '{s}'",
+                    .{ enum_symbol.source_name, variant.source_name },
+                );
+                return self.fail(ast_match.subject.position, message);
+            }
+        }
+        self.releaseTransientBorrow(subject);
+        return self.newExpression(.{
+            .type = if (expression_form orelse false) result_type.? else .void,
+            .position = ast_match.subject.position,
+            .lifetime_depth = lifetime_depth,
+            .value = .{ .match_expression = .{
+                .subject = subject,
+                .temporary_name = temporary_name,
+                .branches = try branches.toOwnedSlice(self.allocator),
             } },
         });
     }
@@ -3789,6 +4183,27 @@ pub const Analyzer = struct {
         return null;
     }
 
+    fn findEnum(self: *const Analyzer, name: []const u8) ?*const EnumSymbol {
+        for (self.enums.items) |*enum_symbol| {
+            if (std.mem.eql(u8, enum_symbol.source_name, name)) return enum_symbol;
+        }
+        return null;
+    }
+
+    fn findEnumByGeneratedName(self: *const Analyzer, name: []const u8) ?*const EnumSymbol {
+        for (self.enums.items) |*enum_symbol| {
+            if (std.mem.eql(u8, enum_symbol.generated_name, name)) return enum_symbol;
+        }
+        return null;
+    }
+
+    fn findEnumVariant(enum_symbol: *const EnumSymbol, name: []const u8) ?usize {
+        for (enum_symbol.variants, 0..) |variant, index| {
+            if (std.mem.eql(u8, variant.source_name, name)) return index;
+        }
+        return null;
+    }
+
     fn findStructureIndex(self: *const Analyzer, name: []const u8) ?usize {
         for (self.structures.items, 0..) |structure, index| {
             if (std.mem.eql(u8, structure.source_name, name)) return index;
@@ -4181,6 +4596,23 @@ pub const Analyzer = struct {
         scope: *const Scope,
         bind_function: bool,
     ) AnalyzeError!*Expression {
+        if (object.type == .enumeration) {
+            const enum_symbol = self.findEnumByGeneratedName(object.type.enumeration.generated_name).?;
+            if (!std.mem.eql(u8, member.name, "raw_value")) {
+                const message = try std.fmt.allocPrint(self.allocator, "enum '{s}' has no property '{s}'", .{ enum_symbol.source_name, member.name });
+                return self.fail(member.name_position, message);
+            }
+            const raw_type = enum_symbol.raw_type orelse {
+                const message = try std.fmt.allocPrint(self.allocator, "enum '{s}' has no raw value", .{enum_symbol.source_name});
+                return self.fail(member.name_position, message);
+            };
+            return self.newExpression(.{
+                .type = raw_type,
+                .position = member.name_position,
+                .lifetime_depth = object.lifetime_depth,
+                .value = .{ .enum_raw_value = object },
+            });
+        }
         const generated_structure_name = switch (object.type) {
             .structure => |structure_type| structure_type.generated_name,
             else => return self.fail(member.name_position, "member access requires a struct or class value"),
@@ -4350,7 +4782,7 @@ pub const Analyzer = struct {
 
     fn isEqualityComparable(self: *const Analyzer, type_value: Type) bool {
         return switch (type_value) {
-            .function, .reference, .void, .null => false,
+            .function, .reference, .enumeration, .void, .null => false,
             .optional => |contained| self.isEqualityComparable(contained.*),
             .list => |element| self.isEqualityComparable(element.*),
             .fixed_array => |array| self.isEqualityComparable(array.element.*),
@@ -4402,6 +4834,20 @@ pub const Analyzer = struct {
             .optional => |contained| self.nonIndependentType(contained.*, field_path, visiting),
             .list => |element| self.nonIndependentType(element.*, field_path, visiting),
             .fixed_array => |array| self.nonIndependentType(array.element.*, field_path, visiting),
+            .enumeration => |enum_type| enumeration: {
+                if (visiting.contains(enum_type.generated_name)) break :enumeration null;
+                try visiting.put(enum_type.generated_name, {});
+                defer _ = visiting.remove(enum_type.generated_name);
+                const enum_symbol = self.findEnumByGeneratedName(enum_type.generated_name) orelse break :enumeration type_value;
+                for (enum_symbol.variants) |variant| {
+                    for (variant.associated_types, 0..) |associated_type, index| {
+                        try field_path.append(self.allocator, try std.fmt.allocPrint(self.allocator, "{s}[{d}]", .{ variant.source_name, index + 1 }));
+                        if (try self.nonIndependentType(associated_type, field_path, visiting)) |cause| break :enumeration cause;
+                        _ = field_path.pop();
+                    }
+                }
+                break :enumeration null;
+            },
             .structure => |structure_type| structure: {
                 if (structure_type.is_class) break :structure type_value;
                 if (visiting.contains(structure_type.generated_name)) break :structure null;
@@ -4602,6 +5048,15 @@ pub const Analyzer = struct {
             },
             .class_initializer => |initializer| for (initializer.arguments) |argument| try self.validateExpression(argument),
             .structure_initializer => |initializer| for (initializer.fields) |field| try self.validateExpression(field),
+            .enum_initializer => |initializer| for (initializer.arguments) |argument| try self.validateExpression(argument),
+            .enum_raw_value => |value| try self.validateExpression(value),
+            .match_expression => |match_value| {
+                try self.validateExpression(match_value.subject);
+                for (match_value.branches) |branch| switch (branch.body) {
+                    .expression => |value| try self.validateExpression(value),
+                    .statements => |values| try self.validateStatements(values),
+                };
+            },
             .member_access => |member| try self.validateExpression(member.object),
             .bound_function => |member| try self.validateExpression(member.object),
             .adapt_function => |value| try self.validateExpression(value),
@@ -4719,6 +5174,7 @@ pub const Analyzer = struct {
                 .value = .{ .variable = .{ .generated_name = symbol.generated_name, .capture_box = &symbol.state.capture_box } },
             });
         } else try self.expression(unary.operand, scope);
+        if (operand.value == .enum_raw_value) return self.fail(unary.operator_position, "enum property 'raw_value' cannot be passed with '&'");
         if (self.immutableFieldInPlace(operand)) |field_candidate| {
             const message = try std.fmt.allocPrint(self.allocator, "cannot pass let field '{s}' with '&'", .{field_candidate.symbol.source_name});
             return self.fail(unary.operator_position, message);
@@ -4976,6 +5432,16 @@ pub const Analyzer = struct {
             .optional => |contained| self.typeContainsClassInner(contained.*, visiting),
             .list => |element| self.typeContainsClassInner(element.*, visiting),
             .fixed_array => |array| self.typeContainsClassInner(array.element.*, visiting),
+            .enumeration => |enum_type| contains: {
+                if (visiting.contains(enum_type.generated_name)) break :contains false;
+                try visiting.put(enum_type.generated_name, {});
+                defer _ = visiting.remove(enum_type.generated_name);
+                const enum_symbol = self.findEnumByGeneratedName(enum_type.generated_name) orelse break :contains false;
+                for (enum_symbol.variants) |variant| for (variant.associated_types) |associated_type| {
+                    if (try self.typeContainsClassInner(associated_type, visiting)) break :contains true;
+                };
+                break :contains false;
+            },
             .structure => |structure_type| contains: {
                 if (structure_type.is_class) break :contains true;
                 if (visiting.contains(structure_type.generated_name)) break :contains false;
@@ -5122,15 +5588,21 @@ fn typeFromAnnotation(
             break :optional_type .{ .optional = contained };
         },
         .structure => |name| structure_type: {
-            const structure = self.findStructure(name) orelse {
-                const message = try std.fmt.allocPrint(self.allocator, "unknown type '{s}'", .{name});
-                return self.fail(position, message);
-            };
-            break :structure_type .{ .structure = .{
-                .source_name = structure.source_name,
-                .generated_name = structure.generated_name,
-                .is_class = structure.is_class,
-            } };
+            if (self.findStructure(name)) |structure| {
+                break :structure_type .{ .structure = .{
+                    .source_name = structure.source_name,
+                    .generated_name = structure.generated_name,
+                    .is_class = structure.is_class,
+                } };
+            }
+            if (self.findEnum(name)) |enum_symbol| {
+                break :structure_type .{ .enumeration = .{
+                    .source_name = enum_symbol.source_name,
+                    .generated_name = enum_symbol.generated_name,
+                } };
+            }
+            const message = try std.fmt.allocPrint(self.allocator, "unknown type '{s}'", .{name});
+            return self.fail(position, message);
         },
         .generic_structure => return self.fail(position, "generic structure type was not specialized before semantic analysis"),
         .type_parameter => return self.fail(position, "generic type parameter was not substituted before semantic analysis"),
@@ -5241,6 +5713,14 @@ fn blockAlwaysReturns(statements: []const Statement) bool {
                     if (all_branches_return and blockAlwaysReturns(else_body)) return true;
                 }
             },
+            .expression_statement => |expression_value| if (expression_value.value == .match_expression) {
+                var all_branches_return = true;
+                for (expression_value.value.match_expression.branches) |branch| switch (branch.body) {
+                    .expression => all_branches_return = false,
+                    .statements => |branch_statements| all_branches_return = all_branches_return and blockAlwaysReturns(branch_statements),
+                };
+                if (all_branches_return) return true;
+            },
             else => {},
         }
     }
@@ -5269,7 +5749,15 @@ fn parameterStored(statements: []const Ast.Statement, name: []const u8) bool {
         },
         .while_statement => |while_value| if (parameterStored(while_value.body, name)) return true,
         .for_statement => |for_value| if (parameterStored(for_value.body, name)) return true,
-        .expression_statement => |expression_value| if (astCollectionCallStoresIdentifier(expression_value, name)) return true,
+        .expression_statement => |expression_value| {
+            if (astCollectionCallStoresIdentifier(expression_value, name)) return true;
+            if (expression_value.value == .match_expression) {
+                for (expression_value.value.match_expression.branches) |branch| switch (branch.body) {
+                    .expression => {},
+                    .statements => |branch_statements| if (parameterStored(branch_statements, name)) return true,
+                };
+            }
+        },
         else => {},
     };
     return false;
@@ -5334,6 +5822,14 @@ fn astExpressionUsesIdentifier(expression_value: *const Ast.Expression, name: []
             break :uses false;
         },
         .cascade => |cascade| astExpressionUsesIdentifier(cascade.object, name),
+        .match_expression => |match_value| uses: {
+            if (astExpressionUsesIdentifier(match_value.subject, name)) break :uses true;
+            for (match_value.branches) |branch| switch (branch.body) {
+                .expression => |value| if (astExpressionUsesIdentifier(value, name)) break :uses true,
+                .statements => {},
+            };
+            break :uses false;
+        },
         .lambda => false,
         else => false,
     };
@@ -5431,12 +5927,34 @@ fn typeEqual(left: Type, right: Type) bool {
             .structure => |right_structure| std.mem.eql(u8, left_structure.generated_name, right_structure.generated_name),
             else => false,
         },
+        .enumeration => |left_enum| switch (right) {
+            .enumeration => |right_enum| std.mem.eql(u8, left_enum.generated_name, right_enum.generated_name),
+            else => false,
+        },
         .optional => |left_contained| switch (right) {
             .optional => |right_contained| typeEqual(left_contained.*, right_contained.*),
             else => false,
         },
         .null => right == .null,
     };
+}
+
+fn rawEnumValuesEqual(left: *const Expression, right: *const Expression) bool {
+    if (left.value == .string and right.value == .string) {
+        return std.mem.eql(u8, left.value.string, right.value.string);
+    }
+    const left_integer = rawEnumInteger(left) orelse return false;
+    const right_integer = rawEnumInteger(right) orelse return false;
+    return left_integer.magnitude == right_integer.magnitude and
+        (left_integer.magnitude == 0 or left_integer.negative == right_integer.negative);
+}
+
+fn rawEnumInteger(value: *const Expression) ?struct { magnitude: u64, negative: bool } {
+    if (value.value == .integer) return .{ .magnitude = value.value.integer, .negative = false };
+    if (value.value == .unary and value.value.unary.operator == .numeric_negate and value.value.unary.operand.value == .integer) {
+        return .{ .magnitude = value.value.unary.operand.value.integer, .negative = true };
+    }
+    return null;
 }
 
 fn sameSignature(
@@ -5550,7 +6068,7 @@ fn constructorSignatures(
 fn isNativeReturnType(value: Type) bool {
     return switch (value) {
         .void, .int, .int8, .int16, .int32, .uint8, .uint16, .uint32, .uint64, .float, .float64, .bool => true,
-        .str, .structure, .list, .fixed_array, .reference, .function, .optional, .null => false,
+        .str, .structure, .enumeration, .list, .fixed_array, .reference, .function, .optional, .null => false,
     };
 }
 
@@ -5599,6 +6117,7 @@ fn typeName(value: Type) []const u8 {
         .optional => "optional",
         .null => "null",
         .structure => |structure_type| structure_type.source_name,
+        .enumeration => |enum_type| enum_type.source_name,
     };
 }
 
@@ -5717,7 +6236,7 @@ const AssignmentRoot = union(enum) {
 
 fn isCascadeOwnedTemporary(expression: *const Ast.Expression) bool {
     return switch (expression.value) {
-        .call, .method_call, .static_method_call, .super_method_call, .class_initializer, .structure_initializer, .sequence_literal => true,
+        .call, .method_call, .static_method_call, .super_method_call, .class_initializer, .structure_initializer, .match_expression, .sequence_literal => true,
         .member_access => |member| isCascadeOwnedTemporary(member.object),
         .index_access => |access| isCascadeOwnedTemporary(access.object),
         .slice_access => true,
@@ -5835,6 +6354,119 @@ fn expectSemanticSuccess(source: []const u8) !void {
         if (analyzer.diagnostic) |diagnostic| std.debug.print("unexpected semantic error: {s}\n", .{diagnostic.message});
         return failure;
     };
+}
+
+test "analyze enum construction and exhaustive match" {
+    try expectSemanticSuccess(
+        \\enum Result { idle; value(int); failed(str) }
+        \\func text(result:Result) str {
+        \\    return match result { idle => "idle"; value(number) => "value"; failed(message) => message }
+        \\}
+        \\func main() { let result = Result.value(7); print(text(result)) }
+    );
+}
+
+test "analyze expression and imperative matches with else" {
+    try expectSemanticSuccess(
+        \\enum State { idle; ready; failed(str) }
+        \\func main() {
+        \\    let state = State.ready()
+        \\    let text = match state { idle => "idle"; else => "other" }
+        \\    match state { failed(message) => { print(message) }; else => { print(text) } }
+        \\    let any = match state { else => true }
+        \\    print(any)
+        \\}
+    );
+}
+
+test "reject incomplete duplicate and ill-typed enum matches" {
+    try expectResolvedSemanticError(
+        \\enum State { idle; ready }
+        \\func main() { let state = State.idle(); match state { idle => {} } }
+    , "match on enum 'State' is not exhaustive; missing variant 'ready'");
+    try expectResolvedSemanticError(
+        \\enum State { idle; ready }
+        \\func main() { let state = State.idle(); match state { idle => {}; idle => {}; ready => {} } }
+    , "variant 'idle' is matched more than once");
+    try expectResolvedSemanticError(
+        \\enum State { idle; ready }
+        \\func main() { let state = State.idle(); let value = match state { idle => 1; ready => "ready" } }
+    , "match branches must have the same type; expected 'int', found 'str'");
+    try expectResolvedSemanticError(
+        \\enum State { idle; ready }
+        \\func main() { let state = State.idle(); let value = match state { idle => 1; else => "ready" } }
+    , "match branches must have the same type; expected 'int', found 'str'");
+    try expectResolvedSemanticError(
+        \\enum State { idle; ready }
+        \\func main() { let state = State.idle(); match state { idle => {}; ready => {}; else => {} } }
+    , "else match branch does not cover any remaining variant");
+    try expectResolvedSemanticError(
+        \\enum State { idle; ready }
+        \\func main() { let state = State.idle(); match state { idle => {}; unknown => {}; ready => {} } }
+    , "enum 'State' has no variant 'unknown'");
+    try expectResolvedSemanticError(
+        \\enum Value { integer(int); empty }
+        \\func main() { let value = Value.integer(); }
+    , "variant 'Value.integer' expects 1 associated values, found 0");
+    try expectResolvedSemanticError(
+        \\enum Value { integer(int); empty }
+        \\func main() { let value = Value.integer("wrong"); }
+    , "associated value 1 of variant 'Value.integer' expects 'int', found 'str'");
+    try expectResolvedSemanticError(
+        \\enum Value { integer(int); empty }
+        \\func main() { let value = Value.empty; }
+    , "an enum variant must be constructed with parentheses");
+    try expectResolvedSemanticError(
+        \\class Owner {}
+        \\enum Value { empty; owner(Owner) }
+        \\func main() { let value = Value.empty(); }
+    , "type 'Value' is not an independent value because field 'owner[1]' reaches 'Owner'; use 'var'");
+}
+
+test "analyze raw enum values and intrinsic property" {
+    try expectSemanticSuccess(
+        \\enum Direction:int { north = 1; south = 2; unknown = -1 }
+        \\enum Name:str { north = "north"; south = "south" }
+        \\func main() {
+        \\    let direction = Direction.north()
+        \\    let code:int = direction.raw_value
+        \\    let name:str = Name.south().raw_value
+        \\    print(code)
+        \\    print(name)
+        \\}
+    );
+}
+
+test "reject invalid raw enum values and property mutation" {
+    try expectResolvedSemanticError(
+        \\enum Direction:int { north = 1; south = 1 }
+        \\func main() {}
+    , "raw enum value is already used by variant 'north'");
+    try expectResolvedSemanticError(
+        \\enum Name:str { first = "same"; second = "s\u{61}me" }
+        \\func main() {}
+    , "raw enum value is already used by variant 'first'");
+    try expectResolvedSemanticError(
+        \\enum Direction:int { north = "north" }
+        \\func main() {}
+    , "raw enum value must be a 'int' literal");
+    try expectResolvedSemanticError(
+        \\enum Direction:int { north = 1 + 1 }
+        \\func main() {}
+    , "raw enum value must be a 'int' literal");
+    try expectResolvedSemanticError(
+        \\enum State { ready }
+        \\func main() { let state = State.ready(); print(state.raw_value) }
+    , "enum 'State' has no raw value");
+    try expectResolvedSemanticError(
+        \\enum Direction:int { north = 1 }
+        \\func main() { var direction = Direction.north(); direction.raw_value = 2 }
+    , "enum property 'raw_value' is read-only");
+    try expectResolvedSemanticError(
+        \\enum Direction:int { north = 1 }
+        \\func replace(value:&int) { value = 2 }
+        \\func main() { var direction = Direction.north(); replace(&direction.raw_value) }
+    , "enum property 'raw_value' cannot be passed with '&'");
 }
 
 test "field mutability controls direct and nested mutation" {
