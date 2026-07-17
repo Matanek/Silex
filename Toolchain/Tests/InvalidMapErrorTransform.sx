@@ -1,0 +1,15 @@
+enum SourceError { failed }
+enum TargetError { wrapped(SourceError) }
+
+func source() Result<int, SourceError> {
+    return Result<int, SourceError>.failure(SourceError.failed())
+}
+
+func main() {
+    let mapped = map_error<int, SourceError, TargetError>(
+        source(),
+        func(error:SourceError) int {
+            return 1
+        }
+    )
+}

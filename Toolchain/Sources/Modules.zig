@@ -174,6 +174,9 @@ pub const Resolver = struct {
         if ((kind == .structure or kind == .type_alias) and std.mem.eql(u8, source_name, "Result")) {
             return self.fail(position, "name 'Result' is reserved");
         }
+        if (kind == .function and std.mem.eql(u8, source_name, "map_error")) {
+            return self.fail(position, "name 'map_error' is reserved");
+        }
         for (self.declarations.items) |existing| {
             if (existing.kind == .type_alias) continue;
             if (existing.module_index == module_index and std.mem.eql(u8, existing.source_name, source_name)) {
@@ -210,6 +213,9 @@ pub const Resolver = struct {
                 const qualifier = import_value.alias orelse import_value.path;
                 if (import_value.alias != null and std.mem.eql(u8, qualifier, "Result")) {
                     return self.fail(import_value.position, "name 'Result' is reserved");
+                }
+                if (import_value.alias != null and std.mem.eql(u8, qualifier, "map_error")) {
+                    return self.fail(import_value.position, "name 'map_error' is reserved");
                 }
                 for (imports.items) |existing| {
                     if (std.mem.eql(u8, existing.qualifier, qualifier)) {
@@ -458,6 +464,7 @@ pub const Resolver = struct {
 
     fn validateIntroducedName(self: *Resolver, file: *const FileInfo, name: []const u8, position: Source.Position) !void {
         if (std.mem.eql(u8, name, "Result")) return self.fail(position, "name 'Result' is reserved");
+        if (std.mem.eql(u8, name, "map_error")) return self.fail(position, "name 'map_error' is reserved");
         for (file.uses.items) |existing| if (std.mem.eql(u8, existing.local_name, name)) {
             const message = try std.fmt.allocPrint(self.allocator, "name '{s}' is already introduced by use", .{name});
             return self.fail(position, message);
@@ -522,7 +529,7 @@ pub const Resolver = struct {
                 var copy = parameter;
                 copy.type = try self.transformType(parameter.type, parameter.position);
                 try parameters.append(self.allocator, copy);
-                try self.declareLocal(parameter.name);
+                try self.declareLocal(parameter.name, parameter.position);
             }
             try constructors.append(self.allocator, .{
                 .visibility = constructor.visibility,
@@ -595,7 +602,7 @@ pub const Resolver = struct {
             var copy = parameter;
             copy.type = try self.transformType(parameter.type, parameter.position);
             try parameters.append(self.allocator, copy);
-            try self.declareLocal(parameter.name);
+            try self.declareLocal(parameter.name, parameter.position);
         }
         var result = function;
         result.name = name;
@@ -827,7 +834,7 @@ pub const Resolver = struct {
                 var copy = value;
                 if (value.annotation) |annotation| copy.annotation = try self.transformType(annotation, value.name_position);
                 if (value.initializer) |initializer| copy.initializer = try self.transformExpression(initializer);
-                try self.declareLocal(value.name);
+                try self.declareLocal(value.name, value.name_position);
                 break :declaration .{ .variable_declaration = copy };
             },
             .assignment => |value| .{ .assignment = .{
@@ -867,7 +874,7 @@ pub const Resolver = struct {
                         .end = try self.transformExpression(range.end),
                     } },
                 },
-                .body = try self.transformForBody(value.body, value.name),
+                .body = try self.transformForBody(value.body, value.name, value.name_position),
             } },
             .break_statement => |position| .{ .break_statement = position },
             .continue_statement => |position| .{ .continue_statement = position },
@@ -905,7 +912,7 @@ pub const Resolver = struct {
     ) anyerror![]const Ast.Statement {
         try self.pushLocalScope();
         defer self.popLocalScope();
-        if (condition == .binding) try self.declareLocal(condition.binding.name);
+        if (condition == .binding) try self.declareLocal(condition.binding.name, condition.binding.name_position);
         return self.transformStatementsInCurrentScope(statements);
     }
 
@@ -915,10 +922,15 @@ pub const Resolver = struct {
         return result.toOwnedSlice(self.allocator);
     }
 
-    fn transformForBody(self: *Resolver, statements: []const Ast.Statement, name: []const u8) anyerror![]const Ast.Statement {
+    fn transformForBody(
+        self: *Resolver,
+        statements: []const Ast.Statement,
+        name: []const u8,
+        position: Source.Position,
+    ) anyerror![]const Ast.Statement {
         try self.pushLocalScope();
         defer self.popLocalScope();
-        try self.declareLocal(name);
+        try self.declareLocal(name, position);
         return self.transformStatementsInCurrentScope(statements);
     }
 
@@ -928,6 +940,9 @@ pub const Resolver = struct {
         result.value = switch (expression.value) {
             .call => |call| call: {
                 const type_arguments = try self.transformTypeArguments(call.type_arguments, call.name_position);
+                if (std.mem.eql(u8, call.name, "map_error") and call.named_fields != null) {
+                    return self.fail(call.name_position, "function 'map_error' does not accept named arguments");
+                }
                 if (call.named_fields) |fields| {
                     if (try self.visibleTypeAlias(expression.position.file, call.name)) |alias| {
                         break :call try self.transformAliasInvocation(alias, call.name, call.name_position, type_arguments, call.arguments, fields);
@@ -945,6 +960,15 @@ pub const Resolver = struct {
                     } };
                 }
                 const arguments = try self.transformExpressions(call.arguments);
+                if (std.mem.eql(u8, call.name, "map_error")) {
+                    break :call .{ .call = .{
+                        .name = "map_error",
+                        .name_position = call.name_position,
+                        .type_arguments = type_arguments,
+                        .arguments = arguments,
+                        .visible_declarations = null,
+                    } };
+                }
                 if (self.findLocal(call.name)) {
                     if (type_arguments.len != 0) return self.fail(call.name_position, "a callable value cannot accept type arguments");
                     break :call .{ .call = .{
@@ -1000,7 +1024,7 @@ pub const Resolver = struct {
                     var copy = parameter;
                     copy.type = try self.transformType(parameter.type, parameter.position);
                     try parameters.append(self.allocator, copy);
-                    try self.declareLocal(parameter.name);
+                    try self.declareLocal(parameter.name, parameter.position);
                 }
                 break :lambda_expression .{ .lambda = .{
                     .position = lambda.position,
@@ -1192,7 +1216,7 @@ pub const Resolver = struct {
                 for (match_value.branches) |branch| {
                     try self.pushLocalScope();
                     defer self.popLocalScope();
-                    for (branch.bindings) |binding| try self.declareLocal(binding.name);
+                    for (branch.bindings) |binding| try self.declareLocal(binding.name, binding.position);
                     try branches.append(self.allocator, .{
                         .variant = branch.variant,
                         .variant_position = branch.variant_position,
@@ -1615,7 +1639,8 @@ pub const Resolver = struct {
         _ = self.local_scopes.pop();
     }
 
-    fn declareLocal(self: *Resolver, name: []const u8) !void {
+    fn declareLocal(self: *Resolver, name: []const u8, position: Source.Position) !void {
+        if (std.mem.eql(u8, name, "map_error")) return self.fail(position, "name 'map_error' is reserved");
         try self.local_scopes.items[self.local_scopes.items.len - 1].append(self.allocator, name);
     }
 

@@ -108,6 +108,18 @@
     ],
     "description": "Unwrap a Result success or propagate its failure"
   },
+  "Transform Result error": {
+    "prefix": "maperror",
+    "body": [
+      "map_error<${1:T}, ${2:E}, ${3:F}>(",
+      "    ${4:result},",
+      "    func(error:${2:E}) ${3:F} {",
+      "        return ${5:transform}(error)",
+      "    }",
+      ")$0"
+    ],
+    "description": "Transform a Result failure explicitly"
+  },
   "Print": {
     "prefix": "print",
     "body": [

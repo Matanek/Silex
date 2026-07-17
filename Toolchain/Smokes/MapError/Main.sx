@@ -1,0 +1,92 @@
+use ErrorMapping.Core.ParseError
+use ErrorMapping.Core.IOError
+use ErrorMapping.Core.parse_config
+use ErrorMapping.Core.save_config
+use ErrorMapping.Core.callback_result
+
+enum AppError {
+    input(ParseError)
+    storage(IOError)
+}
+
+func load_config(succeeds:bool) Result<int, AppError> {
+    let value = try map_error<int, ParseError, AppError>(
+        parse_config(succeeds),
+        func(error:ParseError) AppError {
+            return AppError.input(error)
+        }
+    )
+    return Result<int, AppError>.success(value)
+}
+
+func save_all(succeeds:bool) Result<void, AppError> {
+    try map_error<IOError, AppError>(
+        save_config(succeeds),
+        func(error:IOError) AppError {
+            return AppError.storage(error)
+        }
+    )
+    return Result<void, AppError>.success()
+}
+
+func describe(error:AppError) str {
+    return match error {
+        input(parse_error) => match parse_error {
+            invalid(message) => message
+        }
+        storage(io_error) => match io_error {
+            denied(message) => message
+        }
+    }
+}
+
+func main() {
+    var transformations = 0
+    let preserved = map_error<int, ParseError, AppError>(
+        parse_config(true),
+        func(error:ParseError) AppError {
+            transformations += 1
+            return AppError.input(error)
+        }
+    )
+    let transformed = map_error<int, ParseError, AppError>(
+        parse_config(false),
+        func(error:ParseError) AppError {
+            transformations += 1
+            return AppError.input(error)
+        }
+    )
+    var callback_mapping = map_error<func(), ParseError, AppError>(
+        callback_result(),
+        func(error:ParseError) AppError {
+            transformations += 1
+            return AppError.input(error)
+        }
+    )
+    assert(transformations == 1, "map_error must transform only a failure and exactly once")
+
+    match preserved {
+        success(value) => { print(value) }
+        failure(error) => { print("unexpected") }
+    }
+    match transformed {
+        success(value) => { print("unexpected") }
+        failure(error) => { print(describe(error)) }
+    }
+    match callback_mapping {
+        success(var callback) => { callback() }
+        failure(error) => { print("unexpected") }
+    }
+    match load_config(false) {
+        success(value) => { print("unexpected") }
+        failure(error) => { print(describe(error)) }
+    }
+    match save_all(true) {
+        success => { print("saved") }
+        failure(error) => { print("unexpected") }
+    }
+    match save_all(false) {
+        success => { print("unexpected") }
+        failure(error) => { print(describe(error)) }
+    }
+}

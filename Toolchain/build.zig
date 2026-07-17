@@ -800,6 +800,62 @@ pub fn build(b: *std.Build) void {
         "Tests/ReservedTryIdentifier.sx:2:9: error: expected variable name\n",
     );
 
+    const missing_map_error_type_arguments_command = b.addRunArtifact(executable);
+    missing_map_error_type_arguments_command.addArgs(&.{ "compile", "Tests/MissingMapErrorTypeArguments.sx" });
+    missing_map_error_type_arguments_command.expectExitCode(1);
+    missing_map_error_type_arguments_command.expectStdErrEqual(
+        "Tests/MissingMapErrorTypeArguments.sx:9:18: error: generic function 'map_error' requires explicit type arguments\n",
+    );
+
+    const invalid_map_error_result_type_command = b.addRunArtifact(executable);
+    invalid_map_error_result_type_command.addArgs(&.{ "compile", "Tests/InvalidMapErrorResultType.sx" });
+    invalid_map_error_result_type_command.expectExitCode(1);
+    invalid_map_error_result_type_command.expectStdErrEqual(
+        "Tests/InvalidMapErrorResultType.sx:10:18: error: no compatible signature for function 'map_error<int, IOError, AppError>'; visible signatures: map_error<int, IOError, AppError>(Result<int, IOError>, func(IOError) AppError)\n",
+    );
+
+    const invalid_map_error_transform_command = b.addRunArtifact(executable);
+    invalid_map_error_transform_command.addArgs(&.{ "compile", "Tests/InvalidMapErrorTransform.sx" });
+    invalid_map_error_transform_command.expectExitCode(1);
+    invalid_map_error_transform_command.expectStdErrEqual(
+        "Tests/InvalidMapErrorTransform.sx:9:18: error: no compatible signature for function 'map_error<int, SourceError, TargetError>'; visible signatures: map_error<int, SourceError, TargetError>(Result<int, SourceError>, func(SourceError) TargetError)\n",
+    );
+
+    const invalid_map_error_void_overload_command = b.addRunArtifact(executable);
+    invalid_map_error_void_overload_command.addArgs(&.{ "compile", "Tests/InvalidMapErrorVoidOverload.sx" });
+    invalid_map_error_void_overload_command.expectExitCode(1);
+    invalid_map_error_void_overload_command.expectStdErrEqual(
+        "Tests/InvalidMapErrorVoidOverload.sx:9:28: error: void cannot be used as a type argument\n",
+    );
+
+    const invalid_map_error_type_arity_command = b.addRunArtifact(executable);
+    invalid_map_error_type_arity_command.addArgs(&.{ "compile", "Tests/InvalidMapErrorTypeArity.sx" });
+    invalid_map_error_type_arity_command.expectExitCode(1);
+    invalid_map_error_type_arity_command.expectStdErrEqual(
+        "Tests/InvalidMapErrorTypeArity.sx:9:18: error: generic function 'map_error' has no overload accepting 1 type arguments\n",
+    );
+
+    const reserved_map_error_function_command = b.addRunArtifact(executable);
+    reserved_map_error_function_command.addArgs(&.{ "compile", "Tests/ReservedMapErrorFunction.sx" });
+    reserved_map_error_function_command.expectExitCode(1);
+    reserved_map_error_function_command.expectStdErrEqual(
+        "Tests/ReservedMapErrorFunction.sx:1:6: error: name 'map_error' is reserved\n",
+    );
+
+    const reserved_map_error_local_command = b.addRunArtifact(executable);
+    reserved_map_error_local_command.addArgs(&.{ "compile", "Tests/ReservedMapErrorLocal.sx" });
+    reserved_map_error_local_command.expectExitCode(1);
+    reserved_map_error_local_command.expectStdErrEqual(
+        "Tests/ReservedMapErrorLocal.sx:2:9: error: name 'map_error' is reserved\n",
+    );
+
+    const reserved_map_error_import_alias_command = b.addRunArtifact(executable);
+    reserved_map_error_import_alias_command.addArgs(&.{ "compile", "Tests/ReservedMapErrorImportAlias.sx" });
+    reserved_map_error_import_alias_command.expectExitCode(1);
+    reserved_map_error_import_alias_command.expectStdErrEqual(
+        "Tests/ReservedMapErrorImportAlias.sx:1:19: error: name 'map_error' is reserved\n",
+    );
+
     const missing_generic_function_arguments_command = b.addRunArtifact(executable);
     missing_generic_function_arguments_command.addArgs(&.{ "compile", "Tests/MissingGenericFunctionArguments.sx" });
     missing_generic_function_arguments_command.expectExitCode(1);
@@ -1200,7 +1256,7 @@ pub fn build(b: *std.Build) void {
         "silex: native compilation failed for target 'x86_64-linux-musl'; target support, SDKs, or native sources may be unavailable or incomplete\n",
     );
     backend_discovered_target_failure_command.expectStdErrMatch(b.fmt(
-        "silex: backend details: .silex{c}build{c}v31{c}x86_64-linux-musl{c}",
+        "silex: backend details: .silex{c}build{c}v32{c}x86_64-linux-musl{c}",
         .{
             std.fs.path.sep,
             std.fs.path.sep,
@@ -1648,6 +1704,14 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&invalid_try_constructor_command.step);
     test_step.dependOn(&invalid_try_drop_command.step);
     test_step.dependOn(&reserved_try_identifier_command.step);
+    test_step.dependOn(&missing_map_error_type_arguments_command.step);
+    test_step.dependOn(&invalid_map_error_result_type_command.step);
+    test_step.dependOn(&invalid_map_error_transform_command.step);
+    test_step.dependOn(&invalid_map_error_void_overload_command.step);
+    test_step.dependOn(&invalid_map_error_type_arity_command.step);
+    test_step.dependOn(&reserved_map_error_function_command.step);
+    test_step.dependOn(&reserved_map_error_local_command.step);
+    test_step.dependOn(&reserved_map_error_import_alias_command.step);
     test_step.dependOn(&missing_generic_function_arguments_command.step);
     test_step.dependOn(&unexpected_generic_function_arguments_command.step);
     test_step.dependOn(&invalid_generic_function_arity_command.step);
@@ -1843,8 +1907,13 @@ pub fn build(b: *std.Build) void {
     try_command.addArgs(&.{ "run", "Smokes/Try/silex.json" });
     try_command.expectStdOutEqual(hostText(b, "42\n42\ndenied\n3\nnested failure\nscope released\ndenied\n43\nouter continues\nlambda failure\nouter continues\nsaved\n"));
 
+    const map_error_command = b.addRunArtifact(executable);
+    map_error_command.step.dependOn(&try_command.step);
+    map_error_command.addArgs(&.{ "run", "Smokes/MapError/silex.json" });
+    map_error_command.expectStdOutEqual(hostText(b, "42\nbad input\ncallback\nbad input\nsaved\ndenied\n"));
+
     const generic_functions_command = b.addRunArtifact(executable);
-    generic_functions_command.step.dependOn(&try_command.step);
+    generic_functions_command.step.dependOn(&map_error_command.step);
     generic_functions_command.addArgs(&.{ "run", "Smokes/GenericFunctions.sx" });
     generic_functions_command.expectStdOutEqual(hostText(b, "42\n7\nAda\nGrace\n9\nSilex\n3\n3\n4\n120\nlocal\n11\n5\ngeneric\n"));
 

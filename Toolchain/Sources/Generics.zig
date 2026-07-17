@@ -1,5 +1,6 @@
 const std = @import("std");
 const Ast = @import("Ast.zig");
+const Parser = @import("Parser.zig").Parser;
 const Source = @import("Source.zig");
 
 const Allocator = std.mem.Allocator;
@@ -43,6 +44,29 @@ const intrinsic_result = Ast.Enum{
     .variants = &result_variants,
 };
 
+const intrinsic_function_source =
+    \\func map_error<T, E, F>(result:Result<T,E>, transform:func(E) F) Result<T,F> {
+    \\    match result {
+    \\        success(var value) => { return Result<T,F>.success(value) }
+    \\        failure(var error) => {
+    \\            var mapped:F = transform(error)
+    \\            return Result<T,F>.failure(mapped)
+    \\        }
+    \\    }
+    \\    panic("invalid intrinsic Result variant")
+    \\}
+    \\func map_error<E, F>(result:Result<void,E>, transform:func(E) F) Result<void,F> {
+    \\    match result {
+    \\        success => { return Result<void,F>.success() }
+    \\        failure(var error) => {
+    \\            var mapped:F = transform(error)
+    \\            return Result<void,F>.failure(mapped)
+    \\        }
+    \\    }
+    \\    panic("invalid intrinsic Result variant")
+    \\}
+;
+
 const FunctionSpecialization = struct {
     template_position: Source.Position,
     name: []const u8,
@@ -55,6 +79,7 @@ pub const Specializer = struct {
     enums: std.ArrayList(Ast.Enum) = .empty,
     structures: std.ArrayList(Ast.Structure) = .empty,
     functions: std.ArrayList(Ast.Function) = .empty,
+    function_templates: []const Ast.Function = &.{},
     enum_specializations: std.ArrayList(EnumSpecialization) = .empty,
     structure_specializations: std.ArrayList(StructureSpecialization) = .empty,
     function_specializations: std.ArrayList(FunctionSpecialization) = .empty,
@@ -65,6 +90,16 @@ pub const Specializer = struct {
     }
 
     pub fn specialize(self: *Specializer) SpecializeError!Ast.Program {
+        var intrinsic_parser = Parser.init(self.allocator, intrinsic_function_source);
+        const intrinsic_program = intrinsic_parser.parse() catch |err| {
+            self.diagnostic = intrinsic_parser.diagnostic;
+            return err;
+        };
+        var function_templates: std.ArrayList(Ast.Function) = .empty;
+        try function_templates.appendSlice(self.allocator, intrinsic_program.functions);
+        try function_templates.appendSlice(self.allocator, self.program.functions);
+        self.function_templates = try function_templates.toOwnedSlice(self.allocator);
+
         for (self.program.enums) |enum_value| {
             if (enum_value.type_parameters.len != 0) continue;
             try self.enums.append(self.allocator, try self.rewriteEnum(enum_value, &.{}));
@@ -188,6 +223,9 @@ pub const Specializer = struct {
     ) SpecializeError!Ast.TypeName {
         return switch (value) {
             .structure => |name| structure: {
+                for (bindings) |binding| {
+                    if (std.mem.eql(u8, binding.name, name)) return binding.value;
+                }
                 if (self.findEnumTemplate(name)) |template| {
                     const message = try std.fmt.allocPrint(
                         self.allocator,
@@ -767,13 +805,21 @@ pub const Specializer = struct {
         visible_declarations: ?[]const Source.Position,
         position: Source.Position,
     ) SpecializeError![]const u8 {
+        if (std.mem.eql(u8, template_name, "map_error")) {
+            if (arguments.len == 3 and arguments[0] == .void) {
+                return self.fail(position, "map_error for Result<void,E> expects 2 type arguments: E and F");
+            }
+            if (arguments.len >= 2 and arguments[arguments.len - 1] == .void) {
+                return self.fail(position, "map_error target error type cannot be 'void'");
+            }
+        }
         const name = try self.genericTypeName(template_name, arguments);
         var generic_count: usize = 0;
         var matching_count: usize = 0;
         var expected_arity: ?usize = null;
         var arities_match = true;
 
-        for (self.program.functions) |*function| {
+        for (self.function_templates) |*function| {
             if (function.type_parameters.len == 0 or
                 !std.mem.eql(u8, function.name, template_name) or
                 !functionIsVisible(function.*, visible_declarations)) continue;
@@ -854,7 +900,7 @@ pub const Specializer = struct {
         name: []const u8,
         visible_declarations: ?[]const Source.Position,
     ) bool {
-        for (self.program.functions) |function| {
+        for (self.function_templates) |function| {
             if (function.type_parameters.len != 0 and
                 std.mem.eql(u8, function.name, name) and
                 functionIsVisible(function, visible_declarations)) return true;

@@ -1,0 +1,3 @@
+func main() {
+    let map_error = 1
+}

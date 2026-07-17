@@ -1,0 +1,13 @@
+{
+  "target": "ErrorMapping.App",
+  "modules": [
+    {
+      "name": "ErrorMapping.Core",
+      "sources": ["Core.sx"]
+    },
+    {
+      "name": "ErrorMapping.App",
+      "sources": ["Main.sx"]
+    }
+  ]
+}

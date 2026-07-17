@@ -1,0 +1,5 @@
+func map_error(value:int) int {
+    return value
+}
+
+func main() {}

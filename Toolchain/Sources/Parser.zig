@@ -175,6 +175,7 @@ pub const Parser = struct {
         if (self.current.tag != .identifier) return self.fail("expected alias after 'as'");
         const alias = self.current.lexeme;
         if (std.mem.eql(u8, alias, "Result")) return self.fail("name 'Result' is reserved");
+        if (std.mem.eql(u8, alias, "map_error")) return self.fail("name 'map_error' is reserved");
         try self.advance();
         return alias;
     }

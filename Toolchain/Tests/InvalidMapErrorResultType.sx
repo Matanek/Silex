@@ -1,0 +1,16 @@
+enum ParseError { invalid }
+enum IOError { denied }
+enum AppError { input(ParseError) }
+
+func source() Result<int, ParseError> {
+    return Result<int, ParseError>.failure(ParseError.invalid())
+}
+
+func main() {
+    let mapped = map_error<int, IOError, AppError>(
+        source(),
+        func(error:IOError) AppError {
+            return AppError.input(ParseError.invalid())
+        }
+    )
+}

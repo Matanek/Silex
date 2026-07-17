@@ -71,6 +71,48 @@ the same scope cleanup and destruction as an explicit `return` still occurs.
 including constructors and `drop` blocks. Error transformation remains
 explicit.
 
+## Explicit error transformation
+
+The intrinsic generic function `map_error` transforms only the failure of a
+`Result<T,E>` into a `Result<T,F>`:
+
+```sx
+enum AppError {
+    input(ParseError)
+    storage(IOError)
+}
+
+let config = try map_error<Config, ParseError, AppError>(
+    parse_config(text),
+    func(error:ParseError) AppError {
+        return AppError.input(error)
+    }
+)
+```
+
+On success, the original `T` value is preserved and the transformation is not
+called. On failure, the `E` value is passed to the transformation exactly once
+and its `F` result becomes the new failure. The transformation is an ordinary
+function value: its captures follow the usual lifetime rules, and it is neither
+stored nor called after `map_error` returns.
+
+`Result<void,E>` uses the overload with two explicit type arguments:
+
+```sx
+let saved = map_error<IOError, AppError>(
+    save(),
+    func(error:IOError) AppError {
+        return AppError.storage(error)
+    }
+)
+```
+
+`map_error` performs no implicit conversion, success transformation, or error
+recovery. A transformation that calls `panic` or fails an `assert` remains
+fatal. The function is intrinsic rather than declared by `STD`; its call name
+is reserved and cannot be shadowed by a function, import alias, or local
+binding. As with other generic functions, all type arguments are explicit.
+
 ## Success without a value
 
 `Result<void,E>` represents a recoverable operation with no success value. Its

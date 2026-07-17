@@ -6117,7 +6117,7 @@ fn appendSignature(
     for (parameter_types, parameter_is_mutable_references, 0..) |parameter_type, is_mutable_reference, index| {
         if (index != 0) try output.appendSlice(allocator, ", ");
         if (is_mutable_reference) try output.append(allocator, '&');
-        try output.appendSlice(allocator, try allocatedTypeName(allocator, parameter_type));
+        try output.appendSlice(allocator, try allocatedSignatureTypeName(allocator, parameter_type));
     }
     try output.append(allocator, ')');
 }
@@ -6215,6 +6215,27 @@ fn allocatedTypeName(allocator: Allocator, value: Type) Allocator.Error![]const 
         .list => |element| std.fmt.allocPrint(allocator, "{s}[]", .{try allocatedTypeName(allocator, element.*)}),
         .fixed_array => |array| std.fmt.allocPrint(allocator, "{s}[{d}]", .{ try allocatedTypeName(allocator, array.element.*), array.length }),
         else => typeName(value),
+    };
+}
+
+fn allocatedSignatureTypeName(allocator: Allocator, value: Type) Allocator.Error![]const u8 {
+    return switch (value) {
+        .function => |function| function_name: {
+            var output: std.ArrayList(u8) = .empty;
+            try output.appendSlice(allocator, "func(");
+            for (function.parameters, function.parameter_is_mutable_references, 0..) |parameter, is_mutable_reference, index| {
+                if (index != 0) try output.appendSlice(allocator, ", ");
+                if (is_mutable_reference) try output.append(allocator, '&');
+                try output.appendSlice(allocator, try allocatedTypeName(allocator, parameter));
+            }
+            try output.append(allocator, ')');
+            if (function.return_type.* != .void) {
+                try output.append(allocator, ' ');
+                try output.appendSlice(allocator, try allocatedTypeName(allocator, function.return_type.*));
+            }
+            break :function_name try output.toOwnedSlice(allocator);
+        },
+        else => allocatedTypeName(allocator, value),
     };
 }
 

@@ -2401,6 +2401,7 @@ const language_completions = [_]CompletionItem{
     .{ .label = "true", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "false", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "print", .kind = 3, .detail = "Silex builtin" },
+    .{ .label = "map_error", .kind = 3, .detail = "Silex intrinsic function" },
     .{ .label = "Result", .kind = 7, .detail = "Silex intrinsic type" },
     .{ .label = "void", .kind = 7, .detail = "Silex type" },
     .{ .label = "bool", .kind = 7, .detail = "Silex type" },
@@ -2993,6 +2994,7 @@ test "Result completion distinguishes value and void success" {
 
     const global_items = try completionItems(allocator, std.testing.io, "func main() {}", null);
     try std.testing.expect(containsCompletion(global_items, "Result"));
+    try std.testing.expect(containsCompletion(global_items, "map_error"));
     try std.testing.expect(syntaxDiagnostic(allocator,
         \\enum SaveError { denied }
         \\func save() Result<void, SaveError> { return Result<void, SaveError>.success() }

@@ -1,0 +1,28 @@
+pub enum ParseError {
+    invalid(str)
+}
+
+pub enum IOError {
+    denied(str)
+}
+
+pub func parse_config(succeeds:bool) Result<int, ParseError> {
+    if succeeds {
+        return Result<int, ParseError>.success(42)
+    }
+    return Result<int, ParseError>.failure(ParseError.invalid("bad input"))
+}
+
+pub func save_config(succeeds:bool) Result<void, IOError> {
+    if succeeds {
+        return Result<void, IOError>.success()
+    }
+    return Result<void, IOError>.failure(IOError.denied("denied"))
+}
+
+pub func callback_result() Result<func(), ParseError> {
+    var callback:func() = func() {
+        print("callback")
+    }
+    return Result<func(), ParseError>.success(callback)
+}
