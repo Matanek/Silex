@@ -1,0 +1,10 @@
+enum Failure {
+    denied
+}
+
+func compute() Result<int, Failure> {
+    let value = try 1
+    return Result<int, Failure>.success(value)
+}
+
+func main() {}

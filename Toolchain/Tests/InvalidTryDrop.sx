@@ -1,0 +1,15 @@
+enum Failure {
+    denied
+}
+
+func save() Result<void, Failure> {
+    return Result<void, Failure>.success()
+}
+
+class Resource {
+    drop {
+        try save()
+    }
+}
+
+func main() {}

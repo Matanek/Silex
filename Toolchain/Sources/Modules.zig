@@ -1172,6 +1172,10 @@ pub const Resolver = struct {
                 .end = try self.transformExpression(access.end),
                 .bracket_position = access.bracket_position,
             } },
+            .try_expression => |try_value| .{ .try_expression = .{
+                .operator_position = try_value.operator_position,
+                .operand = try self.transformExpression(try_value.operand),
+            } },
             .unary => |unary| .{ .unary = .{
                 .operator = unary.operator,
                 .operator_position = unary.operator_position,

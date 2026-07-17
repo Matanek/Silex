@@ -150,6 +150,7 @@ pub const Expression = struct {
         safe_member_access: SafeMemberAccess,
         index_access: IndexAccess,
         slice_access: SliceAccess,
+        try_expression: Try,
         unary: Unary,
         conversion: Conversion,
         binary: Binary,
@@ -158,6 +159,11 @@ pub const Expression = struct {
 
     pub const Unary = struct {
         operator: UnaryOperator,
+        operator_position: Source.Position,
+        operand: *Expression,
+    };
+
+    pub const Try = struct {
         operator_position: Source.Position,
         operand: *Expression,
     };

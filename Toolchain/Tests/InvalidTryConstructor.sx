@@ -1,0 +1,17 @@
+enum Failure {
+    denied
+}
+
+func read() Result<int, Failure> {
+    return Result<int, Failure>.success(1)
+}
+
+class Box {
+    let value:int
+
+    pub init() {
+        self.value = try read()
+    }
+}
+
+func main() {}

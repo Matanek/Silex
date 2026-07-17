@@ -653,6 +653,10 @@ pub const Specializer = struct {
                 .end = try self.rewriteExpression(access.end, bindings),
                 .bracket_position = access.bracket_position,
             } },
+            .try_expression => |try_value| .{ .try_expression = .{
+                .operator_position = try_value.operator_position,
+                .operand = try self.rewriteExpression(try_value.operand, bindings),
+            } },
             .unary => |unary| .{ .unary = .{
                 .operator = unary.operator,
                 .operator_position = unary.operator_position,

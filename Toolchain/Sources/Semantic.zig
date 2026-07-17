@@ -112,6 +112,7 @@ pub const Expression = struct {
         safe_access: SafeAccess,
         index_access: IndexAccess,
         slice_access: SliceAccess,
+        try_expression: Try,
         unary: Unary,
         binary: Binary,
         conversion: Conversion,
@@ -120,6 +121,14 @@ pub const Expression = struct {
     pub const Unary = struct {
         operator: Ast.UnaryOperator,
         operand: *Expression,
+    };
+
+    pub const Try = struct {
+        operand: *Expression,
+        temporary_name: []const u8,
+        error_type: Type,
+        return_enum_generated_name: []const u8,
+        failure_variant_index: usize,
     };
 
     pub const Variable = struct {
@@ -1810,6 +1819,7 @@ pub const Analyzer = struct {
                 try self.validateConstructorExpression(structure, access.start, initialized);
                 try self.validateConstructorExpression(structure, access.end, initialized);
             },
+            .try_expression => |try_value| try self.validateConstructorExpression(structure, try_value.operand, initialized),
             .unary => |unary| try self.validateConstructorExpression(structure, unary.operand, initialized),
             .binary => |binary| {
                 try self.validateConstructorExpression(structure, binary.left, initialized);
@@ -2474,6 +2484,7 @@ pub const Analyzer = struct {
             .safe_member_access => |member| self.safeMemberAccessExpression(member, scope),
             .index_access => |access| self.indexAccessExpression(access, scope),
             .slice_access => |access| self.sliceAccessExpression(access, scope),
+            .try_expression => |try_value| self.tryExpression(try_value, scope),
             .unary => |unary| self.unaryExpression(unary, scope),
             .conversion => |conversion| self.conversionExpression(conversion, scope),
             .binary => |binary| self.binaryExpression(binary, scope),
@@ -5069,6 +5080,7 @@ pub const Analyzer = struct {
                 try self.validateExpression(access.start);
                 try self.validateExpression(access.end);
             },
+            .try_expression => |try_value| try self.validateExpression(try_value.operand),
             .unary => |unary| {
                 if (unary.operator == .numeric_negate and unary.operand.value == .integer and isInteger(expression_value.type)) {
                     const bits = integerBits(expression_value.type);
@@ -5126,6 +5138,80 @@ pub const Analyzer = struct {
             .type = result_type,
             .position = unary.operator_position,
             .value = .{ .unary = .{ .operator = unary.operator, .operand = operand } },
+        });
+    }
+
+    const ResultShape = struct {
+        enum_symbol: *const EnumSymbol,
+        success_type: Type,
+        error_type: Type,
+        failure_variant_index: usize,
+    };
+
+    fn resultShape(self: *const Analyzer, value: Type) ?ResultShape {
+        if (value != .enumeration or !std.mem.startsWith(u8, value.enumeration.source_name, "Result<")) return null;
+        const enum_symbol = self.findEnumByGeneratedName(value.enumeration.generated_name) orelse return null;
+        if (enum_symbol.variants.len != 2 or
+            !std.mem.eql(u8, enum_symbol.variants[0].source_name, "success") or
+            !std.mem.eql(u8, enum_symbol.variants[1].source_name, "failure") or
+            enum_symbol.variants[0].associated_types.len > 1 or
+            enum_symbol.variants[1].associated_types.len != 1)
+        {
+            return null;
+        }
+        return .{
+            .enum_symbol = enum_symbol,
+            .success_type = if (enum_symbol.variants[0].associated_types.len == 0)
+                .void
+            else
+                enum_symbol.variants[0].associated_types[0],
+            .error_type = enum_symbol.variants[1].associated_types[0],
+            .failure_variant_index = 1,
+        };
+    }
+
+    fn tryExpression(
+        self: *Analyzer,
+        try_value: Ast.Expression.Try,
+        scope: *const Scope,
+    ) AnalyzeError!*Expression {
+        if (self.current_constructor) return self.fail(try_value.operator_position, "'try' is not available in a constructor");
+        if (self.current_drop) return self.fail(try_value.operator_position, "'try' is not available in a drop block");
+
+        const return_shape = self.resultShape(self.current_return_type) orelse {
+            return self.fail(try_value.operator_position, "'try' requires the current function or lambda to return a Result");
+        };
+        const operand = try self.expression(try_value.operand, scope);
+        const operand_shape = self.resultShape(operand.type) orelse {
+            const message = try std.fmt.allocPrint(
+                self.allocator,
+                "'try' requires a Result operand, found '{s}'",
+                .{typeName(operand.type)},
+            );
+            return self.fail(try_value.operator_position, message);
+        };
+        if (!typeEqual(operand_shape.error_type, return_shape.error_type)) {
+            const message = try std.fmt.allocPrint(
+                self.allocator,
+                "'try' cannot propagate error type '{s}' through Result error type '{s}'",
+                .{ typeName(operand_shape.error_type), typeName(return_shape.error_type) },
+            );
+            return self.fail(try_value.operator_position, message);
+        }
+        const temporary_name = try std.fmt.allocPrint(self.allocator, "silexTry{d}", .{self.next_symbol_id});
+        self.next_symbol_id += 1;
+        self.releaseTransientBorrow(operand);
+        return self.newExpression(.{
+            .type = operand_shape.success_type,
+            .position = try_value.operator_position,
+            .lifetime_depth = operand.lifetime_depth,
+            .value = .{ .try_expression = .{
+                .operand = operand,
+                .temporary_name = temporary_name,
+                .error_type = operand_shape.error_type,
+                .return_enum_generated_name = return_shape.enum_symbol.generated_name,
+                .failure_variant_index = return_shape.failure_variant_index,
+            } },
         });
     }
 
@@ -5811,6 +5897,7 @@ fn astExpressionUsesIdentifier(expression_value: *const Ast.Expression, name: []
         .member_access => |member| astExpressionUsesIdentifier(member.object, name),
         .index_access => |access| astExpressionUsesIdentifier(access.object, name) or astExpressionUsesIdentifier(access.index, name),
         .slice_access => |access| astExpressionUsesIdentifier(access.object, name) or astExpressionUsesIdentifier(access.start, name) or astExpressionUsesIdentifier(access.end, name),
+        .try_expression => |try_value| astExpressionUsesIdentifier(try_value.operand, name),
         .unary => |unary| astExpressionUsesIdentifier(unary.operand, name),
         .conversion => |conversion| astExpressionUsesIdentifier(conversion.operand, name),
         .binary => |binary| astExpressionUsesIdentifier(binary.left, name) or astExpressionUsesIdentifier(binary.right, name),

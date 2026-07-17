@@ -744,6 +744,62 @@ pub fn build(b: *std.Build) void {
         "Tests/InvalidResultMain.sx:5:6: error: 'main' must have return type 'void' and no parameters\n",
     );
 
+    const invalid_try_void_function_command = b.addRunArtifact(executable);
+    invalid_try_void_function_command.addArgs(&.{ "compile", "Tests/InvalidTryVoidFunction.sx" });
+    invalid_try_void_function_command.expectExitCode(1);
+    invalid_try_void_function_command.expectStdErrEqual(
+        "Tests/InvalidTryVoidFunction.sx:10:17: error: 'try' requires the current function or lambda to return a Result\n",
+    );
+
+    const invalid_try_non_result_return_command = b.addRunArtifact(executable);
+    invalid_try_non_result_return_command.addArgs(&.{ "compile", "Tests/InvalidTryNonResultReturn.sx" });
+    invalid_try_non_result_return_command.expectExitCode(1);
+    invalid_try_non_result_return_command.expectStdErrEqual(
+        "Tests/InvalidTryNonResultReturn.sx:10:12: error: 'try' requires the current function or lambda to return a Result\n",
+    );
+
+    const invalid_try_operand_command = b.addRunArtifact(executable);
+    invalid_try_operand_command.addArgs(&.{ "compile", "Tests/InvalidTryOperand.sx" });
+    invalid_try_operand_command.expectExitCode(1);
+    invalid_try_operand_command.expectStdErrEqual(
+        "Tests/InvalidTryOperand.sx:6:17: error: 'try' requires a Result operand, found 'int'\n",
+    );
+
+    const invalid_try_error_type_command = b.addRunArtifact(executable);
+    invalid_try_error_type_command.addArgs(&.{ "compile", "Tests/InvalidTryErrorType.sx" });
+    invalid_try_error_type_command.expectExitCode(1);
+    invalid_try_error_type_command.expectStdErrEqual(
+        "Tests/InvalidTryErrorType.sx:14:17: error: 'try' cannot propagate error type 'ReadError' through Result error type 'SaveError'\n",
+    );
+
+    const invalid_try_lambda_error_type_command = b.addRunArtifact(executable);
+    invalid_try_lambda_error_type_command.addArgs(&.{ "compile", "Tests/InvalidTryLambdaErrorType.sx" });
+    invalid_try_lambda_error_type_command.expectExitCode(1);
+    invalid_try_lambda_error_type_command.expectStdErrEqual(
+        "Tests/InvalidTryLambdaErrorType.sx:15:21: error: 'try' cannot propagate error type 'ReadError' through Result error type 'SaveError'\n",
+    );
+
+    const invalid_try_constructor_command = b.addRunArtifact(executable);
+    invalid_try_constructor_command.addArgs(&.{ "compile", "Tests/InvalidTryConstructor.sx" });
+    invalid_try_constructor_command.expectExitCode(1);
+    invalid_try_constructor_command.expectStdErrEqual(
+        "Tests/InvalidTryConstructor.sx:13:22: error: 'try' is not available in a constructor\n",
+    );
+
+    const invalid_try_drop_command = b.addRunArtifact(executable);
+    invalid_try_drop_command.addArgs(&.{ "compile", "Tests/InvalidTryDrop.sx" });
+    invalid_try_drop_command.expectExitCode(1);
+    invalid_try_drop_command.expectStdErrEqual(
+        "Tests/InvalidTryDrop.sx:11:9: error: 'try' is not available in a drop block\n",
+    );
+
+    const reserved_try_identifier_command = b.addRunArtifact(executable);
+    reserved_try_identifier_command.addArgs(&.{ "compile", "Tests/ReservedTryIdentifier.sx" });
+    reserved_try_identifier_command.expectExitCode(1);
+    reserved_try_identifier_command.expectStdErrEqual(
+        "Tests/ReservedTryIdentifier.sx:2:9: error: expected variable name\n",
+    );
+
     const missing_generic_function_arguments_command = b.addRunArtifact(executable);
     missing_generic_function_arguments_command.addArgs(&.{ "compile", "Tests/MissingGenericFunctionArguments.sx" });
     missing_generic_function_arguments_command.expectExitCode(1);
@@ -1144,7 +1200,7 @@ pub fn build(b: *std.Build) void {
         "silex: native compilation failed for target 'x86_64-linux-musl'; target support, SDKs, or native sources may be unavailable or incomplete\n",
     );
     backend_discovered_target_failure_command.expectStdErrMatch(b.fmt(
-        "silex: backend details: .silex{c}build{c}v30{c}x86_64-linux-musl{c}",
+        "silex: backend details: .silex{c}build{c}v31{c}x86_64-linux-musl{c}",
         .{
             std.fs.path.sep,
             std.fs.path.sep,
@@ -1584,6 +1640,14 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&reserved_result_alias_command.step);
     test_step.dependOn(&invalid_result_let_independence_command.step);
     test_step.dependOn(&invalid_result_main_command.step);
+    test_step.dependOn(&invalid_try_void_function_command.step);
+    test_step.dependOn(&invalid_try_non_result_return_command.step);
+    test_step.dependOn(&invalid_try_operand_command.step);
+    test_step.dependOn(&invalid_try_error_type_command.step);
+    test_step.dependOn(&invalid_try_lambda_error_type_command.step);
+    test_step.dependOn(&invalid_try_constructor_command.step);
+    test_step.dependOn(&invalid_try_drop_command.step);
+    test_step.dependOn(&reserved_try_identifier_command.step);
     test_step.dependOn(&missing_generic_function_arguments_command.step);
     test_step.dependOn(&unexpected_generic_function_arguments_command.step);
     test_step.dependOn(&invalid_generic_function_arity_command.step);
@@ -1774,8 +1838,13 @@ pub fn build(b: *std.Build) void {
     results_command.addArgs(&.{ "run", "Smokes/Results/silex.json" });
     results_command.expectStdOutEqual(hostText(b, "8081\nbad\nsaved\ndenied\ncallback\n"));
 
+    const try_command = b.addRunArtifact(executable);
+    try_command.step.dependOn(&results_command.step);
+    try_command.addArgs(&.{ "run", "Smokes/Try/silex.json" });
+    try_command.expectStdOutEqual(hostText(b, "42\n42\ndenied\n3\nnested failure\nscope released\ndenied\n43\nouter continues\nlambda failure\nouter continues\nsaved\n"));
+
     const generic_functions_command = b.addRunArtifact(executable);
-    generic_functions_command.step.dependOn(&results_command.step);
+    generic_functions_command.step.dependOn(&try_command.step);
     generic_functions_command.addArgs(&.{ "run", "Smokes/GenericFunctions.sx" });
     generic_functions_command.expectStdOutEqual(hostText(b, "42\n7\nAda\nGrace\n9\nSilex\n3\n3\n4\n120\nlocal\n11\n5\ngeneric\n"));
 

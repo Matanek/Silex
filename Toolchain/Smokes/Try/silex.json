@@ -1,0 +1,13 @@
+{
+  "target": "TryChecks.App",
+  "modules": [
+    {
+      "name": "TryChecks.Core",
+      "sources": ["Core.sx"]
+    },
+    {
+      "name": "TryChecks.App",
+      "sources": ["Main.sx"]
+    }
+  ]
+}

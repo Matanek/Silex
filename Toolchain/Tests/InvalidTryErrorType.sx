@@ -1,0 +1,18 @@
+enum ReadError {
+    denied
+}
+
+enum SaveError {
+    denied
+}
+
+func read() Result<int, ReadError> {
+    return Result<int, ReadError>.failure(ReadError.denied())
+}
+
+func save() Result<int, SaveError> {
+    let value = try read()
+    return Result<int, SaveError>.success(value)
+}
+
+func main() {}

@@ -1,0 +1,13 @@
+enum Failure {
+    denied
+}
+
+func read() Result<int, Failure> {
+    return Result<int, Failure>.success(1)
+}
+
+func compute() int {
+    return try read()
+}
+
+func main() {}

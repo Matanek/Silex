@@ -15,6 +15,7 @@ pub const TokenTag = enum {
     keyword_break,
     keyword_continue,
     keyword_return,
+    keyword_try,
     keyword_struct,
     keyword_class,
     keyword_enum,
@@ -481,6 +482,7 @@ fn keywordTag(lexeme: []const u8) ?TokenTag {
         .{ "break", TokenTag.keyword_break },
         .{ "continue", TokenTag.keyword_continue },
         .{ "return", TokenTag.keyword_return },
+        .{ "try", TokenTag.keyword_try },
         .{ "struct", TokenTag.keyword_struct },
         .{ "class", TokenTag.keyword_class },
         .{ "enum", TokenTag.keyword_enum },
@@ -593,6 +595,12 @@ test "reserve static keyword" {
 test "recognize reserved range keyword" {
     var lexer = Lexer.init("range(0, 10)");
     try std.testing.expectEqual(TokenTag.keyword_range, (try lexer.next()).tag);
+}
+
+test "recognize reserved try keyword" {
+    var lexer = Lexer.init("try result");
+    try std.testing.expectEqual(TokenTag.keyword_try, (try lexer.next()).tag);
+    try std.testing.expectEqual(TokenTag.identifier, (try lexer.next()).tag);
 }
 
 test "skip line comments" {

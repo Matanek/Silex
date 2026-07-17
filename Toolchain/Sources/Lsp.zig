@@ -2391,6 +2391,7 @@ const language_completions = [_]CompletionItem{
     .{ .label = "while", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "match", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "return", .kind = 14, .detail = "Silex keyword" },
+    .{ .label = "try", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "import", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "use", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "pub", .kind = 14, .detail = "Silex keyword" },
@@ -2433,6 +2434,7 @@ test "completion items include language terms and document identifiers" {
     try std.testing.expect(containsCompletion(items, "sub"));
     try std.testing.expect(containsCompletion(items, "elif"));
     try std.testing.expect(containsCompletion(items, "match"));
+    try std.testing.expect(containsCompletion(items, "try"));
     try std.testing.expect(containsCompletion(items, "total"));
 }
 
@@ -2994,6 +2996,12 @@ test "Result completion distinguishes value and void success" {
     try std.testing.expect(syntaxDiagnostic(allocator,
         \\enum SaveError { denied }
         \\func save() Result<void, SaveError> { return Result<void, SaveError>.success() }
+        \\func main() {}
+    ) == null);
+    try std.testing.expect(syntaxDiagnostic(allocator,
+        \\enum SaveError { denied }
+        \\func save() Result<void, SaveError> { return Result<void, SaveError>.success() }
+        \\func save_all() Result<void, SaveError> { try save(); return Result<void, SaveError>.success() }
         \\func main() {}
     ) == null);
 }

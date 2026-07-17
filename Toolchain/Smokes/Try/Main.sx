@@ -1,0 +1,91 @@
+use TryChecks.Core.ReadError
+use TryChecks.Core.read
+use TryChecks.Core.call_count
+use TryChecks.Core.save
+
+use ReadError as SourceError
+use ReadError as TargetError
+
+class ScopeProbe {
+    let label:str
+
+    pub init(label:str) {
+        self.label = label
+    }
+
+    drop {
+        print(self.label)
+    }
+}
+
+func explicit(allowed:bool) Result<int, TargetError> {
+    return match read(allowed) {
+        success(value) => Result<int, TargetError>.success(value + 2)
+        failure(error) => Result<int, TargetError>.failure(error)
+    }
+}
+
+func propagated(allowed:bool) Result<int, TargetError> {
+    let value = try read(allowed) + 2
+    return Result<int, TargetError>.success(value)
+}
+
+func nested(allowed:bool) Result<str, SourceError> {
+    let value = try propagated(allowed)
+    return Result<str, SourceError>.success("value")
+}
+
+func scoped(allowed:bool) Result<int, ReadError> {
+    var probe = ScopeProbe("scope released")
+    let value = try read(allowed)
+    return Result<int, ReadError>.success(value)
+}
+
+func check_lambda(allowed:bool) {
+    var callback:func() Result<int, ReadError> = func() Result<int, ReadError> {
+        let value = try (read(allowed))
+        return Result<int, ReadError>.success(value + 3)
+    }
+    match callback() {
+        success(value) => { print(value) }
+        failure(error) => { print("lambda failure") }
+    }
+    print("outer continues")
+}
+
+func save_all(allowed:bool) Result<void, ReadError> {
+    try save(allowed)
+    return Result<void, ReadError>.success()
+}
+
+func print_result(result:Result<int, ReadError>) {
+    match result {
+        success(value) => { print(value) }
+        failure(error) => {
+            print(match error {
+                denied(message) => message
+            })
+        }
+    }
+}
+
+func main() {
+    print_result(explicit(true))
+    print_result(propagated(true))
+    print_result(propagated(false))
+    print(call_count())
+
+    match nested(false) {
+        success(value) => { print(value) }
+        failure(error) => { print("nested failure") }
+    }
+
+    print_result(scoped(false))
+    check_lambda(true)
+    check_lambda(false)
+
+    match save_all(true) {
+        success => { print("saved") }
+        failure(error) => { print("unexpected") }
+    }
+}

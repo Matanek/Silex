@@ -483,6 +483,7 @@ pub const Parser = struct {
             .keyword_break => self.parseLoopControl(.break_statement),
             .keyword_continue => self.parseLoopControl(.continue_statement),
             .keyword_return => self.parseReturn(),
+            .keyword_try => self.parseTryStatement(),
             .keyword_match => self.parseMatchStatement(),
             .identifier, .keyword_self, .keyword_super => self.parseIdentifierStatement(),
             else => self.fail("expected statement"),
@@ -494,6 +495,12 @@ pub const Parser = struct {
         for (expression.value.match_expression.branches) |branch| {
             if (branch.body != .statements) return self.failAt(expression.position, "an imperative match requires a block in every branch");
         }
+        return .{ .expression_statement = expression };
+    }
+
+    fn parseTryStatement(self: *Parser) ParseError!Ast.Statement {
+        const expression = try self.parseExpression(false);
+        try self.expectStatementTerminator();
         return .{ .expression_statement = expression };
     }
 
@@ -1013,6 +1020,18 @@ pub const Parser = struct {
     }
 
     fn parseUnary(self: *Parser, allow_line_breaks: bool) ParseError!*Ast.Expression {
+        if (self.current.tag == .keyword_try) {
+            const operator_position = self.current.position;
+            try self.advance();
+            const operand = try self.parseUnary(allow_line_breaks);
+            return self.newExpression(.{
+                .position = operator_position,
+                .value = .{ .try_expression = .{
+                    .operator_position = operator_position,
+                    .operand = operand,
+                } },
+            });
+        }
         if (self.current.tag != .bang and self.current.tag != .minus and
             self.current.tag != .amp) return self.parseConversion();
 
@@ -2833,6 +2852,28 @@ test "parse intrinsic Result with a void success type" {
     try std.testing.expectEqual(Ast.TypeName.void, return_type.arguments[0]);
     const owner = program.functions[0].statements[0].return_statement.value.?.value.static_method_call.owner.generic_structure;
     try std.testing.expectEqual(Ast.TypeName.void, owner.arguments[0]);
+}
+
+test "parse try with prefix precedence" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(),
+        \\func read() Result<int, Failure> { return Result<int, Failure>.success(1) }
+        \\func load() Result<int, Failure> {
+        \\    let value = try read() + 1
+        \\    let member = try loader.read()
+        \\    return Result<int, Failure>.success(value)
+        \\}
+        \\func main() {}
+    );
+    const program = try parser.parse();
+    const initializer = program.functions[1].statements[0].variable_declaration.initializer.?;
+    try std.testing.expect(initializer.value == .binary);
+    try std.testing.expect(initializer.value.binary.left.value == .try_expression);
+    try std.testing.expect(initializer.value.binary.left.value.try_expression.operand.value == .call);
+    const member = program.functions[1].statements[1].variable_declaration.initializer.?;
+    try std.testing.expect(member.value == .try_expression);
+    try std.testing.expect(member.value.try_expression.operand.value == .method_call);
 }
 
 test "reserve Result and reject void as its error type" {

@@ -30,8 +30,46 @@ match parse_port(text) {
 ```
 
 There is no implicit conversion from `T` or `E`, no implicit variant, and no
-default success. Propagation is still written manually with `match`; `try` and
-error transformation are not part of this version.
+default success.
+
+## Propagation with `try`
+
+The prefix expression `try` evaluates a `Result<T,E>` once. A success produces
+its `T` value; a failure immediately returns the same `E` from the current
+function:
+
+```sx
+func load_port(text:str) Result<int, ParseError> {
+    let port = try parse_port(text)
+    return Result<int, ParseError>.success(port)
+}
+```
+
+The containing function or lambda must itself return `Result<U,E>`. The success
+types `T` and `U` may differ, but the error type must be exactly the same after
+transparent aliases are resolved. No conversion or error transformation is
+attempted. A failure leaves a lambda that contains `try`, not its enclosing
+function.
+
+`try` has prefix precedence: calls and member access bind to its operand before
+it, while binary operators bind after it. Thus `try parse_port(text) + 1` means
+`(try parse_port(text)) + 1`.
+
+For `Result<void,E>`, `try operation()` is a complete statement:
+
+```sx
+func save_all() Result<void, SaveError> {
+    try save_header()
+    try save_body()
+    return Result<void, SaveError>.success()
+}
+```
+
+Propagation is compiled as an ordinary early return. It uses no exception, and
+the same scope cleanup and destruction as an explicit `return` still occurs.
+`try` is invalid outside a function or lambda returning a compatible `Result`,
+including constructors and `drop` blocks. Error transformation remains
+explicit.
 
 ## Success without a value
 

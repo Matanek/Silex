@@ -1,0 +1,3 @@
+func main() {
+    let try = 1
+}

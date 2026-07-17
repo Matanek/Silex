@@ -1373,6 +1373,113 @@ fn generateStatements(
     }
 }
 
+fn generateTryPreludes(
+    allocator: Allocator,
+    output: *std.ArrayList(u8),
+    expression: *const Semantic.Expression,
+    indentation: usize,
+) GenerateError!void {
+    switch (expression.value) {
+        .try_expression => |try_value| {
+            try generateTryPreludes(allocator, output, try_value.operand, indentation);
+            if (expression.type != .void) {
+                try indent(allocator, output, indentation);
+                try output.appendSlice(allocator, "std::optional<");
+                try appendCppType(allocator, output, expression.type);
+                try output.append(allocator, '>');
+                try output.append(allocator, ' ');
+                try output.appendSlice(allocator, try_value.temporary_name);
+                try output.appendSlice(allocator, "Value;\n");
+            }
+            try indent(allocator, output, indentation);
+            try output.appendSlice(allocator, "{\n");
+            try indent(allocator, output, indentation);
+            try output.appendSlice(allocator, "    const auto ");
+            try output.appendSlice(allocator, try_value.temporary_name);
+            try output.appendSlice(allocator, " = ");
+            try generateExpression(allocator, output, try_value.operand);
+            try output.appendSlice(allocator, ";\n");
+            try indent(allocator, output, indentation);
+            try output.appendSlice(allocator, "    if (");
+            try output.appendSlice(allocator, try_value.temporary_name);
+            try output.appendSlice(allocator, try std.fmt.allocPrint(allocator, ".variant == {d}) return ", .{try_value.failure_variant_index}));
+            try output.appendSlice(allocator, try_value.return_enum_generated_name);
+            try output.appendSlice(allocator, try std.fmt.allocPrint(allocator, "{{std::size_t{{{d}}}, ", .{try_value.failure_variant_index}));
+            try output.appendSlice(allocator, try_value.temporary_name);
+            try output.appendSlice(allocator, ".get<");
+            try appendCppType(allocator, output, try_value.error_type);
+            try output.appendSlice(allocator, ">(0)};\n");
+            if (expression.type != .void) {
+                try indent(allocator, output, indentation);
+                try output.appendSlice(allocator, "    ");
+                try output.appendSlice(allocator, try_value.temporary_name);
+                try output.appendSlice(allocator, "Value.emplace(");
+                try output.appendSlice(allocator, try_value.temporary_name);
+                try output.appendSlice(allocator, ".get<");
+                try appendCppType(allocator, output, expression.type);
+                try output.appendSlice(allocator, ">(0));\n");
+            }
+            try indent(allocator, output, indentation);
+            try output.appendSlice(allocator, "}\n");
+        },
+        .string_length => |value| try generateTryPreludes(allocator, output, value, indentation),
+        .sequence_literal => |values| for (values) |value| try generateTryPreludes(allocator, output, value, indentation),
+        .collection_method => |method| {
+            try generateTryPreludes(allocator, output, method.object, indentation);
+            for (method.arguments) |argument| try generateTryPreludes(allocator, output, argument, indentation);
+        },
+        .call => |call| for (call.arguments) |argument| try generateTryPreludes(allocator, output, argument, indentation),
+        .value_call => |call| {
+            try generateTryPreludes(allocator, output, call.callee, indentation);
+            if (call.owner) |owner| try generateTryPreludes(allocator, output, owner, indentation);
+            for (call.arguments) |argument| try generateTryPreludes(allocator, output, argument, indentation);
+        },
+        .lambda => {},
+        .method_call => |call| {
+            try generateTryPreludes(allocator, output, call.object, indentation);
+            for (call.arguments) |argument| try generateTryPreludes(allocator, output, argument, indentation);
+        },
+        .static_method_call => |call| for (call.arguments) |argument| try generateTryPreludes(allocator, output, argument, indentation),
+        .super_method_call => |call| for (call.arguments) |argument| try generateTryPreludes(allocator, output, argument, indentation),
+        .cascade => |cascade| {
+            try generateTryPreludes(allocator, output, cascade.object, indentation);
+            for (cascade.operations) |operation| switch (operation) {
+                .method_call => |call| try generateTryPreludes(allocator, output, call, indentation),
+                .field_assignment => |assignment| try generateTryPreludes(allocator, output, assignment.value, indentation),
+            };
+        },
+        .class_initializer => |initializer| for (initializer.arguments) |argument| try generateTryPreludes(allocator, output, argument, indentation),
+        .structure_initializer => |initializer| for (initializer.fields) |field| try generateTryPreludes(allocator, output, field, indentation),
+        .enum_initializer => |initializer| for (initializer.arguments) |argument| try generateTryPreludes(allocator, output, argument, indentation),
+        .enum_raw_value => |value| try generateTryPreludes(allocator, output, value, indentation),
+        .match_expression => |match_value| try generateTryPreludes(allocator, output, match_value.subject, indentation),
+        .member_access => |member| try generateTryPreludes(allocator, output, member.object, indentation),
+        .bound_function => |member| try generateTryPreludes(allocator, output, member.object, indentation),
+        .adapt_function => |value| try generateTryPreludes(allocator, output, value, indentation),
+        .optional_wrap => |value| try generateTryPreludes(allocator, output, value, indentation),
+        .safe_access => |access| {
+            try generateTryPreludes(allocator, output, access.receiver, indentation);
+            try generateTryPreludes(allocator, output, access.end, indentation);
+        },
+        .index_access => |access| {
+            try generateTryPreludes(allocator, output, access.object, indentation);
+            try generateTryPreludes(allocator, output, access.index, indentation);
+        },
+        .slice_access => |access| {
+            try generateTryPreludes(allocator, output, access.object, indentation);
+            try generateTryPreludes(allocator, output, access.start, indentation);
+            try generateTryPreludes(allocator, output, access.end, indentation);
+        },
+        .unary => |unary| try generateTryPreludes(allocator, output, unary.operand, indentation),
+        .binary => |binary| {
+            try generateTryPreludes(allocator, output, binary.left, indentation);
+            try generateTryPreludes(allocator, output, binary.right, indentation);
+        },
+        .conversion => |conversion| try generateTryPreludes(allocator, output, conversion.operand, indentation),
+        .integer, .floating, .boolean, .null, .string, .cascade_target, .variable, .self, .owner_self, .static_field_access, .optional_unwrap => {},
+    }
+}
+
 fn generateStatement(
     allocator: Allocator,
     output: *std.ArrayList(u8),
@@ -1382,6 +1489,7 @@ fn generateStatement(
 ) GenerateError!void {
     switch (statement) {
         .print => |argument| {
+            try generateTryPreludes(allocator, output, argument, indentation);
             try indent(allocator, output, indentation);
             try output.appendSlice(allocator, "std::cout << ");
             if (argument.type == .bool) try output.append(allocator, '(');
@@ -1392,6 +1500,7 @@ fn generateStatement(
             try output.appendSlice(allocator, " << '\\n';\n");
         },
         .assertion => |assertion| {
+            try generateTryPreludes(allocator, output, assertion.condition, indentation);
             try indent(allocator, output, indentation);
             try output.appendSlice(allocator, "if (!");
             try generateCondition(allocator, output, .{ .expression = assertion.condition });
@@ -1402,6 +1511,7 @@ fn generateStatement(
             try output.appendSlice(allocator, ");\n");
         },
         .panic_statement => |panic_value| {
+            try generateTryPreludes(allocator, output, panic_value.message, indentation);
             try indent(allocator, output, indentation);
             try output.appendSlice(allocator, "panicRuntimeError(");
             try appendCppSourceLocation(allocator, output, panic_value.position);
@@ -1410,6 +1520,7 @@ fn generateStatement(
             try output.appendSlice(allocator, ");\n");
         },
         .variable_declaration => |declaration| {
+            try generateTryPreludes(allocator, output, declaration.initializer, indentation);
             try indent(allocator, output, indentation);
             if (declaration.capture_box.*) {
                 try output.appendSlice(allocator, "auto ");
@@ -1430,6 +1541,8 @@ fn generateStatement(
             try output.appendSlice(allocator, ";\n");
         },
         .assignment => |assignment| {
+            try generateTryPreludes(allocator, output, assignment.target, indentation);
+            if (assignment.value) |value| try generateTryPreludes(allocator, output, value, indentation);
             try indent(allocator, output, indentation);
             const checked_integer = isInteger(assignment.target.type) and assignment.operator != .assign;
             try generateExpression(allocator, output, assignment.target);
@@ -1457,6 +1570,10 @@ fn generateStatement(
             try output.appendSlice(allocator, ";\n");
         },
         .if_statement => |if_statement| {
+            switch (if_statement.condition) {
+                .expression => |condition| try generateTryPreludes(allocator, output, condition, indentation),
+                .binding => |binding| try generateTryPreludes(allocator, output, binding.source, indentation),
+            }
             try indent(allocator, output, indentation);
             try output.appendSlice(allocator, "if ");
             try generateCondition(allocator, output, if_statement.condition);
@@ -1484,6 +1601,7 @@ fn generateStatement(
                 const binding = while_statement.condition.binding;
                 try indent(allocator, output, indentation);
                 try output.appendSlice(allocator, "while (true) {\n");
+                try generateTryPreludes(allocator, output, while_statement.condition.binding.source, indentation + 1);
                 try indent(allocator, output, indentation + 1);
                 try output.appendSlice(allocator, "auto ");
                 try output.appendSlice(allocator, binding.temporary_name);
@@ -1501,14 +1619,24 @@ fn generateStatement(
                 return;
             }
             try indent(allocator, output, indentation);
-            try output.appendSlice(allocator, "while ");
+            try output.appendSlice(allocator, "while (true) {\n");
+            try generateTryPreludes(allocator, output, while_statement.condition.expression, indentation + 1);
+            try indent(allocator, output, indentation + 1);
+            try output.appendSlice(allocator, "if (!");
             try generateCondition(allocator, output, while_statement.condition);
-            try output.appendSlice(allocator, " {\n");
+            try output.appendSlice(allocator, ") break;\n");
             try generateStatements(allocator, output, while_statement.body, indentation + 1, is_main);
             try indent(allocator, output, indentation);
             try output.appendSlice(allocator, "}\n");
         },
         .for_statement => |for_statement| {
+            switch (for_statement.source) {
+                .collection => |collection| try generateTryPreludes(allocator, output, collection, indentation),
+                .integer_range => |range| {
+                    try generateTryPreludes(allocator, output, range.start, indentation);
+                    try generateTryPreludes(allocator, output, range.end, indentation);
+                },
+            }
             switch (for_statement.source) {
                 .collection => |collection| {
                     try indent(allocator, output, indentation);
@@ -1553,6 +1681,7 @@ fn generateStatement(
             try output.appendSlice(allocator, "continue;\n");
         },
         .return_statement => |value| {
+            if (value) |expression| try generateTryPreludes(allocator, output, expression, indentation);
             try indent(allocator, output, indentation);
             if (value) |expression| {
                 try output.appendSlice(allocator, "return ");
@@ -1567,6 +1696,7 @@ fn generateStatement(
                 try generateImperativeMatch(allocator, output, expression.value.match_expression, indentation, is_main);
                 return;
             }
+            try generateTryPreludes(allocator, output, expression, indentation);
             try indent(allocator, output, indentation);
             try generateExpression(allocator, output, expression);
             try output.appendSlice(allocator, ";\n");
@@ -1615,6 +1745,7 @@ fn generateImperativeMatch(
 ) GenerateError!void {
     try indent(allocator, output, indentation);
     try output.appendSlice(allocator, "{\n");
+    try generateTryPreludes(allocator, output, match_value.subject, indentation + 1);
     try indent(allocator, output, indentation + 1);
     try output.appendSlice(allocator, "const auto ");
     try output.appendSlice(allocator, match_value.temporary_name);
@@ -1919,6 +2050,15 @@ fn generateExpression(allocator: Allocator, output: *std.ArrayList(u8), expressi
             try output.appendSlice(allocator, "; const std::int64_t silexSliceEnd = ");
             try generateExpression(allocator, output, access.end);
             try output.appendSlice(allocator, "; return silexCollectionSlice(silexSliceValues, silexSliceStart, silexSliceEnd); }())");
+        },
+        .try_expression => |try_value| {
+            if (expression.type == .void) {
+                try output.appendSlice(allocator, "(void)0");
+            } else {
+                try output.appendSlice(allocator, "std::move(*");
+                try output.appendSlice(allocator, try_value.temporary_name);
+                try output.appendSlice(allocator, "Value)");
+            }
         },
         .variable => |variable| {
             try output.appendSlice(allocator, variable.generated_name);
@@ -2612,6 +2752,32 @@ fn resolveSingleTestProgram(allocator: Allocator, program: Ast.Program) !Ast.Pro
     };
     var resolver = Modules.Resolver.init(allocator, project, &.{.{ .module_index = 0, .program = program }});
     return resolver.resolve();
+}
+
+test "generate try as an ordinary early Result return" {
+    const Parser = @import("Parser.zig").Parser;
+    const Generics = @import("Generics.zig");
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var parser = Parser.init(allocator,
+        \\enum Failure { denied }
+        \\func read() Result<int, Failure> { return Result<int, Failure>.failure(Failure.denied()) }
+        \\func load() Result<int, Failure> {
+        \\    let value = try read()
+        \\    return Result<int, Failure>.success(value)
+        \\}
+        \\func main() {}
+    );
+    const resolved = try resolveSingleTestProgram(allocator, try parser.parse());
+    var specializer = Generics.Specializer.init(allocator, resolved);
+    var analyzer = Semantic.Analyzer.init(allocator);
+    const cpp = try generate(allocator, try analyzer.analyze(try specializer.specialize()));
+
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "const auto silexTry") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, ".variant == 1) return SilexEnum") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "throw") == null);
 }
 
 test "generate typed variables and control flow" {

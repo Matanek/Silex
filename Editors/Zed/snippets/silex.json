@@ -101,6 +101,13 @@
     ],
     "description": "Handle both variants of a Result"
   },
+  "Propagate Result": {
+    "prefix": "try",
+    "body": [
+      "try ${1:operation}($0)"
+    ],
+    "description": "Unwrap a Result success or propagate its failure"
+  },
   "Print": {
     "prefix": "print",
     "body": [

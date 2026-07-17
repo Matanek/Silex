@@ -138,6 +138,7 @@
   "range"
   "in"
   "return"
+  "try"
   "struct"
   "enum"
   "match"
