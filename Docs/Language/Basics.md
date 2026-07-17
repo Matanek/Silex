@@ -9,7 +9,10 @@ func main() {
 }
 ```
 
-An explicit `void` return type is accepted, but omitting it is canonical.
+An explicit `void` return type is accepted, but omitting it is canonical for a
+program that handles all recoverable errors itself. A command-line program may
+instead return `Result<void,str>` so that its last recoverable error becomes a
+deterministic diagnostic and exit code. See [Recoverable errors](Error-Handling.md#the-main-boundary).
 `print` is a built-in function.
 
 ## Naming

@@ -1,0 +1,4 @@
+func main() Result<void,str> {
+    assert(false, "boundary assertion")
+    return Result<void,str>.success()
+}

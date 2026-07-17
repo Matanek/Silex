@@ -3006,6 +3006,10 @@ test "Result completion distinguishes value and void success" {
         \\func save_all() Result<void, SaveError> { try save(); return Result<void, SaveError>.success() }
         \\func main() {}
     ) == null);
+    try std.testing.expect(syntaxDiagnostic(allocator,
+        \\func run_application() Result<void,str> { return Result<void,str>.failure("failed") }
+        \\func main() Result<void,str> { try run_application(); return Result<void,str>.success() }
+    ) == null);
 }
 
 test "enum instance completion exposes only declared raw values" {

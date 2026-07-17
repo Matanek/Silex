@@ -8,6 +8,16 @@
     ],
     "description": "Silex program entry point"
   },
+  "Result main function": {
+    "prefix": "mainresult",
+    "body": [
+      "func main() Result<void,str> {",
+      "    $0",
+      "    return Result<void,str>.success()",
+      "}"
+    ],
+    "description": "Silex entry point with a recoverable error boundary"
+  },
   "Import module": {
     "prefix": "import",
     "body": [

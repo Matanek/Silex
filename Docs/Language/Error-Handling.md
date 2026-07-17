@@ -140,7 +140,38 @@ reference, or another non-independent value requires `var`.
 `Result` is a language type rather than an `STD` declaration or implicit
 module. Its name is reserved and cannot be declared or introduced by a type or
 import alias. It has no fields or methods and cannot cross a `native func`
-signature. `main` continues to return `void`.
+signature.
+
+## The `main` boundary
+
+The program entry point may return `void` or exactly `Result<void,str>`:
+
+```sx
+func run_application() Result<void,str> {
+    return Result<void,str>.failure("configuration missing")
+}
+
+func main() Result<void,str> {
+    try run_application()
+    return Result<void,str>.success()
+}
+```
+
+A final `success()` exits with code `0` and writes nothing. A final
+`failure(message)` writes `error: `, the exact UTF-8 bytes of `message`, then
+one `\n` byte to standard error, and exits with code `1`. The boundary does not
+trim or normalize the message; if it already ends in `\n`, the added newline
+still follows it.
+
+No other `Result` specialization is accepted for `main`. A structured error
+must be handled or transformed explicitly to `str`, for example with
+`map_error`, before it reaches the entry point. For the same reason, `try` in
+`main` can propagate only a `Result` whose error type is `str`.
+
+`main` remains unique, non-generic, and parameterless. A non-void `main` must
+return on every ordinary path. This boundary does not intercept or rewrite a
+`panic` or failed `assert`: those remain fatal runtime errors with their own
+source-located diagnostics.
 
 `panic` and `assert` remain fatal. They never create `failure` and cannot be
 caught with `match`. Cancellation or a system error that an API wishes to

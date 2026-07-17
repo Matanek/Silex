@@ -741,7 +741,35 @@ pub fn build(b: *std.Build) void {
     invalid_result_main_command.addArgs(&.{ "compile", "Tests/InvalidResultMain.sx" });
     invalid_result_main_command.expectExitCode(1);
     invalid_result_main_command.expectStdErrEqual(
-        "Tests/InvalidResultMain.sx:5:6: error: 'main' must have return type 'void' and no parameters\n",
+        "Tests/InvalidResultMain.sx:5:6: error: 'main' must return 'void' or 'Result<void, str>'\n",
+    );
+
+    const invalid_result_main_success_command = b.addRunArtifact(executable);
+    invalid_result_main_success_command.addArgs(&.{ "compile", "Tests/InvalidResultMainSuccess.sx" });
+    invalid_result_main_success_command.expectExitCode(1);
+    invalid_result_main_success_command.expectStdErrEqual(
+        "Tests/InvalidResultMainSuccess.sx:1:6: error: 'main' must return 'void' or 'Result<void, str>'\n",
+    );
+
+    const missing_result_main_return_command = b.addRunArtifact(executable);
+    missing_result_main_return_command.addArgs(&.{ "compile", "Tests/MissingResultMainReturn.sx" });
+    missing_result_main_return_command.expectExitCode(1);
+    missing_result_main_return_command.expectStdErrEqual(
+        "Tests/MissingResultMainReturn.sx:1:6: error: function 'main' must return 'Result<void, str>' on every path\n",
+    );
+
+    const invalid_main_parameter_command = b.addRunArtifact(executable);
+    invalid_main_parameter_command.addArgs(&.{ "compile", "Tests/InvalidMainParameter.sx" });
+    invalid_main_parameter_command.expectExitCode(1);
+    invalid_main_parameter_command.expectStdErrEqual(
+        "Tests/InvalidMainParameter.sx:1:6: error: 'main' must have no parameters\n",
+    );
+
+    const invalid_result_main_try_error_command = b.addRunArtifact(executable);
+    invalid_result_main_try_error_command.addArgs(&.{ "compile", "Tests/InvalidResultMainTryError.sx" });
+    invalid_result_main_try_error_command.expectExitCode(1);
+    invalid_result_main_try_error_command.expectStdErrEqual(
+        "Tests/InvalidResultMainTryError.sx:10:5: error: 'try' cannot propagate error type 'AppError' through Result error type 'str'\n",
     );
 
     const invalid_try_void_function_command = b.addRunArtifact(executable);
@@ -1256,7 +1284,7 @@ pub fn build(b: *std.Build) void {
         "silex: native compilation failed for target 'x86_64-linux-musl'; target support, SDKs, or native sources may be unavailable or incomplete\n",
     );
     backend_discovered_target_failure_command.expectStdErrMatch(b.fmt(
-        "silex: backend details: .silex{c}build{c}v32{c}x86_64-linux-musl{c}",
+        "silex: backend details: .silex{c}build{c}v33{c}x86_64-linux-musl{c}",
         .{
             std.fs.path.sep,
             std.fs.path.sep,
@@ -1696,6 +1724,10 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&reserved_result_alias_command.step);
     test_step.dependOn(&invalid_result_let_independence_command.step);
     test_step.dependOn(&invalid_result_main_command.step);
+    test_step.dependOn(&invalid_result_main_success_command.step);
+    test_step.dependOn(&missing_result_main_return_command.step);
+    test_step.dependOn(&invalid_main_parameter_command.step);
+    test_step.dependOn(&invalid_result_main_try_error_command.step);
     test_step.dependOn(&invalid_try_void_function_command.step);
     test_step.dependOn(&invalid_try_non_result_return_command.step);
     test_step.dependOn(&invalid_try_operand_command.step);
@@ -1912,8 +1944,56 @@ pub fn build(b: *std.Build) void {
     map_error_command.addArgs(&.{ "run", "Smokes/MapError/silex.json" });
     map_error_command.expectStdOutEqual(hostText(b, "42\nbad input\ncallback\nbad input\nsaved\ndenied\n"));
 
+    const main_result_success_command = b.addRunArtifact(executable);
+    main_result_success_command.step.dependOn(&map_error_command.step);
+    main_result_success_command.addArgs(&.{ "run", "Smokes/MainResultSuccess.sx" });
+    main_result_success_command.expectExitCode(0);
+    main_result_success_command.expectStdOutEqual("");
+    main_result_success_command.expectStdErrEqual("");
+
+    const main_result_failure_command = b.addRunArtifact(executable);
+    main_result_failure_command.step.dependOn(&main_result_success_command.step);
+    main_result_failure_command.addArgs(&.{ "run", "Smokes/MainResultFailure.sx" });
+    main_result_failure_command.expectExitCode(1);
+    main_result_failure_command.expectStdOutEqual("");
+    main_result_failure_command.expectStdErrEqual(hostText(b, "error: could not save\n"));
+
+    const main_result_failure_newline_command = b.addRunArtifact(executable);
+    main_result_failure_newline_command.step.dependOn(&main_result_failure_command.step);
+    main_result_failure_newline_command.addArgs(&.{ "run", "Smokes/MainResultFailureNewline.sx" });
+    main_result_failure_newline_command.expectExitCode(1);
+    main_result_failure_newline_command.expectStdOutEqual("");
+    main_result_failure_newline_command.expectStdErrEqual(hostText(b, "error: already terminated\n\n"));
+
+    const main_result_try_failure_command = b.addRunArtifact(executable);
+    main_result_try_failure_command.step.dependOn(&main_result_failure_newline_command.step);
+    main_result_try_failure_command.addArgs(&.{ "run", "Smokes/MainResultTryFailure.sx" });
+    main_result_try_failure_command.expectExitCode(1);
+    main_result_try_failure_command.expectStdOutEqual("");
+    main_result_try_failure_command.expectStdErrEqual(hostText(b, "error: propagated failure\n"));
+
+    const main_result_panic_command = b.addRunArtifact(executable);
+    main_result_panic_command.step.dependOn(&main_result_try_failure_command.step);
+    main_result_panic_command.addArgs(&.{ "run", "Smokes/MainResultPanic.sx" });
+    main_result_panic_command.expectExitCode(1);
+    main_result_panic_command.expectStdOutEqual("");
+    main_result_panic_command.expectStdErrEqual(hostText(
+        b,
+        b.fmt("{s}:2:5: runtime error: boundary panic\n", .{b.pathFromRoot("Smokes/MainResultPanic.sx")}),
+    ));
+
+    const main_result_assert_command = b.addRunArtifact(executable);
+    main_result_assert_command.step.dependOn(&main_result_panic_command.step);
+    main_result_assert_command.addArgs(&.{ "run", "Smokes/MainResultAssert.sx" });
+    main_result_assert_command.expectExitCode(1);
+    main_result_assert_command.expectStdOutEqual("");
+    main_result_assert_command.expectStdErrEqual(hostText(
+        b,
+        b.fmt("{s}:2:5: runtime error: assertion failed: boundary assertion\n", .{b.pathFromRoot("Smokes/MainResultAssert.sx")}),
+    ));
+
     const generic_functions_command = b.addRunArtifact(executable);
-    generic_functions_command.step.dependOn(&map_error_command.step);
+    generic_functions_command.step.dependOn(&main_result_assert_command.step);
     generic_functions_command.addArgs(&.{ "run", "Smokes/GenericFunctions.sx" });
     generic_functions_command.expectStdOutEqual(hostText(b, "42\n7\nAda\nGrace\n9\nSilex\n3\n3\n4\n120\nlocal\n11\n5\ngeneric\n"));
 

@@ -1237,8 +1237,12 @@ pub const Analyzer = struct {
         if (main_count == 0) return self.fail(.{ .line = 1, .column = 1 }, "missing 'main' function");
         if (main_count > 1) return self.fail(.{ .line = 1, .column = 1 }, "'main' cannot be overloaded");
         const main = self.findFunction("main").?;
-        if (!typeEqual(main.return_type, .void) or main.parameter_types.len != 0) {
-            return self.fail(main.position, "'main' must have return type 'void' and no parameters");
+        if (main.parameter_types.len != 0) return self.fail(main.position, "'main' must have no parameters");
+        if (typeEqual(main.return_type, .void)) return;
+        const main_result = self.resultShape(main.return_type) orelse
+            return self.fail(main.position, "'main' must return 'void' or 'Result<void, str>'");
+        if (!typeEqual(main_result.success_type, .void) or !typeEqual(main_result.error_type, .str)) {
+            return self.fail(main.position, "'main' must return 'void' or 'Result<void, str>'");
         }
     }
 

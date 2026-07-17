@@ -1,0 +1,12 @@
+enum AppError {
+    unavailable
+}
+
+func run_application() Result<void,AppError> {
+    return Result<void,AppError>.failure(AppError.unavailable())
+}
+
+func main() Result<void,str> {
+    try run_application()
+    return Result<void,str>.success()
+}

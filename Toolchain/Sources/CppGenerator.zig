@@ -1050,25 +1050,43 @@ pub fn generateWithSources(
         try output.appendSlice(allocator, " {\n");
         try generateCapturedParameterBindings(allocator, &output, function.parameters, 1);
         try generateStatements(allocator, &output, function.statements, 1, function.is_main);
-        if (function.is_main) try output.appendSlice(allocator, "    return 0;\n");
+        if (function.is_main and function.return_type == .void) try output.appendSlice(allocator, "    return 0;\n");
         try output.appendSlice(allocator, "}\n\n");
     }
+    const main_function = for (program.functions) |function| {
+        if (function.is_main) break function;
+    } else unreachable;
+    const main_returns_result = main_function.return_type != .void;
     try output.appendSlice(allocator,
         \\// -----------------------------------------------------------------------------
         \\
         \\} // namespace SilexGenerated
         \\
         \\int main() {
-        \\    const int result = SilexGenerated::silexMain();
+    );
+    try output.appendSlice(allocator, if (main_returns_result)
+        "    const auto result = SilexGenerated::silexMain();\n"
+    else
+        "    const int result = SilexGenerated::silexMain();\n");
+    try output.appendSlice(allocator,
         \\    SilexGenerated::silexResetStaticFields();
         \\    if (SilexGenerated::silexLiveObjects != 0) {
         \\        std::cerr << "silex: runtime error: unreachable class graph was not collected\n";
         \\        return 1;
         \\    }
-        \\    return result;
-        \\}
-        \\
     );
+    if (main_returns_result) {
+        try output.appendSlice(allocator,
+            \\    if (result.variant == 1) {
+            \\        std::cerr << "error: " << result.get<std::string>(0) << '\n';
+            \\        return 1;
+            \\    }
+            \\    return 0;
+        );
+    } else {
+        try output.appendSlice(allocator, "    return result;\n");
+    }
+    try output.appendSlice(allocator, "}\n");
     return output.toOwnedSlice(allocator);
 }
 
@@ -1166,14 +1184,14 @@ fn generateConstructorSignature(
 }
 
 fn generateFunctionSignature(allocator: Allocator, output: *std.ArrayList(u8), function: Semantic.Function, include_names: bool) !void {
-    if (function.is_main) {
-        try output.appendSlice(allocator, "int silexMain(");
+    if (function.is_main and function.return_type == .void) {
+        try output.appendSlice(allocator, "int");
     } else {
         try appendCppType(allocator, output, function.return_type);
-        try output.append(allocator, ' ');
-        try output.appendSlice(allocator, function.generated_name);
-        try output.append(allocator, '(');
     }
+    try output.append(allocator, ' ');
+    try output.appendSlice(allocator, if (function.is_main) "silexMain" else function.generated_name);
+    try output.append(allocator, '(');
     for (function.parameters, 0..) |parameter, index| {
         if (index != 0) try output.appendSlice(allocator, ", ");
         try appendCppType(allocator, output, parameter.type);
@@ -2778,6 +2796,29 @@ test "generate try as an ordinary early Result return" {
     try std.testing.expect(std.mem.indexOf(u8, cpp, "const auto silexTry") != null);
     try std.testing.expect(std.mem.indexOf(u8, cpp, ".variant == 1) return SilexEnum") != null);
     try std.testing.expect(std.mem.indexOf(u8, cpp, "throw") == null);
+}
+
+test "generate Result main boundary" {
+    const Parser = @import("Parser.zig").Parser;
+    const Generics = @import("Generics.zig");
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var parser = Parser.init(allocator,
+        \\func main() Result<void,str> {
+        \\    return Result<void,str>.failure("failed")
+        \\}
+    );
+    const resolved = try resolveSingleTestProgram(allocator, try parser.parse());
+    var specializer = Generics.Specializer.init(allocator, resolved);
+    var analyzer = Semantic.Analyzer.init(allocator);
+    const cpp = try generate(allocator, try analyzer.analyze(try specializer.specialize()));
+
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "SilexEnum0 silexMain()") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "const auto result = SilexGenerated::silexMain();") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "std::cerr << \"error: \" << result.get<std::string>(0) << '\\n';") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "if (result.variant == 1)") != null);
 }
 
 test "generate typed variables and control flow" {

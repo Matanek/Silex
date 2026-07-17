@@ -1,0 +1,17 @@
+enum AppError {
+    unavailable
+}
+
+func run_application() Result<void,AppError> {
+    return Result<void,AppError>.failure(AppError.unavailable())
+}
+
+func main() Result<void,str> {
+    try map_error<AppError,str>(
+        run_application(),
+        func(error:AppError) str {
+            return "propagated failure"
+        }
+    )
+    return Result<void,str>.success()
+}
