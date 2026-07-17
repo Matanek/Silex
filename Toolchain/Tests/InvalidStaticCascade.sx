@@ -1,0 +1,9 @@
+class Client {
+    pub static func create() Client {
+        return Client()
+    }
+}
+
+func main() {
+    var client = Client.create()..create()
+}

@@ -84,6 +84,7 @@ module.exports = grammar({
             seq(
               optional(field("override", "override")),
               optional(field("visibility", choice("pub", "sub"))),
+              optional(field("static", "static")),
               $.function_definition,
             ),
           ),
@@ -618,6 +619,7 @@ module.exports = grammar({
             "object",
             choice(
               $.identifier,
+              $.generic_type,
               $.self_expression,
               $.invocation_expression,
               $.member_expression,

@@ -97,6 +97,39 @@ A class without any `init` keeps its existing named field initializer,
 including `Type()` when its fields permit it. Structures do not have custom
 constructors.
 
+## Static methods
+
+`static func` declares a function attached to a class rather than to one of its
+instances. Visibility precedes `static`; the canonical forms are
+`pub static func`, `sub static func`, and the unmarked private form:
+
+```sx
+class Session {
+    let token:str
+
+    init(token:str) {
+        self.token = token
+    }
+
+    pub static func open(token:str) Session {
+        return Session(token)
+    }
+}
+
+var session = Session.open("abc")
+```
+
+The static body has the declaring class's access context, so a factory may call
+a private constructor or access private fields through an instance received as
+an explicit parameter. It has no `self` or `super`. A static method cannot use
+`override`, does not participate in dynamic dispatch, and is not inherited;
+`Base.create()` and `Child.create()` refer only to declarations written in the
+named class. Static and instance overload sets are independent.
+
+A static factory returns an ordinary value. Its result may begin a cascade,
+for example `Client.create()..connect()`, but a type itself is not a cascade
+receiver and static methods are never candidates after `..`.
+
 ## Single inheritance
 
 A class may name one immediate base class after `:`. The base is part of the

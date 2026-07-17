@@ -243,6 +243,15 @@
     ],
     "description": "Declare a struct method with an explicit return type"
   },
+  "Static method": {
+    "prefix": "staticmethod",
+    "body": [
+      "static func ${1:name}(${2}) ${3:type} {",
+      "    return $0",
+      "}"
+    ],
+    "description": "Declare a static struct method"
+  },
   "Override class method": {
     "prefix": "override",
     "body": [
@@ -320,6 +329,15 @@
       "}"
     ],
     "description": "Expose a class method"
+  },
+  "Public static class method": {
+    "prefix": "pubstatic",
+    "body": [
+      "pub static func ${1:name}(${2}) ${3:type} {",
+      "    return $0",
+      "}"
+    ],
+    "description": "Expose a static class method"
   },
   "Public class constructor": {
     "prefix": "pubinit",

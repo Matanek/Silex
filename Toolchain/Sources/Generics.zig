@@ -436,6 +436,14 @@ pub const Specializer = struct {
                 .arguments = try self.rewriteExpressions(call.arguments, bindings),
                 .named_fields = if (call.named_fields) |fields| try self.rewriteFieldInitializers(fields, bindings) else null,
             } },
+            .static_method_call => |call| .{ .static_method_call = .{
+                .owner = try self.rewriteType(call.owner, bindings, call.owner_position),
+                .owner_position = call.owner_position,
+                .name = call.name,
+                .name_position = call.name_position,
+                .arguments = try self.rewriteExpressions(call.arguments, bindings),
+                .named_fields = if (call.named_fields) |fields| try self.rewriteFieldInitializers(fields, bindings) else null,
+            } },
             .super_method_call => |call| .{ .super_method_call = .{
                 .position = call.position,
                 .name = call.name,

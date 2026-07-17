@@ -1248,6 +1248,46 @@ pub fn build(b: *std.Build) void {
         "Tests/InvalidLetFieldIndependence.sx:4:9: error: type 'Player' is not an independent value and cannot be bound with 'let'; use 'var'\n",
     );
 
+    const invalid_static_self_command = b.addRunArtifact(executable);
+    invalid_static_self_command.addArgs(&.{ "compile", "Tests/InvalidStaticSelf.sx" });
+    invalid_static_self_command.expectExitCode(1);
+    invalid_static_self_command.expectStdErrEqual("Tests/InvalidStaticSelf.sx:3:16: error: 'self' is not available inside a static method\n");
+
+    const invalid_static_super_command = b.addRunArtifact(executable);
+    invalid_static_super_command.addArgs(&.{ "compile", "Tests/InvalidStaticSuper.sx" });
+    invalid_static_super_command.expectExitCode(1);
+    invalid_static_super_command.expectStdErrEqual("Tests/InvalidStaticSuper.sx:9:16: error: 'super' is not available inside a static method\n");
+
+    const invalid_static_override_command = b.addRunArtifact(executable);
+    invalid_static_override_command.addArgs(&.{ "compile", "Tests/InvalidStaticOverride.sx" });
+    invalid_static_override_command.expectExitCode(1);
+    invalid_static_override_command.expectStdErrEqual("Tests/InvalidStaticOverride.sx:2:18: error: a static method cannot use 'override'\n");
+
+    const invalid_static_by_instance_command = b.addRunArtifact(executable);
+    invalid_static_by_instance_command.addArgs(&.{ "compile", "Tests/InvalidStaticByInstance.sx" });
+    invalid_static_by_instance_command.expectExitCode(1);
+    invalid_static_by_instance_command.expectStdErrEqual("Tests/InvalidStaticByInstance.sx:9:13: error: static method 'create' must be called through type 'Factory'\n");
+
+    const invalid_instance_by_type_command = b.addRunArtifact(executable);
+    invalid_instance_by_type_command.addArgs(&.{ "compile", "Tests/InvalidInstanceByType.sx" });
+    invalid_instance_by_type_command.expectExitCode(1);
+    invalid_instance_by_type_command.expectStdErrEqual("Tests/InvalidInstanceByType.sx:8:27: error: instance method 'create' requires a value of type 'Factory'\n");
+
+    const invalid_inherited_static_method_command = b.addRunArtifact(executable);
+    invalid_inherited_static_method_command.addArgs(&.{ "compile", "Tests/InvalidInheritedStaticMethod.sx" });
+    invalid_inherited_static_method_command.expectExitCode(1);
+    invalid_inherited_static_method_command.expectStdErrEqual("Tests/InvalidInheritedStaticMethod.sx:10:23: error: type 'Child' has no static method 'create'\n");
+
+    const invalid_private_static_method_command = b.addRunArtifact(executable);
+    invalid_private_static_method_command.addArgs(&.{ "compile", "Tests/InvalidPrivateStaticMethod.sx" });
+    invalid_private_static_method_command.expectExitCode(1);
+    invalid_private_static_method_command.expectStdErrEqual("Tests/InvalidPrivateStaticMethod.sx:8:27: error: static method 'create' is private in class 'Factory'\n");
+
+    const invalid_static_cascade_command = b.addRunArtifact(executable);
+    invalid_static_cascade_command.addArgs(&.{ "compile", "Tests/InvalidStaticCascade.sx" });
+    invalid_static_cascade_command.expectExitCode(1);
+    invalid_static_cascade_command.expectStdErrEqual("Tests/InvalidStaticCascade.sx:8:35: error: static method 'create' must be called through type 'Client'\n");
+
     const test_step = b.step("test", "Run the toolchain tests");
     test_step.dependOn(b.getInstallStep());
     test_step.dependOn(&test_command.step);
@@ -1259,6 +1299,14 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&invalid_let_field_double_initialization_command.step);
     test_step.dependOn(&invalid_let_field_missing_initialization_command.step);
     test_step.dependOn(&invalid_let_field_independence_command.step);
+    test_step.dependOn(&invalid_static_self_command.step);
+    test_step.dependOn(&invalid_static_super_command.step);
+    test_step.dependOn(&invalid_static_override_command.step);
+    test_step.dependOn(&invalid_static_by_instance_command.step);
+    test_step.dependOn(&invalid_instance_by_type_command.step);
+    test_step.dependOn(&invalid_inherited_static_method_command.step);
+    test_step.dependOn(&invalid_private_static_method_command.step);
+    test_step.dependOn(&invalid_static_cascade_command.step);
     test_step.dependOn(&invalid_command.step);
     test_step.dependOn(&missing_module_subcommand_command.step);
     test_step.dependOn(&missing_module_init_path_command.step);
@@ -1622,9 +1670,13 @@ pub fn build(b: *std.Build) void {
     field_mutability_command.step.dependOn(&structure_equality_command.step);
     field_mutability_command.addArgs(&.{ "run", "Smokes/FieldMutability.sx" });
 
+    const static_methods_command = b.addRunArtifact(executable);
+    static_methods_command.step.dependOn(&field_mutability_command.step);
+    static_methods_command.addArgs(&.{ "run", "Smokes/StaticMethods.sx" });
+
     const integer_semantics_output = "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n";
     const integer_semantics_command = b.addRunArtifact(executable);
-    integer_semantics_command.step.dependOn(&field_mutability_command.step);
+    integer_semantics_command.step.dependOn(&static_methods_command.step);
     integer_semantics_command.addArgs(&.{ "run", "Smokes/IntegerSemantics.sx" });
     integer_semantics_command.expectStdOutEqual(hostText(b, integer_semantics_output));
 
@@ -1756,7 +1808,7 @@ pub fn build(b: *std.Build) void {
     const modules_command = b.addRunArtifact(executable);
     modules_command.step.dependOn(previous_integer_error_step);
     modules_command.addArgs(&.{ "run", "Smokes/Modules/silex.json" });
-    modules_command.expectStdOutEqual(hostText(b, "true\ntrue\ntrue\n7\n11\n3\ngeneric module\n1\n4\n5\n1\n2\nmodules\n"));
+    modules_command.expectStdOutEqual(hostText(b, "true\ntrue\ntrue\nfalse\n7\n16\n11\n3\ngeneric module\n1\n2\n4\n5\n1\n2\nmodules\n"));
 
     const local_imports_command = b.addRunArtifact(executable);
     local_imports_command.step.dependOn(&modules_command.step);

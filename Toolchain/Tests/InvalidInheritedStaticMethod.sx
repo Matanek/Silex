@@ -1,0 +1,11 @@
+class Base {
+    pub static func create() Base {
+        return Base()
+    }
+}
+
+class Child : Base {}
+
+func main() {
+    var child = Child.create()
+}

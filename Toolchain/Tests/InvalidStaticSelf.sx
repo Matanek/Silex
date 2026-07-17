@@ -1,0 +1,7 @@
+struct Factory {
+    static func create() Factory {
+        return self
+    }
+}
+
+func main() {}

@@ -1,0 +1,126 @@
+struct Position {
+    var x:int
+    var y:int
+
+    static func origin() Position {
+        return Position(x:0, y:0)
+    }
+
+    static func from(value:int) Position {
+        return Position(x:value, y:value)
+    }
+
+    static func from(value:str) Position {
+        return Position(x:value.count(), y:0)
+    }
+
+    func from() int {
+        return self.x + self.y
+    }
+}
+
+use Position as Point
+
+class Session {
+    let token:str
+
+    init(token:str) {
+        self.token = token
+    }
+
+    pub static func open(token:str) Session {
+        return Session(token)
+    }
+
+    pub static func copy(other:Session) Session {
+        return Session(other.token)
+    }
+
+    pub func get_token() str {
+        return self.token
+    }
+}
+
+struct Box<T> {
+    var value:T
+
+    static func filled(value:T) Box<T> {
+        return Box<T>(value:value)
+    }
+}
+
+class BaseFactory {
+    pub static func label() str {
+        return "base"
+    }
+
+    sub static func protected_label() str {
+        return "protected"
+    }
+}
+
+class ChildFactory : BaseFactory {
+    pub static func label() str {
+        return "child"
+    }
+
+    pub static func base_label() str {
+        return BaseFactory.protected_label()
+    }
+}
+
+class Client {
+    pub var connected:bool
+    pub var timeout:int
+
+    pub static func create() Client {
+        return Client()
+    }
+
+    pub func connect() {
+        self.connected = true
+    }
+
+    pub func set_timeout(value:int) {
+        self.timeout = value
+    }
+}
+
+struct Selector {
+    static func value() int {
+        return 1
+    }
+
+    func value() int {
+        return 2
+    }
+}
+
+func main() {
+    let origin = Position.origin()
+    let first = Point.from(3)
+    let second = Position.from("abcd")
+    assert(origin.from() == 0, "a struct static factory returns its type")
+    assert(first.from() == 6 && second.from() == 4, "static overloads are selected independently")
+    var Position = origin
+    assert(Position.from() == 0, "a visible local value keeps priority over a type with the same name")
+
+    var session = Session.open("abc")
+    assert(session.get_token() == "abc", "a class static factory can call its private constructor")
+    var copied_session = Session.copy(session)
+    assert(copied_session.get_token() == "abc", "a static method keeps private access through an explicit instance")
+
+    let box = Box<int>.filled(42)
+    assert(box.value == 42, "a generic specialization qualifies a static method")
+
+    assert(BaseFactory.label() == "base", "a base static method belongs to its declaring type")
+    assert(ChildFactory.label() == "child", "a child static method is an independent declaration")
+    assert(ChildFactory.base_label() == "protected", "a child static method can call a visible sub static method explicitly")
+
+    var client = Client.create()..connect()..set_timeout(10)
+    assert(client.connected && client.timeout == 10, "a static factory result starts an ordinary value cascade")
+
+    let static_value = Selector.value()
+    let instance_value = Selector().value()
+    assert(static_value == 1 && instance_value == 2, "static and instance overload sets may share a signature")
+}

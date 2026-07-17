@@ -124,10 +124,35 @@ struct Counter {
 }
 ```
 
-Static methods, custom constructors, inheritance, extensions, and partial
+`static func` declares a method attached to the structure itself. It is called
+through a complete type and has no `self` receiver:
+
+```sx
+struct Position {
+    var x:int
+    var y:int
+
+    static func origin() Position {
+        return Position(x:0, y:0)
+    }
+}
+
+let origin = Position.origin()
+```
+
+A static method belongs to a separate overload set from instance methods and
+can use the structure's type parameters. A specialization such as
+`Box<int>.filled(42)`, an imported type, or a transparent type alias may
+qualify it. A visible local value keeps priority over a type with the same
+name. Static methods cannot be selected through a value, extracted as function
+values, reached with `?.`, or called after `..`. Conversely, an instance method
+cannot be selected through a type.
+
+Custom structure constructors, inheritance, extensions, and partial
 declarations are not part of the current prototype. Shared-identity types are
-declared with `class`; see [Classes](Classes.md). Methods can be overloaded by
-parameter count, type, or `&` passing; see [Functions](Functions.md).
+declared with `class`; see [Classes](Classes.md). Static and instance methods
+can each be overloaded by parameter count, type, or `&` passing; see
+[Functions](Functions.md).
 
 When a method stores a lambda that uses `self` in a function field of that same
 structure, `self` means the owner of the field at call time. Copying the

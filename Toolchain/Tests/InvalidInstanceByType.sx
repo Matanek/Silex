@@ -1,0 +1,9 @@
+struct Factory {
+    func create() Factory {
+        return Factory()
+    }
+}
+
+func main() {
+    let factory = Factory.create()
+}

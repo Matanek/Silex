@@ -1,0 +1,10 @@
+struct Factory {
+    static func create() Factory {
+        return Factory()
+    }
+}
+
+func main() {
+    var factory = Factory()
+    factory.create()
+}

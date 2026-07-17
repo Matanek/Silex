@@ -959,6 +959,17 @@ pub const Resolver = struct {
             .method_call => |call| method: {
                 const type_arguments = try self.transformTypeArguments(call.type_arguments, call.name_position);
                 if (try self.expressionPath(call.object)) |prefix| {
+                    if (try self.staticOwnerType(expression.position.file, prefix, call.name_position)) |owner| {
+                        if (call.named_fields != null) return self.fail(call.name_position, "static methods do not accept named arguments");
+                        if (type_arguments.len != 0) return self.fail(call.name_position, "generic methods are not supported");
+                        break :method .{ .static_method_call = .{
+                            .owner = owner,
+                            .owner_position = call.object.position,
+                            .name = call.name,
+                            .name_position = call.name_position,
+                            .arguments = try self.transformExpressions(call.arguments),
+                        } };
+                    }
                     const path = try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ prefix, call.name });
                     if (self.looksQualified(expression.position.file, path)) {
                         if (try self.visibleTypeAlias(expression.position.file, path)) |alias| {
@@ -1019,6 +1030,14 @@ pub const Resolver = struct {
                     .arguments = try self.transformExpressions(call.arguments),
                 } };
             },
+            .static_method_call => |call| .{ .static_method_call = .{
+                .owner = try self.transformType(call.owner, call.owner_position),
+                .owner_position = call.owner_position,
+                .name = call.name,
+                .name_position = call.name_position,
+                .arguments = try self.transformExpressions(call.arguments),
+                .named_fields = if (call.named_fields) |fields| try self.transformFieldInitializers(fields) else null,
+            } },
             .super_method_call => |call| .{ .super_method_call = .{
                 .position = call.position,
                 .name = call.name,
@@ -1207,6 +1226,20 @@ pub const Resolver = struct {
                 null,
             else => null,
         };
+    }
+
+    fn staticOwnerType(
+        self: *Resolver,
+        file_index: usize,
+        path: []const u8,
+        position: Source.Position,
+    ) !?Ast.TypeName {
+        const head_end = std.mem.indexOfScalar(u8, path, '.') orelse path.len;
+        if (self.findLocal(path[0..head_end])) return null;
+        if (try self.visibleTypeAlias(file_index, path)) |alias| return @as(?Ast.TypeName, try self.resolveAliasType(alias));
+        if ((try self.visibleDeclarationKind(file_index, path)) != .structure) return null;
+        const declaration = try self.resolveName(file_index, path, .structure, position);
+        return .{ .structure = declaration.canonical_name };
     }
 
     fn looksQualified(self: *const Resolver, file_index: usize, path: []const u8) bool {

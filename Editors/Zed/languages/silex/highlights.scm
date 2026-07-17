@@ -130,6 +130,7 @@
   "drop"
   "super"
   "override"
+  "static"
   "func"
 ] @keyword
 

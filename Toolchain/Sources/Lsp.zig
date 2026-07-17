@@ -44,6 +44,7 @@ const DeclaredMember = struct {
     kind: u8,
     detail: []const u8,
     visibility: Ast.MemberVisibility = .public_access,
+    is_static: bool = false,
 };
 
 const DeclaredVariable = struct {
@@ -221,6 +222,11 @@ const Server = struct {
                     }
                     if (qualifiedCompletionContext(source, cursor)) |context| {
                         if (try importedModulePath(self.allocator, source, context.qualifier)) |module_path| {
+                            const project_root = try documentProjectRoot(self.allocator, uri);
+                            if (try memberCompletionItems(self.allocator, self.io, source, project_root, cursor)) |member_items| {
+                                if (member_items.len != 0) break :completion member_items;
+                                self.allocator.free(member_items);
+                            }
                             break :completion try moduleExportCompletionItems(
                                 self.allocator,
                                 self.io,
@@ -1005,10 +1011,19 @@ fn memberCompletionItems(
     defer info.deinit(allocator);
     try collectSemanticInfo(allocator, io, source, project_root, tokens.items, &info);
 
-    var receiver_type = receiverType(info, receiver_path[0], cursor_offset) orelse
+    var static_selection = false;
+    var receiver_type = receiverType(info, receiver_path[0], cursor_offset) orelse type_receiver: {
+        const resolved = resolveNamedType(info, receiver_path[receiver_path.len - 1], null).name;
+        for (info.structures.items) |structure| {
+            if (!std.mem.eql(u8, structure.name, resolved)) continue;
+            static_selection = true;
+            break :type_receiver ReceiverType{ .structure = resolved };
+        }
         return try allocator.alloc(CompletionItem, 0);
+    };
     const enclosing_structure = enclosingStructureName(info, cursor_offset);
     for (receiver_path[1..]) |field_name| {
+        if (static_selection) break;
         const structure_name = switch (receiver_type) {
             .structure => |name| name,
             .list, .fixed_array => return try allocator.alloc(CompletionItem, 0),
@@ -1030,6 +1045,7 @@ fn memberCompletionItems(
         if (hierarchy_depth > info.structures.items.len) break;
         for (info.members.items) |member| {
             if (!std.mem.eql(u8, member.structure, structure_name)) continue;
+            if (member.is_static != static_selection) continue;
             if (!memberVisibleForCompletion(info, structure_name, member.visibility, enclosing_structure)) continue;
             if (containsCompletion(items.items, member.name)) continue;
             try items.append(allocator, .{
@@ -1038,7 +1054,7 @@ fn memberCompletionItems(
                 .detail = member.detail,
             });
         }
-        current_structure = structureBase(info, structure_name);
+        current_structure = if (static_selection) null else structureBase(info, structure_name);
     }
     return try items.toOwnedSlice(allocator);
 }
@@ -1123,6 +1139,7 @@ fn collectSemanticInfo(
                 var declaration_index = member_index;
                 var visibility: Ast.MemberVisibility = if (is_class) .private_access else .public_access;
                 var has_field_mutability = false;
+                var is_static = false;
                 if (tokens[declaration_index].tag == .keyword_override) {
                     declaration_index += 1;
                     member_index += 1;
@@ -1131,6 +1148,11 @@ fn collectSemanticInfo(
                     (tokens[declaration_index].tag == .keyword_pub or tokens[declaration_index].tag == .keyword_sub))
                 {
                     visibility = if (tokens[declaration_index].tag == .keyword_pub) .public_access else .subclass;
+                    declaration_index += 1;
+                    member_index += 1;
+                }
+                if (declaration_index < tokens.len and tokens[declaration_index].tag == .keyword_static) {
+                    is_static = true;
                     declaration_index += 1;
                     member_index += 1;
                 }
@@ -1149,10 +1171,11 @@ fn collectSemanticInfo(
                     try info.members.append(allocator, .{
                         .structure = structure_name,
                         .name = tokens[declaration_index + 1].lexeme,
-                        .type_name = null,
+                        .type_name = if (is_static) methodReturnType(tokens, declaration_index) else null,
                         .kind = 2,
                         .detail = "Silex method",
                         .visibility = visibility,
+                        .is_static = is_static,
                     });
                 } else if (has_field_mutability and declaration.tag == .identifier and declaration_index + 2 < tokens.len and
                     tokens[declaration_index + 1].tag == .colon and isTypeToken(tokens[declaration_index + 2].tag))
@@ -1187,6 +1210,12 @@ fn collectSemanticInfo(
                         .type_name = type_name,
                         .offset = tokenOffset(source, tokens[index + 1]),
                     });
+                } else if (staticCallResultType(info.*, tokens, index + 3)) |type_name| {
+                    try info.variables.append(allocator, .{
+                        .name = tokens[index + 1].lexeme,
+                        .type_name = type_name,
+                        .offset = tokenOffset(source, tokens[index + 1]),
+                    });
                 } else if (index + 6 < tokens.len and tokens[index + 3].tag == .identifier and
                     tokens[index + 4].tag == .dot and tokens[index + 5].tag == .identifier and
                     tokens[index + 6].tag == .left_parenthesis)
@@ -1212,6 +1241,59 @@ fn collectSemanticInfo(
             try collectParameters(allocator, source, tokens, index, &info.variables);
         }
     }
+}
+
+fn methodReturnType(tokens: []const LexerModule.Token, function_index: usize) ?[]const u8 {
+    if (function_index + 2 >= tokens.len or tokens[function_index].tag != .keyword_func) return null;
+    var index = function_index + 2;
+    if (tokens[index].tag != .left_parenthesis) return null;
+    var depth: usize = 0;
+    while (index < tokens.len) : (index += 1) {
+        if (tokens[index].tag == .left_parenthesis) depth += 1 else if (tokens[index].tag == .right_parenthesis) {
+            depth -|= 1;
+            if (depth == 0) {
+                index += 1;
+                break;
+            }
+        }
+    }
+    if (index >= tokens.len or tokens[index].tag == .left_brace) return null;
+    var result: ?[]const u8 = null;
+    while (index < tokens.len and tokens[index].tag != .left_brace) : (index += 1) {
+        if (tokens[index].tag == .identifier) result = tokens[index].lexeme;
+        if (tokens[index].tag == .less or tokens[index].tag == .left_bracket or tokens[index].tag == .question) break;
+    }
+    return result;
+}
+
+fn staticCallResultType(info: SemanticInfo, tokens: []const LexerModule.Token, start: usize) ?[]const u8 {
+    if (start >= tokens.len or tokens[start].tag != .identifier) return null;
+    var owner_name = tokens[start].lexeme;
+    var index = start + 1;
+    while (index < tokens.len) {
+        if (tokens[index].tag == .less) {
+            index = genericArgumentsEnd(tokens, index) orelse return null;
+            continue;
+        }
+        if (index + 2 < tokens.len and tokens[index].tag == .dot and
+            tokens[index + 1].tag == .identifier)
+        {
+            if (tokens[index + 2].tag == .left_parenthesis) {
+                const resolved_owner = resolveNamedType(info, owner_name, null).name;
+                for (info.members.items) |member| {
+                    if (member.is_static and member.type_name != null and
+                        std.mem.eql(u8, member.structure, resolved_owner) and
+                        std.mem.eql(u8, member.name, tokens[index + 1].lexeme)) return member.type_name;
+                }
+                return null;
+            }
+            owner_name = tokens[index + 1].lexeme;
+            index += 2;
+            continue;
+        }
+        return null;
+    }
+    return null;
 }
 
 fn structureInitializerType(info: *const SemanticInfo, tokens: []const LexerModule.Token, start: usize) ?[]const u8 {
@@ -1503,10 +1585,15 @@ fn collectPublicStructureMembers(
             try info.members.append(allocator, .{
                 .structure = structure.name,
                 .name = method.name,
-                .type_name = null,
+                .type_name = if (method.is_static) switch (method.return_type) {
+                    .structure => |name| lastPathSegment(name),
+                    .generic_structure => |generic| lastPathSegment(generic.name),
+                    else => null,
+                } else null,
                 .kind = 2,
                 .detail = "Silex module method",
                 .visibility = visibility,
+                .is_static = method.is_static,
             });
         }
     }
@@ -1665,6 +1752,17 @@ fn memberReceiverPath(
         }
     }
     var path_start = path_end;
+    if (path_end > 0 and source[path_end - 1] == '>') {
+        var depth: usize = 1;
+        var generic_start = path_end - 1;
+        while (generic_start > 0 and depth != 0) {
+            generic_start -= 1;
+            if (source[generic_start] == '>') depth += 1 else if (source[generic_start] == '<') depth -= 1;
+        }
+        if (depth != 0) return null;
+        path_end = generic_start;
+        path_start = path_end;
+    }
     while (path_start > 0 and
         (isIdentifierContinue(source[path_start - 1]) or source[path_start - 1] == '.'))
     {
@@ -1969,6 +2067,7 @@ const language_completions = [_]CompletionItem{
     .{ .label = "drop", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "super", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "override", .kind = 14, .detail = "Silex keyword" },
+    .{ .label = "static", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "assert", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "panic", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "let", .kind = 14, .detail = "Silex keyword" },
@@ -2013,6 +2112,7 @@ test "completion items include language terms and document identifiers" {
     try std.testing.expect(containsCompletion(items, "init"));
     try std.testing.expect(containsCompletion(items, "drop"));
     try std.testing.expect(containsCompletion(items, "override"));
+    try std.testing.expect(containsCompletion(items, "static"));
     try std.testing.expect(containsCompletion(items, "super"));
     try std.testing.expect(containsCompletion(items, "sub"));
     try std.testing.expect(containsCompletion(items, "elif"));
@@ -2405,6 +2505,76 @@ test "member completion recognizes class declarations" {
     defer std.testing.allocator.free(items);
     try std.testing.expectEqual(@as(usize, 1), items.len);
     try std.testing.expectEqualStrings("health", items[0].label);
+}
+
+test "member completion separates static and instance methods" {
+    const source =
+        \\struct Factory {
+        \\    static func create() Factory { return Factory() }
+        \\    func reset() {}
+        \\}
+        \\func main() {
+        \\    var factory = Factory()
+        \\    Factory.
+        \\    factory.
+        \\}
+    ;
+    const type_items = try completionItems(std.testing.allocator, std.testing.io, source, .{ .line = 6, .character = 12 });
+    defer std.testing.allocator.free(type_items);
+    try std.testing.expect(containsCompletion(type_items, "create"));
+    try std.testing.expect(!containsCompletion(type_items, "reset"));
+
+    const value_items = try completionItems(std.testing.allocator, std.testing.io, source, .{ .line = 7, .character = 12 });
+    defer std.testing.allocator.free(value_items);
+    try std.testing.expect(!containsCompletion(value_items, "create"));
+    try std.testing.expect(containsCompletion(value_items, "reset"));
+}
+
+test "member completion recognizes generic and imported static type receivers" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const generic_source =
+        \\struct Box<T> {
+        \\    var value:T
+        \\    static func filled(value:T) Box<T> { return Box<T>(value:value) }
+        \\    func clear() {}
+        \\}
+        \\func main() { Box<int>. }
+    ;
+    const generic_items = try completionItems(allocator, std.testing.io, generic_source, .{ .line = 5, .character = 23 });
+    try std.testing.expect(containsCompletion(generic_items, "filled"));
+    try std.testing.expect(!containsCompletion(generic_items, "clear"));
+
+    const imported_source =
+        \\import Math
+        \\func main() { Math.Vec2. }
+    ;
+    const imported_items = try completionItemsForProject(
+        allocator,
+        std.testing.io,
+        imported_source,
+        "Tests/LspModules",
+        .{ .line = 1, .character = 24 },
+    );
+    try std.testing.expect(containsCompletion(imported_items, "zero"));
+    try std.testing.expect(!containsCompletion(imported_items, "length_squared"));
+}
+
+test "cascade completion after a static factory stays instance-only" {
+    const source =
+        \\class Client {
+        \\    pub static func create() Client { return Client() }
+        \\    pub func connect() {}
+        \\}
+        \\func main() {
+        \\    var client = Client.create()..
+        \\}
+    ;
+    const items = try completionItems(std.testing.allocator, std.testing.io, source, .{ .line = 5, .character = 34 });
+    defer std.testing.allocator.free(items);
+    try std.testing.expect(!containsCompletion(items, "create"));
+    try std.testing.expect(containsCompletion(items, "connect"));
 }
 
 test "member completion infers positional class construction and inherited methods" {

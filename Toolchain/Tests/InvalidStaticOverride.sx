@@ -1,0 +1,5 @@
+class Factory {
+    override pub static func create() {}
+}
+
+func main() {}

@@ -1,0 +1,78 @@
+==============
+Static methods
+==============
+
+struct Box<T> {
+    var value:T
+
+    static func filled(value:T) Box<T> {
+        return Box<T>(value:value)
+    }
+}
+
+func main() {
+    let box = Box<int>.filled(42)
+}
+
+---
+
+(source_file
+  (structure_definition
+    (identifier)
+    (type_parameter_list
+      (type_parameter
+        (identifier)))
+    (structure_field
+      (identifier)
+      (type
+        (named_type
+          (type_identifier))))
+    (function_definition
+      (identifier)
+      (parameter_list
+        (parameter
+          (identifier)
+          (type
+            (named_type
+              (type_identifier)))))
+      (type
+        (named_type
+          (generic_type
+            (type_identifier)
+            (type_argument_list
+              (type
+                (named_type
+                  (type_identifier)))))))
+      (block
+        (statement
+          (return_statement
+            (expression
+              (invocation_expression
+                (generic_type
+                  (type_identifier)
+                  (type_argument_list
+                    (type
+                      (named_type
+                        (type_identifier)))))
+                (field_initializer
+                  (identifier)
+                  (expression
+                    (identifier))))))))))
+  (function_definition
+    (identifier)
+    (parameter_list)
+    (block
+      (statement
+        (variable_declaration
+          (identifier)
+          (expression
+            (invocation_expression
+              (member_expression
+                (generic_type
+                  (type_identifier)
+                  (type_argument_list
+                    (type
+                      (builtin_type))))
+                (identifier))
+              (expression
+                (integer_literal)))))))))

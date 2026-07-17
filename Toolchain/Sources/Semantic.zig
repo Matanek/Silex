@@ -90,6 +90,7 @@ pub const Expression = struct {
         lambda: Lambda,
         owner_self,
         method_call: MethodCall,
+        static_method_call: StaticMethodCall,
         super_method_call: SuperMethodCall,
         class_initializer: ClassInitializer,
         structure_initializer: StructureInitializer,
@@ -152,6 +153,12 @@ pub const Expression = struct {
         method_id: MethodId,
         receiver: Receiver,
         position: Source.Position,
+    };
+
+    pub const StaticMethodCall = struct {
+        owner_generated_name: []const u8,
+        generated_name: []const u8,
+        arguments: []const *Expression,
     };
 
     pub const SuperMethodCall = struct {
@@ -403,6 +410,7 @@ pub const Method = struct {
     is_mutating: bool,
     visibility: Ast.MemberVisibility,
     is_override: bool,
+    is_static: bool,
 };
 
 pub const MethodId = struct {
@@ -514,6 +522,7 @@ const MethodSymbol = struct {
     position: Source.Position,
     visibility: Ast.MemberVisibility,
     is_override: bool,
+    is_static: bool,
     direct_mutation: bool = false,
     dependencies: []const MethodId = &.{},
     is_mutating: bool = false,
@@ -573,6 +582,7 @@ pub const Analyzer = struct {
     current_method_index: ?usize = null,
     current_constructor: bool = false,
     current_drop: bool = false,
+    current_method_static: bool = false,
     current_method_direct_mutation: bool = false,
     current_method_dependencies: std.ArrayList(MethodId) = .empty,
     current_self_state: BindingState = .{},
@@ -785,7 +795,8 @@ pub const Analyzer = struct {
                     try parameter_stored_values.append(self.allocator, parameterStored(ast_method.statements, parameter.name));
                 }
                 for (methods.items) |existing| {
-                    if (std.mem.eql(u8, existing.source_name, ast_method.name) and sameSignature(
+                    if (existing.is_static == ast_method.is_static and
+                        std.mem.eql(u8, existing.source_name, ast_method.name) and sameSignature(
                         existing.parameter_types,
                         existing.parameter_is_mutable_references,
                         parameter_types.items,
@@ -810,6 +821,7 @@ pub const Analyzer = struct {
                     .position = ast_method.name_position,
                     .visibility = ast_method.member_visibility.?,
                     .is_override = ast_method.is_override,
+                    .is_static = ast_method.is_static,
                 });
             }
             self.structures.items[structure_index].methods = try methods.toOwnedSlice(self.allocator);
@@ -862,12 +874,14 @@ pub const Analyzer = struct {
         }
 
         for (self.structures.items[structure_index].methods, 0..) |method_symbol, method_index| {
+            if (method_symbol.is_static) continue;
             var inherited: ?MethodCandidate = null;
             var private_match = false;
             base_index = direct_base_index;
             while (base_index) |index| {
                 const base = self.structures.items[index];
                 for (base.methods, 0..) |base_method, base_method_index| {
+                    if (base_method.is_static) continue;
                     if (!std.mem.eql(u8, method_symbol.source_name, base_method.source_name) or !sameSignature(
                         method_symbol.parameter_types,
                         method_symbol.parameter_is_mutable_references,
@@ -1076,6 +1090,7 @@ pub const Analyzer = struct {
         self.current_method_index = null;
         self.current_constructor = false;
         self.current_drop = false;
+        self.current_method_static = false;
         self.current_self_state = .{};
         self.loop_depth = 0;
         var scope = Scope{ .parent = null, .depth = 1 };
@@ -1127,6 +1142,7 @@ pub const Analyzer = struct {
         self.current_method_index = method_index;
         self.current_constructor = false;
         self.current_drop = false;
+        self.current_method_static = symbol.is_static;
         self.current_method_direct_mutation = false;
         self.current_method_dependencies = .empty;
         self.current_self_state = .{};
@@ -1176,6 +1192,7 @@ pub const Analyzer = struct {
             .is_mutating = false,
             .visibility = symbol.visibility,
             .is_override = symbol.is_override,
+            .is_static = symbol.is_static,
         };
     }
 
@@ -1189,6 +1206,7 @@ pub const Analyzer = struct {
         self.current_method_index = null;
         self.current_constructor = true;
         self.current_drop = false;
+        self.current_method_static = false;
         defer self.current_constructor = false;
         self.current_method_direct_mutation = false;
         self.current_method_dependencies = .empty;
@@ -1244,6 +1262,7 @@ pub const Analyzer = struct {
         self.current_method_index = null;
         self.current_constructor = false;
         self.current_drop = true;
+        self.current_method_static = false;
         defer self.current_drop = false;
         self.current_method_direct_mutation = false;
         self.current_method_dependencies = .empty;
@@ -1521,6 +1540,7 @@ pub const Analyzer = struct {
                 } else try self.validateConstructorExpression(structure, call.object, initialized);
                 for (call.arguments) |argument| try self.validateConstructorExpression(structure, argument, initialized);
             },
+            .static_method_call => |call| for (call.arguments) |argument| try self.validateConstructorExpression(structure, argument, initialized),
             .super_method_call => return self.fail(expression_value.position, "'super.method(...)' is only available inside a class method"),
             .class_initializer => |initializer| for (initializer.arguments) |argument| try self.validateConstructorExpression(structure, argument, initialized),
             .structure_initializer => |initializer| for (initializer.fields) |field| try self.validateConstructorExpression(structure, field, initialized),
@@ -2190,6 +2210,7 @@ pub const Analyzer = struct {
             .value_call => |call| self.valueCallExpression(call, scope),
             .lambda => |lambda| self.lambdaExpression(lambda, scope, null),
             .method_call => |call| self.methodCallExpression(call, scope),
+            .static_method_call => |call| self.staticMethodCallExpression(call, scope),
             .super_method_call => |call| self.superMethodCallExpression(call, scope),
             .cascade => |cascade| self.cascadeExpression(cascade, scope, null),
             .class_initializer => |initializer| self.classInitializerExpression(initializer, scope),
@@ -2458,6 +2479,7 @@ pub const Analyzer = struct {
     }
 
     fn selfExpression(self: *Analyzer, position: Source.Position) AnalyzeError!*Expression {
+        if (self.current_method_static) return self.fail(position, "'self' is not available inside a static method");
         const structure_index = self.current_structure_index orelse return self.fail(position, "'self' is only available inside a method or constructor");
         if (self.current_self_state.mutable_borrow) return self.fail(position, "cannot access 'self' while one of its collections is mutably iterated");
         const structure = self.structures.items[structure_index];
@@ -2930,11 +2952,16 @@ pub const Analyzer = struct {
         const structure = &self.structures.items[structure_index];
         var candidates: std.ArrayList(MethodCandidate) = .empty;
         var inaccessible: ?MethodCandidate = null;
+        var static_match = false;
         var declaring_index: ?usize = structure_index;
         while (declaring_index) |index| {
             const declaring_structure = self.structures.items[index];
             for (declaring_structure.methods, 0..) |method_symbol, method_index| {
                 if (std.mem.eql(u8, method_symbol.source_name, call.name)) {
+                    if (method_symbol.is_static) {
+                        if (index == structure_index) static_match = true;
+                        continue;
+                    }
                     const candidate = MethodCandidate{ .symbol = method_symbol, .structure_index = index, .index = method_index };
                     if (self.memberVisibleFromCurrentContext(index, method_symbol.visibility)) {
                         if (!methodCandidatesContainSlot(candidates.items, method_symbol.generated_name)) try candidates.append(self.allocator, candidate);
@@ -2946,6 +2973,10 @@ pub const Analyzer = struct {
             declaring_index = declaring_structure.base_index;
         }
         if (candidates.items.len == 0) {
+            if (static_match) {
+                const message = try std.fmt.allocPrint(self.allocator, "static method '{s}' must be called through type '{s}'", .{ call.name, structure.source_name });
+                return self.fail(call.name_position, message);
+            }
             if (inaccessible) |candidate| {
                 const declaring_structure = &self.structures.items[candidate.structure_index];
                 return self.failMemberAccess("method", declaring_structure, candidate.symbol.source_name, candidate.symbol.visibility, call.name_position);
@@ -2992,12 +3023,80 @@ pub const Analyzer = struct {
         });
     }
 
+    fn staticMethodCallExpression(
+        self: *Analyzer,
+        call: Ast.Expression.StaticMethodCall,
+        scope: *const Scope,
+    ) AnalyzeError!*Expression {
+        if (call.named_fields != null) return self.fail(call.name_position, "static methods do not accept named arguments");
+        const owner_type = try typeFromAnnotation(self, call.owner, call.owner_position);
+        if (owner_type != .structure) return self.fail(call.owner_position, "a static method must be selected through a struct or class type");
+        const structure_index = self.findStructureIndexByGeneratedName(owner_type.structure.generated_name).?;
+        const structure = &self.structures.items[structure_index];
+        var candidates: std.ArrayList(MethodCandidate) = .empty;
+        var inaccessible: ?MethodCandidate = null;
+        var instance_match = false;
+        for (structure.methods, 0..) |method_symbol, method_index| {
+            if (!std.mem.eql(u8, method_symbol.source_name, call.name)) continue;
+            if (!method_symbol.is_static) {
+                instance_match = true;
+                continue;
+            }
+            const candidate = MethodCandidate{ .symbol = method_symbol, .structure_index = structure_index, .index = method_index };
+            if (self.memberVisibleFromCurrentContext(structure_index, method_symbol.visibility)) {
+                try candidates.append(self.allocator, candidate);
+            } else {
+                inaccessible = candidate;
+            }
+        }
+        if (candidates.items.len == 0) {
+            if (inaccessible) |candidate| {
+                return self.failMemberAccess("static method", structure, candidate.symbol.source_name, candidate.symbol.visibility, call.name_position);
+            }
+            if (instance_match) {
+                const message = try std.fmt.allocPrint(self.allocator, "instance method '{s}' requires a value of type '{s}'", .{ call.name, structure.source_name });
+                return self.fail(call.name_position, message);
+            }
+            const message = try std.fmt.allocPrint(self.allocator, "type '{s}' has no static method '{s}'", .{ structure.source_name, call.name });
+            return self.fail(call.name_position, message);
+        }
+        const resolved = try self.resolveMethodOverload(call.name, call.name_position, call.arguments, scope, candidates.items);
+        const method_symbol = resolved.symbol;
+        var arguments: std.ArrayList(*Expression) = .empty;
+        for (call.arguments, method_symbol.parameter_types, method_symbol.parameter_is_mutable_references, method_symbol.parameter_stored, 0..) |argument, expected_type, is_mutable_reference, is_stored, index| {
+            var value = if (is_mutable_reference)
+                try self.mutableReferenceArgument(argument, scope, expected_type)
+            else
+                try self.expressionForExpected(argument, scope, expected_type);
+            value = try self.coerce(value, expected_type);
+            if (!typeEqual(value.type, expected_type)) {
+                const message = try std.fmt.allocPrint(self.allocator, "argument {d} of static method '{s}' expects '{s}', found '{s}'", .{ index + 1, call.name, typeName(expected_type), typeName(value.type) });
+                return self.fail(argument.position, message);
+            }
+            if (is_stored and value.lifetime_depth != 0) {
+                return self.fail(argument.position, "capturing callback cannot be passed to a parameter whose value escapes the call");
+            }
+            try arguments.append(self.allocator, value);
+            self.releaseTransientBorrow(value);
+        }
+        return self.newExpression(.{
+            .type = method_symbol.return_type,
+            .position = call.name_position,
+            .value = .{ .static_method_call = .{
+                .owner_generated_name = structure.generated_name,
+                .generated_name = method_symbol.generated_name,
+                .arguments = try arguments.toOwnedSlice(self.allocator),
+            } },
+        });
+    }
+
     fn superMethodCallExpression(
         self: *Analyzer,
         call: Ast.Expression.SuperMethodCall,
         scope: *const Scope,
     ) AnalyzeError!*Expression {
         if (call.named_fields != null) return self.fail(call.name_position, "'super' method calls do not accept named arguments");
+        if (self.current_method_static) return self.fail(call.position, "'super' is not available inside a static method");
         const structure_index = self.current_structure_index orelse return self.fail(call.position, "'super' is only available inside a class method");
         if (self.current_method_index == null or self.current_constructor) return self.fail(call.position, "'super.method(...)' is only available inside a class method");
         const structure = self.structures.items[structure_index];
@@ -3010,6 +3109,7 @@ pub const Analyzer = struct {
         while (declaring_index) |index| {
             const declaring_structure = self.structures.items[index];
             for (declaring_structure.methods, 0..) |method_symbol, method_index| {
+                if (method_symbol.is_static) continue;
                 if (!std.mem.eql(u8, method_symbol.source_name, call.name)) continue;
                 const candidate = MethodCandidate{ .symbol = method_symbol, .structure_index = index, .index = method_index };
                 if (self.memberVisibleFrom(structure_index, index, method_symbol.visibility)) {
@@ -4372,6 +4472,9 @@ pub const Analyzer = struct {
                     },
                 }
             },
+            .static_method_call => |call| {
+                for (call.arguments) |argument| try self.validateExpression(argument);
+            },
             .super_method_call => |call| {
                 for (call.arguments) |argument| try self.validateExpression(argument);
             },
@@ -5092,6 +5195,10 @@ fn astExpressionUsesIdentifier(expression_value: *const Ast.Expression, name: []
             for (call.arguments) |argument| if (astExpressionUsesIdentifier(argument, name)) break :uses true;
             break :uses false;
         },
+        .static_method_call => |call| uses: {
+            for (call.arguments) |argument| if (astExpressionUsesIdentifier(argument, name)) break :uses true;
+            break :uses false;
+        },
         .super_method_call => |call| uses: {
             for (call.arguments) |argument| if (astExpressionUsesIdentifier(argument, name)) break :uses true;
             break :uses false;
@@ -5493,7 +5600,7 @@ const AssignmentRoot = union(enum) {
 
 fn isCascadeOwnedTemporary(expression: *const Ast.Expression) bool {
     return switch (expression.value) {
-        .call, .method_call, .super_method_call, .class_initializer, .structure_initializer, .sequence_literal => true,
+        .call, .method_call, .static_method_call, .super_method_call, .class_initializer, .structure_initializer, .sequence_literal => true,
         .member_access => |member| isCascadeOwnedTemporary(member.object),
         .index_access => |access| isCascadeOwnedTemporary(access.object),
         .slice_access => true,
@@ -5637,6 +5744,41 @@ test "field mutability controls direct and nested mutation" {
     try expectResolvedSemanticError(
         "struct State { let values:int[]? } func main() { var state = State(values:[]); state.values?.append(1) }",
         "cannot mutate through let field 'values'",
+    );
+}
+
+test "static methods use type receivers and separate overload sets" {
+    try expectSemanticSuccess(
+        \\struct Position {
+        \\    var x:int
+        \\    static func origin() Position { return Position(x:0) }
+        \\    static func from(value:int) Position { return Position(x:value) }
+        \\    func from() int { return self.x }
+        \\}
+        \\func main() { let origin = Position.origin(); let value = Position.from(3); assert(origin.x + value.from() == 3, "static methods") }
+    );
+    try expectResolvedSemanticError(
+        "struct Factory { static func create() Factory { return Factory() } } func main() { var factory = Factory(); factory.create() }",
+        "static method 'create' must be called through type 'Factory'",
+    );
+    try expectResolvedSemanticError(
+        "struct Factory { func create() Factory { return Factory() } } func main() { let factory = Factory.create() }",
+        "instance method 'create' requires a value of type 'Factory'",
+    );
+}
+
+test "static methods have no self or super and are not inherited" {
+    try expectResolvedSemanticError(
+        "struct Factory { static func create() Factory { return self } } func main() {}",
+        "'self' is not available inside a static method",
+    );
+    try expectResolvedSemanticError(
+        "class Base { pub static func create() Base { return Base() } } class Child : Base {} func main() { let child = Child.create() }",
+        "type 'Child' has no static method 'create'",
+    );
+    try expectResolvedSemanticError(
+        "class Base { pub func value() int { return 1 } } class Child : Base { pub static func value() int { return super.value() } } func main() {}",
+        "'super' is not available inside a static method",
     );
 }
 

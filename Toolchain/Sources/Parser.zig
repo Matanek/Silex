@@ -155,11 +155,18 @@ pub const Parser = struct {
                 try self.advance();
             }
             if (self.current.tag == .keyword_override) return self.fail("'override' must precede the method visibility");
+            const is_static = self.current.tag == .keyword_static;
+            if (is_static) {
+                if (is_override) return self.fail("a static method cannot use 'override'");
+                try self.advance();
+                if (self.current.tag != .keyword_func) return self.fail("expected 'func' after 'static'");
+            }
             if (self.current.tag == .keyword_func) {
                 var method = try self.parseFunction(false);
                 if (method.type_parameters.len != 0) return self.fail("generic methods are not supported");
                 method.member_visibility = visibility;
                 method.is_override = is_override;
+                method.is_static = is_static;
                 try methods.append(self.allocator, method);
                 continue;
             }
@@ -1056,6 +1063,13 @@ pub const Parser = struct {
     }
 
     fn parseIdentifierExpressionAfterToken(self: *Parser, token: Token) ParseError!*Ast.Expression {
+        if (token.tag != .keyword_self and self.current.tag == .less and self.genericStaticMethodCallFollows()) {
+            const arguments = try self.parseTypeArguments();
+            return self.parsePostfix(try self.parseStaticMethodCall(.{ .generic_structure = .{
+                .name = token.lexeme,
+                .arguments = arguments,
+            } }, token.position));
+        }
         const type_arguments = if (token.tag != .keyword_self and self.current.tag == .less and self.genericInvocationFollows())
             try self.parseTypeArguments()
         else
@@ -1128,6 +1142,15 @@ pub const Parser = struct {
             const name = self.current.lexeme;
             const position = self.current.position;
             try self.advance();
+            if (!safe and self.current.tag == .less and self.genericStaticMethodCallFollows()) {
+                const prefix = (try self.expressionPath(expression)) orelse return self.fail("a generic type qualifier must be a name");
+                const arguments = try self.parseTypeArguments();
+                expression = try self.parseStaticMethodCall(.{ .generic_structure = .{
+                    .name = try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ prefix, name }),
+                    .arguments = arguments,
+                } }, expression.position);
+                continue;
+            }
             const type_arguments = if (!safe and self.current.tag == .less and self.genericInvocationFollows())
                 try self.parseTypeArguments()
             else
@@ -1167,6 +1190,33 @@ pub const Parser = struct {
             }
         }
         return expression;
+    }
+
+    fn parseStaticMethodCall(self: *Parser, owner: Ast.TypeName, owner_position: Source.Position) ParseError!*Ast.Expression {
+        try self.expect(.dot, "expected '.' after static method type");
+        if (self.current.tag != .identifier) return self.fail("expected static method name after type");
+        const name = self.current.lexeme;
+        const name_position = self.current.position;
+        try self.advance();
+        if (self.current.tag != .left_parenthesis) return self.fail("a static method must be called directly");
+        const invocation = try self.parseInvocationArguments();
+        return self.newExpression(.{
+            .position = owner_position,
+            .value = .{ .static_method_call = .{
+                .owner = owner,
+                .owner_position = owner_position,
+                .name = name,
+                .name_position = name_position,
+                .arguments = switch (invocation) {
+                    .positional => |values| values,
+                    .named => &.{},
+                },
+                .named_fields = switch (invocation) {
+                    .positional => null,
+                    .named => |fields| fields,
+                },
+            } },
+        });
     }
 
     fn parseCallAfterName(
@@ -1369,6 +1419,27 @@ pub const Parser = struct {
         var probe = self.*;
         _ = probe.parseTypeArguments() catch return false;
         return probe.current.tag == .left_parenthesis;
+    }
+
+    fn genericStaticMethodCallFollows(self: *const Parser) bool {
+        var probe = self.*;
+        _ = probe.parseTypeArguments() catch return false;
+        if (probe.current.tag != .dot) return false;
+        probe.advance() catch return false;
+        if (probe.current.tag != .identifier) return false;
+        probe.advance() catch return false;
+        return probe.current.tag == .left_parenthesis;
+    }
+
+    fn expressionPath(self: *Parser, expression: *const Ast.Expression) ParseError!?[]const u8 {
+        return switch (expression.value) {
+            .identifier => |name| name,
+            .member_access => |member| if (try self.expressionPath(member.object)) |prefix|
+                try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ prefix, member.name })
+            else
+                null,
+            else => null,
+        };
     }
 
     fn binaryExpression(
@@ -2352,6 +2423,32 @@ test "parse override methods and direct super calls" {
     const call = method.statements[0].return_statement.value.?.value.super_method_call;
     try std.testing.expectEqualStrings("update", call.name);
     try std.testing.expectEqual(@as(usize, 1), call.arguments.len);
+}
+
+test "parse static methods and generic static calls" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(),
+        \\struct Box<T> {
+        \\    var value:T
+        \\    static func filled(value:T) Box<T> { return Box<T>(value:value) }
+        \\}
+        \\func main() { let box = Box<int>.filled(42) }
+    );
+    const program = try parser.parse();
+    try std.testing.expect(program.structures[0].methods[0].is_static);
+    const call = program.functions[0].statements[0].variable_declaration.initializer.?;
+    try std.testing.expect(call.value == .static_method_call);
+    try std.testing.expect(call.value.static_method_call.owner == .generic_structure);
+    try std.testing.expectEqualStrings("filled", call.value.static_method_call.name);
+}
+
+test "reject override on static method" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(), "class Factory { override pub static func create() {} }");
+    try std.testing.expectError(error.InvalidSource, parser.parse());
+    try std.testing.expectEqualStrings("a static method cannot use 'override'", parser.diagnostic.?.message);
 }
 
 test "override must precede method visibility" {

@@ -139,6 +139,7 @@ pub const Expression = struct {
         value_call: ValueCall,
         lambda: Lambda,
         method_call: MethodCall,
+        static_method_call: StaticMethodCall,
         super_method_call: SuperMethodCall,
         cascade: Cascade,
         class_initializer: ClassInitializer,
@@ -185,6 +186,15 @@ pub const Expression = struct {
         name: []const u8,
         name_position: Source.Position,
         type_arguments: []const TypeName = &.{},
+        arguments: []const *Expression,
+        named_fields: ?[]const FieldInitializer = null,
+    };
+
+    pub const StaticMethodCall = struct {
+        owner: TypeName,
+        owner_position: Source.Position,
+        name: []const u8,
+        name_position: Source.Position,
         arguments: []const *Expression,
         named_fields: ?[]const FieldInitializer = null,
     };
@@ -466,6 +476,7 @@ pub const Function = struct {
     is_native: bool = false,
     member_visibility: ?MemberVisibility = null,
     is_override: bool = false,
+    is_static: bool = false,
     position: Source.Position,
     name: []const u8,
     name_position: Source.Position,

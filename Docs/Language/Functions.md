@@ -136,11 +136,12 @@ All arguments, return values, and return paths are checked statically. A
 non-void function must return a compatible value on every path. A void function
 may use `return` without a value.
 
-Methods are functions declared inside a structure or class. Their receiver is
-the explicit `self` value; see [Structures](Structures.md) and
+Methods are functions declared inside a structure or class. An instance method
+receives the explicit `self` value. A `static func` method is selected through
+its complete type and has no receiver. See [Structures](Structures.md) and
 [Classes](Classes.md). Structure methods are public by default. Class methods
 are private by default and use `pub` for general access or `sub` for access by
-future descendants.
+future descendants; visibility precedes `static`.
 
 ## Function values and lambdas
 
