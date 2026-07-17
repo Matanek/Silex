@@ -14,4 +14,4 @@ languages = ["Silex"]
 
 [grammars.silex]
 repository = "https://github.com/fmathey/Silex"
-rev = "a638ba83e5c9503c980dd7e8b20018f586419cef"
+rev = "11d5ef97ae1c37b677463b24c1d70ede4aa9e297"
