@@ -27,6 +27,7 @@ module.exports = grammar({
         choice(
           $.import_declaration,
           $.use_declaration,
+          $.enum_definition,
           $.structure_definition,
           $.function_definition,
           $.native_function_declaration,
@@ -61,7 +62,34 @@ module.exports = grammar({
       ),
 
     public_declaration: ($) =>
-      seq(field("visibility", "pub"), choice($.structure_definition, $.function_definition)),
+      seq(field("visibility", "pub"), choice($.enum_definition, $.structure_definition, $.function_definition)),
+
+    enum_definition: ($) =>
+      seq(
+        "enum",
+        field("name", $.identifier),
+        optional(seq(":", field("raw_type", $.raw_enum_type))),
+        "{",
+        repeat1($.enum_variant),
+        "}",
+      ),
+
+    raw_enum_type: (_) => choice("int", "str"),
+
+    enum_variant: ($) =>
+      seq(
+        field("name", $.identifier),
+        optional(
+          field(
+            "associated_types",
+            seq("(", $.type, repeat(seq(",", $.type)), ")"),
+          ),
+        ),
+        optional(seq("=", field("raw_value", choice($.signed_integer_literal, $.string_literal)))),
+        choice(";", $._automatic_semicolon),
+      ),
+
+    signed_integer_literal: ($) => seq(optional("-"), $.integer_literal),
 
     module_path: ($) =>
       seq($.identifier, repeat(seq(".", $.identifier))),
@@ -240,6 +268,7 @@ module.exports = grammar({
         $.if_statement,
         $.while_statement,
         $.for_statement,
+        $.match_expression,
       ),
 
     variable_declaration: ($) =>
@@ -388,6 +417,7 @@ module.exports = grammar({
         $.borrow_expression,
         $.conversion_expression,
         $.lambda_expression,
+        $.match_expression,
         $.invocation_expression,
         $.super_method_expression,
         $.cascade_expression,
@@ -404,6 +434,43 @@ module.exports = grammar({
         $.null_literal,
         $.self_expression,
         $.identifier,
+      ),
+
+    match_expression: ($) =>
+      seq(
+        "match",
+        field("subject", $.expression),
+        "{",
+        repeat1($.match_branch),
+        "}",
+      ),
+
+    match_branch: ($) =>
+      seq(
+        choice(
+          seq(
+            field("variant", $.identifier),
+            optional(field("bindings", $.match_binding_list)),
+          ),
+          field("default", "else"),
+        ),
+        "=>",
+        field(
+          "body",
+          choice(
+            seq($.block, optional(choice(";", $._automatic_semicolon))),
+            seq($.expression, choice(";", $._automatic_semicolon)),
+          ),
+        ),
+      ),
+
+    match_binding_list: ($) =>
+      seq("(", $.match_binding, repeat(seq(",", $.match_binding)), ")"),
+
+    match_binding: ($) =>
+      seq(
+        optional(field("mutability", choice("let", "var"))),
+        field("name", $.identifier),
       ),
 
     lambda_expression: ($) =>
