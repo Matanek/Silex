@@ -1,0 +1,13 @@
+struct Interval<T> {
+    minimum:T
+    maximum:T
+
+    func contains(value:T) bool {
+        return value >= self.minimum && value <= self.maximum
+    }
+}
+
+func main() {
+    let interval = Interval<str>(minimum:"a", maximum:"z")
+    print(interval.contains("m"))
+}

@@ -33,6 +33,66 @@ initializers; they cannot refer to `self`, another field, a variable, or a
 function. Braces delimit declarations and blocks; `Position { x:10 }` is not an
 initializer.
 
+## Generic structures
+
+A structure may declare type parameters after its name. Every use supplies one
+explicit type argument per parameter:
+
+```sx
+struct Pair<T> {
+    first:T
+    second:T
+}
+
+struct Entry<Key, Value> {
+    key:Key
+    value:Value
+}
+
+let coordinates = Pair<int>(first:10, second:20)
+let names:Pair<str> = Pair<str>(first:"Ada", second:"Grace")
+let indexed = Entry<int, Pair<str>>(
+    key:1,
+    value:Pair<str>(first:"left", second:"right"),
+)
+```
+
+`Pair<int>` and `Pair<str>` are distinct concrete types. Repeating the same
+arguments denotes the same type throughout the application and across module
+boundaries. Arguments may themselves be structures, classes, collections,
+optionals, function types, or generic structure specializations.
+
+Type arguments are not inferred. A generic structure name without arguments
+is incomplete, including in an initializer whose fields would otherwise reveal
+the arguments. A non-generic structure does not accept type arguments.
+
+The structure's parameters are in scope in its fields and methods. Methods do
+not redeclare them:
+
+```sx
+struct Box<T> {
+    value:T
+
+    func get() T {
+        return self.value
+    }
+
+    func replace(value:T) {
+        self.value = value
+    }
+}
+
+var score = Box<int>(value:10)
+score.replace(20)
+```
+
+Silex checks every concrete specialization with its ordinary type rules. A
+method operation involving `T` is therefore valid only for arguments that
+support that operation; generic declarations do not use constraints, traits,
+specializations, or compile-time values. Generic classes and methods with their
+own type parameters are not currently part of the language. Free generic
+functions are described in [Functions](Functions.md).
+
 Fields of a `var` structure may be changed, including through nested paths. A
 `let` structure is fully immutable and is accepted only when all its fields are
 recursively independent values. A structure containing a function value or a

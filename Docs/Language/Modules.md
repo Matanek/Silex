@@ -50,9 +50,46 @@ while `use STD.Random.Generator as Generator` introduces a structure. An import
 alias can also qualify a `use`, as in `import STD as Standard` followed by
 `use Standard.Random as Random`.
 
+## Transparent type aliases
+
+`use` can introduce a name for any complete type, not only for a named
+declaration. A composed or scalar type requires an explicit alias:
+
+```sx
+use Vec3<int> as Vec3i
+use int as Integer
+use Integer[] as Integers
+use str? as OptionalString
+use func(int) bool as Predicate
+```
+
+The alias is transparent. It does not declare a new nominal type, perform a
+conversion, change representation, or create another generic specialization.
+The alias and its source type are interchangeable:
+
+```sx
+let position = Vec3i(x:1, y:2, z:3)
+let explicit:Vec3<int> = position
+
+let values:Integers = [1, 2, 3]
+let ordinary:int[] = values
+```
+
+Aliases may name other aliases. Their chains resolve to one underlying type;
+cycles are rejected. A type alias cannot be called or used as a runtime value,
+except that an alias whose underlying type is a structure or class can use that
+type's ordinary initializer.
+
+`pub use <type> as <name>` exports the transparent alias. A consumer may
+qualify, import, rename, or re-export it like another public type declaration.
+The source type is resolved in the file declaring the alias and is not
+reinterpreted in the consumer. Type aliases cannot currently declare their own
+type parameters.
+
 Declarations are private by default. `pub` exposes a structure, class, or
-function, while `pub use` re-exports an existing declaration under the current
-module name. Modules cannot currently be re-exported with `pub use`.
+function, while `pub use` re-exports an existing declaration or type alias
+under the current module name. Modules cannot currently be re-exported with
+`pub use`.
 
 For a class, declaration and member visibility are independent: `pub class`
 exposes the type outside its module, while only its `pub` members are accessible

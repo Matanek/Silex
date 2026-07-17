@@ -1,0 +1,75 @@
+struct Pair<T> {
+    first:T
+    second:T
+
+    func get_first() T {
+        return self.first
+    }
+
+    func replace_second(value:T) {
+        self.second = value
+    }
+}
+
+struct Entry<Key, Value> {
+    key:Key
+    value:Value
+}
+
+struct Box<T> {
+    value:T
+}
+
+class Player {
+    pub name:str
+}
+
+func main() {
+    var numbers = Pair<int>(first:10, second:20)
+    numbers.replace_second(30)
+    print(numbers.get_first())
+    print(numbers.second)
+
+    let names = Pair<str>(first:"Ada", second:"Grace")
+    print(names.first)
+    print(names == Pair<str>(first:"Ada", second:"Grace"))
+
+    let indexed = Entry<int, Pair<str>>(
+        key:7,
+        value:Pair<str>(first:"left", second:"right"),
+    )
+    print(indexed.key)
+    print(indexed.value.second)
+
+    let optional = Box<int?>(value:null)
+    print(optional.value == null)
+
+    var empty:Box<int>
+    print(empty.value)
+
+    let values = Box<int[]>(value:[1, 2, 3])
+    print(values.value.count())
+
+    var players = Pair<Player>(
+        first:Player(name:"Ada"),
+        second:Player(name:"Grace"),
+    )
+    print(players.second.name)
+
+    var callback = Box<func(int) int>(value:func(value:int) int {
+        return value * 2
+    })
+    print(callback.value(4))
+
+    var observer = Box<func(int)>(value:func(value:int) {
+        print(value)
+    })
+    observer.value(4)
+
+    var mutator = Box<func(&int)>(value:func(value:&int) {
+        value += 1
+    })
+    var changed = 8
+    mutator.value(&changed)
+    print(changed)
+}

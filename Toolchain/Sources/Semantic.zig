@@ -4785,6 +4785,8 @@ fn typeFromAnnotation(
                 .is_class = structure.is_class,
             } };
         },
+        .generic_structure => return self.fail(position, "generic structure type was not specialized before semantic analysis"),
+        .type_parameter => return self.fail(position, "generic type parameter was not substituted before semantic analysis"),
     };
 }
 
@@ -4813,6 +4815,8 @@ fn typeFromReturn(
         .list => |element| typeFromAnnotation(self, .{ .list = element }, position),
         .fixed_array => |array| typeFromAnnotation(self, .{ .fixed_array = array }, position),
         .structure => |name| typeFromAnnotation(self, .{ .structure = name }, position),
+        .generic_structure => |generic| typeFromAnnotation(self, .{ .generic_structure = generic }, position),
+        .type_parameter => |name| typeFromAnnotation(self, .{ .type_parameter = name }, position),
         .reference => |reference| typeFromReference(self, reference, position),
         .function => |function| typeFromFunction(self, function, position),
         .optional => |contained| typeFromAnnotation(self, .{ .optional = contained }, position),

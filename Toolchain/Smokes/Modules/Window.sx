@@ -2,6 +2,14 @@ pub struct Session {
     active:bool = true
 }
 
+pub struct Pair<T> {
+    first:T
+    second:T
+}
+
+pub use Pair<int> as IntPair
+pub use int[] as Integers
+
 pub class Meter {
     value:int
 
@@ -24,6 +32,10 @@ pub class Counter : Meter {
 
 pub func create_session() Session {
     return Session()
+}
+
+pub func identity<T>(value:T) T {
+    return value
 }
 
 pub func create_counter() Counter {

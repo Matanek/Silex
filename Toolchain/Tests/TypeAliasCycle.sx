@@ -1,0 +1,4 @@
+use Right[] as Left
+use Left[] as Right
+
+func main() {}

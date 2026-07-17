@@ -7,6 +7,10 @@ use Prefix.Shared as Shared
 use Shared.Deep as Deep
 
 use Plugins.WindowSession
+use Plugins.WindowPair as Pair
+use Plugins.WindowIntPair as IntPair
+use Plugins.WindowIntegers as Integers
+use Plugins.WindowIdentity as identity
 use Window.Session as NativeSession
 
 class LocalCounter : Window.Meter {
@@ -20,6 +24,13 @@ func main() {
     print(session.active)
     print(raw.active)
     print(native.active)
+    let pair = Pair<int>(first:3, second:4)
+    print(pair.first + pair.second)
+    let aliased = IntPair(first:5, second:6)
+    print(aliased.first + aliased.second)
+    let integers:Integers = [1, 2, 3]
+    print(integers.count())
+    print(identity<str>("generic module"))
     var counter = Window.create_counter()
     counter.increment()
     print(counter.current())

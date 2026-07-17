@@ -24,6 +24,14 @@
     ],
     "description": "Depend on and introduce one declaration locally"
   },
+  "Type alias": {
+    "prefix": "usetype",
+    "body": [
+      "use ${1:int[]} as ${2:Integers}",
+      "$0"
+    ],
+    "description": "Introduce a transparent name for a complete type"
+  },
   "Public declaration": {
     "prefix": "pub",
     "body": [
@@ -191,6 +199,16 @@
     ],
     "description": "Declare a function with an explicit return type"
   },
+  "Generic function": {
+    "prefix": "funcg",
+    "body": [
+      "func ${1:name}<${2:T}>(${3:value}:$2) $2 {",
+      "    return $3",
+      "}",
+      "$0"
+    ],
+    "description": "Declare a function with an explicit type parameter"
+  },
   "Lambda": {
     "prefix": "lambda",
     "body": [
@@ -257,6 +275,16 @@
       "$0"
     ],
     "description": "Declare a value type"
+  },
+  "Generic struct": {
+    "prefix": "structg",
+    "body": [
+      "struct ${1:Name}<${2:T}> {",
+      "    ${3:value}:$2",
+      "}",
+      "$0"
+    ],
+    "description": "Declare a value type with an explicit type parameter"
   },
   "Class": {
     "prefix": "class",

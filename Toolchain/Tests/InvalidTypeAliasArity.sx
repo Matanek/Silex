@@ -1,0 +1,7 @@
+struct Box<T> {
+    value:T
+}
+
+use Box<int, str> as InvalidBox
+
+func main() {}

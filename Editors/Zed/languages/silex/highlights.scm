@@ -9,6 +9,16 @@
 (structure_definition
   name: (identifier) @type.definition)
 
+(type_parameter
+  name: (identifier) @type)
+
+(generic_type
+  name: (type_identifier) @type)
+
+(use_declaration
+  type: (_)
+  alias: (identifier) @type.definition)
+
 (structure_field
   name: (identifier) @property)
 

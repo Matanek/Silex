@@ -1,0 +1,5 @@
+use int[] as Integers
+
+func main() {
+    Integers()
+}

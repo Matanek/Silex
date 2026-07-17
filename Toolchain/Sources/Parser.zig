@@ -78,10 +78,15 @@ pub const Parser = struct {
     fn parseUse(self: *Parser, is_public: bool) ParseError!Ast.Use {
         const position = self.current.position;
         try self.advance();
-        const path = try self.parseQualifiedName("expected declaration path after 'use'");
+        const parsed_type = try self.parseTypeNameAfter("expected declaration or type after 'use'");
+        const target: Ast.Use.Target = if (parsed_type == .structure)
+            .{ .declaration = parsed_type.structure }
+        else
+            .{ .type = parsed_type };
         const alias = try self.parseOptionalAlias();
+        if (target == .type and alias == null) return self.failAt(position, "a type expression after 'use' requires an alias with 'as'");
         try self.expectStatementTerminator();
-        return .{ .path = path, .alias = alias, .is_public = is_public, .position = position };
+        return .{ .target = target, .alias = alias, .is_public = is_public, .position = position };
     }
 
     fn parseOptionalAlias(self: *Parser) ParseError!?[]const u8 {
@@ -114,6 +119,10 @@ pub const Parser = struct {
         const name = self.current.lexeme;
         const name_position = self.current.position;
         try self.advance();
+        const type_parameters = if (self.current.tag == .less) parameters: {
+            if (is_class) return self.fail("generic classes are not supported");
+            break :parameters try self.parseTypeParameters();
+        } else &.{};
         var base: ?Ast.BaseClass = null;
         if (self.current.tag == .colon) {
             if (!is_class) return self.fail("only a class can declare a base class");
@@ -148,6 +157,7 @@ pub const Parser = struct {
             if (self.current.tag == .keyword_override) return self.fail("'override' must precede the method visibility");
             if (self.current.tag == .keyword_func) {
                 var method = try self.parseFunction(false);
+                if (method.type_parameters.len != 0) return self.fail("generic methods are not supported");
                 method.member_visibility = visibility;
                 method.is_override = is_override;
                 try methods.append(self.allocator, method);
@@ -223,6 +233,7 @@ pub const Parser = struct {
             .position = position,
             .name = name,
             .name_position = name_position,
+            .type_parameters = type_parameters,
             .base = base,
             .fields = try fields.toOwnedSlice(self.allocator),
             .constructors = try constructors.toOwnedSlice(self.allocator),
@@ -238,6 +249,10 @@ pub const Parser = struct {
         const name = self.current.lexeme;
         const name_position = self.current.position;
         try self.advance();
+        const type_parameters = if (self.current.tag == .less) try self.parseTypeParameters() else &.{};
+        if (type_parameters.len != 0 and std.mem.eql(u8, name, "main")) {
+            return self.fail("'main' cannot be generic");
+        }
         const parameters = try self.parseParameters();
         const return_type: Ast.ReturnType = if (self.current.tag == .left_brace)
             .void
@@ -248,6 +263,7 @@ pub const Parser = struct {
             .position = position,
             .name = name,
             .name_position = name_position,
+            .type_parameters = type_parameters,
             .return_type = return_type,
             .parameters = parameters,
             .statements = try self.parseBlock(),
@@ -265,6 +281,7 @@ pub const Parser = struct {
         const name = self.current.lexeme;
         const name_position = self.current.position;
         try self.advance();
+        if (self.current.tag == .less) return self.fail("native functions cannot be generic");
         const parameters = try self.parseParameters();
         const return_type = try self.parseReturnType();
         try self.expectStatementTerminator();
@@ -303,6 +320,8 @@ pub const Parser = struct {
             .bool => .bool,
             .str => .str,
             .structure => |name| .{ .structure = name },
+            .generic_structure => |generic| .{ .generic_structure = generic },
+            .type_parameter => |name| .{ .type_parameter = name },
             .list => |element| .{ .list = element },
             .fixed_array => |array| .{ .fixed_array = array },
             .reference => |reference| .{ .reference = reference },
@@ -443,9 +462,16 @@ pub const Parser = struct {
             break :grouped grouped_type;
         } else if (self.current.tag == .keyword_func)
             try self.parseFunctionType()
-        else if (self.current.tag == .identifier)
-            .{ .structure = try self.parseQualifiedName(message) }
-        else switch (self.current.tag) {
+        else if (self.current.tag == .identifier) named: {
+            const name = try self.parseQualifiedName(message);
+            if (self.current.tag == .less) {
+                break :named .{ .generic_structure = .{
+                    .name = name,
+                    .arguments = try self.parseTypeArguments(),
+                } };
+            }
+            break :named .{ .structure = name };
+        } else switch (self.current.tag) {
             .keyword_int => .int,
             .keyword_int8 => .int8,
             .keyword_int16 => .int16,
@@ -463,7 +489,7 @@ pub const Parser = struct {
             .keyword_str => .str,
             else => return self.fail(message),
         };
-        if (type_name != .structure and type_name != .function) try self.advance();
+        if (type_name != .structure and type_name != .generic_structure and type_name != .function) try self.advance();
         var result = type_name;
         while (self.current.tag == .left_bracket or self.current.tag == .question) {
             if (self.current.tag == .question) {
@@ -1023,10 +1049,16 @@ pub const Parser = struct {
     }
 
     fn parseIdentifierExpressionAfterToken(self: *Parser, token: Token) ParseError!*Ast.Expression {
+        const type_arguments = if (token.tag != .keyword_self and self.current.tag == .less and self.genericInvocationFollows())
+            try self.parseTypeArguments()
+        else
+            &.{};
         var expression = if (token.tag == .keyword_self)
             try self.newExpression(.{ .position = token.position, .value = .self })
         else if (self.current.tag == .left_parenthesis)
-            try self.parseCallAfterName(token.lexeme, token.position)
+            try self.parseCallAfterName(token.lexeme, token.position, type_arguments)
+        else if (type_arguments.len != 0)
+            return self.fail("type arguments must be followed by an invocation")
         else
             try self.newExpression(.{ .position = token.position, .value = .{ .identifier = token.lexeme } });
 
@@ -1089,6 +1121,10 @@ pub const Parser = struct {
             const name = self.current.lexeme;
             const position = self.current.position;
             try self.advance();
+            const type_arguments = if (!safe and self.current.tag == .less and self.genericInvocationFollows())
+                try self.parseTypeArguments()
+            else
+                &.{};
             if (self.current.tag == .left_parenthesis) {
                 if (safe) {
                     const invocation = try self.parseInvocationArguments();
@@ -1105,7 +1141,9 @@ pub const Parser = struct {
                             .named => |fields| fields,
                         },
                     } } });
-                } else expression = try self.parseMethodCall(expression, name, position);
+                } else expression = try self.parseMethodCall(expression, name, position, type_arguments);
+            } else if (type_arguments.len != 0) {
+                return self.fail("type arguments must be followed by an invocation");
             } else {
                 expression = try self.newExpression(.{
                     .position = expression.position,
@@ -1128,6 +1166,7 @@ pub const Parser = struct {
         self: *Parser,
         name: []const u8,
         position: Source.Position,
+        type_arguments: []const Ast.TypeName,
     ) ParseError!*Ast.Expression {
         const arguments = try self.parseInvocationArguments();
         return self.newExpression(.{
@@ -1135,6 +1174,7 @@ pub const Parser = struct {
             .value = .{ .call = .{
                 .name = name,
                 .name_position = position,
+                .type_arguments = type_arguments,
                 .arguments = switch (arguments) {
                     .positional => |values| values,
                     .named => &.{},
@@ -1228,6 +1268,7 @@ pub const Parser = struct {
         object: *Ast.Expression,
         name: []const u8,
         position: Source.Position,
+        type_arguments: []const Ast.TypeName,
     ) ParseError!*Ast.Expression {
         const arguments = try self.parseInvocationArguments();
         return self.newExpression(.{
@@ -1236,6 +1277,7 @@ pub const Parser = struct {
                 .object = object,
                 .name = name,
                 .name_position = position,
+                .type_arguments = type_arguments,
                 .arguments = switch (arguments) {
                     .positional => |values| values,
                     .named => &.{},
@@ -1246,6 +1288,80 @@ pub const Parser = struct {
                 },
             } },
         });
+    }
+
+    fn parseTypeParameters(self: *Parser) ParseError![]const Ast.TypeParameter {
+        try self.expect(.less, "expected '<'");
+        if (self.current.tag == .greater or self.current.tag == .shift_right) {
+            return self.fail("a generic structure requires at least one type parameter");
+        }
+        var parameters: std.ArrayList(Ast.TypeParameter) = .empty;
+        while (true) {
+            if (self.current.tag != .identifier) return self.fail("expected type parameter name");
+            for (parameters.items) |parameter| {
+                if (std.mem.eql(u8, parameter.name, self.current.lexeme)) {
+                    return self.fail("type parameter is already declared");
+                }
+            }
+            try parameters.append(self.allocator, .{
+                .name = self.current.lexeme,
+                .position = self.current.position,
+            });
+            try self.advance();
+            if (self.current.tag != .comma) break;
+            try self.advance();
+            if (self.current.tag == .greater or self.current.tag == .shift_right) {
+                return self.fail("expected type parameter name after ','");
+            }
+        }
+        try self.expectTypeArgumentClose();
+        return parameters.toOwnedSlice(self.allocator);
+    }
+
+    fn parseTypeArguments(self: *Parser) ParseError![]const Ast.TypeName {
+        try self.expect(.less, "expected '<'");
+        if (self.current.tag == .greater or self.current.tag == .shift_right) {
+            return self.fail("type arguments cannot be empty");
+        }
+        var arguments: std.ArrayList(Ast.TypeName) = .empty;
+        while (true) {
+            try arguments.append(self.allocator, try self.parseTypeNameAfter("expected type argument"));
+            if (self.current.tag != .comma) break;
+            try self.advance();
+            if (self.current.tag == .greater or self.current.tag == .shift_right) {
+                return self.fail("expected type argument after ','");
+            }
+        }
+        try self.expectTypeArgumentClose();
+        return arguments.toOwnedSlice(self.allocator);
+    }
+
+    fn expectTypeArgumentClose(self: *Parser) ParseError!void {
+        if (self.current.tag == .greater) {
+            try self.advance();
+            return;
+        }
+        if (self.current.tag == .shift_right) {
+            const token = self.current;
+            self.previous = .{ .tag = .greater, .lexeme = token.lexeme[0..1], .position = token.position };
+            self.current = .{
+                .tag = .greater,
+                .lexeme = token.lexeme[1..2],
+                .position = .{
+                    .file = token.position.file,
+                    .line = token.position.line,
+                    .column = token.position.column + 1,
+                },
+            };
+            return;
+        }
+        return self.fail("expected '>' after type arguments");
+    }
+
+    fn genericInvocationFollows(self: *const Parser) bool {
+        var probe = self.*;
+        _ = probe.parseTypeArguments() catch return false;
+        return probe.current.tag == .left_parenthesis;
     }
 
     fn binaryExpression(
@@ -2223,4 +2339,95 @@ test "override must precede method visibility" {
     var parser = Parser.init(arena.allocator(), "class Child { pub override func update() {} }");
     try std.testing.expectError(error.InvalidSource, parser.parse());
     try std.testing.expectEqualStrings("'override' must precede the method visibility", parser.diagnostic.?.message);
+}
+
+test "parse generic structure declarations types and invocations" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(),
+        \\struct Pair<T> {
+        \\    first:T
+        \\    second:T
+        \\}
+        \\struct Entry<Key, Value> {
+        \\    key:Key
+        \\    value:Value
+        \\}
+        \\func main() {
+        \\    let pair:Pair<int> = Pair<int>(first:1, second:2)
+        \\    let nested = Entry<int, Pair<str>>(key:1, value:Pair<str>(first:"a", second:"b"))
+        \\    print(pair.first < pair.second)
+        \\}
+    );
+    const program = try parser.parse();
+
+    try std.testing.expectEqual(@as(usize, 1), program.structures[0].type_parameters.len);
+    try std.testing.expectEqualStrings("T", program.structures[0].type_parameters[0].name);
+    try std.testing.expectEqual(@as(usize, 2), program.structures[1].type_parameters.len);
+    const annotation = program.functions[0].statements[0].variable_declaration.annotation.?.generic_structure;
+    try std.testing.expectEqualStrings("Pair", annotation.name);
+    try std.testing.expectEqual(Ast.TypeName.int, annotation.arguments[0]);
+    const initializer = program.functions[0].statements[1].variable_declaration.initializer.?.value.call;
+    try std.testing.expectEqual(@as(usize, 2), initializer.type_arguments.len);
+    try std.testing.expect(initializer.type_arguments[1] == .generic_structure);
+    try std.testing.expect(program.functions[0].statements[2].print.argument.value == .binary);
+}
+
+test "reject duplicate generic structure parameters" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(), "struct Pair<T, T> { value:T }");
+    try std.testing.expectError(error.InvalidSource, parser.parse());
+    try std.testing.expectEqualStrings("type parameter is already declared", parser.diagnostic.?.message);
+}
+
+test "parse generic function declaration and invocation" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(),
+        \\func identity<T>(value:T) T {
+        \\    return value
+        \\}
+        \\func main() {
+        \\    print(identity<int>(42))
+        \\}
+    );
+    const program = try parser.parse();
+    try std.testing.expectEqual(@as(usize, 1), program.functions[0].type_parameters.len);
+    try std.testing.expectEqualStrings("T", program.functions[0].type_parameters[0].name);
+    try std.testing.expect(program.functions[0].parameters[0].type == .structure);
+    const call = program.functions[1].statements[0].print.argument.value.call;
+    try std.testing.expectEqual(@as(usize, 1), call.type_arguments.len);
+    try std.testing.expectEqual(Ast.TypeName.int, call.type_arguments[0]);
+}
+
+test "reject generic main function" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(), "func main<T>() {}");
+    try std.testing.expectError(error.InvalidSource, parser.parse());
+    try std.testing.expectEqualStrings("'main' cannot be generic", parser.diagnostic.?.message);
+}
+
+test "parse transparent type aliases with use" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(),
+        \\use Vec3<int> as Vec3i
+        \\use int[] as Integers
+        \\func main() {}
+    );
+    const program = try parser.parse();
+    try std.testing.expect(program.uses[0].target == .type);
+    try std.testing.expect(program.uses[0].target.type == .generic_structure);
+    try std.testing.expectEqualStrings("Vec3i", program.uses[0].alias.?);
+    try std.testing.expect(program.uses[1].target.type == .list);
+}
+
+test "require a name for a type alias" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(), "use int[]\nfunc main() {}");
+    try std.testing.expectError(error.InvalidSource, parser.parse());
+    try std.testing.expectEqualStrings("a type expression after 'use' requires an alias with 'as'", parser.diagnostic.?.message);
 }

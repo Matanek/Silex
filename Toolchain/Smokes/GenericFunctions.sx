@@ -1,0 +1,76 @@
+struct Box<T> {
+    value:T
+
+    func copied() T {
+        return identity<T>(self.value)
+    }
+}
+
+func identity<T>(value:T) T {
+    return value
+}
+
+func boxed<T>(value:T) Box<T> {
+    return Box<T>(value:value)
+}
+
+func choose<Key, Value>(key:Key, value:Value) Value {
+    print(key)
+    return value
+}
+
+func select<T>(value:T) T {
+    return value
+}
+
+func select<T>(first:T, second:T) T {
+    print(first)
+    return second
+}
+
+func factorial<T>(value:T) T {
+    if value <= 1 {
+        return 1
+    }
+    return value * factorial<T>(value - 1)
+}
+
+func local_copy<T>(value:T) T {
+    let copy:T = value
+    var callback:func(T) T = func(item:T) T {
+        return item
+    }
+    return callback(copy)
+}
+
+func replace<T>(target:&T, value:T) {
+    target = value
+}
+
+func concrete_or_generic(value:int) int {
+    return value + 1
+}
+
+func concrete_or_generic<T>(value:T) T {
+    return value
+}
+
+func main() {
+    print(identity<int>(42))
+    print(identity<int>(7))
+    print(identity<str>("Ada"))
+
+    let box = boxed<str>("Grace")
+    print(box.copied())
+
+    print(choose<int, str>(9, "Silex"))
+    print(select<int>(3))
+    print(select<int>(3, 4))
+    print(factorial<int>(5))
+    print(local_copy<str>("local"))
+    var changed = 10
+    replace<int>(&changed, 11)
+    print(changed)
+    print(concrete_or_generic(4))
+    print(concrete_or_generic<str>("generic"))
+}

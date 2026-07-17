@@ -1,0 +1,9 @@
+pub struct Vec3<T> {
+    x:T
+    y:T
+    z:T
+
+    func reset() {}
+}
+
+pub use Vec3<int> as Vec3i

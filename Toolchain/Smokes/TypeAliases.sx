@@ -1,0 +1,47 @@
+struct Vec3<T> {
+    x:T
+    y:T
+    z:T
+}
+
+use Vec3<int> as Vec3i
+use int as Integer
+use Integer[] as Integers
+use Integers as Numbers
+use str? as OptionalString
+use func(int) bool as Predicate
+use int[3] as Triple
+
+func identity<T>(value:T) T {
+    return value
+}
+
+func sum(value:Vec3<int>) int {
+    return value.x + value.y + value.z
+}
+
+func make() Vec3i {
+    return Vec3i(x:1, y:2, z:3)
+}
+
+func main() {
+    let position:Vec3<int> = identity<Vec3i>(make())
+    print(sum(position))
+
+    let values:Numbers = [4, 5, 6]
+    let ordinary:int[] = values
+    print(ordinary.count())
+
+    let optional:OptionalString = "Ada"
+    if value = optional {
+        print(value)
+    }
+
+    var predicate:Predicate = func(value:int) bool {
+        return value > 0
+    }
+    print(predicate(7))
+
+    let triple:Triple = [7, 8, 9]
+    print(triple[0] + triple[1] + triple[2])
+}

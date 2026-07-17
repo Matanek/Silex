@@ -62,3 +62,10 @@ complete type; `(func(int))?` is an optional function value, while
 
 See [Optional values](Optional-Values.md) for `null`, presence checks,
 conditional bindings, and safe access.
+
+## Type aliases
+
+`use <type> as <name>` gives a complete type a transparent local name. For
+example, `use int[] as Integers` makes `Integers` and `int[]` exactly the same
+type. See [Modules](Modules.md#transparent-type-aliases) for local aliases,
+exports, chains, and diagnostics.

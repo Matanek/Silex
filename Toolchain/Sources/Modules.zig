@@ -10,7 +10,7 @@ pub const File = struct {
     program: Ast.Program,
 };
 
-const Kind = enum { structure, function };
+const Kind = enum { structure, function, type_alias };
 const VisitState = enum { fresh, visiting, done };
 
 const Declaration = struct {
@@ -20,6 +20,7 @@ const Declaration = struct {
     kind: Kind,
     is_public: bool,
     position: Source.Position,
+    aliased_type: ?Ast.TypeName = null,
 };
 
 const Export = struct {
@@ -68,6 +69,8 @@ pub const Resolver = struct {
     exports: std.ArrayList(Export) = .empty,
     file_infos: []FileInfo = &.{},
     local_scopes: std.ArrayList(std.ArrayList([]const u8)) = .empty,
+    current_type_parameters: []const Ast.TypeParameter = &.{},
+    alias_stack: std.ArrayList(*const Declaration) = .empty,
     diagnostic: ?Source.Diagnostic = null,
 
     pub fn init(allocator: Allocator, project: ProjectModule.Project, files: []const File) Resolver {
@@ -81,6 +84,7 @@ pub const Resolver = struct {
         for (order) |module_index| {
             try self.collectModuleUses(module_index);
         }
+        try self.validateTypeAliases();
         try self.validatePublicModuleCollisions();
 
         var structures: std.ArrayList(Ast.Structure) = .empty;
@@ -116,6 +120,18 @@ pub const Resolver = struct {
                     try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ module_name, function.name });
                 try self.addDeclarationWithCanonical(file.module_index, function.name, canonical, .function, function.is_public, function.name_position);
             }
+            for (file.program.uses) |use_value| switch (use_value.target) {
+                .declaration => {},
+                .type => |aliased_type| try self.declarations.append(self.allocator, .{
+                    .module_index = file.module_index,
+                    .source_name = use_value.alias.?,
+                    .canonical_name = use_value.alias.?,
+                    .kind = .type_alias,
+                    .is_public = use_value.is_public,
+                    .position = use_value.position,
+                    .aliased_type = aliased_type,
+                }),
+            };
         }
         for (self.declarations.items) |*declaration| {
             if (declaration.is_public) try self.addExport(declaration.module_index, declaration.source_name, declaration, declaration.position);
@@ -148,6 +164,7 @@ pub const Resolver = struct {
         position: Source.Position,
     ) !void {
         for (self.declarations.items) |existing| {
+            if (existing.kind == .type_alias) continue;
             if (existing.module_index == module_index and std.mem.eql(u8, existing.source_name, source_name)) {
                 if (existing.kind == .function and kind == .function) continue;
                 const message = try std.fmt.allocPrint(self.allocator, "{s} '{s}' is already declared in module '{s}'", .{
@@ -197,7 +214,11 @@ pub const Resolver = struct {
                 });
             }
             for (file.program.uses) |use_value| {
-                const module_index = try self.moduleIndexFromUsePath(imports.items, use_value.path) orelse continue;
+                const path = switch (use_value.target) {
+                    .declaration => |value| value,
+                    .type => continue,
+                };
+                const module_index = try self.moduleIndexFromUsePath(imports.items, path) orelse continue;
                 if (use_value.is_public) {
                     const message = try std.fmt.allocPrint(
                         self.allocator,
@@ -214,7 +235,7 @@ pub const Resolver = struct {
                     );
                     return self.fail(use_value.position, message);
                 }
-                const qualifier = use_value.alias orelse lastSegment(use_value.path);
+                const qualifier = use_value.alias orelse lastSegment(path);
                 for (imports.items) |existing| {
                     if (std.mem.eql(u8, existing.qualifier, qualifier)) {
                         const message = try std.fmt.allocPrint(
@@ -253,7 +274,14 @@ pub const Resolver = struct {
             }
             for (file.program.uses) |use_value| {
                 if (moduleUseAt(&infos[file_index], use_value.position)) continue;
-                const target = try self.qualifiedUseTarget(&infos[file_index], use_value.path) orelse continue;
+                const path = switch (use_value.target) {
+                    .declaration => |value| value,
+                    .type => |aliased_type| {
+                        try self.appendTypeDependencies(&infos[file_index], aliased_type, use_value.position);
+                        continue;
+                    },
+                };
+                const target = try self.qualifiedUseTarget(&infos[file_index], path) orelse continue;
                 const module_index = target.module_index;
                 if (module_index == file.module_index) continue;
                 try infos[file_index].dependencies.append(self.allocator, .{
@@ -263,6 +291,44 @@ pub const Resolver = struct {
             }
         }
         self.file_infos = infos;
+    }
+
+    fn appendTypeDependencies(
+        self: *Resolver,
+        file: *FileInfo,
+        type_name: Ast.TypeName,
+        position: Source.Position,
+    ) !void {
+        switch (type_name) {
+            .structure => |name| try self.appendNamedTypeDependency(file, name, position),
+            .generic_structure => |generic| {
+                try self.appendNamedTypeDependency(file, generic.name, position);
+                for (generic.arguments) |argument| try self.appendTypeDependencies(file, argument, position);
+            },
+            .list, .optional => |contained| try self.appendTypeDependencies(file, contained.*, position),
+            .fixed_array => |array| try self.appendTypeDependencies(file, array.element.*, position),
+            .reference => |reference| try self.appendTypeDependencies(file, reference.target.*, position),
+            .function => |function| {
+                for (function.parameters) |parameter| try self.appendTypeDependencies(file, parameter, position);
+                if (function.return_type) |return_type| try self.appendTypeDependencies(file, return_type.*, position);
+            },
+            else => {},
+        }
+    }
+
+    fn appendNamedTypeDependency(
+        self: *Resolver,
+        file: *FileInfo,
+        name: []const u8,
+        position: Source.Position,
+    ) !void {
+        if (std.mem.indexOfScalar(u8, name, '.') == null) return;
+        const target = try self.qualifiedUseTarget(file, name) orelse return;
+        if (target.module_index == file.module_index) return;
+        try file.dependencies.append(self.allocator, .{
+            .module_index = target.module_index,
+            .position = position,
+        });
     }
 
     fn moduleOrder(self: *Resolver) ![]const usize {
@@ -319,8 +385,28 @@ pub const Resolver = struct {
     }
 
     fn collectModuleUses(self: *Resolver, module_index: usize) !void {
+        try self.collectModuleTypeAliases(module_index);
         try self.collectModuleUsesWithVisibility(module_index, true);
         try self.collectModuleUsesWithVisibility(module_index, false);
+    }
+
+    fn collectModuleTypeAliases(self: *Resolver, module_index: usize) !void {
+        for (self.file_infos) |*file| {
+            if (file.module_index != module_index) continue;
+            for (file.program.uses) |use_value| switch (use_value.target) {
+                .declaration => {},
+                .type => {
+                    const local_name = use_value.alias.?;
+                    try self.validateLocalBinding(file, local_name, use_value.position);
+                    const declaration = self.findDirectByPosition(use_value.position, .type_alias).?;
+                    try file.uses.append(self.allocator, .{
+                        .local_name = local_name,
+                        .declaration = declaration,
+                        .position = use_value.position,
+                    });
+                },
+            };
+        }
     }
 
     fn collectModuleUsesWithVisibility(self: *Resolver, module_index: usize, is_public: bool) !void {
@@ -328,9 +414,13 @@ pub const Resolver = struct {
             if (file.module_index != module_index) continue;
             for (file.program.uses) |use_value| {
                 if (use_value.is_public != is_public) continue;
+                const path = switch (use_value.target) {
+                    .declaration => |value| value,
+                    .type => continue,
+                };
                 if (moduleUseAt(file, use_value.position)) continue;
-                const declarations = try self.resolveUses(file, use_value.path, use_value.position);
-                const local_name = use_value.alias orelse lastSegment(use_value.path);
+                const declarations = try self.resolveUses(file, path, use_value.position);
+                const local_name = use_value.alias orelse lastSegment(path);
                 try self.validateLocalBinding(file, local_name, use_value.position);
                 for (declarations) |declaration| {
                     try file.uses.append(self.allocator, .{
@@ -395,6 +485,9 @@ pub const Resolver = struct {
     }
 
     fn transformStructure(self: *Resolver, structure: Ast.Structure) !Ast.Structure {
+        const previous_type_parameters = self.current_type_parameters;
+        self.current_type_parameters = structure.type_parameters;
+        defer self.current_type_parameters = previous_type_parameters;
         const declaration = self.findDirectByPosition(structure.name_position, .structure).?;
         var fields: std.ArrayList(Ast.StructureField) = .empty;
         for (structure.fields) |field| {
@@ -448,6 +541,9 @@ pub const Resolver = struct {
     }
 
     fn transformFunction(self: *Resolver, function: Ast.Function) !Ast.Function {
+        const previous_type_parameters = self.current_type_parameters;
+        self.current_type_parameters = function.type_parameters;
+        defer self.current_type_parameters = previous_type_parameters;
         const declaration = self.findDirectByPosition(function.name_position, .function).?;
         return self.transformFunctionBody(function, declaration.canonical_name);
     }
@@ -472,7 +568,25 @@ pub const Resolver = struct {
 
     fn transformType(self: *Resolver, value: Ast.TypeName, position: Source.Position) anyerror!Ast.TypeName {
         return switch (value) {
-            .structure => |name| .{ .structure = (try self.resolveName(position.file, name, .structure, position)).canonical_name },
+            .structure => |name| if (self.isCurrentTypeParameter(name))
+                .{ .type_parameter = name }
+            else if (try self.visibleTypeAlias(position.file, name)) |alias|
+                try self.resolveAliasType(alias)
+            else
+                .{ .structure = (try self.resolveName(position.file, name, .structure, position)).canonical_name },
+            .generic_structure => |generic| generic_type: {
+                if (self.isCurrentTypeParameter(generic.name)) {
+                    return self.fail(position, "a type parameter cannot accept type arguments");
+                }
+                const declaration = try self.resolveName(position.file, generic.name, .structure, position);
+                var arguments: std.ArrayList(Ast.TypeName) = .empty;
+                for (generic.arguments) |argument| try arguments.append(self.allocator, try self.transformType(argument, position));
+                break :generic_type .{ .generic_structure = .{
+                    .name = declaration.canonical_name,
+                    .arguments = try arguments.toOwnedSlice(self.allocator),
+                } };
+            },
+            .type_parameter => value,
             .list => |element| .{ .list = try self.transformTypePointer(element.*, position) },
             .fixed_array => |array| .{ .fixed_array = .{
                 .element = try self.transformTypePointer(array.element.*, position),
@@ -502,13 +616,134 @@ pub const Resolver = struct {
         return result;
     }
 
+    fn transformTypeArguments(
+        self: *Resolver,
+        arguments: []const Ast.TypeName,
+        position: Source.Position,
+    ) anyerror![]const Ast.TypeName {
+        var result: std.ArrayList(Ast.TypeName) = .empty;
+        for (arguments) |argument| try result.append(self.allocator, try self.transformType(argument, position));
+        return result.toOwnedSlice(self.allocator);
+    }
+
     fn transformReturnType(self: *Resolver, value: Ast.ReturnType, position: Source.Position) !Ast.ReturnType {
         return switch (value) {
-            .structure => |name| .{ .structure = (try self.resolveName(position.file, name, .structure, position)).canonical_name },
+            .structure => |name| type_result: {
+                const transformed = try self.transformType(.{ .structure = name }, position);
+                break :type_result typeNameToReturnType(transformed);
+            },
+            .generic_structure => |generic| .{ .generic_structure = (try self.transformType(.{ .generic_structure = generic }, position)).generic_structure },
+            .type_parameter => value,
             .function => |function| .{ .function = (try self.transformType(.{ .function = function }, position)).function },
             .optional => |contained| .{ .optional = try self.transformTypePointer(contained.*, position) },
             else => value,
         };
+    }
+
+    fn isCurrentTypeParameter(self: *const Resolver, name: []const u8) bool {
+        if (std.mem.indexOfScalar(u8, name, '.') != null) return false;
+        for (self.current_type_parameters) |parameter| {
+            if (std.mem.eql(u8, parameter.name, name)) return true;
+        }
+        return false;
+    }
+
+    fn visibleTypeAlias(
+        self: *Resolver,
+        file_index: usize,
+        name: []const u8,
+    ) !?*const Declaration {
+        const file = &self.file_infos[file_index];
+        if (std.mem.indexOfScalar(u8, name, '.') == null) {
+            for (file.uses.items) |binding| {
+                if (binding.declaration.kind == .type_alias and std.mem.eql(u8, binding.local_name, name)) {
+                    return binding.declaration;
+                }
+            }
+            return null;
+        }
+        const target = try self.qualifiedExpressionTarget(file, name) orelse return null;
+        const export_value = self.findExport(target.module_index, target.public_name, .type_alias) orelse return null;
+        return export_value.declaration;
+    }
+
+    fn resolveAliasType(self: *Resolver, declaration: *const Declaration) anyerror!Ast.TypeName {
+        for (self.alias_stack.items) |active| {
+            if (active == declaration) {
+                const message = try std.fmt.allocPrint(self.allocator, "type alias cycle involving '{s}'", .{declaration.source_name});
+                return self.fail(declaration.position, message);
+            }
+        }
+        try self.alias_stack.append(self.allocator, declaration);
+        defer _ = self.alias_stack.pop();
+        return self.transformType(declaration.aliased_type.?, declaration.position);
+    }
+
+    fn validateTypeAliases(self: *Resolver) !void {
+        for (self.declarations.items) |*declaration| {
+            if (declaration.kind != .type_alias) continue;
+            const resolved = try self.resolveAliasType(declaration);
+            try self.validateAliasedType(resolved, declaration.position);
+        }
+    }
+
+    fn validateAliasedType(self: *Resolver, value: Ast.TypeName, position: Source.Position) !void {
+        switch (value) {
+            .structure => |name| {
+                const declaration = self.findDeclarationByCanonicalName(name, .structure) orelse return;
+                const parameter_count = self.structureTypeParameterCount(declaration.position);
+                if (parameter_count != 0) {
+                    const message = try std.fmt.allocPrint(
+                        self.allocator,
+                        "generic struct '{s}' requires {d} type argument{s}",
+                        .{ name, parameter_count, if (parameter_count == 1) "" else "s" },
+                    );
+                    return self.fail(position, message);
+                }
+            },
+            .generic_structure => |generic| {
+                const declaration = self.findDeclarationByCanonicalName(generic.name, .structure) orelse {
+                    const message = try std.fmt.allocPrint(self.allocator, "unknown generic struct '{s}'", .{generic.name});
+                    return self.fail(position, message);
+                };
+                const parameter_count = self.structureTypeParameterCount(declaration.position);
+                if (parameter_count != generic.arguments.len) {
+                    const message = if (parameter_count == 0)
+                        try std.fmt.allocPrint(self.allocator, "struct '{s}' does not accept type arguments", .{generic.name})
+                    else
+                        try std.fmt.allocPrint(
+                            self.allocator,
+                            "generic struct '{s}' expects {d} type argument{s}, found {d}",
+                            .{ generic.name, parameter_count, if (parameter_count == 1) "" else "s", generic.arguments.len },
+                        );
+                    return self.fail(position, message);
+                }
+                for (generic.arguments) |argument| try self.validateAliasedType(argument, position);
+            },
+            .list, .optional => |contained| try self.validateAliasedType(contained.*, position),
+            .fixed_array => |array| try self.validateAliasedType(array.element.*, position),
+            .reference => |reference| try self.validateAliasedType(reference.target.*, position),
+            .function => |function| {
+                for (function.parameters) |parameter| try self.validateAliasedType(parameter, position);
+                if (function.return_type) |return_type| try self.validateAliasedType(return_type.*, position);
+            },
+            else => {},
+        }
+    }
+
+    fn findDeclarationByCanonicalName(self: *Resolver, name: []const u8, kind: Kind) ?*const Declaration {
+        for (self.declarations.items) |*declaration| {
+            if (declaration.kind == kind and std.mem.eql(u8, declaration.canonical_name, name)) return declaration;
+        }
+        return null;
+    }
+
+    fn structureTypeParameterCount(self: *const Resolver, position: Source.Position) usize {
+        for (self.files) |file| for (file.program.structures) |structure| {
+            if (structure.name_position.file == position.file and structure.name_position.line == position.line and
+                structure.name_position.column == position.column) return structure.type_parameters.len;
+        };
+        return 0;
     }
 
     fn transformStatement(self: *Resolver, statement: Ast.Statement) anyerror!Ast.Statement {
@@ -627,7 +862,11 @@ pub const Resolver = struct {
         result.position = expression.position;
         result.value = switch (expression.value) {
             .call => |call| call: {
+                const type_arguments = try self.transformTypeArguments(call.type_arguments, call.name_position);
                 if (call.named_fields) |fields| {
+                    if (try self.visibleTypeAlias(expression.position.file, call.name)) |alias| {
+                        break :call try self.transformAliasInvocation(alias, call.name, call.name_position, type_arguments, call.arguments, fields);
+                    }
                     if ((try self.visibleDeclarationKind(expression.position.file, call.name)) == .function) {
                         const message = try std.fmt.allocPrint(self.allocator, "function '{s}' does not accept named arguments; named fields initialize a struct", .{call.name});
                         return self.fail(call.name_position, message);
@@ -636,11 +875,13 @@ pub const Resolver = struct {
                     break :call .{ .structure_initializer = .{
                         .name = declaration.canonical_name,
                         .name_position = call.name_position,
+                        .type_arguments = type_arguments,
                         .fields = try self.transformFieldInitializers(fields),
                     } };
                 }
                 const arguments = try self.transformExpressions(call.arguments);
                 if (self.findLocal(call.name)) {
+                    if (type_arguments.len != 0) return self.fail(call.name_position, "a callable value cannot accept type arguments");
                     break :call .{ .call = .{
                         .name = call.name,
                         .name_position = call.name_position,
@@ -648,9 +889,13 @@ pub const Resolver = struct {
                         .visible_declarations = null,
                     } };
                 }
+                if (try self.visibleTypeAlias(expression.position.file, call.name)) |alias| {
+                    break :call try self.transformAliasInvocation(alias, call.name, call.name_position, type_arguments, call.arguments, null);
+                }
                 if ((try self.visibleDeclarationKind(expression.position.file, call.name)) == .structure) {
                     const declaration = try self.resolveName(expression.position.file, call.name, .structure, call.name_position);
                     if (self.declarationIsClass(declaration)) {
+                        if (type_arguments.len != 0) return self.fail(call.name_position, "generic classes are not supported");
                         break :call .{ .class_initializer = .{
                             .name = declaration.canonical_name,
                             .name_position = call.name_position,
@@ -664,6 +909,7 @@ pub const Resolver = struct {
                     break :call .{ .structure_initializer = .{
                         .name = declaration.canonical_name,
                         .name_position = call.name_position,
+                        .type_arguments = type_arguments,
                         .fields = &.{},
                     } };
                 }
@@ -671,6 +917,7 @@ pub const Resolver = struct {
                 break :call .{ .call = .{
                     .name = declarations[0].canonical_name,
                     .name_position = call.name_position,
+                    .type_arguments = type_arguments,
                     .arguments = arguments,
                     .visible_declarations = try declarationPositions(self.allocator, declarations),
                 } };
@@ -701,6 +948,7 @@ pub const Resolver = struct {
             .structure_initializer => |initializer| .{ .structure_initializer = .{
                 .name = (try self.resolveName(expression.position.file, initializer.name, .structure, initializer.name_position)).canonical_name,
                 .name_position = initializer.name_position,
+                .type_arguments = try self.transformTypeArguments(initializer.type_arguments, initializer.name_position),
                 .fields = try self.transformFieldInitializers(initializer.fields),
             } },
             .class_initializer => |initializer| .{ .class_initializer = .{
@@ -709,9 +957,13 @@ pub const Resolver = struct {
                 .arguments = try self.transformExpressions(initializer.arguments),
             } },
             .method_call => |call| method: {
+                const type_arguments = try self.transformTypeArguments(call.type_arguments, call.name_position);
                 if (try self.expressionPath(call.object)) |prefix| {
                     const path = try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ prefix, call.name });
                     if (self.looksQualified(expression.position.file, path)) {
+                        if (try self.visibleTypeAlias(expression.position.file, path)) |alias| {
+                            break :method try self.transformAliasInvocation(alias, path, call.name_position, type_arguments, call.arguments, call.named_fields);
+                        }
                         if (call.named_fields) |fields| {
                             if ((try self.visibleDeclarationKind(expression.position.file, path)) == .function) {
                                 const message = try std.fmt.allocPrint(self.allocator, "function '{s}' does not accept named arguments; named fields initialize a struct", .{path});
@@ -721,12 +973,14 @@ pub const Resolver = struct {
                             break :method .{ .structure_initializer = .{
                                 .name = declaration.canonical_name,
                                 .name_position = call.name_position,
+                                .type_arguments = type_arguments,
                                 .fields = try self.transformFieldInitializers(fields),
                             } };
                         }
                         if ((try self.visibleDeclarationKind(expression.position.file, path)) == .structure) {
                             const declaration = try self.resolveName(expression.position.file, path, .structure, call.name_position);
                             if (self.declarationIsClass(declaration)) {
+                                if (type_arguments.len != 0) return self.fail(call.name_position, "generic classes are not supported");
                                 break :method .{ .class_initializer = .{
                                     .name = declaration.canonical_name,
                                     .name_position = call.name_position,
@@ -740,6 +994,7 @@ pub const Resolver = struct {
                             break :method .{ .structure_initializer = .{
                                 .name = declaration.canonical_name,
                                 .name_position = call.name_position,
+                                .type_arguments = type_arguments,
                                 .fields = &.{},
                             } };
                         }
@@ -747,6 +1002,7 @@ pub const Resolver = struct {
                         break :method .{ .call = .{
                             .name = declarations[0].canonical_name,
                             .name_position = call.name_position,
+                            .type_arguments = type_arguments,
                             .arguments = try self.transformExpressions(call.arguments),
                             .visible_declarations = try declarationPositions(self.allocator, declarations),
                         } };
@@ -755,6 +1011,7 @@ pub const Resolver = struct {
                 if (call.named_fields != null) {
                     return self.fail(call.name_position, "named arguments require a struct invocation");
                 }
+                if (type_arguments.len != 0) return self.fail(call.name_position, "generic methods are not supported");
                 break :method .{ .method_call = .{
                     .object = try self.transformExpression(call.object),
                     .name = call.name,
@@ -845,6 +1102,66 @@ pub const Resolver = struct {
         return result.toOwnedSlice(self.allocator);
     }
 
+    fn transformAliasInvocation(
+        self: *Resolver,
+        alias: *const Declaration,
+        display_name: []const u8,
+        position: Source.Position,
+        type_arguments: []const Ast.TypeName,
+        arguments: []const *Ast.Expression,
+        named_fields: ?[]const Ast.Expression.FieldInitializer,
+    ) anyerror!Ast.Expression.Value {
+        if (type_arguments.len != 0) {
+            const message = try std.fmt.allocPrint(self.allocator, "type alias '{s}' does not accept type arguments", .{display_name});
+            return self.fail(position, message);
+        }
+        const resolved = try self.resolveAliasType(alias);
+        return switch (resolved) {
+            .generic_structure => |generic| generic_initializer: {
+                if (arguments.len != 0) {
+                    const message = try std.fmt.allocPrint(self.allocator, "struct alias '{s}' requires named fields such as 'field:value'", .{display_name});
+                    return self.fail(position, message);
+                }
+                break :generic_initializer .{ .structure_initializer = .{
+                    .name = generic.name,
+                    .name_position = position,
+                    .type_arguments = generic.arguments,
+                    .fields = if (named_fields) |fields| try self.transformFieldInitializers(fields) else &.{},
+                } };
+            },
+            .structure => |name| structure_initializer: {
+                if (named_fields) |fields| {
+                    break :structure_initializer .{ .structure_initializer = .{
+                        .name = name,
+                        .name_position = position,
+                        .fields = try self.transformFieldInitializers(fields),
+                    } };
+                }
+                const declaration = self.findDeclarationByCanonicalName(name, .structure).?;
+                if (self.declarationIsClass(declaration)) {
+                    break :structure_initializer .{ .class_initializer = .{
+                        .name = name,
+                        .name_position = position,
+                        .arguments = try self.transformExpressions(arguments),
+                    } };
+                }
+                if (arguments.len != 0) {
+                    const message = try std.fmt.allocPrint(self.allocator, "struct alias '{s}' requires named fields such as 'field:value'", .{display_name});
+                    return self.fail(position, message);
+                }
+                break :structure_initializer .{ .structure_initializer = .{
+                    .name = name,
+                    .name_position = position,
+                    .fields = &.{},
+                } };
+            },
+            else => {
+                const message = try std.fmt.allocPrint(self.allocator, "type alias '{s}' cannot be used as a function or value", .{display_name});
+                return self.fail(position, message);
+            },
+        };
+    }
+
     fn resolveUses(
         self: *Resolver,
         file: *const FileInfo,
@@ -852,6 +1169,11 @@ pub const Resolver = struct {
         position: Source.Position,
     ) ![]const *const Declaration {
         if (std.mem.lastIndexOfScalar(u8, path, '.') == null) {
+            var used: std.ArrayList(*const Declaration) = .empty;
+            for (file.uses.items) |binding| {
+                if (std.mem.eql(u8, binding.local_name, path)) try used.append(self.allocator, binding.declaration);
+            }
+            if (used.items.len != 0) return used.toOwnedSlice(self.allocator);
             const declarations = try self.declarationsNamed(file.module_index, path, null, false);
             if (declarations.len != 0) return declarations;
             const message = try std.fmt.allocPrint(self.allocator, "unknown declaration '{s}'", .{path});
@@ -1083,7 +1405,7 @@ pub const Resolver = struct {
             }
         } else {
             for (self.declarations.items) |*declaration| {
-                if (declaration.module_index == module_index and
+                if (declaration.kind != .type_alias and declaration.module_index == module_index and
                     std.mem.eql(u8, declaration.source_name, name) and
                     (kind == null or declaration.kind == kind.?))
                 {
@@ -1096,6 +1418,7 @@ pub const Resolver = struct {
 
     fn findDirect(self: *Resolver, module_index: usize, name: []const u8, kind: ?Kind) ?*const Declaration {
         for (self.declarations.items) |*declaration| {
+            if (kind == null and declaration.kind == .type_alias) continue;
             if (declaration.module_index == module_index and (kind == null or declaration.kind == kind.?) and
                 std.mem.eql(u8, declaration.source_name, name)) return declaration;
         }
@@ -1184,4 +1507,32 @@ fn declarationPositions(allocator: Allocator, declarations: []const *const Decla
     var positions: std.ArrayList(Source.Position) = .empty;
     for (declarations) |declaration| try positions.append(allocator, declaration.position);
     return positions.toOwnedSlice(allocator);
+}
+
+fn typeNameToReturnType(value: Ast.TypeName) Ast.ReturnType {
+    return switch (value) {
+        .int => .int,
+        .int8 => .int8,
+        .int16 => .int16,
+        .int32 => .int32,
+        .int64 => .int64,
+        .uint => .uint,
+        .uint8 => .uint8,
+        .uint16 => .uint16,
+        .uint32 => .uint32,
+        .uint64 => .uint64,
+        .float => .float,
+        .float32 => .float32,
+        .float64 => .float64,
+        .bool => .bool,
+        .str => .str,
+        .structure => |name| .{ .structure = name },
+        .generic_structure => |generic| .{ .generic_structure = generic },
+        .type_parameter => |name| .{ .type_parameter = name },
+        .list => |contained| .{ .list = contained },
+        .fixed_array => |array| .{ .fixed_array = array },
+        .reference => |reference| .{ .reference = reference },
+        .function => |function| .{ .function = function },
+        .optional => |contained| .{ .optional = contained },
+    };
 }

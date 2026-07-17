@@ -53,6 +53,12 @@ const DeclaredVariable = struct {
     offset: usize,
 };
 
+const DeclaredTypeAlias = struct {
+    name: []const u8,
+    target_name: []const u8,
+    collection: ?CollectionKind = null,
+};
+
 const CollectionKind = enum {
     list,
     fixed_array,
@@ -62,6 +68,11 @@ const ReceiverType = union(enum) {
     structure: []const u8,
     list,
     fixed_array,
+};
+
+const NamedType = struct {
+    name: []const u8,
+    collection: ?CollectionKind = null,
 };
 
 const StructureRange = struct {
@@ -76,11 +87,13 @@ const SemanticInfo = struct {
     members: std.ArrayList(DeclaredMember) = .empty,
     variables: std.ArrayList(DeclaredVariable) = .empty,
     structures: std.ArrayList(StructureRange) = .empty,
+    aliases: std.ArrayList(DeclaredTypeAlias) = .empty,
 
     fn deinit(self: *SemanticInfo, allocator: Allocator) void {
         self.members.deinit(allocator);
         self.variables.deinit(allocator);
         self.structures.deinit(allocator);
+        self.aliases.deinit(allocator);
     }
 };
 
@@ -441,6 +454,20 @@ fn signatureNameAt(source: []const u8, cursor: usize) ?[]const u8 {
     if (index == 0) return null;
     index -= 1;
     while (index > 0 and std.ascii.isWhitespace(source[index - 1])) index -= 1;
+    if (index > 0 and source[index - 1] == '>') {
+        var depth: usize = 0;
+        while (index > 0) {
+            index -= 1;
+            if (source[index] == '>') {
+                depth += 1;
+            } else if (source[index] == '<') {
+                depth -= 1;
+                if (depth == 0) break;
+            }
+        }
+        if (depth != 0) return null;
+        while (index > 0 and std.ascii.isWhitespace(source[index - 1])) index -= 1;
+    }
     const end = index;
     while (index > 0 and isIdentifierContinue(source[index - 1])) index -= 1;
     return if (index == end) null else source[index..end];
@@ -453,6 +480,14 @@ fn appendSignatureHelp(
 ) !void {
     var label: std.ArrayList(u8) = .empty;
     try label.appendSlice(allocator, function.name);
+    if (function.type_parameters.len != 0) {
+        try label.append(allocator, '<');
+        for (function.type_parameters, 0..) |parameter, index| {
+            if (index != 0) try label.appendSlice(allocator, ", ");
+            try label.appendSlice(allocator, parameter.name);
+        }
+        try label.append(allocator, '>');
+    }
     try label.append(allocator, '(');
     for (function.parameters, 0..) |parameter, index| {
         if (index != 0) try label.appendSlice(allocator, ", ");
@@ -483,6 +518,16 @@ fn appendAstTypeName(allocator: Allocator, output: *std.ArrayList(u8), type_name
         .bool => try output.appendSlice(allocator, "bool"),
         .str => try output.appendSlice(allocator, "str"),
         .structure => |name| try output.appendSlice(allocator, name),
+        .generic_structure => |generic| {
+            try output.appendSlice(allocator, generic.name);
+            try output.append(allocator, '<');
+            for (generic.arguments, 0..) |argument, index| {
+                if (index != 0) try output.appendSlice(allocator, ", ");
+                try appendAstTypeName(allocator, output, argument);
+            }
+            try output.append(allocator, '>');
+        },
+        .type_parameter => |name| try output.appendSlice(allocator, name),
         .list => |element| {
             try appendAstTypeName(allocator, output, element.*);
             try output.appendSlice(allocator, "[]");
@@ -628,6 +673,7 @@ fn importedModulePath(allocator: Allocator, source: []const u8, qualifier: []con
         const module_end = std.mem.indexOfAny(u8, declaration, " \t\r") orelse declaration.len;
         const path = declaration[0..module_end];
         if (path.len == 0) continue;
+        if (kind == .use_value and looksLikeTypeAliasTarget(path)) continue;
 
         const remainder = std.mem.trimStart(u8, declaration[module_end..], " \t");
         const visible_qualifier = if (std.mem.startsWith(u8, remainder, "as "))
@@ -646,6 +692,17 @@ fn directiveBody(line: []const u8, keyword: []const u8) ?[]const u8 {
     if (!std.mem.startsWith(u8, line, keyword) or line.len == keyword.len or
         !std.ascii.isWhitespace(line[keyword.len])) return null;
     return std.mem.trimStart(u8, line[keyword.len..], " \t");
+}
+
+fn looksLikeTypeAliasTarget(path: []const u8) bool {
+    if (std.mem.indexOfAny(u8, path, "<[]?()") != null) return true;
+    const builtins = [_][]const u8{
+        "int",   "int8",    "int16",   "int32",  "int64",
+        "uint",  "uint8",   "uint16",  "uint32", "uint64",
+        "float", "float32", "float64", "bool",   "str",
+    };
+    for (builtins) |builtin_name| if (std.mem.eql(u8, path, builtin_name)) return true;
+    return false;
 }
 
 fn expandVisibleModulePath(
@@ -736,6 +793,19 @@ fn moduleExportCompletionItems(
                 structure.name,
                 22,
                 "Silex public structure",
+            );
+        }
+        for (program.uses) |use_value| {
+            if (!use_value.is_public or use_value.target != .type) continue;
+            const alias = use_value.alias.?;
+            if (!std.mem.startsWith(u8, alias, context.prefix)) continue;
+            try appendModuleExportCompletion(
+                allocator,
+                &items,
+                context.qualifier,
+                alias,
+                7,
+                "Silex public type alias",
             );
         }
         if (!context.type_only) {
@@ -999,6 +1069,7 @@ fn collectSemanticInfo(
     info: *SemanticInfo,
 ) !void {
     try collectImportedStructures(allocator, io, source, project_root, tokens, info);
+    try collectLocalTypeAliases(allocator, tokens, info);
     var index: usize = 0;
     while (index < tokens.len) : (index += 1) {
         if ((tokens[index].tag == .keyword_struct or tokens[index].tag == .keyword_class) and
@@ -1008,6 +1079,9 @@ fn collectSemanticInfo(
             const is_class = tokens[index].tag == .keyword_class;
             var base_name: ?[]const u8 = null;
             var body_index = index + 2;
+            if (tokens[body_index].tag == .less) {
+                body_index = genericArgumentsEnd(tokens, body_index) orelse continue;
+            }
             if (tokens[body_index].tag == .colon) {
                 body_index += 1;
                 while (body_index < tokens.len and tokens[body_index].tag != .left_brace) : (body_index += 1) {
@@ -1140,7 +1214,11 @@ fn structureInitializerType(info: *const SemanticInfo, tokens: []const LexerModu
         type_name = tokens[index + 1].lexeme;
         index += 2;
     }
+    if (index < tokens.len and tokens[index].tag == .less) {
+        index = genericArgumentsEnd(tokens, index) orelse return null;
+    }
     if (index >= tokens.len or tokens[index].tag != .left_parenthesis) return null;
+    type_name = resolveNamedType(info.*, type_name, null).name;
     const named_initializer = index + 2 < tokens.len and tokens[index + 1].tag == .identifier and
         tokens[index + 2].tag == .colon;
     const empty_initializer = index + 1 < tokens.len and tokens[index + 1].tag == .right_parenthesis;
@@ -1170,8 +1248,105 @@ fn structureInitializerPath(
         try path.appendSlice(allocator, tokens[index + 1].lexeme);
         index += 2;
     }
+    if (index < tokens.len and tokens[index].tag == .less) {
+        index = genericArgumentsEnd(tokens, index) orelse return null;
+    }
     if (index >= tokens.len or tokens[index].tag != .left_parenthesis) return null;
     const result: []const u8 = try path.toOwnedSlice(allocator);
+    return result;
+}
+
+fn genericArgumentsEnd(tokens: []const LexerModule.Token, start: usize) ?usize {
+    if (start >= tokens.len or tokens[start].tag != .less) return null;
+    var depth: usize = 0;
+    var index = start;
+    while (index < tokens.len) : (index += 1) {
+        switch (tokens[index].tag) {
+            .less => depth += 1,
+            .greater => {
+                if (depth == 0) return null;
+                depth -= 1;
+                if (depth == 0) return index + 1;
+            },
+            .shift_right => {
+                if (depth == 0) return null;
+                if (depth <= 2) return index + 1;
+                depth -= 2;
+            },
+            else => {},
+        }
+    }
+    return null;
+}
+
+fn collectLocalTypeAliases(
+    allocator: Allocator,
+    tokens: []const LexerModule.Token,
+    info: *SemanticInfo,
+) !void {
+    for (tokens, 0..) |token, use_index| {
+        if (token.tag != .keyword_use or use_index + 2 >= tokens.len) continue;
+        const line = token.position.line;
+        var as_index = use_index + 1;
+        while (as_index < tokens.len and tokens[as_index].position.line == line and
+            tokens[as_index].tag != .keyword_as) : (as_index += 1)
+        {}
+        if (as_index + 1 >= tokens.len or tokens[as_index].tag != .keyword_as or
+            tokens[as_index + 1].tag != .identifier) continue;
+
+        var target_index = use_index + 1;
+        while (target_index < as_index and tokens[target_index].tag == .amp) target_index += 1;
+        if (target_index >= as_index or !isTypeToken(tokens[target_index].tag) and
+            tokens[target_index].tag != .keyword_func) continue;
+
+        var target_name = tokens[target_index].lexeme;
+        var path_index = target_index + 1;
+        while (path_index + 1 < as_index and tokens[path_index].tag == .dot and
+            tokens[path_index + 1].tag == .identifier)
+        {
+            target_name = tokens[path_index + 1].lexeme;
+            path_index += 2;
+        }
+        try info.aliases.append(allocator, .{
+            .name = tokens[as_index + 1].lexeme,
+            .target_name = target_name,
+            .collection = aliasCollectionKind(tokens[target_index..as_index]),
+        });
+    }
+}
+
+fn aliasCollectionKind(tokens: []const LexerModule.Token) ?CollectionKind {
+    var generic_depth: usize = 0;
+    for (tokens, 0..) |token, index| {
+        switch (token.tag) {
+            .less => generic_depth += 1,
+            .greater => generic_depth -|= 1,
+            .shift_right => generic_depth -|= 2,
+            .left_bracket => if (generic_depth == 0) {
+                if (index + 1 < tokens.len and tokens[index + 1].tag == .right_bracket) return .list;
+                if (index + 2 < tokens.len and tokens[index + 1].tag == .integer and
+                    tokens[index + 2].tag == .right_bracket) return .fixed_array;
+            },
+            else => {},
+        }
+    }
+    return null;
+}
+
+fn resolveNamedType(info: SemanticInfo, name: []const u8, collection: ?CollectionKind) NamedType {
+    var result: NamedType = .{ .name = name, .collection = collection };
+    var depth: usize = 0;
+    while (depth <= info.aliases.items.len) : (depth += 1) {
+        var alias_index = info.aliases.items.len;
+        while (alias_index > 0) {
+            alias_index -= 1;
+            const alias = info.aliases.items[alias_index];
+            if (!std.mem.eql(u8, alias.name, result.name)) continue;
+            result.name = alias.target_name;
+            if (result.collection == null) result.collection = alias.collection;
+            break;
+        } else return result;
+    }
     return result;
 }
 
@@ -1195,6 +1370,7 @@ fn collectImportedStructures(
         const declaration = directiveBody(line, if (kind == .import_value) "import" else "use").?;
         const module_end = std.mem.indexOfAny(u8, declaration, " \t\r") orelse declaration.len;
         const path = declaration[0..module_end];
+        if (kind == .use_value and looksLikeTypeAliasTarget(path)) continue;
         const remainder = std.mem.trimStart(u8, declaration[module_end..], " \t");
         const qualifier = if (std.mem.startsWith(u8, remainder, "as "))
             std.mem.trim(u8, remainder["as ".len..], " \t\r")
@@ -1326,6 +1502,22 @@ fn collectPublicStructureMembers(
             });
         }
     }
+    for (program.uses) |use_value| {
+        if (!use_value.is_public) continue;
+        const alias = use_value.alias orelse continue;
+        const target = switch (use_value.target) {
+            .declaration => |declaration| NamedType{ .name = lastPathSegment(declaration) },
+            .type => |type_name| NamedType{
+                .name = lastPathSegment(astTypeName(type_name)),
+                .collection = astCollectionKind(type_name),
+            },
+        };
+        try info.aliases.append(allocator, .{
+            .name = alias,
+            .target_name = target.name,
+            .collection = target.collection,
+        });
+    }
 }
 
 fn astTypeName(type_name: Ast.TypeName) []const u8 {
@@ -1346,6 +1538,8 @@ fn astTypeName(type_name: Ast.TypeName) []const u8 {
         .bool => "bool",
         .str => "str",
         .structure => |name| name,
+        .generic_structure => |generic| generic.name,
+        .type_parameter => |name| name,
         .list => |element| astTypeName(element.*),
         .fixed_array => |array| astTypeName(array.element.*),
         .reference => |reference| astTypeName(reference.target.*),
@@ -1597,10 +1791,11 @@ fn receiverType(info: SemanticInfo, receiver: []const u8, cursor_offset: usize) 
         if (variable.offset <= cursor_offset and variable.offset >= result_offset and
             std.mem.eql(u8, variable.name, receiver))
         {
-            result = if (variable.collection) |collection| switch (collection) {
+            const resolved = resolveNamedType(info, variable.type_name, variable.collection);
+            result = if (resolved.collection) |collection| switch (collection) {
                 .list => .list,
                 .fixed_array => .fixed_array,
-            } else .{ .structure = variable.type_name };
+            } else .{ .structure = resolved.name };
             result_offset = variable.offset;
         }
     }
@@ -1628,11 +1823,13 @@ fn fieldType(
         for (info.members.items) |member| {
             if (std.mem.eql(u8, member.structure, structure_name) and std.mem.eql(u8, member.name, field)) {
                 if (!memberVisibleForCompletion(info, structure_name, member.visibility, enclosing_structure)) return null;
-                if (member.collection) |collection| return switch (collection) {
+                const type_name = member.type_name orelse return null;
+                const resolved = resolveNamedType(info, type_name, member.collection);
+                if (resolved.collection) |collection| return switch (collection) {
                     .list => .list,
                     .fixed_array => .fixed_array,
                 };
-                return if (member.type_name) |type_name| .{ .structure = type_name } else null;
+                return .{ .structure = resolved.name };
             }
         }
         current_structure = structureBase(info, structure_name);
@@ -2057,6 +2254,132 @@ test "member completion only includes members of the receiver structure" {
     try std.testing.expectEqual(@as(u8, 5), items[0].kind);
 }
 
+test "member completion infers an explicit generic structure initializer" {
+    const source =
+        \\struct Vec3<T> {
+        \\    x:T
+        \\    y:T
+        \\    z:T
+        \\    func reset() {}
+        \\}
+        \\func main() {
+        \\    var value = Vec3<int>()
+        \\    print(value.)
+        \\}
+    ;
+    const items = try completionItems(std.testing.allocator, std.testing.io, source, .{ .line = 8, .character = 16 });
+    defer std.testing.allocator.free(items);
+    try std.testing.expect(containsCompletion(items, "x"));
+    try std.testing.expect(containsCompletion(items, "y"));
+    try std.testing.expect(containsCompletion(items, "z"));
+    try std.testing.expect(containsCompletion(items, "reset"));
+}
+
+test "member completion resolves a local generic type alias initializer" {
+    const source =
+        \\struct Vec3<T> {
+        \\    x:T
+        \\    y:T
+        \\    z:T
+        \\    func reset() {}
+        \\}
+        \\use Vec3<int> as Vec3i
+        \\func main() {
+        \\    var value = Vec3i()
+        \\    print(value.)
+        \\}
+    ;
+    const items = try completionItems(std.testing.allocator, std.testing.io, source, .{ .line = 9, .character = 16 });
+    defer std.testing.allocator.free(items);
+    try std.testing.expect(containsCompletion(items, "x"));
+    try std.testing.expect(containsCompletion(items, "y"));
+    try std.testing.expect(containsCompletion(items, "z"));
+    try std.testing.expect(containsCompletion(items, "reset"));
+}
+
+test "member completion resolves generic and aliased type annotations" {
+    const source =
+        \\struct Vec3<T> {
+        \\    x:T
+        \\    func reset() {}
+        \\}
+        \\use Vec3<int> as Vec3i
+        \\func main() {
+        \\    var direct:Vec3<int>
+        \\    var aliased:Vec3i
+        \\    print(direct.)
+        \\    print(aliased.)
+        \\}
+    ;
+    const direct_items = try completionItems(std.testing.allocator, std.testing.io, source, .{ .line = 8, .character = 17 });
+    defer std.testing.allocator.free(direct_items);
+    try std.testing.expect(containsCompletion(direct_items, "x"));
+    try std.testing.expect(containsCompletion(direct_items, "reset"));
+
+    const aliased_items = try completionItems(std.testing.allocator, std.testing.io, source, .{ .line = 9, .character = 18 });
+    defer std.testing.allocator.free(aliased_items);
+    try std.testing.expect(containsCompletion(aliased_items, "x"));
+    try std.testing.expect(containsCompletion(aliased_items, "reset"));
+}
+
+test "member completion resolves an aliased generic structure field" {
+    const source =
+        \\struct Vec3<T> {
+        \\    x:T
+        \\    func reset() {}
+        \\}
+        \\use Vec3<int> as Vec3i
+        \\struct Transform {
+        \\    position:Vec3i
+        \\}
+        \\func main() {
+        \\    var transform = Transform()
+        \\    print(transform.position.)
+        \\}
+    ;
+    const items = try completionItems(std.testing.allocator, std.testing.io, source, .{ .line = 11, .character = 29 });
+    defer std.testing.allocator.free(items);
+    try std.testing.expect(containsCompletion(items, "x"));
+    try std.testing.expect(containsCompletion(items, "reset"));
+}
+
+test "member completion resolves a public generic type alias from a module" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source =
+        \\import Geometry
+        \\func main() {
+        \\    var value = Geometry.Vec3i()
+        \\    print(value.)
+        \\}
+    ;
+    const items = try completionItemsForProject(
+        arena.allocator(),
+        std.testing.io,
+        source,
+        "Tests/LspModules",
+        .{ .line = 3, .character = 16 },
+    );
+    try std.testing.expect(containsCompletion(items, "x"));
+    try std.testing.expect(containsCompletion(items, "y"));
+    try std.testing.expect(containsCompletion(items, "z"));
+    try std.testing.expect(containsCompletion(items, "reset"));
+}
+
+test "member completion preserves collection aliases" {
+    const source =
+        \\use int[] as Integers
+        \\func main() {
+        \\    var values:Integers
+        \\    values.
+        \\}
+    ;
+    const items = try completionItems(std.testing.allocator, std.testing.io, source, .{ .line = 3, .character = 11 });
+    defer std.testing.allocator.free(items);
+    try std.testing.expect(containsCompletion(items, "append"));
+    try std.testing.expect(containsCompletion(items, "reverse"));
+}
+
 test "member completion recognizes class declarations" {
     const source =
         \\class Player {
@@ -2149,6 +2472,18 @@ test "signature help lists overloaded functions once each" {
     try std.testing.expectEqualStrings("measure()", signatures[0].label);
     try std.testing.expectEqualStrings("measure(int)", signatures[1].label);
     try std.testing.expectEqualStrings("measure(float)", signatures[2].label);
+}
+
+test "signature help recognizes explicit generic arguments" {
+    const source =
+        \\func identity<T>(value:T) T { return value }
+        \\func main() { print(identity<int>(42)) }
+    ;
+    const signatures = try signatureHelpItems(std.testing.allocator, source, .{ .line = 1, .character = 39 });
+    defer std.testing.allocator.free(signatures);
+    defer for (signatures) |signature| std.testing.allocator.free(signature.label);
+    try std.testing.expectEqual(@as(usize, 1), signatures.len);
+    try std.testing.expectEqualStrings("identity<T>(T)", signatures[0].label);
 }
 
 test "cascade completion resolves a receiver on the preceding line" {

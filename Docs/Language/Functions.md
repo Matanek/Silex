@@ -18,6 +18,49 @@ canonical. A non-void return type is never inferred. The compiler collects
 signatures before checking bodies, so functions may be called before their
 definition and may be recursive.
 
+## Generic functions
+
+A function may declare type parameters after its name. Calls provide every
+type argument explicitly:
+
+```sx
+func identity<T>(value:T) T {
+    return value
+}
+
+func choose<Key, Value>(key:Key, value:Value) Value {
+    return value
+}
+
+let answer = identity<int>(42)
+let name = choose<int, str>(1, "Ada")
+```
+
+Type parameters are available throughout the signature and body. They may be
+used in local annotations, function types, collections, optionals, and generic
+structure specializations:
+
+```sx
+func boxed<T>(value:T) Box<T> {
+    return Box<T>(value:value)
+}
+```
+
+Silex does not infer type arguments. Calling `identity(42)` is therefore
+invalid unless a concrete overload named `identity` also exists. An explicit
+call such as `identity<int>(42)` considers only visible generic overloads with
+one type parameter, specializes their complete signatures and bodies, and then
+applies ordinary overload resolution.
+
+Repeating the same arguments reuses one concrete specialization. Recursion is
+valid when it calls the same specialization; recursively producing ever-new
+type arguments is rejected. Public generic functions retain the ordinary
+module, `use`, alias, and re-export rules.
+
+No constraint syntax or type-argument inference is currently provided.
+`main`, `native func`, methods with their own type parameters, and classes
+remain non-generic.
+
 ## Overloads
 
 Top-level functions and methods in the same structure may share a name when

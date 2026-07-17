@@ -1,0 +1,7 @@
+func half<T>(value:T) T {
+    return value / 2
+}
+
+func main() {
+    print(half<str>("no"))
+}

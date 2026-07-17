@@ -1,0 +1,11 @@
+struct Box<T> {
+    value:T
+}
+
+func expand<T>(value:T) {
+    expand<Box<T>>(Box<T>(value:value))
+}
+
+func main() {
+    expand<int>(1)
+}

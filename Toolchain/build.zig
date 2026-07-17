@@ -1,5 +1,5 @@
 const std = @import("std");
-const silex_version = "0.15.0";
+const silex_version = "0.16.0";
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
@@ -581,6 +581,125 @@ pub fn build(b: *std.Build) void {
         "Tests/InvalidStructFieldType.sx:7:31: error: expected 'int', found 'str'\n",
     );
 
+    const missing_generic_arguments_command = b.addRunArtifact(executable);
+    missing_generic_arguments_command.addArgs(&.{ "compile", "Tests/MissingGenericArguments.sx" });
+    missing_generic_arguments_command.expectExitCode(1);
+    missing_generic_arguments_command.expectStdErrEqual(
+        "Tests/MissingGenericArguments.sx:6:15: error: generic struct 'Box' requires 1 type argument\n",
+    );
+
+    const unexpected_generic_arguments_command = b.addRunArtifact(executable);
+    unexpected_generic_arguments_command.addArgs(&.{ "compile", "Tests/UnexpectedGenericArguments.sx" });
+    unexpected_generic_arguments_command.expectExitCode(1);
+    unexpected_generic_arguments_command.expectStdErrEqual(
+        "Tests/UnexpectedGenericArguments.sx:6:15: error: struct 'Box' does not accept type arguments\n",
+    );
+
+    const invalid_generic_arity_command = b.addRunArtifact(executable);
+    invalid_generic_arity_command.addArgs(&.{ "compile", "Tests/InvalidGenericArity.sx" });
+    invalid_generic_arity_command.expectExitCode(1);
+    invalid_generic_arity_command.expectStdErrEqual(
+        "Tests/InvalidGenericArity.sx:7:16: error: generic struct 'Pair' expects 2 type arguments, found 1\n",
+    );
+
+    const invalid_generic_specialization_command = b.addRunArtifact(executable);
+    invalid_generic_specialization_command.addArgs(&.{ "compile", "Tests/InvalidGenericSpecialization.sx" });
+    invalid_generic_specialization_command.expectExitCode(1);
+    invalid_generic_specialization_command.expectStdErrEqual(
+        "Tests/InvalidGenericSpecialization.sx:6:22: error: comparison operator requires numeric operands, found 'str' and 'str'\n",
+    );
+
+    const recursive_generic_structure_expansion_command = b.addRunArtifact(executable);
+    recursive_generic_structure_expansion_command.addArgs(&.{ "compile", "Tests/RecursiveGenericStructureExpansion.sx" });
+    recursive_generic_structure_expansion_command.expectExitCode(1);
+    recursive_generic_structure_expansion_command.expectStdErrEqual(
+        "Tests/RecursiveGenericStructureExpansion.sx:6:5: error: generic struct 'Expand' recursively expands with different type arguments\n",
+    );
+
+    const missing_generic_function_arguments_command = b.addRunArtifact(executable);
+    missing_generic_function_arguments_command.addArgs(&.{ "compile", "Tests/MissingGenericFunctionArguments.sx" });
+    missing_generic_function_arguments_command.expectExitCode(1);
+    missing_generic_function_arguments_command.expectStdErrEqual(
+        "Tests/MissingGenericFunctionArguments.sx:6:11: error: generic function 'identity' requires explicit type arguments\n",
+    );
+
+    const unexpected_generic_function_arguments_command = b.addRunArtifact(executable);
+    unexpected_generic_function_arguments_command.addArgs(&.{ "compile", "Tests/UnexpectedGenericFunctionArguments.sx" });
+    unexpected_generic_function_arguments_command.expectExitCode(1);
+    unexpected_generic_function_arguments_command.expectStdErrEqual(
+        "Tests/UnexpectedGenericFunctionArguments.sx:6:11: error: function 'identity' does not accept type arguments\n",
+    );
+
+    const invalid_generic_function_arity_command = b.addRunArtifact(executable);
+    invalid_generic_function_arity_command.addArgs(&.{ "compile", "Tests/InvalidGenericFunctionArity.sx" });
+    invalid_generic_function_arity_command.expectExitCode(1);
+    invalid_generic_function_arity_command.expectStdErrEqual(
+        "Tests/InvalidGenericFunctionArity.sx:7:11: error: generic function 'choose' expects 2 type arguments, found 1\n",
+    );
+
+    const invalid_generic_function_specialization_command = b.addRunArtifact(executable);
+    invalid_generic_function_specialization_command.addArgs(&.{ "compile", "Tests/InvalidGenericFunctionSpecialization.sx" });
+    invalid_generic_function_specialization_command.expectExitCode(1);
+    invalid_generic_function_specialization_command.expectStdErrEqual(
+        "Tests/InvalidGenericFunctionSpecialization.sx:2:18: error: arithmetic operator requires numeric operands, found 'str' and 'int'\n",
+    );
+
+    const recursive_generic_function_expansion_command = b.addRunArtifact(executable);
+    recursive_generic_function_expansion_command.addArgs(&.{ "compile", "Tests/RecursiveGenericFunctionExpansion.sx" });
+    recursive_generic_function_expansion_command.expectExitCode(1);
+    recursive_generic_function_expansion_command.expectStdErrEqual(
+        "Tests/RecursiveGenericFunctionExpansion.sx:6:5: error: generic function 'expand' recursively expands with different type arguments\n",
+    );
+
+    const missing_type_alias_name_command = b.addRunArtifact(executable);
+    missing_type_alias_name_command.addArgs(&.{ "compile", "Tests/MissingTypeAliasName.sx" });
+    missing_type_alias_name_command.expectExitCode(1);
+    missing_type_alias_name_command.expectStdErrEqual(
+        "Tests/MissingTypeAliasName.sx:1:1: error: a type expression after 'use' requires an alias with 'as'\n",
+    );
+
+    const unknown_type_alias_target_command = b.addRunArtifact(executable);
+    unknown_type_alias_target_command.addArgs(&.{ "compile", "Tests/UnknownTypeAliasTarget.sx" });
+    unknown_type_alias_target_command.expectExitCode(1);
+    unknown_type_alias_target_command.expectStdErrEqual(
+        "Tests/UnknownTypeAliasTarget.sx:1:1: error: unknown type 'Missing'\n",
+    );
+
+    const type_alias_collision_command = b.addRunArtifact(executable);
+    type_alias_collision_command.addArgs(&.{ "compile", "Tests/TypeAliasCollision.sx" });
+    type_alias_collision_command.expectExitCode(1);
+    type_alias_collision_command.expectStdErrEqual(
+        "Tests/TypeAliasCollision.sx:3:1: error: name 'Values' collides with a module declaration\n",
+    );
+
+    const type_alias_as_value_command = b.addRunArtifact(executable);
+    type_alias_as_value_command.addArgs(&.{ "compile", "Tests/TypeAliasAsValue.sx" });
+    type_alias_as_value_command.expectExitCode(1);
+    type_alias_as_value_command.expectStdErrEqual(
+        "Tests/TypeAliasAsValue.sx:4:5: error: type alias 'Integers' cannot be used as a function or value\n",
+    );
+
+    const type_alias_cycle_command = b.addRunArtifact(executable);
+    type_alias_cycle_command.addArgs(&.{ "compile", "Tests/TypeAliasCycle.sx" });
+    type_alias_cycle_command.expectExitCode(1);
+    type_alias_cycle_command.expectStdErrEqual(
+        "Tests/TypeAliasCycle.sx:1:1: error: type alias cycle involving 'Left'\n",
+    );
+
+    const invalid_type_alias_arity_command = b.addRunArtifact(executable);
+    invalid_type_alias_arity_command.addArgs(&.{ "compile", "Tests/InvalidTypeAliasArity.sx" });
+    invalid_type_alias_arity_command.expectExitCode(1);
+    invalid_type_alias_arity_command.expectStdErrEqual(
+        "Tests/InvalidTypeAliasArity.sx:5:1: error: generic struct 'Box' expects 1 type argument, found 2\n",
+    );
+
+    const missing_type_alias_arguments_command = b.addRunArtifact(executable);
+    missing_type_alias_arguments_command.addArgs(&.{ "compile", "Tests/MissingTypeAliasArguments.sx" });
+    missing_type_alias_arguments_command.expectExitCode(1);
+    missing_type_alias_arguments_command.expectStdErrEqual(
+        "Tests/MissingTypeAliasArguments.sx:5:1: error: generic struct 'Box' requires 1 type argument\n",
+    );
+
     const legacy_struct_initializer_command = b.addRunArtifact(executable);
     legacy_struct_initializer_command.addArgs(&.{ "compile", "Tests/LegacyStructInitializer.sx" });
     legacy_struct_initializer_command.expectExitCode(1);
@@ -897,7 +1016,7 @@ pub fn build(b: *std.Build) void {
         "silex: native compilation failed for target 'x86_64-linux-musl'; target support, SDKs, or native sources may be unavailable or incomplete\n",
     );
     backend_discovered_target_failure_command.expectStdErrMatch(b.fmt(
-        "silex: backend details: .silex{c}build{c}v24{c}x86_64-linux-musl{c}",
+        "silex: backend details: .silex{c}build{c}v27{c}x86_64-linux-musl{c}",
         .{
             std.fs.path.sep,
             std.fs.path.sep,
@@ -1176,6 +1295,23 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&immutable_cascade_command.step);
     test_step.dependOn(&duplicate_struct_field_command.step);
     test_step.dependOn(&invalid_struct_field_type_command.step);
+    test_step.dependOn(&missing_generic_arguments_command.step);
+    test_step.dependOn(&unexpected_generic_arguments_command.step);
+    test_step.dependOn(&invalid_generic_arity_command.step);
+    test_step.dependOn(&invalid_generic_specialization_command.step);
+    test_step.dependOn(&recursive_generic_structure_expansion_command.step);
+    test_step.dependOn(&missing_generic_function_arguments_command.step);
+    test_step.dependOn(&unexpected_generic_function_arguments_command.step);
+    test_step.dependOn(&invalid_generic_function_arity_command.step);
+    test_step.dependOn(&invalid_generic_function_specialization_command.step);
+    test_step.dependOn(&recursive_generic_function_expansion_command.step);
+    test_step.dependOn(&missing_type_alias_name_command.step);
+    test_step.dependOn(&unknown_type_alias_target_command.step);
+    test_step.dependOn(&type_alias_collision_command.step);
+    test_step.dependOn(&type_alias_as_value_command.step);
+    test_step.dependOn(&type_alias_cycle_command.step);
+    test_step.dependOn(&invalid_type_alias_arity_command.step);
+    test_step.dependOn(&missing_type_alias_arguments_command.step);
     test_step.dependOn(&legacy_struct_initializer_command.step);
     test_step.dependOn(&positional_struct_initializer_command.step);
     test_step.dependOn(&named_function_arguments_command.step);
@@ -1334,8 +1470,23 @@ pub fn build(b: *std.Build) void {
     structures_command.addArgs(&.{ "run", "Smokes/Structures.sx" });
     structures_command.expectStdOutEqual(hostText(b, "Ada\n35\n0\n10\n0\n9\n3\n"));
 
+    const generic_structures_command = b.addRunArtifact(executable);
+    generic_structures_command.step.dependOn(&structures_command.step);
+    generic_structures_command.addArgs(&.{ "run", "Smokes/GenericStructures.sx" });
+    generic_structures_command.expectStdOutEqual(hostText(b, "10\n30\nAda\ntrue\n7\nright\ntrue\n0\n3\nGrace\n8\n4\n9\n"));
+
+    const generic_functions_command = b.addRunArtifact(executable);
+    generic_functions_command.step.dependOn(&generic_structures_command.step);
+    generic_functions_command.addArgs(&.{ "run", "Smokes/GenericFunctions.sx" });
+    generic_functions_command.expectStdOutEqual(hostText(b, "42\n7\nAda\nGrace\n9\nSilex\n3\n3\n4\n120\nlocal\n11\n5\ngeneric\n"));
+
+    const type_aliases_command = b.addRunArtifact(executable);
+    type_aliases_command.step.dependOn(&generic_functions_command.step);
+    type_aliases_command.addArgs(&.{ "run", "Smokes/TypeAliases.sx" });
+    type_aliases_command.expectStdOutEqual(hostText(b, "6\n3\nAda\ntrue\n24\n"));
+
     const defaults_command = b.addRunArtifact(executable);
-    defaults_command.step.dependOn(&structures_command.step);
+    defaults_command.step.dependOn(&type_aliases_command.step);
     defaults_command.addArgs(&.{ "run", "Smokes/Defaults.sx" });
     defaults_command.expectStdOutEqual(hostText(b, "Ada\nfalse\n1\n7\n0\n\nBob\ntrue\n4\n5\n"));
 
@@ -1559,7 +1710,7 @@ pub fn build(b: *std.Build) void {
     const modules_command = b.addRunArtifact(executable);
     modules_command.step.dependOn(previous_integer_error_step);
     modules_command.addArgs(&.{ "run", "Smokes/Modules/silex.json" });
-    modules_command.expectStdOutEqual(hostText(b, "true\ntrue\ntrue\n1\n4\n5\n1\n2\nmodules\n"));
+    modules_command.expectStdOutEqual(hostText(b, "true\ntrue\ntrue\n7\n11\n3\ngeneric module\n1\n4\n5\n1\n2\nmodules\n"));
 
     const local_imports_command = b.addRunArtifact(executable);
     local_imports_command.step.dependOn(&modules_command.step);

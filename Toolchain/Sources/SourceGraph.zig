@@ -116,11 +116,15 @@ pub const Loader = struct {
             }
             var module_aliases: std.ArrayList(ModuleAlias) = .empty;
             for (file.program.uses) |use_value| {
+                const path = switch (use_value.target) {
+                    .declaration => |value| value,
+                    .type => continue,
+                };
                 const canonical_path = try canonicalUsePath(
                     self.allocator,
                     file.program.imports,
                     module_aliases.items,
-                    use_value.path,
+                    path,
                 );
                 if (try self.loadUseDependency(
                     &modules,
@@ -131,11 +135,24 @@ pub const Loader = struct {
                     package_index,
                 )) |module_name| {
                     try module_aliases.append(self.allocator, .{
-                        .qualifier = use_value.alias orelse lastSegment(use_value.path),
+                        .qualifier = use_value.alias orelse lastSegment(path),
                         .module_name = module_name,
                     });
                 }
             }
+            for (file.program.uses) |use_value| switch (use_value.target) {
+                .declaration => {},
+                .type => |aliased_type| try self.loadTypeUseDependencies(
+                    &modules,
+                    project_root,
+                    file.program.imports,
+                    module_aliases.items,
+                    aliased_type,
+                    use_value.position,
+                    loads_local_modules,
+                    package_index,
+                ),
+            };
             try self.loadQualifiedDependencies(
                 &modules,
                 project_root,
@@ -175,6 +192,96 @@ pub const Loader = struct {
         const module_name = moduleNameFromUse(canonical_path) orelse return null;
         try self.loadNamedModule(modules, project_root, module_name, position, loads_local_modules, package_index);
         return null;
+    }
+
+    fn loadTypeUseDependencies(
+        self: *Loader,
+        modules: *std.ArrayList(ModuleBuilder),
+        project_root: []const u8,
+        imports: []const Ast.Import,
+        module_aliases: []const ModuleAlias,
+        type_name: Ast.TypeName,
+        position: Source.Position,
+        loads_local_modules: bool,
+        package_index: usize,
+    ) !void {
+        switch (type_name) {
+            .structure => |name| {
+                if (std.mem.indexOfScalar(u8, name, '.') != null) {
+                    const canonical = try canonicalUsePath(self.allocator, imports, module_aliases, name);
+                    _ = try self.loadUseDependency(modules, project_root, canonical, position, loads_local_modules, package_index);
+                }
+            },
+            .generic_structure => |generic| {
+                if (std.mem.indexOfScalar(u8, generic.name, '.') != null) {
+                    const canonical = try canonicalUsePath(self.allocator, imports, module_aliases, generic.name);
+                    _ = try self.loadUseDependency(modules, project_root, canonical, position, loads_local_modules, package_index);
+                }
+                for (generic.arguments) |argument| try self.loadTypeUseDependencies(
+                    modules,
+                    project_root,
+                    imports,
+                    module_aliases,
+                    argument,
+                    position,
+                    loads_local_modules,
+                    package_index,
+                );
+            },
+            .list, .optional => |contained| try self.loadTypeUseDependencies(
+                modules,
+                project_root,
+                imports,
+                module_aliases,
+                contained.*,
+                position,
+                loads_local_modules,
+                package_index,
+            ),
+            .fixed_array => |array| try self.loadTypeUseDependencies(
+                modules,
+                project_root,
+                imports,
+                module_aliases,
+                array.element.*,
+                position,
+                loads_local_modules,
+                package_index,
+            ),
+            .reference => |reference| try self.loadTypeUseDependencies(
+                modules,
+                project_root,
+                imports,
+                module_aliases,
+                reference.target.*,
+                position,
+                loads_local_modules,
+                package_index,
+            ),
+            .function => |function| {
+                for (function.parameters) |parameter| try self.loadTypeUseDependencies(
+                    modules,
+                    project_root,
+                    imports,
+                    module_aliases,
+                    parameter,
+                    position,
+                    loads_local_modules,
+                    package_index,
+                );
+                if (function.return_type) |return_type| try self.loadTypeUseDependencies(
+                    modules,
+                    project_root,
+                    imports,
+                    module_aliases,
+                    return_type.*,
+                    position,
+                    loads_local_modules,
+                    package_index,
+                );
+            },
+            else => {},
+        }
     }
 
     fn loadQualifiedDependencies(

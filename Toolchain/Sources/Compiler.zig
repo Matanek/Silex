@@ -2,6 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const build_options = @import("build_options");
 const CppGenerator = @import("CppGenerator.zig");
+const Generics = @import("Generics.zig");
 const Semantic = @import("Semantic.zig");
 const TargetModule = @import("Target.zig");
 const NativeDependency = @import("NativeDependency.zig");
@@ -15,7 +16,7 @@ const SourceGraph = @import("SourceGraph.zig");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
 
-pub const cache_format = "v24";
+pub const cache_format = "v27";
 pub const cache_entry_limit = 8;
 
 const NativeConfiguration = enum {
@@ -77,9 +78,15 @@ pub fn compile(
         else => |other| return other,
     };
 
+    var specializer = Generics.Specializer.init(allocator, ast);
+    const specialized_ast = specializer.specialize() catch |err| switch (err) {
+        error.InvalidSource => return report(source_paths, specializer.diagnostic.?),
+        else => |other| return other,
+    };
+
     var analyzer = Semantic.Analyzer.init(allocator);
     analyzer.native_module_names = native_module_names;
-    const program = analyzer.analyze(ast) catch |err| switch (err) {
+    const program = analyzer.analyze(specialized_ast) catch |err| switch (err) {
         error.InvalidSource => return report(source_paths, analyzer.diagnostic.?),
         else => |other| return other,
     };

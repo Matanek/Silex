@@ -1,0 +1,8 @@
+func choose<Key, Value>(key:Key, value:Value) Value {
+    print(key)
+    return value
+}
+
+func main() {
+    print(choose<int>(1, 2))
+}

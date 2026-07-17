@@ -44,11 +44,18 @@ pub const TypeName = union(enum) {
     bool,
     str,
     structure: []const u8,
+    generic_structure: GenericStructure,
+    type_parameter: []const u8,
     list: *TypeName,
     fixed_array: FixedArray,
     reference: Reference,
     function: FunctionType,
     optional: *TypeName,
+
+    pub const GenericStructure = struct {
+        name: []const u8,
+        arguments: []const TypeName,
+    };
 
     pub const FixedArray = struct {
         element: *TypeName,
@@ -85,6 +92,8 @@ pub const ReturnType = union(enum) {
     bool,
     str,
     structure: []const u8,
+    generic_structure: TypeName.GenericStructure,
+    type_parameter: []const u8,
     list: *TypeName,
     fixed_array: TypeName.FixedArray,
     reference: TypeName.Reference,
@@ -115,7 +124,9 @@ pub const AssignmentOperator = enum {
 
 pub const Expression = struct {
     position: Source.Position,
-    value: union(enum) {
+    value: Value,
+
+    pub const Value = union(enum) {
         integer: []const u8,
         floating: []const u8,
         boolean: bool,
@@ -139,7 +150,7 @@ pub const Expression = struct {
         unary: Unary,
         conversion: Conversion,
         binary: Binary,
-    },
+    };
 
     pub const Unary = struct {
         operator: UnaryOperator,
@@ -150,6 +161,7 @@ pub const Expression = struct {
     pub const Call = struct {
         name: []const u8,
         name_position: Source.Position,
+        type_arguments: []const TypeName = &.{},
         arguments: []const *Expression,
         named_fields: ?[]const FieldInitializer = null,
         visible_declarations: ?[]const Source.Position = null,
@@ -172,6 +184,7 @@ pub const Expression = struct {
         object: *Expression,
         name: []const u8,
         name_position: Source.Position,
+        type_arguments: []const TypeName = &.{},
         arguments: []const *Expression,
         named_fields: ?[]const FieldInitializer = null,
     };
@@ -209,6 +222,7 @@ pub const Expression = struct {
     pub const StructureInitializer = struct {
         name: []const u8,
         name_position: Source.Position,
+        type_arguments: []const TypeName = &.{},
         fields: []const FieldInitializer,
     };
 
@@ -382,10 +396,15 @@ pub const Import = struct {
 };
 
 pub const Use = struct {
-    path: []const u8,
+    target: Target,
     alias: ?[]const u8,
     is_public: bool,
     position: Source.Position,
+
+    pub const Target = union(enum) {
+        declaration: []const u8,
+        type: TypeName,
+    };
 };
 
 pub const Structure = struct {
@@ -394,11 +413,17 @@ pub const Structure = struct {
     position: Source.Position,
     name: []const u8,
     name_position: Source.Position,
+    type_parameters: []const TypeParameter = &.{},
     base: ?BaseClass = null,
     fields: []const StructureField,
     constructors: []const Constructor = &.{},
     drop: ?Drop = null,
     methods: []const Function,
+};
+
+pub const TypeParameter = struct {
+    name: []const u8,
+    position: Source.Position,
 };
 
 pub const BaseClass = struct {
@@ -443,6 +468,7 @@ pub const Function = struct {
     position: Source.Position,
     name: []const u8,
     name_position: Source.Position,
+    type_parameters: []const TypeParameter = &.{},
     return_type: ReturnType,
     parameters: []const Parameter,
     statements: []const Statement,

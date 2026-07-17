@@ -1,0 +1,7 @@
+struct Box<T> {
+    value:T
+}
+
+func main() {
+    let box = Box(value:1)
+}
