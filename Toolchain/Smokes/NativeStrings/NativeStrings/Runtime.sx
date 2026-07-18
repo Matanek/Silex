@@ -1,0 +1,35 @@
+native func native_empty() str
+native func native_unicode() str
+native func native_nul() str
+native func native_next() str
+native func native_negative_length() str
+native func native_null_with_positive_length() str
+native func native_invalid_utf8() str
+
+pub func empty() str {
+    return native_empty()
+}
+
+pub func unicode() str {
+    return native_unicode()
+}
+
+pub func nul() str {
+    return native_nul()
+}
+
+pub func next() str {
+    return native_next()
+}
+
+pub func negative_length() str {
+    return native_negative_length()
+}
+
+pub func null_with_positive_length() str {
+    return native_null_with_positive_length()
+}
+
+pub func invalid_utf8() str {
+    return native_invalid_utf8()
+}

@@ -7496,8 +7496,8 @@ fn constructorSignatures(
 
 fn isNativeReturnType(value: Type) bool {
     return switch (value) {
-        .void, .int, .int8, .int16, .int32, .uint8, .uint16, .uint32, .uint64, .float, .float64, .bool => true,
-        .str, .structure, .protocol, .enumeration, .list, .fixed_array, .reference, .function, .optional, .null => false,
+        .void, .int, .int8, .int16, .int32, .uint8, .uint16, .uint32, .uint64, .float, .float64, .bool, .str => true,
+        .structure, .protocol, .enumeration, .list, .fixed_array, .reference, .function, .optional, .null => false,
     };
 }
 
@@ -8226,6 +8226,20 @@ test "native ABI rejects optional returns" {
     analyzer.native_module_names = &.{"Math"};
     try std.testing.expectError(error.InvalidSource, analyzer.analyze(program));
     try std.testing.expectEqualStrings("native functions cannot return 'int?'", analyzer.diagnostic.?.message);
+}
+
+test "native ABI accepts string returns" {
+    const Parser = @import("Parser.zig").Parser;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var parser = Parser.init(allocator, "native func native_read_text() str\nfunc main() {}\n");
+    const program = try parser.parse();
+    @constCast(program.functions)[0].name = "Console.native_read_text";
+    var analyzer = Analyzer.init(allocator);
+    analyzer.native_module_names = &.{"Console"};
+    _ = try analyzer.analyze(program);
 }
 
 test "native ABI rejects optional parameters" {

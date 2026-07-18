@@ -1,0 +1,9 @@
+{
+  "native": {
+    "sources": {
+      "c": [
+        "Module.c"
+      ]
+    }
+  }
+}

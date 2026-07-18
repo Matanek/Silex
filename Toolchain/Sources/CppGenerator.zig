@@ -140,6 +140,74 @@ pub fn generateWithSources(
         \\    }
         \\}
         \\
+        \\bool nativeStringIsValidUtf8(const std::string& value) {
+        \\    for (std::size_t index = 0; index < value.size();) {
+        \\        const auto first = static_cast<unsigned char>(value[index]);
+        \\        if (first <= 0x7f) {
+        \\            index += 1;
+        \\            continue;
+        \\        }
+        \\        std::size_t continuationCount = 0;
+        \\        std::uint32_t scalar = 0;
+        \\        std::uint32_t minimum = 0;
+        \\        if (first >= 0xc2 && first <= 0xdf) {
+        \\            continuationCount = 1;
+        \\            scalar = first & 0x1f;
+        \\            minimum = 0x80;
+        \\        } else if (first >= 0xe0 && first <= 0xef) {
+        \\            continuationCount = 2;
+        \\            scalar = first & 0x0f;
+        \\            minimum = 0x800;
+        \\        } else if (first >= 0xf0 && first <= 0xf4) {
+        \\            continuationCount = 3;
+        \\            scalar = first & 0x07;
+        \\            minimum = 0x10000;
+        \\        } else {
+        \\            return false;
+        \\        }
+        \\        if (value.size() - index <= continuationCount) return false;
+        \\        for (std::size_t offset = 1; offset <= continuationCount; offset += 1) {
+        \\            const auto continuation = static_cast<unsigned char>(value[index + offset]);
+        \\            if ((continuation & 0xc0) != 0x80) return false;
+        \\            scalar = (scalar << 6) | (continuation & 0x3f);
+        \\        }
+        \\        if (scalar < minimum || (scalar >= 0xd800 && scalar <= 0xdfff) || scalar > 0x10ffff) return false;
+        \\        index += continuationCount + 1;
+        \\    }
+        \\    return true;
+        \\}
+        \\
+        \\template <typename Call>
+        \\std::string callNativeStringFunction(const char* module, const char* function, Call&& call) {
+        \\    char* outputBytes = nullptr;
+        \\    std::int64_t outputLength = 0;
+        \\    try {
+        \\        std::forward<Call>(call)(&outputBytes, &outputLength);
+        \\    } catch (const std::exception& exception) {
+        \\        std::free(outputBytes);
+        \\        nativeFunctionRuntimeError(module, function, exception.what());
+        \\    } catch (...) {
+        \\        std::free(outputBytes);
+        \\        nativeFunctionRuntimeError(module, function, "unknown native exception");
+        \\    }
+        \\    std::unique_ptr<char, decltype(&std::free)> output{outputBytes, &std::free};
+        \\    if (outputLength < 0) {
+        \\        output.reset();
+        \\        nativeFunctionRuntimeError(module, function, "returned a negative length");
+        \\    }
+        \\    if (outputBytes == nullptr && outputLength > 0) {
+        \\        output.reset();
+        \\        nativeFunctionRuntimeError(module, function, "returned a null pointer with a positive length");
+        \\    }
+        \\    if (outputBytes == nullptr) return {};
+        \\    std::string result{outputBytes, static_cast<std::size_t>(outputLength)};
+        \\    output.reset();
+        \\    if (!nativeStringIsValidUtf8(result)) {
+        \\        nativeFunctionRuntimeError(module, function, "returned invalid UTF-8");
+        \\    }
+        \\    return result;
+        \\}
+        \\
         \\template <typename Target, typename Source> bool integerIsExactlyRepresentable(Source value) {
         \\    using Unsigned = std::make_unsigned_t<Source>;
         \\    const Unsigned magnitude = [&] {
@@ -1567,7 +1635,11 @@ fn generateNativeFunctionSignature(
     include_names: bool,
 ) !void {
     try output.appendSlice(allocator, "extern \"C\" ");
-    try appendCppType(allocator, output, function.return_type);
+    if (function.return_type == .str) {
+        try output.appendSlice(allocator, "void");
+    } else {
+        try appendCppType(allocator, output, function.return_type);
+    }
     try output.append(allocator, ' ');
     try output.appendSlice(allocator, function.generated_name);
     try output.append(allocator, '(');
@@ -1592,6 +1664,13 @@ fn generateNativeFunctionSignature(
             }
         }
     }
+    if (function.return_type == .str) {
+        if (function.parameters.len != 0) try output.appendSlice(allocator, ", ");
+        try output.appendSlice(allocator, "char**");
+        if (include_names) try output.appendSlice(allocator, " output_bytes");
+        try output.appendSlice(allocator, ", std::int64_t*");
+        if (include_names) try output.appendSlice(allocator, " output_length");
+    }
     try output.append(allocator, ')');
 }
 
@@ -1604,14 +1683,16 @@ fn generateNativeFunctionCall(
     allocator: Allocator,
     output: *std.ArrayList(u8),
     call: Semantic.Expression.Call,
+    return_type: Semantic.Type,
 ) GenerateError!void {
     const module_name = call.native_module_name.?;
     const function_name = call.native_function_name.?;
-    try output.appendSlice(allocator, "callNativeFunction(");
+    const returns_string = return_type == .str;
+    try output.appendSlice(allocator, if (returns_string) "callNativeStringFunction(" else "callNativeFunction(");
     try appendCppByteStringLiteral(allocator, output, module_name);
     try output.appendSlice(allocator, ", ");
     try appendCppByteStringLiteral(allocator, output, function_name);
-    try output.appendSlice(allocator, ", [&]() {");
+    try output.appendSlice(allocator, if (returns_string) ", [&](char** output_bytes, std::int64_t* output_length) {" else ", [&]() {");
     for (call.arguments, 0..) |argument, index| {
         if (argument.type != .str) continue;
         try output.appendSlice(allocator, "auto&& silexNativeString");
@@ -1620,7 +1701,7 @@ fn generateNativeFunctionCall(
         try generateExpression(allocator, output, argument);
         try output.appendSlice(allocator, ";");
     }
-    try output.appendSlice(allocator, "return ");
+    if (!returns_string) try output.appendSlice(allocator, "return ");
     try output.appendSlice(allocator, call.generated_name);
     try output.append(allocator, '(');
     for (call.arguments, 0..) |argument, index| {
@@ -1634,6 +1715,10 @@ fn generateNativeFunctionCall(
         } else {
             try generateExpression(allocator, output, argument);
         }
+    }
+    if (returns_string) {
+        if (call.arguments.len != 0) try output.appendSlice(allocator, ", ");
+        try output.appendSlice(allocator, "output_bytes, output_length");
     }
     try output.appendSlice(allocator, "); })");
 }
@@ -2478,7 +2563,7 @@ fn generateExpression(allocator: Allocator, output: *std.ArrayList(u8), expressi
         .owner_self => try output.appendSlice(allocator, "silexOwner"),
         .call => |call| {
             if (call.is_native) {
-                try generateNativeFunctionCall(allocator, output, call);
+                try generateNativeFunctionCall(allocator, output, call, expression.type);
             } else {
                 try output.appendSlice(allocator, call.generated_name);
                 try output.append(allocator, '(');
@@ -3297,6 +3382,29 @@ test "generate UTF-8 strings and their length" {
 
     try std.testing.expect(std.mem.indexOf(u8, cpp, "std::string{\"A\\303\\251\\000\", 4}") != null);
     try std.testing.expect(std.mem.indexOf(u8, cpp, "silexStringLength(std::string{") != null);
+}
+
+test "generate string native return bridge" {
+    const Parser = @import("Parser.zig").Parser;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var parser = Parser.init(allocator, "native func native_read_text() str\nfunc main() {}\n");
+    const program = try parser.parse();
+    @constCast(program.functions)[0].name = "Console.native_read_text";
+    var analyzer = Semantic.Analyzer.init(allocator);
+    analyzer.native_module_names = &.{"Console"};
+    const cpp = try generate(allocator, try analyzer.analyze(program));
+
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        cpp,
+        "extern \"C\" void silexNative_Console_native_read_text(char** output_bytes, std::int64_t* output_length);",
+    ) != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "std::string callNativeStringFunction") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "std::free(outputBytes);") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "returned invalid UTF-8") != null);
 }
 
 test "generate recursive structural equality" {

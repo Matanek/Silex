@@ -1,0 +1,5 @@
+use NativeStrings
+
+func main() {
+    NativeStrings.negative_length()
+}

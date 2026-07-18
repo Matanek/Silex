@@ -1,0 +1,18 @@
+use NativeStrings
+use NativeStringsC
+
+func main() {
+    let empty = NativeStrings.empty()
+    let unicode = NativeStrings.unicode()
+    let nul = NativeStrings.nul()
+    let first = NativeStrings.next()
+    let second = NativeStrings.next()
+    let copied = NativeStringsC.copy("C\0")
+
+    print(empty == "")
+    print(unicode == "hé🌟")
+    print(nul == "A\0B")
+    print(first == "first")
+    print(second == "second")
+    print(copied == "C\0")
+}

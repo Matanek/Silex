@@ -2451,8 +2451,37 @@ pub fn build(b: *std.Build) void {
     local_native_manifest_command.addArgs(&.{ "run", "Smokes/LocalNative/project.json" });
     local_native_manifest_command.expectStdOutEqual(hostText(b, "42\n"));
 
+    const native_string_command = b.addRunArtifact(executable);
+    native_string_command.step.dependOn(&local_native_manifest_command.step);
+    native_string_command.addArgs(&.{ "run", "Smokes/NativeStrings/Main.sx" });
+    native_string_command.expectStdOutEqual(hostText(b, "true\ntrue\ntrue\ntrue\ntrue\ntrue\n"));
+
+    const native_string_negative_length_command = b.addRunArtifact(executable);
+    native_string_negative_length_command.step.dependOn(&native_string_command.step);
+    native_string_negative_length_command.addArgs(&.{ "run", "Smokes/NativeStrings/NegativeLength.sx" });
+    native_string_negative_length_command.expectExitCode(1);
+    native_string_negative_length_command.expectStdErrEqual(
+        "runtime error: native function 'NativeStrings.native_negative_length' failed: returned a negative length\n",
+    );
+
+    const native_string_null_pointer_command = b.addRunArtifact(executable);
+    native_string_null_pointer_command.step.dependOn(&native_string_negative_length_command.step);
+    native_string_null_pointer_command.addArgs(&.{ "run", "Smokes/NativeStrings/NullPointer.sx" });
+    native_string_null_pointer_command.expectExitCode(1);
+    native_string_null_pointer_command.expectStdErrEqual(
+        "runtime error: native function 'NativeStrings.native_null_with_positive_length' failed: returned a null pointer with a positive length\n",
+    );
+
+    const native_string_invalid_utf8_command = b.addRunArtifact(executable);
+    native_string_invalid_utf8_command.step.dependOn(&native_string_null_pointer_command.step);
+    native_string_invalid_utf8_command.addArgs(&.{ "run", "Smokes/NativeStrings/InvalidUtf8.sx" });
+    native_string_invalid_utf8_command.expectExitCode(1);
+    native_string_invalid_utf8_command.expectStdErrEqual(
+        "runtime error: native function 'NativeStrings.native_invalid_utf8' failed: returned invalid UTF-8\n",
+    );
+
     const portable_distributed_native_target_command = b.addRunArtifact(executable);
-    portable_distributed_native_target_command.step.dependOn(&local_native_manifest_command.step);
+    portable_distributed_native_target_command.step.dependOn(&native_string_invalid_utf8_command.step);
     portable_distributed_native_target_command.addArgs(&.{
         "compile",
         "Smokes/DistributedNative/Main.sx",
@@ -2829,11 +2858,33 @@ pub fn build(b: *std.Build) void {
         ".silex/cross-native-smoke/LocalNative-x86_64-linux",
     });
 
+    const cross_native_string_linux_smoke_command = b.addRunArtifact(executable);
+    cross_native_string_linux_smoke_command.step.dependOn(&cross_local_native_smoke_command.step);
+    cross_native_string_linux_smoke_command.addArgs(&.{
+        "compile",
+        "Smokes/NativeStrings/Main.sx",
+        "--target",
+        "x86_64-linux-musl",
+        "-o",
+        ".silex/cross-native-smoke/NativeStrings-x86_64-linux",
+    });
+
+    const cross_native_string_windows_smoke_command = b.addRunArtifact(executable);
+    cross_native_string_windows_smoke_command.step.dependOn(&cross_native_string_linux_smoke_command.step);
+    cross_native_string_windows_smoke_command.addArgs(&.{
+        "compile",
+        "Smokes/NativeStrings/Main.sx",
+        "--target",
+        "x86_64-windows-gnu",
+        "-o",
+        ".silex/cross-native-smoke/NativeStrings-x86_64-windows.exe",
+    });
+
     const cross_native_smoke_step = b.step(
         "cross-native-smoke",
         "Cross-compile the native source smoke program for x86_64 Linux",
     );
-    cross_native_smoke_step.dependOn(&cross_local_native_smoke_command.step);
+    cross_native_smoke_step.dependOn(&cross_native_string_windows_smoke_command.step);
 
     const distribution_options = b.addOptions();
     distribution_options.addOption([]const u8, "silex_version", silex_version);

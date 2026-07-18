@@ -128,12 +128,30 @@ section. A standalone main source cannot declare native functions, and
 `pub native func` is invalid. Native function names begin with `native_`.
 
 Their ABI is intentionally narrow: scalar booleans and numbers may be passed
-or returned, while `str` may only be a parameter. A string is passed as UTF-8
-bytes and a byte length; the native runtime must neither retain nor modify its
-byte view. Collections, structures, references, pointers, callbacks and string
-returns are not native-function values. Silex derives the C symbol from the
-module and function name, so a native runtime never chooses an arbitrary C
-symbol.
+or returned, and `str` may be passed or returned. A string parameter is passed
+as UTF-8 bytes and a byte length; the native runtime must neither retain nor
+modify its byte view. A string return uses two output parameters after the
+ordinary parameters:
+
+```cpp
+extern "C" void silexNative_Module_native_read_text(
+    char** output_bytes,
+    std::int64_t* output_length
+);
+```
+
+The native function allocates `output_bytes` with `malloc` and transfers it to
+the generated bridge, which copies exactly `output_length` bytes into an
+independent Silex string then releases the buffer with `free`. An empty result
+may use `nullptr` with length zero. A negative length, or a null pointer with a
+positive length, is a runtime error naming the native function. The bridge
+also rejects invalid UTF-8 with `returned invalid UTF-8`; it frees the buffer
+on every valid and invalid return path. Embedded null bytes are preserved, so
+the length—not C string termination—defines the result. Collections,
+structures, references, pointers, callbacks, optionals, `Result`, and other
+non-scalar values remain unavailable in native-function signatures. Silex
+derives the C symbol from the module and function name, so a native runtime
+never chooses an arbitrary C symbol.
 
 All arguments, return values, and return paths are checked statically. A
 non-void function must return a compatible value on every path. A void function
