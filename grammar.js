@@ -463,6 +463,7 @@ module.exports = grammar({
       choice(
         $.binary_expression,
         $.try_expression,
+        $.move_expression,
         $.unary_expression,
         $.borrow_expression,
         $.conversion_expression,
@@ -950,6 +951,9 @@ module.exports = grammar({
 
     try_expression: ($) =>
       prec(PREC.unary, seq("try", field("operand", $.expression))),
+
+    move_expression: ($) =>
+      prec(PREC.unary, seq("move", field("operand", $.expression))),
 
     borrow_expression: ($) => prec(PREC.unary, seq(field("operator", "&"), field("operand", $.expression))),
 
