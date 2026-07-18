@@ -64,6 +64,30 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
+    const console_session_test_module = b.createModule(.{
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+        .link_libcpp = true,
+    });
+    console_session_test_module.addCSourceFile(.{
+        .file = b.path("Tests/ConsoleSessionIntegration.cpp"),
+        .flags = &.{ "-std=c++23", "-Wall", "-Wextra", "-Werror" },
+    });
+    console_session_test_module.addCSourceFiles(.{
+        .files = &.{
+            "../Library/STD/Console.cpp",
+            "../Library/STD/ConsoleSession.cpp",
+        },
+        .flags = &.{ "-std=c++23", "-Wall", "-Wextra", "-Werror" },
+    });
+    if (target.result.os.tag == .linux) {
+        console_session_test_module.linkSystemLibrary("util", .{});
+    }
+    const console_session_integration = b.addExecutable(.{
+        .name = "silex-console-session-integration",
+        .root_module = console_session_test_module,
+    });
     b.installArtifact(executable);
     const install_library = b.addInstallDirectory(.{
         .source_dir = b.path("../Library"),
@@ -2492,8 +2516,28 @@ pub fn build(b: *std.Build) void {
     console_negative_coordinates_command.expectExitCode(1);
     console_negative_coordinates_command.expectStdErrMatch("runtime error: Console.move_cursor requires non-negative coordinates\n");
 
+    const console_session_compile_command = b.addRunArtifact(executable);
+    console_session_compile_command.step.dependOn(&console_negative_coordinates_command.step);
+    console_session_compile_command.addArgs(&.{ "compile", "Smokes/ConsoleSession/Main.sx" });
+
+    const console_session_command = b.addRunArtifact(console_session_integration);
+    console_session_command.step.dependOn(&console_session_compile_command.step);
+    console_session_command.addArg(".silex/bin/Main");
+
+    const console_session_noninteractive_command = b.addRunArtifact(executable);
+    console_session_noninteractive_command.step.dependOn(&console_session_command.step);
+    console_session_noninteractive_command.addArgs(&.{
+        "run",
+        "Smokes/ConsoleSession/NonInteractive.sx",
+    });
+    console_session_noninteractive_command.expectExitCode(1);
+    console_session_noninteractive_command.expectStdErrEqual(
+        "runtime error: native function 'STD.Console.native_session_create' failed: " ++
+            "Console.Session.create failed: standard input and output must be interactive\n",
+    );
+
     const portable_distributed_native_target_command = b.addRunArtifact(executable);
-    portable_distributed_native_target_command.step.dependOn(&console_negative_coordinates_command.step);
+    portable_distributed_native_target_command.step.dependOn(&console_session_noninteractive_command.step);
     portable_distributed_native_target_command.addArgs(&.{
         "compile",
         "Smokes/DistributedNative/Main.sx",

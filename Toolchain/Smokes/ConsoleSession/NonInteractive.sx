@@ -1,0 +1,6 @@
+use STD.Console as Console
+
+func main() {
+    var session = Console.Session.create()
+    print(session.is_open())
+}

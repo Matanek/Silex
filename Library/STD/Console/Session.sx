@@ -1,0 +1,108 @@
+native func native_session_create() int
+native func native_session_close(handle:int) void
+native func native_session_is_open(handle:int) bool
+native func native_session_read(handle:int, timeout_milliseconds:int) int
+native func native_session_enter_alternate_screen(handle:int) void
+native func native_session_leave_alternate_screen(handle:int) void
+native func native_event_shift() bool
+native func native_event_control() bool
+native func native_event_alt() bool
+native func native_event_number() int
+native func native_event_take_text() str
+
+pub enum Key {
+    character(str)
+    enter
+    escape
+    tab
+    backspace
+    delete
+    arrow_up
+    arrow_down
+    arrow_left
+    arrow_right
+    home
+    end
+    page_up
+    page_down
+    function(int)
+    unknown(str)
+}
+
+pub struct KeyEvent {
+    let key:Key
+    let shift:bool
+    let control:bool
+    let alt:bool
+}
+
+pub struct Session {
+    let handle:int
+
+    static func create() Session {
+        return Session(handle:native_session_create())
+    }
+
+    func read_key() KeyEvent {
+        return event_from_code(native_session_read(self.handle, -1))
+    }
+
+    func poll_key(timeout_milliseconds:int) KeyEvent? {
+        if timeout_milliseconds < 0 {
+            panic("Console.Session.poll_key requires a non-negative timeout")
+        }
+        let code = native_session_read(self.handle, timeout_milliseconds)
+        if code == 0 {
+            return null
+        }
+        return event_from_code(code)
+    }
+
+    func enter_alternate_screen() {
+        native_session_enter_alternate_screen(self.handle)
+    }
+
+    func leave_alternate_screen() {
+        native_session_leave_alternate_screen(self.handle)
+    }
+
+    func is_open() bool {
+        return native_session_is_open(self.handle)
+    }
+
+    func close() {
+        native_session_close(self.handle)
+    }
+
+    drop {
+        native_session_close(self.handle)
+    }
+}
+
+func event_from_code(code:int) KeyEvent {
+    if code == 1 { return event(Key.character(native_event_take_text())) }
+    if code == 2 { return event(Key.enter()) }
+    if code == 3 { return event(Key.escape()) }
+    if code == 4 { return event(Key.tab()) }
+    if code == 5 { return event(Key.backspace()) }
+    if code == 6 { return event(Key.delete()) }
+    if code == 7 { return event(Key.arrow_up()) }
+    if code == 8 { return event(Key.arrow_down()) }
+    if code == 9 { return event(Key.arrow_left()) }
+    if code == 10 { return event(Key.arrow_right()) }
+    if code == 11 { return event(Key.home()) }
+    if code == 12 { return event(Key.end()) }
+    if code == 13 { return event(Key.page_up()) }
+    if code == 14 { return event(Key.page_down()) }
+    if code == 15 { return event(Key.function(native_event_number())) }
+    return event(Key.unknown(native_event_take_text()))
+}
+
+func event(key:Key) KeyEvent {
+    return KeyEvent(
+        key:key,
+        shift:native_event_shift(),
+        control:native_event_control(),
+        alt:native_event_alt()
+    )
+}

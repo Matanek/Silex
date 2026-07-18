@@ -3,7 +3,8 @@
     "sources": {
       "cpp": [
         "Module.cpp",
-        "Console.cpp"
+        "Console.cpp",
+        "ConsoleSession.cpp"
       ]
     }
   }

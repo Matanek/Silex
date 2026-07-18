@@ -1,0 +1,69 @@
+use STD.Console as Console
+
+func describe(event:Console.KeyEvent) str {
+    var modifiers = "-"
+    if event.shift { modifiers = "S" }
+    if event.control { modifiers += "C" } else { modifiers += "-" }
+    if event.alt { modifiers += "A" } else { modifiers += "-" }
+    return modifiers + ":" + match event.key {
+        character(text) => "character:" + text
+        enter => "enter"
+        escape => "escape"
+        tab => "tab"
+        backspace => "backspace"
+        delete => "delete"
+        arrow_up => "arrow_up"
+        arrow_down => "arrow_down"
+        arrow_left => "arrow_left"
+        arrow_right => "arrow_right"
+        home => "home"
+        end => "end"
+        page_up => "page_up"
+        page_down => "page_down"
+        function(number) => "function"
+        unknown(bytes) => "unknown:" + bytes
+    }
+}
+
+func function_number(event:Console.KeyEvent) int {
+    return match event.key {
+        function(number) => number
+        else => 0
+    }
+}
+
+func main() {
+    var session = Console.Session.create()
+    print(session.is_open())
+    print(session.poll_key(0) == null)
+    session.enter_alternate_screen()
+    session.enter_alternate_screen()
+    print(describe(session.read_key()))
+    print(describe(session.read_key()))
+    print(describe(session.read_key()))
+    print(describe(session.read_key()))
+    print(describe(session.read_key()))
+    print(describe(session.read_key()))
+    let function_event = session.read_key()
+    print(describe(function_event))
+    print(function_number(function_event))
+    print(describe(session.read_key()))
+    print(describe(session.read_key()))
+    print(describe(session.read_key()))
+    print(describe(session.read_key()))
+    print(describe(session.read_key()))
+    print(describe(session.read_key()))
+    print(describe(session.read_key()))
+    print(describe(session.read_key()))
+    print(session.poll_key(5) == null)
+    if escape = session.poll_key(40) {
+        print(describe(escape))
+    } else {
+        print("missing escape")
+    }
+    session.leave_alternate_screen()
+    session.leave_alternate_screen()
+    session.close()
+    session.close()
+    print(session.is_open())
+}

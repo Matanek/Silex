@@ -16,6 +16,8 @@
 #include <unistd.h>
 #endif
 
+extern "C" bool silexConsoleSessionIsActive();
+
 namespace {
 
 // -----------------------------------------------------------------------------
@@ -137,6 +139,9 @@ int readByte(const char* operation) {
 }
 
 bool prepareLine() {
+    if (silexConsoleSessionIsActive()) {
+        fail("read_line", "interactive session is active");
+    }
     flushPrompt();
     std::string line;
     while (true) {
@@ -169,6 +174,9 @@ bool prepareLine() {
 }
 
 void waitForEnter() {
+    if (silexConsoleSessionIsActive()) {
+        fail("wait_for_enter", "interactive session is active");
+    }
     flushPrompt();
     while (true) {
         const int value = readByte("wait_for_enter");
