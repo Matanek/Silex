@@ -104,10 +104,17 @@ const StructureRange = struct {
     end: ?usize = null,
 };
 
+const ExtensionRange = struct {
+    target: []const u8,
+    start: usize,
+    end: usize,
+};
+
 const SemanticInfo = struct {
     members: std.ArrayList(DeclaredMember) = .empty,
     variables: std.ArrayList(DeclaredVariable) = .empty,
     structures: std.ArrayList(StructureRange) = .empty,
+    extensions: std.ArrayList(ExtensionRange) = .empty,
     aliases: std.ArrayList(DeclaredTypeAlias) = .empty,
     constraints: std.ArrayList(DeclaredTypeConstraint) = .empty,
     protocols: std.ArrayList([]const u8) = .empty,
@@ -118,6 +125,7 @@ const SemanticInfo = struct {
         self.members.deinit(allocator);
         self.variables.deinit(allocator);
         self.structures.deinit(allocator);
+        self.extensions.deinit(allocator);
         self.aliases.deinit(allocator);
         self.constraints.deinit(allocator);
         self.protocols.deinit(allocator);
@@ -1217,7 +1225,7 @@ fn collectSemanticInfo(
     try collectLocalTypeAliases(allocator, tokens, info);
     try collectLocalEnums(allocator, tokens, info);
     try collectLocalProtocolsAndConstraints(allocator, source, tokens, info);
-    try collectLocalExtensions(allocator, tokens, info);
+    try collectLocalExtensions(allocator, source, tokens, info);
     var index: usize = 0;
     while (index < tokens.len) : (index += 1) {
         if ((tokens[index].tag == .keyword_struct or tokens[index].tag == .keyword_class) and
@@ -1388,6 +1396,7 @@ fn collectSemanticInfo(
 
 fn collectLocalExtensions(
     allocator: Allocator,
+    source: []const u8,
     tokens: []const LexerModule.Token,
     info: *SemanticInfo,
 ) !void {
@@ -1401,6 +1410,7 @@ fn collectLocalExtensions(
         if (target_name == null or target_index >= tokens.len) continue;
 
         var depth: usize = 0;
+        var range_end = source.len;
         var member_index = target_index;
         while (member_index < tokens.len) : (member_index += 1) {
             switch (tokens[member_index].tag) {
@@ -1408,7 +1418,10 @@ fn collectLocalExtensions(
                 .right_brace => {
                     if (depth == 0) break;
                     depth -= 1;
-                    if (depth == 0) break;
+                    if (depth == 0) {
+                        range_end = tokenOffset(source, tokens[member_index]) + tokens[member_index].lexeme.len;
+                        break;
+                    }
                 },
                 else => {},
             }
@@ -1434,6 +1447,11 @@ fn collectLocalExtensions(
             });
             member_index = declaration_index + 1;
         }
+        try info.extensions.append(allocator, .{
+            .target = target_name.?,
+            .start = tokenOffset(source, token),
+            .end = range_end,
+        });
     }
 }
 
@@ -2386,6 +2404,11 @@ fn receiverType(info: SemanticInfo, receiver: []const u8, cursor_offset: usize) 
                 structure.start.? <= cursor_offset and cursor_offset <= structure.end.?)
             {
                 return .{ .structure = structure.name };
+            }
+        }
+        for (info.extensions.items) |extension| {
+            if (extension.start <= cursor_offset and cursor_offset <= extension.end) {
+                return .{ .structure = extension.target };
             }
         }
         return null;
@@ -3459,6 +3482,70 @@ test "self completion resolves fields and methods of the enclosing structure" {
     defer std.testing.allocator.free(items);
     try std.testing.expect(containsCompletion(items, "value"));
     try std.testing.expect(containsCompletion(items, "current"));
+}
+
+test "self completion resolves the target of a local extension" {
+    const source =
+        \\struct Animal {
+        \\    var name:str
+        \\    func show() {}
+        \\}
+        \\extend Animal {
+        \\    func get_name() str {
+        \\        return self.
+        \\    }
+        \\    func set_name(name:str) { self.name = name }
+        \\}
+        \\func main() {}
+    ;
+    const items = try completionItems(std.testing.allocator, std.testing.io, source, .{ .line = 6, .character = 20 });
+    defer std.testing.allocator.free(items);
+    try std.testing.expect(containsCompletion(items, "name"));
+    try std.testing.expect(containsCompletion(items, "show"));
+    try std.testing.expect(containsCompletion(items, "get_name"));
+    try std.testing.expect(containsCompletion(items, "set_name"));
+}
+
+test "self completion resolves an imported extension target" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source =
+        \\import STD.Random as Random
+        \\use Random.Generator as Generator
+        \\extend Generator {
+        \\    func get_uint() uint {
+        \\        return self.
+        \\    }
+        \\}
+        \\func main() {}
+    ;
+    const items = try completionItems(arena.allocator(), std.testing.io, source, .{ .line = 4, .character = 20 });
+    try std.testing.expect(containsCompletion(items, "get_int"));
+    try std.testing.expect(containsCompletion(items, "get_float"));
+    try std.testing.expect(containsCompletion(items, "get_bool"));
+    try std.testing.expect(containsCompletion(items, "get_uint"));
+}
+
+test "self completion in an extension excludes private and sub class members" {
+    const source =
+        \\class Vault {
+        \\    var secret:int
+        \\    sub var inherited:int
+        \\    pub var visible:int
+        \\}
+        \\extend Vault {
+        \\    func inspect() {
+        \\        print(self.)
+        \\    }
+        \\}
+        \\func main() {}
+    ;
+    const items = try completionItems(std.testing.allocator, std.testing.io, source, .{ .line = 7, .character = 19 });
+    defer std.testing.allocator.free(items);
+    try std.testing.expect(containsCompletion(items, "visible"));
+    try std.testing.expect(containsCompletion(items, "inspect"));
+    try std.testing.expect(!containsCompletion(items, "secret"));
+    try std.testing.expect(!containsCompletion(items, "inherited"));
 }
 
 test "signature help lists overloaded functions once each" {
