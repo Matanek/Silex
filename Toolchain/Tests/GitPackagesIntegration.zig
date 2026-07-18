@@ -138,7 +138,7 @@ fn createFoundation(
     );
     const source = try std.fmt.allocPrint(
         allocator,
-        "import Utility\n\npub func answer() int {{ return Utility.base() + {d} }}\n",
+        "use Utility\n\npub func answer() int {{ return Utility.base() + {d} }}\n",
         .{increment},
     );
     try writeFile(allocator, io, repository, "Module.json", manifest);
@@ -182,7 +182,7 @@ fn createApp(
     );
     try writeFile(allocator, io, directory, "Module.json", manifest);
     const source = if (std.mem.eql(u8, dependency_name, "Foundation"))
-        "import Foundation\n\nfunc main() void { print(Foundation.answer()) }\n"
+        "use Foundation\n\nfunc main() void { print(Foundation.answer()) }\n"
     else
         "func main() void {}\n";
     try writeFile(allocator, io, directory, "Main.sx", source);

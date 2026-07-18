@@ -1,4 +1,4 @@
-import Parent
+use Parent
 
 func main() void {
     print("parent only")

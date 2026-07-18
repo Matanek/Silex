@@ -47,7 +47,7 @@ fn isReservedRoot(path: []const u8, root_name: []const u8) bool {
 
 test "recognize reserved distributed module roots" {
     try std.testing.expect(isReservedModule("STD"));
-    try std.testing.expect(isReservedModule("STD.Random"));
+    try std.testing.expect(isReservedModule("STD.Time"));
     try std.testing.expect(isReservedModule("Silex.Window"));
     try std.testing.expect(!isReservedModule("Random"));
     try std.testing.expect(!isReservedModule("std.Random"));

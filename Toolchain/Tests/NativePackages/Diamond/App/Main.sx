@@ -1,5 +1,5 @@
-import Left
-import Right
+use Left
+use Right
 
 func main() {
     print(Left.value() + Right.value())

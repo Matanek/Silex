@@ -50,7 +50,6 @@ pub const TokenTag = enum {
     keyword_print,
     keyword_assert,
     keyword_panic,
-    keyword_import,
     keyword_use,
     keyword_pub,
     keyword_sub,
@@ -519,7 +518,6 @@ fn keywordTag(lexeme: []const u8) ?TokenTag {
         .{ "print", TokenTag.keyword_print },
         .{ "assert", TokenTag.keyword_assert },
         .{ "panic", TokenTag.keyword_panic },
-        .{ "import", TokenTag.keyword_import },
         .{ "use", TokenTag.keyword_use },
         .{ "pub", TokenTag.keyword_pub },
         .{ "sub", TokenTag.keyword_sub },
@@ -567,7 +565,7 @@ test "reserve class keyword" {
 }
 
 test "reserve extend keyword" {
-    var lexer = Lexer.init("extend Generator {}");
+    var lexer = Lexer.init("extend Randomizer {}");
     try std.testing.expectEqual(TokenTag.keyword_extend, (try lexer.next()).tag);
     try std.testing.expectEqual(TokenTag.identifier, (try lexer.next()).tag);
 }

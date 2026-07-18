@@ -1,6 +1,6 @@
-import ExtensionConformanceVisibility.Core as Core
-import ExtensionConformanceVisibility.Types as Types
-import ExtensionConformanceVisibility.Bridge as Bridge
+use ExtensionConformanceVisibility.Core as Core
+use ExtensionConformanceVisibility.Types as Types
+use ExtensionConformanceVisibility.Bridge as Bridge
 
 func main() {
     var drawable:Core.Drawable = Types.Sprite()

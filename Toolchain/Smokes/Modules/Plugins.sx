@@ -1,4 +1,4 @@
-import NK.Window
+use NK.Window
 
 pub use NK.Window.Session as WindowSession
 pub use NK.Window.Pair as WindowPair
@@ -10,5 +10,5 @@ pub use NK.Window.create_session as raw_create
 pub use NK.Window.identity as WindowIdentity
 
 pub func create_window() WindowSession {
-    return NK.Window.create_session()
+    return Window.create_session()
 }

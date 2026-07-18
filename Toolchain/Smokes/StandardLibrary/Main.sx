@@ -1,17 +1,19 @@
-import STD
+use STD
 
-use STD.Random as Random
-use STD.Random.Generator as Generator
+use STD.Randomizer as Randomizer
 
 func main() {
-    var negative:Generator = STD.Random.create(-1)
-    var zero = Random.create(0)
-    var one = Random.create(1)
-    var left = Random.create(42)
-    var right = Random.create(42)
-    var ranges = Random.create(-1)
-    var rejected = Random.create(0)
-    var random = Random.system()
+    var negative:Randomizer = STD.Randomizer.create(-1)
+    var zero = Randomizer.create(0)
+    var one = Randomizer.create(1)
+    var left = Randomizer.create(42)
+    var right = Randomizer.create(42)
+    var ranges = Randomizer.create(-1)
+    var rejected = Randomizer.create(0)
+    var random = Randomizer.create()
+    var shared = Randomizer.create(42)
+    var shared_reference = shared
+    var shared_expected = Randomizer.create(42)
 
     print(negative.get_int())
     print(negative.get_int())
@@ -27,6 +29,9 @@ func main() {
     print(left.get_float() == right.get_float())
     print(left.get_float(-10.0, 40.0) == right.get_float(-10.0, 40.0))
     print(left.get_bool() == right.get_bool())
+    let first_shared = shared.get_int()
+    let second_shared = shared_reference.get_int()
+    print(first_shared == shared_expected.get_int() && second_shared == shared_expected.get_int())
     let die = ranges.get_int(1, 7)
     let negative_range = ranges.get_int(-7, -1)
     print(die >= 1 && die < 7 && negative_range >= -7 && negative_range < -1)

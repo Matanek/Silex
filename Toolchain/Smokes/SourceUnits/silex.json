@@ -1,0 +1,19 @@
+{
+  "target": "SourceUnits.App",
+  "modules": [
+    {
+      "name": "SourceUnits.Core",
+      "sources": [
+        "Widget.sx",
+        "Internal.sx",
+        "WidgetExtensions.sx",
+        "Neighbor.sx",
+        "Broken.sx"
+      ]
+    },
+    {
+      "name": "SourceUnits.App",
+      "sources": ["Main.sx"]
+    }
+  ]
+}

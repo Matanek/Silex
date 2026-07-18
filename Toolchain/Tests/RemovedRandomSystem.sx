@@ -1,0 +1,6 @@
+use STD
+
+func main() {
+    var random = STD.Randomizer.system()
+    print(random.get_int())
+}

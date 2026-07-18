@@ -184,7 +184,7 @@ fn createApp(allocator: Allocator, io: Io, root: []const u8, increment: u8) !voi
     );
     const source = try std.fmt.allocPrint(
         allocator,
-        "import Vendor\n\nfunc main() {{\n    print(Vendor.value() + {d})\n}}\n",
+        "use Vendor\n\nfunc main() {{\n    print(Vendor.value() + {d})\n}}\n",
         .{increment},
     );
     try writeFile(allocator, io, root, "Main.sx", source);

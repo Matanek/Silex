@@ -1,33 +1,42 @@
 # Modules
 
-A module is a logical node in a hierarchy. Files assigned to the same module
-share their enums, protocols, structures, classes, and functions, and directories below it
-provide its submodules. A file does not contain a `module` declaration.
+A module is a logical node in a hierarchy. Each `.sx` file assigned directly
+to it is a source unit whose name is the exact filename without `.sx`. Files
+assigned to the same module share their enums, protocols, structures, classes,
+and functions, and directories below it provide its submodules. A file does
+not contain a `module` declaration.
+
+A source unit is selectable but does not add a namespace segment. For example,
+`STD/Time/Stopwatch.sx` is the unit `STD.Time.Stopwatch`, while its public
+`Stopwatch` structure remains named `STD.Time.Stopwatch` rather than
+`STD.Time.Stopwatch.Stopwatch`. Private declarations in the file remain private
+to `STD.Time`. Manifest modules use the basename of each `sources` path by the
+same rule and reject duplicate unit names.
 
 When compiling an entry file without a manifest, a directory defines a local
 module by the same path rule as the installed standard library: `STD/` provides
-`STD`, `STD/Random/` provides `STD.Random`, and `STD/Time/` provides
-`STD.Time`. A directory remains a module when it contains no direct `.sx`
-source and only groups submodules. Only `.sx` files directly inside a directory
-contribute declarations to that module.
+`STD`, and `STD/Time/` provides `STD.Time`. A directory remains a module when
+it contains no direct `.sx` source and only groups submodules. Only `.sx` files
+directly inside a directory contribute declarations to that module, so
+`STD/Randomizer.sx` declares `STD.Randomizer` directly in `STD`.
 
 The distributed library is installed with Silex. Its currently available
-public root is `STD`; `STD.Random` and `STD.Time` are its existing submodules.
+public root is `STD`; it declares `STD.Randomizer` directly and provides
+`STD.Time` as a submodule.
 The root names `STD` and `Silex` are reserved for distributed modules, so they
 must not be listed as dependencies in a manifest. Distributed modules work
 from a single entry file and from a JSON project manifest. If a local module
-and a distributed module provide the same imported name, compilation fails
+and a distributed module provide the same used name, compilation fails
 instead of choosing one implicitly.
 
 ```sx
-import STD as Standard
+use STD as Standard
 
-use Standard.Random as Random
-use Standard.Random.Generator as Generator
+use Standard.Randomizer as Randomizer
 use Standard.Time.Stopwatch as Stopwatch
 
-func create_generator(seed:int) Generator {
-    return Random.create(seed)
+func create_randomizer(seed:int) Randomizer {
+    return Randomizer.create(seed)
 }
 
 func create_stopwatch() Stopwatch {
@@ -35,25 +44,54 @@ func create_stopwatch() Stopwatch {
 }
 ```
 
-`import` names a module and makes it available through its full name or alias.
-It does not recursively load every submodule. A fully qualified reference under
-that import loads only its longest prefix that names an existing module. Thus
-`import STD` permits `STD.Time.Stopwatch()` and loads `STD.Time` on demand.
-The same rule applies through an import alias such as `Standard.Time.Stopwatch`
-after `import STD as Standard`.
+`use` names a dependency and makes a selected module available through its last
+path segment or an explicit alias. It does not recursively load every submodule.
+A fully qualified reference under that module use resolves the longest module
+prefix and then selects the required source unit or declaration. Thus `use STD`
+permits `STD.Time.Stopwatch()`
+and loads `Stopwatch.sx` and its explicit dependencies on demand.
+The same rule applies through a module alias such as `Standard.Time.Stopwatch`
+after `use STD as Standard`.
 
-A direct `import` also activates the imported module's public extension methods
+A direct module `use` also activates the used module's public extension methods
 and protocol conformances in that source file. This activation is not
-transitive and does not require a separate `use`; see
-[Type extensions](Extensions.md#visibility-and-imports).
+transitive; see [Type extensions](Extensions.md#visibility-and-uses).
 
-A non-public `use` can name either one declaration or one submodule and
-introduce its name or alias into the current file. It can establish that exact
-dependency without a preceding `import`; the longest loaded prefix that names
-a module is selected. Thus `use STD.Random as Random` introduces a module,
-while `use STD.Random.Generator as Generator` introduces a named type. An import
-alias can also qualify a `use`, as in `import STD as Standard` followed by
-`use Standard.Random as Random`.
+A non-public `use` can name a module, a source unit, or a declaration and can
+establish that exact dependency. Thus
+`use STD.Time as Time` selects every direct unit of that module, while
+`use STD.Time.Stopwatch` selects only `Stopwatch.sx` and introduces its public
+homonymous structure. Selecting a unit with no homonymous declaration, such as
+`use STD.Time.Internal`, only loads it; it creates no fictitious `Internal`
+type or value. A declaration whose name differs from its file selects the unit
+that provides it. A path which is simultaneously a unit and a declaration from
+another unit is ambiguous and rejected.
+
+Inside a source unit, an unqualified `use` can select a sibling unit or a
+declaration from the same module:
+
+```sx
+use Internal
+
+pub struct Stopwatch {
+}
+```
+
+The loader opens each selected unit once and follows its `use` directives to a
+stable transitive closure. Neighboring units outside that closure are not
+parsed or added to the program. Cycles between units of one module are allowed
+and loaded as one closure; module and package cycles retain their existing
+errors. A module alias can qualify another `use`, as in `use STD as Standard`
+followed by `use Standard.Randomizer as Randomizer`.
+
+Loading and activation are distinct. A file directly using one unit activates
+the public extensions and protocol conformances in that unit and in the
+same-module units reached through its `use` closure. A dependency that crosses
+into another module or package is compiled but does not activate that other
+module's extensions in the original consumer. Selecting a complete module
+activates all its direct units. Activation stays local to the file containing
+the explicit `use`; dependency aliases never propagate back to its
+consumer.
 
 ## Transparent type aliases
 
@@ -86,7 +124,7 @@ except that an alias whose underlying type is a structure, class, or enum can
 use that type's ordinary initializer or variant constructors.
 
 `pub use <type> as <name>` exports the transparent alias. A consumer may
-qualify, import, rename, or re-export it like another public type declaration.
+qualify, use, rename, or re-export it like another public type declaration.
 The source type is resolved in the file declaring the alias and is not
 reinterpreted in the consumer. Type aliases cannot currently declare their own
 type parameters.
@@ -108,7 +146,7 @@ even when they have no sources of their own. See
 [Installation and command-line use](../Installation.md).
 
 The modules and public APIs currently provided under `STD` are documented in
-the [STD library reference](Libraries/STD.md).
+the [STD library reference](Libraries/STD/README.md).
 
 ## Optional module manifest
 
@@ -125,18 +163,17 @@ the project:
 Library/STD/
 ├── Module.json
 ├── Module.cpp
-├── Random/
-│   └── Generator.sx
+├── Randomizer.sx
 └── Time/
     ├── Clock.sx
     ├── Internal.sx
     └── Stopwatch.sx
 ```
 
-`Generator.sx` and `Internal.sx` declare private `native func` entries and
-expose ordinary Silex functions or structures around them. `Module.cpp`
+`Randomizer.sx` and `Internal.sx` declare private `native func` entries and
+expose ordinary Silex types around them. `Module.cpp`
 defines the C symbols derived from their full module and function paths:
-`STD.Random.native_seed` becomes `silexNative_STD_Random_native_seed`, and
+`STD.native_seed` becomes `silexNative_STD_native_seed`, and
 `STD.Time.native_monotonic_microseconds` becomes
 `silexNative_STD_Time_native_monotonic_microseconds`.
 
@@ -155,8 +192,8 @@ defines the C symbols derived from their full module and function paths:
 When a descendant is loaded, Silex checks its directory and then each parent
 directory for the closest `Module.json` containing `native`. A metadata-only
 manifest does not mask a parent's native configuration. This is why the one
-manifest at `Library/STD/Module.json` provides `Module.cpp` to both
-`STD.Random` and `STD.Time`.
+manifest at `Library/STD/Module.json` provides `Module.cpp` to both `STD` itself
+and `STD.Time`.
 
 The `compile` command selects one target for the whole application: the host
 target by default, or the triple supplied with `--target`. Every loaded native
@@ -206,7 +243,7 @@ entry.
 sources. `public_include_dirs` and `public_defines` also apply to the owner,
 then to native sources compiled by packages that declare the owner as a direct
 dependency. Public include paths are relative to and confined within the
-owner's package root. They do not create Silex imports. The interface is not
+owner's package root. They do not create Silex dependencies. The interface is not
 transitive: a direct consumer can include an owner's public header, but the
 consumer's own dependents must also declare that owner before compiling native
 source against the same header.
@@ -262,7 +299,7 @@ their existing filesystem resolution.
 A directory consumed as an external dependency is a declared package. Its
 `Module.json` names the root module, gives it a Semantic Version, and may list
 other packages required directly by its sources. `STD` is not such a package:
-it is a reserved distributed module and must be imported directly without a
+it is a reserved distributed module and must be used directly without a
 `dependencies` entry. The repository does not currently ship a public external
 package, so the following fragments use explicit placeholders to describe the
 manifest shape rather than names of available modules:
@@ -280,7 +317,7 @@ manifest shape rather than names of available modules:
 ```
 
 The package root provides the module named by `name`; a subdirectory adds its
-own segment below that root module, exactly as `Random/` provides `STD.Random`
+own segment below that root module, exactly as `Time/` provides `STD.Time`
 below `STD/`. A `path` is relative to the manifest that declares it and may
 leave that package directory. The destination is canonicalized and must be a
 directory containing `Module.json`. Its `name` must match the dependency key
@@ -313,13 +350,13 @@ declaring its own `name` or `version`. For a `.sx` entry the project root is the
 entry's directory; for a JSON project manifest it is the manifest's directory.
 Without that root manifest, local module loading behaves exactly as before.
 
-Silex resolves and validates the complete package graph before reading imported
+Silex resolves and validates the complete package graph before reading used
 module sources or compiling native code. The same package name must resolve to
 one canonical directory and one version; diamonds reuse that identity once.
 Cycles, missing paths, incomplete manifests, name mismatches, and multiple
 providers report the dependency chain that led to the error.
 
-Each package can import its own modules, reserved distributed modules such as
+Each package can use its own modules, reserved distributed modules such as
 `STD`, and the packages it declares directly. Transitive dependencies are
 compiled for their parent but do not become importable by an application or
 sibling package that did not declare them.

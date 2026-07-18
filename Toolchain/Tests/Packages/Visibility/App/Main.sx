@@ -1,4 +1,4 @@
-import Utility
+use Utility
 
 func main() {
     print(Utility.value())

@@ -1,4 +1,4 @@
-import ExtensionConformanceVisibility.Conformance as Conformance
+use ExtensionConformanceVisibility.Conformance as Conformance
 
 pub func bridge() {
 }

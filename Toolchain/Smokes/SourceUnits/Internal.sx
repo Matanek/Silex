@@ -1,0 +1,3 @@
+func internal_value() int {
+    return 21
+}

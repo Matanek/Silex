@@ -1,5 +1,5 @@
-import ExtensionConformanceChecks.Core as Core
-import ExtensionConformanceChecks.Types as Types
+use ExtensionConformanceChecks.Core as Core
+use ExtensionConformanceChecks.Types as Types
 
 extend Types.Sprite : Core.Drawable, Core.Named {
     pub func draw() int {

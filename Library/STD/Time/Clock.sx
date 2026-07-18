@@ -1,3 +1,5 @@
+use Internal
+
 pub struct Clock {
     var last_microseconds:int
     var pending_seconds:float

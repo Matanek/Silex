@@ -1,5 +1,5 @@
-import ExtensionVisibility.Core as Core
-import ExtensionVisibility.Bridge as Bridge
+use ExtensionVisibility.Core as Core
+use ExtensionVisibility.Bridge as Bridge
 use Core.Counter
 
 func main() {

@@ -1,5 +1,5 @@
-import NativeChecks.Throw
+use NativeChecks.Throw
 
 func main() {
-    NativeChecks.Throw.fail()
+    Throw.fail()
 }

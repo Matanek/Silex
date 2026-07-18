@@ -440,7 +440,6 @@ pub const Statement = union(enum) {
 };
 
 pub const Program = struct {
-    imports: []const Import = &.{},
     uses: []const Use = &.{},
     enums: []const Enum = &.{},
     protocols: []const Protocol = &.{},
@@ -485,12 +484,6 @@ pub const EnumVariant = struct {
     position: Source.Position,
     associated_types: []const TypeName,
     raw_value: ?*Expression = null,
-};
-
-pub const Import = struct {
-    path: []const u8,
-    alias: ?[]const u8,
-    position: Source.Position,
 };
 
 pub const Use = struct {

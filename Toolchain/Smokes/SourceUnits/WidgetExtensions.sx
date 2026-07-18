@@ -1,0 +1,7 @@
+use Widget
+
+extend Widget {
+    pub func doubled() int {
+        return self.value * 2
+    }
+}

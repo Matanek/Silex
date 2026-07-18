@@ -1,4 +1,4 @@
-import STD as Standard
+use STD as Standard
 
 func main() {
     var stopwatch = Standard.Time.Stopwatch()

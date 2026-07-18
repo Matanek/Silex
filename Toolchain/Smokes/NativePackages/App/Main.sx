@@ -1,4 +1,4 @@
-import Foundation
+use Foundation
 
 func main() {
     print(Foundation.answer())

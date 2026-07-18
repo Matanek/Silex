@@ -1,5 +1,3 @@
-import STD.Random as Random
-
 func apply(value:int, callback:func(int) int) int {
     return callback(value)
 }

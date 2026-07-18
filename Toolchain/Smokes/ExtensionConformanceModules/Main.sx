@@ -1,6 +1,6 @@
-import ExtensionConformanceChecks.Core as Core
-import ExtensionConformanceChecks.Types as Types
-import ExtensionConformanceChecks.Conformances as Conformances
+use ExtensionConformanceChecks.Core as Core
+use ExtensionConformanceChecks.Types as Types
+use ExtensionConformanceChecks.Conformances as Conformances
 
 struct Badge {
     var value:int
@@ -16,16 +16,16 @@ func main() {
     var sprite = Types.Sprite(42)
     var drawable:Core.Drawable = sprite
     var named:Core.Named = sprite
-    assert(drawable.draw() == 42, "imported class dynamic conformance")
+    assert(drawable.draw() == 42, "used class dynamic conformance")
     assert(named.name() == "sprite", "multiple extension conformances")
-    assert(Core.render<Types.Sprite>(sprite) == 42, "imported generic conformance")
+    assert(Core.render<Types.Sprite>(sprite) == 42, "used generic conformance")
     var renderer = Core.Renderer<Types.Sprite>(value:sprite)
-    assert(renderer.render() == 42, "imported generic structure conformance")
+    assert(renderer.render() == 42, "used generic structure conformance")
 
     var token = Types.Token(value:12)
     var token_drawable:Core.Drawable = token
     assert(token_drawable.draw() == 12, "implicit public struct witness")
-    assert(Core.render<Types.Token>(token) == 12, "imported implicit struct conformance")
+    assert(Core.render<Types.Token>(token) == 12, "used implicit struct conformance")
 
     var badge = Badge(value:7)
     var badge_drawable:Core.Drawable = badge

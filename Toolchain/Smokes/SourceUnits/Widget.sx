@@ -1,0 +1,10 @@
+use Internal
+use WidgetExtensions
+
+pub struct Widget {
+    var value:int
+
+    static func create() Widget {
+        return Widget(value:internal_value())
+    }
+}

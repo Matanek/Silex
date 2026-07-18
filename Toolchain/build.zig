@@ -1,5 +1,5 @@
 const std = @import("std");
-const silex_version = "0.17.0";
+const silex_version = "0.18.0";
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
@@ -492,7 +492,21 @@ pub fn build(b: *std.Build) void {
     removed_random_next_command.addArgs(&.{ "compile", "Tests/RemovedRandomNext.sx" });
     removed_random_next_command.expectExitCode(1);
     removed_random_next_command.expectStdErrEqual(
-        "Tests/RemovedRandomNext.sx:5:18: error: struct 'STD.Random.Generator' has no method 'next'\n",
+        "Tests/RemovedRandomNext.sx:5:18: error: class 'STD.Randomizer' has no method 'next'\n",
+    );
+
+    const removed_random_module_command = b.addRunArtifact(executable);
+    removed_random_module_command.addArgs(&.{ "compile", "Tests/RemovedRandomModule.sx" });
+    removed_random_module_command.expectExitCode(1);
+    removed_random_module_command.expectStdErrEqual(
+        "Tests/RemovedRandomModule.sx:1:1: error: module 'STD.Random' was not found\n",
+    );
+
+    const removed_random_system_command = b.addRunArtifact(executable);
+    removed_random_system_command.addArgs(&.{ "compile", "Tests/RemovedRandomSystem.sx" });
+    removed_random_system_command.expectExitCode(1);
+    removed_random_system_command.expectStdErrEqual(
+        "Tests/RemovedRandomSystem.sx:4:33: error: type 'STD.Randomizer' has no static method 'system'\n",
     );
 
     const invalid_logical_command = b.addRunArtifact(executable);
@@ -905,11 +919,11 @@ pub fn build(b: *std.Build) void {
         "Tests/ReservedMapErrorLocal.sx:2:9: error: name 'map_error' is reserved\n",
     );
 
-    const reserved_map_error_import_alias_command = b.addRunArtifact(executable);
-    reserved_map_error_import_alias_command.addArgs(&.{ "compile", "Tests/ReservedMapErrorImportAlias.sx" });
-    reserved_map_error_import_alias_command.expectExitCode(1);
-    reserved_map_error_import_alias_command.expectStdErrEqual(
-        "Tests/ReservedMapErrorImportAlias.sx:1:19: error: name 'map_error' is reserved\n",
+    const reserved_map_error_module_alias_command = b.addRunArtifact(executable);
+    reserved_map_error_module_alias_command.addArgs(&.{ "compile", "Tests/ReservedMapErrorModuleAlias.sx" });
+    reserved_map_error_module_alias_command.expectExitCode(1);
+    reserved_map_error_module_alias_command.expectStdErrEqual(
+        "Tests/ReservedMapErrorModuleAlias.sx:1:16: error: name 'map_error' is reserved\n",
     );
 
     const missing_generic_function_arguments_command = b.addRunArtifact(executable);
@@ -1353,14 +1367,21 @@ pub fn build(b: *std.Build) void {
     missing_module_command.addArgs(&.{ "compile", "Tests/Modules/Missing/project.json" });
     missing_module_command.expectExitCode(1);
     missing_module_command.expectStdErrEqual(
-        "Tests/Modules/Missing/Main.sx:1:1: error: module 'Missing' was not found\n",
+        "Tests/Modules/Missing/Main.sx:1:1: error: unknown declaration 'Missing'\n",
+    );
+
+    const removed_import_command = b.addRunArtifact(executable);
+    removed_import_command.addArgs(&.{ "compile", "Tests/RemovedImport.sx" });
+    removed_import_command.expectExitCode(1);
+    removed_import_command.expectStdErrEqual(
+        "Tests/RemovedImport.sx:1:1: error: 'import' was removed; use 'use STD as Standard'\n",
     );
 
     const module_alias_collision_command = b.addRunArtifact(executable);
     module_alias_collision_command.addArgs(&.{ "compile", "Tests/Modules/AliasCollision/project.json" });
     module_alias_collision_command.expectExitCode(1);
     module_alias_collision_command.expectStdErrEqual(
-        "Tests/Modules/AliasCollision/Main.sx:3:1: error: name 'Shared' collides with an import alias\n",
+        "Tests/Modules/AliasCollision/Main.sx:3:1: error: name 'Shared' collides with a module alias\n",
     );
 
     const multiple_module_providers_command = b.addRunArtifact(executable);
@@ -1368,6 +1389,13 @@ pub fn build(b: *std.Build) void {
     multiple_module_providers_command.expectExitCode(1);
     multiple_module_providers_command.expectStdErrEqual(
         "silex: module 'Lib' has multiple providers\n",
+    );
+
+    const duplicate_source_units_command = b.addRunArtifact(executable);
+    duplicate_source_units_command.addArgs(&.{ "compile", "Tests/Modules/DuplicateUnits/project.json" });
+    duplicate_source_units_command.expectExitCode(1);
+    duplicate_source_units_command.expectStdErrEqual(
+        "silex: module 'App' has multiple source units named 'Item'\n",
     );
 
     const unknown_module_path_command = b.addRunArtifact(executable);
@@ -1391,16 +1419,12 @@ pub fn build(b: *std.Build) void {
         "Tests/Modules/PublicModuleUse/Main.sx:1:5: error: module 'Lib.Child' cannot be re-exported with 'pub use'\n",
     );
 
-    const missing_local_import_command = b.addRunArtifact(executable);
-    missing_local_import_command.addArgs(&.{ "compile", "Tests/LocalImports/Missing/Main.sx" });
-    missing_local_import_command.expectExitCode(1);
-    missing_local_import_command.expectStdErrEqual(
-        "Tests/LocalImports/Missing/Main.sx:1:1: error: local module 'Math.Vec3' was not found at 'Tests/LocalImports/Missing/Math/Vec3'\n",
-    );
+    const local_source_unit_command = b.addRunArtifact(executable);
+    local_source_unit_command.addArgs(&.{ "compile", "Tests/LocalModules/SourceUnit/Main.sx" });
 
-    const parent_only_import_command = b.addRunArtifact(executable);
-    parent_only_import_command.addArgs(&.{ "run", "Tests/LocalImports/ParentOnly/Main.sx" });
-    parent_only_import_command.expectStdOutEqual(hostText(b, "parent only\n"));
+    const parent_only_use_command = b.addRunArtifact(executable);
+    parent_only_use_command.addArgs(&.{ "run", "Tests/LocalModules/ParentOnly/Main.sx" });
+    parent_only_use_command.expectStdOutEqual(hostText(b, "parent only\n"));
 
     const package_diamond_command = b.addRunArtifact(executable);
     package_diamond_command.addArgs(&.{ "run", "Tests/Packages/Diamond/App/Main.sx" });
@@ -1410,7 +1434,7 @@ pub fn build(b: *std.Build) void {
     transitive_package_visibility_command.addArgs(&.{ "compile", "Tests/Packages/Visibility/App/Main.sx" });
     transitive_package_visibility_command.expectExitCode(1);
     transitive_package_visibility_command.expectStdErrEqual(
-        "Tests/Packages/Visibility/App/Main.sx:1:1: error: package 'application' cannot import transitive package 'Utility' without declaring it directly\n",
+        "Tests/Packages/Visibility/App/Main.sx:1:1: error: package 'application' cannot use transitive package 'Utility' without declaring it directly\n",
     );
 
     const package_cycle_command = b.addRunArtifact(executable);
@@ -1775,7 +1799,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&invalid_map_error_type_arity_command.step);
     test_step.dependOn(&reserved_map_error_function_command.step);
     test_step.dependOn(&reserved_map_error_local_command.step);
-    test_step.dependOn(&reserved_map_error_import_alias_command.step);
+    test_step.dependOn(&reserved_map_error_module_alias_command.step);
     test_step.dependOn(&missing_generic_function_arguments_command.step);
     test_step.dependOn(&unexpected_generic_function_arguments_command.step);
     test_step.dependOn(&invalid_generic_function_arity_command.step);
@@ -1836,13 +1860,14 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&private_module_command.step);
     test_step.dependOn(&module_cycle_command.step);
     test_step.dependOn(&missing_module_command.step);
+    test_step.dependOn(&removed_import_command.step);
     test_step.dependOn(&module_alias_collision_command.step);
     test_step.dependOn(&multiple_module_providers_command.step);
     test_step.dependOn(&unknown_module_path_command.step);
     test_step.dependOn(&unknown_qualified_descendant_command.step);
     test_step.dependOn(&public_module_use_command.step);
-    test_step.dependOn(&missing_local_import_command.step);
-    test_step.dependOn(&parent_only_import_command.step);
+    test_step.dependOn(&local_source_unit_command.step);
+    test_step.dependOn(&parent_only_use_command.step);
     test_step.dependOn(&package_diamond_command.step);
     test_step.dependOn(&transitive_package_visibility_command.step);
     test_step.dependOn(&package_cycle_command.step);
@@ -2303,14 +2328,19 @@ pub fn build(b: *std.Build) void {
     modules_command.addArgs(&.{ "run", "Smokes/Modules/silex.json" });
     modules_command.expectStdOutEqual(hostText(b, "true\ntrue\ntrue\nfalse\n7\n16\n11\n3\ngeneric module\n1\n2\n4\n5\n1\n2\nenum module\n20\nmodules\n"));
 
-    const local_imports_command = b.addRunArtifact(executable);
-    local_imports_command.step.dependOn(&modules_command.step);
-    local_imports_command.addArgs(&.{ "run", "Smokes/LocalImports/Main.sx" });
-    local_imports_command.expectStdOutEqual(hostText(b, "2\n3\n9\n3\n7\n"));
+    const local_modules_command = b.addRunArtifact(executable);
+    local_modules_command.step.dependOn(&modules_command.step);
+    local_modules_command.addArgs(&.{ "run", "Smokes/LocalModules/Main.sx" });
+    local_modules_command.expectStdOutEqual(hostText(b, "2\n3\n9\n3\n7\n"));
 
-    const standard_library_output = "1065361344\n1152851127339773951\n508277857751731680\n6637030065269067181\n7345633470618427510\n8792660973527785782\n1082269761\n1152992998833853505\n1954144627577988649\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n1301891922867780472\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n";
+    const source_units_command = b.addRunArtifact(executable);
+    source_units_command.step.dependOn(&local_modules_command.step);
+    source_units_command.addArgs(&.{ "run", "Smokes/SourceUnits/silex.json" });
+    source_units_command.expectStdOutEqual(hostText(b, "42\n"));
+
+    const standard_library_output = "1065361344\n1152851127339773951\n508277857751731680\n6637030065269067181\n7345633470618427510\n8792660973527785782\n1082269761\n1152992998833853505\n1954144627577988649\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n1301891922867780472\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n";
     const standard_library_command = b.addRunArtifact(executable);
-    standard_library_command.step.dependOn(&local_imports_command.step);
+    standard_library_command.step.dependOn(&source_units_command.step);
     standard_library_command.addArgs(&.{ "run", "Smokes/StandardLibrary/Main.sx" });
     standard_library_command.expectStdOutEqual(hostText(
         b,
@@ -2319,19 +2349,19 @@ pub fn build(b: *std.Build) void {
 
     const qualified_parent_alias_command = b.addRunArtifact(executable);
     qualified_parent_alias_command.step.dependOn(&standard_library_command.step);
-    qualified_parent_alias_command.addArgs(&.{ "run", "Smokes/QualifiedImports/ParentAlias.sx" });
+    qualified_parent_alias_command.addArgs(&.{ "run", "Smokes/QualifiedUses/ParentAlias.sx" });
     qualified_parent_alias_command.expectStdOutEqual(hostText(b, "true\n"));
 
-    const random_generator_source = b.getInstallPath(.prefix, "lib/silex/STD/Random/Generator.sx");
+    const randomizer_source = b.getInstallPath(.prefix, "lib/silex/STD/Randomizer.sx");
     const random_error_cases = [_]struct {
         source: []const u8,
         message: []const u8,
     }{
-        .{ .source = "Smokes/RandomErrors/IntOrder.sx", .message = "30:13: runtime error: get_int(minimum, maximum) requires minimum < maximum" },
-        .{ .source = "Smokes/RandomErrors/IntWidth.sx", .message = "35:17: runtime error: get_int(minimum, maximum) requires an interval width that fits in int" },
-        .{ .source = "Smokes/RandomErrors/FloatOrder.sx", .message = "59:13: runtime error: get_float(minimum, maximum) requires minimum < maximum" },
-        .{ .source = "Smokes/RandomErrors/FloatFinite.sx", .message = "56:13: runtime error: get_float(minimum, maximum) requires finite bounds" },
-        .{ .source = "Smokes/RandomErrors/FloatResolution.sx", .message = "66:13: runtime error: get_float(minimum, maximum) requires a representable value below maximum" },
+        .{ .source = "Smokes/RandomErrors/IntOrder.sx", .message = "42:13: runtime error: get_int(minimum, maximum) requires minimum < maximum" },
+        .{ .source = "Smokes/RandomErrors/IntWidth.sx", .message = "47:17: runtime error: get_int(minimum, maximum) requires an interval width that fits in int" },
+        .{ .source = "Smokes/RandomErrors/FloatOrder.sx", .message = "71:13: runtime error: get_float(minimum, maximum) requires minimum < maximum" },
+        .{ .source = "Smokes/RandomErrors/FloatFinite.sx", .message = "68:13: runtime error: get_float(minimum, maximum) requires finite bounds" },
+        .{ .source = "Smokes/RandomErrors/FloatResolution.sx", .message = "78:13: runtime error: get_float(minimum, maximum) requires a representable value below maximum" },
     };
     var previous_random_error_step: *std.Build.Step = &qualified_parent_alias_command.step;
     for (random_error_cases) |case| {
@@ -2341,7 +2371,7 @@ pub fn build(b: *std.Build) void {
         command.expectExitCode(1);
         command.expectStdErrEqual(hostText(
             b,
-            b.fmt("{s}:{s}\n", .{ random_generator_source, case.message }),
+            b.fmt("{s}:{s}\n", .{ randomizer_source, case.message }),
         ));
         previous_random_error_step = &command.step;
     }

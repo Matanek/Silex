@@ -115,7 +115,7 @@ replacing the collection element. A mutable loop binds directly to each element
 and allows no other direct access to the collection.
 
 An integer range can use `start...end` or the equivalent intrinsic
-`range(start, end)`. `range` is reserved and available without an import. The
+`range(start, end)`. `range` is reserved and available without a `use`. The
 first bound is produced and the second bound is never produced:
 
 ```sx

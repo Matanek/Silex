@@ -26,7 +26,6 @@ pub const Parser = struct {
 
     pub fn parse(self: *Parser) !Ast.Program {
         try self.advance();
-        var imports: std.ArrayList(Ast.Import) = .empty;
         var uses: std.ArrayList(Ast.Use) = .empty;
         var enums: std.ArrayList(Ast.Enum) = .empty;
         var protocols: std.ArrayList(Ast.Protocol) = .empty;
@@ -34,8 +33,8 @@ pub const Parser = struct {
         var structures: std.ArrayList(Ast.Structure) = .empty;
         var functions: std.ArrayList(Ast.Function) = .empty;
         while (self.current.tag != .end) {
-            if (self.current.tag == .keyword_import) {
-                try imports.append(self.allocator, try self.parseImport());
+            if (self.current.tag == .identifier and std.mem.eql(u8, self.current.lexeme, "import")) {
+                return self.rejectImport();
             } else if (self.current.tag == .keyword_use) {
                 try uses.append(self.allocator, try self.parseUse(false));
             } else if (self.current.tag == .keyword_pub) {
@@ -68,11 +67,10 @@ pub const Parser = struct {
             } else if (self.current.tag == .keyword_elif) {
                 return self.fail("'elif' must directly continue an if chain");
             } else {
-                return self.fail("expected import, use, enum, protocol, extend, struct, class, func, or native func declaration");
+                return self.fail("expected use, enum, protocol, extend, struct, class, func, or native func declaration");
             }
         }
         return .{
-            .imports = try imports.toOwnedSlice(self.allocator),
             .uses = try uses.toOwnedSlice(self.allocator),
             .enums = try enums.toOwnedSlice(self.allocator),
             .protocols = try protocols.toOwnedSlice(self.allocator),
@@ -257,13 +255,17 @@ pub const Parser = struct {
         };
     }
 
-    fn parseImport(self: *Parser) ParseError!Ast.Import {
+    fn rejectImport(self: *Parser) ParseError!Ast.Program {
         const position = self.current.position;
         try self.advance();
         const path = try self.parseQualifiedName("expected module name after 'import'");
         const alias = try self.parseOptionalAlias();
         try self.expectStatementTerminator();
-        return .{ .path = path, .alias = alias, .position = position };
+        const replacement = if (alias) |name|
+            try std.fmt.allocPrint(self.allocator, "'import' was removed; use 'use {s} as {s}'", .{ path, name })
+        else
+            try std.fmt.allocPrint(self.allocator, "'import' was removed; use 'use {s}'", .{path});
+        return self.failAt(position, replacement);
     }
 
     fn parseUse(self: *Parser, is_public: bool) ParseError!Ast.Use {
@@ -3063,9 +3065,25 @@ test "reserve Result and reject void as its error type" {
     try std.testing.expectError(error.InvalidSource, type_parameter.parse());
     try std.testing.expectEqualStrings("type name 'Result' is reserved", type_parameter.diagnostic.?.message);
 
-    var import_alias = Parser.init(arena.allocator(), "import Library as Result\nfunc main() {}");
-    try std.testing.expectError(error.InvalidSource, import_alias.parse());
-    try std.testing.expectEqualStrings("name 'Result' is reserved", import_alias.diagnostic.?.message);
+    var module_alias = Parser.init(arena.allocator(), "use Library as Result\nfunc main() {}");
+    try std.testing.expectError(error.InvalidSource, module_alias.parse());
+    try std.testing.expectEqualStrings("name 'Result' is reserved", module_alias.diagnostic.?.message);
+}
+
+test "removed import reports its use replacement" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var aliased = Parser.init(arena.allocator(), "import STD as Standard\nfunc main() {}");
+    try std.testing.expectError(error.InvalidSource, aliased.parse());
+    try std.testing.expectEqualStrings(
+        "'import' was removed; use 'use STD as Standard'",
+        aliased.diagnostic.?.message,
+    );
+
+    var direct = Parser.init(arena.allocator(), "import STD\nfunc main() {}");
+    try std.testing.expectError(error.InvalidSource, direct.parse());
+    try std.testing.expectEqualStrings("'import' was removed; use 'use STD'", direct.diagnostic.?.message);
 }
 
 test "parse terminal else match branches" {
@@ -3168,42 +3186,42 @@ test "parse type extensions and reject stateful members" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     var parser = Parser.init(arena.allocator(),
-        \\extend Random.Generator {
+        \\extend STD.Randomizer {
         \\    pub func get_uint() uint { return self.get_int() as uint }
-        \\    static func seeded() Generator { return Generator() }
+        \\    static func seeded() Randomizer { return Randomizer.create() }
         \\}
         \\func main() {}
     );
     const program = try parser.parse();
     try std.testing.expectEqual(@as(usize, 1), program.extensions.len);
-    try std.testing.expectEqualStrings("Random.Generator", program.extensions[0].target);
+    try std.testing.expectEqualStrings("STD.Randomizer", program.extensions[0].target);
     try std.testing.expectEqual(@as(usize, 2), program.extensions[0].methods.len);
     try std.testing.expect(program.extensions[0].methods[0].is_public);
     try std.testing.expectEqual(Ast.MemberVisibility.public_access, program.extensions[0].methods[0].member_visibility.?);
     try std.testing.expect(program.extensions[0].methods[1].is_static);
     try std.testing.expect(program.extensions[0].methods[1].member_visibility == null);
 
-    var field = Parser.init(arena.allocator(), "extend Generator { var state:int } func main() {}");
+    var field = Parser.init(arena.allocator(), "extend Randomizer { var state:int } func main() {}");
     try std.testing.expectError(error.InvalidSource, field.parse());
     try std.testing.expectEqualStrings("an extension cannot declare a field", field.diagnostic.?.message);
 
-    var subclass = Parser.init(arena.allocator(), "extend Generator { sub func next() {} } func main() {}");
+    var subclass = Parser.init(arena.allocator(), "extend Randomizer { sub func next() {} } func main() {}");
     try std.testing.expectError(error.InvalidSource, subclass.parse());
     try std.testing.expectEqualStrings("an extension method cannot use 'sub'", subclass.diagnostic.?.message);
 
-    var constructor = Parser.init(arena.allocator(), "extend Generator { init() {} } func main() {}");
+    var constructor = Parser.init(arena.allocator(), "extend Randomizer { init() {} } func main() {}");
     try std.testing.expectError(error.InvalidSource, constructor.parse());
     try std.testing.expectEqualStrings("an extension cannot declare a constructor", constructor.diagnostic.?.message);
 
-    var destructor = Parser.init(arena.allocator(), "extend Generator { drop {} } func main() {}");
+    var destructor = Parser.init(arena.allocator(), "extend Randomizer { drop {} } func main() {}");
     try std.testing.expectError(error.InvalidSource, destructor.parse());
     try std.testing.expectEqualStrings("an extension cannot declare 'drop'", destructor.diagnostic.?.message);
 
-    var override_method = Parser.init(arena.allocator(), "extend Generator { override func next() {} } func main() {}");
+    var override_method = Parser.init(arena.allocator(), "extend Randomizer { override func next() {} } func main() {}");
     try std.testing.expectError(error.InvalidSource, override_method.parse());
     try std.testing.expectEqualStrings("an extension method cannot use 'override'", override_method.diagnostic.?.message);
 
-    var generic = Parser.init(arena.allocator(), "extend Generator<int> { func next() {} } func main() {}");
+    var generic = Parser.init(arena.allocator(), "extend Randomizer<int> { func next() {} } func main() {}");
     try std.testing.expectError(error.InvalidSource, generic.parse());
     try std.testing.expectEqualStrings("generic extensions are not supported", generic.diagnostic.?.message);
 }

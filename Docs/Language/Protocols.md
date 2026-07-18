@@ -14,7 +14,7 @@ pub protocol Drawable {
 ```
 
 Protocols follow ordinary module visibility. A private protocol is available
-inside its module; `pub protocol` can be imported, renamed, or re-exported.
+inside its module; `pub protocol` can be used, renamed, or re-exported.
 Requirements cannot currently be generic, static, constructors, fields, or
 default implementations. Protocol inheritance and generic protocols are not
 part of the current language.
@@ -58,7 +58,7 @@ inherits every valid conformance of its base class.
 
 `extend Type : Protocol` adds a nominal conformance without changing the
 target's representation. The conformance is available in its declaring module
-and in source files that directly import that module:
+and in source files that directly use that module:
 
 ```sx
 extend Sprite : Drawable {

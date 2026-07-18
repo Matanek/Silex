@@ -1,4 +1,4 @@
-import NativeRuntime
+use NativeRuntime
 
 func main() {
     print(NativeRuntime.linked())

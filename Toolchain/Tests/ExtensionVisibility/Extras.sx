@@ -1,4 +1,4 @@
-import ExtensionVisibility.Core as Core
+use ExtensionVisibility.Core as Core
 use Core.Counter
 
 extend Counter {

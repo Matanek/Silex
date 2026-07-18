@@ -186,7 +186,7 @@ let origin = Position.origin()
 
 A static method belongs to a separate overload set from instance methods and
 can use the structure's type parameters. A specialization such as
-`Box<int>.filled(42)`, an imported type, or a transparent type alias may
+`Box<int>.filled(42)`, a used type, or a transparent type alias may
 qualify it. A visible local value keeps priority over a type with the same
 name. Static methods cannot be selected through a value, extracted as function
 values, reached with `?.`, or called after `..`. Conversely, an instance method

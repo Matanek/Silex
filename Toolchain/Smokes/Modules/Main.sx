@@ -1,5 +1,5 @@
-import NK
-import Prefix
+use NK
+use Prefix
 
 use NK.Plugins as Plugins
 use NK.Window as Window

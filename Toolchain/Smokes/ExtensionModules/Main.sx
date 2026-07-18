@@ -1,12 +1,11 @@
-import ExtensionChecks.Core as Core
-import ExtensionChecks.Extras as Extras
-import STD.Random as Random
+use ExtensionChecks.Core as Core
+use ExtensionChecks.Extras as Extras
 
 use Core.Counter
 use Core.Box
-use Random.Generator as Generator
+use STD.Randomizer as Randomizer
 
-extend Generator {
+extend Randomizer {
     pub func get_uint() uint {
         return self.get_int() as uint
     }
@@ -14,12 +13,12 @@ extend Generator {
 
 func main() {
     var counter = Counter.start(4)
-    assert(counter.bump() == 5, "imported mutating extension")
+    assert(counter.bump() == 5, "used mutating extension")
     assert(Extras.advance(&counter) == 6, "structure extension across module files")
 
     var box = Box(21)
-    assert(box.doubled() == 42, "imported class extension")
+    assert(box.doubled() == 42, "used class extension")
 
-    var generator = Random.create(42)
-    assert(generator.get_uint() > 0, "extended STD.Random.Generator")
+    var randomizer = Randomizer.create(42)
+    assert(randomizer.get_uint() > 0, "extended STD.Randomizer")
 }

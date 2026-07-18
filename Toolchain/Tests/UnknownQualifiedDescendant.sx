@@ -1,4 +1,4 @@
-import STD
+use STD
 
 func main() {
     var value = STD.Unknown.Value()

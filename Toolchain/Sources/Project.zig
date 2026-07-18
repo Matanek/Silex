@@ -81,11 +81,24 @@ pub fn load(allocator: Allocator, io: Io, input_path: []const u8) !Project {
             }
         }
         var sources: std.ArrayList([]const u8) = .empty;
+        var unit_names: std.ArrayList([]const u8) = .empty;
         for (module.sources) |relative_source| {
             if (!std.mem.endsWith(u8, relative_source, ".sx")) {
                 std.debug.print("silex: module source '{s}' must use the .sx extension\n", .{relative_source});
                 return error.Reported;
             }
+            const basename = std.fs.path.basename(relative_source);
+            const unit_name = basename[0 .. basename.len - ".sx".len];
+            for (unit_names.items) |existing_name| {
+                if (std.mem.eql(u8, existing_name, unit_name)) {
+                    std.debug.print("silex: module '{s}' has multiple source units named '{s}'\n", .{
+                        module.name,
+                        unit_name,
+                    });
+                    return error.Reported;
+                }
+            }
+            try unit_names.append(allocator, unit_name);
             const source_path = try std.fs.path.join(allocator, &.{ manifest_dir, relative_source });
             for (modules.items) |existing| for (existing.sources) |existing_source| {
                 if (std.mem.eql(u8, existing_source, source_path)) {

@@ -1,4 +1,4 @@
-import ExtensionConformanceConflict.First as First
+use ExtensionConformanceConflict.First as First
 
 pub func first() {
 }

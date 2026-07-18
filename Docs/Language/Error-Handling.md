@@ -1,6 +1,6 @@
 # Recoverable errors
 
-Silex exposes the intrinsic generic type `Result<T,E>` without an import. A
+Silex exposes the intrinsic generic type `Result<T,E>` without a `use`. A
 function uses it explicitly when an expected failure belongs to its ordinary
 control flow:
 
@@ -110,7 +110,7 @@ let saved = map_error<IOError, AppError>(
 `map_error` performs no implicit conversion, success transformation, or error
 recovery. A transformation that calls `panic` or fails an `assert` remains
 fatal. The function is intrinsic rather than declared by `STD`; its call name
-is reserved and cannot be shadowed by a function, import alias, or local
+is reserved and cannot be shadowed by a function, module alias, or local
 binding. As with other generic functions, all type arguments are explicit.
 
 ## Success without a value
@@ -139,7 +139,7 @@ reference, or another non-independent value requires `var`.
 
 `Result` is a language type rather than an `STD` declaration or implicit
 module. Its name is reserved and cannot be declared or introduced by a type or
-import alias. It has no fields or methods and cannot cross a `native func`
+module alias. It has no fields or methods and cannot cross a `native func`
 signature.
 
 ## The `main` boundary

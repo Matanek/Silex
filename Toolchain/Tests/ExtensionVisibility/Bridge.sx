@@ -1,5 +1,5 @@
-import ExtensionVisibility.Core as Core
-import ExtensionVisibility.Extras as Extras
+use ExtensionVisibility.Core as Core
+use ExtensionVisibility.Extras as Extras
 use Core.Counter
 
 pub func advanced(value:int) int {

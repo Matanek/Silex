@@ -1,4 +1,4 @@
-import Lib
+use Lib
 
 func main() void {
     print(Lib.hidden())

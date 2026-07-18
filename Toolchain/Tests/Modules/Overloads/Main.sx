@@ -1,4 +1,4 @@
-import Library
+use Library
 use Library.measure
 
 struct Holder {

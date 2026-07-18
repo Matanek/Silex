@@ -1,5 +1,5 @@
-import ExtensionConformanceConflict.FirstBridge as FirstBridge
-import ExtensionConformanceConflict.SecondBridge as SecondBridge
+use ExtensionConformanceConflict.FirstBridge as FirstBridge
+use ExtensionConformanceConflict.SecondBridge as SecondBridge
 
 func main() {
 }

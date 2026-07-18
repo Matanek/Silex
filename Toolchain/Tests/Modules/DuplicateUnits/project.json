@@ -1,0 +1,9 @@
+{
+  "target": "App",
+  "modules": [
+    {
+      "name": "App",
+      "sources": ["First/Item.sx", "Second/Item.sx"]
+    }
+  ]
+}

@@ -1,4 +1,4 @@
-import Common
+use Common
 
 pub func value() int {
     return Common.base() + 1

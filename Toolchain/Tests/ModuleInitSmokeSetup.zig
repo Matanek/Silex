@@ -18,7 +18,7 @@ pub fn main(init: std.process.Init) !void {
     try std.Io.Dir.cwd().writeFile(init.io, .{
         .sub_path = main_path,
         .data =
-        \\import Answer
+        \\use Answer
         \\
         \\func main() {
         \\    print(Answer.value())

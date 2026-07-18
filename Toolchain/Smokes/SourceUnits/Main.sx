@@ -1,0 +1,6 @@
+use SourceUnits.Core.Widget
+
+func main() {
+    let widget = Widget.create()
+    print(widget.doubled())
+}

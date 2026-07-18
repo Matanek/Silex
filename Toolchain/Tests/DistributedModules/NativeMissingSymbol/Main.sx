@@ -1,5 +1,5 @@
-import NativeChecks.MissingSymbol
+use NativeChecks.MissingSymbol
 
 func main() {
-    print(NativeChecks.MissingSymbol.call())
+    print(MissingSymbol.call())
 }

@@ -248,16 +248,17 @@ const Server = struct {
                 const source = self.documentText(uri) orelse break :completion &[_]CompletionItem{};
                 const position = completionPosition(params);
                 if (position) |cursor| {
-                    if (importCompletionPrefix(source, cursor)) |prefix| {
-                        break :completion try localModuleCompletionItems(
+                    if (useCompletionPrefix(source, cursor)) |prefix| {
+                        break :completion try useCompletionItems(
                             self.allocator,
                             self.io,
                             uri,
+                            source,
                             prefix,
                         );
                     }
                     if (qualifiedCompletionContext(source, cursor)) |context| {
-                        if (try importedModulePath(self.allocator, source, context.qualifier)) |module_path| {
+                        if (try usedModulePath(self.allocator, source, context.qualifier)) |module_path| {
                             const project_root = try documentProjectRoot(self.allocator, uri);
                             if (try memberCompletionItems(self.allocator, self.io, source, project_root, cursor)) |member_items| {
                                 if (member_items.len != 0) break :completion member_items;
@@ -660,17 +661,17 @@ fn isIncompleteCascadePrefix(source: []const u8, position: Position) bool {
     return std.mem.eql(u8, std.mem.trim(u8, source[line_start..cursor_offset], " \t\r"), ".");
 }
 
-fn importCompletionPrefix(source: []const u8, position: Position) ?[]const u8 {
+fn useCompletionPrefix(source: []const u8, position: Position) ?[]const u8 {
     const cursor_offset = byteOffsetAtPosition(source, position) orelse return null;
     const line_start = if (std.mem.lastIndexOfScalar(u8, source[0..cursor_offset], '\n')) |newline|
         newline + 1
     else
         0;
     const line = std.mem.trimStart(u8, source[line_start..cursor_offset], " \t");
-    if (!std.mem.startsWith(u8, line, "import") or line.len == "import".len) return null;
-    if (!std.ascii.isWhitespace(line["import".len])) return null;
+    if (!std.mem.startsWith(u8, line, "use") or line.len == "use".len) return null;
+    if (!std.ascii.isWhitespace(line["use".len])) return null;
 
-    const prefix = std.mem.trimStart(u8, line["import".len..], " \t");
+    const prefix = std.mem.trimStart(u8, line["use".len..], " \t");
     for (prefix) |character| {
         if (std.ascii.isWhitespace(character)) return null;
         if (!isIdentifierContinue(character) and character != '.') return null;
@@ -707,31 +708,22 @@ const VisibleModule = struct {
     module_path: []const u8,
 };
 
-fn importedModulePath(allocator: Allocator, source: []const u8, qualifier: []const u8) !?[]const u8 {
+fn usedModulePath(allocator: Allocator, source: []const u8, qualifier: []const u8) !?[]const u8 {
     var modules: std.ArrayList(VisibleModule) = .empty;
     var lines = std.mem.splitScalar(u8, source, '\n');
     while (lines.next()) |source_line| {
         const line = std.mem.trim(u8, source_line, " \t\r");
-        const kind: enum { import_value, use_value } = if (directiveBody(line, "import") != null)
-            .import_value
-        else if (directiveBody(line, "use") != null)
-            .use_value
-        else
-            continue;
-
-        const declaration = directiveBody(line, if (kind == .import_value) "import" else "use").?;
+        const declaration = directiveBody(line, "use") orelse continue;
         const module_end = std.mem.indexOfAny(u8, declaration, " \t\r") orelse declaration.len;
         const path = declaration[0..module_end];
         if (path.len == 0) continue;
-        if (kind == .use_value and looksLikeTypeAliasTarget(path)) continue;
+        if (looksLikeTypeAliasTarget(path)) continue;
 
         const remainder = std.mem.trimStart(u8, declaration[module_end..], " \t");
         const visible_qualifier = if (std.mem.startsWith(u8, remainder, "as "))
             std.mem.trim(u8, remainder["as ".len..], " \t\r")
-        else if (kind == .use_value)
-            lastPathSegment(path)
         else
-            path;
+            lastPathSegment(path);
         const module_path = try expandVisibleModulePath(allocator, modules.items, path) orelse path;
         try modules.append(allocator, .{ .qualifier = visible_qualifier, .module_path = module_path });
     }
@@ -824,6 +816,15 @@ fn moduleExportCompletionItems(
     }
 
     for (source_names.items) |source_name| {
+        const unit_name = source_name[0 .. source_name.len - ".sx".len];
+        if (std.mem.startsWith(u8, unit_name, context.prefix)) try appendModuleExportCompletion(
+            allocator,
+            &items,
+            context.qualifier,
+            unit_name,
+            9,
+            "Silex source unit",
+        );
         const module_source_path = try std.fs.path.join(allocator, &.{ module_directory, source_name });
         const module_source = Io.Dir.cwd().readFileAlloc(
             io,
@@ -979,6 +980,51 @@ fn localModuleCompletionItems(
         }
     }.lessThan);
     return try items.toOwnedSlice(allocator);
+}
+
+fn useCompletionItems(
+    allocator: Allocator,
+    io: Io,
+    uri: []const u8,
+    source: []const u8,
+    prefix: []const u8,
+) ![]const CompletionItem {
+    var items: std.ArrayList(CompletionItem) = .empty;
+    const modules = try localModuleCompletionItems(allocator, io, uri, prefix);
+    try items.appendSlice(allocator, modules);
+
+    if (std.mem.lastIndexOfScalar(u8, prefix, '.')) |separator| {
+        const qualifier = prefix[0..separator];
+        const module_path = try usedModulePath(allocator, source, qualifier) orelse qualifier;
+        const exports = try moduleExportCompletionItems(
+            allocator,
+            io,
+            uri,
+            module_path,
+            .{
+                .qualifier = qualifier,
+                .prefix = prefix[separator + 1 ..],
+                .type_only = false,
+            },
+        );
+        for (exports) |candidate| {
+            var duplicate = false;
+            for (items.items) |existing| {
+                if (std.mem.eql(u8, existing.label, candidate.label)) {
+                    duplicate = true;
+                    break;
+                }
+            }
+            if (!duplicate) try items.append(allocator, candidate);
+        }
+    }
+
+    std.mem.sort(CompletionItem, items.items, {}, struct {
+        fn lessThan(_: void, left: CompletionItem, right: CompletionItem) bool {
+            return std.mem.lessThan(u8, left.label, right.label);
+        }
+    }.lessThan);
+    return items.toOwnedSlice(allocator);
 }
 
 fn collectModules(
@@ -1221,7 +1267,7 @@ fn collectSemanticInfo(
         .name = "failure",
         .has_associated_values = true,
     });
-    try collectImportedStructures(allocator, io, source, project_root, tokens, info);
+    try collectUsedStructures(allocator, io, source, project_root, tokens, info);
     try collectLocalTypeAliases(allocator, tokens, info);
     try collectLocalEnums(allocator, tokens, info);
     try collectLocalProtocolsAndConstraints(allocator, source, tokens, info);
@@ -1372,7 +1418,7 @@ fn collectSemanticInfo(
                     tokens[index + 6].tag == .left_parenthesis)
                 {
                     const qualifier = tokens[index + 3].lexeme;
-                    const module_path = try importedModulePath(allocator, source, qualifier) orelse continue;
+                    const module_path = try usedModulePath(allocator, source, qualifier) orelse continue;
                     const type_name = standardFunctionReturnStructure(
                         allocator,
                         io,
@@ -1916,7 +1962,7 @@ fn resolveNamedType(info: SemanticInfo, name: []const u8, collection: ?Collectio
     return result;
 }
 
-fn collectImportedStructures(
+fn collectUsedStructures(
     allocator: Allocator,
     io: Io,
     source: []const u8,
@@ -1927,33 +1973,26 @@ fn collectImportedStructures(
     var lines = std.mem.splitScalar(u8, source, '\n');
     while (lines.next()) |source_line| {
         const line = std.mem.trim(u8, source_line, " \t\r");
-        const kind: enum { import_value, use_value } = if (directiveBody(line, "import") != null)
-            .import_value
-        else if (directiveBody(line, "use") != null)
-            .use_value
-        else
-            continue;
-        const declaration = directiveBody(line, if (kind == .import_value) "import" else "use").?;
+        const declaration = directiveBody(line, "use") orelse continue;
         const module_end = std.mem.indexOfAny(u8, declaration, " \t\r") orelse declaration.len;
         const path = declaration[0..module_end];
-        if (kind == .use_value and looksLikeTypeAliasTarget(path)) continue;
+        if (looksLikeTypeAliasTarget(path)) continue;
         const remainder = std.mem.trimStart(u8, declaration[module_end..], " \t");
         const qualifier = if (std.mem.startsWith(u8, remainder, "as "))
             std.mem.trim(u8, remainder["as ".len..], " \t\r")
-        else if (kind == .use_value)
-            lastPathSegment(path)
         else
-            path;
-        const module_path = try importedModulePath(allocator, source, qualifier) orelse continue;
+            lastPathSegment(path);
+        const module_path = try usedModulePath(allocator, source, qualifier) orelse continue;
         const module_directory = try longestModuleSourceDirectory(
             allocator,
             io,
             module_path,
             project_root,
         ) orelse continue;
-        try visitModuleSources(
+        try visitSelectedModuleSources(
             allocator,
             io,
+            module_path,
             module_directory,
             collectPublicStructureMembers,
             info,
@@ -1964,16 +2003,17 @@ fn collectImportedStructures(
         if (token.tag != .identifier) continue;
         const path = try structureInitializerPath(allocator, tokens, index) orelse continue;
         defer allocator.free(path);
-        const module_path = try importedModulePath(allocator, source, path) orelse continue;
+        const module_path = try usedModulePath(allocator, source, path) orelse continue;
         const module_directory = try longestModuleSourceDirectory(
             allocator,
             io,
             module_path,
             project_root,
         ) orelse continue;
-        try visitModuleSources(
+        try visitSelectedModuleSources(
             allocator,
             io,
+            module_path,
             module_directory,
             collectPublicStructureMembers,
             info,
@@ -2241,6 +2281,52 @@ fn visitModuleSources(
         var parser = ParserModule.Parser.init(allocator, module_source);
         const program = parser.parse() catch continue;
         try visit(allocator, program, context);
+    }
+}
+
+fn visitSelectedModuleSources(
+    allocator: Allocator,
+    io: Io,
+    selected_path: []const u8,
+    module_directory: []const u8,
+    comptime visit: anytype,
+    context: anytype,
+) !void {
+    const unit_name = lastPathSegment(selected_path);
+    const unit_filename = try std.fmt.allocPrint(allocator, "{s}.sx", .{unit_name});
+    const unit_path = try std.fs.path.join(allocator, &.{ module_directory, unit_filename });
+    const stat = Io.Dir.cwd().statFile(io, unit_path, .{}) catch {
+        return visitModuleSources(allocator, io, module_directory, visit, context);
+    };
+    if (stat.kind != .file) return visitModuleSources(allocator, io, module_directory, visit, context);
+
+    var pending: std.ArrayList([]const u8) = .empty;
+    var visited: std.ArrayList([]const u8) = .empty;
+    try pending.append(allocator, unit_name);
+    while (pending.pop()) |current| {
+        var already_visited = false;
+        for (visited.items) |existing| if (std.mem.eql(u8, existing, current)) {
+            already_visited = true;
+            break;
+        };
+        if (already_visited) continue;
+        try visited.append(allocator, current);
+
+        const filename = try std.fmt.allocPrint(allocator, "{s}.sx", .{current});
+        const source_path = try std.fs.path.join(allocator, &.{ module_directory, filename });
+        const source = Io.Dir.cwd().readFileAlloc(io, source_path, allocator, .limited(max_message_size)) catch continue;
+        var parser = ParserModule.Parser.init(allocator, source);
+        const program = parser.parse() catch continue;
+        try visit(allocator, program, context);
+        for (program.uses) |use_value| {
+            if (use_value.target != .declaration) continue;
+            const sibling = use_value.target.declaration;
+            if (std.mem.indexOfScalar(u8, sibling, '.') != null) continue;
+            const sibling_filename = try std.fmt.allocPrint(allocator, "{s}.sx", .{sibling});
+            const sibling_path = try std.fs.path.join(allocator, &.{ module_directory, sibling_filename });
+            const sibling_stat = Io.Dir.cwd().statFile(io, sibling_path, .{}) catch continue;
+            if (sibling_stat.kind == .file) try pending.append(allocator, sibling);
+        }
     }
 }
 
@@ -2695,7 +2781,6 @@ const language_completions = [_]CompletionItem{
     .{ .label = "match", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "return", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "try", .kind = 14, .detail = "Silex keyword" },
-    .{ .label = "import", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "use", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "pub", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "sub", .kind = 14, .detail = "Silex keyword" },
@@ -2742,6 +2827,7 @@ test "completion items include language terms and document identifiers" {
     try std.testing.expect(containsCompletion(items, "match"));
     try std.testing.expect(containsCompletion(items, "try"));
     try std.testing.expect(containsCompletion(items, "total"));
+    try std.testing.expect(!containsCompletion(items, "import"));
 }
 
 test "constrained generic completion exposes protocol requirements" {
@@ -2806,39 +2892,38 @@ test "member completion infers neutral iteration elements" {
     try std.testing.expect(!containsCompletion(items, "jump"));
 }
 
-test "local extension completion augments an imported STD type" {
+test "local extension completion augments a used STD type" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const source =
-        \\import STD.Random as Random
-        \\use STD.Random.Generator as Generator
-        \\extend Generator {
+        \\use STD.Randomizer as Randomizer
+        \\extend Randomizer {
         \\    pub func get_uint() uint { return self.get_int() as uint }
-        \\    static func seeded() Generator { return Random.create(42) }
+        \\    static func seeded() Randomizer { return Randomizer.create(42) }
         \\}
         \\func main() {
-        \\    var generator:Generator
-        \\    generator.
+        \\    var randomizer = Randomizer.create(42)
+        \\    randomizer.
         \\}
     ;
     const items = try completionItems(
         arena.allocator(),
         std.testing.io,
         source,
-        .{ .line = 8, .character = 14 },
+        .{ .line = 7, .character = 15 },
     );
     try std.testing.expect(containsCompletion(items, "get_int"));
     try std.testing.expect(containsCompletion(items, "get_uint"));
     try std.testing.expect(!containsCompletion(items, "seeded"));
 }
 
-test "direct module import activates public extension completion" {
+test "direct module use activates public extension completion" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
     const source =
-        \\import Math
-        \\import Extras
+        \\use Math
+        \\use Extras
         \\func main() {
         \\    var vector = Math.Vec2()
         \\    vector.
@@ -2856,8 +2941,8 @@ test "direct module import activates public extension completion" {
     try std.testing.expect(!containsCompletion(items, "origin"));
 
     const class_source =
-        \\import Math
-        \\import Extras
+        \\use Math
+        \\use Extras
         \\func main() {
         \\    var canvas = Math.Canvas()
         \\    canvas.
@@ -2873,50 +2958,50 @@ test "direct module import activates public extension completion" {
     try std.testing.expect(!containsCompletion(class_items, "hidden"));
 }
 
-test "import completion recognizes only the module path context" {
+test "use completion recognizes only the dependency path context" {
     try std.testing.expectEqualStrings(
         "M",
-        importCompletionPrefix("import M", .{ .line = 0, .character = 8 }).?,
+        useCompletionPrefix("use M", .{ .line = 0, .character = 5 }).?,
     );
     try std.testing.expectEqualStrings(
         "",
-        importCompletionPrefix("    import ", .{ .line = 0, .character = 11 }).?,
+        useCompletionPrefix("    use ", .{ .line = 0, .character = 8 }).?,
     );
-    try std.testing.expect(importCompletionPrefix(
-        "import Math as M",
+    try std.testing.expect(useCompletionPrefix(
+        "use Math as M",
         .{ .line = 0, .character = 16 },
     ) == null);
 }
 
-test "qualified completion resolves an imported module and its typed prefix" {
+test "qualified completion resolves a used module and its typed prefix" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
     const source =
-        \\import Math
+        \\use Math
         \\var pos:Math.V
     ;
     const context = qualifiedCompletionContext(source, .{ .line = 1, .character = 14 }).?;
     try std.testing.expectEqualStrings("Math", context.qualifier);
     try std.testing.expectEqualStrings("V", context.prefix);
     try std.testing.expect(context.type_only);
-    try std.testing.expectEqualStrings("Math", (try importedModulePath(allocator, source, context.qualifier)).?);
+    try std.testing.expectEqualStrings("Math", (try usedModulePath(allocator, source, context.qualifier)).?);
 
-    const aliased_source = "import Math as Algebra\nvar pos:Algebra.V";
+    const aliased_source = "use Math as Algebra\nvar pos:Algebra.V";
     const aliased = qualifiedCompletionContext(aliased_source, .{ .line = 1, .character = 17 }).?;
     try std.testing.expectEqualStrings("Algebra", aliased.qualifier);
-    try std.testing.expectEqualStrings("Math", (try importedModulePath(allocator, aliased_source, aliased.qualifier)).?);
+    try std.testing.expectEqualStrings("Math", (try usedModulePath(allocator, aliased_source, aliased.qualifier)).?);
 
     const parent_source =
-        \\import STD as Standard
-        \\use Standard.Random as Random
-        \\var pos:Random.G
+        \\use STD as Standard
+        \\use Standard.Time as Time
+        \\var pos:Time.S
     ;
-    const parent = qualifiedCompletionContext(parent_source, .{ .line = 2, .character = 16 }).?;
-    try std.testing.expectEqualStrings("Random", parent.qualifier);
+    const parent = qualifiedCompletionContext(parent_source, .{ .line = 2, .character = 14 }).?;
+    try std.testing.expectEqualStrings("Time", parent.qualifier);
     try std.testing.expectEqualStrings(
-        "STD.Random",
-        (try importedModulePath(allocator, parent_source, parent.qualifier)).?,
+        "STD.Time",
+        (try usedModulePath(allocator, parent_source, parent.qualifier)).?,
     );
 }
 
@@ -2933,30 +3018,18 @@ test "standard library modules and exports complete" {
     const uri = "file:///Users/nekmata/Projects/Silex/Sandbox/Main.sx";
     const roots = try localModuleCompletionItems(allocator, std.testing.io, uri, "STD");
     try std.testing.expect(containsCompletion(roots, "STD"));
-    const modules = try localModuleCompletionItems(allocator, std.testing.io, uri, "STD.R");
-    try std.testing.expect(containsCompletion(modules, "STD.Random"));
     const time_modules = try localModuleCompletionItems(allocator, std.testing.io, uri, "STD.T");
     try std.testing.expect(containsCompletion(time_modules, "STD.Time"));
 
-    const submodules = try moduleExportCompletionItems(
+    const exports = try moduleExportCompletionItems(
         allocator,
         std.testing.io,
         uri,
         "STD",
         .{ .qualifier = "STD", .prefix = "R", .type_only = false },
     );
-    try std.testing.expect(containsCompletion(submodules, "STD.Random"));
-
-    const exports = try moduleExportCompletionItems(
-        allocator,
-        std.testing.io,
-        uri,
-        "STD.Random",
-        .{ .qualifier = "STD.Random", .prefix = "", .type_only = false },
-    );
-    try std.testing.expect(containsCompletion(exports, "STD.Random.Generator"));
-    try std.testing.expect(containsCompletion(exports, "STD.Random.create"));
-    try std.testing.expect(containsCompletion(exports, "STD.Random.system"));
+    try std.testing.expect(containsCompletion(exports, "STD.Randomizer"));
+    try std.testing.expect(!containsCompletion(exports, "STD.Random"));
 
     const time_exports = try moduleExportCompletionItems(
         allocator,
@@ -2966,17 +3039,51 @@ test "standard library modules and exports complete" {
         .{ .qualifier = "STD.Time", .prefix = "", .type_only = false },
     );
     try std.testing.expect(containsCompletion(time_exports, "STD.Time.Clock"));
+    try std.testing.expect(containsCompletion(time_exports, "STD.Time.Internal"));
     try std.testing.expect(containsCompletion(time_exports, "STD.Time.Stopwatch"));
+
+    const static_source =
+        \\use STD
+        \\func main() {
+        \\    STD.Randomizer.
+        \\}
+    ;
+    const static_methods = try completionItems(
+        allocator,
+        std.testing.io,
+        static_source,
+        .{ .line = 2, .character = 19 },
+    );
+    try std.testing.expect(containsCompletion(static_methods, "create"));
+    try std.testing.expect(!containsCompletion(static_methods, "system"));
+    try std.testing.expect(!containsCompletion(static_methods, "get_int"));
 }
 
-test "member completion infers an imported standard-library factory result" {
+test "use completion includes modules source units and public types" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const uri = "file:///Users/nekmata/Projects/Silex/Repository/Toolchain/Tests/LspModules/Main.sx";
+
+    const modules = try useCompletionItems(allocator, std.testing.io, uri, "use Geo", "Geo");
+    try std.testing.expect(containsCompletion(modules, "Geometry"));
+
+    const declarations = try useCompletionItems(allocator, std.testing.io, uri, "use Geometry.D", "Geometry.D");
+    try std.testing.expect(containsCompletion(declarations, "Geometry.Direction"));
+    try std.testing.expect(containsCompletion(declarations, "Geometry.DirectionName"));
+
+    const aliases = try useCompletionItems(allocator, std.testing.io, uri, "use Geometry.V", "Geometry.V");
+    try std.testing.expect(containsCompletion(aliases, "Geometry.Vec3"));
+    try std.testing.expect(containsCompletion(aliases, "Geometry.Vec3i"));
+}
+
+test "member completion infers a used standard-library factory result" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const source =
-        \\import STD
-        \\use STD.Random as Random
+        \\use STD.Randomizer as Randomizer
         \\func main() void {
-        \\    var rand = Random.system()
+        \\    var rand = Randomizer.create()
         \\    print(rand.get_)
         \\}
     ;
@@ -2984,7 +3091,7 @@ test "member completion infers an imported standard-library factory result" {
         arena.allocator(),
         std.testing.io,
         source,
-        .{ .line = 4, .character = 19 },
+        .{ .line = 3, .character = 19 },
     );
     try std.testing.expect(containsCompletion(items, "get_int"));
     try std.testing.expect(containsCompletion(items, "get_float"));
@@ -2992,38 +3099,38 @@ test "member completion infers an imported standard-library factory result" {
     try std.testing.expect(!containsCompletion(items, "next"));
 }
 
-test "member completion infers qualified standard-library structure initializers" {
+test "member completion infers qualified standard-library factory results" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
     const aliased_source =
-        \\import STD.Random as Random
+        \\use STD as Standard
         \\func main() void {
-        \\    var generator = Random.Generator(state:1)
-        \\    generator.
+        \\    var randomizer = Standard.Randomizer.create(1)
+        \\    randomizer.
         \\}
     ;
     const aliased_items = try completionItems(
         allocator,
         std.testing.io,
         aliased_source,
-        .{ .line = 3, .character = 14 },
+        .{ .line = 3, .character = 15 },
     );
     try std.testing.expect(containsCompletion(aliased_items, "get_int"));
     try std.testing.expect(containsCompletion(aliased_items, "get_float"));
 
     const canonical_source =
-        \\import STD.Random
+        \\use STD
         \\func main() void {
-        \\    var generator = STD.Random.Generator(state:1)
-        \\    generator.
+        \\    var randomizer = STD.Randomizer.create(1)
+        \\    randomizer.
         \\}
     ;
     const canonical_items = try completionItems(
         allocator,
         std.testing.io,
         canonical_source,
-        .{ .line = 3, .character = 14 },
+        .{ .line = 3, .character = 15 },
     );
     try std.testing.expect(containsCompletion(canonical_items, "get_int"));
     try std.testing.expect(containsCompletion(canonical_items, "get_float"));
@@ -3033,7 +3140,7 @@ test "member completion loads local module structure fields and methods" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const source =
-        \\import Math
+        \\use Math
         \\func main() void {
         \\    var vec = Math.Vec2()
         \\    vec.
@@ -3055,7 +3162,7 @@ test "member completion exposes STD Time clock methods" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const source =
-        \\import STD.Time as Time
+        \\use STD.Time as Time
         \\func main() void {
         \\    var clock = Time.Clock()
         \\    clock.
@@ -3078,7 +3185,7 @@ test "member completion exposes STD Time stopwatch methods" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const source =
-        \\import STD
+        \\use STD
         \\func main() void {
         \\    var stopwatch = STD.Time.Stopwatch()
         \\    stopwatch.
@@ -3209,7 +3316,7 @@ test "member completion resolves a public generic type alias from a module" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const source =
-        \\import Geometry
+        \\use Geometry
         \\func main() {
         \\    var value = Geometry.Vec3i()
         \\    print(value.)
@@ -3330,7 +3437,7 @@ test "member completion recognizes generic and aliased static field receivers" {
     try std.testing.expect(!containsCompletion(alias_items, "value"));
 }
 
-test "member completion recognizes generic and imported static type receivers" {
+test "member completion recognizes generic and used static type receivers" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -3347,7 +3454,7 @@ test "member completion recognizes generic and imported static type receivers" {
     try std.testing.expect(!containsCompletion(generic_items, "clear"));
 
     const imported_source =
-        \\import Math
+        \\use Math
         \\func main() { Math.Vec2. }
     ;
     const imported_items = try completionItemsForProject(
@@ -3469,12 +3576,12 @@ test "enum instance completion exposes only declared raw values" {
     try std.testing.expect(containsCompletion(direct_items, "raw_value"));
 }
 
-test "enum completion resolves public imported types and module exports" {
+test "enum completion resolves public used types and module exports" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
     const source =
-        \\import Geometry
+        \\use Geometry
         \\use Geometry.Direction as Heading
         \\func main() {
         \\    Geometry.Direction.
@@ -3609,20 +3716,19 @@ test "self completion resolves the target of a local extension" {
     try std.testing.expect(containsCompletion(items, "set_name"));
 }
 
-test "self completion resolves an imported extension target" {
+test "self completion resolves a used extension target" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const source =
-        \\import STD.Random as Random
-        \\use Random.Generator as Generator
-        \\extend Generator {
+        \\use STD.Randomizer as Randomizer
+        \\extend Randomizer {
         \\    func get_uint() uint {
         \\        return self.
         \\    }
         \\}
         \\func main() {}
     ;
-    const items = try completionItems(arena.allocator(), std.testing.io, source, .{ .line = 4, .character = 20 });
+    const items = try completionItems(arena.allocator(), std.testing.io, source, .{ .line = 3, .character = 20 });
     try std.testing.expect(containsCompletion(items, "get_int"));
     try std.testing.expect(containsCompletion(items, "get_float"));
     try std.testing.expect(containsCompletion(items, "get_bool"));
@@ -3719,7 +3825,7 @@ test "terminal member dot after a compact cascade keeps the first receiver" {
     defer arena.deinit();
     const allocator = arena.allocator();
     const source =
-        \\import STD
+        \\use STD
         \\func main() void {
         \\    var stopwatch = STD.Time.Stopwatch()
         \\    stopwatch..reset()..start().

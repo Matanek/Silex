@@ -1,4 +1,4 @@
-import Math
+use Math
 
 extend Math.Vec2 {
     func scaled() float {

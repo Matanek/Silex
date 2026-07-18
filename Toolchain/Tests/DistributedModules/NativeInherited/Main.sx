@@ -1,6 +1,6 @@
-import NativeChecks.Shared.First
-import NativeChecks.Shared.Second
+use NativeChecks.Shared.First
+use NativeChecks.Shared.Second
 
 func main() {
-    print(NativeChecks.Shared.First.value() + NativeChecks.Shared.Second.value())
+    print(First.value() + Second.value())
 }

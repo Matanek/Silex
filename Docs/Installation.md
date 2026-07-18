@@ -29,8 +29,9 @@ silex run hello.sx
 `compile` writes a native executable. `run` compiles and executes the program.
 The source layout and module model are in the [language reference](Language.md).
 The installed distribution also contains Silex's distributed-library sources,
-so imports such as `import STD`, `import STD.Random`, and `import STD.Time` work
-without cloning this repository or adding their module files to the project.
+so `use STD`, declarations such as `STD.Randomizer`, and submodules such as
+`STD.Time` work without cloning this repository or adding their module files to
+the project.
 The available APIs are indexed in the [library reference](Language.md#libraries).
 A directory-backed local or distributed module may provide an optional
 `Module.json`. Its `native` section is compiled and linked once when any module
@@ -41,7 +42,7 @@ that inherits it is loaded.
 For a small program, pass its entry source file directly. Its directory is the
 local project root: each subdirectory is a module, including a parent that only
 contains submodules, and the `.sx` files directly inside that directory belong
-to it. Importing a parent does not recursively load all of its descendants.
+to it. Using a parent does not recursively load all of its descendants.
 
 Pass a JSON manifest when the target program itself spans several source files,
 or when the project needs to assign files to modules explicitly:

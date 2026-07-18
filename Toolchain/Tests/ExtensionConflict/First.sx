@@ -1,4 +1,4 @@
-import ExtensionConflict.Core as Core
+use ExtensionConflict.Core as Core
 use Core.Value
 
 extend Value {

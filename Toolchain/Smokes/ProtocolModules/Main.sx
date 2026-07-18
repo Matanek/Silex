@@ -1,4 +1,4 @@
-import ProtocolChecks.Core as Core
+use ProtocolChecks.Core as Core
 
 use Core.Named
 use Core.RemoteUser
@@ -15,10 +15,10 @@ func main() {
     print(name_of<RemoteUser>(remote))
 
     var named:Named = remote
-    assert(named.name() == "remote", "imported protocol value")
+    assert(named.name() == "remote", "used protocol value")
 
     var local = LocalUser()
     print(name_of<LocalUser>(local))
     named = local
-    assert(named.name() == "local", "imported protocol replacement")
+    assert(named.name() == "local", "used protocol replacement")
 }

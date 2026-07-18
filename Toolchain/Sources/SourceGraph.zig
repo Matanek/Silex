@@ -15,12 +15,41 @@ const EnvironMap = std.process.Environ.Map;
 
 const ModuleBuilder = struct {
     name: []const u8,
+    available_sources: std.ArrayList(UnitSource) = .empty,
     sources: std.ArrayList([]const u8) = .empty,
     provider: Provider,
+    module_root: []const u8,
+    package_name: ?[]const u8 = null,
+    catalog_complete: bool = false,
+    selected: bool = false,
     native_runtime_name: ?[]const u8 = null,
     module_manifest_path: ?[]const u8 = null,
     native_module_directory: ?[]const u8 = null,
     package_index: usize = 0,
+};
+
+const UnitSource = struct {
+    name: []const u8,
+    path: []const u8,
+};
+
+const UnitTarget = struct {
+    module_index: usize,
+    source_index: usize,
+};
+
+const Selection = union(enum) {
+    module: usize,
+    units: struct {
+        items: []const UnitTarget,
+        load_only: bool,
+    },
+};
+
+const FileState = struct {
+    use_edges: std.ArrayList(usize) = .empty,
+    activation_roots: std.ArrayList(usize) = .empty,
+    load_only_uses: std.ArrayList(Source.Position) = .empty,
 };
 
 const NativeRuntime = struct {
@@ -51,6 +80,7 @@ pub const Loader = struct {
     source_paths: std.ArrayList([]const u8) = .empty,
     source_contents: std.ArrayList([]const u8) = .empty,
     files: std.ArrayList(Modules.File) = .empty,
+    file_states: std.ArrayList(FileState) = .empty,
     diagnostic: ?Source.Diagnostic = null,
     package_graph: ?PackageGraph.Graph = null,
 
@@ -65,55 +95,28 @@ pub const Loader = struct {
         const loads_local_modules = project.single_file;
         var modules: std.ArrayList(ModuleBuilder) = .empty;
         for (project.modules) |module| {
-            var sources: std.ArrayList([]const u8) = .empty;
-            try sources.appendSlice(self.allocator, module.sources);
-            const root_package_name = self.package_graph.?.packages[0].name;
-            const native_runtime = if (root_package_name) |package_name|
-                if (moduleBelongsToPackage(module.name, package_name))
-                    try findNativeRuntimeInPackage(
-                        self.allocator,
-                        self.io,
-                        self.package_graph.?.packages[0].root,
-                        package_name,
-                        module.name,
-                    )
-                else if (loads_local_modules)
-                    null
-                else
-                    try findNativeRuntime(self.allocator, self.io, project_root, module.name)
-            else if (loads_local_modules)
-                null
-            else
-                try findNativeRuntime(self.allocator, self.io, project_root, module.name);
+            var available_sources: std.ArrayList(UnitSource) = .empty;
+            for (module.sources) |source_path| try self.addAvailableSource(
+                &available_sources,
+                source_path,
+                .{ .line = 1, .column = 1 },
+                module.name,
+            );
             try modules.append(self.allocator, .{
                 .name = module.name,
-                .sources = sources,
+                .available_sources = available_sources,
                 .provider = .application,
+                .module_root = project_root,
+                .catalog_complete = true,
                 .package_index = 0,
-                .native_runtime_name = if (native_runtime) |runtime| runtime.module_name else null,
-                .module_manifest_path = if (native_runtime) |runtime| runtime.manifest_path else null,
-                .native_module_directory = if (native_runtime) |runtime| runtime.module_directory else null,
             });
         }
-        for (project.modules, 0..) |module, module_index| for (module.sources) |source_path| {
-            try self.appendFile(source_path, module_index);
-        };
+        _ = try self.selectModule(&modules, project.target_module, .{ .line = 1, .column = 1 });
 
         var file_index: usize = 0;
         while (file_index < self.files.items.len) : (file_index += 1) {
             const file = self.files.items[file_index];
             const package_index = modules.items[file.module_index].package_index;
-            for (file.program.imports) |import_value| {
-                if (StandardLibrary.isReservedModule(import_value.path)) {
-                    try self.loadDistributedModule(&modules, import_value.path, import_value.position);
-                } else if (self.package_graph.?.explicit) {
-                    try self.loadExplicitModule(&modules, project_root, import_value.path, import_value.position, package_index);
-                } else if (loads_local_modules) {
-                    try self.loadLocalOrDistributedModule(&modules, project_root, import_value.path, import_value.position);
-                } else {
-                    try self.loadDistributedModule(&modules, import_value.path, import_value.position);
-                }
-            }
             var module_aliases: std.ArrayList(ModuleAlias) = .empty;
             for (file.program.uses) |use_value| {
                 const path = switch (use_value.target) {
@@ -122,45 +125,59 @@ pub const Loader = struct {
                 };
                 const canonical_path = try canonicalUsePath(
                     self.allocator,
-                    file.program.imports,
                     module_aliases.items,
                     path,
                 );
-                if (try self.loadUseDependency(
+                const selection = try self.resolveSelection(
                     &modules,
                     project_root,
                     canonical_path,
                     use_value.position,
                     loads_local_modules,
                     package_index,
-                )) |module_name| {
-                    try module_aliases.append(self.allocator, .{
-                        .qualifier = use_value.alias orelse lastSegment(path),
-                        .module_name = module_name,
-                    });
+                    file.module_index,
+                );
+                const roots = try self.selectSelection(&modules, selection, use_value.position);
+                try self.appendRoots(&self.file_states.items[file_index].use_edges, roots);
+                try self.appendRoots(&self.file_states.items[file_index].activation_roots, roots);
+                switch (selection) {
+                    .module => |module_index| {
+                        try module_aliases.append(self.allocator, .{
+                            .qualifier = use_value.alias orelse lastSegment(path),
+                            .module_name = modules.items[module_index].name,
+                        });
+                    },
+                    .units => |units| if (units.load_only) try self.file_states.items[file_index].load_only_uses.append(
+                        self.allocator,
+                        use_value.position,
+                    ),
                 }
             }
             for (file.program.uses) |use_value| switch (use_value.target) {
                 .declaration => {},
-                .type => |aliased_type| try self.loadTypeUseDependencies(
+                .type => |aliased_type| try self.selectTypeUseDependencies(
                     &modules,
                     project_root,
-                    file.program.imports,
                     module_aliases.items,
                     aliased_type,
                     use_value.position,
                     loads_local_modules,
                     package_index,
+                    file.module_index,
+                    &self.file_states.items[file_index],
                 ),
             };
-            try self.loadQualifiedDependencies(
+            try self.selectQualifiedDependencies(
                 &modules,
                 project_root,
                 file_index,
                 loads_local_modules,
                 package_index,
+                module_aliases.items,
             );
         }
+
+        try self.finishActivationClosures();
 
         var project_modules: std.ArrayList(ProjectModule.Module) = .empty;
         for (modules.items) |*module| try project_modules.append(self.allocator, .{
@@ -176,7 +193,149 @@ pub const Loader = struct {
         return self.finish(project);
     }
 
-    fn loadUseDependency(
+    fn addAvailableSource(
+        self: *Loader,
+        sources: *std.ArrayList(UnitSource),
+        source_path: []const u8,
+        position: Source.Position,
+        module_name: []const u8,
+    ) !void {
+        const basename = std.fs.path.basename(source_path);
+        const unit_name = basename[0 .. basename.len - ".sx".len];
+        for (sources.items) |source| if (std.mem.eql(u8, source.name, unit_name)) {
+            if (std.mem.eql(u8, source.path, source_path)) return;
+            return self.fail(position, try std.fmt.allocPrint(
+                self.allocator,
+                "module '{s}' has multiple source units named '{s}'",
+                .{ module_name, unit_name },
+            ));
+        };
+        try sources.append(self.allocator, .{
+            .name = try self.allocator.dupe(u8, unit_name),
+            .path = source_path,
+        });
+    }
+
+    fn ensureCatalog(self: *Loader, module: *ModuleBuilder, position: Source.Position) !void {
+        if (module.catalog_complete) return;
+        const directory_path = if (module.package_name) |name|
+            try packageModulePath(self.allocator, module.module_root, name, module.name)
+        else
+            try localModulePath(self.allocator, module.module_root, module.name);
+        var directory = Io.Dir.cwd().openDir(self.io, directory_path, .{ .iterate = true }) catch |err| switch (err) {
+            error.FileNotFound, error.NotDir => return self.moduleNotFound(position, module.name, directory_path, null),
+            else => |other| return other,
+        };
+        defer directory.close(self.io);
+        var names: std.ArrayList([]const u8) = .empty;
+        var iterator = directory.iterateAssumeFirstIteration();
+        while (try iterator.next(self.io)) |entry| {
+            if (entry.kind == .file and std.mem.endsWith(u8, entry.name, ".sx")) {
+                try names.append(self.allocator, try self.allocator.dupe(u8, entry.name));
+            }
+        }
+        std.mem.sort([]const u8, names.items, {}, struct {
+            fn lessThan(_: void, left: []const u8, right: []const u8) bool {
+                return std.mem.lessThan(u8, left, right);
+            }
+        }.lessThan);
+        for (names.items) |name| try self.addAvailableSource(
+            &module.available_sources,
+            try std.fs.path.join(self.allocator, &.{ directory_path, name }),
+            position,
+            module.name,
+        );
+        module.catalog_complete = true;
+    }
+
+    fn ensureRuntime(self: *Loader, module: *ModuleBuilder) !void {
+        if (module.selected) return;
+        const native_runtime = try findNativeRuntimeInPackage(
+            self.allocator,
+            self.io,
+            module.module_root,
+            module.package_name,
+            module.name,
+        );
+        if (native_runtime) |runtime| {
+            module.native_runtime_name = runtime.module_name;
+            module.module_manifest_path = runtime.manifest_path;
+            module.native_module_directory = runtime.module_directory;
+        }
+        module.selected = true;
+    }
+
+    fn selectModule(
+        self: *Loader,
+        modules: *std.ArrayList(ModuleBuilder),
+        module_index: usize,
+        position: Source.Position,
+    ) ![]const usize {
+        try self.ensureCatalog(&modules.items[module_index], position);
+        try self.ensureRuntime(&modules.items[module_index]);
+        var roots: std.ArrayList(usize) = .empty;
+        for (modules.items[module_index].available_sources.items, 0..) |_, source_index| {
+            try roots.append(self.allocator, try self.selectUnit(modules, .{
+                .module_index = module_index,
+                .source_index = source_index,
+            }));
+        }
+        return roots.toOwnedSlice(self.allocator);
+    }
+
+    fn selectUnit(self: *Loader, modules: *std.ArrayList(ModuleBuilder), target: UnitTarget) !usize {
+        const module = &modules.items[target.module_index];
+        try self.ensureRuntime(module);
+        const unit = module.available_sources.items[target.source_index];
+        if (self.findLoadedFile(unit.path)) |file_index| return file_index;
+        try module.sources.append(self.allocator, unit.path);
+        return self.appendFile(unit.path, target.module_index, unit.name);
+    }
+
+    fn selectSelection(
+        self: *Loader,
+        modules: *std.ArrayList(ModuleBuilder),
+        selection: Selection,
+        position: Source.Position,
+    ) ![]const usize {
+        return switch (selection) {
+            .module => |module_index| self.selectModule(modules, module_index, position),
+            .units => |units| block: {
+                var roots: std.ArrayList(usize) = .empty;
+                for (units.items) |target| try roots.append(self.allocator, try self.selectUnit(modules, target));
+                break :block roots.toOwnedSlice(self.allocator);
+            },
+        };
+    }
+
+    fn appendRoots(self: *Loader, destination: *std.ArrayList(usize), roots: []const usize) !void {
+        for (roots) |root| {
+            var found = false;
+            for (destination.items) |existing| if (existing == root) {
+                found = true;
+                break;
+            };
+            if (!found) try destination.append(self.allocator, root);
+        }
+    }
+
+    fn ensureNamedModule(
+        self: *Loader,
+        modules: *std.ArrayList(ModuleBuilder),
+        project_root: []const u8,
+        module_name: []const u8,
+        position: Source.Position,
+        loads_local_modules: bool,
+        package_index: usize,
+    ) !usize {
+        if (findModule(modules.items, module_name)) |module_index| {
+            if (self.moduleAccessible(modules.items[module_index], package_index)) return module_index;
+        }
+        try self.loadNamedModule(modules, project_root, module_name, position, loads_local_modules, package_index);
+        return findModule(modules.items, module_name) orelse unreachable;
+    }
+
+    fn resolveSelection(
         self: *Loader,
         modules: *std.ArrayList(ModuleBuilder),
         project_root: []const u8,
@@ -184,113 +343,315 @@ pub const Loader = struct {
         position: Source.Position,
         loads_local_modules: bool,
         package_index: usize,
-    ) !?[]const u8 {
+        current_module_index: usize,
+    ) !Selection {
         if (try self.moduleExists(modules.items, project_root, canonical_path, loads_local_modules, package_index)) {
-            try self.loadNamedModule(modules, project_root, canonical_path, position, loads_local_modules, package_index);
-            return canonical_path;
+            return .{ .module = try self.ensureNamedModule(
+                modules,
+                project_root,
+                canonical_path,
+                position,
+                loads_local_modules,
+                package_index,
+            ) };
         }
-        const module_name = moduleNameFromUse(canonical_path) orelse return null;
-        try self.loadNamedModule(modules, project_root, module_name, position, loads_local_modules, package_index);
+
+        if (std.mem.indexOfScalar(u8, canonical_path, '.') == null) {
+            if (self.package_graph.?.explicit and
+                self.package_graph.?.findPackage(canonical_path) != null and
+                self.package_graph.?.directDependency(package_index, canonical_path) == null)
+            {
+                try self.transitiveVisibilityError(position, package_index, canonical_path);
+                unreachable;
+            }
+            return self.resolveUnitOrDeclaration(modules, current_module_index, canonical_path, position, true);
+        }
+        var candidate = canonical_path;
+        while (std.mem.lastIndexOfScalar(u8, candidate, '.')) |separator| {
+            candidate = candidate[0..separator];
+            if (!try self.moduleExists(modules.items, project_root, candidate, loads_local_modules, package_index)) continue;
+            const module_index = try self.ensureNamedModule(
+                modules,
+                project_root,
+                candidate,
+                position,
+                loads_local_modules,
+                package_index,
+            );
+            const remainder = canonical_path[candidate.len + 1 ..];
+            if (std.mem.indexOfScalar(u8, remainder, '.') != null) continue;
+            return self.resolveUnitOrDeclaration(
+                modules,
+                module_index,
+                remainder,
+                position,
+                module_index == current_module_index,
+            );
+        }
+        return self.fail(position, try std.fmt.allocPrint(
+            self.allocator,
+            "unknown use target '{s}'",
+            .{canonical_path},
+        ));
+    }
+
+    fn resolveUnitOrDeclaration(
+        self: *Loader,
+        modules: *std.ArrayList(ModuleBuilder),
+        module_index: usize,
+        name: []const u8,
+        position: Source.Position,
+        same_module: bool,
+    ) !Selection {
+        if (!modules.items[module_index].catalog_complete) {
+            const module = &modules.items[module_index];
+            const directory_path = if (module.package_name) |package_name|
+                try packageModulePath(self.allocator, module.module_root, package_name, module.name)
+            else
+                try localModulePath(self.allocator, module.module_root, module.name);
+            const filename = try std.fmt.allocPrint(self.allocator, "{s}.sx", .{name});
+            const exact_path = try std.fs.path.join(self.allocator, &.{ directory_path, filename });
+            const stat = Io.Dir.cwd().statFile(self.io, exact_path, .{}) catch null;
+            if (stat != null and stat.?.kind == .file) {
+                try self.addAvailableSource(&module.available_sources, exact_path, position, module.name);
+                const source_index = module.available_sources.items.len - 1;
+                const homonymous = try self.unitDeclares(exact_path, name, !same_module);
+                return .{ .units = .{
+                    .items = try self.allocator.dupe(UnitTarget, &.{.{
+                        .module_index = module_index,
+                        .source_index = source_index,
+                    }}),
+                    .load_only = same_module or !homonymous,
+                } };
+            }
+        }
+        try self.ensureCatalog(&modules.items[module_index], position);
+        const exact_unit = findUnit(modules.items[module_index].available_sources.items, name);
+        var declarations: std.ArrayList(UnitTarget) = .empty;
+        for (modules.items[module_index].available_sources.items, 0..) |unit, source_index| {
+            if (try self.unitDeclares(unit.path, name, !same_module)) try declarations.append(self.allocator, .{
+                .module_index = module_index,
+                .source_index = source_index,
+            });
+        }
+        if (exact_unit) |source_index| {
+            for (declarations.items) |declaration| if (declaration.source_index != source_index) {
+                return self.fail(position, try std.fmt.allocPrint(
+                    self.allocator,
+                    "use target '{s}.{s}' is ambiguous between source unit '{s}' and a declaration from another unit",
+                    .{ modules.items[module_index].name, name, name },
+                ));
+            };
+            const homonymous = for (declarations.items) |declaration| {
+                if (declaration.source_index == source_index) break true;
+            } else false;
+            return .{ .units = .{
+                .items = try self.allocator.dupe(UnitTarget, &.{.{
+                    .module_index = module_index,
+                    .source_index = source_index,
+                }}),
+                .load_only = same_module or !homonymous,
+            } };
+        }
+        if (declarations.items.len != 0) return .{ .units = .{
+            .items = try declarations.toOwnedSlice(self.allocator),
+            .load_only = false,
+        } };
+        if (same_module) return .{ .units = .{
+            .items = &.{},
+            .load_only = false,
+        } };
+        return self.fail(position, try std.fmt.allocPrint(
+            self.allocator,
+            "module '{s}' has no source unit or selectable declaration '{s}'",
+            .{ modules.items[module_index].name, name },
+        ));
+    }
+
+    fn unitDeclares(self: *Loader, source_path: []const u8, name: []const u8, public_only: bool) !bool {
+        const source = Io.Dir.cwd().readFileAlloc(self.io, source_path, self.allocator, .limited(16 * 1024 * 1024)) catch return false;
+        if (public_only) {
+            var lines = std.mem.splitScalar(u8, source, '\n');
+            while (lines.next()) |source_line| {
+                const line = std.mem.trim(u8, source_line, " \t\r");
+                if (!std.mem.startsWith(u8, line, "pub use ")) continue;
+                const declaration = line["pub use ".len..];
+                const alias_marker = std.mem.indexOf(u8, declaration, " as ");
+                const exported_name = if (alias_marker) |index|
+                    std.mem.trim(u8, declaration[index + " as ".len ..], " \t\r")
+                else block: {
+                    const target_end = std.mem.indexOfAny(u8, declaration, " <\t\r") orelse declaration.len;
+                    break :block lastSegment(declaration[0..target_end]);
+                };
+                if (std.mem.eql(u8, exported_name, name)) return true;
+            }
+        }
+        var lexer = LexerModule.Lexer.init(source);
+        var depth: usize = 0;
+        var is_public = false;
+        while (true) {
+            const token = lexer.next() catch return false;
+            if (token.tag == .end) return false;
+            if (token.tag == .left_brace) {
+                depth += 1;
+                is_public = false;
+                continue;
+            }
+            if (token.tag == .right_brace) {
+                depth -|= 1;
+                is_public = false;
+                continue;
+            }
+            if (depth != 0) continue;
+            if (token.tag == .keyword_pub) {
+                is_public = true;
+                continue;
+            }
+            const declares = token.tag == .keyword_struct or token.tag == .keyword_class or
+                token.tag == .keyword_protocol or token.tag == .keyword_enum or token.tag == .keyword_func;
+            if (declares) {
+                const declared = lexer.next() catch return false;
+                if (declared.tag == .identifier and std.mem.eql(u8, declared.lexeme, name) and
+                    (!public_only or is_public)) return true;
+            }
+            is_public = false;
+        }
+    }
+
+    fn findLoadedFile(self: *const Loader, source_path: []const u8) ?usize {
+        for (self.source_paths.items, 0..) |loaded, index| {
+            if (std.mem.eql(u8, loaded, source_path)) return index;
+        }
         return null;
     }
 
-    fn loadTypeUseDependencies(
+    fn selectTypeUseDependencies(
         self: *Loader,
         modules: *std.ArrayList(ModuleBuilder),
         project_root: []const u8,
-        imports: []const Ast.Import,
         module_aliases: []const ModuleAlias,
         type_name: Ast.TypeName,
         position: Source.Position,
         loads_local_modules: bool,
         package_index: usize,
+        current_module_index: usize,
+        state: *FileState,
     ) !void {
         switch (type_name) {
             .structure => |name| {
                 if (std.mem.indexOfScalar(u8, name, '.') != null) {
-                    const canonical = try canonicalUsePath(self.allocator, imports, module_aliases, name);
-                    _ = try self.loadUseDependency(modules, project_root, canonical, position, loads_local_modules, package_index);
+                    const canonical = try canonicalUsePath(self.allocator, module_aliases, name);
+                    const selection = try self.resolveSelection(
+                        modules,
+                        project_root,
+                        canonical,
+                        position,
+                        loads_local_modules,
+                        package_index,
+                        current_module_index,
+                    );
+                    const roots = try self.selectSelection(modules, selection, position);
+                    try self.appendRoots(&state.use_edges, roots);
+                    try self.appendRoots(&state.activation_roots, roots);
                 }
             },
             .generic_structure => |generic| {
                 if (std.mem.indexOfScalar(u8, generic.name, '.') != null) {
-                    const canonical = try canonicalUsePath(self.allocator, imports, module_aliases, generic.name);
-                    _ = try self.loadUseDependency(modules, project_root, canonical, position, loads_local_modules, package_index);
+                    const canonical = try canonicalUsePath(self.allocator, module_aliases, generic.name);
+                    const selection = try self.resolveSelection(
+                        modules,
+                        project_root,
+                        canonical,
+                        position,
+                        loads_local_modules,
+                        package_index,
+                        current_module_index,
+                    );
+                    const roots = try self.selectSelection(modules, selection, position);
+                    try self.appendRoots(&state.use_edges, roots);
+                    try self.appendRoots(&state.activation_roots, roots);
                 }
-                for (generic.arguments) |argument| try self.loadTypeUseDependencies(
+                for (generic.arguments) |argument| try self.selectTypeUseDependencies(
                     modules,
                     project_root,
-                    imports,
                     module_aliases,
                     argument,
                     position,
                     loads_local_modules,
                     package_index,
+                    current_module_index,
+                    state,
                 );
             },
-            .list, .optional => |contained| try self.loadTypeUseDependencies(
+            .list, .optional => |contained| try self.selectTypeUseDependencies(
                 modules,
                 project_root,
-                imports,
                 module_aliases,
                 contained.*,
                 position,
                 loads_local_modules,
                 package_index,
+                current_module_index,
+                state,
             ),
-            .fixed_array => |array| try self.loadTypeUseDependencies(
+            .fixed_array => |array| try self.selectTypeUseDependencies(
                 modules,
                 project_root,
-                imports,
                 module_aliases,
                 array.element.*,
                 position,
                 loads_local_modules,
                 package_index,
+                current_module_index,
+                state,
             ),
-            .reference => |reference| try self.loadTypeUseDependencies(
+            .reference => |reference| try self.selectTypeUseDependencies(
                 modules,
                 project_root,
-                imports,
                 module_aliases,
                 reference.target.*,
                 position,
                 loads_local_modules,
                 package_index,
+                current_module_index,
+                state,
             ),
             .function => |function| {
-                for (function.parameters) |parameter| try self.loadTypeUseDependencies(
+                for (function.parameters) |parameter| try self.selectTypeUseDependencies(
                     modules,
                     project_root,
-                    imports,
                     module_aliases,
                     parameter,
                     position,
                     loads_local_modules,
                     package_index,
+                    current_module_index,
+                    state,
                 );
-                if (function.return_type) |return_type| try self.loadTypeUseDependencies(
+                if (function.return_type) |return_type| try self.selectTypeUseDependencies(
                     modules,
                     project_root,
-                    imports,
                     module_aliases,
                     return_type.*,
                     position,
                     loads_local_modules,
                     package_index,
+                    current_module_index,
+                    state,
                 );
             },
             else => {},
         }
     }
 
-    fn loadQualifiedDependencies(
+    fn selectQualifiedDependencies(
         self: *Loader,
         modules: *std.ArrayList(ModuleBuilder),
         project_root: []const u8,
         file_index: usize,
         loads_local_modules: bool,
         package_index: usize,
+        module_aliases: []const ModuleAlias,
     ) !void {
         const file = self.files.items[file_index];
         var lexer = LexerModule.Lexer.initFile(self.source_contents.items[file_index], file_index);
@@ -323,21 +684,22 @@ pub const Loader = struct {
                 end += 2;
             }
 
-            if (try canonicalImportedPath(self.allocator, file.program.imports, path.items)) |canonical| {
-                try self.loadLongestQualifiedModule(
+            if (try canonicalAliasedPath(self.allocator, module_aliases, path.items)) |canonical| {
+                try self.selectLongestQualifiedTarget(
                     modules,
                     project_root,
                     canonical,
                     tokens.items[index].position,
                     loads_local_modules,
                     package_index,
+                    file.module_index,
                 );
             }
             index = end + 1;
         }
     }
 
-    fn loadLongestQualifiedModule(
+    fn selectLongestQualifiedTarget(
         self: *Loader,
         modules: *std.ArrayList(ModuleBuilder),
         project_root: []const u8,
@@ -345,15 +707,29 @@ pub const Loader = struct {
         position: Source.Position,
         loads_local_modules: bool,
         package_index: usize,
+        current_module_index: usize,
     ) !void {
         var candidate = canonical_path;
         while (true) {
-            if (try self.moduleExists(modules.items, project_root, candidate, loads_local_modules, package_index)) {
-                try self.loadNamedModule(modules, project_root, candidate, position, loads_local_modules, package_index);
-                return;
-            }
-            const separator = std.mem.lastIndexOfScalar(u8, candidate, '.') orelse return;
-            candidate = candidate[0..separator];
+            const selection = self.resolveSelection(
+                modules,
+                project_root,
+                candidate,
+                position,
+                loads_local_modules,
+                package_index,
+                current_module_index,
+            ) catch |err| switch (err) {
+                error.InvalidSource => {
+                    self.diagnostic = null;
+                    const separator = std.mem.lastIndexOfScalar(u8, candidate, '.') orelse return;
+                    candidate = candidate[0..separator];
+                    continue;
+                },
+                else => |other| return other,
+            };
+            _ = try self.selectSelection(modules, selection, position);
+            return;
         }
     }
 
@@ -549,7 +925,7 @@ pub const Loader = struct {
     ) !void {
         return self.fail(position, try std.fmt.allocPrint(
             self.allocator,
-            "package '{s}' cannot import transitive package '{s}' without declaring it directly",
+            "package '{s}' cannot use transitive package '{s}' without declaring it directly",
             .{ self.package_graph.?.packageLabel(package_index), dependency_name },
         ));
     }
@@ -573,48 +949,16 @@ pub const Loader = struct {
             return;
         }
 
-        const directory_path = if (package_name) |name|
-            try packageModulePath(self.allocator, module_root, name, module_name)
-        else
-            try localModulePath(self.allocator, module_root, module_name);
-        var directory = Io.Dir.cwd().openDir(self.io, directory_path, .{ .iterate = true }) catch |err| switch (err) {
-            error.FileNotFound, error.NotDir => {
-                return self.moduleNotFound(position, module_name, directory_path, null);
-            },
-            else => |other| return other,
-        };
-        defer directory.close(self.io);
-
-        var source_names: std.ArrayList([]const u8) = .empty;
-        var iterator = directory.iterateAssumeFirstIteration();
-        while (try iterator.next(self.io)) |entry| {
-            if (entry.kind != .file or !std.mem.endsWith(u8, entry.name, ".sx")) continue;
-            try source_names.append(self.allocator, try self.allocator.dupe(u8, entry.name));
-        }
-        std.mem.sort([]const u8, source_names.items, {}, struct {
-            fn lessThan(_: void, left: []const u8, right: []const u8) bool {
-                return std.mem.lessThan(u8, left, right);
-            }
-        }.lessThan);
-
-        const module_index = modules.items.len;
-        const native_runtime = try findNativeRuntimeInPackage(self.allocator, self.io, module_root, package_name, module_name);
         try modules.append(self.allocator, .{
             .name = module_name,
             .provider = provider,
+            .module_root = module_root,
+            .package_name = package_name,
             .package_index = package_index,
-            .native_runtime_name = if (native_runtime) |runtime| runtime.module_name else null,
-            .module_manifest_path = if (native_runtime) |runtime| runtime.manifest_path else null,
-            .native_module_directory = if (native_runtime) |runtime| runtime.module_directory else null,
         });
-        for (source_names.items) |source_name| {
-            const source_path = try std.fs.path.join(self.allocator, &.{ directory_path, source_name });
-            try modules.items[module_index].sources.append(self.allocator, source_path);
-            try self.appendFile(source_path, module_index);
-        }
     }
 
-    fn appendFile(self: *Loader, source_path: []const u8, module_index: usize) !void {
+    fn appendFile(self: *Loader, source_path: []const u8, module_index: usize, unit_name: []const u8) !usize {
         const source = Io.Dir.cwd().readFileAlloc(self.io, source_path, self.allocator, .limited(16 * 1024 * 1024)) catch |err| {
             std.debug.print("silex: unable to read '{s}': {t}\n", .{ source_path, err });
             return error.Reported;
@@ -630,7 +974,40 @@ pub const Loader = struct {
             },
             else => |other| return other,
         };
-        try self.files.append(self.allocator, .{ .module_index = module_index, .program = program });
+        try self.files.append(self.allocator, .{
+            .module_index = module_index,
+            .unit_name = unit_name,
+            .program = program,
+        });
+        try self.file_states.append(self.allocator, .{});
+        return file_index;
+    }
+
+    fn finishActivationClosures(self: *Loader) !void {
+        for (self.files.items, 0..) |*file, file_index| {
+            var activated: std.ArrayList(usize) = .empty;
+            for (self.file_states.items[file_index].activation_roots.items) |root| {
+                const activation_module = self.files.items[root].module_index;
+                var pending: std.ArrayList(usize) = .empty;
+                try pending.append(self.allocator, root);
+                while (pending.pop()) |current| {
+                    var visited = false;
+                    for (activated.items) |existing| if (existing == current) {
+                        visited = true;
+                        break;
+                    };
+                    if (visited) continue;
+                    try activated.append(self.allocator, current);
+                    for (self.file_states.items[current].use_edges.items) |dependency| {
+                        if (self.files.items[dependency].module_index == activation_module) {
+                            try pending.append(self.allocator, dependency);
+                        }
+                    }
+                }
+            }
+            file.activated_files = try activated.toOwnedSlice(self.allocator);
+            file.load_only_uses = try self.file_states.items[file_index].load_only_uses.toOwnedSlice(self.allocator);
+        }
     }
 
     fn finish(self: *Loader, project: ProjectModule.Project) !Loaded {
@@ -682,6 +1059,13 @@ fn findModule(modules: []const ModuleBuilder, name: []const u8) ?usize {
     return null;
 }
 
+fn findUnit(sources: []const UnitSource, name: []const u8) ?usize {
+    for (sources, 0..) |source, index| {
+        if (std.mem.eql(u8, source.name, name)) return index;
+    }
+    return null;
+}
+
 fn graphDependencyConflictsWithModule(
     graph: PackageGraph.Graph,
     package_index: usize,
@@ -698,20 +1082,11 @@ fn moduleNameFromUse(path: []const u8) ?[]const u8 {
 
 fn canonicalUsePath(
     allocator: Allocator,
-    imports: []const Ast.Import,
     aliases: []const ModuleAlias,
     path: []const u8,
 ) ![]const u8 {
     var matched_qualifier: ?[]const u8 = null;
     var matched_module: ?[]const u8 = null;
-    for (imports) |import_value| {
-        const qualifier = import_value.alias orelse import_value.path;
-        if (!pathHasQualifier(path, qualifier)) continue;
-        if (matched_qualifier == null or qualifier.len > matched_qualifier.?.len) {
-            matched_qualifier = qualifier;
-            matched_module = import_value.path;
-        }
-    }
     for (aliases) |alias| {
         if (!pathHasQualifier(path, alias.qualifier)) continue;
         if (matched_qualifier == null or alias.qualifier.len > matched_qualifier.?.len) {
@@ -726,27 +1101,20 @@ fn canonicalUsePath(
     });
 }
 
-fn canonicalImportedPath(
+fn canonicalAliasedPath(
     allocator: Allocator,
-    imports: []const Ast.Import,
+    aliases: []const ModuleAlias,
     path: []const u8,
 ) !?[]const u8 {
-    var matched: ?Ast.Import = null;
-    for (imports) |import_value| {
-        const qualifier = import_value.alias orelse import_value.path;
-        if (!pathHasQualifier(path, qualifier)) continue;
-        if (matched == null) {
-            matched = import_value;
-            continue;
-        }
-        const matched_qualifier = matched.?.alias orelse matched.?.path;
-        if (qualifier.len > matched_qualifier.len) matched = import_value;
+    var matched: ?ModuleAlias = null;
+    for (aliases) |alias| {
+        if (!pathHasQualifier(path, alias.qualifier)) continue;
+        if (matched == null or alias.qualifier.len > matched.?.qualifier.len) matched = alias;
     }
-    const import_value = matched orelse return null;
-    const qualifier = import_value.alias orelse import_value.path;
+    const alias = matched orelse return null;
     const canonical: []const u8 = try std.fmt.allocPrint(allocator, "{s}.{s}", .{
-        import_value.path,
-        path[qualifier.len + 1 ..],
+        alias.module_name,
+        path[alias.qualifier.len + 1 ..],
     });
     return canonical;
 }
@@ -926,35 +1294,144 @@ test "use paths select a declaration from their parent module" {
     try std.testing.expect(moduleNameFromUse("Vec3") == null);
 }
 
-test "use paths expand import and module aliases" {
-    const imports = &[_]Ast.Import{.{
-        .path = "STD",
-        .alias = "Standard",
-        .position = .{ .line = 1, .column = 1 },
-    }};
-    const aliases = &[_]ModuleAlias{.{ .qualifier = "Random", .module_name = "STD.Random" }};
+test "use paths expand module aliases" {
+    const aliases = &[_]ModuleAlias{
+        .{ .qualifier = "Standard", .module_name = "STD" },
+        .{ .qualifier = "Time", .module_name = "STD.Time" },
+    };
 
-    const imported = try canonicalUsePath(std.testing.allocator, imports, &.{}, "Standard.Random");
-    defer std.testing.allocator.free(imported);
-    try std.testing.expectEqualStrings("STD.Random", imported);
-    const expanded = try canonicalUsePath(std.testing.allocator, imports, aliases, "Random.Generator");
+    const standard = try canonicalUsePath(std.testing.allocator, aliases, "Standard.Time");
+    defer std.testing.allocator.free(standard);
+    try std.testing.expectEqualStrings("STD.Time", standard);
+    const expanded = try canonicalUsePath(std.testing.allocator, aliases, "Time.Stopwatch");
     defer std.testing.allocator.free(expanded);
-    try std.testing.expectEqualStrings("STD.Random.Generator", expanded);
+    try std.testing.expectEqualStrings("STD.Time.Stopwatch", expanded);
 }
 
-test "qualified paths expand parent import aliases" {
-    const imports = &[_]Ast.Import{.{
-        .path = "STD",
-        .alias = "Standard",
-        .position = .{ .line = 1, .column = 1 },
-    }};
+test "qualified paths expand parent module aliases" {
+    const aliases = &[_]ModuleAlias{.{ .qualifier = "Standard", .module_name = "STD" }};
 
-    const canonical = (try canonicalImportedPath(
+    const canonical = (try canonicalAliasedPath(
         std.testing.allocator,
-        imports,
+        aliases,
         "Standard.Time.Stopwatch",
     )).?;
     defer std.testing.allocator.free(canonical);
     try std.testing.expectEqualStrings("STD.Time.Stopwatch", canonical);
-    try std.testing.expect(try canonicalImportedPath(std.testing.allocator, imports, "stopwatch.start") == null);
+    try std.testing.expect(try canonicalAliasedPath(std.testing.allocator, aliases, "stopwatch.start") == null);
+}
+
+test "source unit selection loads only its transitive sibling closure" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{ .iterate = true });
+    defer temporary.cleanup();
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "project.json",
+        .data =
+        \\{"target":"App","modules":[
+        \\  {"name":"Lib","sources":["Alpha.sx","Internal.sx","AlphaExtensions.sx","Broken.sx"]},
+        \\  {"name":"App","sources":["Main.sx"]}
+        \\]}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "use Lib.Alpha\nfunc main() { print(Alpha.value()) }\n",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Alpha.sx",
+        .data = "use Internal\nuse AlphaExtensions\npub struct Alpha { static func value() int { return helper() } }\n",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Internal.sx",
+        .data = "func helper() int { return 42 }\n",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "AlphaExtensions.sx",
+        .data = "use Alpha\nextend Alpha { pub func doubled() int { return 84 } }\n",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Broken.sx",
+        .data = "pub struct Broken {\n",
+    });
+
+    var environ = EnvironMap.init(allocator);
+    const project_path = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "project.json" });
+    var loader = Loader.init(allocator, std.testing.io, &environ);
+    const loaded = try loader.load(project_path);
+
+    try std.testing.expectEqual(@as(usize, 4), loaded.files.len);
+    try std.testing.expectEqualStrings("Main", loaded.files[0].unit_name);
+    try std.testing.expectEqualStrings("Alpha", loaded.files[1].unit_name);
+    try std.testing.expectEqualStrings("Internal", loaded.files[2].unit_name);
+    try std.testing.expectEqualStrings("AlphaExtensions", loaded.files[3].unit_name);
+    try std.testing.expectEqualSlices(usize, &.{ 1, 3, 2 }, loaded.files[0].activated_files);
+}
+
+test "a differently named declaration selects its providing source unit" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{ .iterate = true });
+    defer temporary.cleanup();
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "project.json",
+        .data =
+        \\{"target":"App","modules":[
+        \\  {"name":"Lib","sources":["API.sx","Neighbor.sx"]},
+        \\  {"name":"App","sources":["Main.sx"]}
+        \\]}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "use Lib.Renamed\nfunc main() { let value = Renamed() }\n",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "API.sx",
+        .data = "pub struct Renamed {}\n",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Neighbor.sx",
+        .data = "pub struct Neighbor {}\n",
+    });
+
+    var environ = EnvironMap.init(allocator);
+    const project_path = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "project.json" });
+    var loader = Loader.init(allocator, std.testing.io, &environ);
+    const loaded = try loader.load(project_path);
+
+    try std.testing.expectEqual(@as(usize, 2), loaded.files.len);
+    try std.testing.expectEqualStrings("API", loaded.files[1].unit_name);
+}
+
+test "a source unit and declaration from another unit are ambiguous" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{ .iterate = true });
+    defer temporary.cleanup();
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "project.json",
+        .data =
+        \\{"target":"App","modules":[
+        \\  {"name":"Lib","sources":["Thing.sx","Other.sx"]},
+        \\  {"name":"App","sources":["Main.sx"]}
+        \\]}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = "use Lib.Thing\nfunc main() {}\n" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Thing.sx", .data = "func helper() {}\n" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Other.sx", .data = "pub struct Thing {}\n" });
+
+    var environ = EnvironMap.init(allocator);
+    const project_path = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "project.json" });
+    var loader = Loader.init(allocator, std.testing.io, &environ);
+    try std.testing.expectError(error.InvalidSource, loader.load(project_path));
+    try std.testing.expect(std.mem.indexOf(u8, loader.diagnostic.?.message, "is ambiguous") != null);
 }

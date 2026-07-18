@@ -23,4 +23,4 @@ files use the `.sx` extension; `silex` is the compiler command.
 
 ## Libraries
 
-- [STD](Language/Libraries/STD.md)
+- [STD](Language/Libraries/STD/README.md)

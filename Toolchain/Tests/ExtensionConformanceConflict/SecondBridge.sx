@@ -1,4 +1,4 @@
-import ExtensionConformanceConflict.Second as Second
+use ExtensionConformanceConflict.Second as Second
 
 pub func second() {
 }

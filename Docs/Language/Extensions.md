@@ -2,19 +2,18 @@
 
 `extend` adds methods to an existing nominal structure or class without
 changing the declaration, storage, initialization, or identity of that type.
-The target may be local or imported:
+The target may be local or selected with `use`:
 
 ```sx
-import STD.Random as Random
-use STD.Random.Generator as Generator
+use STD.Randomizer as Randomizer
 
-extend Generator {
+extend Randomizer {
     pub func get_uint() uint {
         return self.get_int() as uint
     }
 
-    pub static func seeded(seed:int) Generator {
-        return Random.create(seed)
+    pub static func seeded(seed:int) Randomizer {
+        return Randomizer.create(seed)
     }
 }
 ```
@@ -25,8 +24,8 @@ through `self` or call another mutating method. A `static func` is selected
 through the complete type and has no receiver:
 
 ```sx
-var generator = Generator.seeded(42)
-let value = generator.get_uint()
+var randomizer = Randomizer.seeded(42)
+let value = randomizer.get_uint()
 ```
 
 Extension methods are resolved statically from the receiver's declared type.
@@ -67,31 +66,33 @@ protocol witness separately.
 
 Only one conformance between a given type and protocol may exist in the whole
 compilation. A duplicate in the type declaration or another extension is an
-error even when the two extension modules are not directly imported together.
+error even when the two extension modules are not directly used together.
 This global coherence keeps dynamic witnesses and generic specializations
 unambiguous.
 
-## Visibility and imports
+## Visibility and uses
 
 An unmarked method takes the target's default member visibility. A structure
 extension method is therefore public and becomes active in a source file that
-directly imports its declaring module. A class extension method remains private
-to that module unless it uses `pub`. The explicit marker remains accepted for
-structure extensions even though it is redundant there:
+directly selects its declaring module or source unit. A class extension method
+remains private to that module unless it uses `pub`. The explicit marker
+remains accepted for structure extensions even though it is redundant there:
 
 ```sx
-import MyLibrary.RandomExtensions as RandomExtensions
+use MyLibrary.RandomExtensions as RandomExtensions
 
-func sample(generator:Generator) uint {
-    return generator.get_uint()
+func sample(randomizer:Randomizer) uint {
+    return randomizer.get_uint()
 }
 ```
 
-The import activates all public extension methods and conformances declared by
-that module; there is no separate `use` form for either. Merely compiling a
-module, depending on its package, or importing it transitively does not activate
-its extensions. Each consuming source file names the extension module directly,
-following the ordinary file-scoped `import` rules.
+That module `use` activates all public extension methods and conformances it
+declares. A `use` selecting a unit or declaration activates those supplied
+by its same-module unit closure; a `use` selecting a module activates all its
+direct units. Merely compiling another module or package reached beyond that
+closure does not activate its extensions. Each consuming source file names the
+module, unit, or declaration it wants directly, following the ordinary
+file-scoped dependency rules.
 
 An extension has the access rights of an outside caller. Its body can use only
 the target's `pub` members, never private or `sub` members, even when the
@@ -102,7 +103,7 @@ extension is declared in the module that owns the type.
 An extension cannot repeat the exact signature of a method declared by the
 type. Two visible extensions cannot provide the same exact signature either;
 the diagnostic names both extension modules instead of choosing according to
-source or import order. Different signatures remain ordinary overloads.
+source or dependency order. Different signatures remain ordinary overloads.
 
 Extensions add behavior only. They cannot declare fields, constructors,
 `drop`, `override`, or `sub` members. Names after `:` must be protocols and can

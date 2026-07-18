@@ -1,3 +1,3 @@
-import B
+use B
 
 func main() void {}

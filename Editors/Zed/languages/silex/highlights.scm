@@ -1,5 +1,4 @@
 (identifier) @variable
-(module_path) @namespace
 (qualified_name) @type
 (void_type) @type.builtin
 (builtin_type) @type.builtin
@@ -132,7 +131,6 @@
 (comment) @comment
 
 [
-  "import"
   "use"
   "pub"
   "sub"

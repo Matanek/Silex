@@ -7,7 +7,10 @@ const Allocator = std.mem.Allocator;
 
 pub const File = struct {
     module_index: usize,
+    unit_name: []const u8 = "",
     program: Ast.Program,
+    activated_files: []const usize = &.{},
+    load_only_uses: []const Source.Position = &.{},
 };
 
 const Kind = enum { structure, protocol, function, type_alias };
@@ -30,11 +33,10 @@ const Export = struct {
     position: Source.Position,
 };
 
-const ImportBinding = struct {
+const ModuleBinding = struct {
     module_index: usize,
     qualifier: []const u8,
     position: Source.Position,
-    from_use: bool = false,
 };
 
 const QualifiedTarget = struct {
@@ -54,9 +56,10 @@ const UseBinding = struct {
 };
 
 const FileInfo = struct {
+    file_index: usize,
     module_index: usize,
     program: Ast.Program,
-    imports: []const ImportBinding,
+    module_bindings: []const ModuleBinding,
     dependencies: std.ArrayList(Dependency) = .empty,
     uses: std.ArrayList(UseBinding) = .empty,
 };
@@ -79,7 +82,7 @@ pub const Resolver = struct {
 
     pub fn resolve(self: *Resolver) !Ast.Program {
         try self.collectDeclarations();
-        try self.collectImports();
+        try self.collectModuleBindings();
         const order = try self.moduleOrder();
         for (order) |module_index| {
             try self.collectModuleUses(module_index);
@@ -147,7 +150,11 @@ pub const Resolver = struct {
         const declaration = try self.resolveName(extension.position.file, extension.target, .structure, extension.target_position);
         const target_is_class = self.declarationIsClass(declaration);
         var conformances: std.ArrayList(Ast.ProtocolReference) = .empty;
-        const conformance_visible_files = try self.extensionVisibleFiles(declaring_module_index, true);
+        const conformance_visible_files = try self.extensionVisibleFiles(
+            declaring_module_index,
+            extension.position.file,
+            true,
+        );
         for (extension.conformances) |conformance| {
             const protocol = try self.resolveName(extension.position.file, conformance.name, .protocol, conformance.position);
             try conformances.append(self.allocator, .{
@@ -164,7 +171,11 @@ pub const Resolver = struct {
                 transformed.member_visibility = if (target_is_class) .private_access else .public_access;
                 if (!target_is_class) transformed.is_public = true;
             }
-            transformed.extension_visible_files = try self.extensionVisibleFiles(declaring_module_index, transformed.is_public);
+            transformed.extension_visible_files = try self.extensionVisibleFiles(
+                declaring_module_index,
+                extension.position.file,
+                transformed.is_public,
+            );
             transformed.extension_module_name = self.project.modules[declaring_module_index].name;
             try methods.append(self.allocator, transformed);
         }
@@ -175,21 +186,24 @@ pub const Resolver = struct {
         return result;
     }
 
-    fn extensionVisibleFiles(self: *Resolver, declaring_module_index: usize, is_public: bool) ![]const usize {
+    fn extensionVisibleFiles(
+        self: *Resolver,
+        declaring_module_index: usize,
+        declaring_file_index: usize,
+        is_public: bool,
+    ) ![]const usize {
         var result: std.ArrayList(usize) = .empty;
         for (self.file_infos) |file| {
             var visible = file.module_index == declaring_module_index;
             if (!visible and is_public) {
-                for (file.imports) |import_value| {
-                    if (import_value.module_index == declaring_module_index) {
+                for (self.files[file.file_index].activated_files) |activated_file| {
+                    if (activated_file == declaring_file_index) {
                         visible = true;
                         break;
                     }
                 }
             }
-            if (visible) if (sourceFileIndex(file.program)) |file_index| {
-                try result.append(self.allocator, file_index);
-            };
+            if (visible) try result.append(self.allocator, file.file_index);
         }
         return result.toOwnedSlice(self.allocator);
     }
@@ -283,48 +297,17 @@ pub const Resolver = struct {
         });
     }
 
-    fn collectImports(self: *Resolver) !void {
+    fn collectModuleBindings(self: *Resolver) !void {
         var infos = try self.allocator.alloc(FileInfo, self.files.len);
         for (self.files, 0..) |file, file_index| {
-            var imports: std.ArrayList(ImportBinding) = .empty;
-            for (file.program.imports) |import_value| {
-                const module_index = self.findModule(import_value.path) orelse {
-                    const message = try std.fmt.allocPrint(self.allocator, "module '{s}' was not found", .{import_value.path});
-                    return self.fail(import_value.position, message);
-                };
-                if (module_index == file.module_index) {
-                    const message = try std.fmt.allocPrint(self.allocator, "module '{s}' cannot import itself", .{import_value.path});
-                    return self.fail(import_value.position, message);
-                }
-                const qualifier = import_value.alias orelse import_value.path;
-                if (import_value.alias != null and std.mem.eql(u8, qualifier, "Result")) {
-                    return self.fail(import_value.position, "name 'Result' is reserved");
-                }
-                if (import_value.alias != null and std.mem.eql(u8, qualifier, "map_error")) {
-                    return self.fail(import_value.position, "name 'map_error' is reserved");
-                }
-                for (imports.items) |existing| {
-                    if (std.mem.eql(u8, existing.qualifier, qualifier)) {
-                        const message = try std.fmt.allocPrint(self.allocator, "import qualifier '{s}' is already declared", .{qualifier});
-                        return self.fail(import_value.position, message);
-                    }
-                }
-                if (self.findDirect(file.module_index, qualifier, null) != null) {
-                    const message = try std.fmt.allocPrint(self.allocator, "import qualifier '{s}' collides with a module declaration", .{qualifier});
-                    return self.fail(import_value.position, message);
-                }
-                try imports.append(self.allocator, .{
-                    .module_index = module_index,
-                    .qualifier = qualifier,
-                    .position = import_value.position,
-                });
-            }
+            var module_bindings: std.ArrayList(ModuleBinding) = .empty;
             for (file.program.uses) |use_value| {
+                if (loadOnlyUseAt(self.files[file_index], use_value.position)) continue;
                 const path = switch (use_value.target) {
                     .declaration => |value| value,
                     .type => continue,
                 };
-                const module_index = try self.moduleIndexFromUsePath(imports.items, path) orelse continue;
+                const module_index = try self.moduleIndexFromUsePath(module_bindings.items, path) orelse continue;
                 if (use_value.is_public) {
                     const message = try std.fmt.allocPrint(
                         self.allocator,
@@ -342,7 +325,7 @@ pub const Resolver = struct {
                     return self.fail(use_value.position, message);
                 }
                 const qualifier = use_value.alias orelse lastSegment(path);
-                for (imports.items) |existing| {
+                for (module_bindings.items) |existing| {
                     if (std.mem.eql(u8, existing.qualifier, qualifier)) {
                         const message = try std.fmt.allocPrint(
                             self.allocator,
@@ -360,25 +343,26 @@ pub const Resolver = struct {
                     );
                     return self.fail(use_value.position, message);
                 }
-                try imports.append(self.allocator, .{
+                try module_bindings.append(self.allocator, .{
                     .module_index = module_index,
                     .qualifier = qualifier,
                     .position = use_value.position,
-                    .from_use = true,
                 });
             }
             infos[file_index] = .{
+                .file_index = file_index,
                 .module_index = file.module_index,
                 .program = file.program,
-                .imports = try imports.toOwnedSlice(self.allocator),
+                .module_bindings = try module_bindings.toOwnedSlice(self.allocator),
             };
-            for (infos[file_index].imports) |import_value| {
+            for (infos[file_index].module_bindings) |binding| {
                 try infos[file_index].dependencies.append(self.allocator, .{
-                    .module_index = import_value.module_index,
-                    .position = import_value.position,
+                    .module_index = binding.module_index,
+                    .position = binding.position,
                 });
             }
             for (file.program.uses) |use_value| {
+                if (loadOnlyUseAt(self.files[file_index], use_value.position)) continue;
                 if (moduleUseAt(&infos[file_index], use_value.position)) continue;
                 const path = switch (use_value.target) {
                     .declaration => |value| value,
@@ -519,6 +503,7 @@ pub const Resolver = struct {
         for (self.file_infos) |*file| {
             if (file.module_index != module_index) continue;
             for (file.program.uses) |use_value| {
+                if (loadOnlyUseAt(self.files[file.file_index], use_value.position)) continue;
                 if (use_value.is_public != is_public) continue;
                 const path = switch (use_value.target) {
                     .declaration => |value| value,
@@ -542,8 +527,8 @@ pub const Resolver = struct {
 
     fn validateLocalBinding(self: *Resolver, file: *const FileInfo, name: []const u8, position: Source.Position) !void {
         try self.validateIntroducedName(file, name, position);
-        for (file.imports) |import_value| if (std.mem.eql(u8, import_value.qualifier, name)) {
-            const message = try std.fmt.allocPrint(self.allocator, "name '{s}' collides with an import alias", .{name});
+        for (file.module_bindings) |binding| if (std.mem.eql(u8, binding.qualifier, name)) {
+            const message = try std.fmt.allocPrint(self.allocator, "name '{s}' collides with a module alias", .{name});
             return self.fail(position, message);
         };
     }
@@ -1509,8 +1494,8 @@ pub const Resolver = struct {
 
     fn looksQualified(self: *const Resolver, file_index: usize, path: []const u8) bool {
         const file = self.file_infos[file_index];
-        for (file.imports) |import_value| {
-            if (pathHasQualifier(path, import_value.qualifier)) return true;
+        for (file.module_bindings) |binding| {
+            if (pathHasQualifier(path, binding.qualifier)) return true;
         }
         return pathHasQualifier(path, self.project.modules[file.module_index].name);
     }
@@ -1623,7 +1608,7 @@ pub const Resolver = struct {
         }
         for (self.project.modules, 0..) |module, module_index| {
             if (pathHasQualifier(path, module.name) and module_index != file.module_index) {
-                const message = try std.fmt.allocPrint(self.allocator, "module '{s}' is not imported in this file", .{module.name});
+                const message = try std.fmt.allocPrint(self.allocator, "module '{s}' is not used in this file", .{module.name});
                 return self.fail(position, message);
             }
         }
@@ -1633,7 +1618,7 @@ pub const Resolver = struct {
 
     fn moduleIndexFromUsePath(
         self: *Resolver,
-        bindings: []const ImportBinding,
+        bindings: []const ModuleBinding,
         path: []const u8,
     ) !?usize {
         if (try self.canonicalPathFromBindings(bindings, path)) |canonical| {
@@ -1643,7 +1628,7 @@ pub const Resolver = struct {
     }
 
     fn qualifiedUseTarget(self: *Resolver, file: *const FileInfo, path: []const u8) !?QualifiedTarget {
-        if (try self.canonicalPathFromBindings(file.imports, path)) |canonical| {
+        if (try self.canonicalPathFromBindings(file.module_bindings, path)) |canonical| {
             if (self.longestModuleTarget(canonical)) |target| return target;
         }
         return self.longestModuleTarget(path);
@@ -1654,7 +1639,7 @@ pub const Resolver = struct {
         if (pathHasQualifier(path, current_name)) {
             if (self.longestModuleTarget(path)) |target| return target;
         }
-        if (try self.canonicalPathFromBindings(file.imports, path)) |canonical| {
+        if (try self.canonicalPathFromBindings(file.module_bindings, path)) |canonical| {
             return self.longestModuleTarget(canonical);
         }
         return null;
@@ -1662,10 +1647,10 @@ pub const Resolver = struct {
 
     fn canonicalPathFromBindings(
         self: *Resolver,
-        bindings: []const ImportBinding,
+        bindings: []const ModuleBinding,
         path: []const u8,
     ) !?[]const u8 {
-        var matched: ?ImportBinding = null;
+        var matched: ?ModuleBinding = null;
         for (bindings) |binding| {
             if (!pathHasQualifier(path, binding.qualifier)) continue;
             if (matched == null or binding.qualifier.len > matched.?.qualifier.len) matched = binding;
@@ -1814,7 +1799,6 @@ fn pathHasQualifier(path: []const u8, qualifier: []const u8) bool {
 }
 
 fn sourceFileIndex(program: Ast.Program) ?usize {
-    if (program.imports.len != 0) return program.imports[0].position.file;
     if (program.uses.len != 0) return program.uses[0].position.file;
     if (program.enums.len != 0) return program.enums[0].position.file;
     if (program.protocols.len != 0) return program.protocols[0].position.file;
@@ -1848,10 +1832,17 @@ fn lastSegment(path: []const u8) []const u8 {
 }
 
 fn moduleUseAt(file: *const FileInfo, position: Source.Position) bool {
-    for (file.imports) |binding| {
-        if (!binding.from_use) continue;
+    for (file.module_bindings) |binding| {
         if (binding.position.file == position.file and binding.position.line == position.line and
             binding.position.column == position.column) return true;
+    }
+    return false;
+}
+
+fn loadOnlyUseAt(file: File, position: Source.Position) bool {
+    for (file.load_only_uses) |candidate| {
+        if (candidate.file == position.file and candidate.line == position.line and
+            candidate.column == position.column) return true;
     }
     return false;
 }

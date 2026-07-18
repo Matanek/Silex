@@ -1,9 +1,21 @@
 native func native_seed() int
 
-pub struct Generator {
+pub class Randomizer {
     var state:int
 
-    func get_int() int {
+    init(seed:int) {
+        self.state = seed
+    }
+
+    pub static func create() Randomizer {
+        return Randomizer(native_seed())
+    }
+
+    pub static func create(seed:int) Randomizer {
+        return Randomizer(seed)
+    }
+
+    pub func get_int() int {
         var value:uint
         if self.state < 0 {
             let minimum:int = -9223372036854775808
@@ -25,7 +37,7 @@ pub struct Generator {
         return self.state
     }
 
-    func get_int(minimum:int, maximum:int) int {
+    pub func get_int(minimum:int, maximum:int) int {
         if minimum >= maximum {
             panic("get_int(minimum, maximum) requires minimum < maximum")
         }
@@ -46,12 +58,12 @@ pub struct Generator {
         panic("get_int(minimum, maximum) could not produce a value")
     }
 
-    func get_float() float {
+    pub func get_float() float {
         let bits:uint = (self.get_int() as uint) & 0xFF_FFFF
         return (bits as float) / 16777216.0
     }
 
-    func get_float(minimum:float, maximum:float) float {
+    pub func get_float(minimum:float, maximum:float) float {
         if minimum - minimum != 0.0 || maximum - maximum != 0.0 {
             panic("get_float(minimum, maximum) requires finite bounds")
         }
@@ -74,15 +86,7 @@ pub struct Generator {
         panic("get_float(minimum, maximum) could not produce a value")
     }
 
-    func get_bool() bool {
+    pub func get_bool() bool {
         return self.get_int() % 2 == 0
     }
-}
-
-pub func create(seed:int) Generator {
-    return Generator(state:seed)
-}
-
-pub func system() Generator {
-    return Generator(state:native_seed())
 }

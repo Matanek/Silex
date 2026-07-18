@@ -1,4 +1,4 @@
-import Consumer
+use Consumer
 
 func main() {
     print(Consumer.value())

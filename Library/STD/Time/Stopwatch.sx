@@ -1,3 +1,5 @@
+use Internal
+
 pub struct Stopwatch {
     var last_microseconds:int
     var elapsed_seconds:float
