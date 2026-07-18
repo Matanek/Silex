@@ -18,6 +18,8 @@ func main() {
 
 - [Randomizer](Randomizer.md) — reproducible pseudo-random values for games,
   simulations, and tests.
+- [Console](Console.md) — text output and optional interactive-terminal
+  display control.
 - [Time](Time/README.md) — monotonic elapsed-time and logical-loop utilities.
   - [Stopwatch](Time/Stopwatch.md) measures bounded real durations.
   - [Clock](Time/Clock.md) drives scaled and pausable logical time.

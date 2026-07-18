@@ -169,6 +169,8 @@ the project:
 Library/STD/
 ├── Module.json
 ├── Module.cpp
+├── Console/
+│   └── Console.sx
 ├── Randomizer.sx
 └── Time/
     ├── Clock.sx

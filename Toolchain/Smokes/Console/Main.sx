@@ -1,0 +1,22 @@
+use STD.Console as Console
+
+func main() {
+    Console.write("write")
+    Console.write_line(": line")
+    Console.write_line("")
+    Console.write_error("error")
+    Console.write_error_line(": line")
+    Console.flush()
+    print(Console.is_interactive())
+    print(Console.get_dimensions() == null)
+    Console.clear_screen()
+    Console.clear_line()
+    Console.move_cursor(4, 2)
+    Console.show_cursor()
+    Console.hide_cursor()
+    Console.set_foreground(Console.Color.red())
+    Console.set_background(Console.Color.bright_blue())
+    Console.enable_style(Console.TextStyle.bold())
+    Console.enable_style(Console.TextStyle.underline())
+    Console.reset_style()
+}

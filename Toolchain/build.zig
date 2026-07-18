@@ -2480,8 +2480,20 @@ pub fn build(b: *std.Build) void {
         "runtime error: native function 'NativeStrings.native_invalid_utf8' failed: returned invalid UTF-8\n",
     );
 
+    const console_smoke_command = b.addRunArtifact(executable);
+    console_smoke_command.step.dependOn(&native_string_invalid_utf8_command.step);
+    console_smoke_command.addArgs(&.{ "run", "Smokes/Console/Main.sx" });
+    console_smoke_command.expectStdOutEqual(hostText(b, "write: line\n\nfalse\ntrue\n"));
+    console_smoke_command.expectStdErrEqual(hostText(b, "error: line\n"));
+
+    const console_negative_coordinates_command = b.addRunArtifact(executable);
+    console_negative_coordinates_command.step.dependOn(&console_smoke_command.step);
+    console_negative_coordinates_command.addArgs(&.{ "run", "Smokes/Console/NegativeCoordinates.sx" });
+    console_negative_coordinates_command.expectExitCode(1);
+    console_negative_coordinates_command.expectStdErrMatch("runtime error: Console.move_cursor requires non-negative coordinates\n");
+
     const portable_distributed_native_target_command = b.addRunArtifact(executable);
-    portable_distributed_native_target_command.step.dependOn(&native_string_invalid_utf8_command.step);
+    portable_distributed_native_target_command.step.dependOn(&console_negative_coordinates_command.step);
     portable_distributed_native_target_command.addArgs(&.{
         "compile",
         "Smokes/DistributedNative/Main.sx",
@@ -2880,11 +2892,22 @@ pub fn build(b: *std.Build) void {
         ".silex/cross-native-smoke/NativeStrings-x86_64-windows.exe",
     });
 
+    const cross_console_windows_smoke_command = b.addRunArtifact(executable);
+    cross_console_windows_smoke_command.step.dependOn(&cross_native_string_windows_smoke_command.step);
+    cross_console_windows_smoke_command.addArgs(&.{
+        "compile",
+        "Smokes/Console/Main.sx",
+        "--target",
+        "x86_64-windows-gnu",
+        "-o",
+        ".silex/cross-native-smoke/Console-x86_64-windows.exe",
+    });
+
     const cross_native_smoke_step = b.step(
         "cross-native-smoke",
         "Cross-compile the native source smoke program for x86_64 Linux",
     );
-    cross_native_smoke_step.dependOn(&cross_native_string_windows_smoke_command.step);
+    cross_native_smoke_step.dependOn(&cross_console_windows_smoke_command.step);
 
     const distribution_options = b.addOptions();
     distribution_options.addOption([]const u8, "silex_version", silex_version);
