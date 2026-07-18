@@ -3,7 +3,7 @@ Noncopyable filtering and propagation
 ====================================
 
 func inspect(state:State, pending:File?, result:Result<File,Error>) {
-    match borrow state {
+    match @state {
         loaded(file) => { print(file) }
         failed(error) => { print(error) }
     }
@@ -11,7 +11,7 @@ func inspect(state:State, pending:File?, result:Result<File,Error>) {
         loaded(var file) => { consume(move file) }
         failed(error) => { print(error) }
     }
-    if file = borrow pending { print(file) }
+    if file = @pending { print(file) }
     if var file = move pending { consume(move file) }
     let value = try move result
 }
@@ -50,7 +50,7 @@ func inspect(state:State, pending:File?, result:Result<File,Error>) {
       (statement
         (match_expression
           (expression
-            (read_borrow_expression
+            (read_reference_expression
               (expression
                 (identifier))))
           (match_branch
@@ -111,7 +111,7 @@ func inspect(state:State, pending:File?, result:Result<File,Error>) {
           (conditional_binding
             (identifier)
             (expression
-              (read_borrow_expression
+              (read_reference_expression
                 (expression
                   (identifier)))))
           (block

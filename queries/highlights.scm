@@ -64,7 +64,7 @@
 (lambda_expression "func" @keyword)
 (function_type "func" @type.builtin)
 (function_type_parameter mutable_reference: "&" @type)
-(function_type_parameter read_borrow: "borrow" @keyword)
+(function_type_parameter read_reference: "@" @type)
 
 (print_statement
   function: (identifier) @function.call)
@@ -118,10 +118,10 @@
 (parameter
   mutable_reference: "&" @type)
 (parameter
-  read_borrow: "borrow" @keyword)
-(borrow_expression
+  read_reference: "@" @type)
+(mutable_reference_expression
   operator: "&" @operator)
-(read_borrow_expression "borrow" @keyword)
+(read_reference_expression "@" @operator)
 (self_expression) @keyword
 (comment) @comment
 

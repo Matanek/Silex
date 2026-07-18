@@ -111,6 +111,6 @@ func use_mutable(callback:func(&int)) {
           (invocation_expression
             target: (identifier)
             (expression
-              (borrow_expression
+              (mutable_reference_expression
                 operand: (expression
                   (identifier))))))))))
