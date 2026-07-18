@@ -1,0 +1,26 @@
+use STD.Console as Console
+
+func main() {
+    Console.write("prompt> ")
+    if ascii = Console.read_line() {
+        assert(ascii == "Ada", "ASCII line")
+    }
+    if utf8 = Console.read_line() {
+        assert(utf8 == "étoile 🌟", "UTF-8 line")
+    }
+    if empty = Console.read_line() {
+        assert(empty == "", "empty line")
+    }
+    if crlf = Console.read_line() {
+        assert(crlf == "CRLF", "CRLF line")
+    }
+    if nul = Console.read_line() {
+        assert(nul == "A\0B", "internal null byte")
+    }
+    if last = Console.read_line() {
+        assert(last == "last", "unterminated final line")
+    }
+    assert(Console.read_line() == null, "end of input")
+    Console.wait_for_enter()
+    print("console input")
+}

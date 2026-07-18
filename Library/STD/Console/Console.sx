@@ -15,6 +15,9 @@ native func native_set_foreground(code:int) void
 native func native_set_background(code:int) void
 native func native_enable_style(code:int) void
 native func native_reset_style() void
+native func native_prepare_line() bool
+native func native_take_line() str
+native func native_wait_for_enter() void
 
 pub struct Dimensions {
     let columns:int
@@ -84,6 +87,17 @@ pub func set_foreground(color:Color) { native_set_foreground(color_code(color, f
 pub func set_background(color:Color) { native_set_background(color_code(color, true)) }
 pub func enable_style(style:TextStyle) { native_enable_style(style_code(style)) }
 pub func reset_style() { native_reset_style() }
+
+pub func read_line() str? {
+    if native_prepare_line() {
+        return native_take_line()
+    }
+    return null
+}
+
+pub func wait_for_enter() {
+    native_wait_for_enter()
+}
 
 func color_code(color:Color, background:bool) int {
     let foreground = match color {

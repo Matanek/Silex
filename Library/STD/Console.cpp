@@ -1,8 +1,12 @@
 #include <cstdint>
 #include <csignal>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <optional>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -120,6 +124,60 @@ void flush() {
 
 // -----------------------------------------------------------------------------
 
+std::optional<std::string> pendingLine;
+
+void flushPrompt() {
+    if (std::fflush(stdout) != 0) fail("read_line", "unable to flush standard output");
+}
+
+int readByte(const char* operation) {
+    const int value = std::fgetc(stdin);
+    if (value != EOF || std::feof(stdin) != 0) return value;
+    fail(operation, "unable to read standard input");
+}
+
+bool prepareLine() {
+    flushPrompt();
+    std::string line;
+    while (true) {
+        const int value = readByte("read_line");
+        if (value == EOF) {
+            if (line.empty()) return false;
+            pendingLine = std::move(line);
+            return true;
+        }
+        if (value == '\n') {
+            pendingLine = std::move(line);
+            return true;
+        }
+        if (value == '\r') {
+            const int next = readByte("read_line");
+            if (next == '\n') {
+                pendingLine = std::move(line);
+                return true;
+            }
+            line.push_back('\r');
+            if (next == EOF) {
+                pendingLine = std::move(line);
+                return true;
+            }
+            if (std::ungetc(next, stdin) == EOF) fail("read_line", "unable to preserve input");
+            continue;
+        }
+        line.push_back(static_cast<char>(value));
+    }
+}
+
+void waitForEnter() {
+    flushPrompt();
+    while (true) {
+        const int value = readByte("wait_for_enter");
+        if (value == EOF || value == '\n') return;
+    }
+}
+
+// -----------------------------------------------------------------------------
+
 } // namespace
 
 extern "C" void silexNative_STD_Console_native_write(const char* text, std::int64_t length) {
@@ -188,4 +246,26 @@ extern "C" void silexNative_STD_Console_native_enable_style(std::int64_t code) {
 
 extern "C" void silexNative_STD_Console_native_reset_style() {
     control("\x1b[0m", "reset_style");
+}
+
+extern "C" bool silexNative_STD_Console_native_prepare_line() {
+    return prepareLine();
+}
+
+extern "C" void silexNative_STD_Console_native_take_line(
+    char** output_bytes,
+    std::int64_t* output_length
+) {
+    if (!pendingLine.has_value()) fail("read_line", "line was not prepared");
+    const auto length = pendingLine->size();
+    auto* bytes = length == 0 ? nullptr : static_cast<char*>(std::malloc(length));
+    if (length != 0 && bytes == nullptr) fail("read_line", "unable to allocate line");
+    if (length != 0) std::memcpy(bytes, pendingLine->data(), length);
+    pendingLine.reset();
+    *output_bytes = bytes;
+    *output_length = static_cast<std::int64_t>(length);
+}
+
+extern "C" void silexNative_STD_Console_native_wait_for_enter() {
+    waitForEnter();
 }

@@ -1,0 +1,5 @@
+use STD.Console as Console
+
+func main() {
+    Console.read_line()
+}

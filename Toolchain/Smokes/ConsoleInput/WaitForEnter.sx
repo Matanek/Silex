@@ -1,0 +1,7 @@
+use STD.Console as Console
+
+func main() {
+    Console.write("continue> ")
+    Console.wait_for_enter()
+    print("continued")
+}
