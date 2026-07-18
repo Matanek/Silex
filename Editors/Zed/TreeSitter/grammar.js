@@ -261,7 +261,7 @@ module.exports = grammar({
       ),
     function_type_parameter: ($) =>
       seq(
-        optional(choice(field("read_borrow", "borrow"), field("mutable_reference", "&"))),
+        optional(choice(field("read_reference", "@"), field("mutable_reference", "&"))),
         field("type", $.type),
       ),
     grouped_type: ($) => seq("(", field("type", $.type), ")"),
@@ -291,10 +291,9 @@ module.exports = grammar({
 
     parameter: ($) =>
       seq(
-        optional(field("read_borrow", "borrow")),
         field("name", $.identifier),
         ":",
-        optional(field("mutable_reference", "&")),
+        optional(choice(field("read_reference", "@"), field("mutable_reference", "&"))),
         field("type", $.type),
       ),
 
@@ -468,9 +467,9 @@ module.exports = grammar({
         $.binary_expression,
         $.try_expression,
         $.move_expression,
-        $.read_borrow_expression,
+        $.read_reference_expression,
         $.unary_expression,
-        $.borrow_expression,
+        $.mutable_reference_expression,
         $.conversion_expression,
         $.lambda_expression,
         $.match_expression,
@@ -619,7 +618,7 @@ module.exports = grammar({
       choice(
         alias($.cascade_binary_expression, $.binary_expression),
         alias($.cascade_unary_expression, $.unary_expression),
-        alias($.cascade_borrow_expression, $.borrow_expression),
+        alias($.cascade_mutable_reference_expression, $.mutable_reference_expression),
         alias($.cascade_conversion_expression, $.conversion_expression),
         $.invocation_expression,
         $.sequence_literal,
@@ -720,7 +719,7 @@ module.exports = grammar({
         ),
       ),
 
-    cascade_borrow_expression: ($) =>
+    cascade_mutable_reference_expression: ($) =>
       prec(
         PREC.unary,
         seq(field("operator", "&"), field("operand", $._cascade_assignment_value)),
@@ -960,10 +959,11 @@ module.exports = grammar({
     move_expression: ($) =>
       prec(PREC.unary, seq("move", field("operand", $.expression))),
 
-    read_borrow_expression: ($) =>
-      prec(PREC.unary, seq("borrow", field("operand", $.expression))),
+    read_reference_expression: ($) =>
+      prec(PREC.unary, seq("@", field("operand", $.expression))),
 
-    borrow_expression: ($) => prec(PREC.unary, seq(field("operator", "&"), field("operand", $.expression))),
+    mutable_reference_expression: ($) =>
+      prec(PREC.unary, seq(field("operator", "&"), field("operand", $.expression))),
 
     conversion_expression: ($) =>
       prec.left(

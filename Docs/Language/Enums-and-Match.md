@@ -175,7 +175,7 @@ mutates the subject.
 
 When an enum is noncopyable, a named subject chooses an explicit mode.
 `match move value` consumes the complete enum and transfers each associated
-value to its branch binding. `match borrow value` keeps the enum available and
+value to its branch binding. `match @value` keeps the enum available and
 creates read-only bindings limited to the branch. A fresh noncopyable enum
 temporary is consumed without an extra marker. Ordinary `match` keeps its copy
 semantics for copyable enums. A consuming `else` destroys the active associated
@@ -187,8 +187,8 @@ match move state {
     failed(error) => { print(error.message()) }
 }
 
-match borrow state {
-    loaded(document) => { inspect(borrow document) }
+match @state {
+    loaded(document) => { inspect(@document) }
     failed(error) => { print(error.message()) }
 }
 ```

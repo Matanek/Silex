@@ -2688,7 +2688,7 @@ pub const Analyzer = struct {
                 }
                 if (value.?.borrowed_parameter) {
                     if (assignmentRoot(ast.target)) |root| switch (root) {
-                        .self, .static => return self.fail(ast.value.?.position, "a 'borrow' parameter cannot be stored beyond its call"),
+                        .self, .static => return self.fail(ast.value.?.position, "a read-reference parameter cannot be stored beyond its call"),
                         .variable => {},
                     };
                 }
@@ -2925,7 +2925,7 @@ pub const Analyzer = struct {
                 else
                     .copy;
                 if (mode == .borrow and binding.mutability == .mutable) {
-                    return self.fail(binding.name_position, "a binding extracted with 'borrow' is read-only and cannot use 'var'");
+                    return self.fail(binding.name_position, "a binding extracted with '@' is read-only and cannot use 'var'");
                 }
                 const source = switch (mode) {
                     .copy => try self.expression(binding.source, parent_scope),
@@ -2935,7 +2935,7 @@ pub const Analyzer = struct {
                 if (source.type != .optional) return self.fail(binding.source.position, "conditional binding source must have an optional type");
                 const noncopyable = try self.isNonCopyableType(source.type);
                 if (noncopyable and mode == .copy and !self.isNonCopyableTemporary(source)) {
-                    return self.fail(binding.source.position, "a named noncopyable optional must be extracted with 'move' or 'borrow'");
+                    return self.fail(binding.source.position, "a named noncopyable optional must be extracted with 'move' or '@'");
                 }
                 if (binding.mutability == .immutable and mode == .copy) {
                     try self.requireIndependentLetType(source.type.optional.*, binding.name_position);
@@ -3159,7 +3159,7 @@ pub const Analyzer = struct {
                 return self.fail(ast_value.position, message);
             }
             if (value.borrowed_parameter) {
-                return self.fail(ast.position, "a 'borrow' parameter cannot be returned from its call");
+                return self.fail(ast.position, "a read-reference parameter cannot be returned from its call");
             }
             if (value.lifetime_depth != 0) {
                 return self.fail(ast.position, "capturing function value cannot be returned from its lexical scope");
@@ -3194,7 +3194,7 @@ pub const Analyzer = struct {
             return self.fail(ast.value.unary.operator_position, "'&' is only valid for an argument of a parameter declared with '&'");
         }
         if (ast.value == .borrow_expression) {
-            return self.fail(ast.value.borrow_expression.operator_position, "'borrow' is only valid for an argument of a parameter declared with 'borrow'");
+            return self.fail(ast.value.borrow_expression.operator_position, "'@' is only valid for an argument of a parameter declared as '@T'");
         }
         return switch (ast.value) {
             .integer => |lexeme| self.integerExpression(ast.position, lexeme),
@@ -4357,7 +4357,7 @@ pub const Analyzer = struct {
             if (self.isNonCopyableTemporary(subject)) {
                 mode = .move;
             } else {
-                return self.fail(ast_match.subject.position, "a named noncopyable enum must be matched with 'match move' or 'match borrow'");
+                return self.fail(ast_match.subject.position, "a named noncopyable enum must be matched with 'match move' or 'match @value'");
             }
         }
         const enum_symbol = self.findEnumByGeneratedName(subject.type.enumeration.generated_name).?;
@@ -4413,7 +4413,7 @@ pub const Analyzer = struct {
             for (ast_branch.bindings, associated_types) |ast_binding, binding_type| {
                 try self.requireAvailableVariableName(&branch_scope, ast_binding.name, ast_binding.position);
                 if (mode == .borrow and ast_binding.mutability == .mutable) {
-                    return self.fail(ast_binding.position, "a match binding extracted with 'borrow' is read-only and cannot use 'var'");
+                    return self.fail(ast_binding.position, "a match binding extracted with '@' is read-only and cannot use 'var'");
                 }
                 if (ast_binding.mutability == .immutable and mode == .copy) try self.requireIndependentLetType(binding_type, ast_binding.position);
                 const generated_name = try std.fmt.allocPrint(self.allocator, "silexValue{d}", .{self.next_symbol_id});
@@ -4817,7 +4817,7 @@ pub const Analyzer = struct {
                             resolved_operation = .append_range;
                             if (value.borrowed_parameter) {
                                 if (assignmentRoot(call.object)) |root| switch (root) {
-                                    .self, .static => return self.fail(argument.position, "a 'borrow' parameter cannot be stored beyond its call"),
+                                    .self, .static => return self.fail(argument.position, "a read-reference parameter cannot be stored beyond its call"),
                                     .variable => {},
                                 };
                             }
@@ -4844,7 +4844,7 @@ pub const Analyzer = struct {
             };
             if (stores_value and value.borrowed_parameter) {
                 if (assignmentRoot(call.object)) |root| switch (root) {
-                    .self, .static => return self.fail(argument.position, "a 'borrow' parameter cannot be stored beyond its call"),
+                    .self, .static => return self.fail(argument.position, "a read-reference parameter cannot be stored beyond its call"),
                     .variable => {},
                 };
             }
@@ -5763,7 +5763,7 @@ pub const Analyzer = struct {
     ) AnalyzeError!void {
         try self.rejectUniqueOwnerComposition(type_value, true, position);
         if (mode == .value) return;
-        if (is_native and mode == .borrow) return self.fail(position, "a native function cannot declare a 'borrow' parameter");
+        if (is_native and mode == .borrow) return self.fail(position, "a native function cannot declare an '@T' parameter");
         if (type_value == .structure and type_value.structure.is_class) {
             if (mode == .mutable_reference) {
                 const message = try std.fmt.allocPrint(
@@ -5775,18 +5775,18 @@ pub const Analyzer = struct {
             }
             const message = try std.fmt.allocPrint(
                 self.allocator,
-                "class '{s}' already has shared identity; parameter mode 'borrow' is invalid",
+                "class '{s}' already has shared identity; parameter mode '@' is invalid",
                 .{type_value.structure.source_name},
             );
             return self.fail(position, message);
         }
         if (type_value == .protocol and mode == .borrow) {
-            return self.fail(position, "a dynamic protocol value cannot be passed with 'borrow'");
+            return self.fail(position, "a dynamic protocol value cannot be passed with '@'");
         }
         if (try self.isNonCopyableType(type_value) and mode == .mutable_reference) {
             const message = try std.fmt.allocPrint(
                 self.allocator,
-                "noncopyable value '{s}' cannot be passed with '&'; use 'borrow' for read-only access",
+                "noncopyable value '{s}' cannot be passed with '&'; use '@' for read-only access",
                 .{typeName(type_value)},
             );
             return self.fail(position, message);
@@ -6286,7 +6286,7 @@ pub const Analyzer = struct {
             return self.fail(move_value.operator_position, message);
         }
         if (symbol.state.borrowed_parameter) {
-            return self.fail(move_value.operator_position, "a 'borrow' parameter cannot be consumed with 'move'");
+            return self.fail(move_value.operator_position, "a read-reference parameter cannot be consumed with 'move'");
         }
         const operand = try self.variableExpression(move_value.operand.position, name, scope);
         if (symbol.state.immutable_borrows != 0 or symbol.state.mutable_borrow or symbol.state.transient_mutable_borrows != 0) {
@@ -6402,7 +6402,7 @@ pub const Analyzer = struct {
         expected_type: Type,
     ) AnalyzeError!*Expression {
         if (argument.value != .borrow_expression) {
-            return self.fail(argument.position, "a parameter declared with 'borrow' requires an argument written as 'borrow value'");
+            return self.fail(argument.position, "a parameter declared as '@T' requires an argument written as '@value'");
         }
         return self.readBorrowValue(argument.value.borrow_expression, scope, expected_type);
     }
@@ -6774,7 +6774,7 @@ pub const Analyzer = struct {
         while (lambda_context) |lambda| : (lambda_context = lambda.parent) {
             if (symbol.scope_depth < lambda.local_depth) {
                 if (symbol.state.borrowed_parameter) {
-                    return self.fail(position, "a 'borrow' parameter cannot be captured by a lambda");
+                    return self.fail(position, "a read-reference parameter cannot be captured by a lambda");
                 }
                 if (try self.isNonCopyableType(symbol.type)) {
                     const message = try std.fmt.allocPrint(
@@ -7464,7 +7464,7 @@ fn appendSignature(
     try output.append(allocator, '(');
     for (parameter_types, parameter_modes, 0..) |parameter_type, mode, index| {
         if (index != 0) try output.appendSlice(allocator, ", ");
-        if (mode == .borrow) try output.appendSlice(allocator, "borrow ");
+        if (mode == .borrow) try output.append(allocator, '@');
         if (mode == .mutable_reference) try output.append(allocator, '&');
         try output.appendSlice(allocator, try allocatedSignatureTypeName(allocator, parameter_type));
     }
@@ -7575,7 +7575,7 @@ fn allocatedSignatureTypeName(allocator: Allocator, value: Type) Allocator.Error
             try output.appendSlice(allocator, "func(");
             for (function.parameters, function.parameter_modes, 0..) |parameter, mode, index| {
                 if (index != 0) try output.appendSlice(allocator, ", ");
-                if (mode == .borrow) try output.appendSlice(allocator, "borrow ");
+                if (mode == .borrow) try output.append(allocator, '@');
                 if (mode == .mutable_reference) try output.append(allocator, '&');
                 try output.appendSlice(allocator, try allocatedTypeName(allocator, parameter));
             }
@@ -8509,27 +8509,27 @@ test "noncopyable values compose through fields enums optionals collections clas
         \\enum Slot { full(Holder); empty }
         \\func consume(value:Resource) {}
         \\func consume_holder(value:Holder) {}
-        \\func inspect(borrow value:Resource) {}
+        \\func inspect(value:@Resource) {}
         \\func main() {
         \\    let holder = Holder(resource:Resource.open(1))
-        \\    inspect(borrow holder.resource)
+        \\    inspect(@holder.resource)
         \\    var optional:Resource? = Resource.open(3)
-        \\    if value = borrow optional { inspect(borrow value) }
+        \\    if value = @optional { inspect(@value) }
         \\    if var value = move optional { consume(move value) }
         \\    var slot = Slot.full(Holder(resource:Resource.open(4)))
-        \\    match borrow slot { full(value) => { inspect(borrow value.resource) }; empty => {} }
+        \\    match @slot { full(value) => { inspect(@value.resource) }; empty => {} }
         \\    match move slot { full(var value) => { consume_holder(move value) }; empty => {} }
         \\    var values:Resource[] = []
         \\    values.append(Resource.open(5))
         \\    let resource = Resource.open(6)
         \\    values.append(move resource)
-        \\    for value in values { inspect(borrow value) }
-        \\    for var value in values { inspect(borrow value) }
+        \\    for value in values { inspect(@value) }
+        \\    for var value in values { inspect(@value) }
         \\    consume(values.take_first())
         \\    consume(values.replace(0, Resource.open(7)))
         \\    consume(values.take_last())
         \\    var owner = Owner(resource:Resource.open(8))
-        \\    inspect(borrow owner.resource)
+        \\    inspect(@owner.resource)
         \\}
     );
     try expectSemanticSuccess(
@@ -8539,8 +8539,8 @@ test "noncopyable values compose through fields enums optionals collections clas
         \\    func value() int { return self.handle }
         \\    drop {}
         \\}
-        \\func inspect(borrow value:Resource) int { return value.value() }
-        \\func main() { let resource = Resource(handle:1); print(inspect(borrow resource)) }
+        \\func inspect(value:@Resource) int { return value.value() }
+        \\func main() { let resource = Resource(handle:1); print(inspect(@resource)) }
     );
     try expectResolvedSemanticError(
         declaration ++ "func main() { let first = Resource.open(1); let second = first }",
@@ -8556,7 +8556,7 @@ test "noncopyable values compose through fields enums optionals collections clas
     );
     try expectResolvedSemanticError(
         declaration ++ "func mutate(resource:&Resource) {} func main() {}",
-        "noncopyable value 'Resource' cannot be passed with '&'; use 'borrow' for read-only access",
+        "noncopyable value 'Resource' cannot be passed with '&'; use '@' for read-only access",
     );
     try expectResolvedSemanticError(
         declaration ++ "func main() { let resource = Resource.open(1); let callback = func() { print(resource.handle) } }",
@@ -8586,11 +8586,11 @@ test "noncopyable containers require explicit whole-value transfer" {
     );
     try expectResolvedSemanticError(
         declaration ++ "func main() { let slot = Slot.full(Holder(resource:Resource(handle:1))); match slot { full(value) => {}; empty => {} } }",
-        "a named noncopyable enum must be matched with 'match move' or 'match borrow'",
+        "a named noncopyable enum must be matched with 'match move' or 'match @value'",
     );
     try expectResolvedSemanticError(
         declaration ++ "func main() { let pending:Resource? = Resource(handle:1); if value = pending {} }",
-        "a named noncopyable optional must be extracted with 'move' or 'borrow'",
+        "a named noncopyable optional must be extracted with 'move' or '@'",
     );
     try expectResolvedSemanticError(
         declaration ++ "func main() { let holder = Holder(resource:Resource(handle:1)); consume(move holder.resource) }",
@@ -9447,7 +9447,7 @@ test "reject storing a capturing lambda in a longer-lived collection" {
     );
 }
 
-test "read borrows preserve owners and support overloads" {
+test "read references preserve owners and support overloads" {
     const Parser = @import("Parser.zig").Parser;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -9459,18 +9459,18 @@ test "read borrows preserve owners and support overloads" {
         \\    drop {}
         \\}
         \\func inspect(value:int) int { return value }
-        \\func inspect(borrow value:int) int { return value + 1 }
-        \\func describe(borrow resource:Resource) int { return resource.get_handle() }
-        \\func forward(borrow resource:Resource) int { return describe(borrow resource) }
-        \\func pair(borrow left:Resource, borrow right:Resource) int { return left.get_handle() + right.get_handle() }
+        \\func inspect(value:@int) int { return value + 1 }
+        \\func describe(resource:@Resource) int { return resource.get_handle() }
+        \\func forward(resource:@Resource) int { return describe(@resource) }
+        \\func pair(left:@Resource, right:@Resource) int { return left.get_handle() + right.get_handle() }
         \\func main() {
         \\    var resource = Resource(handle:4)
         \\    let copied = inspect(4)
-        \\    let borrowed = inspect(borrow copied)
-        \\    let described = describe(borrow resource)
-        \\    let forwarded = forward(borrow resource)
-        \\    let paired = pair(borrow resource, borrow resource)
-        \\    let temporary = describe(borrow Resource(handle:5))
+        \\    let borrowed = inspect(@copied)
+        \\    let described = describe(@resource)
+        \\    let forwarded = forward(@resource)
+        \\    let paired = pair(@resource, @resource)
+        \\    let temporary = describe(@Resource(handle:5))
         \\    let moved = move resource
         \\}
     );
@@ -9480,7 +9480,7 @@ test "read borrows preserve owners and support overloads" {
     try std.testing.expect(program.functions[5].statements[2].variable_declaration.initializer.value == .call);
 }
 
-test "read borrows reject mutation conflicts and escape" {
+test "read references reject mutation conflicts and escape" {
     const resource =
         \\struct Resource {
         \\    var handle:int
@@ -9490,57 +9490,57 @@ test "read borrows reject mutation conflicts and escape" {
         \\}
     ;
     try expectResolvedSemanticError(
-        resource ++ "func invalid(borrow value:Resource) { value.increment() } func main() {}",
+        resource ++ "func invalid(value:@Resource) { value.increment() } func main() {}",
         "cannot call mutating method 'increment' on immutable value 'value'",
     );
     try expectResolvedSemanticError(
-        resource ++ "func invalid(borrow value:Resource) Resource { return value } func main() {}",
-        "a 'borrow' parameter cannot be returned from its call",
+        resource ++ "func invalid(value:@Resource) Resource { return value } func main() {}",
+        "a read-reference parameter cannot be returned from its call",
     );
     try expectResolvedSemanticError(
-        resource ++ "func invalid(borrow value:Resource) { let callback = func() { print(value.handle) } } func main() {}",
-        "a 'borrow' parameter cannot be captured by a lambda",
+        resource ++ "func invalid(value:@Resource) { let callback = func() { print(value.handle) } } func main() {}",
+        "a read-reference parameter cannot be captured by a lambda",
     );
     try expectResolvedSemanticError(
-        "struct Data { var value:int } struct Holder { var saved:Data; func save(borrow value:Data) { self.saved = value } } func main() {}",
-        "a 'borrow' parameter cannot be stored beyond its call",
+        "struct Data { var value:int } struct Holder { var saved:Data; func save(value:@Data) { self.saved = value } } func main() {}",
+        "a read-reference parameter cannot be stored beyond its call",
     );
     try expectResolvedSemanticError(
-        "struct Holder { var saved:int[]; func save(borrow value:int) { self.saved.append(value) } } func main() {}",
-        "a 'borrow' parameter cannot be stored beyond its call",
+        "struct Holder { var saved:int[]; func save(value:@int) { self.saved.append(value) } } func main() {}",
+        "a read-reference parameter cannot be stored beyond its call",
     );
     try expectResolvedSemanticError(
-        resource ++ "func invalid(borrow value:Resource) { let moved = move value } func main() {}",
-        "a 'borrow' parameter cannot be consumed with 'move'",
+        resource ++ "func invalid(value:@Resource) { let moved = move value } func main() {}",
+        "a read-reference parameter cannot be consumed with 'move'",
     );
     try expectResolvedSemanticError(
-        resource ++ "func conflict(borrow first:Resource, second:Resource) {} func main() { let value = Resource(handle:1); conflict(borrow value, move value) }",
+        resource ++ "func conflict(first:@Resource, second:Resource) {} func main() { let value = Resource(handle:1); conflict(@value, move value) }",
         "cannot move borrowed noncopyable value 'value'",
     );
     try expectResolvedSemanticError(
-        "func conflict(borrow first:int, second:&int) {} func main() { var value = 1; conflict(borrow value, &value) }",
+        "func conflict(first:@int, second:&int) {} func main() { var value = 1; conflict(@value, &value) }",
         "cannot pass a value with '&' while it is read-borrowed",
     );
     try expectResolvedSemanticError(
-        "func conflict(first:&int, borrow second:int) {} func main() { var value = 1; conflict(&value, borrow value) }",
+        "func conflict(first:&int, second:@int) {} func main() { var value = 1; conflict(&value, @value) }",
         "cannot read-borrow a value while it is mutably borrowed",
     );
     try expectResolvedSemanticError(
-        "class Shared {} func inspect(borrow value:Shared) {} func main() {}",
-        "class 'Shared' already has shared identity; parameter mode 'borrow' is invalid",
+        "class Shared {} func inspect(value:@Shared) {} func main() {}",
+        "class 'Shared' already has shared identity; parameter mode '@' is invalid",
     );
     try expectResolvedSemanticError(
-        "protocol Shared { func read() } func inspect(borrow value:Shared) {} func main() {}",
-        "a dynamic protocol value cannot be passed with 'borrow'",
+        "protocol Shared { func read() } func inspect(value:@Shared) {} func main() {}",
+        "a dynamic protocol value cannot be passed with '@'",
     );
 }
 
-test "native functions reject read borrow parameters" {
+test "native functions reject read reference parameters" {
     const Parser = @import("Parser.zig").Parser;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
-    var parser = Parser.init(allocator, "native func native_inspect(borrow value:int) void; func main() {}");
+    var parser = Parser.init(allocator, "native func native_inspect(value:@int) void; func main() {}");
     const parsed = try parser.parse();
     const functions = try allocator.dupe(Ast.Function, parsed.functions);
     functions[0].name = "Test.native_inspect";
@@ -9550,29 +9550,29 @@ test "native functions reject read borrow parameters" {
     analyzer.native_module_names = &.{"Test"};
     try std.testing.expectError(error.InvalidSource, analyzer.analyze(program));
     try std.testing.expectEqualStrings(
-        "a native function cannot declare a 'borrow' parameter",
+        "a native function cannot declare an '@T' parameter",
         analyzer.diagnostic.?.message,
     );
 }
 
-test "protocol requirements preserve read borrow modes" {
+test "protocol requirements preserve read reference modes" {
     const Parser = @import("Parser.zig").Parser;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
     var parser = Parser.init(allocator,
-        \\protocol Reader { func read(borrow value:int) int }
+        \\protocol Reader { func read(value:@int) int }
         \\struct Counter : Reader {
-        \\    func read(borrow value:int) int { return value + 1 }
+        \\    func read(value:@int) int { return value + 1 }
         \\}
-        \\func main() { let counter = Counter(); let result = counter.read(borrow 1) }
+        \\func main() { let counter = Counter(); let result = counter.read(@1) }
     );
     var analyzer = Analyzer.init(allocator);
     const program = try analyzer.analyze(try resolveSingleTestProgram(allocator, try parser.parse()));
     try std.testing.expectEqual(Ast.ParameterMode.borrow, program.protocols[0].requirements[0].parameter_modes[0]);
 
     try expectResolvedSemanticError(
-        "protocol Reader { func read(borrow value:int) int } struct Counter : Reader { func read(value:int) int { return value } } func main() {}",
+        "protocol Reader { func read(value:@int) int } struct Counter : Reader { func read(value:int) int { return value } } func main() {}",
         "type 'Counter' does not satisfy method 'read' required by protocol 'Reader'",
     );
 }

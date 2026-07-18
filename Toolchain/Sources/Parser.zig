@@ -560,21 +560,21 @@ pub const Parser = struct {
         try self.expect(.left_parenthesis, "expected '('");
         var parameters: std.ArrayList(Ast.Parameter) = .empty;
         while (self.current.tag != .right_parenthesis) {
-            const is_borrow = self.current.tag == .keyword_borrow;
-            if (is_borrow) try self.advance();
             if (self.current.tag != .identifier) return self.fail("expected parameter name");
             const name = self.current.lexeme;
             const position = self.current.position;
             try self.advance();
             try self.expect(.colon, "expected ':' after parameter name");
+            const is_read_reference = self.current.tag == .at;
+            if (is_read_reference) try self.advance();
             const is_mutable_reference = self.current.tag == .amp;
             if (is_mutable_reference) try self.advance();
-            if (is_borrow and is_mutable_reference) return self.fail("a parameter cannot combine 'borrow' and '&'");
+            if (is_read_reference and is_mutable_reference) return self.fail("a parameter cannot combine '@' and '&'");
             try parameters.append(self.allocator, .{
                 .name = name,
                 .position = position,
                 .type = try self.parseTypeName(),
-                .mode = if (is_borrow) .borrow else if (is_mutable_reference) .mutable_reference else .value,
+                .mode = if (is_read_reference) .borrow else if (is_mutable_reference) .mutable_reference else .value,
             });
             if (self.current.tag != .comma) break;
             try self.advance();
@@ -767,13 +767,13 @@ pub const Parser = struct {
         var parameters: std.ArrayList(Ast.TypeName) = .empty;
         var parameter_modes: std.ArrayList(Ast.ParameterMode) = .empty;
         while (self.current.tag != .right_parenthesis) {
-            const is_borrow = self.current.tag == .keyword_borrow;
-            if (is_borrow) try self.advance();
+            const is_read_reference = self.current.tag == .at;
+            if (is_read_reference) try self.advance();
             const is_mutable_reference = self.current.tag == .amp;
             if (is_mutable_reference) try self.advance();
-            if (is_borrow and is_mutable_reference) return self.fail("a function parameter type cannot combine 'borrow' and '&'");
+            if (is_read_reference and is_mutable_reference) return self.fail("a function parameter type cannot combine '@' and '&'");
             try parameters.append(self.allocator, try self.parseTypeNameAfter("expected function parameter type"));
-            try parameter_modes.append(self.allocator, if (is_borrow) .borrow else if (is_mutable_reference) .mutable_reference else .value);
+            try parameter_modes.append(self.allocator, if (is_read_reference) .borrow else if (is_mutable_reference) .mutable_reference else .value);
             if (self.current.tag != .comma) break;
             try self.advance();
         }
@@ -1148,7 +1148,7 @@ pub const Parser = struct {
     }
 
     fn parseUnary(self: *Parser, allow_line_breaks: bool) ParseError!*Ast.Expression {
-        if (self.current.tag == .keyword_borrow) {
+        if (self.current.tag == .at) {
             const operator_position = self.current.position;
             try self.advance();
             const operand = try self.parseUnary(allow_line_breaks);
@@ -3298,17 +3298,26 @@ test "parse protocol conformances on a type extension" {
     try std.testing.expectEqualStrings("expected protocol name after ':'", missing.diagnostic.?.message);
 }
 
-test "parse read borrow parameters and arguments" {
+test "parse read reference parameters and arguments" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     var parser = Parser.init(arena.allocator(),
         \\struct Data { let value:int }
-        \\func inspect(borrow value:Data) int { return value.value }
-        \\func main() { let data = Data(value:1); inspect(borrow data) }
+        \\func inspect(value:@Data) int { return value.value }
+        \\func main() { let data = Data(value:1); inspect(@data) }
     );
     const program = try parser.parse();
     try std.testing.expectEqual(Ast.ParameterMode.borrow, program.functions[0].parameters[0].mode);
     const call = program.functions[1].statements[1].expression_statement.value.call;
     try std.testing.expect(call.arguments[0].value == .borrow_expression);
     try std.testing.expect(call.arguments[0].value.borrow_expression.operand.value == .identifier);
+
+    var released_identifier = Parser.init(arena.allocator(), "func borrow(value:int) int { return value } func main() {}");
+    _ = try released_identifier.parse();
+
+    var old_keyword = Parser.init(arena.allocator(), "func inspect(borrow value:Data) {} func main() {}");
+    try std.testing.expectError(error.InvalidSource, old_keyword.parse());
+
+    var old_postfix = Parser.init(arena.allocator(), "func inspect(value:Data@) {} func main() {}");
+    try std.testing.expectError(error.InvalidSource, old_postfix.parse());
 }

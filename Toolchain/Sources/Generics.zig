@@ -1165,7 +1165,7 @@ fn appendTypeName(
             try output.appendSlice(allocator, "func(");
             for (function.parameters, function.parameter_modes, 0..) |parameter, mode, index| {
                 if (index != 0) try output.appendSlice(allocator, ", ");
-                if (mode == .borrow) try output.appendSlice(allocator, "borrow ");
+                if (mode == .borrow) try output.append(allocator, '@');
                 if (mode == .mutable_reference) try output.append(allocator, '&');
                 try appendTypeName(allocator, output, parameter);
             }

@@ -103,27 +103,27 @@ func forward(resource:Resources.Resource) Resources.Resource {
     return move resource
 }
 
-func inspect(borrow resource:Resources.Resource) int {
+func inspect(resource:@Resources.Resource) int {
     return resource.value()
 }
 
-func inspect_forwarded(borrow resource:Resources.Resource) int {
-    return inspect(borrow resource)
+func inspect_forwarded(resource:@Resources.Resource) int {
+    return inspect(@resource)
 }
 
-func inspect_pair(borrow left:Resources.Resource, borrow right:Resources.Resource) int {
+func inspect_pair(left:@Resources.Resource, right:@Resources.Resource) int {
     return left.value() + right.value()
 }
 
-func read_int(borrow value:int) int {
+func read_int(value:@int) int {
     return value + 0
 }
 
-func generic_read<T>(borrow value:T) int {
+func generic_read<T>(value:@T) int {
     return 1
 }
 
-func constrained_read<T:Resources.Readable>(borrow value:T) int {
+func constrained_read<T:Resources.Readable>(value:@T) int {
     return value.value()
 }
 
@@ -141,20 +141,20 @@ func propagated_named(label:int) Result<Resources.Resource,Resources.OpenError> 
 func composition() {
     print("composition")
     let box = ResourceBox(resource:Resources.Resource.open(100))
-    print(inspect(borrow box.resource))
-    print(constrained_read<Resources.Resource>(borrow box.resource))
+    print(inspect(@box.resource))
+    print(constrained_read<Resources.Resource>(@box.resource))
 
     let generic = GenericBox<Resources.Resource>(value:Resources.Resource.open(101))
-    print(inspect(borrow generic.value))
+    print(inspect(@generic.value))
     let transferred_generic = move generic
-    print(inspect(borrow transferred_generic.value))
+    print(inspect(@transferred_generic.value))
     let copyable_generic = GenericBox<int>(value:99)
     let copied_generic = copyable_generic
     print(copied_generic.value)
 
     var state = ResourceState.loaded(ResourceBox(resource:Resources.Resource.open(102)))
-    match borrow state {
-        loaded(value) => { print(inspect(borrow value.resource)) }
+    match @state {
+        loaded(value) => { print(inspect(@value.resource)) }
         failed(error) => { print(error) }
     }
     match move state {
@@ -168,14 +168,14 @@ func composition() {
     }
 
     var pending:Resources.Resource? = Resources.Resource.open(103)
-    if value = borrow pending { print(inspect(borrow value)) }
+    if value = @pending { print(inspect(@value)) }
     if var value = move pending { consume(move value) }
 
     var values:Resources.Resource[] = []
     values.append(Resources.Resource.open(104))
     let named = Resources.Resource.open(105)
     values.append(move named)
-    for value in values { print(inspect(borrow value)) }
+    for value in values { print(inspect(@value)) }
     for var value in values { print(value.value()) }
     consume(values.take_first())
     consume(values.replace(0, Resources.Resource.open(106)))
@@ -213,9 +213,9 @@ func composition() {
     }
 
     var holder = ResourceHolder(resource:Resources.Resource.open(109))
-    print(inspect(borrow holder.resource))
+    print(inspect(@holder.resource))
     var holder_alias = holder
-    print(inspect(borrow holder_alias.resource))
+    print(inspect(@holder_alias.resource))
     var reverse:Resources.Resource[] = [Resources.Resource.open(110), Resources.Resource.open(111)]
     let pair = ResourcePair(
         first:Resources.Resource.open(112),
@@ -227,16 +227,16 @@ func borrows() {
     print("borrows")
     let fixed = Resources.Resource.open(90)
     var mutable = Resources.Resource.open(91)
-    print(inspect(borrow fixed))
-    print(inspect_forwarded(borrow mutable))
-    print(inspect_pair(borrow fixed, borrow fixed))
-    print(inspect(borrow Resources.Resource.open(92)))
+    print(inspect(@fixed))
+    print(inspect_forwarded(@mutable))
+    print(inspect_pair(@fixed, @fixed))
+    print(inspect(@Resources.Resource.open(92)))
     let data = Data(value:2)
-    assert(read_int(borrow data.value) == 2, "read borrow accepts a field")
+    assert(read_int(@data.value) == 2, "read reference accepts a field")
     var values:int[] = [3]
-    assert(read_int(borrow values[0]) == 3, "read borrow accepts an indexed element")
-    assert(generic_read<int>(borrow values[0]) == 1, "generic read borrow keeps its mode")
-    assert(generic_read<Resources.Resource>(borrow fixed) == 1, "generic read borrow accepts an owner")
+    assert(read_int(@values[0]) == 3, "read reference accepts an indexed element")
+    assert(generic_read<int>(@values[0]) == 1, "generic read reference keeps its mode")
+    assert(generic_read<Resources.Resource>(@fixed) == 1, "generic read reference accepts an owner")
     consume(move mutable)
     print(fixed.value())
 }

@@ -3657,7 +3657,7 @@ test "generate cascades through one stable receiver" {
     try std.testing.expect(std.mem.indexOf(u8, cpp, "std::reverse(silexCascadeValue.begin(), silexCascadeValue.end());") != null);
 }
 
-test "generate read borrow parameters as const references" {
+test "generate read reference parameters as const references" {
     const Parser = @import("Parser.zig").Parser;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -3665,8 +3665,8 @@ test "generate read borrow parameters as const references" {
 
     var parser = Parser.init(allocator,
         \\struct Resource { let handle:int; drop {} }
-        \\func inspect(borrow resource:Resource) int { return resource.handle }
-        \\func main() { let resource = Resource(handle:1); print(inspect(borrow resource)) }
+        \\func inspect(resource:@Resource) int { return resource.handle }
+        \\func main() { let resource = Resource(handle:1); print(inspect(@resource)) }
     );
     var analyzer = Semantic.Analyzer.init(allocator);
     const cpp = try generate(allocator, try analyzer.analyze(try resolveSingleTestProgram(allocator, try parser.parse())));

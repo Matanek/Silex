@@ -66,49 +66,49 @@ reset(source)
 print(source[0]) // 10
 ```
 
-## Reading without copying
+## Read references
 
-Use `borrow name:T` when a function only needs to inspect a value without
-copying or consuming it. The call repeats the marker as `borrow value`, making
-the temporary alias visible at both ends:
+Use `name:@T` when a function only needs to inspect a value without copying or
+consuming it. The call uses `@value`, making the temporary read-only reference
+visible at both ends:
 
 ```sx
-func describe(borrow file:File) str {
+func describe(file:@File) str {
     return file.get_path()
 }
 
 let file = File.open("notes.txt")
-print(describe(borrow file))
+print(describe(@file))
 print(file.get_path())
 ```
 
-The parameter remains nominally `T`; `borrow` is a passing mode, not a
-reference type. It accepts a readable `let` or `var`, field, indexed element,
-or temporary. The alias ends when the synchronous call returns, and a
-temporary lives through that call. Several read borrows of one root may be
-arguments of the same call.
+`@T` is a parameter mode rather than a general storable type. `@value` accepts
+a readable `let` or `var`, field, indexed element, or temporary. The alias ends
+when the synchronous call returns, and a temporary lives through that call.
+Several read references to one root may be arguments of the same call.
 
-A borrowed parameter is read-only. It may inspect fields, index collections,
-call non-mutating methods, and forward the alias to another `borrow` parameter.
+A read-reference parameter is read-only. It may inspect fields, index
+collections, call non-mutating methods, and forward the alias to another `@T`
+parameter.
 It cannot be assigned, passed with `&`, used as a mutating receiver, consumed
 with `move`, returned, stored beyond the call, or captured by a lambda. While a
-read borrow is active, the same root cannot be mutated, moved, or passed with
-`&`.
+read reference is active, the same root cannot be mutated, moved, or passed
+with `&`.
 
-`borrow` works with copyable and noncopyable value types, including unique
+`@` works with copyable and noncopyable value types, including unique
 resources. It is invalid for a class, whose ordinary value already carries a
 shared identity, and for a dynamic protocol value that may hide such an
-identity. Native functions do not declare `borrow` parameters.
+identity. Native functions do not declare `@T` parameters.
 
 The marker participates in overload resolution and function types. These are
 three distinct signatures:
 
 ```sx
 func inspect(value:Data) {}
-func inspect(borrow value:Data) {}
+func inspect(value:@Data) {}
 func inspect(value:&Data) {}
 
-var callback:func(borrow Data) = func(borrow value:Data) {}
+var callback:func(@Data) = func(value:@Data) {}
 ```
 
 ## Mutating an argument
@@ -144,14 +144,15 @@ A `let` binding or field, including any nested field or element reached through
 it, cannot be passed with `&`.
 Several `&` arguments may name the same place at runtime. They are temporary
 aliases for the duration of that call, and writes follow the function body's
-normal execution order. An `&` argument cannot overlap a `borrow` argument of
+normal execution order. An `&` argument cannot overlap an `@` argument of
 the same root in that call.
 
-`&T` exists only in a function or method parameter. Silex has no general
-reference type: references cannot be declared locally, stored, returned, or
-dereferenced. Ordinary assignment is the value-copy operation for ordinary
-values. The distinct `move name` expression transfers a complete unique-resource
-local or parameter; it is not a general replacement for copying.
+`@T` and `&T` exist only in a function or method parameter or function type.
+Silex has no general reference type: references cannot be declared locally,
+stored, returned, or dereferenced. Ordinary assignment is the value-copy
+operation for ordinary values. The distinct `move name` expression transfers a
+complete unique-resource local or parameter; it is not a general replacement
+for copying.
 
 A class reference already has shared identity and cannot be declared as an
 `&ClassName` parameter. `&ClassName?` remains valid because it aliases the

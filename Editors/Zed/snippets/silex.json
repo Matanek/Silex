@@ -134,10 +134,10 @@
     ],
     "description": "Consume a noncopyable enum and own its associated values"
   },
-  "Borrow noncopyable match": {
-    "prefix": "matchborrow",
+  "Read-reference noncopyable match": {
+    "prefix": "matchref",
     "body": [
-      "match borrow ${1:value} {",
+      "match @${1:value} {",
       "    ${2:variant}(${3:item}) => {",
       "        $0",
       "    }",
@@ -187,19 +187,19 @@
     ],
     "description": "Transfer a unique resource explicitly"
   },
-  "Read borrow parameter": {
-    "prefix": "borrowparam",
+  "Read reference parameter": {
+    "prefix": "readrefparam",
     "body": [
-      "borrow ${1:name}:${2:Type}"
+      "${1:name}:@${2:Type}"
     ],
-    "description": "Declare a temporary read-only borrow parameter"
+    "description": "Declare a temporary read-only reference parameter"
   },
-  "Read borrow argument": {
-    "prefix": "borrow",
+  "Read reference argument": {
+    "prefix": "readref",
     "body": [
-      "borrow ${1:value}"
+      "@${1:value}"
     ],
-    "description": "Pass a value through a temporary read-only borrow"
+    "description": "Pass a value through a temporary read-only reference"
   },
   "Transform Result error": {
     "prefix": "maperror",

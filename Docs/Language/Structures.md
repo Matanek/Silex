@@ -289,21 +289,21 @@ indexed elements, partial values, and captured outer bindings. A noncopyable
 value cannot be passed with `&`, captured by a lambda, converted to a dynamic
 protocol value, or compared for equality.
 Named owner arguments and returns must spell `move` at the transfer site. A
-`borrow resource:Resource` parameter may inspect the same owner through a
-matching `borrow resource` argument without transferring or copying it; the
+`resource:@Resource` parameter may inspect the same owner through a matching
+`@resource` argument without transferring or copying it; the
 owner remains available after the call.
 
 After `move file`, that binding is consumed: it cannot be read, mutated, moved
-again, borrowed, or destroyed. A consumed `var` can receive a new temporary or
+again, referenced, or destroyed. A consumed `var` can receive a new temporary or
 transferred owner and becomes available again; a consumed `let` cannot be
 assigned. Assigning an available owner `var` first evaluates the new owner,
 runs the destination's `drop` exactly once, then installs the new owner. Moving
 a binding into itself is invalid.
 
-An active read borrow blocks `move` and `&` on the same owner until the call
-returns. The borrowed parameter itself cannot be moved, mutated, returned,
+An active `@` reference blocks `move` and `&` on the same owner until the call
+returns. The referenced parameter itself cannot be moved, mutated, returned,
 stored, or captured. It may call non-mutating methods and forward the same
-temporary alias to another `borrow` parameter.
+temporary alias to another `@T` parameter.
 
 At a control-flow join, an owner is available only when it is available on
 every path that reaches the join. Paths ending in `return`, `break`, `continue`,
