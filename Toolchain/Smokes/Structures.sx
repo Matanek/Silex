@@ -6,7 +6,7 @@ struct Position {
         return self.x + self.y
     }
 
-    func move(dx:int, dy:int) {
+    func shift(dx:int, dy:int) {
         self.translate(dx, dy)
     }
 
@@ -34,7 +34,7 @@ func main() {
         name:"Ada",
     )
 
-    player.position..move(2, 0)..translate(0, 3)
+    player.position..shift(2, 0)..translate(0, 3)
     print(player.name)
     print(player.position.total())
 
@@ -43,7 +43,7 @@ func main() {
 
     var configured = Position(x:0, y:0)
         ..x = 7
-        ..move(1, 2)
+        ..shift(1, 2)
     print(configured.total())
 
     let empty = Position()

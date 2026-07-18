@@ -56,6 +56,43 @@ func reverse_order() {
     print(first.value() + second.value())
 }
 
+func consume(resource:Resources.Resource) {
+    print("consume")
+    print(resource.value())
+}
+
+func forward(resource:Resources.Resource) Resources.Resource {
+    print("forward")
+    return move resource
+}
+
+func transfers() {
+    print("transfers")
+    let first = Resources.Resource.open(80)
+    let second = move first
+    consume(move second)
+    consume(Resources.Resource.open(81))
+
+    var replace = Resources.Resource.open(82)
+    replace = Resources.Resource.open(83)
+    let returned = forward(move replace)
+    print(returned.value())
+
+    var reusable = Resources.Resource.open(84)
+    consume(move reusable)
+    reusable = Resources.Resource.open(85)
+    consume(move reusable)
+
+    var loop_resource = Resources.Resource.open(86)
+    var index = 0
+    while index < 1 {
+        consume(move loop_resource)
+        loop_resource = Resources.Resource.open(87)
+        index++
+    }
+    consume(move loop_resource)
+}
+
 func main() {
     Resources.internal_access(1)
     lexical_scopes()
@@ -72,6 +109,7 @@ func main() {
     }
 
     reverse_order()
+    transfers()
     match Resources.incomplete_initialization(60, false) {
         success => { print("unexpected") }
         failure(error) => { print(error) }

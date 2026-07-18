@@ -260,21 +260,56 @@ aggregate initializer. Ordinary structures remain transparent.
 
 A completed owner value can be bound locally with `let` when its fields meet
 the ordinary independence rules, or with `var` when its public behaviour needs
-a mutable receiver. In the current language step, only a temporary owner value
-may initialize that binding directly. A named owner cannot be copied, assigned,
-passed as an ordinary or `&` argument, returned, captured by a lambda, converted
-to a dynamic protocol value, or compared for equality. A static factory may
-return a freshly constructed temporary such as the `File.open` result above.
+a mutable receiver. A temporary owner transfers implicitly into a local,
+ordinary parameter, assignment destination, or return value. A static factory
+may therefore return a freshly constructed `File`, and this call is valid:
+
+```sx
+func close(file:File) {}
+
+close(File.open("notes.txt"))
+```
+
+A named owner never transfers implicitly. Prefix `move` names the complete
+local binding or ordinary parameter whose ownership is transferred:
+
+```sx
+func forward(file:File) File {
+    return move file
+}
+
+let first = File.open("notes.txt")
+let second = move first
+close(move second)
+```
+
+`move` accepts only a direct unique-resource name. It rejects ordinary copyable
+values, `self`, static storage, fields, indexed elements, partial values, and
+captured outer bindings. A unique resource cannot be passed with `&`, captured
+by a lambda, converted to a dynamic protocol value, or compared for equality.
+Named owner arguments and returns must spell `move` at the transfer site.
+
+After `move file`, that binding is consumed: it cannot be read, mutated, moved
+again, borrowed, or destroyed. A consumed `var` can receive a new temporary or
+transferred owner and becomes available again; a consumed `let` cannot be
+assigned. Assigning an available owner `var` first evaluates the new owner,
+runs the destination's `drop` exactly once, then installs the new owner. Moving
+a binding into itself is invalid.
+
+At a control-flow join, an owner is available only when it is available on
+every path that reaches the join. Paths ending in `return`, `break`, `continue`,
+`panic`, or failed `try` do not constrain paths that continue. Every path back
+to a loop header must restore the same owner availability it had before the
+iteration; otherwise the loop is rejected.
 
 An owner cannot yet appear inside another structure, class, collection,
-optional, enum, or `Result`, nor in static storage. Explicit transfer and
-composition are future language steps; there is currently no `move`
-expression.
+optional, enum, or `Result`, nor in static storage. Owner composition remains a
+future language step.
 
 `drop` receives `self` implicitly and may access the structure's private
 storage. It has no parameters, parentheses, return type, or visibility marker,
 cannot be called explicitly, and cannot contain `return` or `try`. It executes
-exactly once for each completely constructed local owner:
+exactly once for each completely constructed and untransferred owner:
 
 - at the lexical end of its block;
 - before `return`, `break`, or `continue` leaves its scope;
@@ -285,7 +320,9 @@ Completed locals are destroyed in reverse construction order. An owner whose
 initializer did not complete is not destroyed. Its `drop` body runs before its
 fields are destroyed automatically in reverse declaration order. Owner fields
 are not yet permitted, so recursive owner destruction begins only when owner
-composition is introduced.
+composition is introduced. A transfer destination becomes responsible for the
+eventual `drop`; the consumed source performs no later destruction. An owner
+parameter likewise owns its argument until it is dropped or transferred again.
 
 These guarantees cover ordinary language exits. A `panic`, failed `assert`,
 forced process termination, or fatal native failure does not promise cleanup;

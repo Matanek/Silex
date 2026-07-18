@@ -178,7 +178,7 @@ class Entity {
         self.position = position
     }
 
-    pub func move(delta:int) {
+    pub func advance(delta:int) {
         self.position += delta
     }
 }
@@ -192,7 +192,7 @@ class Player : Entity {
 }
 
 var player = Player("Ada", 1)
-player.move(2)
+player.advance(2)
 ```
 
 Inheritance is transitive but always single. The base must be a visible class;
@@ -240,7 +240,7 @@ identity:
 
 ```sx
 func update(entity:Entity) {
-    entity.move(1)
+    entity.advance(1)
 }
 
 var player = Player("Ada", 1)

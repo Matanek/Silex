@@ -142,6 +142,13 @@
     ],
     "description": "Unwrap a Result success or propagate its failure"
   },
+  "Move unique resource": {
+    "prefix": "move",
+    "body": [
+      "move ${1:value}"
+    ],
+    "description": "Transfer a unique resource explicitly"
+  },
   "Transform Result error": {
     "prefix": "maperror",
     "body": [

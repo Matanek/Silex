@@ -901,6 +901,7 @@ pub fn generateWithSources(
             }
             try output.appendSlice(allocator, ";\n");
         }
+        if (structure.is_owner) try output.appendSlice(allocator, "    bool silexOwnsResource = true;\n");
         if ((structure.is_class and structure.constructors.len == 0 and structure.implicit_constructor_available) or structure.is_owner) {
             try output.appendSlice(allocator, "\n    ");
             try output.appendSlice(allocator, structure.generated_name);
@@ -947,14 +948,25 @@ pub fn generateWithSources(
                 try output.appendSlice(allocator, "& operator=(const ");
                 try output.appendSlice(allocator, structure.generated_name);
                 try output.appendSlice(allocator, "&) = delete;\n    ");
-                try output.appendSlice(allocator, structure.generated_name);
-                try output.appendSlice(allocator, "(");
-                try output.appendSlice(allocator, structure.generated_name);
-                try output.appendSlice(allocator, "&&) = delete;\n    ");
-                try output.appendSlice(allocator, structure.generated_name);
-                try output.appendSlice(allocator, "& operator=(");
-                try output.appendSlice(allocator, structure.generated_name);
-                try output.appendSlice(allocator, "&&) = delete;\n    ~");
+                if (structure.is_owner) {
+                    try output.appendSlice(allocator, structure.generated_name);
+                    try output.appendSlice(allocator, "(");
+                    try output.appendSlice(allocator, structure.generated_name);
+                    try output.appendSlice(allocator, "&& other) noexcept;\n    ");
+                    try output.appendSlice(allocator, structure.generated_name);
+                    try output.appendSlice(allocator, "& operator=(");
+                    try output.appendSlice(allocator, structure.generated_name);
+                    try output.appendSlice(allocator, "&& other) noexcept;\n    void silexDropResource();\n    ~");
+                } else {
+                    try output.appendSlice(allocator, structure.generated_name);
+                    try output.appendSlice(allocator, "(");
+                    try output.appendSlice(allocator, structure.generated_name);
+                    try output.appendSlice(allocator, "&&) = delete;\n    ");
+                    try output.appendSlice(allocator, structure.generated_name);
+                    try output.appendSlice(allocator, "& operator=(");
+                    try output.appendSlice(allocator, structure.generated_name);
+                    try output.appendSlice(allocator, "&&) = delete;\n    ~");
+                }
                 try output.appendSlice(allocator, structure.generated_name);
                 try output.appendSlice(allocator, "();\n");
             }
@@ -1067,12 +1079,54 @@ pub fn generateWithSources(
                 }
                 try output.appendSlice(allocator, "::silexDrop();\n}\n\n");
             } else {
-                try output.appendSlice(allocator, structure.generated_name);
-                try output.appendSlice(allocator, "::~");
-                try output.appendSlice(allocator, structure.generated_name);
-                try output.appendSlice(allocator, "() {\n");
-                try generateStatements(allocator, &output, drop.statements, 1, false);
-                try output.appendSlice(allocator, "}\n\n");
+                if (structure.is_owner) {
+                    try output.appendSlice(allocator, structure.generated_name);
+                    try output.appendSlice(allocator, "::");
+                    try output.appendSlice(allocator, structure.generated_name);
+                    try output.appendSlice(allocator, "(");
+                    try output.appendSlice(allocator, structure.generated_name);
+                    try output.appendSlice(allocator, "&& other) noexcept : ");
+                    for (structure.fields, 0..) |field, field_index| {
+                        if (field_index != 0) try output.appendSlice(allocator, ", ");
+                        try output.appendSlice(allocator, field.generated_name);
+                        try output.appendSlice(allocator, "(std::move(other.");
+                        try output.appendSlice(allocator, field.generated_name);
+                        try output.appendSlice(allocator, "))");
+                    }
+                    if (structure.fields.len != 0) try output.appendSlice(allocator, ", ");
+                    try output.appendSlice(allocator, "silexOwnsResource(std::exchange(other.silexOwnsResource, false)) {}\n\n");
+
+                    try output.appendSlice(allocator, structure.generated_name);
+                    try output.appendSlice(allocator, "& ");
+                    try output.appendSlice(allocator, structure.generated_name);
+                    try output.appendSlice(allocator, "::operator=(");
+                    try output.appendSlice(allocator, structure.generated_name);
+                    try output.appendSlice(allocator, "&& other) noexcept {\n    if (this == &other) return *this;\n    if (silexOwnsResource) {\n        silexDropResource();\n        silexOwnsResource = false;\n    }\n");
+                    for (structure.fields) |field| {
+                        try output.appendSlice(allocator, "    ");
+                        try output.appendSlice(allocator, field.generated_name);
+                        try output.appendSlice(allocator, " = std::move(other.");
+                        try output.appendSlice(allocator, field.generated_name);
+                        try output.appendSlice(allocator, ");\n");
+                    }
+                    try output.appendSlice(allocator, "    silexOwnsResource = std::exchange(other.silexOwnsResource, false);\n    return *this;\n}\n\nvoid ");
+                    try output.appendSlice(allocator, structure.generated_name);
+                    try output.appendSlice(allocator, "::silexDropResource() {\n");
+                    try generateStatements(allocator, &output, drop.statements, 1, false);
+                    try output.appendSlice(allocator, "}\n\n");
+
+                    try output.appendSlice(allocator, structure.generated_name);
+                    try output.appendSlice(allocator, "::~");
+                    try output.appendSlice(allocator, structure.generated_name);
+                    try output.appendSlice(allocator, "() {\n    if (silexOwnsResource) silexDropResource();\n}\n\n");
+                } else {
+                    try output.appendSlice(allocator, structure.generated_name);
+                    try output.appendSlice(allocator, "::~");
+                    try output.appendSlice(allocator, structure.generated_name);
+                    try output.appendSlice(allocator, "() {\n");
+                    try generateStatements(allocator, &output, drop.statements, 1, false);
+                    try output.appendSlice(allocator, "}\n\n");
+                }
             }
         }
         for (structure.methods) |method| {
@@ -1628,6 +1682,7 @@ fn generateTryPreludes(
     indentation: usize,
 ) GenerateError!void {
     switch (expression.value) {
+        .move_expression => |move_value| try generateTryPreludes(allocator, output, move_value.operand, indentation),
         .try_expression => |try_value| {
             try generateTryPreludes(allocator, output, try_value.operand, indentation);
             if (expression.type != .void) {
@@ -1784,7 +1839,9 @@ fn generateStatement(
                 try generateExpression(allocator, output, declaration.initializer);
                 try output.append(allocator, ')');
             } else {
-                if (declaration.mutability == .immutable and declaration.type != .reference) try output.appendSlice(allocator, "const ");
+                if (declaration.mutability == .immutable and declaration.type != .reference and !isUniqueOwnerType(declaration.type)) {
+                    try output.appendSlice(allocator, "const ");
+                }
                 try appendCppType(allocator, output, declaration.type);
                 try output.append(allocator, ' ');
                 try output.appendSlice(allocator, declaration.generated_name);
@@ -2326,6 +2383,11 @@ fn generateExpression(allocator: Allocator, output: *std.ArrayList(u8), expressi
                 try output.appendSlice(allocator, try_value.temporary_name);
                 try output.appendSlice(allocator, "Value)");
             }
+        },
+        .move_expression => |move_value| {
+            try output.appendSlice(allocator, "std::move(");
+            try generateExpression(allocator, output, move_value.operand);
+            try output.append(allocator, ')');
         },
         .variable => |variable| {
             try output.appendSlice(allocator, variable.generated_name);
@@ -2888,6 +2950,10 @@ fn isClassType(type_name: Semantic.Type) bool {
     return type_name == .structure and type_name.structure.is_class;
 }
 
+fn isUniqueOwnerType(type_name: Semantic.Type) bool {
+    return type_name == .structure and type_name.structure.is_owner;
+}
+
 fn silexTypeName(type_name: Semantic.Type) []const u8 {
     return switch (type_name) {
         .void => "void",
@@ -3423,7 +3489,7 @@ test "generate drop before field clearing with automatic base chaining" {
     try std.testing.expect(std.mem.indexOf(u8, cpp, "SilexClass0::silexDrop();") != null);
 }
 
-test "generate unique resource struct as noncopyable RAII value" {
+test "generate unique resource struct as movable RAII value" {
     const Parser = @import("Parser.zig").Parser;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -3435,7 +3501,14 @@ test "generate unique resource struct as noncopyable RAII value" {
         \\    static func open(handle:int) Resource { return Resource(handle:handle) }
         \\    drop { print(self.handle) }
         \\}
-        \\func main() { let resource = Resource.open(7) }
+        \\func consume(resource:Resource) {}
+        \\func main() {
+        \\    var first = Resource.open(7)
+        \\    let second = move first
+        \\    first = Resource.open(8)
+        \\    consume(move first)
+        \\    consume(move second)
+        \\}
     );
     var analyzer = Semantic.Analyzer.init(allocator);
     const cpp = try generate(allocator, try analyzer.analyze(try resolveSingleTestProgram(allocator, try parser.parse())));
@@ -3443,10 +3516,14 @@ test "generate unique resource struct as noncopyable RAII value" {
     try std.testing.expect(std.mem.indexOf(u8, cpp, "SilexStruct0(std::int64_t silexField0) : field0(std::move(silexField0)) {}") != null);
     try std.testing.expect(std.mem.indexOf(u8, cpp, "SilexStruct0(const SilexStruct0&) = delete;") != null);
     try std.testing.expect(std.mem.indexOf(u8, cpp, "SilexStruct0& operator=(const SilexStruct0&) = delete;") != null);
-    try std.testing.expect(std.mem.indexOf(u8, cpp, "SilexStruct0(SilexStruct0&&) = delete;") != null);
-    try std.testing.expect(std.mem.indexOf(u8, cpp, "SilexStruct0& operator=(SilexStruct0&&) = delete;") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "bool silexOwnsResource = true;") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "SilexStruct0(SilexStruct0&& other) noexcept;") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "SilexStruct0& operator=(SilexStruct0&& other) noexcept;") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "void silexDropResource();") != null);
     try std.testing.expect(std.mem.indexOf(u8, cpp, "~SilexStruct0();") != null);
-    try std.testing.expect(std.mem.indexOf(u8, cpp, "SilexStruct0::~SilexStruct0()") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "silexOwnsResource(std::exchange(other.silexOwnsResource, false))") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "if (silexOwnsResource) silexDropResource();") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "std::move(silexValue") != null);
 }
 
 test "generate inferred const and mutating methods" {

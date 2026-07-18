@@ -137,7 +137,10 @@ symbol.
 
 All arguments, return values, and return paths are checked statically. A
 non-void function must return a compatible value on every path. A void function
-may use `return` without a value.
+may use `return` without a value. A unique-resource parameter owns its value;
+a named owner argument or return uses `move`, while a freshly produced
+temporary transfers implicitly. See
+[unique resource structures](Structures.md#unique-resource-structures).
 
 Methods are functions declared inside a structure or class. An instance method
 receives the explicit `self` value. A `static func` method is selected through

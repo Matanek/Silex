@@ -1,0 +1,62 @@
+======================
+Move prefix precedence
+======================
+
+func forward(resource:Resource) Resource {
+    return move resource
+}
+
+func main() {
+    let first = Resource.open()
+    let second = move first
+    consume(move second)
+}
+
+---
+
+(source_file
+  (function_definition
+    (identifier)
+    (parameter_list
+      (parameter
+        (identifier)
+          (type
+          (named_type
+            (type_identifier)))))
+    (type
+      (named_type
+        (type_identifier)))
+    (block
+      (statement
+        (return_statement
+          (expression
+            (move_expression
+              (expression
+                (identifier))))))))
+  (function_definition
+    (identifier)
+    (parameter_list)
+    (block
+      (statement
+        (variable_declaration
+          (identifier)
+          (expression
+            (invocation_expression
+              (member_expression
+                (identifier)
+                (identifier))))))
+      (statement
+        (variable_declaration
+          (identifier)
+          (expression
+            (move_expression
+              (expression
+                (identifier))))))
+      (statement
+        (expression_statement
+          (invocation_expression
+            (identifier)
+            (expression
+              (move_expression
+                (expression
+                  (identifier))))))))))

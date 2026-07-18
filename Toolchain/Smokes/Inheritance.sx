@@ -7,7 +7,7 @@ class Entity {
         self.position = position
     }
 
-    pub func move(delta:int) {
+    pub func advance(delta:int) {
         self.position += delta
     }
 
@@ -180,7 +180,7 @@ class DerivedNode : NodeBase {
 }
 
 func update(entity:Entity) {
-    entity.move(1)
+    entity.advance(1)
 }
 
 func make_entity(player:Player) Entity {

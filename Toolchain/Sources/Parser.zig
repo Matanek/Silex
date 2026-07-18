@@ -1142,6 +1142,18 @@ pub const Parser = struct {
     }
 
     fn parseUnary(self: *Parser, allow_line_breaks: bool) ParseError!*Ast.Expression {
+        if (self.current.tag == .keyword_move) {
+            const operator_position = self.current.position;
+            try self.advance();
+            const operand = try self.parseUnary(allow_line_breaks);
+            return self.newExpression(.{
+                .position = operator_position,
+                .value = .{ .move_expression = .{
+                    .operator_position = operator_position,
+                    .operand = operand,
+                } },
+            });
+        }
         if (self.current.tag == .keyword_try) {
             const operator_position = self.current.position;
             try self.advance();
@@ -2692,7 +2704,7 @@ test "parse method and field cascade operations" {
     var parser = Parser.init(arena.allocator(),
         \\struct Point { var x:int }
         \\func main() void {
-        \\    var point = Point(x:0)..x = 10..move(1, 2)
+        \\    var point = Point(x:0)..x = 10..shift(1, 2)
         \\}
     );
     const program = try parser.parse();
@@ -2701,7 +2713,7 @@ test "parse method and field cascade operations" {
     try std.testing.expect(cascade.operations[0] == .field_assignment);
     try std.testing.expectEqualStrings("10", cascade.operations[0].field_assignment.value.value.integer);
     try std.testing.expect(cascade.operations[1] == .method_call);
-    try std.testing.expectEqualStrings("move", cascade.operations[1].method_call.name);
+    try std.testing.expectEqualStrings("shift", cascade.operations[1].method_call.name);
 }
 
 test "parse terminal member access after a cascade" {
@@ -3051,6 +3063,20 @@ test "parse try with prefix precedence" {
     const member = program.functions[1].statements[1].variable_declaration.initializer.?;
     try std.testing.expect(member.value == .try_expression);
     try std.testing.expect(member.value.try_expression.operand.value == .method_call);
+}
+
+test "parse move with prefix precedence" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(),
+        \\func main() {
+        \\    let next = move current
+        \\}
+    );
+    const program = try parser.parse();
+    const initializer = program.functions[0].statements[0].variable_declaration.initializer.?;
+    try std.testing.expect(initializer.value == .move_expression);
+    try std.testing.expect(initializer.value.move_expression.operand.value == .identifier);
 }
 
 test "reserve Result and reject void as its error type" {

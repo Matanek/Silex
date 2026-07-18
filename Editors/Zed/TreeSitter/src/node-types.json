@@ -1144,6 +1144,10 @@
           "named": true
         },
         {
+          "type": "move_expression",
+          "named": true
+        },
+        {
           "type": "null_literal",
           "named": true
         },
@@ -1973,6 +1977,22 @@
           },
           {
             "type": "string_literal",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "move_expression",
+    "named": true,
+    "fields": {
+      "operand": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "expression",
             "named": true
           }
         ]
@@ -3513,6 +3533,10 @@
   },
   {
     "type": "match",
+    "named": false
+  },
+  {
+    "type": "move",
     "named": false
   },
   {

@@ -1361,7 +1361,7 @@ pub fn build(b: *std.Build) void {
         "silex: native compilation failed for target 'x86_64-linux-musl'; target support, SDKs, or native sources may be unavailable or incomplete\n",
     );
     backend_discovered_target_failure_command.expectStdErrMatch(b.fmt(
-        "silex: backend details: .silex{c}build{c}v39{c}x86_64-linux-musl{c}",
+        "silex: backend details: .silex{c}build{c}v40{c}x86_64-linux-musl{c}",
         .{
             std.fs.path.sep,
             std.fs.path.sep,
@@ -2553,6 +2553,37 @@ pub fn build(b: *std.Build) void {
             "101\n" ++
             "close 51\n" ++
             "close 50\n" ++
+            "transfers\n" ++
+            "open 80\n" ++
+            "consume\n" ++
+            "80\n" ++
+            "close 80\n" ++
+            "open 81\n" ++
+            "consume\n" ++
+            "81\n" ++
+            "close 81\n" ++
+            "open 82\n" ++
+            "open 83\n" ++
+            "close 82\n" ++
+            "forward\n" ++
+            "83\n" ++
+            "open 84\n" ++
+            "consume\n" ++
+            "84\n" ++
+            "close 84\n" ++
+            "open 85\n" ++
+            "consume\n" ++
+            "85\n" ++
+            "close 85\n" ++
+            "open 86\n" ++
+            "consume\n" ++
+            "86\n" ++
+            "close 86\n" ++
+            "open 87\n" ++
+            "consume\n" ++
+            "87\n" ++
+            "close 87\n" ++
+            "close 83\n" ++
             "reject\n" ++
             "60\n" ++
             "incomplete\n" ++

@@ -1325,6 +1325,10 @@ pub const Resolver = struct {
                 .operator_position = try_value.operator_position,
                 .operand = try self.transformExpression(try_value.operand),
             } },
+            .move_expression => |move_value| .{ .move_expression = .{
+                .operator_position = move_value.operator_position,
+                .operand = try self.transformExpression(move_value.operand),
+            } },
             .unary => |unary| .{ .unary = .{
                 .operator = unary.operator,
                 .operator_position = unary.operator_position,

@@ -2798,6 +2798,7 @@ const language_completions = [_]CompletionItem{
     .{ .label = "match", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "return", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "try", .kind = 14, .detail = "Silex keyword" },
+    .{ .label = "move", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "use", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "pub", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "sub", .kind = 14, .detail = "Silex keyword" },
@@ -2843,6 +2844,7 @@ test "completion items include language terms and document identifiers" {
     try std.testing.expect(containsCompletion(items, "elif"));
     try std.testing.expect(containsCompletion(items, "match"));
     try std.testing.expect(containsCompletion(items, "try"));
+    try std.testing.expect(containsCompletion(items, "move"));
     try std.testing.expect(containsCompletion(items, "total"));
     try std.testing.expect(!containsCompletion(items, "import"));
 }
@@ -3275,11 +3277,11 @@ test "member completion only includes members of the receiver structure" {
         \\    var speed:float = 100
         \\}
         \\func main() void {
-        \\    var move:Move
-        \\    print(move.)
+        \\    var motion:Move
+        \\    print(motion.)
         \\}
     ;
-    const items = try completionItems(std.testing.allocator, std.testing.io, source, .{ .line = 5, .character = 15 });
+    const items = try completionItems(std.testing.allocator, std.testing.io, source, .{ .line = 5, .character = 17 });
     defer std.testing.allocator.free(items);
     try std.testing.expectEqual(@as(usize, 1), items.len);
     try std.testing.expectEqualStrings("speed", items[0].label);
@@ -3854,8 +3856,8 @@ test "cascade completion resolves a receiver on the preceding line" {
         \\    var speed:float = 100
         \\}
         \\func main() void {
-        \\    var move:Move
-        \\    move
+        \\    var motion:Move
+        \\    motion
         \\        ..
         \\}
     ;
@@ -3872,11 +3874,11 @@ test "compact cascade completion keeps the first receiver" {
         \\    func reset() void {}
         \\}
         \\func main() void {
-        \\    var move:Move
-        \\    move..reset()..
+        \\    var motion:Move
+        \\    motion..reset()..
         \\}
     ;
-    const items = try completionItems(std.testing.allocator, std.testing.io, source, .{ .line = 6, .character = 19 });
+    const items = try completionItems(std.testing.allocator, std.testing.io, source, .{ .line = 6, .character = 21 });
     defer std.testing.allocator.free(items);
     try std.testing.expect(containsCompletion(items, "speed"));
     try std.testing.expect(containsCompletion(items, "reset"));
@@ -3925,7 +3927,7 @@ test "cascade completion resolves an inferred structure initializer" {
         \\    func stop() void {}
         \\}
         \\func main() void {
-        \\    var move = Move(speed:10)
+        \\    var motion = Move(speed:10)
         \\        ..
         \\}
     ;

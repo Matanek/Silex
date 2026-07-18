@@ -142,6 +142,7 @@
   "in"
   "return"
   "try"
+  "move"
   "struct"
   "protocol"
   "extend"

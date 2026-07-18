@@ -67,6 +67,8 @@ func save_all() Result<void, SaveError> {
 
 Propagation is compiled as an ordinary early return. It uses no exception, and
 the same scope cleanup and destruction as an explicit `return` still occurs.
+For unique-resource availability, the failure path is terminal: it does not
+constrain a continuing path at a later control-flow join.
 `try` is invalid outside a function or lambda returning a compatible `Result`,
 including constructors and `drop` blocks. Error transformation remains
 explicit.

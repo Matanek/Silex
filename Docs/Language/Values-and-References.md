@@ -4,8 +4,9 @@ Primitive values, strings, fixed arrays, lists, ordinary structures, and enums
 have value semantics. Assignment, an ordinary function argument, a return
 value, a field, and an indexed element never create observable shared mutable
 state. A structure declaring `drop` is the noncopyable exception: it owns one
-unique local resource and currently initializes a binding only from a temporary
-value. See [Structures](Structures.md#unique-resource-structures).
+unique local resource. A temporary transfers implicitly into its destination;
+a named owner transfers only through `move`. See
+[Structures](Structures.md#unique-resource-structures).
 
 Function values are copied as values too, but a capturing lambda contains
 lexical borrows of the bindings it uses. Copying it copies those borrows, not
@@ -102,9 +103,9 @@ normal execution order.
 
 `&T` exists only in a function or method parameter. Silex has no general
 reference type: references cannot be declared locally, stored, returned, or
-dereferenced. There are no `copy` or `move` expressions; ordinary assignment
-is the value-copy operation exposed by the language and is rejected for unique
-resource structures.
+dereferenced. Ordinary assignment is the value-copy operation for ordinary
+values. The distinct `move name` expression transfers a complete unique-resource
+local or parameter; it is not a general replacement for copying.
 
 A class reference already has shared identity and cannot be declared as an
 `&ClassName` parameter. `&ClassName?` remains valid because it aliases the

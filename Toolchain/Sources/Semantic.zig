@@ -73,6 +73,8 @@ const BindingState = struct {
     lifetime_depth: usize = 0,
     narrowed_valid: bool = true,
     capture_box: bool = false,
+    owner_available: bool = true,
+    consumed_at: ?Source.Position = null,
 };
 
 const Borrow = struct {
@@ -122,6 +124,7 @@ pub const Expression = struct {
         index_access: IndexAccess,
         slice_access: SliceAccess,
         try_expression: Try,
+        move_expression: Move,
         unary: Unary,
         binary: Binary,
         conversion: Conversion,
@@ -196,6 +199,10 @@ pub const Expression = struct {
     pub const ProtocolConversion = struct {
         operand: *Expression,
         witness_name: []const u8,
+    };
+
+    pub const Move = struct {
+        operand: *Expression,
     };
 
     pub const StaticMethodCall = struct {
@@ -571,6 +578,19 @@ const Scope = struct {
     borrows: std.ArrayList(Borrow) = .empty,
 };
 
+const OwnerStateSnapshot = struct {
+    name: []const u8,
+    state: *BindingState,
+    available: bool,
+    consumed_at: ?Source.Position,
+};
+
+const LoopFlow = struct {
+    tracked: []const OwnerStateSnapshot,
+    break_states: std.ArrayList([]const OwnerStateSnapshot) = .empty,
+    continue_states: std.ArrayList([]const OwnerStateSnapshot) = .empty,
+};
+
 const LambdaContext = struct {
     local_depth: usize,
     captures: std.ArrayList(Expression.Lambda.Capture) = .empty,
@@ -764,6 +784,7 @@ pub const Analyzer = struct {
     current_method_dependencies: std.ArrayList(MethodId) = .empty,
     current_self_state: BindingState = .{},
     loop_depth: usize = 0,
+    current_loop_flow: ?*LoopFlow = null,
     function_scope_depth: usize = 0,
     current_lambda: ?*LambdaContext = null,
     diagnostic: ?Source.Diagnostic = null,
@@ -1952,7 +1973,7 @@ pub const Analyzer = struct {
                 const message = try std.fmt.allocPrint(self.allocator, "argument {d} of base constructor '{s}' expects '{s}', found '{s}'", .{ index + 1, base.source_name, typeName(expected_type), typeName(value.type) });
                 return self.fail(argument.position, message);
             }
-            if (!is_mutable_reference) try self.rejectUniqueOwnerArgument(value.type, argument.position);
+            if (!is_mutable_reference) try self.rejectUniqueOwnerArgument(value, argument.position);
             if (is_stored and value.lifetime_depth != 0) {
                 return self.fail(argument.position, "capturing callback cannot be passed to a base constructor parameter whose value escapes the call");
             }
@@ -2195,6 +2216,7 @@ pub const Analyzer = struct {
                 try self.validateConstructorExpression(structure, access.end, initialized);
             },
             .try_expression => |try_value| try self.validateConstructorExpression(structure, try_value.operand, initialized),
+            .move_expression => |move_value| try self.validateConstructorExpression(structure, move_value.operand, initialized),
             .unary => |unary| try self.validateConstructorExpression(structure, unary.operand, initialized),
             .binary => |binary| {
                 try self.validateConstructorExpression(structure, binary.left, initialized);
@@ -2234,6 +2256,7 @@ pub const Analyzer = struct {
         var result: std.ArrayList(Statement) = .empty;
         for (ast_statements) |ast_statement| {
             try result.append(self.allocator, try self.statement(ast_statement, scope));
+            if (!astStatementFallsThrough(ast_statement)) break;
         }
         return result.toOwnedSlice(self.allocator);
     }
@@ -2257,10 +2280,14 @@ pub const Analyzer = struct {
             .for_statement => |for_statement| self.forStatement(for_statement, scope),
             .break_statement => |position| loop_control: {
                 if (self.loop_depth == 0) return self.fail(position, "'break' is only available inside a loop");
+                const flow = self.current_loop_flow.?;
+                try flow.break_states.append(self.allocator, try self.captureOwnerStates(flow.tracked));
                 break :loop_control .break_statement;
             },
             .continue_statement => |position| loop_control: {
                 if (self.loop_depth == 0) return self.fail(position, "'continue' is only available inside a loop");
+                const flow = self.current_loop_flow.?;
+                try flow.continue_states.append(self.allocator, try self.captureOwnerStates(flow.tracked));
                 break :loop_control .continue_statement;
             },
             .return_statement => |return_statement| self.returnStatement(return_statement, scope),
@@ -2483,6 +2510,11 @@ pub const Analyzer = struct {
             },
         }
 
+        if (ast.target.value == .identifier) {
+            const symbol = findSymbol(scope, ast.target.value.identifier).?;
+            if (isUniqueOwnerType(symbol.type)) return self.uniqueOwnerAssignment(ast, symbol, scope);
+        }
+
         const target = prepared_target orelse if (ast.target.value == .identifier and findSymbol(scope, ast.target.value.identifier) != null and
             findSymbol(scope, ast.target.value.identifier).?.unwrap_optional)
         narrowed_assignment: {
@@ -2527,6 +2559,57 @@ pub const Analyzer = struct {
         if (ast.value) |ast_value| value = try self.expressionForExpected(ast_value, scope, target.type);
 
         return self.checkedAssignment(ast, target, value, scope);
+    }
+
+    fn uniqueOwnerAssignment(
+        self: *Analyzer,
+        ast: Ast.Statement.Assignment,
+        symbol: *const Symbol,
+        scope: *const Scope,
+    ) AnalyzeError!Statement {
+        if (ast.operator != .assign) {
+            const message = try std.fmt.allocPrint(
+                self.allocator,
+                "operator '{s}' is not available for unique resource '{s}'",
+                .{ assignmentOperatorText(ast.operator), typeName(symbol.type) },
+            );
+            return self.fail(ast.position, message);
+        }
+        const ast_value = ast.value.?;
+        if (ast_value.value == .move_expression and
+            ast_value.value.move_expression.operand.value == .identifier and
+            std.mem.eql(u8, ast_value.value.move_expression.operand.value.identifier, symbol.source_name))
+        {
+            const message = try std.fmt.allocPrint(self.allocator, "cannot move unique resource '{s}' into itself", .{symbol.source_name});
+            return self.fail(ast_value.value.move_expression.operator_position, message);
+        }
+        var value = try self.expressionForExpected(ast_value, scope, symbol.type);
+        value = try self.coerce(value, symbol.type);
+        if (!typeEqual(symbol.type, value.type)) {
+            const message = try typeMismatchMessage(self.allocator, symbol.type, value.type);
+            return self.fail(ast_value.position, message);
+        }
+        if (!isUniqueOwnerTemporary(value)) {
+            const message = try std.fmt.allocPrint(
+                self.allocator,
+                "unique resource '{s}' must be assigned from a temporary or with 'move'",
+                .{typeName(symbol.type)},
+            );
+            return self.fail(ast_value.position, message);
+        }
+        const target = try self.newExpression(.{
+            .type = symbol.type,
+            .position = ast.target.position,
+            .value = .{ .variable = .{ .generated_name = symbol.generated_name, .capture_box = &symbol.state.capture_box } },
+        });
+        symbol.state.owner_available = true;
+        symbol.state.consumed_at = null;
+        return .{ .assignment = .{
+            .position = ast.position,
+            .target = target,
+            .operator = .assign,
+            .value = value,
+        } };
     }
 
     fn checkedAssignment(
@@ -2600,6 +2683,77 @@ pub const Analyzer = struct {
         } };
     }
 
+    fn snapshotOwnerStates(self: *Analyzer, scope: *const Scope) Allocator.Error![]const OwnerStateSnapshot {
+        var snapshots: std.ArrayList(OwnerStateSnapshot) = .empty;
+        var current: ?*const Scope = scope;
+        while (current) |visible_scope| : (current = visible_scope.parent) {
+            for (visible_scope.symbols.items) |symbol| {
+                if (!isUniqueOwnerType(symbol.type)) continue;
+                try snapshots.append(self.allocator, .{
+                    .name = symbol.source_name,
+                    .state = symbol.state,
+                    .available = symbol.state.owner_available,
+                    .consumed_at = symbol.state.consumed_at,
+                });
+            }
+        }
+        return snapshots.toOwnedSlice(self.allocator);
+    }
+
+    fn captureOwnerStates(self: *Analyzer, tracked: []const OwnerStateSnapshot) Allocator.Error![]const OwnerStateSnapshot {
+        const snapshots = try self.allocator.alloc(OwnerStateSnapshot, tracked.len);
+        for (tracked, snapshots) |entry, *snapshot| snapshot.* = .{
+            .name = entry.name,
+            .state = entry.state,
+            .available = entry.state.owner_available,
+            .consumed_at = entry.state.consumed_at,
+        };
+        return snapshots;
+    }
+
+    fn restoreOwnerStates(snapshot: []const OwnerStateSnapshot) void {
+        for (snapshot) |entry| {
+            entry.state.owner_available = entry.available;
+            entry.state.consumed_at = entry.consumed_at;
+        }
+    }
+
+    fn mergeOwnerStates(base: []const OwnerStateSnapshot, outcomes: []const []const OwnerStateSnapshot) void {
+        if (outcomes.len == 0) {
+            restoreOwnerStates(base);
+            return;
+        }
+        for (base, 0..) |entry, index| {
+            var available = true;
+            var consumed_at: ?Source.Position = null;
+            for (outcomes) |outcome| {
+                if (outcome[index].available) continue;
+                available = false;
+                if (consumed_at == null) consumed_at = outcome[index].consumed_at;
+            }
+            entry.state.owner_available = available;
+            entry.state.consumed_at = if (available) null else consumed_at;
+        }
+    }
+
+    fn requireSameOwnerStates(
+        self: *Analyzer,
+        expected: []const OwnerStateSnapshot,
+        actual: []const OwnerStateSnapshot,
+        loop_position: Source.Position,
+    ) AnalyzeError!void {
+        for (expected, actual) |before, after| {
+            if (before.available == after.available) continue;
+            const position = after.consumed_at orelse loop_position;
+            const message = try std.fmt.allocPrint(
+                self.allocator,
+                "unique resource '{s}' must have the same availability on every path returning to the loop header",
+                .{before.name},
+            );
+            return self.fail(position, message);
+        }
+    }
+
     fn ifStatement(
         self: *Analyzer,
         ast: Ast.Statement.If,
@@ -2607,17 +2761,24 @@ pub const Analyzer = struct {
     ) AnalyzeError!Statement {
         var body_scope = Scope{ .parent = parent_scope, .depth = parent_scope.depth + 1 };
         const condition = try self.analyzeCondition(ast.condition, parent_scope, &body_scope);
+        const tracked = try self.snapshotOwnerStates(parent_scope);
+        var remaining = try self.captureOwnerStates(tracked);
+        var outcomes: std.ArrayList([]const OwnerStateSnapshot) = .empty;
         if (condition == .expression) try self.applyPresenceReduction(ast.condition.expression, &body_scope, true);
         const body = try self.statements(ast.body, &body_scope);
         self.releaseScopeBorrows(&body_scope);
+        if (astStatementsFallThrough(ast.body)) try outcomes.append(self.allocator, try self.captureOwnerStates(tracked));
 
         var alternatives: std.ArrayList(Statement.If.Alternative) = .empty;
         for (ast.alternatives) |ast_alternative| {
+            restoreOwnerStates(remaining);
             var alternative_scope = Scope{ .parent = parent_scope, .depth = parent_scope.depth + 1 };
             const alternative_condition = try self.analyzeCondition(ast_alternative.condition, parent_scope, &alternative_scope);
+            remaining = try self.captureOwnerStates(tracked);
             if (alternative_condition == .expression) try self.applyPresenceReduction(ast_alternative.condition.expression, &alternative_scope, true);
             const alternative_body = try self.statements(ast_alternative.body, &alternative_scope);
             self.releaseScopeBorrows(&alternative_scope);
+            if (astStatementsFallThrough(ast_alternative.body)) try outcomes.append(self.allocator, try self.captureOwnerStates(tracked));
             try alternatives.append(self.allocator, .{
                 .condition = alternative_condition,
                 .body = alternative_body,
@@ -2626,11 +2787,16 @@ pub const Analyzer = struct {
 
         var else_body: ?[]const Statement = null;
         if (ast.else_body) |ast_else_body| {
+            restoreOwnerStates(remaining);
             var else_scope = Scope{ .parent = parent_scope, .depth = parent_scope.depth + 1 };
             if (ast.condition == .expression) try self.applyPresenceReduction(ast.condition.expression, &else_scope, false);
             else_body = try self.statements(ast_else_body, &else_scope);
             self.releaseScopeBorrows(&else_scope);
+            if (astStatementsFallThrough(ast_else_body)) try outcomes.append(self.allocator, try self.captureOwnerStates(tracked));
+        } else {
+            try outcomes.append(self.allocator, remaining);
         }
+        mergeOwnerStates(tracked, outcomes.items);
 
         return .{ .if_statement = .{
             .condition = condition,
@@ -2645,13 +2811,33 @@ pub const Analyzer = struct {
         ast: Ast.Statement.While,
         parent_scope: *const Scope,
     ) AnalyzeError!Statement {
+        const tracked = try self.snapshotOwnerStates(parent_scope);
         var body_scope = Scope{ .parent = parent_scope, .depth = parent_scope.depth + 1 };
         const condition = try self.analyzeCondition(ast.condition, parent_scope, &body_scope);
+        const condition_exit = try self.captureOwnerStates(tracked);
         if (condition == .expression) try self.applyPresenceReduction(ast.condition.expression, &body_scope, true);
+
+        var flow = LoopFlow{ .tracked = tracked };
+        const previous_flow = self.current_loop_flow;
+        self.current_loop_flow = &flow;
         self.loop_depth += 1;
-        defer self.loop_depth -= 1;
+        defer {
+            self.loop_depth -= 1;
+            self.current_loop_flow = previous_flow;
+        }
         const body = try self.statements(ast.body, &body_scope);
         self.releaseScopeBorrows(&body_scope);
+
+        if (astStatementsFallThrough(ast.body)) {
+            try self.requireSameOwnerStates(tracked, try self.captureOwnerStates(tracked), ast.position);
+        }
+        for (flow.continue_states.items) |continue_state| {
+            try self.requireSameOwnerStates(tracked, continue_state, ast.position);
+        }
+        var exits: std.ArrayList([]const OwnerStateSnapshot) = .empty;
+        try exits.append(self.allocator, condition_exit);
+        try exits.appendSlice(self.allocator, flow.break_states.items);
+        mergeOwnerStates(tracked, exits.items);
         return .{ .while_statement = .{
             .condition = condition,
             .body = body,
@@ -2822,6 +3008,8 @@ pub const Analyzer = struct {
         };
         defer if (iteration_borrow) |borrow| releaseBorrow(borrow);
 
+        const tracked = try self.snapshotOwnerStates(parent_scope);
+
         if (ast.binding == .immutable) {
             try self.requireIndependentLetType(element_type, ast.name_position);
         }
@@ -2840,10 +3028,26 @@ pub const Analyzer = struct {
             .read_iteration = ast.binding == .read,
         });
 
+        var flow = LoopFlow{ .tracked = tracked };
+        const previous_flow = self.current_loop_flow;
+        self.current_loop_flow = &flow;
         self.loop_depth += 1;
-        defer self.loop_depth -= 1;
+        defer {
+            self.loop_depth -= 1;
+            self.current_loop_flow = previous_flow;
+        }
         const body = try self.statements(ast.body, &body_scope);
         self.releaseScopeBorrows(&body_scope);
+        if (astStatementsFallThrough(ast.body)) {
+            try self.requireSameOwnerStates(tracked, try self.captureOwnerStates(tracked), ast.position);
+        }
+        for (flow.continue_states.items) |continue_state| {
+            try self.requireSameOwnerStates(tracked, continue_state, ast.position);
+        }
+        var exits: std.ArrayList([]const OwnerStateSnapshot) = .empty;
+        try exits.append(self.allocator, tracked);
+        try exits.appendSlice(self.allocator, flow.break_states.items);
+        mergeOwnerStates(tracked, exits.items);
         return .{ .for_statement = .{
             .generated_name = generated_name,
             .element_type = element_type,
@@ -2874,7 +3078,7 @@ pub const Analyzer = struct {
             if (isUniqueOwnerType(value.type) and !isUniqueOwnerTemporary(value)) {
                 const message = try std.fmt.allocPrint(
                     self.allocator,
-                    "cannot return named unique resource '{s}' before explicit transfer is available",
+                    "named unique resource '{s}' must be returned with 'move'",
                     .{typeName(value.type)},
                 );
                 return self.fail(ast.position, message);
@@ -2928,6 +3132,7 @@ pub const Analyzer = struct {
             .index_access => |access| self.indexAccessExpression(access, scope),
             .slice_access => |access| self.sliceAccessExpression(access, scope),
             .try_expression => |try_value| self.tryExpression(try_value, scope),
+            .move_expression => |move_value| self.moveExpression(move_value, scope),
             .unary => |unary| self.unaryExpression(unary, scope),
             .conversion => |conversion| self.conversionExpression(conversion, scope),
             .binary => |binary| self.binaryExpression(binary, scope),
@@ -3179,6 +3384,15 @@ pub const Analyzer = struct {
             const message = try std.fmt.allocPrint(self.allocator, "unknown variable '{s}'", .{name});
             return self.fail(position, message);
         };
+        if (isUniqueOwnerType(symbol.type) and !symbol.state.owner_available) {
+            const consumed_at = symbol.state.consumed_at.?;
+            const message = try std.fmt.allocPrint(
+                self.allocator,
+                "unique resource '{s}' was consumed by 'move' at {d}:{d}",
+                .{ name, consumed_at.line, consumed_at.column },
+            );
+            return self.fail(position, message);
+        }
         try self.recordSymbolCapture(symbol, position);
         if (symbol.state.mutable_borrow) {
             const message = try std.fmt.allocPrint(self.allocator, "cannot access variable '{s}' while it is mutably borrowed", .{name});
@@ -3464,7 +3678,7 @@ pub const Analyzer = struct {
                 const message = try std.fmt.allocPrint(self.allocator, "argument {d} of '{s}' expects '{s}', found '{s}'", .{ index + 1, call.name, typeName(expected_type), typeName(value.type) });
                 return self.fail(argument.position, message);
             }
-            if (!is_mutable_reference) try self.rejectUniqueOwnerArgument(value.type, argument.position);
+            if (!is_mutable_reference) try self.rejectUniqueOwnerArgument(value, argument.position);
             if (is_stored and value.lifetime_depth != 0) {
                 return self.fail(argument.position, "capturing callback cannot be passed to a parameter whose value escapes the call");
             }
@@ -3520,7 +3734,7 @@ pub const Analyzer = struct {
                 const message = try std.fmt.allocPrint(self.allocator, "argument {d} expects '{s}', found '{s}'", .{ index + 1, typeName(expected_type), typeName(argument.type) });
                 return self.fail(ast_argument.position, message);
             }
-            if (!is_mutable_reference) try self.rejectUniqueOwnerArgument(argument.type, ast_argument.position);
+            if (!is_mutable_reference) try self.rejectUniqueOwnerArgument(argument, ast_argument.position);
             try arguments.append(self.allocator, argument);
         }
         return self.newExpression(.{
@@ -3597,11 +3811,17 @@ pub const Analyzer = struct {
         };
         const previous_lambda = self.current_lambda;
         const previous_return_type = self.current_return_type;
+        const previous_loop_depth = self.loop_depth;
+        const previous_loop_flow = self.current_loop_flow;
         self.current_lambda = &context;
         self.current_return_type = return_type;
+        self.loop_depth = 0;
+        self.current_loop_flow = null;
         defer {
             self.current_lambda = previous_lambda;
             self.current_return_type = previous_return_type;
+            self.loop_depth = previous_loop_depth;
+            self.current_loop_flow = previous_loop_flow;
         }
         const body = try self.statements(lambda.statements, &scope);
         self.releaseScopeBorrows(&scope);
@@ -3746,7 +3966,7 @@ pub const Analyzer = struct {
                 const message = try std.fmt.allocPrint(self.allocator, "argument {d} of method '{s}' expects '{s}', found '{s}'", .{ index + 1, call.name, typeName(expected_type), typeName(value.type) });
                 return self.fail(argument.position, message);
             }
-            if (!is_mutable_reference) try self.rejectUniqueOwnerArgument(value.type, argument.position);
+            if (!is_mutable_reference) try self.rejectUniqueOwnerArgument(value, argument.position);
             if (is_stored and receiver_depth < value.lifetime_depth) {
                 return self.fail(argument.position, "capturing callback cannot be stored in a receiver that outlives one of its captures");
             }
@@ -3837,7 +4057,7 @@ pub const Analyzer = struct {
                 );
                 return self.fail(argument.position, message);
             }
-            if (!is_mutable_reference) try self.rejectUniqueOwnerArgument(value.type, argument.position);
+            if (!is_mutable_reference) try self.rejectUniqueOwnerArgument(value, argument.position);
             try arguments.append(self.allocator, value);
             self.releaseTransientBorrow(value);
         }
@@ -3946,7 +4166,7 @@ pub const Analyzer = struct {
                 const message = try std.fmt.allocPrint(self.allocator, "argument {d} of static method '{s}' expects '{s}', found '{s}'", .{ index + 1, call.name, typeName(expected_type), typeName(value.type) });
                 return self.fail(argument.position, message);
             }
-            if (!is_mutable_reference) try self.rejectUniqueOwnerArgument(value.type, argument.position);
+            if (!is_mutable_reference) try self.rejectUniqueOwnerArgument(value, argument.position);
             if (is_stored and value.lifetime_depth != 0) {
                 return self.fail(argument.position, "capturing callback cannot be passed to a parameter whose value escapes the call");
             }
@@ -4033,8 +4253,12 @@ pub const Analyzer = struct {
         var expression_form: ?bool = null;
         var lifetime_depth = subject.lifetime_depth;
         var has_else = false;
+        const tracked = try self.snapshotOwnerStates(parent_scope);
+        const branch_entry = try self.captureOwnerStates(tracked);
+        var owner_outcomes: std.ArrayList([]const OwnerStateSnapshot) = .empty;
 
         for (ast_match.branches, 0..) |ast_branch, branch_index| {
+            restoreOwnerStates(branch_entry);
             var associated_types: []const Type = &.{};
             const variant_index: ?usize = if (ast_branch.variant) |variant_name| variant: {
                 const index = findEnumVariant(enum_symbol, variant_name) orelse {
@@ -4110,12 +4334,17 @@ pub const Analyzer = struct {
                         result_type = value.type;
                     }
                     lifetime_depth = @max(lifetime_depth, value.lifetime_depth);
+                    try owner_outcomes.append(self.allocator, try self.captureOwnerStates(tracked));
                     break :expression_body .{ .expression = value };
                 },
                 .statements => |ast_statements| block_body: {
                     if (expression_form == true) return self.fail(ast_branch.variant_position, "match cannot mix expression branches and block branches");
                     expression_form = false;
-                    break :block_body .{ .statements = try self.statements(ast_statements, &branch_scope) };
+                    const statements_value = try self.statements(ast_statements, &branch_scope);
+                    if (astStatementsFallThrough(ast_statements)) {
+                        try owner_outcomes.append(self.allocator, try self.captureOwnerStates(tracked));
+                    }
+                    break :block_body .{ .statements = statements_value };
                 },
             };
             self.releaseScopeBorrows(&branch_scope);
@@ -4137,6 +4366,7 @@ pub const Analyzer = struct {
                 return self.fail(ast_match.subject.position, message);
             }
         }
+        mergeOwnerStates(tracked, owner_outcomes.items);
         self.releaseTransientBorrow(subject);
         return self.newExpression(.{
             .type = if (expression_form orelse false) result_type.? else .void,
@@ -4203,7 +4433,7 @@ pub const Analyzer = struct {
                 const message = try std.fmt.allocPrint(self.allocator, "argument {d} of method '{s}' expects '{s}', found '{s}'", .{ index + 1, call.name, typeName(expected_type), typeName(value.type) });
                 return self.fail(argument.position, message);
             }
-            if (!is_mutable_reference) try self.rejectUniqueOwnerArgument(value.type, argument.position);
+            if (!is_mutable_reference) try self.rejectUniqueOwnerArgument(value, argument.position);
             if (is_stored and value.lifetime_depth > 1) {
                 return self.fail(argument.position, "capturing callback cannot be stored in a receiver that outlives one of its captures");
             }
@@ -4476,7 +4706,7 @@ pub const Analyzer = struct {
                 const message = try std.fmt.allocPrint(self.allocator, "argument {d} of method '{s}' expects '{s}', found '{s}'", .{ index + 1, call.name, typeName(expected_type), typeName(value.type) });
                 return self.fail(argument.position, message);
             }
-            try self.rejectUniqueOwnerArgument(value.type, argument.position);
+            try self.rejectUniqueOwnerArgument(value, argument.position);
             const stores_value = switch (operation) {
                 .append, .prepend => true,
                 .insert, .replace => index == 1,
@@ -4672,6 +4902,8 @@ pub const Analyzer = struct {
         parameter_is_mutable_references: []const bool,
     ) AnalyzeError!?[]const u8 {
         if (arguments.len != parameter_types.len) return null;
+        const owner_states = try self.snapshotOwnerStates(scope);
+        defer restoreOwnerStates(owner_states);
         var scores: std.ArrayList(u8) = .empty;
         for (arguments, parameter_types, parameter_is_mutable_references) |argument, parameter_type, is_mutable_reference| {
             const is_borrow = argument.value == .unary and argument.value.unary.operator == .borrow;
@@ -5164,7 +5396,7 @@ pub const Analyzer = struct {
                 const message = try std.fmt.allocPrint(self.allocator, "argument {d} of constructor '{s}' expects '{s}', found '{s}'", .{ index + 1, structure.source_name, typeName(expected_type), typeName(value.type) });
                 return self.fail(argument.position, message);
             }
-            if (!is_mutable_reference) try self.rejectUniqueOwnerArgument(value.type, argument.position);
+            if (!is_mutable_reference) try self.rejectUniqueOwnerArgument(value, argument.position);
             if (is_stored and value.lifetime_depth != 0) {
                 return self.fail(argument.position, "capturing callback cannot be passed to a constructor parameter whose value escapes the call");
             }
@@ -5399,32 +5631,25 @@ pub const Analyzer = struct {
         position: Source.Position,
     ) AnalyzeError!void {
         try self.rejectUniqueOwnerComposition(type_value, true, position);
-        if (!isUniqueOwnerType(type_value)) return;
-        const message = if (is_mutable_reference)
-            try std.fmt.allocPrint(
-                self.allocator,
-                "unique resource '{s}' cannot be passed with '&'",
-                .{typeName(type_value)},
-            )
-        else
-            try std.fmt.allocPrint(
-                self.allocator,
-                "unique resource '{s}' cannot be passed before explicit transfer is available",
-                .{typeName(type_value)},
-            );
+        if (!isUniqueOwnerType(type_value) or !is_mutable_reference) return;
+        const message = try std.fmt.allocPrint(
+            self.allocator,
+            "unique resource '{s}' cannot be passed with '&'",
+            .{typeName(type_value)},
+        );
         return self.fail(position, message);
     }
 
     fn rejectUniqueOwnerArgument(
         self: *Analyzer,
-        type_value: Type,
+        value: *const Expression,
         position: Source.Position,
     ) AnalyzeError!void {
-        if (!isUniqueOwnerType(type_value)) return;
+        if (!isUniqueOwnerType(value.type) or isUniqueOwnerTemporary(value)) return;
         const message = try std.fmt.allocPrint(
             self.allocator,
-            "unique resource '{s}' cannot be passed before explicit transfer is available",
-            .{typeName(type_value)},
+            "unique resource '{s}' must be passed with 'move'",
+            .{typeName(value.type)},
         );
         return self.fail(position, message);
     }
@@ -5802,6 +6027,7 @@ pub const Analyzer = struct {
                 try self.validateExpression(access.start);
                 try self.validateExpression(access.end);
             },
+            .move_expression => |move_value| try self.validateExpression(move_value.operand),
             .try_expression => |try_value| try self.validateExpression(try_value.operand),
             .unary => |unary| {
                 if (unary.operator == .numeric_negate and unary.operand.value == .integer and isInteger(expression_value.type)) {
@@ -5861,6 +6087,41 @@ pub const Analyzer = struct {
             .type = result_type,
             .position = unary.operator_position,
             .value = .{ .unary = .{ .operator = unary.operator, .operand = operand } },
+        });
+    }
+
+    fn moveExpression(
+        self: *Analyzer,
+        move_value: Ast.Expression.Move,
+        scope: *const Scope,
+    ) AnalyzeError!*Expression {
+        if (move_value.operand.value != .identifier) {
+            return self.fail(move_value.operator_position, "'move' requires a complete local binding or parameter");
+        }
+        const name = move_value.operand.value.identifier;
+        const symbol = findSymbol(scope, name) orelse {
+            const message = try std.fmt.allocPrint(self.allocator, "unknown variable '{s}'", .{name});
+            return self.fail(move_value.operand.position, message);
+        };
+        if (!isUniqueOwnerType(symbol.type)) {
+            const message = try std.fmt.allocPrint(
+                self.allocator,
+                "'move' requires a unique resource, found '{s}'",
+                .{typeName(symbol.type)},
+            );
+            return self.fail(move_value.operator_position, message);
+        }
+        const operand = try self.variableExpression(move_value.operand.position, name, scope);
+        if (symbol.state.immutable_borrows != 0 or symbol.state.mutable_borrow) {
+            const message = try std.fmt.allocPrint(self.allocator, "cannot move borrowed unique resource '{s}'", .{name});
+            return self.fail(move_value.operator_position, message);
+        }
+        symbol.state.owner_available = false;
+        symbol.state.consumed_at = move_value.operator_position;
+        return self.newExpression(.{
+            .type = symbol.type,
+            .position = move_value.operator_position,
+            .value = .{ .move_expression = .{ .operand = operand } },
         });
     }
 
@@ -6594,6 +6855,36 @@ fn blockAlwaysReturns(statements: []const Statement) bool {
     return false;
 }
 
+fn astStatementsFallThrough(statements: []const Ast.Statement) bool {
+    for (statements) |statement_value| {
+        if (!astStatementFallsThrough(statement_value)) return false;
+    }
+    return true;
+}
+
+fn astStatementFallsThrough(statement_value: Ast.Statement) bool {
+    return switch (statement_value) {
+        .panic_statement, .break_statement, .continue_statement, .return_statement => false,
+        .if_statement => |if_value| if_falls_through: {
+            const else_body = if_value.else_body orelse break :if_falls_through true;
+            if (astStatementsFallThrough(if_value.body)) break :if_falls_through true;
+            for (if_value.alternatives) |alternative| {
+                if (astStatementsFallThrough(alternative.body)) break :if_falls_through true;
+            }
+            break :if_falls_through astStatementsFallThrough(else_body);
+        },
+        .expression_statement => |expression_value| match_falls_through: {
+            if (expression_value.value != .match_expression) break :match_falls_through true;
+            for (expression_value.value.match_expression.branches) |branch| switch (branch.body) {
+                .expression => break :match_falls_through true,
+                .statements => |branch_statements| if (astStatementsFallThrough(branch_statements)) break :match_falls_through true,
+            };
+            break :match_falls_through false;
+        },
+        else => true,
+    };
+}
+
 fn parameterStored(statements: []const Ast.Statement, name: []const u8) bool {
     for (statements) |statement_value| switch (statement_value) {
         .assignment => |assignment_value| {
@@ -6760,7 +7051,7 @@ fn isUniqueOwnerType(type_value: Type) bool {
 fn isUniqueOwnerTemporary(expression: *const Expression) bool {
     if (!isUniqueOwnerType(expression.type)) return false;
     return switch (expression.value) {
-        .structure_initializer, .call, .value_call, .method_call, .static_method_call => true,
+        .structure_initializer, .call, .value_call, .method_call, .static_method_call, .move_expression => true,
         else => false,
     };
 }
@@ -7252,6 +7543,21 @@ fn expectResolvedSemanticError(source: []const u8, expected_message: []const u8)
         analyzer.analyze(try resolveSingleTestProgram(allocator, try parser.parse())),
     );
     try std.testing.expectEqualStrings(expected_message, analyzer.diagnostic.?.message);
+}
+
+fn expectResolvedSemanticErrorContains(source: []const u8, expected_message: []const u8) !void {
+    const Parser = @import("Parser.zig").Parser;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var parser = Parser.init(allocator, source);
+    var analyzer = Analyzer.init(allocator);
+    try std.testing.expectError(
+        error.InvalidSource,
+        analyzer.analyze(try resolveSingleTestProgram(allocator, try parser.parse())),
+    );
+    try std.testing.expect(std.mem.indexOf(u8, analyzer.diagnostic.?.message, expected_message) != null);
 }
 
 fn expectSemanticSuccess(source: []const u8) !void {
@@ -7925,7 +8231,7 @@ test "unique resource structures initialize local owners directly" {
     );
 }
 
-test "unique resource structures reject transfer and composition before move" {
+test "unique resource structures reject implicit transfer and composition" {
     const declaration =
         \\struct Resource {
         \\    let handle:int
@@ -7939,16 +8245,8 @@ test "unique resource structures reject transfer and composition before move" {
         "cannot copy unique resource 'Resource'; initialize it directly from a temporary value",
     );
     try expectResolvedSemanticError(
-        declaration ++ "func consume(resource:Resource) {} func main() {}",
-        "unique resource 'Resource' cannot be passed before explicit transfer is available",
-    );
-    try expectResolvedSemanticError(
         declaration ++ "func duplicate() Resource { let resource = Resource.open(1); return resource } func main() {}",
-        "cannot return named unique resource 'Resource' before explicit transfer is available",
-    );
-    try expectResolvedSemanticError(
-        declaration ++ "func main() { var resource = Resource.open(1); resource = Resource.open(2) }",
-        "cannot assign unique resource 'Resource' before explicit transfer is available",
+        "named unique resource 'Resource' must be returned with 'move'",
     );
     try expectResolvedSemanticError(
         declaration ++ "struct Holder { let resource:Resource } func main() {}",
@@ -7988,6 +8286,111 @@ test "unique resource structures reject transfer and composition before move" {
     );
 }
 
+test "unique resources transfer explicitly through locals parameters assignments and returns" {
+    try expectSemanticSuccess(
+        \\struct Resource {
+        \\    let handle:int
+        \\    static func open(handle:int) Resource { return Resource(handle:handle) }
+        \\    drop {}
+        \\}
+        \\func consume(resource:Resource) {}
+        \\func forward(resource:Resource) Resource { return move resource }
+        \\func main() {
+        \\    let first = Resource.open(1)
+        \\    let second = move first
+        \\    consume(move second)
+        \\    consume(Resource.open(2))
+        \\    let third = forward(Resource.open(3))
+        \\    var reusable = move third
+        \\    reusable = Resource.open(4)
+        \\    consume(move reusable)
+        \\    reusable = Resource.open(5)
+        \\    consume(move reusable)
+        \\}
+    );
+}
+
+test "unique resource availability follows branches matches and loop exits" {
+    try expectSemanticSuccess(
+        \\struct Resource {
+        \\    let handle:int
+        \\    static func open(handle:int) Resource { return Resource(handle:handle) }
+        \\    drop {}
+        \\}
+        \\enum Choice { first; second }
+        \\func consume(resource:Resource) {}
+        \\func branch(flag:bool) {
+        \\    let resource = Resource.open(1)
+        \\    if flag { consume(move resource); return }
+        \\    consume(move resource)
+        \\}
+        \\func main() {
+        \\    var resource = Resource.open(2)
+        \\    if true { consume(move resource); resource = Resource.open(3) }
+        \\    else { consume(move resource); resource = Resource.open(4) }
+        \\    match Choice.first() {
+        \\        first => { consume(move resource); resource = Resource.open(5) }
+        \\        second => { consume(move resource); resource = Resource.open(6) }
+        \\    }
+        \\    var count = 0
+        \\    while count < 1 {
+        \\        consume(move resource)
+        \\        resource = Resource.open(7)
+        \\        count += 1
+        \\    }
+        \\    for index in 0...1 {
+        \\        consume(move resource)
+        \\        resource = Resource.open(index)
+        \\    }
+        \\    consume(move resource)
+        \\}
+    );
+}
+
+test "unique resource moves reject invalid sources and consumed uses" {
+    const declaration =
+        \\struct Resource {
+        \\    let handle:int
+        \\    static func open(handle:int) Resource { return Resource(handle:handle) }
+        \\    drop {}
+        \\}
+        \\func consume(resource:Resource) {}
+    ;
+
+    try expectResolvedSemanticError(
+        declaration ++ "func main() { let value = 1; let invalid = move value }",
+        "'move' requires a unique resource, found 'int'",
+    );
+    try expectResolvedSemanticError(
+        declaration ++ "func main() { let resource = Resource.open(1); let invalid = move resource.handle }",
+        "'move' requires a complete local binding or parameter",
+    );
+    try expectResolvedSemanticError(
+        declaration ++ "func main() { let resource = Resource.open(1); consume(resource) }",
+        "unique resource 'Resource' must be passed with 'move'",
+    );
+    try expectResolvedSemanticErrorContains(
+        declaration ++ "func main() { let resource = Resource.open(1); consume(move resource); print(resource.handle) }",
+        "unique resource 'resource' was consumed by 'move' at",
+    );
+    try expectResolvedSemanticErrorContains(
+        declaration ++ "func main() { let resource = Resource.open(1); consume(move resource); consume(move resource) }",
+        "unique resource 'resource' was consumed by 'move' at",
+    );
+    try expectResolvedSemanticError(
+        declaration ++ "func main() { let resource = Resource.open(1); let other = move resource; resource = move other }",
+        "cannot assign to immutable variable 'resource'",
+    );
+    try expectResolvedSemanticError(
+        declaration ++ "func main() { var resource = Resource.open(1); resource = move resource }",
+        "cannot move unique resource 'resource' into itself",
+    );
+    try expectResolvedSemanticError(
+        declaration ++ "func main() { var resource = Resource.open(1); while true { consume(move resource) } }",
+        "unique resource 'resource' must have the same availability on every path returning to the loop header",
+    );
+}
+
 test "unique resource drop has the ordinary drop restrictions" {
     try expectResolvedSemanticError(
         "struct Resource { drop { return } } func main() {}",
@@ -8006,14 +8409,14 @@ test "class inheritance constructs one base and converts references upward" {
         \\    var id:int
         \\    sub var position:int
         \\    sub init(id:int, position:int) { self.id = id; self.position = position }
-        \\    pub func move(delta:int) { self.position += delta }
+        \\    pub func advance(delta:int) { self.position += delta }
         \\}
         \\class Player : Entity {
         \\    var name:str
         \\    pub init(id:int, name:str, position:int) : super(id, position) { self.name = name }
         \\    pub func copy_position(other:Entity) { self.position = other.position }
         \\}
-        \\func update(entity:Entity) { entity.move(1) }
+        \\func update(entity:Entity) { entity.advance(1) }
         \\func main() {
         \\    var player = Player(1, "Ada", 2)
         \\    var entity:Entity = player

@@ -157,6 +157,7 @@ pub const Expression = struct {
         index_access: IndexAccess,
         slice_access: SliceAccess,
         try_expression: Try,
+        move_expression: Move,
         unary: Unary,
         conversion: Conversion,
         binary: Binary,
@@ -170,6 +171,11 @@ pub const Expression = struct {
     };
 
     pub const Try = struct {
+        operator_position: Source.Position,
+        operand: *Expression,
+    };
+
+    pub const Move = struct {
         operator_position: Source.Position,
         operand: *Expression,
     };
