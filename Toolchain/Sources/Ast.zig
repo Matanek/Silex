@@ -504,6 +504,7 @@ pub const Structure = struct {
     position: Source.Position,
     name: []const u8,
     name_position: Source.Position,
+    module_files: []const usize = &.{},
     type_parameters: []const TypeParameter = &.{},
     base: ?BaseClass = null,
     conformances: []const ProtocolReference = &.{},

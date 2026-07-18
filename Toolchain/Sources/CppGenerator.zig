@@ -901,7 +901,7 @@ pub fn generateWithSources(
             }
             try output.appendSlice(allocator, ";\n");
         }
-        if (structure.is_class and structure.constructors.len == 0 and structure.implicit_constructor_available) {
+        if ((structure.is_class and structure.constructors.len == 0 and structure.implicit_constructor_available) or structure.is_owner) {
             try output.appendSlice(allocator, "\n    ");
             try output.appendSlice(allocator, structure.generated_name);
             try output.append(allocator, '(');
@@ -935,7 +935,29 @@ pub fn generateWithSources(
             try output.appendSlice(allocator, ";\n");
         }
         if (structure.drop != null) {
-            try output.appendSlice(allocator, "\n    void silexDrop() override;\n");
+            if (structure.is_class) {
+                try output.appendSlice(allocator, "\n    void silexDrop() override;\n");
+            } else {
+                try output.appendSlice(allocator, "\n    ");
+                try output.appendSlice(allocator, structure.generated_name);
+                try output.appendSlice(allocator, "(const ");
+                try output.appendSlice(allocator, structure.generated_name);
+                try output.appendSlice(allocator, "&) = delete;\n    ");
+                try output.appendSlice(allocator, structure.generated_name);
+                try output.appendSlice(allocator, "& operator=(const ");
+                try output.appendSlice(allocator, structure.generated_name);
+                try output.appendSlice(allocator, "&) = delete;\n    ");
+                try output.appendSlice(allocator, structure.generated_name);
+                try output.appendSlice(allocator, "(");
+                try output.appendSlice(allocator, structure.generated_name);
+                try output.appendSlice(allocator, "&&) = delete;\n    ");
+                try output.appendSlice(allocator, structure.generated_name);
+                try output.appendSlice(allocator, "& operator=(");
+                try output.appendSlice(allocator, structure.generated_name);
+                try output.appendSlice(allocator, "&&) = delete;\n    ~");
+                try output.appendSlice(allocator, structure.generated_name);
+                try output.appendSlice(allocator, "();\n");
+            }
         }
         if (structure.fields.len > 0 and (structure.constructors.len > 0 or structure.methods.len > 0)) try output.append(allocator, '\n');
         for (structure.methods) |method| {
@@ -1032,17 +1054,26 @@ pub fn generateWithSources(
             try output.appendSlice(allocator, "}\n\n");
         }
         if (structure.drop) |drop| {
-            try output.appendSlice(allocator, "void ");
-            try output.appendSlice(allocator, structure.generated_name);
-            try output.appendSlice(allocator, "::silexDrop() {\n");
-            try generateStatements(allocator, &output, drop.statements, 1, false);
-            try output.appendSlice(allocator, "    ");
-            if (structure.base) |base| {
-                try output.appendSlice(allocator, base.generated_name);
+            if (structure.is_class) {
+                try output.appendSlice(allocator, "void ");
+                try output.appendSlice(allocator, structure.generated_name);
+                try output.appendSlice(allocator, "::silexDrop() {\n");
+                try generateStatements(allocator, &output, drop.statements, 1, false);
+                try output.appendSlice(allocator, "    ");
+                if (structure.base) |base| {
+                    try output.appendSlice(allocator, base.generated_name);
+                } else {
+                    try output.appendSlice(allocator, "SilexObject");
+                }
+                try output.appendSlice(allocator, "::silexDrop();\n}\n\n");
             } else {
-                try output.appendSlice(allocator, "SilexObject");
+                try output.appendSlice(allocator, structure.generated_name);
+                try output.appendSlice(allocator, "::~");
+                try output.appendSlice(allocator, structure.generated_name);
+                try output.appendSlice(allocator, "() {\n");
+                try generateStatements(allocator, &output, drop.statements, 1, false);
+                try output.appendSlice(allocator, "}\n\n");
             }
-            try output.appendSlice(allocator, "::silexDrop();\n}\n\n");
         }
         for (structure.methods) |method| {
             try generateMethodSignature(allocator, &output, method, structure.generated_name, true);
@@ -3390,6 +3421,32 @@ test "generate drop before field clearing with automatic base chaining" {
     try std.testing.expect(std.mem.indexOf(u8, cpp, "for (SilexObject* object : garbage) object->silexDrop();") != null);
     try std.testing.expect(std.mem.indexOf(u8, cpp, "SilexClass1::silexDrop()") != null);
     try std.testing.expect(std.mem.indexOf(u8, cpp, "SilexClass0::silexDrop();") != null);
+}
+
+test "generate unique resource struct as noncopyable RAII value" {
+    const Parser = @import("Parser.zig").Parser;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var parser = Parser.init(allocator,
+        \\struct Resource {
+        \\    let handle:int
+        \\    static func open(handle:int) Resource { return Resource(handle:handle) }
+        \\    drop { print(self.handle) }
+        \\}
+        \\func main() { let resource = Resource.open(7) }
+    );
+    var analyzer = Semantic.Analyzer.init(allocator);
+    const cpp = try generate(allocator, try analyzer.analyze(try resolveSingleTestProgram(allocator, try parser.parse())));
+
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "SilexStruct0(std::int64_t silexField0) : field0(std::move(silexField0)) {}") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "SilexStruct0(const SilexStruct0&) = delete;") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "SilexStruct0& operator=(const SilexStruct0&) = delete;") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "SilexStruct0(SilexStruct0&&) = delete;") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "SilexStruct0& operator=(SilexStruct0&&) = delete;") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "~SilexStruct0();") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "SilexStruct0::~SilexStruct0()") != null);
 }
 
 test "generate inferred const and mutating methods" {

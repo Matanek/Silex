@@ -10,7 +10,8 @@ associate to the left. `&&` and `||` short-circuit.
 Arithmetic and ordering comparisons require compatible numeric operands, except
 that `+` also concatenates two strings. Equality uses the same numeric
 compatibility rules, compares strings by bytes, and compares two values of the
-same structure type recursively by their fields. `print` accepts numbers,
+same ordinary structure type recursively by their fields. A unique resource
+structure declaring `drop` does not support equality. `print` accepts numbers,
 `bool`, and `str`.
 
 Mutable numeric places support `+=`, `-=`, `*=`, `/=`, `++`, and `--`; `+=`

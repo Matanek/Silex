@@ -1,0 +1,11 @@
+{
+  "author": "Silex",
+  "description": "Unique resource lifetime smoke",
+  "native": {
+    "sources": {
+      "cpp": [
+        "Module.cpp"
+      ]
+    }
+  }
+}

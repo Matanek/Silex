@@ -138,6 +138,12 @@ For a class, declaration and member visibility are independent: `pub class`
 exposes the type outside its module, while only its `pub` members are accessible
 outside the class. See [Classes](Classes.md).
 
+A public structure that declares `drop` exposes its type and methods but keeps
+its fields and named aggregate initializer private to its declaring module.
+Every source unit assigned to that module may use the storage directly; a type
+extension retains external-caller rights and may not. See
+[unique resource structures](Structures.md#unique-resource-structures).
+
 Duplicate providers, missing modules, dependency cycles, ambiguous aliases, and
 access to private declarations are compile-time errors. Dependencies and type
 extensions are never implicitly transitive. A project manifest can define this

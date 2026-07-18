@@ -1,0 +1,5 @@
+pub struct Resource {
+    let handle:int
+    static func open(handle:int) Resource { return Resource(handle:handle) }
+    drop {}
+}

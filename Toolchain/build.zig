@@ -380,6 +380,27 @@ pub fn build(b: *std.Build) void {
     invalid_inheritance_cycle_command.expectExitCode(1);
     invalid_inheritance_cycle_command.expectStdErrEqual("Tests/InvalidInheritanceCycle.sx:1:7: error: inheritance cycle involving class 'First'\n");
 
+    const unique_resource_initializer_visibility_command = b.addRunArtifact(executable);
+    unique_resource_initializer_visibility_command.addArgs(&.{ "compile", "Tests/UniqueResourceVisibility/Initializer/silex.json" });
+    unique_resource_initializer_visibility_command.expectExitCode(1);
+    unique_resource_initializer_visibility_command.expectStdErrEqual(
+        "Tests/UniqueResourceVisibility/Initializer/Main.sx:4:30: error: initializer of unique resource struct 'Resources.Resource' is private to its module\n",
+    );
+
+    const unique_resource_field_visibility_command = b.addRunArtifact(executable);
+    unique_resource_field_visibility_command.addArgs(&.{ "compile", "Tests/UniqueResourceVisibility/Field/silex.json" });
+    unique_resource_field_visibility_command.expectExitCode(1);
+    unique_resource_field_visibility_command.expectStdErrEqual(
+        "Tests/UniqueResourceVisibility/Field/Main.sx:5:20: error: field 'handle' of unique resource struct 'Resources.Resource' is private to its module\n",
+    );
+
+    const unique_resource_extension_visibility_command = b.addRunArtifact(executable);
+    unique_resource_extension_visibility_command.addArgs(&.{ "compile", "Tests/UniqueResourceVisibility/Extension/silex.json" });
+    unique_resource_extension_visibility_command.expectExitCode(1);
+    unique_resource_extension_visibility_command.expectStdErrEqual(
+        "Tests/UniqueResourceVisibility/Extension/Main.sx:5:21: error: field 'handle' of unique resource struct 'Resources.Resource' is private to its module\n",
+    );
+
     const extension_visibility_command = b.addRunArtifact(executable);
     extension_visibility_command.addArgs(&.{ "compile", "Tests/ExtensionVisibility/silex.json" });
     extension_visibility_command.expectExitCode(1);
@@ -863,6 +884,20 @@ pub fn build(b: *std.Build) void {
         "Tests/InvalidTryDrop.sx:11:9: error: 'try' is not available in a drop block\n",
     );
 
+    const invalid_try_unique_resource_drop_command = b.addRunArtifact(executable);
+    invalid_try_unique_resource_drop_command.addArgs(&.{ "compile", "Tests/InvalidTryUniqueResourceDrop.sx" });
+    invalid_try_unique_resource_drop_command.expectExitCode(1);
+    invalid_try_unique_resource_drop_command.expectStdErrEqual(
+        "Tests/InvalidTryUniqueResourceDrop.sx:11:9: error: 'try' is not available in a drop block\n",
+    );
+
+    const invalid_unique_resource_result_command = b.addRunArtifact(executable);
+    invalid_unique_resource_result_command.addArgs(&.{ "compile", "Tests/InvalidUniqueResourceResult.sx" });
+    invalid_unique_resource_result_command.expectExitCode(1);
+    invalid_unique_resource_result_command.expectStdErrEqual(
+        "Tests/InvalidUniqueResourceResult.sx:1:1: error: type 'Resource' cannot contain unique resource 'Resource' before unique-resource composition is available\n",
+    );
+
     const reserved_try_identifier_command = b.addRunArtifact(executable);
     reserved_try_identifier_command.addArgs(&.{ "compile", "Tests/ReservedTryIdentifier.sx" });
     reserved_try_identifier_command.expectExitCode(1);
@@ -1326,7 +1361,7 @@ pub fn build(b: *std.Build) void {
         "silex: native compilation failed for target 'x86_64-linux-musl'; target support, SDKs, or native sources may be unavailable or incomplete\n",
     );
     backend_discovered_target_failure_command.expectStdErrMatch(b.fmt(
-        "silex: backend details: .silex{c}build{c}v38{c}x86_64-linux-musl{c}",
+        "silex: backend details: .silex{c}build{c}v39{c}x86_64-linux-musl{c}",
         .{
             std.fs.path.sep,
             std.fs.path.sep,
@@ -1722,6 +1757,9 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&invalid_class_default_variable_command.step);
     test_step.dependOn(&invalid_missing_class_constructor_command.step);
     test_step.dependOn(&invalid_inheritance_cycle_command.step);
+    test_step.dependOn(&unique_resource_initializer_visibility_command.step);
+    test_step.dependOn(&unique_resource_field_visibility_command.step);
+    test_step.dependOn(&unique_resource_extension_visibility_command.step);
     test_step.dependOn(&extension_visibility_command.step);
     test_step.dependOn(&extension_conflict_command.step);
     test_step.dependOn(&extension_conformance_visibility_command.step);
@@ -1791,6 +1829,8 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&invalid_try_lambda_error_type_command.step);
     test_step.dependOn(&invalid_try_constructor_command.step);
     test_step.dependOn(&invalid_try_drop_command.step);
+    test_step.dependOn(&invalid_try_unique_resource_drop_command.step);
+    test_step.dependOn(&invalid_unique_resource_result_command.step);
     test_step.dependOn(&reserved_try_identifier_command.step);
     test_step.dependOn(&missing_map_error_type_arguments_command.step);
     test_step.dependOn(&invalid_map_error_result_type_command.step);
@@ -2471,9 +2511,67 @@ pub fn build(b: *std.Build) void {
     native_package_smoke_command.addArgs(&.{ "run", "Smokes/NativePackages/App/Main.sx" });
     native_package_smoke_command.expectStdOutEqual(hostText(b, "42\n"));
 
+    const unique_resources_smoke_command = b.addRunArtifact(executable);
+    unique_resources_smoke_command.step.dependOn(&native_package_smoke_command.step);
+    unique_resources_smoke_command.addArgs(&.{ "run", "Smokes/UniqueResources/silex.json" });
+    unique_resources_smoke_command.expectStdOutEqual(hostText(
+        b,
+        "open 1\n" ++
+            "1\n" ++
+            "close 1\n" ++
+            "lexical\n" ++
+            "open 10\n" ++
+            "10\n" ++
+            "open 11\n" ++
+            "11\n" ++
+            "close 11\n" ++
+            "after inner\n" ++
+            "close 10\n" ++
+            "open 20\n" ++
+            "return\n" ++
+            "20\n" ++
+            "close 20\n" ++
+            "open 31\n" ++
+            "continue\n" ++
+            "31\n" ++
+            "close 31\n" ++
+            "open 32\n" ++
+            "break\n" ++
+            "32\n" ++
+            "close 32\n" ++
+            "open 40\n" ++
+            "try body\n" ++
+            "40\n" ++
+            "close 40\n" ++
+            "try success\n" ++
+            "open 41\n" ++
+            "close 41\n" ++
+            "try failure\n" ++
+            "open 50\n" ++
+            "open 51\n" ++
+            "reverse\n" ++
+            "101\n" ++
+            "close 51\n" ++
+            "close 50\n" ++
+            "reject\n" ++
+            "60\n" ++
+            "incomplete\n" ++
+            "open 61\n" ++
+            "complete\n" ++
+            "61\n" ++
+            "close 61\n" ++
+            "complete success\n" ++
+            "open 70\n" ++
+            "open 71\n" ++
+            "main\n" ++
+            "141\n" ++
+            "close 71\n" ++
+            "close 70\n",
+    ));
+
     const smoke_step = b.step("smoke", "Compile and run the smoke program");
     smoke_step.dependOn(b.getInstallStep());
-    smoke_step.dependOn(&native_package_smoke_command.step);
+    smoke_step.dependOn(&unique_resources_smoke_command.step);
 
     const benchmark_suffix = if (b.graph.host.result.os.tag == .windows) ".exe" else "";
     const silex_benchmark_path = b.fmt("zig-out/bin/IntegerLoopsSilex{s}", .{benchmark_suffix});

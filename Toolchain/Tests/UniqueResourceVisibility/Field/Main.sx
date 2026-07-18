@@ -1,0 +1,6 @@
+use Resources
+
+func main() {
+    let resource = Resources.Resource.open(1)
+    print(resource.handle)
+}

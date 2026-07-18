@@ -1,0 +1,15 @@
+pub struct Resource {
+    let handle:int
+
+    static func open(handle:int) Resource {
+        return Resource(handle:handle)
+    }
+
+    func get_handle() int {
+        return self.handle
+    }
+
+    drop {
+        print(self.handle)
+    }
+}

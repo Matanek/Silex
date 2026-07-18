@@ -405,7 +405,9 @@ class Texture {
 
 `drop` has no parameters, parentheses, return type, or visibility marker. It
 receives `self` implicitly, can read private state, cannot return, and cannot be
-called explicitly. Structures cannot declare it.
+called explicitly. A structure may also declare `drop`, but that declaration
+marks a noncopyable value with deterministic lexical destruction rather than a
+shared instance; see [unique resource structures](Structures.md#unique-resource-structures).
 
 The runtime calls `drop` exactly once before clearing the instance fields. An
 acyclic instance runs it when its last strong reference disappears. For an

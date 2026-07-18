@@ -1,0 +1,8 @@
+struct Resource {
+    let handle:int
+    drop {}
+}
+
+func main() {
+    let resource:Result<Resource,str> = Result<Resource,str>.failure("missing")
+}

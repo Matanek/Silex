@@ -613,6 +613,13 @@ pub const Resolver = struct {
         }
         var result = structure;
         result.name = declaration.canonical_name;
+        var module_files: std.ArrayList(usize) = .empty;
+        for (self.file_infos) |file| {
+            if (file.module_index == declaration.module_index) {
+                try module_files.append(self.allocator, file.file_index);
+            }
+        }
+        result.module_files = try module_files.toOwnedSlice(self.allocator);
         result.type_parameters = try self.transformTypeParameters(structure.type_parameters);
         var conformances: std.ArrayList(Ast.ProtocolReference) = .empty;
         if (structure.base) |base| {

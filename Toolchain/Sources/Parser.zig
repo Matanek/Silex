@@ -379,9 +379,11 @@ pub const Parser = struct {
             }
             if (self.current.tag == .keyword_drop) {
                 if (is_override) return self.fail("'override' cannot apply to 'drop'");
-                if (!is_class) return self.fail("'drop' is available only in classes");
                 if (has_visibility) return self.fail("'drop' does not accept a visibility modifier");
-                if (drop != null) return self.fail("a class can declare only one 'drop' block");
+                if (drop != null) return self.fail(if (is_class)
+                    "a class can declare only one 'drop' block"
+                else
+                    "a struct can declare only one 'drop' block");
                 const drop_position = self.current.position;
                 try self.advance();
                 if (self.current.tag != .left_brace) return self.fail("'drop' must be followed by a block");
@@ -2334,7 +2336,7 @@ test "parse visible overloaded class constructors" {
     try std.testing.expectEqual(@as(usize, 1), program.structures[0].constructors[1].parameters.len);
 }
 
-test "parse one class drop block" {
+test "parse class and struct drop blocks" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     var parser = Parser.init(arena.allocator(),
@@ -2342,17 +2344,23 @@ test "parse one class drop block" {
         \\    var handle:int = 1
         \\    drop { print(self.handle) }
         \\}
+        \\struct File {
+        \\    let handle:int
+        \\    drop { print(self.handle) }
+        \\}
         \\func main() {}
     );
     const program = try parser.parse();
     try std.testing.expect(program.structures[0].drop != null);
     try std.testing.expectEqual(@as(usize, 1), program.structures[0].drop.?.statements.len);
+    try std.testing.expect(program.structures[1].drop != null);
+    try std.testing.expectEqual(@as(usize, 1), program.structures[1].drop.?.statements.len);
 }
 
 test "reject invalid drop declarations and explicit calls" {
     const cases = [_]struct { source: []const u8, message: []const u8 }{
-        .{ .source = "struct Value { drop {} } func main() {}", .message = "'drop' is available only in classes" },
         .{ .source = "class Value { drop {} drop {} } func main() {}", .message = "a class can declare only one 'drop' block" },
+        .{ .source = "struct Value { drop {} drop {} } func main() {}", .message = "a struct can declare only one 'drop' block" },
         .{ .source = "class Value { pub drop {} } func main() {}", .message = "'drop' does not accept a visibility modifier" },
         .{ .source = "class Value { sub drop {} } func main() {}", .message = "'drop' does not accept a visibility modifier" },
         .{ .source = "class Value { override drop {} } func main() {}", .message = "'override' cannot apply to 'drop'" },

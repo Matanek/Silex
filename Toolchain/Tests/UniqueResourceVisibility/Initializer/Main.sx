@@ -1,0 +1,5 @@
+use Resources
+
+func main() {
+    let resource = Resources.Resource(handle:1)
+}

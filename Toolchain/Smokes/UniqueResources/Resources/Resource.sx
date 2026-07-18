@@ -1,0 +1,35 @@
+native func native_open(label:int) int
+native func native_close(handle:int) void
+
+pub struct Resource {
+    let handle:int
+    let label:int
+
+    static func open(label:int) Resource {
+        return Resource(handle:native_open(label), label:label)
+    }
+
+    func value() int {
+        return self.label
+    }
+
+    drop {
+        native_close(self.handle)
+    }
+}
+
+pub func maybe_open(label:int, complete:bool) Result<int,str> {
+    if complete {
+        return Result<int,str>.success(native_open(label))
+    }
+    print("reject")
+    print(label)
+    return Result<int,str>.failure("incomplete")
+}
+
+pub func incomplete_initialization(label:int, complete:bool) Result<void,str> {
+    let resource = Resource(handle:try maybe_open(label, complete), label:label)
+    print("complete")
+    print(resource.value())
+    return Result<void,str>.success()
+}

@@ -42,6 +42,7 @@ pub const StructureType = struct {
     source_name: []const u8,
     generated_name: []const u8,
     is_class: bool,
+    is_owner: bool = false,
 };
 
 pub const ProtocolType = struct {
@@ -460,6 +461,7 @@ pub const EnumVariant = struct {
 pub const Structure = struct {
     generated_name: []const u8,
     is_class: bool,
+    is_owner: bool = false,
     equality_comparable: bool,
     protocol_conformances: []const ProtocolConformance,
     base: ?StructureType,
@@ -605,6 +607,8 @@ const StructureSymbol = struct {
     source_name: []const u8,
     generated_name: []const u8,
     is_class: bool,
+    is_owner: bool,
+    module_files: []const usize,
     base_index: ?usize,
     protocol_conformances: []const ProtocolConformanceSymbol,
     fields: []StructureFieldSymbol,
@@ -856,6 +860,7 @@ pub const Analyzer = struct {
             try structures.append(self.allocator, .{
                 .generated_name = symbol.generated_name,
                 .is_class = symbol.is_class,
+                .is_owner = symbol.is_owner,
                 .equality_comparable = self.isEqualityComparable(.{ .structure = self.structureType(structure_index) }),
                 .protocol_conformances = try self.protocolConformances(structure_index),
                 .base = if (symbol.base_index) |base_index| self.structureType(base_index) else null,
@@ -923,6 +928,7 @@ pub const Analyzer = struct {
                     if (associated_type == .void or associated_type == .reference) {
                         return self.fail(ast_variant.position, "an enum associated value cannot have this type");
                     }
+                    try self.rejectUniqueOwnerComposition(associated_type, false, ast_variant.position);
                     try associated_types.append(self.allocator, associated_type);
                 }
                 const raw_value = if (ast_variant.raw_value) |ast_raw_value|
@@ -1062,6 +1068,7 @@ pub const Analyzer = struct {
                     "a class field cannot have a reference type"
                 else
                     "a struct field cannot have a reference type");
+                try self.rejectUniqueOwnerComposition(field_type, false, field.position);
                 if (field_type == .structure and !field_type.structure.is_class) {
                     const dependency_index = self.findStructureIndex(field_type.structure.source_name).?;
                     if (dependency_index >= structure_index) {
@@ -1109,6 +1116,7 @@ pub const Analyzer = struct {
                 for (ast_constructor.parameters) |parameter| {
                     const parameter_type = try typeFromAnnotation(self, parameter.type, parameter.position);
                     try self.rejectClassMutableReference(parameter_type, parameter.is_mutable_reference, parameter.position);
+                    try self.rejectUniqueOwnerParameter(parameter_type, parameter.is_mutable_reference, parameter.position);
                     try parameter_types.append(self.allocator, parameter_type);
                     try parameter_is_mutable_references.append(self.allocator, parameter.is_mutable_reference);
                     var stored = parameterStored(ast_constructor.statements, parameter.name);
@@ -1143,6 +1151,7 @@ pub const Analyzer = struct {
                 for (ast_method.parameters) |parameter| {
                     const parameter_type = try typeFromAnnotation(self, parameter.type, parameter.position);
                     try self.rejectClassMutableReference(parameter_type, parameter.is_mutable_reference, parameter.position);
+                    try self.rejectUniqueOwnerParameter(parameter_type, parameter.is_mutable_reference, parameter.position);
                     try parameter_types.append(self.allocator, parameter_type);
                     try parameter_is_mutable_references.append(self.allocator, parameter.is_mutable_reference);
                     try parameter_stored_values.append(self.allocator, parameterStored(ast_method.statements, parameter.name));
@@ -1174,6 +1183,7 @@ pub const Analyzer = struct {
                 }
                 const return_type = try typeFromReturn(self, ast_method.return_type, ast_method.position);
                 if (return_type == .reference) return self.fail(ast_method.position, "a method cannot return a reference");
+                try self.rejectUniqueOwnerComposition(return_type, true, ast_method.position);
                 try methods.append(self.allocator, .{
                     .source_name = ast_method.name,
                     .generated_name = if (ast_structure.is_class)
@@ -1211,6 +1221,8 @@ pub const Analyzer = struct {
                 else
                     try std.fmt.allocPrint(self.allocator, "SilexStruct{d}", .{structure_index}),
                 .is_class = ast_structure.is_class,
+                .is_owner = !ast_structure.is_class and ast_structure.drop != null,
+                .module_files = ast_structure.module_files,
                 .base_index = null,
                 .protocol_conformances = &.{},
                 .fields = &.{},
@@ -1243,6 +1255,7 @@ pub const Analyzer = struct {
                 for (requirement.parameters) |parameter| {
                     const parameter_type = try typeFromAnnotation(self, parameter.type, parameter.position);
                     try self.rejectClassMutableReference(parameter_type, parameter.is_mutable_reference, parameter.position);
+                    try self.rejectUniqueOwnerParameter(parameter_type, parameter.is_mutable_reference, parameter.position);
                     try parameter_types.append(self.allocator, parameter_type);
                     try parameter_references.append(self.allocator, parameter.is_mutable_reference);
                 }
@@ -1259,6 +1272,7 @@ pub const Analyzer = struct {
                 }
                 const return_type = try typeFromReturn(self, requirement.return_type, requirement.position);
                 if (return_type == .reference) return self.fail(requirement.position, "a protocol method cannot return a reference");
+                try self.rejectUniqueOwnerComposition(return_type, true, requirement.position);
                 try requirements.append(self.allocator, .{
                     .source_name = requirement.name,
                     .generated_name = try std.fmt.allocPrint(self.allocator, "method{d}_{d}", .{ protocol_index, requirement_index }),
@@ -1520,6 +1534,7 @@ pub const Analyzer = struct {
             for (ast_function.parameters) |parameter| {
                 const parameter_type = try typeFromAnnotation(self, parameter.type, parameter.position);
                 try self.rejectClassMutableReference(parameter_type, parameter.is_mutable_reference, parameter.position);
+                try self.rejectUniqueOwnerParameter(parameter_type, parameter.is_mutable_reference, parameter.position);
                 try parameter_types.append(self.allocator, parameter_type);
                 try parameter_is_mutable_references.append(self.allocator, parameter.is_mutable_reference);
                 try parameter_stored_values.append(self.allocator, parameterStored(ast_function.statements, parameter.name));
@@ -1541,6 +1556,7 @@ pub const Analyzer = struct {
             }
             const return_type = try typeFromReturn(self, ast_function.return_type, ast_function.position);
             if (return_type == .reference) return self.fail(ast_function.position, "a function cannot return a reference");
+            try self.rejectUniqueOwnerComposition(return_type, true, ast_function.position);
             if (ast_function.is_native) {
                 if (!isNativeReturnType(return_type)) {
                     const return_name = try allocatedTypeName(self.allocator, return_type);
@@ -1936,6 +1952,7 @@ pub const Analyzer = struct {
                 const message = try std.fmt.allocPrint(self.allocator, "argument {d} of base constructor '{s}' expects '{s}', found '{s}'", .{ index + 1, base.source_name, typeName(expected_type), typeName(value.type) });
                 return self.fail(argument.position, message);
             }
+            if (!is_mutable_reference) try self.rejectUniqueOwnerArgument(value.type, argument.position);
             if (is_stored and value.lifetime_depth != 0) {
                 return self.fail(argument.position, "capturing callback cannot be passed to a base constructor parameter whose value escapes the call");
             }
@@ -2285,6 +2302,17 @@ pub const Analyzer = struct {
             try typeFromAnnotation(self, annotation, declaration.name_position)
         else
             null;
+        if (declaration.initializer == null and declared_annotation_type != null and isUniqueOwnerType(declared_annotation_type.?)) {
+            const structure = self.findStructureByGeneratedName(declared_annotation_type.?.structure.generated_name).?;
+            if (!self.uniqueOwnerStorageVisible(structure, declaration.name_position.file)) {
+                const message = try std.fmt.allocPrint(
+                    self.allocator,
+                    "initializer of unique resource struct '{s}' is private to its module",
+                    .{structure.source_name},
+                );
+                return self.fail(declaration.name_position, message);
+            }
+        }
         var initializer = if (declaration.initializer) |ast_initializer|
             try self.expressionForExpected(ast_initializer, scope, declared_annotation_type)
         else
@@ -2297,6 +2325,15 @@ pub const Analyzer = struct {
         initializer = try self.coerce(initializer, declared_type);
         if (!typeEqual(declared_type, initializer.type)) {
             const message = try typeMismatchMessage(self.allocator, declared_type, initializer.type);
+            return self.fail(if (declaration.initializer) |value| value.position else declaration.name_position, message);
+        }
+        try self.rejectUniqueOwnerComposition(declared_type, true, declaration.name_position);
+        if (isUniqueOwnerType(declared_type) and !isUniqueOwnerTemporary(initializer)) {
+            const message = try std.fmt.allocPrint(
+                self.allocator,
+                "cannot copy unique resource '{s}'; initialize it directly from a temporary value",
+                .{typeName(declared_type)},
+            );
             return self.fail(if (declaration.initializer) |value| value.position else declaration.name_position, message);
         }
 
@@ -2450,7 +2487,7 @@ pub const Analyzer = struct {
             findSymbol(scope, ast.target.value.identifier).?.unwrap_optional)
         narrowed_assignment: {
             const symbol = findSymbol(scope, ast.target.value.identifier).?;
-            try self.recordSymbolCapture(symbol);
+            try self.recordSymbolCapture(symbol, ast.target.position);
             symbol.state.narrowed_valid = false;
             break :narrowed_assignment try self.newExpression(.{
                 .type = symbol.original_type.?,
@@ -2461,6 +2498,15 @@ pub const Analyzer = struct {
             try self.memberAccessExpressionRaw(ast.target.value.member_access, scope, false)
         else
             try self.expression(ast.target, scope);
+
+        if (isUniqueOwnerType(target.type)) {
+            const message = try std.fmt.allocPrint(
+                self.allocator,
+                "cannot assign unique resource '{s}' before explicit transfer is available",
+                .{typeName(target.type)},
+            );
+            return self.fail(ast.position, message);
+        }
 
         if (target.value == .enum_raw_value) return self.fail(ast.position, "enum property 'raw_value' is read-only");
 
@@ -2825,6 +2871,14 @@ pub const Analyzer = struct {
             if (value.lifetime_depth != 0) {
                 return self.fail(ast.position, "capturing function value cannot be returned from its lexical scope");
             }
+            if (isUniqueOwnerType(value.type) and !isUniqueOwnerTemporary(value)) {
+                const message = try std.fmt.allocPrint(
+                    self.allocator,
+                    "cannot return named unique resource '{s}' before explicit transfer is available",
+                    .{typeName(value.type)},
+                );
+                return self.fail(ast.position, message);
+            }
             return .{ .return_statement = value };
         }
         if (!typeEqual(self.current_return_type, .void)) {
@@ -2983,6 +3037,7 @@ pub const Analyzer = struct {
             },
             else => return self.fail(position, "sequence literal requires an array or list type"),
         }
+        try self.rejectUniqueOwnerComposition(result_type, false, position);
 
         var values: std.ArrayList(*Expression) = .empty;
         var lifetime_depth: usize = 0;
@@ -3124,7 +3179,7 @@ pub const Analyzer = struct {
             const message = try std.fmt.allocPrint(self.allocator, "unknown variable '{s}'", .{name});
             return self.fail(position, message);
         };
-        try self.recordSymbolCapture(symbol);
+        try self.recordSymbolCapture(symbol, position);
         if (symbol.state.mutable_borrow) {
             const message = try std.fmt.allocPrint(self.allocator, "cannot access variable '{s}' while it is mutably borrowed", .{name});
             return self.fail(position, message);
@@ -3147,6 +3202,14 @@ pub const Analyzer = struct {
         const structure_index = self.current_structure_index orelse return self.fail(position, "'self' is only available inside a method or constructor");
         if (self.current_self_state.mutable_borrow) return self.fail(position, "cannot access 'self' while one of its collections is mutably iterated");
         const structure = self.structures.items[structure_index];
+        if (self.current_lambda != null and structure.is_owner) {
+            const message = try std.fmt.allocPrint(
+                self.allocator,
+                "unique resource '{s}' cannot be captured by a lambda",
+                .{structure.source_name},
+            );
+            return self.fail(position, message);
+        }
         if (self.current_lambda) |_| {
             var owner_context = self.current_lambda;
             while (owner_context) |lambda| : (owner_context = lambda.parent) {
@@ -3156,11 +3219,7 @@ pub const Analyzer = struct {
                     try self.recordLambdaCapture(child_context.?, "silexOwner", false);
                 }
                 return self.newExpression(.{
-                    .type = .{ .structure = .{
-                        .source_name = structure.source_name,
-                        .generated_name = structure.generated_name,
-                        .is_class = structure.is_class,
-                    } },
+                    .type = .{ .structure = self.structureType(structure_index) },
                     .position = position,
                     .value = .owner_self,
                 });
@@ -3172,11 +3231,7 @@ pub const Analyzer = struct {
             }
         }
         return self.newExpression(.{
-            .type = .{ .structure = .{
-                .source_name = structure.source_name,
-                .generated_name = structure.generated_name,
-                .is_class = structure.is_class,
-            } },
+            .type = .{ .structure = self.structureType(structure_index) },
             .position = position,
             .lifetime_depth = if (self.current_lambda != null) self.function_scope_depth else 0,
             .value = .self,
@@ -3312,6 +3367,15 @@ pub const Analyzer = struct {
                     }
                     break :equality .bool;
                 }
+                if (isUniqueOwnerType(left.type) or isUniqueOwnerType(right.type)) {
+                    const owner_type = if (isUniqueOwnerType(left.type)) left.type else right.type;
+                    const message = try std.fmt.allocPrint(
+                        self.allocator,
+                        "type '{s}' does not support equality",
+                        .{typeName(owner_type)},
+                    );
+                    return self.fail(binary.operator_position, message);
+                }
                 if (!self.isEqualityComparable(left.type) or !self.isEqualityComparable(right.type)) {
                     return self.fail(binary.operator_position, "function values and values containing them are not comparable");
                 }
@@ -3400,6 +3464,7 @@ pub const Analyzer = struct {
                 const message = try std.fmt.allocPrint(self.allocator, "argument {d} of '{s}' expects '{s}', found '{s}'", .{ index + 1, call.name, typeName(expected_type), typeName(value.type) });
                 return self.fail(argument.position, message);
             }
+            if (!is_mutable_reference) try self.rejectUniqueOwnerArgument(value.type, argument.position);
             if (is_stored and value.lifetime_depth != 0) {
                 return self.fail(argument.position, "capturing callback cannot be passed to a parameter whose value escapes the call");
             }
@@ -3455,6 +3520,7 @@ pub const Analyzer = struct {
                 const message = try std.fmt.allocPrint(self.allocator, "argument {d} expects '{s}', found '{s}'", .{ index + 1, typeName(expected_type), typeName(argument.type) });
                 return self.fail(ast_argument.position, message);
             }
+            if (!is_mutable_reference) try self.rejectUniqueOwnerArgument(argument.type, ast_argument.position);
             try arguments.append(self.allocator, argument);
         }
         return self.newExpression(.{
@@ -3485,6 +3551,8 @@ pub const Analyzer = struct {
                 return self.fail(parameter.position, message);
             }
             const parameter_type = try typeFromAnnotation(self, parameter.type, parameter.position);
+            try self.rejectClassMutableReference(parameter_type, parameter.is_mutable_reference, parameter.position);
+            try self.rejectUniqueOwnerParameter(parameter_type, parameter.is_mutable_reference, parameter.position);
             const generated_name = try std.fmt.allocPrint(self.allocator, "silexValue{d}", .{self.next_symbol_id});
             self.next_symbol_id += 1;
             try parameter_types.append(self.allocator, parameter_type);
@@ -3506,6 +3574,7 @@ pub const Analyzer = struct {
             });
         }
         const return_type = try typeFromReturn(self, lambda.return_type, lambda.position);
+        try self.rejectUniqueOwnerComposition(return_type, true, lambda.position);
         const return_pointer = try self.allocator.create(Type);
         return_pointer.* = return_type;
         var lambda_type: Type = .{ .function = .{
@@ -3677,6 +3746,7 @@ pub const Analyzer = struct {
                 const message = try std.fmt.allocPrint(self.allocator, "argument {d} of method '{s}' expects '{s}', found '{s}'", .{ index + 1, call.name, typeName(expected_type), typeName(value.type) });
                 return self.fail(argument.position, message);
             }
+            if (!is_mutable_reference) try self.rejectUniqueOwnerArgument(value.type, argument.position);
             if (is_stored and receiver_depth < value.lifetime_depth) {
                 return self.fail(argument.position, "capturing callback cannot be stored in a receiver that outlives one of its captures");
             }
@@ -3767,6 +3837,7 @@ pub const Analyzer = struct {
                 );
                 return self.fail(argument.position, message);
             }
+            if (!is_mutable_reference) try self.rejectUniqueOwnerArgument(value.type, argument.position);
             try arguments.append(self.allocator, value);
             self.releaseTransientBorrow(value);
         }
@@ -3875,6 +3946,7 @@ pub const Analyzer = struct {
                 const message = try std.fmt.allocPrint(self.allocator, "argument {d} of static method '{s}' expects '{s}', found '{s}'", .{ index + 1, call.name, typeName(expected_type), typeName(value.type) });
                 return self.fail(argument.position, message);
             }
+            if (!is_mutable_reference) try self.rejectUniqueOwnerArgument(value.type, argument.position);
             if (is_stored and value.lifetime_depth != 0) {
                 return self.fail(argument.position, "capturing callback cannot be passed to a parameter whose value escapes the call");
             }
@@ -4131,6 +4203,7 @@ pub const Analyzer = struct {
                 const message = try std.fmt.allocPrint(self.allocator, "argument {d} of method '{s}' expects '{s}', found '{s}'", .{ index + 1, call.name, typeName(expected_type), typeName(value.type) });
                 return self.fail(argument.position, message);
             }
+            if (!is_mutable_reference) try self.rejectUniqueOwnerArgument(value.type, argument.position);
             if (is_stored and value.lifetime_depth > 1) {
                 return self.fail(argument.position, "capturing callback cannot be stored in a receiver that outlives one of its captures");
             }
@@ -4403,6 +4476,7 @@ pub const Analyzer = struct {
                 const message = try std.fmt.allocPrint(self.allocator, "argument {d} of method '{s}' expects '{s}', found '{s}'", .{ index + 1, call.name, typeName(expected_type), typeName(value.type) });
                 return self.fail(argument.position, message);
             }
+            try self.rejectUniqueOwnerArgument(value.type, argument.position);
             const stores_value = switch (operation) {
                 .append, .prepend => true,
                 .insert, .replace => index == 1,
@@ -4745,6 +4819,7 @@ pub const Analyzer = struct {
             .source_name = structure.source_name,
             .generated_name = structure.generated_name,
             .is_class = structure.is_class,
+            .is_owner = structure.is_owner,
         };
     }
 
@@ -4892,8 +4967,22 @@ pub const Analyzer = struct {
         field: StructureFieldSymbol,
         position: Source.Position,
     ) AnalyzeError!void {
+        if (structure.is_owner and !self.uniqueOwnerStorageVisible(structure, position.file)) {
+            const message = try std.fmt.allocPrint(
+                self.allocator,
+                "field '{s}' of unique resource struct '{s}' is private to its module",
+                .{ field.source_name, structure.source_name },
+            );
+            return self.fail(position, message);
+        }
         if (self.memberVisibleFromCurrentContext(structure_index, field.visibility)) return;
         return self.failMemberAccess("field", structure, field.source_name, field.visibility, position);
+    }
+
+    fn uniqueOwnerStorageVisible(self: *const Analyzer, structure: *const StructureSymbol, source_file: usize) bool {
+        if (self.current_extension) return false;
+        if (structure.module_files.len == 0) return source_file == structure.position.file;
+        return fileSetContains(structure.module_files, source_file);
     }
 
     fn failMemberAccess(
@@ -4930,6 +5019,14 @@ pub const Analyzer = struct {
             return self.fail(initializer.name_position, message);
         };
         const structure_index = self.findStructureIndexByGeneratedName(structure.generated_name).?;
+        if (structure.is_owner and !self.uniqueOwnerStorageVisible(structure, initializer.name_position.file)) {
+            const message = try std.fmt.allocPrint(
+                self.allocator,
+                "initializer of unique resource struct '{s}' is private to its module",
+                .{structure.source_name},
+            );
+            return self.fail(initializer.name_position, message);
+        }
         if (structure.is_class and structure.constructors.len != 0) {
             const message = try std.fmt.allocPrint(
                 self.allocator,
@@ -5002,11 +5099,7 @@ pub const Analyzer = struct {
             lifetime_depth = @max(lifetime_depth, value.lifetime_depth);
         }
         return self.newExpression(.{
-            .type = .{ .structure = .{
-                .source_name = structure.source_name,
-                .generated_name = structure.generated_name,
-                .is_class = structure.is_class,
-            } },
+            .type = .{ .structure = self.structureType(structure_index) },
             .position = initializer.name_position,
             .lifetime_depth = lifetime_depth,
             .value = .{ .structure_initializer = .{
@@ -5071,6 +5164,7 @@ pub const Analyzer = struct {
                 const message = try std.fmt.allocPrint(self.allocator, "argument {d} of constructor '{s}' expects '{s}', found '{s}'", .{ index + 1, structure.source_name, typeName(expected_type), typeName(value.type) });
                 return self.fail(argument.position, message);
             }
+            if (!is_mutable_reference) try self.rejectUniqueOwnerArgument(value.type, argument.position);
             if (is_stored and value.lifetime_depth != 0) {
                 return self.fail(argument.position, "capturing callback cannot be passed to a constructor parameter whose value escapes the call");
             }
@@ -5079,11 +5173,7 @@ pub const Analyzer = struct {
             self.releaseTransientBorrow(value);
         }
         return self.newExpression(.{
-            .type = .{ .structure = .{
-                .source_name = structure.source_name,
-                .generated_name = structure.generated_name,
-                .is_class = true,
-            } },
+            .type = .{ .structure = self.structureType(structure_index) },
             .position = initializer.name_position,
             .lifetime_depth = lifetime_depth,
             .value = .{ .class_initializer = .{
@@ -5302,6 +5392,99 @@ pub const Analyzer = struct {
         return self.fail(position, message);
     }
 
+    fn rejectUniqueOwnerParameter(
+        self: *Analyzer,
+        type_value: Type,
+        is_mutable_reference: bool,
+        position: Source.Position,
+    ) AnalyzeError!void {
+        try self.rejectUniqueOwnerComposition(type_value, true, position);
+        if (!isUniqueOwnerType(type_value)) return;
+        const message = if (is_mutable_reference)
+            try std.fmt.allocPrint(
+                self.allocator,
+                "unique resource '{s}' cannot be passed with '&'",
+                .{typeName(type_value)},
+            )
+        else
+            try std.fmt.allocPrint(
+                self.allocator,
+                "unique resource '{s}' cannot be passed before explicit transfer is available",
+                .{typeName(type_value)},
+            );
+        return self.fail(position, message);
+    }
+
+    fn rejectUniqueOwnerArgument(
+        self: *Analyzer,
+        type_value: Type,
+        position: Source.Position,
+    ) AnalyzeError!void {
+        if (!isUniqueOwnerType(type_value)) return;
+        const message = try std.fmt.allocPrint(
+            self.allocator,
+            "unique resource '{s}' cannot be passed before explicit transfer is available",
+            .{typeName(type_value)},
+        );
+        return self.fail(position, message);
+    }
+
+    fn rejectUniqueOwnerComposition(
+        self: *Analyzer,
+        type_value: Type,
+        allow_direct_owner: bool,
+        position: Source.Position,
+    ) AnalyzeError!void {
+        if (allow_direct_owner and isUniqueOwnerType(type_value)) return;
+        const owner = try self.uniqueOwnerCause(type_value) orelse return;
+        const message = try std.fmt.allocPrint(
+            self.allocator,
+            "type '{s}' cannot contain unique resource '{s}' before unique-resource composition is available",
+            .{ typeName(type_value), owner.source_name },
+        );
+        return self.fail(position, message);
+    }
+
+    fn uniqueOwnerCause(self: *const Analyzer, type_value: Type) Allocator.Error!?StructureType {
+        var visiting = std.StringHashMap(void).init(self.allocator);
+        defer visiting.deinit();
+        return self.uniqueOwnerCauseInner(type_value, &visiting);
+    }
+
+    fn uniqueOwnerCauseInner(
+        self: *const Analyzer,
+        type_value: Type,
+        visiting: *std.StringHashMap(void),
+    ) Allocator.Error!?StructureType {
+        return switch (type_value) {
+            .optional => |contained| self.uniqueOwnerCauseInner(contained.*, visiting),
+            .list => |element| self.uniqueOwnerCauseInner(element.*, visiting),
+            .fixed_array => |array| self.uniqueOwnerCauseInner(array.element.*, visiting),
+            .enumeration => |enum_type| enumeration: {
+                if (visiting.contains(enum_type.generated_name)) break :enumeration null;
+                try visiting.put(enum_type.generated_name, {});
+                defer _ = visiting.remove(enum_type.generated_name);
+                const enum_symbol = self.findEnumByGeneratedName(enum_type.generated_name) orelse break :enumeration null;
+                for (enum_symbol.variants) |variant| for (variant.associated_types) |associated_type| {
+                    if (try self.uniqueOwnerCauseInner(associated_type, visiting)) |owner| break :enumeration owner;
+                };
+                break :enumeration null;
+            },
+            .structure => |structure_type| structure: {
+                if (structure_type.is_owner) break :structure structure_type;
+                if (structure_type.is_class or visiting.contains(structure_type.generated_name)) break :structure null;
+                try visiting.put(structure_type.generated_name, {});
+                defer _ = visiting.remove(structure_type.generated_name);
+                const structure_symbol = self.findStructureByGeneratedName(structure_type.generated_name) orelse break :structure null;
+                for (structure_symbol.fields) |field| {
+                    if (try self.uniqueOwnerCauseInner(field.type, visiting)) |owner| break :structure owner;
+                }
+                break :structure null;
+            },
+            else => null,
+        };
+    }
+
     fn isEqualityComparable(self: *const Analyzer, type_value: Type) bool {
         return switch (type_value) {
             .function, .reference, .protocol, .enumeration, .void, .null => false,
@@ -5309,6 +5492,7 @@ pub const Analyzer = struct {
             .list => |element| self.isEqualityComparable(element.*),
             .fixed_array => |array| self.isEqualityComparable(array.element.*),
             .structure => |structure_type| comparable: {
+                if (structure_type.is_owner) break :comparable false;
                 const structure = self.findStructureByGeneratedName(structure_type.generated_name) orelse break :comparable false;
                 if (structure.is_class) break :comparable true;
                 for (structure.fields) |field| if (!self.isEqualityComparable(field.type)) break :comparable false;
@@ -5791,7 +5975,7 @@ pub const Analyzer = struct {
             findSymbol(scope, unary.operand.value.identifier).?.unwrap_optional)
         narrowed_operand: {
             const symbol = findSymbol(scope, unary.operand.value.identifier).?;
-            try self.recordSymbolCapture(symbol);
+            try self.recordSymbolCapture(symbol, unary.operand.position);
             symbol.state.narrowed_valid = false;
             break :narrowed_operand try self.newExpression(.{
                 .type = symbol.original_type.?,
@@ -5915,6 +6099,14 @@ pub const Analyzer = struct {
             return expression_value;
         }
         if (target_type == .protocol and expression_value.type == .structure) {
+            if (expression_value.type.structure.is_owner) {
+                const message = try std.fmt.allocPrint(
+                    self.allocator,
+                    "unique resource '{s}' cannot be converted to dynamic protocol value '{s}'",
+                    .{ expression_value.type.structure.source_name, target_type.protocol.source_name },
+                );
+                return self.fail(expression_value.position, message);
+            }
             const structure_index = self.findStructureIndexByGeneratedName(expression_value.type.structure.generated_name).?;
             if (self.structureConformsToProtocol(structure_index, target_type.protocol.index, expression_value.position.file)) {
                 return self.newExpression(.{
@@ -6056,10 +6248,18 @@ pub const Analyzer = struct {
         try lambda.captures.append(self.allocator, .{ .generated_name = generated_name, .by_value = by_value });
     }
 
-    fn recordSymbolCapture(self: *Analyzer, symbol: *const Symbol) !void {
+    fn recordSymbolCapture(self: *Analyzer, symbol: *const Symbol, position: Source.Position) !void {
         var lambda_context = self.current_lambda;
         while (lambda_context) |lambda| : (lambda_context = lambda.parent) {
             if (symbol.scope_depth < lambda.local_depth) {
+                if (isUniqueOwnerType(symbol.type)) {
+                    const message = try std.fmt.allocPrint(
+                        self.allocator,
+                        "unique resource '{s}' cannot be captured by a lambda",
+                        .{typeName(symbol.type)},
+                    );
+                    return self.fail(position, message);
+                }
                 const by_value = try self.typeContainsClass(symbol.type);
                 if (by_value) symbol.state.capture_box = true;
                 try self.recordLambdaCapture(lambda, symbol.generated_name, by_value);
@@ -6259,11 +6459,8 @@ fn typeFromAnnotation(
                 } };
             }
             if (self.findStructure(name)) |structure| {
-                break :structure_type .{ .structure = .{
-                    .source_name = structure.source_name,
-                    .generated_name = structure.generated_name,
-                    .is_class = structure.is_class,
-                } };
+                const structure_index = self.findStructureIndexByGeneratedName(structure.generated_name).?;
+                break :structure_type .{ .structure = self.structureType(structure_index) };
             }
             if (self.findEnum(name)) |enum_symbol| {
                 break :structure_type .{ .enumeration = .{
@@ -6554,6 +6751,18 @@ fn appendUnicodeScalar(allocator: Allocator, output: *std.ArrayList(u8), scalar:
         try output.append(allocator, @intCast(0x80 | ((scalar >> 6) & 0x3F)));
         try output.append(allocator, @intCast(0x80 | (scalar & 0x3F)));
     }
+}
+
+fn isUniqueOwnerType(type_value: Type) bool {
+    return type_value == .structure and type_value.structure.is_owner;
+}
+
+fn isUniqueOwnerTemporary(expression: *const Expression) bool {
+    if (!isUniqueOwnerType(expression.type)) return false;
+    return switch (expression.value) {
+        .structure_initializer, .call, .value_call, .method_call, .static_method_call => true,
+        else => false,
+    };
 }
 
 fn typeEqual(left: Type, right: Type) bool {
@@ -7695,6 +7904,93 @@ test "class drop can read private state but cannot return" {
 
     try expectResolvedSemanticError(
         "class Texture { drop { return } } func main() {}",
+        "'drop' cannot return",
+    );
+}
+
+test "unique resource structures initialize local owners directly" {
+    try expectSemanticSuccess(
+        \\struct Resource {
+        \\    let handle:int
+        \\    static func open(handle:int) Resource { return Resource(handle:handle) }
+        \\    func value() int { return self.handle }
+        \\    drop { print(self.handle) }
+        \\}
+        \\func main() {
+        \\    let first = Resource.open(1)
+        \\    var second = Resource.open(2)
+        \\    print(first.value())
+        \\    print(second.value())
+        \\}
+    );
+}
+
+test "unique resource structures reject transfer and composition before move" {
+    const declaration =
+        \\struct Resource {
+        \\    let handle:int
+        \\    static func open(handle:int) Resource { return Resource(handle:handle) }
+        \\    drop {}
+        \\}
+    ;
+
+    try expectResolvedSemanticError(
+        declaration ++ "func main() { let first = Resource.open(1); let second = first }",
+        "cannot copy unique resource 'Resource'; initialize it directly from a temporary value",
+    );
+    try expectResolvedSemanticError(
+        declaration ++ "func consume(resource:Resource) {} func main() {}",
+        "unique resource 'Resource' cannot be passed before explicit transfer is available",
+    );
+    try expectResolvedSemanticError(
+        declaration ++ "func duplicate() Resource { let resource = Resource.open(1); return resource } func main() {}",
+        "cannot return named unique resource 'Resource' before explicit transfer is available",
+    );
+    try expectResolvedSemanticError(
+        declaration ++ "func main() { var resource = Resource.open(1); resource = Resource.open(2) }",
+        "cannot assign unique resource 'Resource' before explicit transfer is available",
+    );
+    try expectResolvedSemanticError(
+        declaration ++ "struct Holder { let resource:Resource } func main() {}",
+        "type 'Resource' cannot contain unique resource 'Resource' before unique-resource composition is available",
+    );
+    try expectResolvedSemanticError(
+        declaration ++ "class Holder { var resource:Resource } func main() {}",
+        "type 'Resource' cannot contain unique resource 'Resource' before unique-resource composition is available",
+    );
+    try expectResolvedSemanticError(
+        declaration ++ "struct Registry { static var current:Resource } func main() {}",
+        "type 'Resource' cannot contain unique resource 'Resource' before unique-resource composition is available",
+    );
+    try expectResolvedSemanticError(
+        declaration ++ "enum Slot { full(Resource) } func main() {}",
+        "type 'Resource' cannot contain unique resource 'Resource' before unique-resource composition is available",
+    );
+    try expectResolvedSemanticError(
+        declaration ++ "func main() { let resources:Resource[] = [] }",
+        "type 'list' cannot contain unique resource 'Resource' before unique-resource composition is available",
+    );
+    try expectResolvedSemanticError(
+        declaration ++ "func main() { let resource:Resource? = null }",
+        "type 'optional' cannot contain unique resource 'Resource' before unique-resource composition is available",
+    );
+    try expectResolvedSemanticError(
+        declaration ++ "func borrow(resource:&Resource) {} func main() {}",
+        "unique resource 'Resource' cannot be passed with '&'",
+    );
+    try expectResolvedSemanticError(
+        declaration ++ "func main() { let resource = Resource.open(1); let callback = func() { print(resource.handle) } }",
+        "unique resource 'Resource' cannot be captured by a lambda",
+    );
+    try expectResolvedSemanticError(
+        declaration ++ "func main() { let first = Resource.open(1); let second = Resource.open(2); print(first == second) }",
+        "type 'Resource' does not support equality",
+    );
+}
+
+test "unique resource drop has the ordinary drop restrictions" {
+    try expectResolvedSemanticError(
+        "struct Resource { drop { return } } func main() {}",
         "'drop' cannot return",
     );
 }

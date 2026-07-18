@@ -1295,6 +1295,7 @@ fn collectSemanticInfo(
                 }
             }
             if (body_index >= tokens.len or tokens[body_index].tag != .left_brace) continue;
+            const is_owner = !is_class and structureDeclaresDrop(tokens, body_index);
             var depth: usize = 0;
             var parentheses: usize = 0;
             var member_index = body_index;
@@ -1377,7 +1378,7 @@ fn collectSemanticInfo(
                         .collection = collectionKind(tokens, declaration_index + 2),
                         .kind = 5,
                         .detail = "Silex field",
-                        .visibility = visibility,
+                        .visibility = if (is_owner) .private_access else visibility,
                         .is_static = is_static,
                     });
                 }
@@ -1442,6 +1443,21 @@ fn collectSemanticInfo(
             try collectIterationBinding(allocator, source, tokens, index, &info.variables);
         }
     }
+}
+
+fn structureDeclaresDrop(tokens: []const LexerModule.Token, body_index: usize) bool {
+    var depth: usize = 0;
+    for (tokens[body_index..]) |token| switch (token.tag) {
+        .left_brace => depth += 1,
+        .right_brace => {
+            if (depth == 0) return false;
+            depth -= 1;
+            if (depth == 0) return false;
+        },
+        .keyword_drop => if (depth == 1) return true,
+        else => {},
+    };
+    return false;
 }
 
 fn collectIterationBinding(
@@ -2133,6 +2149,7 @@ fn collectPublicStructureMembers(
             .is_class = structure.is_class,
         });
         for (structure.fields) |field| {
+            if (!structure.is_class and structure.drop != null) continue;
             if (structure.is_class and field.visibility != .public_access) continue;
             try info.members.append(allocator, .{
                 .structure = structure.name,
@@ -3156,6 +3173,52 @@ test "member completion loads local module structure fields and methods" {
     try std.testing.expect(containsCompletion(items, "x"));
     try std.testing.expect(containsCompletion(items, "y"));
     try std.testing.expect(containsCompletion(items, "length_squared"));
+}
+
+test "member completion keeps unique resource storage private outside its module" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source =
+        \\use Math
+        \\func main() {
+        \\    let resource = Math.Resource.open(7)
+        \\    resource.
+        \\}
+    ;
+    const items = try completionItemsForProject(
+        arena.allocator(),
+        std.testing.io,
+        source,
+        "Tests/LspModules",
+        .{ .line = 3, .character = 13 },
+    );
+    try std.testing.expect(containsCompletion(items, "get_handle"));
+    try std.testing.expect(!containsCompletion(items, "handle"));
+}
+
+test "member completion gives owner extensions external storage rights" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source =
+        \\struct Resource {
+        \\    let handle:int
+        \\    func get_handle() int { return self.handle }
+        \\    drop {}
+        \\}
+        \\extend Resource {
+        \\    func inspect() {
+        \\        self.
+        \\    }
+        \\}
+    ;
+    const items = try completionItems(
+        arena.allocator(),
+        std.testing.io,
+        source,
+        .{ .line = 7, .character = 13 },
+    );
+    try std.testing.expect(containsCompletion(items, "get_handle"));
+    try std.testing.expect(!containsCompletion(items, "handle"));
 }
 
 test "member completion exposes STD Time clock methods" {

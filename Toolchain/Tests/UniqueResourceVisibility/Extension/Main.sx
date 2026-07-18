@@ -1,0 +1,9 @@
+use Resources
+
+extend Resources.Resource {
+    func read() int {
+        return self.handle
+    }
+}
+
+func main() {}

@@ -1,9 +1,10 @@
 # Structures
 
 A `struct` is a nominal value type with typed fields and optional field
-defaults. Its fields and methods are public by default; class-only member
-markers `pub` and `sub` are not written in a structure. Every field starts
-with `let` or `var`; the older `name:type` form is invalid.
+defaults. Its fields and methods are public by default, except for the storage
+of a unique resource structure described below; class-only member markers
+`pub` and `sub` are not written in a structure. Every field starts with `let`
+or `var`; the older `name:type` form is invalid.
 
 ```sx
 struct Position {
@@ -108,9 +109,9 @@ narrow exception: its `let` protects the collection storage without requiring
 independent elements.
 
 Structures compare by value when they have the same declared type, except when
-they contain a function value directly or recursively; such values are not
-comparable. A function field has no intrinsic default and must be supplied by
-the initializer, for example with `func() {}`.
+they contain a function value directly or recursively or declare `drop`; such
+values are not comparable. A function field has no intrinsic default and must
+be supplied by the initializer, for example with `func() {}`.
 
 ## Static fields
 
@@ -219,3 +220,74 @@ struct Counter {
 An extracted field such as `var callback = counter.callback` is instead bound
 to `counter` and cannot outlive it. A direct `counter.callback()` call supplies
 the current owner without extracting the field.
+
+## Unique resource structures
+
+A structure that declares `drop` owns one unique local resource. The block is
+both its custom destruction operation and its nominal noncopyable marker; no
+additional declaration keyword is used. A structure without `drop` keeps the
+ordinary value-copy semantics described above.
+
+```sx
+native func native_file_open(path:str) int
+native func native_file_close(handle:int)
+
+pub struct File {
+    let handle:int
+    let path:str
+
+    static func open(path:str) File {
+        return File(handle:native_file_open(path), path:path)
+    }
+
+    func get_path() str {
+        return self.path
+    }
+
+    drop {
+        native_file_close(self.handle)
+    }
+}
+```
+
+For a public owner structure, its fields and named aggregate initializer are
+visible only to source units in the declaring module. Its methods and static
+methods retain the ordinary public visibility of structure methods, so an
+external caller constructs `File` through `File.open` and reads it through
+`get_path`. An extension has the same storage rights as an external caller,
+even when it extends the type by name; it cannot access `handle` or invoke the
+aggregate initializer. Ordinary structures remain transparent.
+
+A completed owner value can be bound locally with `let` when its fields meet
+the ordinary independence rules, or with `var` when its public behaviour needs
+a mutable receiver. In the current language step, only a temporary owner value
+may initialize that binding directly. A named owner cannot be copied, assigned,
+passed as an ordinary or `&` argument, returned, captured by a lambda, converted
+to a dynamic protocol value, or compared for equality. A static factory may
+return a freshly constructed temporary such as the `File.open` result above.
+
+An owner cannot yet appear inside another structure, class, collection,
+optional, enum, or `Result`, nor in static storage. Explicit transfer and
+composition are future language steps; there is currently no `move`
+expression.
+
+`drop` receives `self` implicitly and may access the structure's private
+storage. It has no parameters, parentheses, return type, or visibility marker,
+cannot be called explicitly, and cannot contain `return` or `try`. It executes
+exactly once for each completely constructed local owner:
+
+- at the lexical end of its block;
+- before `return`, `break`, or `continue` leaves its scope;
+- before an early `Result` return caused by a failed `try`;
+- at the end of `main`, like any other function.
+
+Completed locals are destroyed in reverse construction order. An owner whose
+initializer did not complete is not destroyed. Its `drop` body runs before its
+fields are destroyed automatically in reverse declaration order. Owner fields
+are not yet permitted, so recursive owner destruction begins only when owner
+composition is introduced.
+
+These guarantees cover ordinary language exits. A `panic`, failed `assert`,
+forced process termination, or fatal native failure does not promise cleanup;
+a failure inside `drop` is fatal. Class `drop` instead follows shared-reference
+and cycle-collection lifetime, as described in [Classes](Classes.md).

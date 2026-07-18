@@ -1,0 +1,88 @@
+use Resources
+
+func lexical_scopes() {
+    print("lexical")
+    let outer = Resources.Resource.open(10)
+    print(outer.value())
+    if true {
+        var inner = Resources.Resource.open(11)
+        print(inner.value())
+    }
+    print("after inner")
+}
+
+func early_return() {
+    let resource = Resources.Resource.open(20)
+    print("return")
+    print(resource.value())
+    return
+}
+
+func loop_exits() {
+    var index = 0
+    while index < 3 {
+        index++
+        let resource = Resources.Resource.open(30 + index)
+        if index == 1 {
+            print("continue")
+            print(resource.value())
+            continue
+        }
+        print("break")
+        print(resource.value())
+        break
+    }
+}
+
+func result(allowed:bool) Result<void,str> {
+    if allowed {
+        return Result<void,str>.success()
+    }
+    return Result<void,str>.failure("failed")
+}
+
+func try_exit(label:int, allowed:bool) Result<void,str> {
+    let resource = Resources.Resource.open(label)
+    try result(allowed)
+    print("try body")
+    print(resource.value())
+    return Result<void,str>.success()
+}
+
+func reverse_order() {
+    let first = Resources.Resource.open(50)
+    var second = Resources.Resource.open(51)
+    print("reverse")
+    print(first.value() + second.value())
+}
+
+func main() {
+    Resources.internal_access(1)
+    lexical_scopes()
+    early_return()
+    loop_exits()
+
+    match try_exit(40, true) {
+        success => { print("try success") }
+        failure(error) => { print("unexpected") }
+    }
+    match try_exit(41, false) {
+        success => { print("unexpected") }
+        failure(error) => { print("try failure") }
+    }
+
+    reverse_order()
+    match Resources.incomplete_initialization(60, false) {
+        success => { print("unexpected") }
+        failure(error) => { print(error) }
+    }
+    match Resources.incomplete_initialization(61, true) {
+        success => { print("complete success") }
+        failure(error) => { print("unexpected") }
+    }
+
+    let final_let = Resources.Resource.open(70)
+    var final_var = Resources.Resource.open(71)
+    print("main")
+    print(final_let.value() + final_var.value())
+}
