@@ -1998,8 +1998,12 @@ fn collectPublicStructureMembers(
     info: *SemanticInfo,
 ) !void {
     for (program.extensions) |extension| {
+        const target_is_struct = if (extensionTargetIsClass(program, info.*, extension.target)) |is_class|
+            !is_class
+        else
+            false;
         for (extension.methods) |method| {
-            if (!method.is_public) continue;
+            if (!method.is_public and !target_is_struct) continue;
             try info.members.append(allocator, .{
                 .structure = lastPathSegment(extension.target),
                 .name = method.name,
@@ -2096,6 +2100,20 @@ fn collectPublicStructureMembers(
             .collection = target.collection,
         });
     }
+}
+
+fn extensionTargetIsClass(program: Ast.Program, info: SemanticInfo, target: []const u8) ?bool {
+    const target_name = lastPathSegment(target);
+    for (program.structures) |structure| {
+        if (std.mem.eql(u8, structure.name, target_name)) return structure.is_class;
+    }
+    var index = info.structures.items.len;
+    while (index > 0) {
+        index -= 1;
+        const structure = info.structures.items[index];
+        if (std.mem.eql(u8, structure.name, target_name)) return structure.is_class;
+    }
+    return null;
 }
 
 fn astTypeName(type_name: Ast.TypeName) []const u8 {
@@ -2774,6 +2792,23 @@ test "direct module import activates public extension completion" {
     try std.testing.expect(containsCompletion(items, "length_squared"));
     try std.testing.expect(containsCompletion(items, "scaled"));
     try std.testing.expect(!containsCompletion(items, "origin"));
+
+    const class_source =
+        \\import Math
+        \\import Extras
+        \\func main() {
+        \\    var canvas = Math.Canvas()
+        \\    canvas.
+        \\}
+    ;
+    const class_items = try completionItemsForProject(
+        allocator,
+        std.testing.io,
+        class_source,
+        "Tests/LspModules",
+        .{ .line = 4, .character = 11 },
+    );
+    try std.testing.expect(!containsCompletion(class_items, "hidden"));
 }
 
 test "import completion recognizes only the module path context" {

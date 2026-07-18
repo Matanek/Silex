@@ -5,3 +5,7 @@ pub class Sprite {
         self.value = value
     }
 }
+
+pub struct Token {
+    var value:int
+}

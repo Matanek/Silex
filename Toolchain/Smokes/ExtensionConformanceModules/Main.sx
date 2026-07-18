@@ -7,7 +7,7 @@ struct Badge {
 }
 
 extend Badge : Core.Drawable {
-    pub func draw() int {
+    func draw() int {
         return self.value
     }
 }
@@ -21,6 +21,11 @@ func main() {
     assert(Core.render<Types.Sprite>(sprite) == 42, "imported generic conformance")
     var renderer = Core.Renderer<Types.Sprite>(value:sprite)
     assert(renderer.render() == 42, "imported generic structure conformance")
+
+    var token = Types.Token(value:12)
+    var token_drawable:Core.Drawable = token
+    assert(token_drawable.draw() == 12, "implicit public struct witness")
+    assert(Core.render<Types.Token>(token) == 12, "imported implicit struct conformance")
 
     var badge = Badge(value:7)
     var badge_drawable:Core.Drawable = badge

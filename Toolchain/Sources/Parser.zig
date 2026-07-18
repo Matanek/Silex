@@ -121,7 +121,7 @@ pub const Parser = struct {
             }
             var method = try self.parseFunction(is_public);
             if (method.type_parameters.len != 0) return self.fail("generic extension methods are not supported");
-            method.member_visibility = if (is_public) .public_access else .private_access;
+            method.member_visibility = if (is_public) .public_access else null;
             method.is_static = is_static;
             try methods.append(self.allocator, method);
         }
@@ -3179,7 +3179,9 @@ test "parse type extensions and reject stateful members" {
     try std.testing.expectEqualStrings("Random.Generator", program.extensions[0].target);
     try std.testing.expectEqual(@as(usize, 2), program.extensions[0].methods.len);
     try std.testing.expect(program.extensions[0].methods[0].is_public);
+    try std.testing.expectEqual(Ast.MemberVisibility.public_access, program.extensions[0].methods[0].member_visibility.?);
     try std.testing.expect(program.extensions[0].methods[1].is_static);
+    try std.testing.expect(program.extensions[0].methods[1].member_visibility == null);
 
     var field = Parser.init(arena.allocator(), "extend Generator { var state:int } func main() {}");
     try std.testing.expectError(error.InvalidSource, field.parse());

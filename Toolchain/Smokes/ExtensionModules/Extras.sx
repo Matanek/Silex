@@ -9,11 +9,11 @@ extend Counter {
         return self.value
     }
 
-    pub func bump() int {
+    func bump() int {
         return self.step()
     }
 
-    pub static func start(value:int) Counter {
+    static func start(value:int) Counter {
         return Counter(value:value)
     }
 }

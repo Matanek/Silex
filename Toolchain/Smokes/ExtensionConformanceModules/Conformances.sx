@@ -10,3 +10,9 @@ extend Types.Sprite : Core.Drawable, Core.Named {
         return "sprite"
     }
 }
+
+extend Types.Token : Core.Drawable {
+    func draw() int {
+        return self.value
+    }
+}

@@ -1273,12 +1273,19 @@ pub const Analyzer = struct {
             for (structure.protocol_conformances) |conformance| {
                 const protocol = self.protocols.items[conformance.protocol_index];
                 for (protocol.requirements) |requirement| {
-                    if (self.findProtocolRequirementMethod(structure_index, requirement, conformance) != null) continue;
-                    const message = try std.fmt.allocPrint(
-                        self.allocator,
-                        "type '{s}' does not satisfy method '{s}' required by protocol '{s}'",
-                        .{ structure.source_name, requirement.source_name, protocol.source_name },
-                    );
+                    if (self.findProtocolRequirementMethod(structure_index, requirement, conformance, true) != null) continue;
+                    const message = if (self.findProtocolRequirementMethod(structure_index, requirement, conformance, false) != null)
+                        try std.fmt.allocPrint(
+                            self.allocator,
+                            "method '{s}' must be public to satisfy protocol '{s}' for type '{s}'",
+                            .{ requirement.source_name, protocol.source_name, structure.source_name },
+                        )
+                    else
+                        try std.fmt.allocPrint(
+                            self.allocator,
+                            "type '{s}' does not satisfy method '{s}' required by protocol '{s}'",
+                            .{ structure.source_name, requirement.source_name, protocol.source_name },
+                        );
                     return self.fail(conformance.position, message);
                 }
             }
@@ -1290,6 +1297,7 @@ pub const Analyzer = struct {
         start_index: usize,
         requirement: ProtocolRequirement,
         conformance: ProtocolConformanceSymbol,
+        require_public: bool,
     ) ?MethodCandidate {
         var structure_index: ?usize = start_index;
         while (structure_index) |index| {
@@ -1299,7 +1307,7 @@ pub const Analyzer = struct {
                     if (conformance.extension_visible_files == null or index != start_index or
                         !fileSetContains(visible_files, conformance.position.file)) continue;
                 }
-                if (method_symbol.is_static or method_symbol.visibility != .public_access) continue;
+                if (method_symbol.is_static or (require_public and method_symbol.visibility != .public_access)) continue;
                 if (!std.mem.eql(u8, method_symbol.source_name, requirement.source_name)) continue;
                 if (!sameSignature(
                     method_symbol.parameter_types,
@@ -1368,7 +1376,7 @@ pub const Analyzer = struct {
             };
             var method_names: std.ArrayList([]const u8) = .empty;
             for (protocol.requirements) |requirement| {
-                const candidate = self.findProtocolRequirementMethod(structure_index, requirement, conformance) orelse unreachable;
+                const candidate = self.findProtocolRequirementMethod(structure_index, requirement, conformance, true) orelse unreachable;
                 try method_names.append(self.allocator, candidate.symbol.generated_name);
             }
             try conformances.append(self.allocator, .{
@@ -7247,7 +7255,7 @@ test "reject missing private static and incompatible protocol requirements" {
         \\protocol Drawable { func draw() }
         \\class Player : Drawable { func draw() {} }
         \\func main() {}
-    , "type 'Player' does not satisfy method 'draw' required by protocol 'Drawable'");
+    , "method 'draw' must be public to satisfy protocol 'Drawable' for type 'Player'");
     try expectResolvedSemanticError(
         \\protocol Drawable { func draw() }
         \\struct Icon : Drawable { static func draw() {} }
@@ -7332,11 +7340,13 @@ test "extension conformances support dynamic values and multiple protocols" {
         \\protocol Named { func name() str }
         \\struct Sprite { var value:int }
         \\struct Existing { func draw() int { return 7 } }
+        \\class Button {}
         \\extend Sprite : Drawable, Named {
-        \\    pub func draw() int { return self.value }
-        \\    pub func name() str { return "sprite" }
+        \\    func draw() int { return self.value }
+        \\    func name() str { return "sprite" }
         \\}
         \\extend Existing : Drawable {}
+        \\extend Button : Drawable { pub func draw() int { return 9 } }
         \\func main() {
         \\    var sprite = Sprite(value:42)
         \\    var drawable:Drawable = sprite
@@ -7345,17 +7355,19 @@ test "extension conformances support dynamic values and multiple protocols" {
         \\    assert(named.name() == "sprite", "second extension conformance")
         \\    var existing:Drawable = Existing()
         \\    assert(existing.draw() == 7, "existing method conformance")
+        \\    var button:Drawable = Button()
+        \\    assert(button.draw() == 9, "public class extension conformance")
         \\}
     );
 }
 
-test "extension conformances require public methods and apply to the exact type" {
+test "extension conformances use target visibility defaults and apply to the exact type" {
     try expectResolvedSemanticError(
         \\protocol Drawable { func draw() }
         \\class Sprite {}
         \\extend Sprite : Drawable { func draw() {} }
         \\func main() {}
-    , "type 'Sprite' does not satisfy method 'draw' required by protocol 'Drawable'");
+    , "method 'draw' must be public to satisfy protocol 'Drawable' for type 'Sprite'");
     try expectResolvedSemanticError(
         \\protocol Drawable { func draw() }
         \\struct Sprite {}

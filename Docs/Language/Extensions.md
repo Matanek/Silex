@@ -47,7 +47,7 @@ struct Sprite {
 }
 
 extend Sprite : Drawable {
-    pub func draw() {
+    func draw() {
     }
 }
 ```
@@ -55,7 +55,10 @@ extend Sprite : Drawable {
 The target then converts to the dynamic protocol type and satisfies a matching
 generic constraint wherever that extension is active. Requirement methods must
 be public instance methods with the ordinary matching signature. They may
-already belong to the target or be declared as `pub` methods in an extension.
+already belong to the target or be declared in an extension. An unmarked
+extension method follows its target's member default: public for a structure
+and private for a class. A class extension therefore writes `pub func` when its
+method satisfies a protocol requirement.
 
 A conformance extension applies only to its exact nominal target. A class
 descendant does not inherit it. The conformance changes no field, layout,
@@ -70,10 +73,11 @@ unambiguous.
 
 ## Visibility and imports
 
-Every source file in the declaring module can use its extension methods. A
-method without `pub` remains private to that module. A `pub` extension method
-also becomes a candidate in a source file that directly imports the declaring
-module:
+An unmarked method takes the target's default member visibility. A structure
+extension method is therefore public and becomes active in a source file that
+directly imports its declaring module. A class extension method remains private
+to that module unless it uses `pub`. The explicit marker remains accepted for
+structure extensions even though it is redundant there:
 
 ```sx
 import MyLibrary.RandomExtensions as RandomExtensions

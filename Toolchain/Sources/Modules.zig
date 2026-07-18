@@ -145,6 +145,7 @@ pub const Resolver = struct {
 
     fn transformExtension(self: *Resolver, extension: Ast.Extension, declaring_module_index: usize) !Ast.Extension {
         const declaration = try self.resolveName(extension.position.file, extension.target, .structure, extension.target_position);
+        const target_is_class = self.declarationIsClass(declaration);
         var conformances: std.ArrayList(Ast.ProtocolReference) = .empty;
         const conformance_visible_files = try self.extensionVisibleFiles(declaring_module_index, true);
         for (extension.conformances) |conformance| {
@@ -159,7 +160,11 @@ pub const Resolver = struct {
         var methods: std.ArrayList(Ast.Function) = .empty;
         for (extension.methods) |method| {
             var transformed = try self.transformFunctionBody(method, method.name);
-            transformed.extension_visible_files = try self.extensionVisibleFiles(declaring_module_index, method.is_public);
+            if (transformed.member_visibility == null) {
+                transformed.member_visibility = if (target_is_class) .private_access else .public_access;
+                if (!target_is_class) transformed.is_public = true;
+            }
+            transformed.extension_visible_files = try self.extensionVisibleFiles(declaring_module_index, transformed.is_public);
             transformed.extension_module_name = self.project.modules[declaring_module_index].name;
             try methods.append(self.allocator, transformed);
         }
