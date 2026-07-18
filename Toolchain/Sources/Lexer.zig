@@ -19,6 +19,7 @@ pub const TokenTag = enum {
     keyword_struct,
     keyword_class,
     keyword_protocol,
+    keyword_extend,
     keyword_enum,
     keyword_match,
     keyword_init,
@@ -487,6 +488,7 @@ fn keywordTag(lexeme: []const u8) ?TokenTag {
         .{ "struct", TokenTag.keyword_struct },
         .{ "class", TokenTag.keyword_class },
         .{ "protocol", TokenTag.keyword_protocol },
+        .{ "extend", TokenTag.keyword_extend },
         .{ "enum", TokenTag.keyword_enum },
         .{ "match", TokenTag.keyword_match },
         .{ "init", TokenTag.keyword_init },
@@ -561,6 +563,12 @@ test "recognize declaration keywords" {
 test "reserve class keyword" {
     var lexer = Lexer.init("class Player {}");
     try std.testing.expectEqual(TokenTag.keyword_class, (try lexer.next()).tag);
+    try std.testing.expectEqual(TokenTag.identifier, (try lexer.next()).tag);
+}
+
+test "reserve extend keyword" {
+    var lexer = Lexer.init("extend Generator {}");
+    try std.testing.expectEqual(TokenTag.keyword_extend, (try lexer.next()).tag);
     try std.testing.expectEqual(TokenTag.identifier, (try lexer.next()).tag);
 }
 

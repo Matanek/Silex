@@ -1,0 +1,3 @@
+pub struct Counter {
+    var value:int
+}

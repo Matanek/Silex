@@ -942,7 +942,7 @@ pub fn generateWithSources(
             try output.appendSlice(allocator, "    ");
             if (method.is_static) {
                 try output.appendSlice(allocator, "static ");
-            } else if (structure.is_class and method.visibility != .private_access) try output.appendSlice(allocator, "virtual ");
+            } else if (structure.is_class and !method.is_extension and method.visibility != .private_access) try output.appendSlice(allocator, "virtual ");
             try generateMethodSignature(allocator, &output, method, null, false);
             if (method.is_override) try output.appendSlice(allocator, " override");
             try output.appendSlice(allocator, ";\n");
@@ -1167,7 +1167,8 @@ fn generateProtocolTypes(
         try output.appendSlice(allocator, protocol.generated_name);
         try output.appendSlice(allocator, " make(T value, const Witness* witness) {\n        ");
         try output.appendSlice(allocator, protocol.generated_name);
-        try output.appendSlice(allocator,
+        try output.appendSlice(
+            allocator,
             " result;\n        result.storage_ = std::make_unique<Storage<T>>(std::move(value));\n        result.witness_ = witness;\n        return result;\n    }\n",
         );
         for (protocol.requirements) |requirement| {

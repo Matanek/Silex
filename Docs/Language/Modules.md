@@ -42,6 +42,10 @@ that import loads only its longest prefix that names an existing module. Thus
 The same rule applies through an import alias such as `Standard.Time.Stopwatch`
 after `import STD as Standard`.
 
+A direct `import` also activates the imported module's public type extensions
+in that source file. This activation is not transitive and does not require a
+separate `use`; see [Type extensions](Extensions.md#visibility-and-imports).
+
 A non-public `use` can name either one declaration or one submodule and
 introduce its name or alias into the current file. It can establish that exact
 dependency without a preceding `import`; the longest loaded prefix that names
@@ -96,10 +100,10 @@ exposes the type outside its module, while only its `pub` members are accessible
 outside the class. See [Classes](Classes.md).
 
 Duplicate providers, missing modules, dependency cycles, ambiguous aliases, and
-access to private declarations are compile-time errors. Dependencies are never
-implicitly transitive. A project manifest can define this module layout
-explicitly; parent modules of its dotted module names are inferred even when
-they have no sources of their own. See
+access to private declarations are compile-time errors. Dependencies and type
+extensions are never implicitly transitive. A project manifest can define this
+module layout explicitly; parent modules of its dotted module names are inferred
+even when they have no sources of their own. See
 [Installation and command-line use](../Installation.md).
 
 The modules and public APIs currently provided under `STD` are documented in

@@ -10,6 +10,9 @@
 (protocol_definition
   name: (identifier) @name) @item
 
+(extension_definition
+  target: (named_type) @name) @item
+
 (constructor_definition "init" @name) @item
 
 (drop_definition "drop" @name) @item

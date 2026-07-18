@@ -30,6 +30,7 @@ pub const Parser = struct {
         var uses: std.ArrayList(Ast.Use) = .empty;
         var enums: std.ArrayList(Ast.Enum) = .empty;
         var protocols: std.ArrayList(Ast.Protocol) = .empty;
+        var extensions: std.ArrayList(Ast.Extension) = .empty;
         var structures: std.ArrayList(Ast.Structure) = .empty;
         var functions: std.ArrayList(Ast.Function) = .empty;
         while (self.current.tag != .end) {
@@ -56,6 +57,8 @@ pub const Parser = struct {
                 try enums.append(self.allocator, try self.parseEnum(false));
             } else if (self.current.tag == .keyword_protocol) {
                 try protocols.append(self.allocator, try self.parseProtocol(false));
+            } else if (self.current.tag == .keyword_extend) {
+                try extensions.append(self.allocator, try self.parseExtension());
             } else if (self.current.tag == .keyword_struct or self.current.tag == .keyword_class) {
                 try structures.append(self.allocator, try self.parseStructure(false));
             } else if (self.current.tag == .keyword_func) {
@@ -65,7 +68,7 @@ pub const Parser = struct {
             } else if (self.current.tag == .keyword_elif) {
                 return self.fail("'elif' must directly continue an if chain");
             } else {
-                return self.fail("expected import, use, enum, protocol, struct, class, func, or native func declaration");
+                return self.fail("expected import, use, enum, protocol, extend, struct, class, func, or native func declaration");
             }
         }
         return .{
@@ -73,8 +76,47 @@ pub const Parser = struct {
             .uses = try uses.toOwnedSlice(self.allocator),
             .enums = try enums.toOwnedSlice(self.allocator),
             .protocols = try protocols.toOwnedSlice(self.allocator),
+            .extensions = try extensions.toOwnedSlice(self.allocator),
             .structures = try structures.toOwnedSlice(self.allocator),
             .functions = try functions.toOwnedSlice(self.allocator),
+        };
+    }
+
+    fn parseExtension(self: *Parser) ParseError!Ast.Extension {
+        const position = self.current.position;
+        try self.expect(.keyword_extend, "expected 'extend'");
+        const target_position = self.current.position;
+        const target = try self.parseQualifiedName("expected struct or class name after 'extend'");
+        if (self.current.tag == .less) return self.fail("generic extensions are not supported");
+        try self.expect(.left_brace, "expected '{' after extended type");
+        var methods: std.ArrayList(Ast.Function) = .empty;
+        while (self.current.tag != .right_brace and self.current.tag != .end) {
+            if (self.current.tag == .keyword_sub) return self.fail("an extension method cannot use 'sub'");
+            if (self.current.tag == .keyword_override) return self.fail("an extension method cannot use 'override'");
+            const is_public = self.current.tag == .keyword_pub;
+            if (is_public) try self.advance();
+            const is_static = self.current.tag == .keyword_static;
+            if (is_static) try self.advance();
+            if (self.current.tag == .keyword_init) return self.fail("an extension cannot declare a constructor");
+            if (self.current.tag == .keyword_drop) return self.fail("an extension cannot declare 'drop'");
+            if (self.current.tag == .keyword_let or self.current.tag == .keyword_var) {
+                return self.fail("an extension cannot declare a field");
+            }
+            if (self.current.tag != .keyword_func) {
+                return self.fail("an extension can declare only methods");
+            }
+            var method = try self.parseFunction(is_public);
+            if (method.type_parameters.len != 0) return self.fail("generic extension methods are not supported");
+            method.member_visibility = if (is_public) .public_access else .private_access;
+            method.is_static = is_static;
+            try methods.append(self.allocator, method);
+        }
+        try self.expect(.right_brace, "expected '}' after extension methods");
+        return .{
+            .position = position,
+            .target = target,
+            .target_position = target_position,
+            .methods = try methods.toOwnedSlice(self.allocator),
         };
     }
 
@@ -3105,4 +3147,46 @@ test "require a name for a type alias" {
     var parser = Parser.init(arena.allocator(), "use int[]\nfunc main() {}");
     try std.testing.expectError(error.InvalidSource, parser.parse());
     try std.testing.expectEqualStrings("a type expression after 'use' requires an alias with 'as'", parser.diagnostic.?.message);
+}
+
+test "parse type extensions and reject stateful members" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(),
+        \\extend Random.Generator {
+        \\    pub func get_uint() uint { return self.get_int() as uint }
+        \\    static func seeded() Generator { return Generator() }
+        \\}
+        \\func main() {}
+    );
+    const program = try parser.parse();
+    try std.testing.expectEqual(@as(usize, 1), program.extensions.len);
+    try std.testing.expectEqualStrings("Random.Generator", program.extensions[0].target);
+    try std.testing.expectEqual(@as(usize, 2), program.extensions[0].methods.len);
+    try std.testing.expect(program.extensions[0].methods[0].is_public);
+    try std.testing.expect(program.extensions[0].methods[1].is_static);
+
+    var field = Parser.init(arena.allocator(), "extend Generator { var state:int } func main() {}");
+    try std.testing.expectError(error.InvalidSource, field.parse());
+    try std.testing.expectEqualStrings("an extension cannot declare a field", field.diagnostic.?.message);
+
+    var subclass = Parser.init(arena.allocator(), "extend Generator { sub func next() {} } func main() {}");
+    try std.testing.expectError(error.InvalidSource, subclass.parse());
+    try std.testing.expectEqualStrings("an extension method cannot use 'sub'", subclass.diagnostic.?.message);
+
+    var constructor = Parser.init(arena.allocator(), "extend Generator { init() {} } func main() {}");
+    try std.testing.expectError(error.InvalidSource, constructor.parse());
+    try std.testing.expectEqualStrings("an extension cannot declare a constructor", constructor.diagnostic.?.message);
+
+    var destructor = Parser.init(arena.allocator(), "extend Generator { drop {} } func main() {}");
+    try std.testing.expectError(error.InvalidSource, destructor.parse());
+    try std.testing.expectEqualStrings("an extension cannot declare 'drop'", destructor.diagnostic.?.message);
+
+    var override_method = Parser.init(arena.allocator(), "extend Generator { override func next() {} } func main() {}");
+    try std.testing.expectError(error.InvalidSource, override_method.parse());
+    try std.testing.expectEqualStrings("an extension method cannot use 'override'", override_method.diagnostic.?.message);
+
+    var generic = Parser.init(arena.allocator(), "extend Generator<int> { func next() {} } func main() {}");
+    try std.testing.expectError(error.InvalidSource, generic.parse());
+    try std.testing.expectEqualStrings("generic extensions are not supported", generic.diagnostic.?.message);
 }

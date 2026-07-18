@@ -70,6 +70,17 @@
     ],
     "description": "Declare a nominal method contract"
   },
+  "Type extension": {
+    "prefix": "extend",
+    "body": [
+      "extend ${1:Type} {",
+      "    pub func ${2:method}(${3})${4} {",
+      "        $0",
+      "    }",
+      "}"
+    ],
+    "description": "Add methods to an existing struct or class"
+  },
   "Generic enum": {
     "prefix": "enumgeneric",
     "body": [

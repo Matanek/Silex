@@ -1,0 +1,9 @@
+{
+  "target": "ExtensionVisibility.App",
+  "modules": [
+    { "name": "ExtensionVisibility.Core", "sources": ["Core.sx"] },
+    { "name": "ExtensionVisibility.Extras", "sources": ["Extras.sx"] },
+    { "name": "ExtensionVisibility.Bridge", "sources": ["Bridge.sx"] },
+    { "name": "ExtensionVisibility.App", "sources": ["Main.sx"] }
+  ]
+}

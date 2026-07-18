@@ -436,8 +436,16 @@ pub const Program = struct {
     uses: []const Use = &.{},
     enums: []const Enum = &.{},
     protocols: []const Protocol = &.{},
+    extensions: []const Extension = &.{},
     structures: []const Structure,
     functions: []const Function,
+};
+
+pub const Extension = struct {
+    position: Source.Position,
+    target: []const u8,
+    target_position: Source.Position,
+    methods: []const Function,
 };
 
 pub const Protocol = struct {
@@ -556,6 +564,8 @@ pub const Function = struct {
     member_visibility: ?MemberVisibility = null,
     is_override: bool = false,
     is_static: bool = false,
+    extension_visible_files: ?[]const usize = null,
+    extension_module_name: ?[]const u8 = null,
     position: Source.Position,
     name: []const u8,
     name_position: Source.Position,

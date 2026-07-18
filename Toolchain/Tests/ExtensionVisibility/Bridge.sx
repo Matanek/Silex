@@ -1,0 +1,8 @@
+import ExtensionVisibility.Core as Core
+import ExtensionVisibility.Extras as Extras
+use Core.Counter
+
+pub func advanced(value:int) int {
+    var counter = Counter(value:value)
+    return counter.bump()
+}

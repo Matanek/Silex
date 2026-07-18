@@ -1,0 +1,8 @@
+import ExtensionConflict.Core as Core
+use Core.Value
+
+extend Value {
+    pub func read() int {
+        return 2
+    }
+}

@@ -89,6 +89,7 @@ pub const Resolver = struct {
 
         var enums: std.ArrayList(Ast.Enum) = .empty;
         var protocols: std.ArrayList(Ast.Protocol) = .empty;
+        var extensions: std.ArrayList(Ast.Extension) = .empty;
         var structures: std.ArrayList(Ast.Structure) = .empty;
         var functions: std.ArrayList(Ast.Function) = .empty;
         for (order) |module_index| {
@@ -108,12 +109,67 @@ pub const Resolver = struct {
                 }
             }
         }
+        for (order) |module_index| {
+            for (self.file_infos) |file| {
+                if (file.module_index != module_index) continue;
+                for (file.program.extensions) |extension| {
+                    const transformed = try self.transformExtension(extension, file.module_index);
+                    try extensions.append(self.allocator, transformed);
+                    var found = false;
+                    for (structures.items) |*structure| {
+                        if (!std.mem.eql(u8, structure.name, transformed.target)) continue;
+                        if (structure.type_parameters.len != 0) {
+                            return self.fail(extension.target_position, "generic structures cannot be extended");
+                        }
+                        structure.methods = try appendFunctions(self.allocator, structure.methods, transformed.methods);
+                        found = true;
+                        break;
+                    }
+                    if (!found) return self.fail(extension.target_position, "only a struct or class can be extended");
+                }
+            }
+        }
         return .{
             .enums = try enums.toOwnedSlice(self.allocator),
             .protocols = try protocols.toOwnedSlice(self.allocator),
+            .extensions = try extensions.toOwnedSlice(self.allocator),
             .structures = try structures.toOwnedSlice(self.allocator),
             .functions = try functions.toOwnedSlice(self.allocator),
         };
+    }
+
+    fn transformExtension(self: *Resolver, extension: Ast.Extension, declaring_module_index: usize) !Ast.Extension {
+        const declaration = try self.resolveName(extension.position.file, extension.target, .structure, extension.target_position);
+        var methods: std.ArrayList(Ast.Function) = .empty;
+        for (extension.methods) |method| {
+            var transformed = try self.transformFunctionBody(method, method.name);
+            transformed.extension_visible_files = try self.extensionVisibleFiles(declaring_module_index, method.is_public);
+            transformed.extension_module_name = self.project.modules[declaring_module_index].name;
+            try methods.append(self.allocator, transformed);
+        }
+        var result = extension;
+        result.target = declaration.canonical_name;
+        result.methods = try methods.toOwnedSlice(self.allocator);
+        return result;
+    }
+
+    fn extensionVisibleFiles(self: *Resolver, declaring_module_index: usize, is_public: bool) ![]const usize {
+        var result: std.ArrayList(usize) = .empty;
+        for (self.file_infos) |file| {
+            var visible = file.module_index == declaring_module_index;
+            if (!visible and is_public) {
+                for (file.imports) |import_value| {
+                    if (import_value.module_index == declaring_module_index) {
+                        visible = true;
+                        break;
+                    }
+                }
+            }
+            if (visible) if (sourceFileIndex(file.program)) |file_index| {
+                try result.append(self.allocator, file_index);
+            };
+        }
+        return result.toOwnedSlice(self.allocator);
     }
 
     fn collectDeclarations(self: *Resolver) !void {
@@ -1733,6 +1789,24 @@ pub const Resolver = struct {
 
 fn pathHasQualifier(path: []const u8, qualifier: []const u8) bool {
     return path.len > qualifier.len and std.mem.startsWith(u8, path, qualifier) and path[qualifier.len] == '.';
+}
+
+fn sourceFileIndex(program: Ast.Program) ?usize {
+    if (program.imports.len != 0) return program.imports[0].position.file;
+    if (program.uses.len != 0) return program.uses[0].position.file;
+    if (program.enums.len != 0) return program.enums[0].position.file;
+    if (program.protocols.len != 0) return program.protocols[0].position.file;
+    if (program.extensions.len != 0) return program.extensions[0].position.file;
+    if (program.structures.len != 0) return program.structures[0].position.file;
+    if (program.functions.len != 0) return program.functions[0].position.file;
+    return null;
+}
+
+fn appendFunctions(allocator: Allocator, left: []const Ast.Function, right: []const Ast.Function) ![]const Ast.Function {
+    const result = try allocator.alloc(Ast.Function, left.len + right.len);
+    @memcpy(result[0..left.len], left);
+    @memcpy(result[left.len..], right);
+    return result;
 }
 
 fn lastSegment(path: []const u8) []const u8 {

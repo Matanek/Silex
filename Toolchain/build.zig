@@ -380,6 +380,20 @@ pub fn build(b: *std.Build) void {
     invalid_inheritance_cycle_command.expectExitCode(1);
     invalid_inheritance_cycle_command.expectStdErrEqual("Tests/InvalidInheritanceCycle.sx:1:7: error: inheritance cycle involving class 'First'\n");
 
+    const extension_visibility_command = b.addRunArtifact(executable);
+    extension_visibility_command.addArgs(&.{ "compile", "Tests/ExtensionVisibility/silex.json" });
+    extension_visibility_command.expectExitCode(1);
+    extension_visibility_command.expectStdErrEqual(
+        "Tests/ExtensionVisibility/Main.sx:7:13: error: struct 'ExtensionVisibility.Core.Counter' has no method 'bump'\n",
+    );
+
+    const extension_conflict_command = b.addRunArtifact(executable);
+    extension_conflict_command.addArgs(&.{ "compile", "Tests/ExtensionConflict/silex.json" });
+    extension_conflict_command.expectExitCode(1);
+    extension_conflict_command.expectStdErrEqual(
+        "Tests/ExtensionConflict/Second.sx:5:14: error: extension method 'read' from module 'ExtensionConflict.Second' conflicts with module 'ExtensionConflict.First' on type 'ExtensionConflict.Core.Value'\n",
+    );
+
     const invalid_private_super_constructor_command = b.addRunArtifact(executable);
     invalid_private_super_constructor_command.addArgs(&.{ "compile", "Tests/InvalidPrivateSuperConstructor.sx" });
     invalid_private_super_constructor_command.expectExitCode(1);
@@ -1284,7 +1298,7 @@ pub fn build(b: *std.Build) void {
         "silex: native compilation failed for target 'x86_64-linux-musl'; target support, SDKs, or native sources may be unavailable or incomplete\n",
     );
     backend_discovered_target_failure_command.expectStdErrMatch(b.fmt(
-        "silex: backend details: .silex{c}build{c}v35{c}x86_64-linux-musl{c}",
+        "silex: backend details: .silex{c}build{c}v36{c}x86_64-linux-musl{c}",
         .{
             std.fs.path.sep,
             std.fs.path.sep,
@@ -1670,6 +1684,8 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&invalid_class_default_variable_command.step);
     test_step.dependOn(&invalid_missing_class_constructor_command.step);
     test_step.dependOn(&invalid_inheritance_cycle_command.step);
+    test_step.dependOn(&extension_visibility_command.step);
+    test_step.dependOn(&extension_conflict_command.step);
     test_step.dependOn(&invalid_private_super_constructor_command.step);
     test_step.dependOn(&invalid_class_collection_covariance_command.step);
     test_step.dependOn(&invalid_private_class_field_command.step);
@@ -2012,8 +2028,13 @@ pub fn build(b: *std.Build) void {
     protocol_modules_command.addArgs(&.{ "run", "Smokes/ProtocolModules/silex.json" });
     protocol_modules_command.expectStdOutEqual(hostText(b, "remote\nlocal\n"));
 
+    const extension_modules_command = b.addRunArtifact(executable);
+    extension_modules_command.step.dependOn(&protocol_modules_command.step);
+    extension_modules_command.addArgs(&.{ "run", "Smokes/ExtensionModules/silex.json" });
+    extension_modules_command.expectStdOutEqual("");
+
     const type_aliases_command = b.addRunArtifact(executable);
-    type_aliases_command.step.dependOn(&protocol_modules_command.step);
+    type_aliases_command.step.dependOn(&extension_modules_command.step);
     type_aliases_command.addArgs(&.{ "run", "Smokes/TypeAliases.sx" });
     type_aliases_command.expectStdOutEqual(hostText(b, "6\n3\nAda\ntrue\n24\n"));
 

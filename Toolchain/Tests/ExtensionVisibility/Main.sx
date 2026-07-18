@@ -1,0 +1,8 @@
+import ExtensionVisibility.Core as Core
+import ExtensionVisibility.Bridge as Bridge
+use Core.Counter
+
+func main() {
+    var counter = Counter(value:0)
+    counter.bump()
+}

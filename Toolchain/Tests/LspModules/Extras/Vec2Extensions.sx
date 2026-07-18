@@ -1,0 +1,11 @@
+import Math
+
+extend Math.Vec2 {
+    pub func scaled() float {
+        return self.length_squared()
+    }
+
+    pub static func origin() Math.Vec2 {
+        return Math.Vec2()
+    }
+}

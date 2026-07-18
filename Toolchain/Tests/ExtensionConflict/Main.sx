@@ -1,0 +1,9 @@
+import ExtensionConflict.Core as Core
+import ExtensionConflict.First as First
+import ExtensionConflict.Second as Second
+use Core.Value
+
+func main() {
+    let value = Value()
+    print(value.read())
+}

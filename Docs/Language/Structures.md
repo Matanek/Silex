@@ -189,10 +189,11 @@ name. Static methods cannot be selected through a value, extracted as function
 values, reached with `?.`, or called after `..`. Conversely, an instance method
 cannot be selected through a type.
 
-Custom structure constructors, structure inheritance, extensions, and partial
-declarations are not part of the current prototype. A structure may list only
-protocol conformances after `:`. Shared-identity types are declared with
-`class`; see [Classes](Classes.md). Static and instance methods
+Custom structure constructors, structure inheritance, and partial declarations
+are not part of the current prototype. A structure may list only protocol
+conformances after `:`. Methods can be added without changing its representation
+through [type extensions](Extensions.md). Shared-identity types are declared
+with `class`; see [Classes](Classes.md). Static and instance methods
 can each be overloaded by parameter count, type, or `&` passing; see
 [Functions](Functions.md).
 

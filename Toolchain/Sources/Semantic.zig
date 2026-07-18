@@ -524,6 +524,7 @@ pub const Method = struct {
     visibility: Ast.MemberVisibility,
     is_override: bool,
     is_static: bool,
+    is_extension: bool,
 };
 
 pub const MethodId = struct {
@@ -669,6 +670,8 @@ const MethodSymbol = struct {
     visibility: Ast.MemberVisibility,
     is_override: bool,
     is_static: bool,
+    extension_visible_files: ?[]const usize,
+    extension_module_name: ?[]const u8,
     direct_mutation: bool = false,
     dependencies: []const MethodId = &.{},
     is_mutating: bool = false,
@@ -684,6 +687,16 @@ fn methodCandidatesContainSlot(candidates: []const MethodCandidate, generated_na
     for (candidates) |candidate| {
         if (std.mem.eql(u8, candidate.symbol.generated_name, generated_name)) return true;
     }
+    return false;
+}
+
+fn fileSetContains(files: []const usize, target: usize) bool {
+    for (files) |file| if (file == target) return true;
+    return false;
+}
+
+fn fileSetsOverlap(left: []const usize, right: []const usize) bool {
+    for (left) |file| if (fileSetContains(right, file)) return true;
     return false;
 }
 
@@ -731,6 +744,7 @@ pub const Analyzer = struct {
     current_constructor: bool = false,
     current_drop: bool = false,
     current_method_static: bool = false,
+    current_extension: bool = false,
     current_method_direct_mutation: bool = false,
     current_method_dependencies: std.ArrayList(MethodId) = .empty,
     current_self_state: BindingState = .{},
@@ -1103,8 +1117,21 @@ pub const Analyzer = struct {
                         existing.parameter_is_mutable_references,
                         parameter_types.items,
                         parameter_is_mutable_references.items,
-                    )) {
-                        const message = try std.fmt.allocPrint(self.allocator, "method '{s}' with this signature is already declared in {s} '{s}'", .{ ast_method.name, if (ast_structure.is_class) "class" else "struct", ast_structure.name });
+                    )) duplicate: {
+                        const existing_extension = existing.extension_visible_files;
+                        const current_extension = ast_method.extension_visible_files;
+                        if (existing_extension != null and current_extension != null and
+                            !fileSetsOverlap(existing_extension.?, current_extension.?)) break :duplicate;
+                        const message = if (existing_extension != null and current_extension != null)
+                            try std.fmt.allocPrint(
+                                self.allocator,
+                                "extension method '{s}' from module '{s}' conflicts with module '{s}' on type '{s}'",
+                                .{ ast_method.name, ast_method.extension_module_name.?, existing.extension_module_name.?, ast_structure.name },
+                            )
+                        else if (existing_extension != null or current_extension != null)
+                            try std.fmt.allocPrint(self.allocator, "extension method '{s}' conflicts with an existing method signature on type '{s}'", .{ ast_method.name, ast_structure.name })
+                        else
+                            try std.fmt.allocPrint(self.allocator, "method '{s}' with this signature is already declared in {s} '{s}'", .{ ast_method.name, if (ast_structure.is_class) "class" else "struct", ast_structure.name });
                         return self.fail(ast_method.name_position, message);
                     }
                 }
@@ -1124,6 +1151,8 @@ pub const Analyzer = struct {
                     .visibility = ast_method.member_visibility.?,
                     .is_override = ast_method.is_override,
                     .is_static = ast_method.is_static,
+                    .extension_visible_files = ast_method.extension_visible_files,
+                    .extension_module_name = ast_method.extension_module_name,
                 });
             }
             self.structures.items[structure_index].methods = try methods.toOwnedSlice(self.allocator);
@@ -1232,6 +1261,7 @@ pub const Analyzer = struct {
         while (structure_index) |index| {
             const structure = self.structures.items[index];
             for (structure.methods, 0..) |method_symbol, method_index| {
+                if (method_symbol.extension_visible_files != null) continue;
                 if (method_symbol.is_static or method_symbol.visibility != .public_access) continue;
                 if (!std.mem.eql(u8, method_symbol.source_name, requirement.source_name)) continue;
                 if (!sameSignature(
@@ -1326,6 +1356,7 @@ pub const Analyzer = struct {
         }
 
         for (self.structures.items[structure_index].methods, 0..) |method_symbol, method_index| {
+            if (method_symbol.extension_visible_files != null) continue;
             if (method_symbol.is_static) continue;
             var inherited: ?MethodCandidate = null;
             var private_match = false;
@@ -1333,6 +1364,7 @@ pub const Analyzer = struct {
             while (base_index) |index| {
                 const base = self.structures.items[index];
                 for (base.methods, 0..) |base_method, base_method_index| {
+                    if (base_method.extension_visible_files != null) continue;
                     if (base_method.is_static) continue;
                     if (!std.mem.eql(u8, method_symbol.source_name, base_method.source_name) or !sameSignature(
                         method_symbol.parameter_types,
@@ -1483,6 +1515,7 @@ pub const Analyzer = struct {
     fn validateStructureDefaults(self: *Analyzer) AnalyzeError!void {
         self.current_structure_index = null;
         self.current_method_index = null;
+        self.current_extension = false;
         var empty_scope = Scope{ .parent = null, .depth = 0 };
         for (self.structures.items) |*structure| {
             for (structure.fields) |*field| {
@@ -1571,6 +1604,7 @@ pub const Analyzer = struct {
         self.current_constructor = false;
         self.current_drop = false;
         self.current_method_static = false;
+        self.current_extension = false;
         self.current_self_state = .{};
         self.loop_depth = 0;
         var scope = Scope{ .parent = null, .depth = 1 };
@@ -1623,6 +1657,7 @@ pub const Analyzer = struct {
         self.current_constructor = false;
         self.current_drop = false;
         self.current_method_static = symbol.is_static;
+        self.current_extension = symbol.extension_visible_files != null;
         self.current_method_direct_mutation = false;
         self.current_method_dependencies = .empty;
         self.current_self_state = .{};
@@ -1673,6 +1708,7 @@ pub const Analyzer = struct {
             .visibility = symbol.visibility,
             .is_override = symbol.is_override,
             .is_static = symbol.is_static,
+            .is_extension = symbol.extension_visible_files != null,
         };
     }
 
@@ -1687,6 +1723,7 @@ pub const Analyzer = struct {
         self.current_constructor = true;
         self.current_drop = false;
         self.current_method_static = false;
+        self.current_extension = false;
         defer self.current_constructor = false;
         self.current_method_direct_mutation = false;
         self.current_method_dependencies = .empty;
@@ -1743,6 +1780,7 @@ pub const Analyzer = struct {
         self.current_constructor = false;
         self.current_drop = true;
         self.current_method_static = false;
+        self.current_extension = false;
         defer self.current_drop = false;
         self.current_method_direct_mutation = false;
         self.current_method_dependencies = .empty;
@@ -3477,12 +3515,15 @@ pub const Analyzer = struct {
             const declaring_structure = self.structures.items[index];
             for (declaring_structure.methods, 0..) |method_symbol, method_index| {
                 if (std.mem.eql(u8, method_symbol.source_name, call.name)) {
+                    if (method_symbol.extension_visible_files) |visible_files| {
+                        if (index != structure_index or !fileSetContains(visible_files, call.name_position.file)) continue;
+                    }
                     if (method_symbol.is_static) {
                         if (index == structure_index) static_match = true;
                         continue;
                     }
                     const candidate = MethodCandidate{ .symbol = method_symbol, .structure_index = index, .index = method_index };
-                    if (self.memberVisibleFromCurrentContext(index, method_symbol.visibility)) {
+                    if (method_symbol.extension_visible_files != null or self.memberVisibleFromCurrentContext(index, method_symbol.visibility)) {
                         if (!methodCandidatesContainSlot(candidates.items, method_symbol.generated_name)) try candidates.append(self.allocator, candidate);
                     } else {
                         inaccessible = candidate;
@@ -3677,12 +3718,15 @@ pub const Analyzer = struct {
         var instance_match = false;
         for (structure.methods, 0..) |method_symbol, method_index| {
             if (!std.mem.eql(u8, method_symbol.source_name, call.name)) continue;
+            if (method_symbol.extension_visible_files) |visible_files| {
+                if (!fileSetContains(visible_files, call.name_position.file)) continue;
+            }
             if (!method_symbol.is_static) {
                 instance_match = true;
                 continue;
             }
             const candidate = MethodCandidate{ .symbol = method_symbol, .structure_index = structure_index, .index = method_index };
-            if (self.memberVisibleFromCurrentContext(structure_index, method_symbol.visibility)) {
+            if (method_symbol.extension_visible_files != null or self.memberVisibleFromCurrentContext(structure_index, method_symbol.visibility)) {
                 try candidates.append(self.allocator, candidate);
             } else {
                 inaccessible = candidate;
@@ -3921,6 +3965,7 @@ pub const Analyzer = struct {
         scope: *const Scope,
     ) AnalyzeError!*Expression {
         if (call.named_fields != null) return self.fail(call.name_position, "'super' method calls do not accept named arguments");
+        if (self.current_extension) return self.fail(call.position, "'super' is not available in an extension method");
         if (self.current_method_static) return self.fail(call.position, "'super' is not available inside a static method");
         const structure_index = self.current_structure_index orelse return self.fail(call.position, "'super' is only available inside a class method");
         if (self.current_method_index == null or self.current_constructor) return self.fail(call.position, "'super.method(...)' is only available inside a class method");
@@ -3934,6 +3979,7 @@ pub const Analyzer = struct {
         while (declaring_index) |index| {
             const declaring_structure = self.structures.items[index];
             for (declaring_structure.methods, 0..) |method_symbol, method_index| {
+                if (method_symbol.extension_visible_files != null) continue;
                 if (method_symbol.is_static) continue;
                 if (!std.mem.eql(u8, method_symbol.source_name, call.name)) continue;
                 const candidate = MethodCandidate{ .symbol = method_symbol, .structure_index = index, .index = method_index };
@@ -4692,6 +4738,7 @@ pub const Analyzer = struct {
         structure_index: usize,
         visibility: Ast.MemberVisibility,
     ) bool {
+        if (self.current_extension) return visibility == .public_access;
         const current_index = self.current_structure_index orelse return visibility == .public_access;
         return self.memberVisibleFrom(current_index, structure_index, visibility);
     }
@@ -7163,6 +7210,44 @@ test "analyze dynamic protocol values and reject values outside their contract" 
         \\struct Icon : Drawable { func draw() {} }
         \\func main() { var drawable:Drawable = Icon(); drawable.save() }
     , "protocol 'Drawable' has no method 'save'");
+}
+
+test "analyze local type extensions with mutation and static methods" {
+    try expectSemanticSuccess(
+        \\struct Counter { var value:int }
+        \\extend Counter {
+        \\    func increment() int { self.value += 1; return self.value }
+        \\    pub static func zero() Counter { return Counter(value:0) }
+        \\}
+        \\func main() {
+        \\    var counter = Counter.zero()
+        \\    assert(counter.increment() == 1, "extension mutation")
+        \\}
+    );
+}
+
+test "extensions use only public members and do not participate in inheritance" {
+    try expectResolvedSemanticError(
+        \\class Vault { var secret:int; pub init() { self.secret = 1 } }
+        \\extend Vault { pub func reveal() int { return self.secret } }
+        \\func main() {}
+    , "field 'secret' is private in class 'Vault'");
+    try expectResolvedSemanticError(
+        \\class Entity { sub func hidden() {} }
+        \\extend Entity { pub func expose() { self.hidden() } }
+        \\func main() {}
+    , "method 'hidden' is accessible only from class 'Entity' and its descendants");
+    try expectResolvedSemanticError(
+        \\class Entity {}
+        \\extend Entity { pub func ping() {} }
+        \\class Player : Entity {}
+        \\func main() { var player = Player(); player.ping() }
+    , "class 'Player' has no method 'ping'");
+    try expectResolvedSemanticError(
+        \\struct Value { func read() int { return 1 } }
+        \\extend Value { pub func read() int { return 2 } }
+        \\func main() {}
+    , "extension method 'read' conflicts with an existing method signature on type 'Value'");
 }
 
 test "native ABI rejects optional returns" {

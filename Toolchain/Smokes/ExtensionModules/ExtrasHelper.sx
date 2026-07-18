@@ -1,0 +1,7 @@
+import ExtensionChecks.Core as Core
+
+use Core.Counter
+
+pub func advance(counter:&Counter) int {
+    return counter.step()
+}

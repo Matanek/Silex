@@ -1,0 +1,17 @@
+{
+  "target": "ExtensionChecks.App",
+  "modules": [
+    {
+      "name": "ExtensionChecks.Core",
+      "sources": ["Core.sx"]
+    },
+    {
+      "name": "ExtensionChecks.Extras",
+      "sources": ["Extras.sx", "ExtrasHelper.sx"]
+    },
+    {
+      "name": "ExtensionChecks.App",
+      "sources": ["Main.sx"]
+    }
+  ]
+}

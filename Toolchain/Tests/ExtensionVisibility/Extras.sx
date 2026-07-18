@@ -1,0 +1,9 @@
+import ExtensionVisibility.Core as Core
+use Core.Counter
+
+extend Counter {
+    pub func bump() int {
+        self.value += 1
+        return self.value
+    }
+}

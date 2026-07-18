@@ -479,6 +479,9 @@ fn signatureHelpItems(
     for (program.structures) |structure| for (structure.methods) |method| {
         if (std.mem.eql(u8, method.name, name)) try appendSignatureHelp(allocator, &result, method);
     };
+    for (program.extensions) |extension| for (extension.methods) |method| {
+        if (std.mem.eql(u8, method.name, name)) try appendSignatureHelp(allocator, &result, method);
+    };
     return result.toOwnedSlice(allocator);
 }
 
@@ -1214,6 +1217,7 @@ fn collectSemanticInfo(
     try collectLocalTypeAliases(allocator, tokens, info);
     try collectLocalEnums(allocator, tokens, info);
     try collectLocalProtocolsAndConstraints(allocator, source, tokens, info);
+    try collectLocalExtensions(allocator, tokens, info);
     var index: usize = 0;
     while (index < tokens.len) : (index += 1) {
         if ((tokens[index].tag == .keyword_struct or tokens[index].tag == .keyword_class) and
@@ -1378,6 +1382,57 @@ fn collectSemanticInfo(
 
         if (tokens[index].tag == .keyword_func) {
             try collectParameters(allocator, source, tokens, index, &info.variables);
+        }
+    }
+}
+
+fn collectLocalExtensions(
+    allocator: Allocator,
+    tokens: []const LexerModule.Token,
+    info: *SemanticInfo,
+) !void {
+    for (tokens, 0..) |token, index| {
+        if (token.tag != .keyword_extend or index + 2 >= tokens.len) continue;
+        var target_index = index + 1;
+        var target_name: ?[]const u8 = null;
+        while (target_index < tokens.len and tokens[target_index].tag != .left_brace) : (target_index += 1) {
+            if (tokens[target_index].tag == .identifier) target_name = tokens[target_index].lexeme;
+        }
+        if (target_name == null or target_index >= tokens.len) continue;
+
+        var depth: usize = 0;
+        var member_index = target_index;
+        while (member_index < tokens.len) : (member_index += 1) {
+            switch (tokens[member_index].tag) {
+                .left_brace => depth += 1,
+                .right_brace => {
+                    if (depth == 0) break;
+                    depth -= 1;
+                    if (depth == 0) break;
+                },
+                else => {},
+            }
+            if (depth != 1) continue;
+
+            var declaration_index = member_index;
+            if (tokens[declaration_index].tag == .keyword_pub) declaration_index += 1;
+            var is_static = false;
+            if (declaration_index < tokens.len and tokens[declaration_index].tag == .keyword_static) {
+                is_static = true;
+                declaration_index += 1;
+            }
+            if (declaration_index + 1 >= tokens.len or tokens[declaration_index].tag != .keyword_func or
+                tokens[declaration_index + 1].tag != .identifier) continue;
+            try info.members.append(allocator, .{
+                .structure = target_name.?,
+                .name = tokens[declaration_index + 1].lexeme,
+                .type_name = if (is_static) methodReturnType(tokens, declaration_index) else null,
+                .kind = 2,
+                .detail = "Silex extension method",
+                .visibility = .public_access,
+                .is_static = is_static,
+            });
+            member_index = declaration_index + 1;
         }
     }
 }
@@ -1919,6 +1974,24 @@ fn collectPublicStructureMembers(
     program: Ast.Program,
     info: *SemanticInfo,
 ) !void {
+    for (program.extensions) |extension| {
+        for (extension.methods) |method| {
+            if (!method.is_public) continue;
+            try info.members.append(allocator, .{
+                .structure = lastPathSegment(extension.target),
+                .name = method.name,
+                .type_name = if (method.is_static) switch (method.return_type) {
+                    .structure => |name| lastPathSegment(name),
+                    .generic_structure => |generic| lastPathSegment(generic.name),
+                    else => null,
+                } else null,
+                .kind = 2,
+                .detail = "Silex module extension method",
+                .visibility = .public_access,
+                .is_static = method.is_static,
+            });
+        }
+    }
     for (program.protocols) |protocol| {
         if (!protocol.is_public) continue;
         try info.protocols.append(allocator, protocol.name);
@@ -2519,6 +2592,7 @@ const language_completions = [_]CompletionItem{
     .{ .label = "struct", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "class", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "protocol", .kind = 14, .detail = "Silex keyword" },
+    .{ .label = "extend", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "enum", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "init", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "drop", .kind = 14, .detail = "Silex keyword" },
@@ -2571,6 +2645,7 @@ test "completion items include language terms and document identifiers" {
     try std.testing.expect(containsCompletion(items, "func"));
     try std.testing.expect(containsCompletion(items, "class"));
     try std.testing.expect(containsCompletion(items, "protocol"));
+    try std.testing.expect(containsCompletion(items, "extend"));
     try std.testing.expect(containsCompletion(items, "enum"));
     try std.testing.expect(containsCompletion(items, "init"));
     try std.testing.expect(containsCompletion(items, "drop"));
@@ -2621,6 +2696,56 @@ test "protocol value completion exposes only protocol requirements" {
     try std.testing.expect(containsCompletion(items, "draw"));
     try std.testing.expect(!containsCompletion(items, "jump"));
     try std.testing.expect(!containsCompletion(items, "score"));
+}
+
+test "local extension completion augments an imported STD type" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source =
+        \\import STD.Random as Random
+        \\use STD.Random.Generator as Generator
+        \\extend Generator {
+        \\    pub func get_uint() uint { return self.get_int() as uint }
+        \\    static func seeded() Generator { return Random.create(42) }
+        \\}
+        \\func main() {
+        \\    var generator:Generator
+        \\    generator.
+        \\}
+    ;
+    const items = try completionItems(
+        arena.allocator(),
+        std.testing.io,
+        source,
+        .{ .line = 8, .character = 14 },
+    );
+    try std.testing.expect(containsCompletion(items, "get_int"));
+    try std.testing.expect(containsCompletion(items, "get_uint"));
+    try std.testing.expect(!containsCompletion(items, "seeded"));
+}
+
+test "direct module import activates public extension completion" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const source =
+        \\import Math
+        \\import Extras
+        \\func main() {
+        \\    var vector = Math.Vec2()
+        \\    vector.
+        \\}
+    ;
+    const items = try completionItemsForProject(
+        allocator,
+        std.testing.io,
+        source,
+        "Tests/LspModules",
+        .{ .line = 4, .character = 11 },
+    );
+    try std.testing.expect(containsCompletion(items, "length_squared"));
+    try std.testing.expect(containsCompletion(items, "scaled"));
+    try std.testing.expect(!containsCompletion(items, "origin"));
 }
 
 test "import completion recognizes only the module path context" {

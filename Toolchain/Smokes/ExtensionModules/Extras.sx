@@ -1,0 +1,25 @@
+import ExtensionChecks.Core as Core
+
+use Core.Counter
+use Core.Box
+
+extend Counter {
+    func step() int {
+        self.value += 1
+        return self.value
+    }
+
+    pub func bump() int {
+        return self.step()
+    }
+
+    pub static func start(value:int) Counter {
+        return Counter(value:value)
+    }
+}
+
+extend Box {
+    pub func doubled() int {
+        return self.value * 2
+    }
+}

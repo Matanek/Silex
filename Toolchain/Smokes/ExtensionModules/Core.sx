@@ -1,0 +1,11 @@
+pub struct Counter {
+    var value:int
+}
+
+pub class Box {
+    pub var value:int
+
+    pub init(value:int) {
+        self.value = value
+    }
+}
