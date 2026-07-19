@@ -76,8 +76,8 @@ pub fn build(b: *std.Build) void {
     });
     console_session_test_module.addCSourceFiles(.{
         .files = &.{
-            "../Library/STD/Console.cpp",
-            "../Library/STD/ConsoleSession.cpp",
+            "../Library/STD/Console/Console.cpp",
+            "../Library/STD/Console/Session.cpp",
         },
         .flags = &.{ "-std=c++23", "-Wall", "-Wextra", "-Werror" },
     });
