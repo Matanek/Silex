@@ -4,7 +4,7 @@
 canonical line input, and immediate keyboard sessions.
 
 ```sx
-use STD.Console as Console
+use STD.Console
 
 Console.write("Name: ")
 if name = Console.read_line() {
@@ -52,7 +52,7 @@ process. In this mode, `Ctrl+C` is returned as a key event rather than sent as
 an interruption signal.
 
 ```sx
-use STD.Console as Console
+use STD.Console
 
 var session = Console.Session.create()
 session.enter_alternate_screen()

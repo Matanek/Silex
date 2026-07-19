@@ -37,6 +37,11 @@ const QualifiedCompletionContext = struct {
     type_only: bool,
 };
 
+const ModuleExportScope = enum {
+    public_api,
+    use_path,
+};
+
 const DeclaredMember = struct {
     structure: []const u8,
     name: []const u8,
@@ -270,6 +275,7 @@ const Server = struct {
                                 uri,
                                 module_path,
                                 context,
+                                .public_api,
                             );
                         }
                     }
@@ -784,6 +790,7 @@ fn moduleExportCompletionItems(
     uri: []const u8,
     module_path: []const u8,
     context: QualifiedCompletionContext,
+    scope: ModuleExportScope,
 ) ![]const CompletionItem {
     const source_path = try filePathFromUri(allocator, uri) orelse
         return try allocator.alloc(CompletionItem, 0);
@@ -819,7 +826,7 @@ fn moduleExportCompletionItems(
 
     for (source_names.items) |source_name| {
         const unit_name = source_name[0 .. source_name.len - ".sx".len];
-        if (std.mem.startsWith(u8, unit_name, context.prefix)) try appendModuleExportCompletion(
+        if (scope == .use_path and std.mem.startsWith(u8, unit_name, context.prefix)) try appendModuleExportCompletion(
             allocator,
             &items,
             context.qualifier,
@@ -1008,6 +1015,7 @@ fn useCompletionItems(
                 .prefix = prefix[separator + 1 ..],
                 .type_only = false,
             },
+            .use_path,
         );
         for (exports) |candidate| {
             var duplicate = false;
@@ -3049,6 +3057,7 @@ test "standard library modules and exports complete" {
         uri,
         "STD",
         .{ .qualifier = "STD", .prefix = "R", .type_only = false },
+        .use_path,
     );
     try std.testing.expect(containsCompletion(exports, "STD.Randomizer"));
     try std.testing.expect(!containsCompletion(exports, "STD.Random"));
@@ -3059,10 +3068,35 @@ test "standard library modules and exports complete" {
         uri,
         "STD.Time",
         .{ .qualifier = "STD.Time", .prefix = "", .type_only = false },
+        .use_path,
     );
     try std.testing.expect(containsCompletion(time_exports, "STD.Time.Clock"));
     try std.testing.expect(containsCompletion(time_exports, "STD.Time.Internal"));
     try std.testing.expect(containsCompletion(time_exports, "STD.Time.Stopwatch"));
+
+    const console_api = try moduleExportCompletionItems(
+        allocator,
+        std.testing.io,
+        uri,
+        "STD.Console",
+        .{ .qualifier = "Console", .prefix = "", .type_only = false },
+        .public_api,
+    );
+    try std.testing.expect(!containsCompletion(console_api, "Console.Console"));
+    const session = findCompletion(console_api, "Console.Session").?;
+    try std.testing.expectEqualStrings("Silex public structure", session.detail);
+
+    const console_uses = try moduleExportCompletionItems(
+        allocator,
+        std.testing.io,
+        uri,
+        "STD.Console",
+        .{ .qualifier = "STD.Console", .prefix = "", .type_only = false },
+        .use_path,
+    );
+    try std.testing.expect(containsCompletion(console_uses, "STD.Console.Console"));
+    const session_unit = findCompletion(console_uses, "STD.Console.Session").?;
+    try std.testing.expectEqualStrings("Silex source unit", session_unit.detail);
 
     const static_source =
         \\use STD
@@ -3681,6 +3715,7 @@ test "enum completion resolves public used types and module exports" {
         "file:///Users/nekmata/Projects/Silex/Repository/Toolchain/Tests/LspModules/Main.sx",
         "Geometry",
         .{ .qualifier = "Geometry", .prefix = "Direction", .type_only = true },
+        .public_api,
     );
     try std.testing.expect(containsCompletion(exports, "Geometry.Direction"));
     try std.testing.expect(containsCompletion(exports, "Geometry.DirectionName"));
