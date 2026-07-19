@@ -128,7 +128,9 @@ section. A standalone main source cannot declare native functions, and
 `pub native func` is invalid. Native function names begin with `native_`.
 
 Their ABI is intentionally narrow: scalar booleans and numbers may be passed
-or returned, and `str` may be passed or returned. A string parameter is passed
+or returned, and `str` may be passed or returned. `uint8[]` and `uint8[N]` are
+the only collection parameters; an owned `uint8[]` is the only collection
+return. A string parameter is passed
 as UTF-8 bytes and a byte length; the native runtime must neither retain nor
 modify its byte view. A string return uses two output parameters after the
 ordinary parameters:
@@ -147,9 +149,9 @@ may use `nullptr` with length zero. A negative length, or a null pointer with a
 positive length, is a runtime error naming the native function. The bridge
 also rejects invalid UTF-8 with `returned invalid UTF-8`; it frees the buffer
 on every valid and invalid return path. Embedded null bytes are preserved, so
-the length—not C string termination—defines the result. Collections,
-references, pointers, callbacks, `Result` parameters, and other non-transferable
-values remain unavailable in native-function signatures. Silex derives the C symbol
+the length—not C string termination—defines the result. References, pointers,
+`Result` parameters, and other non-transferable values remain unavailable in
+native-function signatures. Silex derives the C symbol
 from the module and function name, so a native runtime never chooses an
 arbitrary C symbol.
 
@@ -202,8 +204,8 @@ free it. An empty sequence has length zero and may use a null pointer. Silex may
 borrow its collection storage or materialize a temporary copy; neither choice
 is observable and the caller's sequence remains unchanged.
 
-Only these two input types are admitted: `uint8[]` and `uint8[N]`. Other list
-or array element types, mutable buffers, collection returns, general slices,
+Only these two collection parameter types are admitted: `uint8[]` and
+`uint8[N]`. Other list or array element types, mutable buffers, general slices,
 and pointers visible in `.sx` remain outside the native ABI.
 
 A native function may return an owned `uint8[]`. Its C symbol returns `void`
@@ -214,9 +216,9 @@ copies exactly `output_length` bytes into a new, independent list, then calls
 bytes and every byte value remain intact. An empty result may use a null pointer
 and zero length. A negative length, or a null pointer with a positive length,
 is a fatal native contract violation after the bridge has released the output.
-Only the dynamic `uint8[]` return has this ABI: fixed arrays, other element
-types, nested collections, optional byte lists, caller-owned mutation, and
-adoption without a copy remain unavailable.
+Only the dynamic `uint8[]` collection return has this ABI: fixed arrays, other
+element types, nested collections, optional byte lists, caller-owned mutation,
+and adoption without a copy remain unavailable.
 
 A native function may receive a synchronous callback whose parameters and return
 are `void` or scalar numeric and boolean values. For `func(int) bool`, the C
@@ -297,12 +299,17 @@ segment, so a C or C++ implementation of `STD.Console` includes:
 ```
 
 The generated header has ordinary C types from `<stdbool.h>` and `<stdint.h>`,
-includes guards, and a C++-protected `extern "C"` block. It contains the exact
-symbols and scalar, string, optional-return, or flat-structure ABI above, never
-generated-program types, `std::string`, or project paths. Its include root is
-supplied automatically to the native runtime that implements the module. A C++
-definition that disagrees with a generated declaration therefore fails while
-compiling that runtime.
+include guards, and a C++-protected `extern "C"` block. It contains the exact
+symbols and every admitted ABI above: scalars, strings, flat structures,
+optional and `Result` returns, byte views and returns, and synchronous callback
+pairs. It never contains generated-program types, `std::string`, or project
+paths. Its include root is supplied automatically to the native runtime that
+implements the module. A C++ definition that disagrees with a declaration
+fails while compiling its runtime when that translation unit includes the
+generated header. The distributed runtimes do so explicitly: `STD` uses
+`<SilexNative/STD.h>`, `STD.Time` uses
+`<SilexNative/STD/Time.h>`, and `STD.Console` uses
+`<SilexNative/STD/Console.h>`.
 
 All arguments, return values, and return paths are checked statically. A
 non-void function must return a compatible value on every path. A void function

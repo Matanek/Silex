@@ -72,14 +72,14 @@ pub fn build(b: *std.Build) void {
     });
     console_session_test_module.addCSourceFile(.{
         .file = b.path("Tests/ConsoleSessionIntegration.cpp"),
-        .flags = &.{ "-std=c++23", "-Wall", "-Wextra", "-Werror" },
+        .flags = &.{ "-std=c++23", "-Wall", "-Wextra", "-Werror", "-DSILEX_CONSOLE_STANDALONE_TEST" },
     });
     console_session_test_module.addCSourceFiles(.{
         .files = &.{
             "../Library/STD/Console/Console.cpp",
             "../Library/STD/Console/Session.cpp",
         },
-        .flags = &.{ "-std=c++23", "-Wall", "-Wextra", "-Werror" },
+        .flags = &.{ "-std=c++23", "-Wall", "-Wextra", "-Werror", "-DSILEX_CONSOLE_STANDALONE_TEST" },
     });
     if (target.result.os.tag == .linux) {
         console_session_test_module.linkSystemLibrary("util", .{});
@@ -2657,8 +2657,23 @@ pub fn build(b: *std.Build) void {
     console_smoke_command.expectStdOutEqual(hostText(b, "write: line\n\nfalse\ntrue\n"));
     console_smoke_command.expectStdErrEqual(hostText(b, "error: line\n"));
 
+    const isolated_std_smoke_command = b.addRunArtifact(executable);
+    isolated_std_smoke_command.step.dependOn(&console_smoke_command.step);
+    isolated_std_smoke_command.addArgs(&.{ "run", "Smokes/IsolatedSTD/Main.sx" });
+    isolated_std_smoke_command.expectStdOutEqual(hostText(b, "true\n"));
+
+    const isolated_time_smoke_command = b.addRunArtifact(executable);
+    isolated_time_smoke_command.step.dependOn(&isolated_std_smoke_command.step);
+    isolated_time_smoke_command.addArgs(&.{ "run", "Smokes/IsolatedTime/Main.sx" });
+    isolated_time_smoke_command.expectStdOutEqual(hostText(b, "true\n"));
+
+    const isolated_console_smoke_command = b.addRunArtifact(executable);
+    isolated_console_smoke_command.step.dependOn(&isolated_time_smoke_command.step);
+    isolated_console_smoke_command.addArgs(&.{ "run", "Smokes/IsolatedConsole/Main.sx" });
+    isolated_console_smoke_command.expectStdOutEqual(hostText(b, "false\n"));
+
     const console_negative_coordinates_command = b.addRunArtifact(executable);
-    console_negative_coordinates_command.step.dependOn(&console_smoke_command.step);
+    console_negative_coordinates_command.step.dependOn(&isolated_console_smoke_command.step);
     console_negative_coordinates_command.addArgs(&.{ "run", "Smokes/Console/NegativeCoordinates.sx" });
     console_negative_coordinates_command.expectExitCode(1);
     console_negative_coordinates_command.expectStdErrMatch("runtime error: Console.move_cursor requires non-negative coordinates\n");
@@ -3270,11 +3285,53 @@ pub fn build(b: *std.Build) void {
         ".silex/cross-native-smoke/Console-x86_64-windows.exe",
     });
 
+    const cross_isolated_std_linux_smoke_command = b.addRunArtifact(executable);
+    cross_isolated_std_linux_smoke_command.step.dependOn(&cross_console_windows_smoke_command.step);
+    cross_isolated_std_linux_smoke_command.addArgs(&.{
+        "compile", "Smokes/IsolatedSTD/Main.sx",                         "--target", "x86_64-linux-musl",
+        "-o",      ".silex/cross-native-smoke/IsolatedSTD-x86_64-linux",
+    });
+
+    const cross_isolated_std_windows_smoke_command = b.addRunArtifact(executable);
+    cross_isolated_std_windows_smoke_command.step.dependOn(&cross_isolated_std_linux_smoke_command.step);
+    cross_isolated_std_windows_smoke_command.addArgs(&.{
+        "compile", "Smokes/IsolatedSTD/Main.sx",                               "--target", "x86_64-windows-gnu",
+        "-o",      ".silex/cross-native-smoke/IsolatedSTD-x86_64-windows.exe",
+    });
+
+    const cross_isolated_time_linux_smoke_command = b.addRunArtifact(executable);
+    cross_isolated_time_linux_smoke_command.step.dependOn(&cross_isolated_std_windows_smoke_command.step);
+    cross_isolated_time_linux_smoke_command.addArgs(&.{
+        "compile", "Smokes/IsolatedTime/Main.sx",                         "--target", "x86_64-linux-musl",
+        "-o",      ".silex/cross-native-smoke/IsolatedTime-x86_64-linux",
+    });
+
+    const cross_isolated_time_windows_smoke_command = b.addRunArtifact(executable);
+    cross_isolated_time_windows_smoke_command.step.dependOn(&cross_isolated_time_linux_smoke_command.step);
+    cross_isolated_time_windows_smoke_command.addArgs(&.{
+        "compile", "Smokes/IsolatedTime/Main.sx",                               "--target", "x86_64-windows-gnu",
+        "-o",      ".silex/cross-native-smoke/IsolatedTime-x86_64-windows.exe",
+    });
+
+    const cross_isolated_console_linux_smoke_command = b.addRunArtifact(executable);
+    cross_isolated_console_linux_smoke_command.step.dependOn(&cross_isolated_time_windows_smoke_command.step);
+    cross_isolated_console_linux_smoke_command.addArgs(&.{
+        "compile", "Smokes/IsolatedConsole/Main.sx",                         "--target", "x86_64-linux-musl",
+        "-o",      ".silex/cross-native-smoke/IsolatedConsole-x86_64-linux",
+    });
+
+    const cross_isolated_console_windows_smoke_command = b.addRunArtifact(executable);
+    cross_isolated_console_windows_smoke_command.step.dependOn(&cross_isolated_console_linux_smoke_command.step);
+    cross_isolated_console_windows_smoke_command.addArgs(&.{
+        "compile", "Smokes/IsolatedConsole/Main.sx",                               "--target", "x86_64-windows-gnu",
+        "-o",      ".silex/cross-native-smoke/IsolatedConsole-x86_64-windows.exe",
+    });
+
     const cross_native_smoke_step = b.step(
         "cross-native-smoke",
         "Cross-compile the native source smoke program for x86_64 Linux",
     );
-    cross_native_smoke_step.dependOn(&cross_console_windows_smoke_command.step);
+    cross_native_smoke_step.dependOn(&cross_isolated_console_windows_smoke_command.step);
 
     const distribution_options = b.addOptions();
     distribution_options.addOption([]const u8, "silex_version", silex_version);

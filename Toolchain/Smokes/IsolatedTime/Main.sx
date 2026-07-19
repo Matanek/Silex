@@ -1,0 +1,7 @@
+use STD.Time.Stopwatch as Stopwatch
+
+func main() {
+    var stopwatch = Stopwatch()
+    stopwatch.start()
+    print(stopwatch.is_running())
+}

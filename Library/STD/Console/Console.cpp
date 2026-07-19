@@ -8,6 +8,10 @@
 #include <string>
 #include <utility>
 
+#if !defined(SILEX_CONSOLE_STANDALONE_TEST)
+#include <SilexNative/STD/Console.h>
+#endif
+
 #if defined(_WIN32)
 #include <windows.h>
 #else

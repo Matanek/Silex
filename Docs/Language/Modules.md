@@ -170,21 +170,28 @@ Library/STD/
 ├── Module.json
 ├── Module.cpp
 ├── Console/
-│   └── Console.sx
+│   ├── Console.cpp
+│   ├── Console.sx
+│   ├── Module.json
+│   ├── Session.cpp
+│   └── Session.sx
 ├── Randomizer.sx
 └── Time/
     ├── Clock.sx
     ├── Internal.sx
+    ├── Module.cpp
+    ├── Module.json
     └── Stopwatch.sx
 ```
 
 `Randomizer.sx` and `Internal.sx` declare private `native func` entries and
-expose ordinary Silex types around them. `Module.cpp`
-includes the generated interface, then defines the C symbols derived from
-their full module and function paths:
+expose ordinary Silex types around them. Each runtime includes the generated
+interface for the sole module whose symbols it implements:
 
 ```cpp
-#include <SilexNative/STD/Time.h>
+#include <SilexNative/STD.h>          // Library/STD/Module.cpp
+#include <SilexNative/STD/Time.h>     // Library/STD/Time/Module.cpp
+#include <SilexNative/STD/Console.h>  // Library/STD/Console/*.cpp
 ```
 
 `STD.native_seed` becomes `silexNative_STD_native_seed`, and
@@ -205,9 +212,12 @@ their full module and function paths:
 
 When a descendant is loaded, Silex checks its directory and then each parent
 directory for the closest `Module.json` containing `native`. A metadata-only
-manifest does not mask a parent's native configuration. This is why the one
-manifest at `Library/STD/Module.json` provides `Module.cpp` to both `STD` itself
-and `STD.Time`.
+manifest does not mask a parent's native configuration. `Library/STD/Module.json`
+selects only `Module.cpp`, `Library/STD/Time/Module.json` selects only its
+`Module.cpp`, and `Library/STD/Console/Module.json` selects only `Console.cpp`
+and `Session.cpp`. Loading one of these modules therefore compiles only its
+runtime and generates the header it includes; no unrelated header is created
+merely to satisfy another runtime source.
 
 The `compile` command selects one target for the whole application: the host
 target by default, or the triple supplied with `--target`. Every loaded native

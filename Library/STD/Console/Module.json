@@ -1,7 +1,7 @@
 {
   "native": {
     "sources": {
-      "cpp": ["Module.cpp"]
+      "cpp": ["Console.cpp", "Session.cpp"]
     }
   }
 }

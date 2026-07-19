@@ -1,0 +1,5 @@
+use STD.Console as Console
+
+func main() {
+    print(Console.is_interactive())
+}

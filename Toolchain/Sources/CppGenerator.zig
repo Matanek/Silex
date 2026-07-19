@@ -235,7 +235,7 @@ pub fn generateWithSources(
         \\#define SILEX_NATIVE_RELEASE_OBSERVER(pointer) ((void)0)
         \\#endif
         \\
-        \\void silexNativeRelease(void* pointer) {
+        \\static void silexNativeRelease(void* pointer) {
         \\    SILEX_NATIVE_RELEASE_OBSERVER(pointer);
         \\    std::free(pointer);
         \\}
@@ -5111,22 +5111,31 @@ test "native output releases are observed exactly once" {
 
     var parser = Parser.init(allocator,
         \\struct Message { let first:str; let second:str }
+        \\native func native_text() str
         \\native func native_message() Message
         \\native func native_optional() str?
         \\native func native_bytes() uint8[]
         \\native func native_result() Result<uint8[],str>
+        \\native func native_failure() Result<uint8[],str>
+        \\native func native_exception() str
         \\func main() {
+        \\    let text = native_text()
         \\    let message = native_message()
         \\    let optional = native_optional()
         \\    let bytes = native_bytes()
         \\    let result = native_result()
+        \\    let failure = native_failure()
+        \\    let exception = native_exception()
         \\}
     );
     const ast = try parser.parse();
-    @constCast(ast.functions)[0].name = "Probe.native_message";
-    @constCast(ast.functions)[1].name = "Probe.native_optional";
-    @constCast(ast.functions)[2].name = "Probe.native_bytes";
-    @constCast(ast.functions)[3].name = "Probe.native_result";
+    @constCast(ast.functions)[0].name = "Probe.native_text";
+    @constCast(ast.functions)[1].name = "Probe.native_message";
+    @constCast(ast.functions)[2].name = "Probe.native_optional";
+    @constCast(ast.functions)[3].name = "Probe.native_bytes";
+    @constCast(ast.functions)[4].name = "Probe.native_result";
+    @constCast(ast.functions)[5].name = "Probe.native_failure";
+    @constCast(ast.functions)[6].name = "Probe.native_exception";
     var specializer = Generics.Specializer.init(allocator, ast);
     var analyzer = Semantic.Analyzer.init(allocator);
     analyzer.native_module_names = &.{"Probe"};
@@ -5140,22 +5149,33 @@ test "native output releases are observed exactly once" {
         \\#include <cstdlib>
         \\#include <cstring>
         \\#include <cstdio>
+        \\#include <stdexcept>
         \\namespace {
         \\struct Allocation { void* pointer; int releases; };
-        \\Allocation allocations[8]{};
+        \\Allocation allocations[32]{};
         \\std::size_t allocationCount = 0;
-        \\char* allocateText(const char* text) {
-        \\    const auto length = std::strlen(text);
+        \\char* allocateText(const char* text, std::size_t length) {
         \\    auto* result = static_cast<char*>(std::malloc(length));
         \\    std::memcpy(result, text, length);
         \\    allocations[allocationCount++] = {result, 0};
         \\    return result;
+        \\}
+        \\char* allocateText(const char* text) {
+        \\    return allocateText(text, std::strlen(text));
         \\}
         \\std::uint8_t* allocateBytes() {
         \\    auto* result = static_cast<std::uint8_t*>(std::malloc(2));
         \\    result[0] = 4; result[1] = 2;
         \\    allocations[allocationCount++] = {result, 0};
         \\    return result;
+        \\}
+        \\int testMode() {
+        \\    auto* file = std::fopen("Mode.txt", "r");
+        \\    if (file == nullptr) std::_Exit(4);
+        \\    int mode = 0;
+        \\    if (std::fscanf(file, "%d", &mode) != 1) std::_Exit(5);
+        \\    std::fclose(file);
+        \\    return mode;
         \\}
         \\void verifyReleases() {
         \\    for (std::size_t index = 0; index < allocationCount; index += 1) {
@@ -5166,26 +5186,52 @@ test "native output releases are observed exactly once" {
         \\}
         \\extern "C" void silexNativeTestObserveRelease(void* pointer) {
         \\    if (pointer == nullptr) return;
-        \\    for (std::size_t index = 0; index < allocationCount; index += 1) {
-        \\        if (allocations[index].pointer != pointer) continue;
-        \\        allocations[index].releases += 1;
+        \\    for (std::size_t index = allocationCount; index > 0; index -= 1) {
+        \\        auto& allocation = allocations[index - 1];
+        \\        if (allocation.pointer != pointer || allocation.releases != 0) continue;
+        \\        allocation.releases += 1;
         \\        return;
         \\    }
         \\    std::_Exit(3);
         \\}
+        \\extern "C" void silexNative_Probe_native_text(char** bytes, std::int64_t* length) {
+        \\    *bytes = allocateText("text"); *length = 4;
+        \\}
         \\extern "C" void silexNative_Probe_native_message(SilexNative_Probe_Message* output) {
         \\    output->field0Bytes = allocateText("first"); output->field0Length = 5;
         \\    output->field1Bytes = allocateText("second"); output->field1Length = 6;
+        \\    if (testMode() == 1) output->field1Length = -1;
         \\}
         \\extern "C" bool silexNative_Probe_native_optional(char** bytes, std::int64_t* length) {
-        \\    *bytes = allocateText("optional"); *length = 8; return true;
+        \\    *bytes = allocateText("optional"); *length = 8; return testMode() != 2;
         \\}
         \\extern "C" void silexNative_Probe_native_bytes(std::uint8_t** bytes, std::int64_t* length) {
-        \\    *bytes = allocateBytes(); *length = 2;
+        \\    *bytes = allocateBytes(); *length = testMode() == 3 ? -1 : 2;
         \\}
         \\extern "C" void silexNative_Probe_native_result(SilexNative_Probe_native_resultResult* output) {
-        \\    output->tag = SilexNative_Probe_native_resultResultTag_failure;
+        \\    const int mode = testMode();
+        \\    if (mode == 7) {
+        \\        const char invalid[] = {static_cast<char>(0xff)};
+        \\        output->tag = SilexNative_Probe_native_resultResultTag_failure;
+        \\        output->failureBytes = allocateText(invalid, 1); output->failureLength = 1;
+        \\        return;
+        \\    }
+        \\    output->successBytes = allocateBytes(); output->successLength = 2;
+        \\    output->tag = SilexNative_Probe_native_resultResultTag_success;
+        \\    if (mode == 4) {
+        \\        output->failureBytes = allocateText("inactive"); output->failureLength = 8;
+        \\    } else if (mode == 5) {
+        \\        output->failureBytes = allocateText("unknown"); output->failureLength = 7;
+        \\        output->tag = static_cast<SilexNative_Probe_native_resultResultTag>(7);
+        \\    }
+        \\}
+        \\extern "C" void silexNative_Probe_native_failure(SilexNative_Probe_native_failureResult* output) {
+        \\    output->tag = SilexNative_Probe_native_failureResultTag_failure;
         \\    output->failureBytes = allocateText("failure"); output->failureLength = 7;
+        \\}
+        \\extern "C" void silexNative_Probe_native_exception(char** bytes, std::int64_t* length) {
+        \\    *bytes = allocateText("exception"); *length = 9;
+        \\    if (testMode() == 6) throw std::runtime_error("expected");
         \\}
     ;
     const probe = try std.fmt.allocPrint(allocator, "{s}\n{s}", .{ cpp, native_definitions });
@@ -5209,18 +5255,23 @@ test "native output releases are observed exactly once" {
     });
 
     const executable_argument = if (builtin.os.tag == .windows) ".\\Probe.exe" else "./Probe";
-    const execution = try std.process.run(std.testing.allocator, std.testing.io, .{
-        .argv = &.{executable_argument},
-        .cwd = .{ .dir = temporary.dir },
-        .stdout_limit = .limited(1024 * 1024),
-        .stderr_limit = .limited(1024 * 1024),
-    });
-    defer std.testing.allocator.free(execution.stdout);
-    defer std.testing.allocator.free(execution.stderr);
-    try std.testing.expectEqual(@as(u8, 0), switch (execution.term) {
-        .exited => |code| code,
-        else => 1,
-    });
+    for (0..8) |mode| {
+        const mode_text = try std.fmt.allocPrint(allocator, "{d}", .{mode});
+        try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Mode.txt", .data = mode_text });
+        const execution = try std.process.run(std.testing.allocator, std.testing.io, .{
+            .argv = &.{executable_argument},
+            .cwd = .{ .dir = temporary.dir },
+            .stdout_limit = .limited(1024 * 1024),
+            .stderr_limit = .limited(1024 * 1024),
+        });
+        defer std.testing.allocator.free(execution.stdout);
+        defer std.testing.allocator.free(execution.stderr);
+        const expected_exit_code: u8 = if (mode == 0) 0 else 1;
+        try std.testing.expectEqual(expected_exit_code, switch (execution.term) {
+            .exited => |code| code,
+            else => 255,
+        });
+    }
 }
 
 test "optimized backend eliminates a provably unnecessary integer check" {

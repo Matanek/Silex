@@ -11,7 +11,7 @@
 #include <string>
 #include <utility>
 
-#if __has_include(<SilexNative/STD/Console.h>)
+#if !defined(SILEX_CONSOLE_STANDALONE_TEST)
 #include <SilexNative/STD/Console.h>
 #else
 struct SilexNative_STD_Console_NativeKeyEvent {
