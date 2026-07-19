@@ -101,10 +101,14 @@ fn appendFunctionSignature(
     function: Semantic.Function,
 ) !void {
     const structure = returnedStructure(program, function);
-    if (function.return_type == .str or structure != null) {
+    const returned = nativeReturnValueType(function.return_type);
+    const optional = function.return_type == .optional;
+    if (optional) {
+        try output.appendSlice(allocator, "bool");
+    } else if (returned == .str or structure != null) {
         try output.appendSlice(allocator, "void");
     } else {
-        try appendType(allocator, output, function.return_type);
+        try appendType(allocator, output, returned);
     }
     try output.append(allocator, ' ');
     try output.appendSlice(allocator, function.generated_name);
@@ -126,15 +130,19 @@ fn appendFunctionSignature(
         try output.appendSlice(allocator, parameter.generated_name);
         parameter_count += 1;
     }
-    if (function.return_type == .str) {
+    if (returned == .str) {
         if (parameter_count != 0) try output.appendSlice(allocator, ", ");
         try output.appendSlice(allocator, "char** output_bytes, int64_t* output_length");
-    } else if (structure) |returned| {
+    } else if (structure) |returned_structure| {
         if (parameter_count != 0) try output.appendSlice(allocator, ", ");
-        try output.appendSlice(allocator, try transportName(allocator, function.native_module_name.?, returned.source_name));
+        try output.appendSlice(allocator, try transportName(allocator, function.native_module_name.?, returned_structure.source_name));
+        try output.appendSlice(allocator, "* output");
+    } else if (optional) {
+        if (parameter_count != 0) try output.appendSlice(allocator, ", ");
+        try appendType(allocator, output, returned);
         try output.appendSlice(allocator, "* output");
     }
-    if (parameter_count == 0 and function.return_type != .str and structure == null) try output.appendSlice(allocator, "void");
+    if (parameter_count == 0 and returned != .str and structure == null and !optional) try output.appendSlice(allocator, "void");
     try output.append(allocator, ')');
 }
 
@@ -171,7 +179,7 @@ fn appendTransportDefinition(
 }
 
 fn returnedStructure(program: Semantic.Program, function: Semantic.Function) ?Semantic.Structure {
-    const structure_type = switch (function.return_type) {
+    const structure_type = switch (nativeReturnValueType(function.return_type)) {
         .structure => |value| value,
         else => return null,
     };
@@ -179,6 +187,10 @@ fn returnedStructure(program: Semantic.Program, function: Semantic.Function) ?Se
         if (std.mem.eql(u8, structure.generated_name, structure_type.generated_name)) return structure;
     }
     return null;
+}
+
+fn nativeReturnValueType(return_type: Semantic.Type) Semantic.Type {
+    return if (return_type == .optional) return_type.optional.* else return_type;
 }
 
 fn returnedStructureAppearedEarlier(
@@ -325,4 +337,42 @@ test "native headers define string structure fields as owned bytes and lengths" 
     try std.testing.expect(std.mem.indexOf(u8, header, "char* detail_bytes;") != null);
     try std.testing.expect(std.mem.indexOf(u8, header, "int64_t detail_length;") != null);
     try std.testing.expect(std.mem.indexOf(u8, header, "std::string") == null);
+}
+
+test "native headers define optional return presence and outputs" {
+    const Parser = @import("Parser.zig").Parser;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var parser = Parser.init(allocator,
+        \\struct Message { let code:int; let text:str }
+        \\native func native_integer() int?
+        \\native func native_text(handle:int) str?
+        \\native func native_message() Message?
+        \\func main() {}
+    );
+    const ast = try parser.parse();
+    @constCast(ast.functions)[0].name = "Events.native_integer";
+    @constCast(ast.functions)[1].name = "Events.native_text";
+    @constCast(ast.functions)[2].name = "Events.native_message";
+    var analyzer = Semantic.Analyzer.init(allocator);
+    analyzer.native_module_names = &.{"Events"};
+    const header = try renderHeader(allocator, try analyzer.analyze(ast), "Events");
+
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        header,
+        "bool silexNative_Events_native_integer(int64_t* output);",
+    ) != null);
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        header,
+        "bool silexNative_Events_native_text(int64_t silexValue0, char** output_bytes, int64_t* output_length);",
+    ) != null);
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        header,
+        "bool silexNative_Events_native_message(SilexNative_Events_Message* output);",
+    ) != null);
 }

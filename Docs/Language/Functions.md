@@ -148,9 +148,9 @@ positive length, is a runtime error naming the native function. The bridge
 also rejects invalid UTF-8 with `returned invalid UTF-8`; it frees the buffer
 on every valid and invalid return path. Embedded null bytes are preserved, so
 the length—not C string termination—defines the result. Collections,
-references, pointers, callbacks, optionals, `Result`, and other non-scalar
-values remain unavailable in native-function signatures. Silex derives the C
-symbol from the module and function name, so a native runtime never chooses an
+references, pointers, callbacks, `Result`, and other non-transferable values
+remain unavailable in native-function signatures. Silex derives the C symbol
+from the module and function name, so a native runtime never chooses an
 arbitrary C symbol.
 
 A native function may also return a copyable, non-generic structure whose
@@ -175,6 +175,28 @@ structures, and structures with `drop` remain unavailable in a native return
 structure. Strings in structures passed as parameters are not yet supported;
 structures remain unavailable as native parameters.
 
+A native function may return `T?` when `T` is one of the transferable return
+types above: a scalar boolean or number, `str`, or an admitted flat structure.
+The C symbol returns `bool` to report presence and receives the same transport
+for `T` as output parameters after its ordinary parameters. For example:
+
+```cpp
+extern "C" bool silexNative_Module_native_poll(
+    std::int64_t handle,
+    SilexNative_Module_NativeEvent* output
+);
+```
+
+Silex zero-initializes the output before calling the symbol. `false` produces
+`null` without reading the transported value; `true` applies all ordinary
+scalar, string, structure, length, and UTF-8 validations before constructing an
+independent present value. A native function that reports absence after placing
+an owned string buffer in the output violates the contract: the bridge frees
+every transferred buffer, then reports a runtime error naming the native
+function and, for a structure, the offending field. Native optional parameters,
+nested optionals, `Result`, and additional transferable types are not introduced
+by this ABI.
+
 Before compiling a native runtime, Silex generates its authoritative C
 interface beneath `.silex/build/`. Every module segment becomes a header-path
 segment, so a C or C++ implementation of `STD.Console` includes:
@@ -185,7 +207,7 @@ segment, so a C or C++ implementation of `STD.Console` includes:
 
 The generated header has ordinary C types from `<stdbool.h>` and `<stdint.h>`,
 includes guards, and a C++-protected `extern "C"` block. It contains the exact
-symbols and scalar, string, or flat-structure ABI above, never
+symbols and scalar, string, optional-return, or flat-structure ABI above, never
 generated-program types, `std::string`, or project paths. Its include root is
 supplied automatically to the native runtime that implements the module. A C++
 definition that disagrees with a generated declaration therefore fails while

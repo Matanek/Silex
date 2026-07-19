@@ -1,0 +1,6 @@
+use NativeOptionalReturns as Native
+
+func main() {
+    let value = Native.absent_event_with_buffer()
+    print(value == null)
+}

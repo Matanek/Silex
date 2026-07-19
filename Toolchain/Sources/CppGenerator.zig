@@ -1678,10 +1678,14 @@ fn generateNativeFunctionSignature(
 ) !void {
     try output.appendSlice(allocator, "extern \"C\" ");
     const structure = nativeReturnStructure(program, function);
-    if (function.return_type == .str or structure != null) {
+    const returned = nativeReturnValueType(function.return_type);
+    const optional = function.return_type == .optional;
+    if (optional) {
+        try output.appendSlice(allocator, "bool");
+    } else if (returned == .str or structure != null) {
         try output.appendSlice(allocator, "void");
     } else {
-        try appendCppType(allocator, output, function.return_type);
+        try appendCppType(allocator, output, returned);
     }
     try output.append(allocator, ' ');
     try output.appendSlice(allocator, function.generated_name);
@@ -1707,19 +1711,24 @@ fn generateNativeFunctionSignature(
             }
         }
     }
-    if (function.return_type == .str) {
+    if (returned == .str) {
         if (function.parameters.len != 0) try output.appendSlice(allocator, ", ");
         try output.appendSlice(allocator, "char**");
         if (include_names) try output.appendSlice(allocator, " output_bytes");
         try output.appendSlice(allocator, ", std::int64_t*");
         if (include_names) try output.appendSlice(allocator, " output_length");
-    } else if (structure) |returned| {
+    } else if (structure) |returned_structure| {
         if (function.parameters.len != 0) try output.appendSlice(allocator, ", ");
         try output.appendSlice(allocator, try NativeInterface.transportName(
             allocator,
             function.native_module_name.?,
-            returned.source_name,
+            returned_structure.source_name,
         ));
+        try output.append(allocator, '*');
+        if (include_names) try output.appendSlice(allocator, " output");
+    } else if (optional) {
+        if (function.parameters.len != 0) try output.appendSlice(allocator, ", ");
+        try appendCppType(allocator, output, returned);
         try output.append(allocator, '*');
         if (include_names) try output.appendSlice(allocator, " output");
     }
@@ -1756,7 +1765,7 @@ fn generateNativeTransportDefinition(
 }
 
 fn nativeReturnStructure(program: Semantic.Program, function: Semantic.Function) ?Semantic.Structure {
-    const structure_type = switch (function.return_type) {
+    const structure_type = switch (nativeReturnValueType(function.return_type)) {
         .structure => |value| value,
         else => return null,
     };
@@ -1782,10 +1791,16 @@ fn nativeReturnStructureAppearedEarlier(
 
 fn structureIsNativeReturn(functions: []const Semantic.Function, structure: Semantic.Structure) bool {
     for (functions) |function| {
-        if (!function.is_native or function.return_type != .structure) continue;
-        if (std.mem.eql(u8, function.return_type.structure.generated_name, structure.generated_name)) return true;
+        if (!function.is_native) continue;
+        const returned = nativeReturnValueType(function.return_type);
+        if (returned != .structure) continue;
+        if (std.mem.eql(u8, returned.structure.generated_name, structure.generated_name)) return true;
     }
     return false;
+}
+
+fn nativeReturnValueType(return_type: Semantic.Type) Semantic.Type {
+    return if (return_type == .optional) return_type.optional.* else return_type;
 }
 
 fn containsNativeFunction(functions: []const Semantic.Function) bool {
@@ -1817,6 +1832,9 @@ fn generateNativeFunctionCall(
     call: Semantic.Expression.Call,
     return_type: Semantic.Type,
 ) GenerateError!void {
+    if (return_type == .optional) {
+        return generateNativeOptionalFunctionCall(allocator, output, call, return_type.optional.*);
+    }
     const module_name = call.native_module_name.?;
     const function_name = call.native_function_name.?;
     const returns_string = return_type == .str;
@@ -1947,6 +1965,202 @@ fn generateNativeFunctionCall(
             }
         }
         try output.appendSlice(allocator, ");");
+    }
+    try output.appendSlice(allocator, " })");
+}
+
+fn generateNativeOptionalFunctionCall(
+    allocator: Allocator,
+    output: *std.ArrayList(u8),
+    call: Semantic.Expression.Call,
+    returned_type: Semantic.Type,
+) GenerateError!void {
+    const module_name = call.native_module_name.?;
+    const function_name = call.native_function_name.?;
+    const returns_string = returned_type == .str;
+    const returned_structure = call.native_return_structure;
+
+    try output.appendSlice(allocator, "callNativeFunction(");
+    try appendCppByteStringLiteral(allocator, output, module_name);
+    try output.appendSlice(allocator, ", ");
+    try appendCppByteStringLiteral(allocator, output, function_name);
+    try output.appendSlice(allocator, ", [&]() -> std::optional<");
+    try appendCppType(allocator, output, returned_type);
+    try output.appendSlice(allocator, "> {");
+
+    for (call.arguments, 0..) |argument, index| {
+        if (argument.type != .str) continue;
+        try output.appendSlice(allocator, "auto&& silexNativeString");
+        try output.appendSlice(allocator, try std.fmt.allocPrint(allocator, "{d}", .{index}));
+        try output.appendSlice(allocator, " = ");
+        try generateExpression(allocator, output, argument);
+        try output.append(allocator, ';');
+    }
+
+    if (returns_string) {
+        try output.appendSlice(allocator, "char* silexNativeOutputBytes = nullptr;std::int64_t silexNativeOutputLength = 0;");
+    } else if (returned_structure) |structure| {
+        try output.appendSlice(allocator, try NativeInterface.transportName(allocator, module_name, structure.source_name));
+        try output.appendSlice(allocator, " silexNativeOutput{};");
+    } else {
+        try appendCppType(allocator, output, returned_type);
+        try output.appendSlice(allocator, " silexNativeOutput{};");
+    }
+
+    const has_owned_buffers = returns_string or
+        (returned_structure != null and nativeReturnHasString(returned_structure.?));
+    if (has_owned_buffers) try output.appendSlice(allocator, "bool silexNativePresent = false;try {");
+    if (!has_owned_buffers) try output.appendSlice(allocator, "const bool silexNativePresent = ");
+    if (has_owned_buffers) try output.appendSlice(allocator, "silexNativePresent = ");
+    try output.appendSlice(allocator, call.generated_name);
+    try output.append(allocator, '(');
+    for (call.arguments, 0..) |argument, index| {
+        if (index != 0) try output.appendSlice(allocator, ", ");
+        if (argument.type == .str) {
+            try output.appendSlice(allocator, "silexNativeString");
+            try output.appendSlice(allocator, try std.fmt.allocPrint(allocator, "{d}", .{index}));
+            try output.appendSlice(allocator, ".data(), static_cast<std::int64_t>(silexNativeString");
+            try output.appendSlice(allocator, try std.fmt.allocPrint(allocator, "{d}", .{index}));
+            try output.appendSlice(allocator, ".size())");
+        } else {
+            try generateExpression(allocator, output, argument);
+        }
+    }
+    if (call.arguments.len != 0) try output.appendSlice(allocator, ", ");
+    if (returns_string) {
+        try output.appendSlice(allocator, "&silexNativeOutputBytes, &silexNativeOutputLength");
+    } else {
+        try output.appendSlice(allocator, "&silexNativeOutput");
+    }
+    try output.appendSlice(allocator, ");");
+
+    if (has_owned_buffers) {
+        try output.appendSlice(allocator, "} catch (...) {");
+        if (returns_string) {
+            try output.appendSlice(allocator, "std::free(silexNativeOutputBytes);");
+        } else for (returned_structure.?.fields) |field| {
+            if (field.type != .str) continue;
+            try output.appendSlice(allocator, "std::free(silexNativeOutput.");
+            try output.appendSlice(allocator, field.generated_name);
+            try output.appendSlice(allocator, "Bytes);");
+        }
+        try output.appendSlice(allocator, "throw;}");
+    }
+
+    if (returns_string) {
+        try output.appendSlice(allocator, "std::unique_ptr<char, decltype(&std::free)> silexNativeGuard{silexNativeOutputBytes, &std::free};");
+        try output.appendSlice(allocator, "if (!silexNativePresent) {if (silexNativeOutputBytes != nullptr) {silexNativeGuard.reset();nativeFunctionRuntimeError(");
+        try appendCppByteStringLiteral(allocator, output, module_name);
+        try output.appendSlice(allocator, ", ");
+        try appendCppByteStringLiteral(allocator, output, function_name);
+        try output.appendSlice(allocator, ", \"returned an owned buffer while reporting absence\");}return std::nullopt;}");
+        try output.appendSlice(allocator, "if (silexNativeOutputLength < 0) {silexNativeGuard.reset();nativeFunctionRuntimeError(");
+        try appendCppByteStringLiteral(allocator, output, module_name);
+        try output.appendSlice(allocator, ", ");
+        try appendCppByteStringLiteral(allocator, output, function_name);
+        try output.appendSlice(allocator, ", \"returned a negative length\");}");
+        try output.appendSlice(allocator, "if (silexNativeOutputBytes == nullptr && silexNativeOutputLength > 0) {silexNativeGuard.reset();nativeFunctionRuntimeError(");
+        try appendCppByteStringLiteral(allocator, output, module_name);
+        try output.appendSlice(allocator, ", ");
+        try appendCppByteStringLiteral(allocator, output, function_name);
+        try output.appendSlice(allocator, ", \"returned a null pointer with a positive length\");}");
+        try output.appendSlice(allocator, "std::string silexNativeString = silexNativeOutputBytes == nullptr ? std::string{} : std::string{silexNativeOutputBytes, static_cast<std::size_t>(silexNativeOutputLength)};silexNativeGuard.reset();if (!nativeStringIsValidUtf8(silexNativeString)) {nativeFunctionRuntimeError(");
+        try appendCppByteStringLiteral(allocator, output, module_name);
+        try output.appendSlice(allocator, ", ");
+        try appendCppByteStringLiteral(allocator, output, function_name);
+        try output.appendSlice(allocator, ", \"returned invalid UTF-8\");}return silexNativeString;");
+    } else if (returned_structure) |structure| {
+        if (nativeReturnHasString(structure)) {
+            for (structure.fields) |field| {
+                if (field.type != .str) continue;
+                try output.appendSlice(allocator, "std::unique_ptr<char, decltype(&std::free)> silexNativeGuard_");
+                try output.appendSlice(allocator, field.generated_name);
+                try output.appendSlice(allocator, "{silexNativeOutput.");
+                try output.appendSlice(allocator, field.generated_name);
+                try output.appendSlice(allocator, "Bytes, &std::free};");
+            }
+            try output.appendSlice(allocator, "if (!silexNativePresent) {");
+            for (structure.fields) |field| {
+                if (field.type != .str) continue;
+                try output.appendSlice(allocator, "if (silexNativeOutput.");
+                try output.appendSlice(allocator, field.generated_name);
+                try output.appendSlice(allocator, "Bytes != nullptr) {");
+                try generateNativeStringGuardCleanup(allocator, output, structure);
+                try output.appendSlice(allocator, "nativeStructureFieldRuntimeError(");
+                try appendCppByteStringLiteral(allocator, output, module_name);
+                try output.appendSlice(allocator, ", ");
+                try appendCppByteStringLiteral(allocator, output, function_name);
+                try output.appendSlice(allocator, ", ");
+                try appendCppByteStringLiteral(allocator, output, field.source_name);
+                try output.appendSlice(allocator, ", \"returned an owned buffer while reporting absence\");}");
+            }
+            try output.appendSlice(allocator, "return std::nullopt;}");
+            for (structure.fields) |field| {
+                if (field.type != .str) continue;
+                try output.appendSlice(allocator, "if (silexNativeOutput.");
+                try output.appendSlice(allocator, field.generated_name);
+                try output.appendSlice(allocator, "Length < 0) {");
+                try generateNativeStringGuardCleanup(allocator, output, structure);
+                try output.appendSlice(allocator, "nativeStructureFieldRuntimeError(");
+                try appendCppByteStringLiteral(allocator, output, module_name);
+                try output.appendSlice(allocator, ", ");
+                try appendCppByteStringLiteral(allocator, output, function_name);
+                try output.appendSlice(allocator, ", ");
+                try appendCppByteStringLiteral(allocator, output, field.source_name);
+                try output.appendSlice(allocator, ", \"returned a negative length\");}");
+                try output.appendSlice(allocator, "if (silexNativeOutput.");
+                try output.appendSlice(allocator, field.generated_name);
+                try output.appendSlice(allocator, "Bytes == nullptr && silexNativeOutput.");
+                try output.appendSlice(allocator, field.generated_name);
+                try output.appendSlice(allocator, "Length > 0) {");
+                try generateNativeStringGuardCleanup(allocator, output, structure);
+                try output.appendSlice(allocator, "nativeStructureFieldRuntimeError(");
+                try appendCppByteStringLiteral(allocator, output, module_name);
+                try output.appendSlice(allocator, ", ");
+                try appendCppByteStringLiteral(allocator, output, function_name);
+                try output.appendSlice(allocator, ", ");
+                try appendCppByteStringLiteral(allocator, output, field.source_name);
+                try output.appendSlice(allocator, ", \"returned a null pointer with a positive length\");}");
+                try output.appendSlice(allocator, "std::string silexNativeString_");
+                try output.appendSlice(allocator, field.generated_name);
+                try output.appendSlice(allocator, " = silexNativeOutput.");
+                try output.appendSlice(allocator, field.generated_name);
+                try output.appendSlice(allocator, "Bytes == nullptr ? std::string{} : std::string{silexNativeOutput.");
+                try output.appendSlice(allocator, field.generated_name);
+                try output.appendSlice(allocator, "Bytes, static_cast<std::size_t>(silexNativeOutput.");
+                try output.appendSlice(allocator, field.generated_name);
+                try output.appendSlice(allocator, "Length)};if (!nativeStringIsValidUtf8(silexNativeString_");
+                try output.appendSlice(allocator, field.generated_name);
+                try output.appendSlice(allocator, ")) {");
+                try generateNativeStringGuardCleanup(allocator, output, structure);
+                try output.appendSlice(allocator, "nativeStructureFieldRuntimeError(");
+                try appendCppByteStringLiteral(allocator, output, module_name);
+                try output.appendSlice(allocator, ", ");
+                try appendCppByteStringLiteral(allocator, output, function_name);
+                try output.appendSlice(allocator, ", ");
+                try appendCppByteStringLiteral(allocator, output, field.source_name);
+                try output.appendSlice(allocator, ", \"returned invalid UTF-8\");}");
+            }
+            try generateNativeStringGuardCleanup(allocator, output, structure);
+        } else {
+            try output.appendSlice(allocator, "if (!silexNativePresent) return std::nullopt;");
+        }
+        try output.appendSlice(allocator, "return ");
+        try output.appendSlice(allocator, structure.generated_name);
+        try output.appendSlice(allocator, "(SilexNativeReturnTag{}");
+        for (structure.fields) |field| {
+            if (field.type == .str) {
+                try output.appendSlice(allocator, ", std::move(silexNativeString_");
+                try output.appendSlice(allocator, field.generated_name);
+                try output.append(allocator, ')');
+            } else {
+                try output.appendSlice(allocator, ", silexNativeOutput.");
+                try output.appendSlice(allocator, field.generated_name);
+            }
+        }
+        try output.appendSlice(allocator, ");");
+    } else {
+        try output.appendSlice(allocator, "if (!silexNativePresent) return std::nullopt;return silexNativeOutput;");
     }
     try output.appendSlice(allocator, " })");
 }
@@ -3695,6 +3909,47 @@ test "generate owned string structure native return bridge" {
     try std.testing.expect(std.mem.indexOf(u8, cpp, "nativeStructureFieldRuntimeError(\"Events\", \"native_message\", \"detail\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, cpp, "std::move(silexNativeString_field1)") != null);
     try std.testing.expect(std.mem.indexOf(u8, cpp, "std::move(silexNativeString_field2)") != null);
+}
+
+test "generate optional native return bridges" {
+    const Parser = @import("Parser.zig").Parser;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var parser = Parser.init(allocator,
+        \\struct Message { let code:int; let text:str }
+        \\native func native_integer() int?
+        \\native func native_text() str?
+        \\native func native_message() Message?
+        \\func main() {}
+    );
+    const program = try parser.parse();
+    @constCast(program.functions)[0].name = "Events.native_integer";
+    @constCast(program.functions)[1].name = "Events.native_text";
+    @constCast(program.functions)[2].name = "Events.native_message";
+    var analyzer = Semantic.Analyzer.init(allocator);
+    analyzer.native_module_names = &.{"Events"};
+    const cpp = try generate(allocator, try analyzer.analyze(program));
+
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        cpp,
+        "extern \"C\" bool silexNative_Events_native_integer(std::int64_t* output);",
+    ) != null);
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        cpp,
+        "extern \"C\" bool silexNative_Events_native_text(char** output_bytes, std::int64_t* output_length);",
+    ) != null);
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        cpp,
+        "extern \"C\" bool silexNative_Events_native_message(SilexNative_Events_Message* output);",
+    ) != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "if (!silexNativePresent) return std::nullopt") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "returned an owned buffer while reporting absence") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "std::optional<SilexStruct0>") != null);
 }
 
 test "generate recursive structural equality" {

@@ -2528,8 +2528,29 @@ pub fn build(b: *std.Build) void {
         "runtime error: native function 'NativeStructureStrings.native_invalid_utf8' field 'detail' failed: returned invalid UTF-8\n",
     );
 
+    const native_optional_return_command = b.addRunArtifact(executable);
+    native_optional_return_command.step.dependOn(&native_structure_string_invalid_utf8_command.step);
+    native_optional_return_command.addArgs(&.{ "run", "Smokes/NativeOptionalReturns/Main.sx" });
+    native_optional_return_command.expectStdOutEqual(hostText(b, "événement 1\névénement 3\n"));
+
+    const native_optional_absent_text_buffer_command = b.addRunArtifact(executable);
+    native_optional_absent_text_buffer_command.step.dependOn(&native_optional_return_command.step);
+    native_optional_absent_text_buffer_command.addArgs(&.{ "run", "Smokes/NativeOptionalReturns/AbsentTextBuffer.sx" });
+    native_optional_absent_text_buffer_command.expectExitCode(1);
+    native_optional_absent_text_buffer_command.expectStdErrEqual(
+        "runtime error: native function 'NativeOptionalReturns.native_absent_text_with_buffer' failed: returned an owned buffer while reporting absence\n",
+    );
+
+    const native_optional_absent_event_buffer_command = b.addRunArtifact(executable);
+    native_optional_absent_event_buffer_command.step.dependOn(&native_optional_absent_text_buffer_command.step);
+    native_optional_absent_event_buffer_command.addArgs(&.{ "run", "Smokes/NativeOptionalReturns/AbsentEventBuffer.sx" });
+    native_optional_absent_event_buffer_command.expectExitCode(1);
+    native_optional_absent_event_buffer_command.expectStdErrEqual(
+        "runtime error: native function 'NativeOptionalReturns.native_absent_event_with_buffer' field 'text' failed: returned an owned buffer while reporting absence\n",
+    );
+
     const native_string_command = b.addRunArtifact(executable);
-    native_string_command.step.dependOn(&native_structure_string_invalid_utf8_command.step);
+    native_string_command.step.dependOn(&native_optional_absent_event_buffer_command.step);
     native_string_command.addArgs(&.{ "run", "Smokes/NativeStrings/Main.sx" });
     native_string_command.expectStdOutEqual(hostText(b, "true\ntrue\ntrue\ntrue\ntrue\ntrue\n"));
 
@@ -2989,8 +3010,30 @@ pub fn build(b: *std.Build) void {
         ".silex/cross-native-smoke/NativeStructureStrings-x86_64-windows.exe",
     });
 
+    const cross_native_optional_return_linux_smoke_command = b.addRunArtifact(executable);
+    cross_native_optional_return_linux_smoke_command.step.dependOn(&cross_native_structure_string_windows_smoke_command.step);
+    cross_native_optional_return_linux_smoke_command.addArgs(&.{
+        "compile",
+        "Smokes/NativeOptionalReturns/Main.sx",
+        "--target",
+        "x86_64-linux-musl",
+        "-o",
+        ".silex/cross-native-smoke/NativeOptionalReturns-x86_64-linux",
+    });
+
+    const cross_native_optional_return_windows_smoke_command = b.addRunArtifact(executable);
+    cross_native_optional_return_windows_smoke_command.step.dependOn(&cross_native_optional_return_linux_smoke_command.step);
+    cross_native_optional_return_windows_smoke_command.addArgs(&.{
+        "compile",
+        "Smokes/NativeOptionalReturns/Main.sx",
+        "--target",
+        "x86_64-windows-gnu",
+        "-o",
+        ".silex/cross-native-smoke/NativeOptionalReturns-x86_64-windows.exe",
+    });
+
     const cross_native_string_linux_smoke_command = b.addRunArtifact(executable);
-    cross_native_string_linux_smoke_command.step.dependOn(&cross_native_structure_string_windows_smoke_command.step);
+    cross_native_string_linux_smoke_command.step.dependOn(&cross_native_optional_return_windows_smoke_command.step);
     cross_native_string_linux_smoke_command.addArgs(&.{
         "compile",
         "Smokes/NativeStrings/Main.sx",

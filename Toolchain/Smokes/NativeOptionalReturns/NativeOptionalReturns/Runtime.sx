@@ -1,0 +1,30 @@
+pub struct NativeEvent {
+    let sequence:int
+    let text:str
+}
+
+native func native_integer(value:int) int?
+native func native_text(sequence:int) str?
+native func native_event(sequence:int) NativeEvent?
+native func native_absent_text_with_buffer() str?
+native func native_absent_event_with_buffer() NativeEvent?
+
+pub func integer(value:int) int? {
+    return native_integer(value)
+}
+
+pub func text(sequence:int) str? {
+    return native_text(sequence)
+}
+
+pub func event(sequence:int) NativeEvent? {
+    return native_event(sequence)
+}
+
+pub func absent_text_with_buffer() str? {
+    return native_absent_text_with_buffer()
+}
+
+pub func absent_event_with_buffer() NativeEvent? {
+    return native_absent_event_with_buffer()
+}

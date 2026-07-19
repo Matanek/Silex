@@ -6895,6 +6895,7 @@ pub const Analyzer = struct {
     }
 
     fn isNativeReturnType(self: *const Analyzer, value: Type) Allocator.Error!bool {
+        if (value == .optional) return self.isNativeReturnType(value.optional.*);
         if (isNativeScalarReturnType(value)) return true;
         const structure_type = switch (value) {
             .structure => |type_value| type_value,
@@ -6908,7 +6909,8 @@ pub const Analyzer = struct {
     }
 
     fn nativeReturnStructure(self: *const Analyzer, value: Type) Allocator.Error!?NativeReturnStructure {
-        const structure_type = switch (value) {
+        const returned = if (value == .optional) value.optional.* else value;
+        const structure_type = switch (returned) {
             .structure => |type_value| type_value,
             else => return null,
         };
@@ -8294,19 +8296,41 @@ test "extension conformances use target visibility defaults and apply to the exa
     , "extension conformance of type 'Sprite' to protocol 'Drawable' from module 'Test' conflicts with the conformance declared by the type");
 }
 
-test "native ABI rejects optional returns" {
+test "native ABI accepts optional transferable returns" {
     const Parser = @import("Parser.zig").Parser;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var parser = Parser.init(allocator, "native func native_lookup() int?\n");
+    var parser = Parser.init(allocator,
+        \\struct Message { let code:int; let text:str }
+        \\native func native_integer() int?
+        \\native func native_text() str?
+        \\native func native_message() Message?
+        \\func main() {}
+    );
+    const program = try parser.parse();
+    @constCast(program.functions)[0].name = "Native.native_integer";
+    @constCast(program.functions)[1].name = "Native.native_text";
+    @constCast(program.functions)[2].name = "Native.native_message";
+    var analyzer = Analyzer.init(allocator);
+    analyzer.native_module_names = &.{"Native"};
+    _ = try analyzer.analyze(program);
+}
+
+test "native ABI rejects optional non-transferable returns" {
+    const Parser = @import("Parser.zig").Parser;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var parser = Parser.init(allocator, "native func native_lookup() int[]?\n");
     const program = try parser.parse();
     @constCast(program.functions)[0].name = "Math.native_lookup";
     var analyzer = Analyzer.init(allocator);
     analyzer.native_module_names = &.{"Math"};
     try std.testing.expectError(error.InvalidSource, analyzer.analyze(program));
-    try std.testing.expectEqualStrings("native functions cannot return 'int?'", analyzer.diagnostic.?.message);
+    try std.testing.expectEqualStrings("native functions cannot return 'int[]?'", analyzer.diagnostic.?.message);
 }
 
 test "native ABI accepts string returns" {

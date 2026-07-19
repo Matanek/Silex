@@ -1,0 +1,39 @@
+use NativeOptionalReturns as Native
+
+func main() {
+    assert(Native.integer(-1) == null, "absent scalar")
+    if integer = Native.integer(42) {
+        assert(integer == 42, "present scalar")
+    } else {
+        panic("scalar must be present")
+    }
+
+    if first_text = Native.text(1) {
+        assert(first_text == "texte 1", "first present string")
+    } else {
+        panic("first string must be present")
+    }
+    assert(Native.text(2) == null, "absent string")
+    if second_text = Native.text(3) {
+        assert(second_text == "texte 3", "second present string")
+    } else {
+        panic("second string must be present")
+    }
+
+    if first = Native.event(1) {
+        assert(first.sequence == 1, "first event sequence")
+        assert(first.text == "événement 1", "first event text")
+        assert(Native.event(2) == null, "absent event")
+        if second = Native.event(3) {
+            assert(second.sequence == 3, "second event sequence")
+            assert(second.text == "événement 3", "second event text")
+            assert(first.text == "événement 1", "independent successive events")
+            print(first.text)
+            print(second.text)
+        } else {
+            panic("second event must be present")
+        }
+    } else {
+        panic("first event must be present")
+    }
+}

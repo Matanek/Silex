@@ -1,0 +1,6 @@
+use NativeOptionalReturns as Native
+
+func main() {
+    let value = Native.absent_text_with_buffer()
+    print(value == null)
+}
