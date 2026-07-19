@@ -2475,8 +2475,21 @@ pub fn build(b: *std.Build) void {
     local_native_manifest_command.addArgs(&.{ "run", "Smokes/LocalNative/project.json" });
     local_native_manifest_command.expectStdOutEqual(hostText(b, "42\n"));
 
+    const native_interface_command = b.addRunArtifact(executable);
+    native_interface_command.step.dependOn(&local_native_manifest_command.step);
+    native_interface_command.addArgs(&.{ "run", "Smokes/NativeInterface/Main.sx" });
+    native_interface_command.expectStdOutEqual(hostText(b, "42\ntrue\ntrue\n"));
+
+    const incompatible_native_interface_command = b.addRunArtifact(executable);
+    incompatible_native_interface_command.step.dependOn(&native_interface_command.step);
+    incompatible_native_interface_command.addArgs(&.{ "compile", "Tests/NativeInterface/Main.sx" });
+    incompatible_native_interface_command.expectExitCode(1);
+    incompatible_native_interface_command.expectStdErrMatch(
+        "silex: native compilation failed for target '.*'",
+    );
+
     const native_string_command = b.addRunArtifact(executable);
-    native_string_command.step.dependOn(&local_native_manifest_command.step);
+    native_string_command.step.dependOn(&incompatible_native_interface_command.step);
     native_string_command.addArgs(&.{ "run", "Smokes/NativeStrings/Main.sx" });
     native_string_command.expectStdOutEqual(hostText(b, "true\ntrue\ntrue\ntrue\ntrue\ntrue\n"));
 

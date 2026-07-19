@@ -153,6 +153,21 @@ non-scalar values remain unavailable in native-function signatures. Silex
 derives the C symbol from the module and function name, so a native runtime
 never chooses an arbitrary C symbol.
 
+Before compiling a native runtime, Silex generates its authoritative C
+interface beneath `.silex/build/`. Every module segment becomes a header-path
+segment, so a C or C++ implementation of `STD.Console` includes:
+
+```cpp
+#include <SilexNative/STD/Console.h>
+```
+
+The generated header has ordinary C types from `<stdbool.h>` and `<stdint.h>`,
+includes guards, and a C++-protected `extern "C"` block. It contains the exact
+symbols and scalar or string ABI above, never generated-program types,
+`std::string`, or project paths. Its include root is supplied automatically to
+the native runtime that implements the module. A C++ definition that disagrees
+with a generated declaration therefore fails while compiling that runtime.
+
 All arguments, return values, and return paths are checked statically. A
 non-void function must return a compatible value on every path. A void function
 may use `return` without a value. A unique-resource parameter owns its value;

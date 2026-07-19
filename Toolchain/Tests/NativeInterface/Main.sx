@@ -1,0 +1,5 @@
+use Interface.Api as Api
+
+func main() {
+    print(Api.value())
+}

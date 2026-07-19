@@ -1,0 +1,7 @@
+use Interop.Api as Api
+
+func main() {
+    print(Api.add(20, 22))
+    print(Api.echo("Silex") == "Silex")
+    print(Api.ready())
+}

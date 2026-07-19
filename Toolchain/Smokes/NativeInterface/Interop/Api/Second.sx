@@ -1,0 +1,5 @@
+native func native_ready() bool
+
+pub func ready() bool {
+    return native_ready()
+}

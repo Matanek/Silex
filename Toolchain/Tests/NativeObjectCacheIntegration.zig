@@ -67,6 +67,27 @@ pub fn main(init: std.process.Init) !void {
         "Reused native package Vendor",
     );
 
+    try writeFile(
+        allocator,
+        init.io,
+        vendor,
+        "Vendor.sx",
+        "native func native_value() int\n" ++
+            "native func native_unused(value:int) int\n\n" ++
+            "pub func value() int {\n" ++
+            "    return native_value()\n" ++
+            "}\n\n",
+    );
+    try expectCompile(
+        allocator,
+        init.io,
+        &environment,
+        silex,
+        first_app,
+        &.{ "compile", "Main.sx" },
+        "Compiled native package Vendor",
+    );
+
     try createApp(allocator, init.io, second_app, 3);
     try expectCompile(
         allocator,
@@ -157,6 +178,7 @@ fn createVendor(allocator: Allocator, io: Io, root: []const u8, value: u8) !void
         root,
         "Source.c",
         "#include <Header.h>\n" ++
+            "#include <SilexNative/Vendor.h>\n" ++
             "#include <stdint.h>\n\n" ++
             "int64_t silexNative_Vendor_native_value(void) {\n" ++
             "    return VENDOR_VALUE;\n" ++

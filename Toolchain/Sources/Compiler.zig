@@ -2,6 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const build_options = @import("build_options");
 const CppGenerator = @import("CppGenerator.zig");
+const NativeInterface = @import("NativeInterface.zig");
 const Generics = @import("Generics.zig");
 const Semantic = @import("Semantic.zig");
 const TargetModule = @import("Target.zig");
@@ -61,15 +62,7 @@ pub fn compile(
     const source_paths = loaded.source_paths;
     const source_contents = loaded.source_contents;
     const files = loaded.files;
-    const module_runtimes = try loadModuleRuntimes(allocator, io, project, loaded.package_graph, target);
-    const object_plan = try NativeObjectCache.makePlan(
-        allocator,
-        io,
-        loaded.package_graph,
-        module_runtimes,
-        target,
-        default_native_configuration.compilerFlags(),
-    );
+    const loaded_module_runtimes = try loadModuleRuntimes(allocator, io, project, loaded.package_graph, target);
     const native_module_names = try nativeModuleNames(allocator, project);
     const canonical_source_paths = try canonicalizeSourcePaths(allocator, io, source_paths);
     var resolver = Modules.Resolver.init(allocator, project, files);
@@ -108,6 +101,32 @@ pub fn compile(
             return error.Reported;
         }
     }
+    const legacy_cache_root = try std.fs.path.join(allocator, &.{ artifact_root, ".silex", "cache" });
+    Io.Dir.cwd().deleteTree(io, legacy_cache_root) catch |err| {
+        std.debug.print("silex: warning: unable to remove legacy project cache: {t}\n", .{err});
+    };
+    const cache_root = try std.fs.path.join(allocator, &.{ artifact_root, ".silex", "build" });
+    const version_cache_dir = try std.fs.path.join(allocator, &.{ cache_root, cache_format });
+    const target_cache_dir = try std.fs.path.join(allocator, &.{ version_cache_dir, target_name });
+    try Io.Dir.cwd().createDirPath(io, target_cache_dir);
+    cleanObsoleteCacheLayouts(allocator, io, cache_root) catch |err| {
+        std.debug.print("silex: warning: unable to remove obsolete cache layouts: {t}\n", .{err});
+    };
+    const native_interface_root = try NativeInterface.write(allocator, io, program, target_cache_dir);
+    const module_runtimes = try applyNativeInterface(
+        allocator,
+        loaded_module_runtimes,
+        program.functions,
+        native_interface_root,
+    );
+    const object_plan = try NativeObjectCache.makePlan(
+        allocator,
+        io,
+        loaded.package_graph,
+        module_runtimes,
+        target,
+        default_native_configuration.compilerFlags(),
+    );
     const cache_key = try cacheKey(
         allocator,
         io,
@@ -121,17 +140,6 @@ pub fn compile(
         module_runtimes,
         default_native_configuration,
     );
-    const legacy_cache_root = try std.fs.path.join(allocator, &.{ artifact_root, ".silex", "cache" });
-    Io.Dir.cwd().deleteTree(io, legacy_cache_root) catch |err| {
-        std.debug.print("silex: warning: unable to remove legacy project cache: {t}\n", .{err});
-    };
-    const cache_root = try std.fs.path.join(allocator, &.{ artifact_root, ".silex", "build" });
-    const version_cache_dir = try std.fs.path.join(allocator, &.{ cache_root, cache_format });
-    const target_cache_dir = try std.fs.path.join(allocator, &.{ version_cache_dir, target_name });
-    try Io.Dir.cwd().createDirPath(io, target_cache_dir);
-    cleanObsoleteCacheLayouts(allocator, io, cache_root) catch |err| {
-        std.debug.print("silex: warning: unable to remove obsolete cache layouts: {t}\n", .{err});
-    };
 
     const cache_dir = try std.fs.path.join(allocator, &.{ target_cache_dir, &cache_key });
     try Io.Dir.cwd().createDirPath(io, cache_dir);
@@ -248,6 +256,40 @@ fn nativeModuleNames(allocator: Allocator, project: ProjectModule.Project) ![]co
         if (module.module_manifest_path != null) try names.append(allocator, module.name);
     }
     return names.toOwnedSlice(allocator);
+}
+
+fn applyNativeInterface(
+    allocator: Allocator,
+    runtimes: []const NativeDependency.ModuleRuntime,
+    functions: []const Semantic.Function,
+    interface_root: ?[]const u8,
+) ![]const NativeDependency.ModuleRuntime {
+    const root = interface_root orelse return runtimes;
+    var updated: std.ArrayList(NativeDependency.ModuleRuntime) = .empty;
+    for (runtimes) |runtime| {
+        var composed = runtime;
+        if (runtimeNeedsNativeInterface(runtime, functions)) {
+            var include_dirs: std.ArrayList([]const u8) = .empty;
+            try include_dirs.append(allocator, root);
+            try include_dirs.appendSlice(allocator, runtime.include_dirs);
+            composed.include_dirs = try include_dirs.toOwnedSlice(allocator);
+        }
+        try updated.append(allocator, composed);
+    }
+    return updated.toOwnedSlice(allocator);
+}
+
+fn runtimeNeedsNativeInterface(
+    runtime: NativeDependency.ModuleRuntime,
+    functions: []const Semantic.Function,
+) bool {
+    for (functions) |function| {
+        if (!function.is_native) continue;
+        const module_name = function.native_module_name.?;
+        if (!std.mem.startsWith(u8, module_name, runtime.module_name)) continue;
+        if (module_name.len == runtime.module_name.len or module_name[runtime.module_name.len] == '.') return true;
+    }
+    return false;
 }
 
 fn loadModuleRuntimes(

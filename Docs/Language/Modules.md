@@ -180,7 +180,13 @@ Library/STD/
 
 `Randomizer.sx` and `Internal.sx` declare private `native func` entries and
 expose ordinary Silex types around them. `Module.cpp`
-defines the C symbols derived from their full module and function paths:
+includes the generated interface, then defines the C symbols derived from
+their full module and function paths:
+
+```cpp
+#include <SilexNative/STD/Time.h>
+```
+
 `STD.native_seed` becomes `silexNative_STD_native_seed`, and
 `STD.Time.native_monotonic_microseconds` becomes
 `silexNative_STD_Time_native_monotonic_microseconds`.
@@ -276,13 +282,14 @@ and the contents of included package headers. Paths are normalized relative to
 their package or public interface, so two projects can reuse one immutable Git
 package checkout without their own absolute paths entering the identity.
 
-Changing an included vendored header or the native target creates a new object
-set. Changing only a package `.sx` file leaves its native objects reusable;
-the application C++ and final link remain local under `.silex/build/`. A
-dependency implementation change replaces the objects linked for that owner,
-while a dependent package is recompiled only when the public native interface
-it consumes changes. System libraries and frameworks are still evaluated for
-every required final link and are never stored as cache contents.
+Changing an included vendored header, generated Silex native interface, or the
+native target creates a new object set. Changing a package `.sx` file otherwise
+leaves its native objects reusable; the application C++ and final link remain
+local under `.silex/build/`. A dependency implementation change replaces the
+objects linked for that owner, while a dependent package is recompiled only
+when the public native interface it consumes changes. System libraries and
+frameworks are still evaluated for every required final link and are never
+stored as cache contents.
 
 The optional manifest can be initialized without changing the module's Silex
 sources:
