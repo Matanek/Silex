@@ -542,6 +542,7 @@ pub fn generateWithSources(
         \\
         \\    std::size_t size() const { return values_.size(); }
         \\    bool empty() const { return values_.empty(); }
+        \\    const T* data() const { return values_.data(); }
         \\    bool operator==(const SilexList& other) const { return values_ == other.values_; }
         \\    bool operator!=(const SilexList& other) const { return !(*this == other); }
         \\    const_iterator begin() const { return values_.begin(); }
@@ -1745,6 +1746,17 @@ fn generateNativeFunctionSignature(
             } else {
                 try output.appendSlice(allocator, ", std::int64_t");
             }
+        } else if (isNativeByteViewType(parameter.type)) {
+            try output.appendSlice(allocator, "const std::uint8_t*");
+            if (include_names) {
+                try output.append(allocator, ' ');
+                try output.appendSlice(allocator, parameter.generated_name);
+                try output.appendSlice(allocator, "Bytes, std::int64_t ");
+                try output.appendSlice(allocator, parameter.generated_name);
+                try output.appendSlice(allocator, "Length");
+            } else {
+                try output.appendSlice(allocator, ", std::int64_t");
+            }
         } else if (nativeStructureForType(program, parameter.type)) |parameter_structure| {
             try output.appendSlice(allocator, "const ");
             try output.appendSlice(allocator, try NativeInterface.inputTransportName(
@@ -1896,6 +1908,14 @@ fn nativeBranchValueType(value: Semantic.Type) Semantic.Type {
     return if (value == .optional) value.optional.* else value;
 }
 
+fn isNativeByteViewType(value: Semantic.Type) bool {
+    return switch (value) {
+        .list => |element| element.* == .uint8,
+        .fixed_array => |array| array.element.* == .uint8,
+        else => false,
+    };
+}
+
 fn generateNativeResultTransportIfNew(
     allocator: Allocator,
     output: *std.ArrayList(u8),
@@ -2043,6 +2063,14 @@ fn generateNativeArgumentPreludes(
             try output.append(allocator, ';');
             continue;
         }
+        if (isNativeByteViewType(argument.type)) {
+            try output.appendSlice(allocator, "const auto& silexNativeBytes");
+            try output.appendSlice(allocator, try std.fmt.allocPrint(allocator, "{d}", .{index}));
+            try output.appendSlice(allocator, " = ");
+            try generateExpression(allocator, output, argument);
+            try output.append(allocator, ';');
+            continue;
+        }
         const structure = parameter_structure orelse continue;
         try output.appendSlice(allocator, "const auto& silexNativeStructure");
         try output.appendSlice(allocator, try std.fmt.allocPrint(allocator, "{d}", .{index}));
@@ -2089,6 +2117,12 @@ fn generateNativeArgument(
         try output.appendSlice(allocator, "silexNativeString");
         try output.appendSlice(allocator, try std.fmt.allocPrint(allocator, "{d}", .{index}));
         try output.appendSlice(allocator, ".data(), static_cast<std::int64_t>(silexNativeString");
+        try output.appendSlice(allocator, try std.fmt.allocPrint(allocator, "{d}", .{index}));
+        try output.appendSlice(allocator, ".size())");
+    } else if (isNativeByteViewType(argument.type)) {
+        try output.appendSlice(allocator, "silexNativeBytes");
+        try output.appendSlice(allocator, try std.fmt.allocPrint(allocator, "{d}", .{index}));
+        try output.appendSlice(allocator, ".data(), static_cast<std::int64_t>(silexNativeBytes");
         try output.appendSlice(allocator, try std.fmt.allocPrint(allocator, "{d}", .{index}));
         try output.appendSlice(allocator, ".size())");
     } else if (call.native_parameter_structures[index] != null) {
@@ -4637,6 +4671,48 @@ test "generate borrowed string fields in native structure parameters" {
         cpp,
         "silexNative_Files_native_round_trip(&silexNativeInput0, &silexNativeOutput)",
     ) != null);
+}
+
+test "generate borrowed uint8 collection native parameters" {
+    const Parser = @import("Parser.zig").Parser;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var parser = Parser.init(allocator,
+        \\native func native_checksum(bytes:uint8[]) uint64
+        \\native func native_block(bytes:uint8[4]) bool
+        \\func main() {
+        \\    let list:uint8[] = [0, 1, 255]
+        \\    let block:uint8[4] = [1, 2, 3, 4]
+        \\    print(native_checksum(list))
+        \\    print(native_block(block))
+        \\}
+    );
+    const program = try parser.parse();
+    @constCast(program.functions)[0].name = "Bytes.native_checksum";
+    @constCast(program.functions)[1].name = "Bytes.native_block";
+    var analyzer = Semantic.Analyzer.init(allocator);
+    analyzer.native_module_names = &.{"Bytes"};
+    const cpp = try generate(allocator, try analyzer.analyze(program));
+
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        cpp,
+        "extern \"C\" std::uint64_t silexNative_Bytes_native_checksum(const std::uint8_t* silexValue0Bytes, std::int64_t silexValue0Length);",
+    ) != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "const auto& silexNativeBytes0 = silexVariable0;") != null);
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        cpp,
+        "silexNative_Bytes_native_checksum(silexNativeBytes0.data(), static_cast<std::int64_t>(silexNativeBytes0.size()))",
+    ) != null);
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        cpp,
+        "silexNative_Bytes_native_block(silexNativeBytes0.data(), static_cast<std::int64_t>(silexNativeBytes0.size()))",
+    ) != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "const T* data() const { return values_.data(); }") != null);
 }
 
 test "generate validated native Result bridges" {

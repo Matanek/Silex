@@ -1,0 +1,25 @@
+use NativeByteViews as Native
+
+func main() {
+    var bytes:uint8[] = [0, 17, 0, 255]
+    let original:uint8[] = bytes
+    print(Native.checksum(bytes))
+    let empty:uint8[] = []
+    print(Native.checksum(empty))
+
+    let block:uint8[4] = [0, 17, 0, 255]
+    print(Native.fixed_checksum(block))
+    match Native.write_block(block) {
+        success => { print(true) }
+        failure(error) => { print(error) }
+    }
+
+    var large:uint8[] = []
+    var index:int = 0
+    while (index < 1024) {
+        large.append((index % 256) as uint8)
+        index += 1
+    }
+    print(Native.checksum(large))
+    print(bytes == original)
+}

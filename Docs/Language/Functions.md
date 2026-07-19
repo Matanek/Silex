@@ -194,6 +194,18 @@ Nested structures, enums, classes, protocols, collections, references,
 optionals, `Result`, functions, generic structures, and structures with `drop`
 remain unavailable as native structure parameters.
 
+A native function may also receive `uint8[]` or `uint8[N]` as a read-only byte
+view. The generated C declaration expands each such parameter to a
+`const uint8_t*` and an `int64_t` byte length. The view is contiguous and is
+valid only during the call: native code cannot modify it, retain its pointer, or
+free it. An empty sequence has length zero and may use a null pointer. Silex may
+borrow its collection storage or materialize a temporary copy; neither choice
+is observable and the caller's sequence remains unchanged.
+
+Only these two input types are admitted: `uint8[]` and `uint8[N]`. Other list
+or array element types, mutable buffers, collection returns, general slices,
+and pointers visible in `.sx` remain outside the native ABI.
+
 A native function may return `T?` when `T` is one of the transferable return
 types above: a scalar boolean or number, `str`, or an admitted flat structure.
 The C symbol returns `bool` to report presence and receives the same transport

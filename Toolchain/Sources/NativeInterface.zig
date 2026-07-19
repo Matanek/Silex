@@ -142,6 +142,15 @@ fn appendFunctionSignature(
             parameter_count += 2;
             continue;
         }
+        if (isNativeByteViewType(parameter.type)) {
+            try output.appendSlice(allocator, "const uint8_t* ");
+            try output.appendSlice(allocator, parameter.generated_name);
+            try output.appendSlice(allocator, "Bytes, int64_t ");
+            try output.appendSlice(allocator, parameter.generated_name);
+            try output.appendSlice(allocator, "Length");
+            parameter_count += 2;
+            continue;
+        }
         if (structureForType(program, parameter.type)) |parameter_structure| {
             try output.appendSlice(allocator, "const ");
             try output.appendSlice(allocator, try inputTransportName(
@@ -215,6 +224,14 @@ fn nativeResultShape(program: Semantic.Program, value: Semantic.Type) ?NativeRes
 
 fn nativeBranchValueType(value: Semantic.Type) Semantic.Type {
     return if (value == .optional) value.optional.* else value;
+}
+
+fn isNativeByteViewType(value: Semantic.Type) bool {
+    return switch (value) {
+        .list => |element| element.* == .uint8,
+        .fixed_array => |array| array.element.* == .uint8,
+        else => false,
+    };
 }
 
 fn appendResultTransportIfNew(
@@ -655,4 +672,34 @@ test "native headers expose tagged Result outputs" {
         "void silexNative_Files_native_open(const char* silexValue0Bytes, int64_t silexValue0Length, SilexNative_Files_native_openResult* output);",
     ) != null);
     try std.testing.expect(std.mem.indexOf(u8, header, "SilexNative_Files_native_saveResultTag tag;") != null);
+}
+
+test "native headers expose uint8 collections as borrowed byte views" {
+    const Parser = @import("Parser.zig").Parser;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var parser = Parser.init(allocator,
+        \\native func native_checksum(bytes:uint8[]) uint64
+        \\native func native_write_block(bytes:uint8[512]) bool
+        \\func main() {}
+    );
+    const ast = try parser.parse();
+    @constCast(ast.functions)[0].name = "Bytes.native_checksum";
+    @constCast(ast.functions)[1].name = "Bytes.native_write_block";
+    var analyzer = Semantic.Analyzer.init(allocator);
+    analyzer.native_module_names = &.{"Bytes"};
+    const header = try renderHeader(allocator, try analyzer.analyze(ast), "Bytes");
+
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        header,
+        "uint64_t silexNative_Bytes_native_checksum(const uint8_t* silexValue0Bytes, int64_t silexValue0Length);",
+    ) != null);
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        header,
+        "bool silexNative_Bytes_native_write_block(const uint8_t* silexValue1Bytes, int64_t silexValue1Length);",
+    ) != null);
 }

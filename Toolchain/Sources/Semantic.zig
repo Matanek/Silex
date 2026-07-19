@@ -6977,6 +6977,7 @@ pub const Analyzer = struct {
     }
 
     fn isNativeParameterType(self: *const Analyzer, value: Type) Allocator.Error!bool {
+        if (isNativeByteViewType(value)) return true;
         if (isNativeScalarParameterType(value)) return true;
         const structure_type = switch (value) {
             .structure => |type_value| type_value,
@@ -7632,6 +7633,14 @@ fn isNativeScalarParameterType(value: Type) bool {
     return value == .str or isNativeScalarReturnType(value);
 }
 
+fn isNativeByteViewType(value: Type) bool {
+    return switch (value) {
+        .list => |element| element.* == .uint8,
+        .fixed_array => |array| array.element.* == .uint8,
+        else => false,
+    };
+}
+
 fn moduleName(function_name: []const u8) ?[]const u8 {
     const separator = std.mem.lastIndexOfScalar(u8, function_name, '.') orelse return null;
     return function_name[0..separator];
@@ -7987,6 +7996,23 @@ fn expectNativeStructureParameterRejected(source: []const u8) !void {
     analyzer.native_module_names = &.{"Native"};
     try std.testing.expectError(error.InvalidSource, analyzer.analyze(try specializer.specialize()));
     try std.testing.expect(std.mem.startsWith(u8, analyzer.diagnostic.?.message, "native parameter 'value' cannot use 'Payload"));
+}
+
+fn expectNativeByteViewParameterRejected(source: []const u8) !void {
+    const Parser = @import("Parser.zig").Parser;
+    const Generics = @import("Generics.zig");
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var parser = Parser.init(allocator, source);
+    const program = try parser.parse();
+    @constCast(program.functions)[0].name = "Native.native_read";
+    var specializer = Generics.Specializer.init(allocator, program);
+    var analyzer = Analyzer.init(allocator);
+    analyzer.native_module_names = &.{"Native"};
+    try std.testing.expectError(error.InvalidSource, analyzer.analyze(try specializer.specialize()));
+    try std.testing.expect(std.mem.startsWith(u8, analyzer.diagnostic.?.message, "native parameter 'bytes' cannot use '"));
 }
 
 test "analyze enum construction and exhaustive match" {
@@ -8563,6 +8589,39 @@ test "native ABI accepts scalar and string structure parameters" {
     var analyzer = Analyzer.init(allocator);
     analyzer.native_module_names = &.{"Native"};
     _ = try analyzer.analyze(program);
+}
+
+test "native ABI accepts borrowed uint8 collection parameters" {
+    const Parser = @import("Parser.zig").Parser;
+    const Generics = @import("Generics.zig");
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var parser = Parser.init(allocator,
+        \\native func native_checksum(bytes:uint8[]) uint64
+        \\native func native_write_block(bytes:uint8[512]) Result<void,str>
+        \\func main() {}
+    );
+    const program = try parser.parse();
+    @constCast(program.functions)[0].name = "Native.native_checksum";
+    @constCast(program.functions)[1].name = "Native.native_write_block";
+    var specializer = Generics.Specializer.init(allocator, program);
+    var analyzer = Analyzer.init(allocator);
+    analyzer.native_module_names = &.{"Native"};
+    _ = try analyzer.analyze(try specializer.specialize());
+}
+
+test "native ABI rejects unsupported collection parameters" {
+    const cases = [_][]const u8{
+        "native func native_read(bytes:int[]) int; func main() {}",
+        "native func native_read(bytes:str[]) int; func main() {}",
+        "native func native_read(bytes:uint8[][]) int; func main() {}",
+        "native func native_read(bytes:int[4]) int; func main() {}",
+        "native func native_read(bytes:uint8[4][]) int; func main() {}",
+        "native func native_read(bytes:&uint8[]) int; func main() {}",
+    };
+    for (cases) |source| try expectNativeByteViewParameterRejected(source);
 }
 
 test "native ABI rejects non scalar structure parameters" {

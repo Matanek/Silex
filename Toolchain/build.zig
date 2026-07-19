@@ -2591,8 +2591,13 @@ pub fn build(b: *std.Build) void {
         "runtime error: native function 'NativeResults.native_invalid_utf8' failed: Result failure returned invalid UTF-8\n",
     );
 
+    const native_byte_view_command = b.addRunArtifact(executable);
+    native_byte_view_command.step.dependOn(&native_result_invalid_utf8_command.step);
+    native_byte_view_command.addArgs(&.{ "run", "Smokes/NativeByteViews/Main.sx" });
+    native_byte_view_command.expectStdOutEqual(hostText(b, "272\n0\n272\ntrue\n130560\ntrue\n"));
+
     const native_string_command = b.addRunArtifact(executable);
-    native_string_command.step.dependOn(&native_result_invalid_utf8_command.step);
+    native_string_command.step.dependOn(&native_byte_view_command.step);
     native_string_command.addArgs(&.{ "run", "Smokes/NativeStrings/Main.sx" });
     native_string_command.expectStdOutEqual(hostText(b, "true\ntrue\ntrue\ntrue\ntrue\ntrue\n"));
 
@@ -3140,8 +3145,30 @@ pub fn build(b: *std.Build) void {
         ".silex/cross-native-smoke/NativeResults-x86_64-windows.exe",
     });
 
+    const cross_native_byte_view_linux_smoke_command = b.addRunArtifact(executable);
+    cross_native_byte_view_linux_smoke_command.step.dependOn(&cross_native_result_windows_smoke_command.step);
+    cross_native_byte_view_linux_smoke_command.addArgs(&.{
+        "compile",
+        "Smokes/NativeByteViews/Main.sx",
+        "--target",
+        "x86_64-linux-musl",
+        "-o",
+        ".silex/cross-native-smoke/NativeByteViews-x86_64-linux",
+    });
+
+    const cross_native_byte_view_windows_smoke_command = b.addRunArtifact(executable);
+    cross_native_byte_view_windows_smoke_command.step.dependOn(&cross_native_byte_view_linux_smoke_command.step);
+    cross_native_byte_view_windows_smoke_command.addArgs(&.{
+        "compile",
+        "Smokes/NativeByteViews/Main.sx",
+        "--target",
+        "x86_64-windows-gnu",
+        "-o",
+        ".silex/cross-native-smoke/NativeByteViews-x86_64-windows.exe",
+    });
+
     const cross_native_string_linux_smoke_command = b.addRunArtifact(executable);
-    cross_native_string_linux_smoke_command.step.dependOn(&cross_native_result_windows_smoke_command.step);
+    cross_native_string_linux_smoke_command.step.dependOn(&cross_native_byte_view_windows_smoke_command.step);
     cross_native_string_linux_smoke_command.addArgs(&.{
         "compile",
         "Smokes/NativeStrings/Main.sx",
