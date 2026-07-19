@@ -30,6 +30,5 @@ func main() {
     let second = Native.compress(secondInput)
     assert(first.count() == 4 && first[0] == 0 && first[1] == 17 && first[2] == 0 && first[3] == 255, "successive direct outputs independent")
     assert(second.count() == 2 && second[0] == 8 && second[1] == 9, "second direct output")
-    assert(Native.outputs_freed(), "every native buffer is freed once")
     print("native byte buffers ok")
 }

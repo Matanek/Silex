@@ -231,6 +231,15 @@ pub fn generateWithSources(
         \\    return true;
         \\}
         \\
+        \\#ifndef SILEX_NATIVE_RELEASE_OBSERVER
+        \\#define SILEX_NATIVE_RELEASE_OBSERVER(pointer) ((void)0)
+        \\#endif
+        \\
+        \\void silexNativeRelease(void* pointer) {
+        \\    SILEX_NATIVE_RELEASE_OBSERVER(pointer);
+        \\    std::free(pointer);
+        \\}
+        \\
         \\template <typename Call>
         \\std::string callNativeStringFunction(const char* module, const char* function, Call&& call) {
         \\    char* outputBytes = nullptr;
@@ -238,13 +247,13 @@ pub fn generateWithSources(
         \\    try {
         \\        std::forward<Call>(call)(&outputBytes, &outputLength);
         \\    } catch (const std::exception& exception) {
-        \\        std::free(outputBytes);
+        \\        silexNativeRelease(outputBytes);
         \\        nativeFunctionRuntimeError(module, function, exception.what());
         \\    } catch (...) {
-        \\        std::free(outputBytes);
+        \\        silexNativeRelease(outputBytes);
         \\        nativeFunctionRuntimeError(module, function, "unknown native exception");
         \\    }
-        \\    std::unique_ptr<char, decltype(&std::free)> output{outputBytes, &std::free};
+        \\    std::unique_ptr<char, decltype(&silexNativeRelease)> output{outputBytes, &silexNativeRelease};
         \\    if (outputLength < 0) {
         \\        output.reset();
         \\        nativeFunctionRuntimeError(module, function, "returned a negative length");
@@ -2277,8 +2286,8 @@ fn generateNativeResultPointerAction(
     action: NativeResultOwnedAction,
 ) GenerateError!void {
     switch (action) {
-        .raw_free => try output.appendSlice(allocator, "std::free("),
-        .guard => try output.appendSlice(allocator, if (byte_buffer) "std::unique_ptr<std::uint8_t, decltype(&std::free)> silexNativeGuard_" else "std::unique_ptr<char, decltype(&std::free)> silexNativeGuard_"),
+        .raw_free => try output.appendSlice(allocator, "silexNativeRelease("),
+        .guard => try output.appendSlice(allocator, if (byte_buffer) "std::unique_ptr<std::uint8_t, decltype(&silexNativeRelease)> silexNativeGuard_" else "std::unique_ptr<char, decltype(&silexNativeRelease)> silexNativeGuard_"),
         .reset => try output.appendSlice(allocator, "silexNativeGuard_"),
     }
     if (action == .guard or action == .reset) {
@@ -2302,7 +2311,7 @@ fn generateNativeResultPointerAction(
     } else {
         try output.appendSlice(allocator, "Bytes");
     }
-    try output.appendSlice(allocator, if (action == .guard) ", &std::free};" else ");");
+    try output.appendSlice(allocator, if (action == .guard) ", &silexNativeRelease};" else ");");
 }
 
 fn generateNativeResultOwnedCondition(
@@ -2714,18 +2723,18 @@ fn generateNativeFunctionCall(
             try output.appendSlice(allocator, "} catch (...) {");
             for (structure.fields) |field| {
                 if (field.type != .str) continue;
-                try output.appendSlice(allocator, "std::free(silexNativeOutput.");
+                try output.appendSlice(allocator, "silexNativeRelease(silexNativeOutput.");
                 try output.appendSlice(allocator, field.generated_name);
                 try output.appendSlice(allocator, "Bytes);");
             }
             try output.appendSlice(allocator, "throw;}");
             for (structure.fields) |field| {
                 if (field.type != .str) continue;
-                try output.appendSlice(allocator, "std::unique_ptr<char, decltype(&std::free)> silexNativeGuard_");
+                try output.appendSlice(allocator, "std::unique_ptr<char, decltype(&silexNativeRelease)> silexNativeGuard_");
                 try output.appendSlice(allocator, field.generated_name);
                 try output.appendSlice(allocator, "{silexNativeOutput.");
                 try output.appendSlice(allocator, field.generated_name);
-                try output.appendSlice(allocator, "Bytes, &std::free};");
+                try output.appendSlice(allocator, "Bytes, &silexNativeRelease};");
             }
             for (structure.fields) |field| {
                 if (field.type != .str) continue;
@@ -2815,8 +2824,8 @@ fn generateNativeByteBufferFunctionCall(
         try generateNativeArgument(allocator, output, call, index);
     }
     if (call.arguments.len != 0) try output.appendSlice(allocator, ", ");
-    try output.appendSlice(allocator, "&silexNativeOutputBytes, &silexNativeOutputLength);} catch (...) {std::free(silexNativeOutputBytes);throw;}");
-    try output.appendSlice(allocator, "std::unique_ptr<std::uint8_t, decltype(&std::free)> silexNativeGuard{silexNativeOutputBytes, &std::free};");
+    try output.appendSlice(allocator, "&silexNativeOutputBytes, &silexNativeOutputLength);} catch (...) {silexNativeRelease(silexNativeOutputBytes);throw;}");
+    try output.appendSlice(allocator, "std::unique_ptr<std::uint8_t, decltype(&silexNativeRelease)> silexNativeGuard{silexNativeOutputBytes, &silexNativeRelease};");
     try output.appendSlice(allocator, "if (silexNativeOutputLength < 0) {silexNativeGuard.reset();nativeFunctionRuntimeError(");
     try appendCppByteStringLiteral(allocator, output, module_name);
     try output.appendSlice(allocator, ", ");
@@ -2883,10 +2892,10 @@ fn generateNativeOptionalFunctionCall(
     if (has_owned_buffers) {
         try output.appendSlice(allocator, "} catch (...) {");
         if (returns_string) {
-            try output.appendSlice(allocator, "std::free(silexNativeOutputBytes);");
+            try output.appendSlice(allocator, "silexNativeRelease(silexNativeOutputBytes);");
         } else for (returned_structure.?.fields) |field| {
             if (field.type != .str) continue;
-            try output.appendSlice(allocator, "std::free(silexNativeOutput.");
+            try output.appendSlice(allocator, "silexNativeRelease(silexNativeOutput.");
             try output.appendSlice(allocator, field.generated_name);
             try output.appendSlice(allocator, "Bytes);");
         }
@@ -2894,7 +2903,7 @@ fn generateNativeOptionalFunctionCall(
     }
 
     if (returns_string) {
-        try output.appendSlice(allocator, "std::unique_ptr<char, decltype(&std::free)> silexNativeGuard{silexNativeOutputBytes, &std::free};");
+        try output.appendSlice(allocator, "std::unique_ptr<char, decltype(&silexNativeRelease)> silexNativeGuard{silexNativeOutputBytes, &silexNativeRelease};");
         try output.appendSlice(allocator, "if (!silexNativePresent) {if (silexNativeOutputBytes != nullptr) {silexNativeGuard.reset();nativeFunctionRuntimeError(");
         try appendCppByteStringLiteral(allocator, output, module_name);
         try output.appendSlice(allocator, ", ");
@@ -2919,11 +2928,11 @@ fn generateNativeOptionalFunctionCall(
         if (nativeTransportHasString(structure)) {
             for (structure.fields) |field| {
                 if (field.type != .str) continue;
-                try output.appendSlice(allocator, "std::unique_ptr<char, decltype(&std::free)> silexNativeGuard_");
+                try output.appendSlice(allocator, "std::unique_ptr<char, decltype(&silexNativeRelease)> silexNativeGuard_");
                 try output.appendSlice(allocator, field.generated_name);
                 try output.appendSlice(allocator, "{silexNativeOutput.");
                 try output.appendSlice(allocator, field.generated_name);
-                try output.appendSlice(allocator, "Bytes, &std::free};");
+                try output.appendSlice(allocator, "Bytes, &silexNativeRelease};");
             }
             try output.appendSlice(allocator, "if (!silexNativePresent) {");
             for (structure.fields) |field| {
@@ -4691,7 +4700,8 @@ test "generate string native return bridge" {
         "extern \"C\" void silexNative_Console_native_read_text(char** output_bytes, std::int64_t* output_length);",
     ) != null);
     try std.testing.expect(std.mem.indexOf(u8, cpp, "std::string callNativeStringFunction") != null);
-    try std.testing.expect(std.mem.indexOf(u8, cpp, "std::free(outputBytes);") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "void silexNativeRelease(void* pointer)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "silexNativeRelease(outputBytes);") != null);
     try std.testing.expect(std.mem.indexOf(u8, cpp, "returned invalid UTF-8") != null);
 }
 
@@ -4748,8 +4758,8 @@ test "generate owned string structure native return bridge" {
 
     try std.testing.expect(std.mem.indexOf(u8, cpp, "char* field1Bytes = nullptr;") != null);
     try std.testing.expect(std.mem.indexOf(u8, cpp, "std::int64_t field1Length = 0;") != null);
-    try std.testing.expect(std.mem.indexOf(u8, cpp, "std::unique_ptr<char, decltype(&std::free)> silexNativeGuard_field1") != null);
-    try std.testing.expect(std.mem.indexOf(u8, cpp, "std::free(silexNativeOutput.field1Bytes);std::free(silexNativeOutput.field2Bytes);throw;") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "std::unique_ptr<char, decltype(&silexNativeRelease)> silexNativeGuard_field1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "silexNativeRelease(silexNativeOutput.field1Bytes);silexNativeRelease(silexNativeOutput.field2Bytes);throw;") != null);
     try std.testing.expect(std.mem.count(u8, cpp, "silexNativeGuard_field1.reset();") >= 4);
     try std.testing.expect(std.mem.count(u8, cpp, "silexNativeGuard_field2.reset();") >= 4);
     try std.testing.expect(std.mem.indexOf(u8, cpp, "nativeStructureFieldRuntimeError(\"Events\", \"native_message\", \"detail\"") != null);
@@ -4967,7 +4977,7 @@ test "generate owned uint8 list native returns" {
     try std.testing.expect(std.mem.indexOf(u8, cpp, "SilexList<std::uint8_t> silexNativeResult;") != null);
     try std.testing.expect(std.mem.indexOf(u8, cpp, "returned a negative length") != null);
     try std.testing.expect(std.mem.indexOf(u8, cpp, "std::uint8_t* successBytes = nullptr;") != null);
-    try std.testing.expect(std.mem.indexOf(u8, cpp, "std::unique_ptr<std::uint8_t, decltype(&std::free)> silexNativeGuard_success") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "std::unique_ptr<std::uint8_t, decltype(&silexNativeRelease)> silexNativeGuard_success") != null);
     try std.testing.expect(std.mem.indexOf(u8, cpp, "SilexList<std::uint8_t> silexNativeBytes_success;") != null);
     try std.testing.expect(std.mem.indexOf(u8, cpp, "std::move(silexNativeBytes_success)") != null);
 }
@@ -5001,18 +5011,18 @@ test "generate validated native Result bridges" {
     try std.testing.expect(std.mem.indexOf(u8, cpp, "char* failureBytes = nullptr;") != null);
     try std.testing.expect(std.mem.indexOf(u8, cpp, "returned an owned buffer in the inactive failure branch") != null);
     try std.testing.expect(std.mem.indexOf(u8, cpp, "returned an unknown Result tag") != null);
-    try std.testing.expect(std.mem.indexOf(u8, cpp, "std::free(silexNativeOutput.successValue.field1Bytes)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "silexNativeRelease(silexNativeOutput.successValue.field1Bytes)") != null);
     try std.testing.expect(std.mem.indexOf(u8, cpp, "std::move(silexNativeString_failure)") != null);
     try std.testing.expect(std.mem.indexOf(u8, cpp, "SilexNative_Files_native_saveResult") != null);
     try std.testing.expectEqual(@as(usize, 1), std.mem.count(
         u8,
         cpp,
-        "std::unique_ptr<char, decltype(&std::free)> silexNativeGuard_success_field1",
+        "std::unique_ptr<char, decltype(&silexNativeRelease)> silexNativeGuard_success_field1",
     ));
     try std.testing.expectEqual(@as(usize, 2), std.mem.count(
         u8,
         cpp,
-        "std::unique_ptr<char, decltype(&std::free)> silexNativeGuard_failure",
+        "std::unique_ptr<char, decltype(&silexNativeRelease)> silexNativeGuard_failure",
     ));
 }
 
@@ -5088,6 +5098,129 @@ test "generate checked integer operations with backend overflow primitives" {
     try std.testing.expect(std.mem.indexOf(u8, cpp, "silexValue0 = checkedDivide(silexValue0, std::int8_t{2}, SilexSourceLocation{") != null);
     try std.testing.expect(std.mem.indexOf(u8, cpp, "checkedRemainder(silexValue0, std::int8_t{2}, SilexSourceLocation{") != null);
     try std.testing.expect(std.mem.indexOf(u8, cpp, "checkedNegate(silexValue0, SilexSourceLocation{") != null);
+}
+
+test "native output releases are observed exactly once" {
+    if (build_options.developer_zig.len == 0) return error.SkipZigTest;
+
+    const Parser = @import("Parser.zig").Parser;
+    const Generics = @import("Generics.zig");
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var parser = Parser.init(allocator,
+        \\struct Message { let first:str; let second:str }
+        \\native func native_message() Message
+        \\native func native_optional() str?
+        \\native func native_bytes() uint8[]
+        \\native func native_result() Result<uint8[],str>
+        \\func main() {
+        \\    let message = native_message()
+        \\    let optional = native_optional()
+        \\    let bytes = native_bytes()
+        \\    let result = native_result()
+        \\}
+    );
+    const ast = try parser.parse();
+    @constCast(ast.functions)[0].name = "Probe.native_message";
+    @constCast(ast.functions)[1].name = "Probe.native_optional";
+    @constCast(ast.functions)[2].name = "Probe.native_bytes";
+    @constCast(ast.functions)[3].name = "Probe.native_result";
+    var specializer = Generics.Specializer.init(allocator, ast);
+    var analyzer = Semantic.Analyzer.init(allocator);
+    analyzer.native_module_names = &.{"Probe"};
+    const cpp = try generate(allocator, try analyzer.analyze(try specializer.specialize()));
+
+    const observer =
+        \\#define SILEX_NATIVE_RELEASE_OBSERVER(pointer) silexNativeTestObserveRelease(pointer)
+        \\extern "C" void silexNativeTestObserveRelease(void* pointer);
+    ;
+    const native_definitions =
+        \\#include <cstdlib>
+        \\#include <cstring>
+        \\#include <cstdio>
+        \\namespace {
+        \\struct Allocation { void* pointer; int releases; };
+        \\Allocation allocations[8]{};
+        \\std::size_t allocationCount = 0;
+        \\char* allocateText(const char* text) {
+        \\    const auto length = std::strlen(text);
+        \\    auto* result = static_cast<char*>(std::malloc(length));
+        \\    std::memcpy(result, text, length);
+        \\    allocations[allocationCount++] = {result, 0};
+        \\    return result;
+        \\}
+        \\std::uint8_t* allocateBytes() {
+        \\    auto* result = static_cast<std::uint8_t*>(std::malloc(2));
+        \\    result[0] = 4; result[1] = 2;
+        \\    allocations[allocationCount++] = {result, 0};
+        \\    return result;
+        \\}
+        \\void verifyReleases() {
+        \\    for (std::size_t index = 0; index < allocationCount; index += 1) {
+        \\        if (allocations[index].releases != 1) std::_Exit(2);
+        \\    }
+        \\}
+        \\struct RegisterVerifier { RegisterVerifier() { std::atexit(verifyReleases); } } registerVerifier;
+        \\}
+        \\extern "C" void silexNativeTestObserveRelease(void* pointer) {
+        \\    if (pointer == nullptr) return;
+        \\    for (std::size_t index = 0; index < allocationCount; index += 1) {
+        \\        if (allocations[index].pointer != pointer) continue;
+        \\        allocations[index].releases += 1;
+        \\        return;
+        \\    }
+        \\    std::_Exit(3);
+        \\}
+        \\extern "C" void silexNative_Probe_native_message(SilexNative_Probe_Message* output) {
+        \\    output->field0Bytes = allocateText("first"); output->field0Length = 5;
+        \\    output->field1Bytes = allocateText("second"); output->field1Length = 6;
+        \\}
+        \\extern "C" bool silexNative_Probe_native_optional(char** bytes, std::int64_t* length) {
+        \\    *bytes = allocateText("optional"); *length = 8; return true;
+        \\}
+        \\extern "C" void silexNative_Probe_native_bytes(std::uint8_t** bytes, std::int64_t* length) {
+        \\    *bytes = allocateBytes(); *length = 2;
+        \\}
+        \\extern "C" void silexNative_Probe_native_result(SilexNative_Probe_native_resultResult* output) {
+        \\    output->tag = SilexNative_Probe_native_resultResultTag_failure;
+        \\    output->failureBytes = allocateText("failure"); output->failureLength = 7;
+        \\}
+    ;
+    const probe = try std.fmt.allocPrint(allocator, "{s}\n{s}", .{ cpp, native_definitions });
+
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Observer.hpp", .data = observer });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Probe.cpp", .data = probe });
+    const executable_name = if (builtin.os.tag == .windows) "Probe.exe" else "Probe";
+    const compilation = try std.process.run(std.testing.allocator, std.testing.io, .{
+        .argv = &.{ build_options.developer_zig, "c++", "-std=c++23", "-include", "Observer.hpp", "Probe.cpp", "-o", executable_name },
+        .cwd = .{ .dir = temporary.dir },
+        .stdout_limit = .limited(1024 * 1024),
+        .stderr_limit = .limited(1024 * 1024),
+    });
+    defer std.testing.allocator.free(compilation.stdout);
+    defer std.testing.allocator.free(compilation.stderr);
+    try std.testing.expectEqual(@as(u8, 0), switch (compilation.term) {
+        .exited => |code| code,
+        else => 1,
+    });
+
+    const executable_argument = if (builtin.os.tag == .windows) ".\\Probe.exe" else "./Probe";
+    const execution = try std.process.run(std.testing.allocator, std.testing.io, .{
+        .argv = &.{executable_argument},
+        .cwd = .{ .dir = temporary.dir },
+        .stdout_limit = .limited(1024 * 1024),
+        .stderr_limit = .limited(1024 * 1024),
+    });
+    defer std.testing.allocator.free(execution.stdout);
+    defer std.testing.allocator.free(execution.stderr);
+    try std.testing.expectEqual(@as(u8, 0), switch (execution.term) {
+        .exited => |code| code,
+        else => 1,
+    });
 }
 
 test "optimized backend eliminates a provably unnecessary integer check" {
