@@ -1,6 +1,7 @@
 const std = @import("std");
 const Ast = @import("Ast.zig");
 const LexerModule = @import("Lexer.zig");
+const ModuleDiscovery = @import("ModuleDiscovery.zig");
 const ModuleManifest = @import("ModuleManifest.zig");
 const Modules = @import("Modules.zig");
 const PackageGraph = @import("PackageGraph.zig");
@@ -741,6 +742,7 @@ pub const Loader = struct {
         loads_local_modules: bool,
         package_index: usize,
     ) !bool {
+        if (!ModuleDiscovery.isModuleName(module_name)) return false;
         if (findModule(modules, module_name)) |module_index| {
             return self.moduleAccessible(modules[module_index], package_index);
         }
@@ -768,6 +770,18 @@ pub const Loader = struct {
         package_index: usize,
     ) !void {
         if (StandardLibrary.isReservedModule(module_name)) {
+            if (loads_local_modules) {
+                const local_path = try localModulePath(self.allocator, project_root, module_name);
+                if (try isDirectory(self.io, local_path)) {
+                    const library_root = StandardLibrary.root(self.allocator, self.io) catch {
+                        return self.loadDistributedModule(modules, module_name, position);
+                    };
+                    const distributed_path = try localModulePath(self.allocator, library_root, module_name);
+                    if (try isDirectory(self.io, distributed_path)) {
+                        return self.multipleProviders(position, module_name);
+                    }
+                }
+            }
             return self.loadDistributedModule(modules, module_name, position);
         }
         if (self.package_graph.?.explicit) {
@@ -1205,7 +1219,8 @@ fn findNativeRuntimeInPackage(
 }
 
 fn nativeModuleManifestPath(allocator: Allocator, io: Io, module_directory: []const u8) !?[]const u8 {
-    const path = try std.fs.path.join(allocator, &.{ module_directory, "Module.json" });
+    try ModuleManifest.rejectLegacyInDirectory(allocator, io, module_directory);
+    const path = try ModuleManifest.manifestPath(allocator, module_directory);
     const stat = Io.Dir.cwd().statFile(io, path, .{}) catch |err| switch (err) {
         error.FileNotFound => return null,
         else => |other| return other,
@@ -1218,7 +1233,7 @@ fn nativeModuleManifestPath(allocator: Allocator, io: Io, module_directory: []co
     return if (manifest.native != null) path else null;
 }
 
-test "native runtime ignores metadata-only and incorrectly cased child manifests" {
+test "native runtime uses @Module.json and ignores metadata-only or incorrectly cased manifests" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -1231,11 +1246,11 @@ test "native runtime ignores metadata-only and incorrectly cased child manifests
         .data = "{\"native\":{}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "Library/Parent/Child/Module.json",
+        .sub_path = "Library/Parent/Child/@Module.json",
         .data = "{\"author\":\"Child author\"}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "Library/Parent/Module.json",
+        .sub_path = "Library/Parent/@Module.json",
         .data = "{\"native\":{}}",
     });
     const library_root = try std.fs.path.join(allocator, &.{
@@ -1254,11 +1269,11 @@ test "native runtime ignores metadata-only and incorrectly cased child manifests
 
     try std.testing.expectEqualStrings("Parent", runtime.module_name);
     try std.testing.expectEqualStrings(expected_directory, runtime.module_directory);
-    try std.testing.expect(std.mem.endsWith(u8, runtime.manifest_path, "Parent/Module.json"));
+    try std.testing.expect(std.mem.endsWith(u8, runtime.manifest_path, "Parent/@Module.json"));
 
     try temporary.dir.createDir(std.testing.io, "Library/Metadata", .default_dir);
     try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "Library/Metadata/Module.json",
+        .sub_path = "Library/Metadata/@Module.json",
         .data = "{\"description\":\"No native runtime\"}",
     });
     try std.testing.expect(try findNativeRuntime(
@@ -1279,6 +1294,18 @@ test "native runtime ignores metadata-only and incorrectly cased child manifests
         library_root,
         "Legacy",
     ) == null);
+
+    try temporary.dir.createDir(std.testing.io, "Library/OldManifest", .default_dir);
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Library/OldManifest/Module.json",
+        .data = "{\"native\":{}}",
+    });
+    try std.testing.expectError(error.Reported, findNativeRuntime(
+        allocator,
+        std.testing.io,
+        library_root,
+        "OldManifest",
+    ));
 }
 
 test "local module paths follow their logical segments" {

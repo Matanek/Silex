@@ -20,6 +20,15 @@ it contains no direct `.sx` source and only groups submodules. Only `.sx` files
 directly inside a directory contribute declarations to that module, so
 `STD/Randomizer.sx` declares `STD.Randomizer` directly in `STD`.
 
+A directory whose name starts with `@` is infrastructure rather than a Silex
+module. Automatic module discovery and completion skip that directory and its
+descendants at every depth. Explicit file-oriented mechanisms may still use
+it: `@Module.json` can list a native source under `@Native/`, and C or C++ code
+can include headers stored there. A library may likewise keep documentation in
+`@Docs/` or use another `@` name for infrastructure that must not become a
+module. A leading `_` has no special meaning and remains available for ordinary
+modules, including a future private-module convention.
+
 The distributed library is installed with Silex. Its currently available
 public root is `STD`; it declares `STD.Randomizer` directly and provides
 `STD.Time` as a submodule.
@@ -157,41 +166,41 @@ the [STD library reference](Libraries/STD/README.md).
 ## Optional module manifest
 
 A directory-backed local or distributed module may contain one optional,
-exactly-cased `Module.json`. Pure Silex modules do not need it. The manifest
+exactly-cased `@Module.json`. Pure Silex modules do not need it. The manifest
 accepts optional `author`, `description`, `name`, `version`, `dependencies`, and
 `native` fields. `name` and `version` become mandatory only when another
-package references that directory.
+package references that directory. The former exact name `Module.json` is not
+accepted: when Silex encounters it while looking for a module manifest, it asks
+the developer to rename it to `@Module.json` instead of ignoring it.
 
 The installed `STD` module is the concrete native module currently shipped by
 the project:
 
 ```text
 Library/STD/
-├── Module.json
-├── Module.cpp
-├── Console/
+├── @Module.json
+├── @Native/
 │   ├── Console.cpp
-│   ├── Console.sx
-│   ├── Module.json
+│   ├── Randomizer.cpp
 │   ├── Session.cpp
+│   └── Time.cpp
+├── Console/
+│   ├── Console.sx
 │   └── Session.sx
 ├── Randomizer.sx
 └── Time/
     ├── Clock.sx
     ├── Internal.sx
-    ├── Module.cpp
-    ├── Module.json
     └── Stopwatch.sx
 ```
 
 `Randomizer.sx` and `Internal.sx` declare private `native func` entries and
-expose ordinary Silex types around them. Each runtime includes the generated
-interface for the sole module whose symbols it implements:
+expose ordinary Silex types around them. The single native runtime is owned by
+`STD/@Module.json`; each of its four private C++ units includes the generated
+root interface directly:
 
 ```cpp
-#include <SilexNative/STD.h>          // Library/STD/Module.cpp
-#include <SilexNative/STD/Time.h>     // Library/STD/Time/Module.cpp
-#include <SilexNative/STD/Console.h>  // Library/STD/Console/*.cpp
+#include <SilexNative/STD.h>
 ```
 
 `STD.native_seed` becomes `silexNative_STD_native_seed`, and
@@ -203,7 +212,10 @@ interface for the sole module whose symbols it implements:
   "native": {
     "sources": {
       "cpp": [
-        "Module.cpp"
+        "@Native/Console.cpp",
+        "@Native/Session.cpp",
+        "@Native/Randomizer.cpp",
+        "@Native/Time.cpp"
       ]
     }
   }
@@ -211,21 +223,21 @@ interface for the sole module whose symbols it implements:
 ```
 
 When a descendant is loaded, Silex checks its directory and then each parent
-directory for the closest `Module.json` containing `native`. A metadata-only
-manifest does not mask a parent's native configuration. `Library/STD/Module.json`
-selects only `Module.cpp`, `Library/STD/Time/Module.json` selects only its
-`Module.cpp`, and `Library/STD/Console/Module.json` selects only `Console.cpp`
-and `Session.cpp`. Loading one of these modules therefore compiles only its
-runtime and generates the header it includes; no unrelated header is created
-merely to satisfy another runtime source.
+directory for the closest `@Module.json` containing `native`. A metadata-only
+manifest does not mask a parent's native configuration. The sole
+`Library/STD/@Module.json` therefore provides one runtime to `STD` and every
+loaded descendant. Its root header `SilexNative/STD.h` is always generated for
+that selected runtime and aggregates the native declarations actually loaded
+from `STD`, `STD.Console`, `STD.Time`, or another descendant. It does not need
+headers for modules absent from the program.
 
 The `compile` command selects one target for the whole application: the host
 target by default, or the triple supplied with `--target`. Every loaded native
 module inherits that same target. Its configuration is composed from the
 fields directly under `native`, then an optional `targets` entry named after
 the target OS, and finally an optional entry named after the exact Zig triple.
-`STD` currently uses only the general configuration, so `Module.cpp` applies
-to every supported target.
+`STD` currently uses only the general configuration, so
+its four sources under `@Native/` apply to every supported target.
 
 Native sources are listed explicitly under `c`, `cpp`, `objective_c`, or
 `objective_cpp`; relative source and include paths must remain inside the
@@ -250,11 +262,11 @@ Silex declarations beyond each module's `.sx` API.
 
 A package can vendor the source distribution of a native library under its
 root and make that ownership explicit. `STD` does not currently vendor a
-third-party library: `Module.cpp` only implements its private Silex
-`native func` declarations, so its manifest needs neither `provides` nor a
-public native interface. A future package that owns a native library can list
-its identity in `provides`, its source files in `sources`, and the headers or
-defines intended for direct consumers in `public_include_dirs` and
+third-party library: its sources under `@Native/` only implement its private
+Silex `native func` declarations, so its manifest needs neither `provides` nor
+a public native interface. A future package that owns a native library can
+list its identity in `provides`, its source files in `sources`, and the headers
+or defines intended for direct consumers in `public_include_dirs` and
 `public_defines`.
 
 `provides` contains declared native identities, not inferred symbols. Two
@@ -309,11 +321,12 @@ silex module init PATH/TO/MODULE
 silex module init PATH/TO/MODULE --native
 ```
 
-The plain form creates `Module.json` containing `{}`. The native form creates
-or completes the manifest with `Module.cpp` as a portable C++ source and creates
-that file only when it is absent. Existing metadata, source files, and native
-configuration are never overwritten implicitly. `Library/STD` is already in
-the resulting native form: both its manifest entry and `Module.cpp` exist.
+The plain form creates `@Module.json` containing `{}`. The native form creates
+or completes the manifest with `@Native/Module.cpp` as a portable C++ source
+and creates that file only when it is absent. Existing metadata, source files,
+and native configuration are never overwritten implicitly. A library author
+can then replace this starting point with any explicit source layout;
+`Library/STD` lists four independent `.cpp` units instead.
 
 ## Local packages
 
@@ -322,7 +335,7 @@ submodule directories. It needs no manifest, and neighboring local modules keep
 their existing filesystem resolution.
 
 A directory consumed as an external dependency is a declared package. Its
-`Module.json` names the root module, gives it a Semantic Version, and may list
+`@Module.json` names the root module, gives it a Semantic Version, and may list
 other packages required directly by its sources. `STD` is not such a package:
 it is a reserved distributed module and must be used directly without a
 `dependencies` entry. The repository does not currently ship a public external
@@ -345,7 +358,7 @@ The package root provides the module named by `name`; a subdirectory adds its
 own segment below that root module, exactly as `Time/` provides `STD.Time`
 below `STD/`. A `path` is relative to the manifest that declares it and may
 leave that package directory. The destination is canonicalized and must be a
-directory containing `Module.json`. Its `name` must match the dependency key
+directory containing `@Module.json`. Its `name` must match the dependency key
 exactly and its `version` must be valid Semantic Versioning.
 
 A dependency can instead name a Git repository:
@@ -370,7 +383,7 @@ accepts exact constraints such as `=1.2.3` and caret constraints such as
 the first nonzero component. Prerelease versions only match a constraint that
 itself names a prerelease.
 
-An application can declare `dependencies` in a root `Module.json` without
+An application can declare `dependencies` in a root `@Module.json` without
 declaring its own `name` or `version`. For a `.sx` entry the project root is the
 entry's directory; for a JSON project manifest it is the manifest's directory.
 Without that root manifest, local module loading behaves exactly as before.

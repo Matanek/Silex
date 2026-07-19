@@ -445,11 +445,11 @@ test "module native root applies to an explicit target without overrides" {
 
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Module.cpp", .data = "" });
     try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "Module.json",
+        .sub_path = "@Module.json",
         .data = "{\"native\":{\"sources\":{\"cpp\":[\"Module.cpp\"]}}}",
     });
     const directory = try testModuleDirectory(allocator, temporary.sub_path);
-    const manifest_path = try std.fs.path.join(allocator, &.{ directory, "Module.json" });
+    const manifest_path = try std.fs.path.join(allocator, &.{ directory, "@Module.json" });
     const target = try TargetModule.Target.parse(allocator, std.testing.io, "riscv64-linux-musl");
     var diagnostic: ?ModuleRuntimeDiagnostic = null;
     const runtime = try loadModuleRuntime(
@@ -481,7 +481,7 @@ test "OS and exact target overrides compose in order and normalize options" {
         try temporary.dir.writeFile(std.testing.io, .{ .sub_path = source, .data = "" });
     }
     try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "Module.json",
+        .sub_path = "@Module.json",
         .data =
         \\{
         \\  "native": {
@@ -509,7 +509,7 @@ test "OS and exact target overrides compose in order and normalize options" {
         ,
     });
     const directory = try testModuleDirectory(allocator, temporary.sub_path);
-    const manifest_path = try std.fs.path.join(allocator, &.{ directory, "Module.json" });
+    const manifest_path = try std.fs.path.join(allocator, &.{ directory, "@Module.json" });
     const target = try TargetModule.Target.parse(allocator, std.testing.io, "x86_64-linux-musl");
     var diagnostic: ?ModuleRuntimeDiagnostic = null;
     const runtime = try loadModuleRuntime(
@@ -549,7 +549,7 @@ test "SDL-shaped native configuration selects common and OS files" {
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Vendor/SDL/src/SDL.c", .data = "" });
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Vendor/SDL/src/video/cocoa/SDL_cocoa.m", .data = "" });
     try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "Module.json",
+        .sub_path = "@Module.json",
         .data =
         \\{
         \\  "native": {
@@ -566,7 +566,7 @@ test "SDL-shaped native configuration selects common and OS files" {
         ,
     });
     const directory = try testModuleDirectory(allocator, temporary.sub_path);
-    const manifest_path = try std.fs.path.join(allocator, &.{ directory, "Module.json" });
+    const manifest_path = try std.fs.path.join(allocator, &.{ directory, "@Module.json" });
     const target = try TargetModule.Target.parse(allocator, std.testing.io, "aarch64-macos-none");
     var diagnostic: ?ModuleRuntimeDiagnostic = null;
     const runtime = try loadModuleRuntime(
@@ -596,7 +596,7 @@ test "duplicate canonical source reports both configuration levels" {
 
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Runtime.c", .data = "" });
     try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "Module.json",
+        .sub_path = "@Module.json",
         .data =
         \\{
         \\  "native": {
@@ -609,7 +609,7 @@ test "duplicate canonical source reports both configuration levels" {
         ,
     });
     const directory = try testModuleDirectory(allocator, temporary.sub_path);
-    const manifest_path = try std.fs.path.join(allocator, &.{ directory, "Module.json" });
+    const manifest_path = try std.fs.path.join(allocator, &.{ directory, "@Module.json" });
     const target = try TargetModule.Target.parse(allocator, std.testing.io, "x86_64-linux-musl");
     var diagnostic: ?ModuleRuntimeDiagnostic = null;
 

@@ -112,11 +112,17 @@ pub fn compile(
     cleanObsoleteCacheLayouts(allocator, io, cache_root) catch |err| {
         std.debug.print("silex: warning: unable to remove obsolete cache layouts: {t}\n", .{err});
     };
-    const native_interface_root = try NativeInterface.write(allocator, io, program, target_cache_dir);
+    const native_interface_root = try NativeInterface.write(
+        allocator,
+        io,
+        program,
+        project,
+        loaded_module_runtimes,
+        target_cache_dir,
+    );
     const module_runtimes = try applyNativeInterface(
         allocator,
         loaded_module_runtimes,
-        program.functions,
         native_interface_root,
     );
     const object_plan = try NativeObjectCache.makePlan(
@@ -261,35 +267,19 @@ fn nativeModuleNames(allocator: Allocator, project: ProjectModule.Project) ![]co
 fn applyNativeInterface(
     allocator: Allocator,
     runtimes: []const NativeDependency.ModuleRuntime,
-    functions: []const Semantic.Function,
     interface_root: ?[]const u8,
 ) ![]const NativeDependency.ModuleRuntime {
     const root = interface_root orelse return runtimes;
     var updated: std.ArrayList(NativeDependency.ModuleRuntime) = .empty;
     for (runtimes) |runtime| {
         var composed = runtime;
-        if (runtimeNeedsNativeInterface(runtime, functions)) {
-            var include_dirs: std.ArrayList([]const u8) = .empty;
-            try include_dirs.append(allocator, root);
-            try include_dirs.appendSlice(allocator, runtime.include_dirs);
-            composed.include_dirs = try include_dirs.toOwnedSlice(allocator);
-        }
+        var include_dirs: std.ArrayList([]const u8) = .empty;
+        try include_dirs.append(allocator, root);
+        try include_dirs.appendSlice(allocator, runtime.include_dirs);
+        composed.include_dirs = try include_dirs.toOwnedSlice(allocator);
         try updated.append(allocator, composed);
     }
     return updated.toOwnedSlice(allocator);
-}
-
-fn runtimeNeedsNativeInterface(
-    runtime: NativeDependency.ModuleRuntime,
-    functions: []const Semantic.Function,
-) bool {
-    for (functions) |function| {
-        if (!function.is_native) continue;
-        const module_name = function.native_module_name.?;
-        if (!std.mem.startsWith(u8, module_name, runtime.module_name)) continue;
-        if (module_name.len == runtime.module_name.len or module_name[runtime.module_name.len] == '.') return true;
-    }
-    return false;
 }
 
 fn loadModuleRuntimes(
@@ -883,7 +873,7 @@ test "native system linkage always reruns the final link" {
     const runtime = NativeDependency.ModuleRuntime{
         .module_name = "Example",
         .module_directory = "Example",
-        .manifest_path = "Example/Module.json",
+        .manifest_path = "Example/@Module.json",
         .sources = &.{},
         .include_dirs = &.{},
         .defines = &.{},

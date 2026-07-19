@@ -4,13 +4,16 @@ const NativeDependency = @import("NativeDependency.zig");
 
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
+const native_directory_name = "@Native";
+const native_source_name = "Module.cpp";
+const native_source_relative_path = "@Native/Module.cpp";
 
 const native_manifest =
     \\{
     \\  "native": {
     \\    "sources": {
     \\      "cpp": [
-    \\        "Module.cpp"
+    \\        "@Native/Module.cpp"
     \\      ]
     \\    }
     \\  }
@@ -66,25 +69,31 @@ pub fn run(allocator: Allocator, io: Io, args: []const []const u8) !u8 {
     }
 
     const directory_path = args[0];
-    const manifest_path = try std.fs.path.join(allocator, &.{ directory_path, "Module.json" });
-    const source_path = try std.fs.path.join(allocator, &.{ directory_path, "Module.cpp" });
+    const manifest_path = try ModuleManifest.manifestPath(allocator, directory_path);
+    const source_path = try std.fs.path.join(allocator, &.{ directory_path, native_directory_name, native_source_name });
     const result = initialize(allocator, io, directory_path, native) catch |err| switch (err) {
         error.ModulePathCollision => {
             std.debug.print("silex: module path exists and is not a directory: {s}\n", .{directory_path});
             return 1;
         },
         error.ManifestPathCollision => {
-            std.debug.print("silex: Module.json path exists and is not a file: {s}\n", .{manifest_path});
+            std.debug.print("silex: @Module.json path exists and is not a file: {s}\n", .{manifest_path});
+            return 1;
+        },
+        error.NativeDirectoryPathCollision => {
+            const native_directory_path = try std.fs.path.join(allocator, &.{ directory_path, native_directory_name });
+            std.debug.print("silex: @Native path exists and is not a directory: {s}\n", .{native_directory_path});
             return 1;
         },
         error.NativeSourcePathCollision => {
-            std.debug.print("silex: Module.cpp path exists and is not a file: {s}\n", .{source_path});
+            std.debug.print("silex: @Native/Module.cpp path exists and is not a file: {s}\n", .{source_path});
             return 1;
         },
         error.InvalidModuleManifest => {
             std.debug.print("silex: invalid module manifest: {s}\n", .{manifest_path});
             return 1;
         },
+        error.Reported => return 1,
         else => |other| return other,
     };
 
@@ -108,8 +117,9 @@ pub fn run(allocator: Allocator, io: Io, args: []const []const u8) !u8 {
 fn initialize(allocator: Allocator, io: Io, directory_path: []const u8, native: bool) !Result {
     const directory_state = try pathState(io, directory_path);
     if (directory_state != .missing and directory_state != .directory) return error.ModulePathCollision;
+    if (directory_state == .directory) try ModuleManifest.rejectLegacyInDirectory(allocator, io, directory_path);
 
-    const manifest_path = try std.fs.path.join(allocator, &.{ directory_path, "Module.json" });
+    const manifest_path = try ModuleManifest.manifestPath(allocator, directory_path);
     const manifest_state = if (directory_state == .directory) try pathState(io, manifest_path) else .missing;
     if (manifest_state != .missing and manifest_state != .file) return error.ManifestPathCollision;
 
@@ -129,15 +139,18 @@ fn initialize(allocator: Allocator, io: Io, directory_path: []const u8, native: 
         return .{ .outcome = .created_manifest };
     }
 
-    const source_path = try std.fs.path.join(allocator, &.{ directory_path, "Module.cpp" });
-    const source_state = if (directory_state == .directory) try pathState(io, source_path) else .missing;
+    const native_directory_path = try std.fs.path.join(allocator, &.{ directory_path, native_directory_name });
+    const native_directory_state = if (directory_state == .directory) try pathState(io, native_directory_path) else .missing;
+    if (native_directory_state != .missing and native_directory_state != .directory) return error.NativeDirectoryPathCollision;
+    const source_path = try std.fs.path.join(allocator, &.{ native_directory_path, native_source_name });
+    const source_state = if (native_directory_state == .directory) try pathState(io, source_path) else .missing;
     if (source_state != .missing and source_state != .file) return error.NativeSourcePathCollision;
 
     const contents = if (manifest) |existing|
         try nativeManifestWithMetadata(allocator, existing)
     else
         native_manifest;
-    try Io.Dir.cwd().createDirPath(io, directory_path);
+    try Io.Dir.cwd().createDirPath(io, native_directory_path);
     if (source_state == .missing) try Io.Dir.cwd().writeFile(io, .{ .sub_path = source_path, .data = native_source });
     try Io.Dir.cwd().writeFile(io, .{ .sub_path = manifest_path, .data = contents });
     return .{
@@ -165,7 +178,7 @@ fn nativeManifestWithMetadata(allocator: Allocator, manifest: ModuleManifest.Man
         .name = manifest.name,
         .version = manifest.version,
         .dependencies = manifest.dependencies,
-        .native = .{ .sources = .{ .cpp = &.{"Module.cpp"} } },
+        .native = .{ .sources = .{ .cpp = &.{native_source_relative_path} } },
     };
     const json = try std.json.Stringify.valueAlloc(allocator, value, .{
         .whitespace = .indent_2,
@@ -198,9 +211,9 @@ test "plain initialization creates only an empty manifest" {
     const result = try initialize(allocator, std.testing.io, directory, false);
 
     try std.testing.expectEqual(Outcome.created_manifest, result.outcome);
-    const contents = try Io.Dir.cwd().readFileAlloc(std.testing.io, try std.fs.path.join(allocator, &.{ directory, "Module.json" }), allocator, .limited(1024));
+    const contents = try Io.Dir.cwd().readFileAlloc(std.testing.io, try std.fs.path.join(allocator, &.{ directory, "@Module.json" }), allocator, .limited(1024));
     try std.testing.expectEqualStrings("{}\n", contents);
-    try std.testing.expectEqual(PathState.missing, try pathState(std.testing.io, try std.fs.path.join(allocator, &.{ directory, "Module.cpp" })));
+    try std.testing.expectEqual(PathState.missing, try pathState(std.testing.io, try std.fs.path.join(allocator, &.{ directory, native_directory_name })));
 }
 
 test "native initialization creates the portable manifest and marker source" {
@@ -215,9 +228,9 @@ test "native initialization creates the portable manifest and marker source" {
 
     try std.testing.expectEqual(Outcome.created_native_manifest, result.outcome);
     try std.testing.expect(result.native_source_created);
-    const manifest = try Io.Dir.cwd().readFileAlloc(std.testing.io, try std.fs.path.join(allocator, &.{ directory, "Module.json" }), allocator, .limited(1024));
+    const manifest = try Io.Dir.cwd().readFileAlloc(std.testing.io, try std.fs.path.join(allocator, &.{ directory, "@Module.json" }), allocator, .limited(1024));
     try std.testing.expectEqualStrings(native_manifest, manifest);
-    const source = try Io.Dir.cwd().readFileAlloc(std.testing.io, try std.fs.path.join(allocator, &.{ directory, "Module.cpp" }), allocator, .limited(1024));
+    const source = try Io.Dir.cwd().readFileAlloc(std.testing.io, try std.fs.path.join(allocator, &.{ directory, native_directory_name, native_source_name }), allocator, .limited(1024));
     try std.testing.expectEqualStrings(native_source, source);
 }
 
@@ -237,7 +250,7 @@ test "plain initialization preserves an existing Silex module" {
     try std.testing.expectEqualStrings("pub func value() int { return 1 }\n", source);
 }
 
-test "native initialization preserves metadata and existing Module.cpp" {
+test "native initialization preserves metadata and creates @Native source" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -245,19 +258,18 @@ test "native initialization preserves metadata and existing Module.cpp" {
     defer temporary.cleanup();
     try temporary.dir.createDir(std.testing.io, "Core", .default_dir);
     try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "Core/Module.json",
+        .sub_path = "Core/@Module.json",
         .data = "{\"author\":\"Ada\",\"description\":\"Core utilities\",\"name\":\"Core\",\"version\":\"1.2.3\",\"dependencies\":{}}\n",
     });
-    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Core/Module.cpp", .data = "existing\n" });
     const directory = try testPath(allocator, temporary.sub_path, "Core");
 
     const result = try initialize(allocator, std.testing.io, directory, true);
 
     try std.testing.expectEqual(Outcome.updated_native_manifest, result.outcome);
-    try std.testing.expect(!result.native_source_created);
-    const source = try temporary.dir.readFileAlloc(std.testing.io, "Core/Module.cpp", allocator, .limited(1024));
-    try std.testing.expectEqualStrings("existing\n", source);
-    const manifest = try ModuleManifest.load(allocator, std.testing.io, try std.fs.path.join(allocator, &.{ directory, "Module.json" }));
+    try std.testing.expect(result.native_source_created);
+    const source = try temporary.dir.readFileAlloc(std.testing.io, "Core/@Native/Module.cpp", allocator, .limited(1024));
+    try std.testing.expectEqualStrings(native_source, source);
+    const manifest = try ModuleManifest.load(allocator, std.testing.io, try std.fs.path.join(allocator, &.{ directory, "@Module.json" }));
     try std.testing.expectEqualStrings("Ada", manifest.author.?);
     try std.testing.expectEqualStrings("Core utilities", manifest.description.?);
     try std.testing.expectEqualStrings("Core", manifest.name.?);
@@ -274,15 +286,15 @@ test "existing native configuration is not changed and creates no source" {
     defer temporary.cleanup();
     try temporary.dir.createDir(std.testing.io, "Core", .default_dir);
     const original = "{\"native\":{\"sources\":{\"c\":[\"Runtime.c\"]}}}\n";
-    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Core/Module.json", .data = original });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Core/@Module.json", .data = original });
     const directory = try testPath(allocator, temporary.sub_path, "Core");
 
     const result = try initialize(allocator, std.testing.io, directory, true);
 
     try std.testing.expectEqual(Outcome.native_exists, result.outcome);
-    const contents = try temporary.dir.readFileAlloc(std.testing.io, "Core/Module.json", allocator, .limited(1024));
+    const contents = try temporary.dir.readFileAlloc(std.testing.io, "Core/@Module.json", allocator, .limited(1024));
     try std.testing.expectEqualStrings(original, contents);
-    try std.testing.expectEqual(PathState.missing, try pathState(std.testing.io, try std.fs.path.join(allocator, &.{ directory, "Module.cpp" })));
+    try std.testing.expectEqual(PathState.missing, try pathState(std.testing.io, try std.fs.path.join(allocator, &.{ directory, native_directory_name })));
 }
 
 test "invalid manifest and native source collision write nothing" {
@@ -292,21 +304,50 @@ test "invalid manifest and native source collision write nothing" {
     var temporary = std.testing.tmpDir(.{});
     defer temporary.cleanup();
     try temporary.dir.createDir(std.testing.io, "Invalid", .default_dir);
-    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Invalid/Module.json", .data = "not json\n" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Invalid/@Module.json", .data = "not json\n" });
     const invalid_directory = try testPath(allocator, temporary.sub_path, "Invalid");
     try std.testing.expectError(error.InvalidModuleManifest, initialize(allocator, std.testing.io, invalid_directory, true));
-    try std.testing.expectEqual(PathState.missing, try pathState(std.testing.io, try std.fs.path.join(allocator, &.{ invalid_directory, "Module.cpp" })));
+    try std.testing.expectEqual(PathState.missing, try pathState(std.testing.io, try std.fs.path.join(allocator, &.{ invalid_directory, native_directory_name })));
 
     try temporary.dir.createDir(std.testing.io, "Collision", .default_dir);
-    try temporary.dir.createDir(std.testing.io, "Collision/Module.cpp", .default_dir);
+    try temporary.dir.createDirPath(std.testing.io, "Collision/@Native/Module.cpp");
     const collision_directory = try testPath(allocator, temporary.sub_path, "Collision");
     try std.testing.expectError(error.NativeSourcePathCollision, initialize(allocator, std.testing.io, collision_directory, true));
-    try std.testing.expectEqual(PathState.missing, try pathState(std.testing.io, try std.fs.path.join(allocator, &.{ collision_directory, "Module.json" })));
+    try std.testing.expectEqual(PathState.missing, try pathState(std.testing.io, try std.fs.path.join(allocator, &.{ collision_directory, "@Module.json" })));
 
     try temporary.dir.createDir(std.testing.io, "ManifestCollision", .default_dir);
-    try temporary.dir.createDir(std.testing.io, "ManifestCollision/Module.json", .default_dir);
+    try temporary.dir.createDir(std.testing.io, "ManifestCollision/@Module.json", .default_dir);
     const manifest_collision_directory = try testPath(allocator, temporary.sub_path, "ManifestCollision");
     try std.testing.expectError(error.ManifestPathCollision, initialize(allocator, std.testing.io, manifest_collision_directory, false));
+}
+
+test "initialization rejects legacy manifests and @Native path collisions" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.createDir(std.testing.io, "Legacy", .default_dir);
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Legacy/Module.json", .data = "{}\n" });
+    const legacy_directory = try testPath(allocator, temporary.sub_path, "Legacy");
+    try std.testing.expectError(error.Reported, initialize(allocator, std.testing.io, legacy_directory, false));
+    try std.testing.expectEqual(
+        PathState.missing,
+        try pathState(std.testing.io, try ModuleManifest.manifestPath(allocator, legacy_directory)),
+    );
+
+    try temporary.dir.createDir(std.testing.io, "NativeCollision", .default_dir);
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "NativeCollision/@Native", .data = "collision\n" });
+    const collision_directory = try testPath(allocator, temporary.sub_path, "NativeCollision");
+    try std.testing.expectError(
+        error.NativeDirectoryPathCollision,
+        initialize(allocator, std.testing.io, collision_directory, true),
+    );
+    try std.testing.expectEqual(
+        PathState.missing,
+        try pathState(std.testing.io, try ModuleManifest.manifestPath(allocator, collision_directory)),
+    );
 }
 
 fn testPath(allocator: Allocator, temporary_sub_path: []const u8, name: []const u8) ![]const u8 {

@@ -115,7 +115,7 @@ pub fn main(init: std.process.Init) !void {
 
 fn createUtility(allocator: Allocator, io: Io, repository: []const u8) !void {
     try initializeRepository(allocator, io, repository);
-    try writeFile(allocator, io, repository, "Module.json", "{\n  \"name\": \"Utility\",\n  \"version\": \"1.0.0\"\n}\n");
+    try writeFile(allocator, io, repository, "@Module.json", "{\n  \"name\": \"Utility\",\n  \"version\": \"1.0.0\"\n}\n");
     try writeFile(allocator, io, repository, "Utility.sx", "pub func base() int { return 40 }\n");
     try commitRepository(allocator, io, repository, "initial");
 }
@@ -141,7 +141,7 @@ fn createFoundation(
         "use Utility\n\npub func answer() int {{ return Utility.base() + {d} }}\n",
         .{increment},
     );
-    try writeFile(allocator, io, repository, "Module.json", manifest);
+    try writeFile(allocator, io, repository, "@Module.json", manifest);
     try writeFile(allocator, io, repository, "Foundation.sx", source);
     try commitRepository(allocator, io, repository, message);
 }
@@ -154,7 +154,7 @@ fn createIncomplete(allocator: Allocator, io: Io, repository: []const u8) !void 
 
 fn createMismatch(allocator: Allocator, io: Io, repository: []const u8) !void {
     try initializeRepository(allocator, io, repository);
-    try writeFile(allocator, io, repository, "Module.json", "{\n  \"name\": \"Actual\",\n  \"version\": \"1.0.0\"\n}\n");
+    try writeFile(allocator, io, repository, "@Module.json", "{\n  \"name\": \"Actual\",\n  \"version\": \"1.0.0\"\n}\n");
     try commitRepository(allocator, io, repository, "mismatch");
 }
 
@@ -180,7 +180,7 @@ fn createApp(
         "{{\n  \"dependencies\": {{\n    \"{s}\": {{ \"git\": {s}, \"version\": \"{s}\"{s} }}\n  }}\n}}\n",
         .{ dependency_name, quoted_url, version, revision_field },
     );
-    try writeFile(allocator, io, directory, "Module.json", manifest);
+    try writeFile(allocator, io, directory, "@Module.json", manifest);
     const source = if (std.mem.eql(u8, dependency_name, "Foundation"))
         "use Foundation\n\nfunc main() void { print(Foundation.answer()) }\n"
     else

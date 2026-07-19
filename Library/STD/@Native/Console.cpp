@@ -8,10 +8,6 @@
 #include <string>
 #include <utility>
 
-#if !defined(SILEX_CONSOLE_STANDALONE_TEST)
-#include <SilexNative/STD/Console.h>
-#endif
-
 #if defined(_WIN32)
 #include <windows.h>
 #else
@@ -20,13 +16,17 @@
 #include <unistd.h>
 #endif
 
+#if !defined(SILEX_CONSOLE_STANDALONE_TEST)
+#include <SilexNative/STD.h>
+#endif
+
 extern "C" bool silexConsoleSessionIsActive();
 
 namespace {
 
 // -----------------------------------------------------------------------------
 
-[[noreturn]] void fail(const char* operation, const char* detail) {
+[[noreturn]] void consoleFail(const char* operation, const char* detail) {
     throw std::runtime_error(std::string{"Console."} + operation + " failed: " + detail);
 }
 
@@ -36,7 +36,7 @@ namespace {
 
 HANDLE handle(bool errorOutput) {
     const auto value = GetStdHandle(errorOutput ? STD_ERROR_HANDLE : STD_OUTPUT_HANDLE);
-    if (value == nullptr || value == INVALID_HANDLE_VALUE) fail(errorOutput ? "write_error" : "write", "standard handle is unavailable");
+    if (value == nullptr || value == INVALID_HANDLE_VALUE) consoleFail(errorOutput ? "write_error" : "write", "standard handle is unavailable");
     return value;
 }
 
@@ -61,7 +61,7 @@ void writeAll(bool errorOutput, const char* bytes, std::int64_t length, const ch
         const auto remaining = size - offset;
         const auto chunk = static_cast<DWORD>(remaining > 0xffffffffu ? 0xffffffffu : remaining);
         DWORD written = 0;
-        if (WriteFile(output, bytes + offset, chunk, &written, nullptr) == 0 || written == 0) fail(operation, "unable to write");
+        if (WriteFile(output, bytes + offset, chunk, &written, nullptr) == 0 || written == 0) consoleFail(operation, "unable to write");
         offset += written;
     }
 }
@@ -98,7 +98,7 @@ void writeAll(bool errorOutput, const char* bytes, std::int64_t length, const ch
             continue;
         }
         if (written < 0 && errno == EINTR) continue;
-        fail(operation, "unable to write");
+        consoleFail(operation, "unable to write");
     }
 }
 
@@ -125,7 +125,7 @@ void control(const std::string& value, const char* operation) {
 }
 
 void flush() {
-    if (std::fflush(stdout) != 0 || std::fflush(stderr) != 0) fail("flush", "unable to flush");
+    if (std::fflush(stdout) != 0 || std::fflush(stderr) != 0) consoleFail("flush", "unable to flush");
 }
 
 // -----------------------------------------------------------------------------
@@ -133,18 +133,18 @@ void flush() {
 std::optional<std::string> pendingLine;
 
 void flushPrompt() {
-    if (std::fflush(stdout) != 0) fail("read_line", "unable to flush standard output");
+    if (std::fflush(stdout) != 0) consoleFail("read_line", "unable to flush standard output");
 }
 
 int readByte(const char* operation) {
     const int value = std::fgetc(stdin);
     if (value != EOF || std::feof(stdin) != 0) return value;
-    fail(operation, "unable to read standard input");
+    consoleFail(operation, "unable to read standard input");
 }
 
 bool prepareLine() {
     if (silexConsoleSessionIsActive()) {
-        fail("read_line", "interactive session is active");
+        consoleFail("read_line", "interactive session is active");
     }
     flushPrompt();
     std::string line;
@@ -170,7 +170,7 @@ bool prepareLine() {
                 pendingLine = std::move(line);
                 return true;
             }
-            if (std::ungetc(next, stdin) == EOF) fail("read_line", "unable to preserve input");
+            if (std::ungetc(next, stdin) == EOF) consoleFail("read_line", "unable to preserve input");
             continue;
         }
         line.push_back(static_cast<char>(value));
@@ -179,7 +179,7 @@ bool prepareLine() {
 
 void waitForEnter() {
     if (silexConsoleSessionIsActive()) {
-        fail("wait_for_enter", "interactive session is active");
+        consoleFail("wait_for_enter", "interactive session is active");
     }
     flushPrompt();
     while (true) {
@@ -268,10 +268,10 @@ extern "C" void silexNative_STD_Console_native_take_line(
     char** output_bytes,
     std::int64_t* output_length
 ) {
-    if (!pendingLine.has_value()) fail("read_line", "line was not prepared");
+    if (!pendingLine.has_value()) consoleFail("read_line", "line was not prepared");
     const auto length = pendingLine->size();
     auto* bytes = length == 0 ? nullptr : static_cast<char*>(std::malloc(length));
-    if (length != 0 && bytes == nullptr) fail("read_line", "unable to allocate line");
+    if (length != 0 && bytes == nullptr) consoleFail("read_line", "unable to allocate line");
     if (length != 0) std::memcpy(bytes, pendingLine->data(), length);
     pendingLine.reset();
     *output_bytes = bytes;

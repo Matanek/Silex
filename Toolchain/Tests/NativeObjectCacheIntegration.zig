@@ -151,7 +151,7 @@ fn createVendor(allocator: Allocator, io: Io, root: []const u8, value: u8) !void
         allocator,
         io,
         root,
-        "Module.json",
+        "@Module.json",
         "{\n" ++
             "  \"name\": \"Vendor\",\n" ++
             "  \"version\": \"1.0.0\",\n" ++
@@ -197,7 +197,7 @@ fn createApp(allocator: Allocator, io: Io, root: []const u8, increment: u8) !voi
         allocator,
         io,
         root,
-        "Module.json",
+        "@Module.json",
         "{\n" ++
             "  \"dependencies\": {\n" ++
             "    \"Vendor\": { \"path\": \"../Vendor\" }\n" ++

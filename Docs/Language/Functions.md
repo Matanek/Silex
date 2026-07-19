@@ -123,7 +123,7 @@ func require_positive(value:int) int {
 
 `native func` declares a private, top-level function implemented by a named
 module's native runtime rather than by a Silex body. The local or distributed
-module, or one of its parents, must contain a `Module.json` with a `native`
+module, or one of its parents, must contain a `@Module.json` with a `native`
 section. A standalone main source cannot declare native functions, and
 `pub native func` is invalid. Native function names begin with `native_`.
 
@@ -292,7 +292,7 @@ nested Result branches remain unavailable.
 
 Before compiling a native runtime, Silex generates its authoritative C
 interface beneath `.silex/build/`. Every module segment becomes a header-path
-segment, so a C or C++ implementation of `STD.Console` includes:
+segment, so the exact interface of `STD.Console` remains available as:
 
 ```cpp
 #include <SilexNative/STD/Console.h>
@@ -305,11 +305,18 @@ optional and `Result` returns, byte views and returns, and synchronous callback
 pairs. It never contains generated-program types, `std::string`, or project
 paths. Its include root is supplied automatically to the native runtime that
 implements the module. A C++ definition that disagrees with a declaration
-fails while compiling its runtime when that translation unit includes the
-generated header. The distributed runtimes do so explicitly: `STD` uses
-`<SilexNative/STD.h>`, `STD.Time` uses
-`<SilexNative/STD/Time.h>`, and `STD.Console` uses
-`<SilexNative/STD/Console.h>`.
+fails while compiling its runtime when that translation unit includes a
+generated header containing the declaration.
+
+A manifest inherited by several modules also receives a generated root header
+named after that runtime. It aggregates the declarations actually loaded from
+all modules served by the manifest and exists even when the selected source
+closure contains no native declaration. This lets a library keep one native
+runtime independent of its Silex module layout. The distributed `STD` runtime
+includes `<SilexNative/STD.h>` from each of its four C++ units; that header may
+therefore contain declarations originating in `STD`, `STD.Console`, and
+`STD.Time`. Per-module headers remain available but do not determine how the C
+or C++ implementation is split into files.
 
 All arguments, return values, and return paths are checked statically. A
 non-void function must return a compatible value on every path. A void function

@@ -1,4 +1,4 @@
-#include <SilexNative/Interop/Api.h>
+#include <SilexNative/Interop.h>
 
 #include <cstdlib>
 #include <cstring>
@@ -22,4 +22,8 @@ extern "C" void silexNative_Interop_Api_native_echo(
 
 extern "C" bool silexNative_Interop_Api_native_ready(void) {
     return true;
+}
+
+extern "C" int64_t silexNative_Interop_Status_native_code(void) {
+    return 7;
 }

@@ -76,8 +76,8 @@ pub fn build(b: *std.Build) void {
     });
     console_session_test_module.addCSourceFiles(.{
         .files = &.{
-            "../Library/STD/Console/Console.cpp",
-            "../Library/STD/Console/Session.cpp",
+            "../Library/STD/@Native/Console.cpp",
+            "../Library/STD/@Native/Session.cpp",
         },
         .flags = &.{ "-std=c++23", "-Wall", "-Wextra", "-Werror", "-DSILEX_CONSOLE_STANDALONE_TEST" },
     });
@@ -88,12 +88,23 @@ pub fn build(b: *std.Build) void {
         .name = "silex-console-session-integration",
         .root_module = console_session_test_module,
     });
+    const clean_library_install = b.addExecutable(.{
+        .name = "silex-clean-library-install",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("BuildSupport/CleanLibraryInstall.zig"),
+            .target = b.graph.host,
+            .optimize = .ReleaseSafe,
+        }),
+    });
     b.installArtifact(executable);
+    const clean_installed_library = b.addRunArtifact(clean_library_install);
+    clean_installed_library.addArg(b.getInstallPath(.prefix, "lib/silex"));
     const install_library = b.addInstallDirectory(.{
         .source_dir = b.path("../Library"),
         .install_dir = .prefix,
         .install_subdir = "lib/silex",
     });
+    install_library.step.dependOn(&clean_installed_library.step);
     b.getInstallStep().dependOn(&install_library.step);
 
     const run_command = b.addRunArtifact(executable);
@@ -107,6 +118,7 @@ pub fn build(b: *std.Build) void {
         .root_module = module,
     });
     const test_command = b.addRunArtifact(tests);
+    test_command.step.dependOn(b.getInstallStep());
 
     const semantic_tests = b.addTest(.{
         .root_module = b.createModule(.{
@@ -127,6 +139,7 @@ pub fn build(b: *std.Build) void {
         .root_module = lsp_test_module,
     });
     const lsp_test_command = b.addRunArtifact(lsp_tests);
+    lsp_test_command.step.dependOn(b.getInstallStep());
 
     const invalid_command = b.addRunArtifact(executable);
     invalid_command.addArgs(&.{ "compile", "Tests/InvalidArithmetic.sx" });
@@ -182,8 +195,13 @@ pub fn build(b: *std.Build) void {
     invalid_native_function_command.addArgs(&.{ "compile", "Tests/InvalidNativeFunction.sx" });
     invalid_native_function_command.expectExitCode(1);
     invalid_native_function_command.expectStdErrEqual(
-        "Tests/InvalidNativeFunction.sx:1:1: error: native functions are only available in a named module with Module.json native configuration\n",
+        "Tests/InvalidNativeFunction.sx:1:1: error: native functions are only available in a named module with @Module.json native configuration\n",
     );
+
+    const legacy_module_manifest_command = b.addRunArtifact(executable);
+    legacy_module_manifest_command.addArgs(&.{ "compile", "Tests/LegacyManifest/Main.sx" });
+    legacy_module_manifest_command.expectExitCode(1);
+    legacy_module_manifest_command.expectStdErrMatch("'; rename it to '@Module.json'\n");
 
     const invalid_public_native_function_command = b.addRunArtifact(executable);
     invalid_public_native_function_command.addArgs(&.{ "compile", "Tests/InvalidPublicNativeFunction.sx" });
@@ -534,6 +552,7 @@ pub fn build(b: *std.Build) void {
     ));
 
     const removed_random_next_command = b.addRunArtifact(executable);
+    removed_random_next_command.step.dependOn(b.getInstallStep());
     removed_random_next_command.addArgs(&.{ "compile", "Tests/RemovedRandomNext.sx" });
     removed_random_next_command.expectExitCode(1);
     removed_random_next_command.expectStdErrEqual(
@@ -541,6 +560,7 @@ pub fn build(b: *std.Build) void {
     );
 
     const removed_random_module_command = b.addRunArtifact(executable);
+    removed_random_module_command.step.dependOn(b.getInstallStep());
     removed_random_module_command.addArgs(&.{ "compile", "Tests/RemovedRandomModule.sx" });
     removed_random_module_command.expectExitCode(1);
     removed_random_module_command.expectStdErrEqual(
@@ -548,6 +568,7 @@ pub fn build(b: *std.Build) void {
     );
 
     const removed_random_system_command = b.addRunArtifact(executable);
+    removed_random_system_command.step.dependOn(b.getInstallStep());
     removed_random_system_command.addArgs(&.{ "compile", "Tests/RemovedRandomSystem.sx" });
     removed_random_system_command.expectExitCode(1);
     removed_random_system_command.expectStdErrEqual(
@@ -1475,6 +1496,7 @@ pub fn build(b: *std.Build) void {
     );
 
     const unknown_qualified_descendant_command = b.addRunArtifact(executable);
+    unknown_qualified_descendant_command.step.dependOn(b.getInstallStep());
     unknown_qualified_descendant_command.addArgs(&.{ "compile", "Tests/UnknownQualifiedDescendant.sx" });
     unknown_qualified_descendant_command.expectExitCode(1);
     unknown_qualified_descendant_command.expectStdErrEqual(
@@ -1752,6 +1774,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&missing_mutable_reference_argument_command.step);
     test_step.dependOn(&invalid_local_reference_command.step);
     test_step.dependOn(&invalid_native_function_command.step);
+    test_step.dependOn(&legacy_module_manifest_command.step);
     test_step.dependOn(&invalid_public_native_function_command.step);
     test_step.dependOn(&invalid_native_type_command.step);
     test_step.dependOn(&missing_native_symbol_command.step);
@@ -1962,6 +1985,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&invalid_public_include_path_command.step);
 
     const smoke_command = b.addRunArtifact(executable);
+    smoke_command.step.dependOn(b.getInstallStep());
     smoke_command.addArgs(&.{ "run", "Smokes/Main.sx" });
     smoke_command.expectStdOutEqual(hostText(b, "Hello from Silex smoke test\n50\nlogic works\ntrue\nfalse\n2\n1\n"));
 
@@ -2460,13 +2484,8 @@ pub fn build(b: *std.Build) void {
         standard_library_output ++ "true\n",
     ));
 
-    const distributed_native_runtime_command = b.addRunArtifact(executable);
-    distributed_native_runtime_command.step.dependOn(&standard_library_manifest_command.step);
-    distributed_native_runtime_command.addArgs(&.{ "run", "Smokes/DistributedNative/Main.sx" });
-    distributed_native_runtime_command.expectStdOutEqual(hostText(b, "Distributed native runtime linked\ntrue\n10\n"));
-
     const local_native_runtime_command = b.addRunArtifact(executable);
-    local_native_runtime_command.step.dependOn(&distributed_native_runtime_command.step);
+    local_native_runtime_command.step.dependOn(&standard_library_manifest_command.step);
     local_native_runtime_command.addArgs(&.{ "run", "Smokes/LocalNative/Main.sx" });
     local_native_runtime_command.expectStdOutEqual(hostText(b, "42\n"));
 
@@ -2478,7 +2497,7 @@ pub fn build(b: *std.Build) void {
     const native_interface_command = b.addRunArtifact(executable);
     native_interface_command.step.dependOn(&local_native_manifest_command.step);
     native_interface_command.addArgs(&.{ "run", "Smokes/NativeInterface/Main.sx" });
-    native_interface_command.expectStdOutEqual(hostText(b, "42\ntrue\ntrue\n"));
+    native_interface_command.expectStdOutEqual(hostText(b, "42\ntrue\ntrue\ntrue\n"));
 
     const incompatible_native_interface_command = b.addRunArtifact(executable);
     incompatible_native_interface_command.step.dependOn(&native_interface_command.step);
@@ -2702,11 +2721,11 @@ pub fn build(b: *std.Build) void {
     portable_distributed_native_target_command.step.dependOn(&console_session_noninteractive_command.step);
     portable_distributed_native_target_command.addArgs(&.{
         "compile",
-        "Smokes/DistributedNative/Main.sx",
+        "Smokes/IsolatedSTD/Main.sx",
         "--target",
         "riscv64-linux-musl",
         "-o",
-        ".silex/portable-native-target/DistributedNative-riscv64-linux",
+        ".silex/portable-native-target/STD-riscv64-linux",
     });
 
     const distributed_module_collision_command = b.addRunArtifact(executable);
@@ -2714,7 +2733,7 @@ pub fn build(b: *std.Build) void {
     distributed_module_collision_command.addArgs(&.{ "compile", "Tests/DistributedModules/Collision/Main.sx" });
     distributed_module_collision_command.expectExitCode(1);
     distributed_module_collision_command.expectStdErrEqual(
-        "Tests/DistributedModules/Collision/Main.sx:1:1: error: module 'NativeRuntime' has multiple providers\n",
+        "Tests/DistributedModules/Collision/Main.sx:1:1: error: module 'STD' has multiple providers\n",
     );
 
     const native_source_command = b.addRunArtifact(executable);
@@ -2739,8 +2758,8 @@ pub fn build(b: *std.Build) void {
     initialize_native_module_command.step.dependOn(&clean_module_init_smoke_command.step);
     initialize_native_module_command.addArgs(&.{ "module", "init", module_init_smoke_directory, "--native" });
     initialize_native_module_command.expectStdErrEqual(
-        "Created native module manifest: .zig-cache/module-init-smoke/Answer/Module.json\n" ++
-            "Created native source: .zig-cache/module-init-smoke/Answer/Module.cpp\n",
+        "Created native module manifest: .zig-cache/module-init-smoke/Answer/@Module.json\n" ++
+            "Created native source: .zig-cache/module-init-smoke/Answer/@Native/Module.cpp\n",
     );
 
     const populate_module_init_smoke_command = b.addRunArtifact(module_init_smoke_setup);
@@ -3019,6 +3038,7 @@ pub fn build(b: *std.Build) void {
     benchmark_step.dependOn(&benchmark_runner.step);
 
     const cross_smoke_command = b.addRunArtifact(executable);
+    cross_smoke_command.step.dependOn(b.getInstallStep());
     cross_smoke_command.addArgs(&.{
         "compile",
         "Smokes/Main.sx",
@@ -3043,6 +3063,7 @@ pub fn build(b: *std.Build) void {
     cross_smoke_step.dependOn(&cross_integer_semantics_command.step);
 
     const cross_native_smoke_command = b.addRunArtifact(executable);
+    cross_native_smoke_command.step.dependOn(b.getInstallStep());
     cross_native_smoke_command.addArgs(&.{
         "compile",
         "Smokes/Native/Main.sx",
@@ -3054,19 +3075,8 @@ pub fn build(b: *std.Build) void {
         ".silex/cross-native-smoke/Main-x86_64-linux",
     });
 
-    const cross_distributed_native_smoke_command = b.addRunArtifact(executable);
-    cross_distributed_native_smoke_command.step.dependOn(&cross_native_smoke_command.step);
-    cross_distributed_native_smoke_command.addArgs(&.{
-        "compile",
-        "Smokes/DistributedNative/Main.sx",
-        "--target",
-        "x86_64-linux-musl",
-        "-o",
-        ".silex/cross-native-smoke/DistributedNative-x86_64-linux",
-    });
-
     const cross_local_native_smoke_command = b.addRunArtifact(executable);
-    cross_local_native_smoke_command.step.dependOn(&cross_distributed_native_smoke_command.step);
+    cross_local_native_smoke_command.step.dependOn(&cross_native_smoke_command.step);
     cross_local_native_smoke_command.addArgs(&.{
         "compile",
         "Smokes/LocalNative/Main.sx",
@@ -3376,6 +3386,12 @@ pub fn build(b: *std.Build) void {
         .install_dir = .prefix,
         .install_subdir = b.fmt("{s}/lib/silex", .{distribution_root}),
     });
+    const clean_distribution_library = b.addRunArtifact(clean_library_install);
+    clean_distribution_library.addArg(b.getInstallPath(
+        .prefix,
+        b.fmt("{s}/lib/silex", .{distribution_root}),
+    ));
+    install_distribution_library.step.dependOn(&clean_distribution_library.step);
 
     const distribution_step = b.step("dist", "Build a self-contained distribution for this host");
     distribution_step.dependOn(&install_silex.step);

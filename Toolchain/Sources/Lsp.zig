@@ -2,6 +2,7 @@ const std = @import("std");
 const build_options = @import("build_options");
 const Ast = @import("Ast.zig");
 const LexerModule = @import("Lexer.zig");
+const ModuleDiscovery = @import("ModuleDiscovery.zig");
 const ParserModule = @import("Parser.zig");
 const Source = @import("Source.zig");
 const StandardLibrary = @import("StandardLibrary.zig");
@@ -810,7 +811,7 @@ fn moduleExportCompletionItems(
     while (iterator.next(io) catch null) |entry| {
         if (entry.kind == .file and std.mem.endsWith(u8, entry.name, ".sx")) {
             try source_names.append(allocator, try allocator.dupe(u8, entry.name));
-        } else if (entry.kind == .directory and entry.name.len > 0 and entry.name[0] != '.' and
+        } else if (entry.kind == .directory and ModuleDiscovery.isDirectoryName(entry.name) and
             std.mem.startsWith(u8, entry.name, context.prefix))
         {
             try appendModuleExportCompletion(
@@ -1052,7 +1053,7 @@ fn collectModules(
     var child_directories: std.ArrayList([]const u8) = .empty;
     var iterator = directory.iterateAssumeFirstIteration();
     while (iterator.next(io) catch null) |entry| {
-        if (entry.kind == .directory and entry.name.len > 0 and entry.name[0] != '.') {
+        if (entry.kind == .directory and ModuleDiscovery.isDirectoryName(entry.name)) {
             try child_directories.append(allocator, try allocator.dupe(u8, entry.name));
         }
     }
@@ -3041,6 +3042,25 @@ test "file URIs are decoded for local module discovery" {
     try std.testing.expectEqualStrings("/tmp/Silex Project/Main.sx", path);
 }
 
+test "module completion excludes infrastructure directories but keeps underscore directories" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{ .iterate = true });
+    defer temporary.cleanup();
+
+    try temporary.dir.createDirPath(std.testing.io, "@Native/Nested");
+    try temporary.dir.createDirPath(std.testing.io, "_Private/Nested");
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    var items: std.ArrayList(CompletionItem) = .empty;
+    try collectModules(allocator, std.testing.io, root, "", "", "Silex module", &items);
+
+    try std.testing.expect(!containsCompletion(items.items, "@Native"));
+    try std.testing.expect(!containsCompletion(items.items, "@Native.Nested"));
+    try std.testing.expect(containsCompletion(items.items, "_Private"));
+    try std.testing.expect(containsCompletion(items.items, "_Private.Nested"));
+}
+
 test "standard library modules and exports complete" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -3050,6 +3070,8 @@ test "standard library modules and exports complete" {
     try std.testing.expect(containsCompletion(roots, "STD"));
     const time_modules = try localModuleCompletionItems(allocator, std.testing.io, uri, "STD.T");
     try std.testing.expect(containsCompletion(time_modules, "STD.Time"));
+    const infrastructure = try localModuleCompletionItems(allocator, std.testing.io, uri, "STD.@");
+    try std.testing.expect(!containsCompletion(infrastructure, "STD.@Native"));
 
     const exports = try moduleExportCompletionItems(
         allocator,

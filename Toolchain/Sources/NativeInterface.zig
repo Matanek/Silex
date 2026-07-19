@@ -1,45 +1,95 @@
 const std = @import("std");
+const NativeDependency = @import("NativeDependency.zig");
+const ProjectModule = @import("Project.zig");
 const Semantic = @import("Semantic.zig");
 
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
 
+const Header = struct {
+    module_name: []const u8,
+    contents: []const u8,
+};
+
 pub fn write(
     allocator: Allocator,
     io: Io,
     program: Semantic.Program,
+    project: ProjectModule.Project,
+    runtimes: []const NativeDependency.ModuleRuntime,
     target_cache_dir: []const u8,
 ) !?[]const u8 {
-    var has_native_function = false;
-    var hasher = std.crypto.hash.sha2.Sha256.init(.{});
-    hasher.update("silex-native-interface-v1");
+    var headers: std.ArrayList(Header) = .empty;
 
+    for (runtimes, 0..) |runtime, index| {
+        const runtime_name = runtime.module_name;
+        if (runtimeAppearedEarlier(runtimes[0..index], runtime_name)) continue;
+        const header = try renderRuntimeHeader(allocator, program, project, runtime_name);
+        try headers.append(allocator, .{ .module_name = runtime_name, .contents = header });
+    }
     for (program.functions, 0..) |function, index| {
         if (!function.is_native or appearedEarlier(program.functions[0..index], function.native_module_name.?)) continue;
-        has_native_function = true;
-        const header = try renderHeader(allocator, program, function.native_module_name.?);
-        hasher.update("\x00module\x00");
-        hasher.update(function.native_module_name.?);
-        hasher.update("\x00header\x00");
-        hasher.update(header);
+        if (hasHeader(headers.items, function.native_module_name.?)) continue;
+        try headers.append(allocator, .{
+            .module_name = function.native_module_name.?,
+            .contents = try renderHeader(allocator, program, function.native_module_name.?),
+        });
     }
-    if (!has_native_function) return null;
+    if (headers.items.len == 0) return null;
+
+    var hasher = std.crypto.hash.sha2.Sha256.init(.{});
+    hasher.update("silex-native-interface-v2");
+    for (headers.items) |header| {
+        hasher.update("\x00module\x00");
+        hasher.update(header.module_name);
+        hasher.update("\x00header\x00");
+        hasher.update(header.contents);
+    }
 
     var digest: [std.crypto.hash.sha2.Sha256.digest_length]u8 = undefined;
     hasher.final(&digest);
     const key = std.fmt.bytesToHex(digest, .lower);
     const root = try std.fs.path.join(allocator, &.{ target_cache_dir, "interfaces", &key });
 
-    for (program.functions, 0..) |function, index| {
-        if (!function.is_native or appearedEarlier(program.functions[0..index], function.native_module_name.?)) continue;
-        const header = try renderHeader(allocator, program, function.native_module_name.?);
-        const module_path = try modulePath(allocator, function.native_module_name.?);
+    for (headers.items) |header| {
+        const module_path = try modulePath(allocator, header.module_name);
         const filename = try std.fmt.allocPrint(allocator, "{s}.h", .{module_path});
         const path = try std.fs.path.join(allocator, &.{ root, "SilexNative", filename });
         if (std.fs.path.dirname(path)) |directory| try Io.Dir.cwd().createDirPath(io, directory);
-        try Io.Dir.cwd().writeFile(io, .{ .sub_path = path, .data = header });
+        try Io.Dir.cwd().writeFile(io, .{ .sub_path = path, .data = header.contents });
     }
     return root;
+}
+
+fn runtimeAppearedEarlier(runtimes: []const NativeDependency.ModuleRuntime, runtime_name: []const u8) bool {
+    for (runtimes) |runtime| {
+        if (std.mem.eql(u8, runtime.module_name, runtime_name)) return true;
+    }
+    return false;
+}
+
+fn hasHeader(headers: []const Header, module_name: []const u8) bool {
+    for (headers) |header| {
+        if (std.mem.eql(u8, header.module_name, module_name)) return true;
+    }
+    return false;
+}
+
+fn renderRuntimeHeader(
+    allocator: Allocator,
+    program: Semantic.Program,
+    project: ProjectModule.Project,
+    runtime_name: []const u8,
+) ![]const u8 {
+    var module_names: std.ArrayList([]const u8) = .empty;
+    for (project.modules) |module| {
+        const candidate = module.native_runtime_name orelse continue;
+        if (!std.mem.eql(u8, candidate, runtime_name)) continue;
+        for (module_names.items) |existing| {
+            if (std.mem.eql(u8, existing, module.name)) break;
+        } else try module_names.append(allocator, module.name);
+    }
+    return renderHeaderForModules(allocator, program, runtime_name, module_names.items);
 }
 
 fn appearedEarlier(functions: []const Semantic.Function, module_name: []const u8) bool {
@@ -55,11 +105,20 @@ fn renderHeader(
     program: Semantic.Program,
     module_name: []const u8,
 ) ![]const u8 {
+    return renderHeaderForModules(allocator, program, module_name, &.{module_name});
+}
+
+fn renderHeaderForModules(
+    allocator: Allocator,
+    program: Semantic.Program,
+    header_name: []const u8,
+    module_names: []const []const u8,
+) ![]const u8 {
     var output: std.ArrayList(u8) = .empty;
     try output.appendSlice(allocator, "#ifndef SILEX_NATIVE_");
-    try appendGuardName(allocator, &output, module_name);
+    try appendGuardName(allocator, &output, header_name);
     try output.appendSlice(allocator, "_H\n#define SILEX_NATIVE_");
-    try appendGuardName(allocator, &output, module_name);
+    try appendGuardName(allocator, &output, header_name);
     try output.appendSlice(
         allocator,
         "_H\n\n#include <stdbool.h>\n#include <stdint.h>\n\n#ifdef __cplusplus\n" ++
@@ -68,7 +127,8 @@ fn renderHeader(
 
     var emitted_transports: std.ArrayList([]const u8) = .empty;
     for (program.functions) |function| {
-        if (!function.is_native or !std.mem.eql(u8, function.native_module_name.?, module_name)) continue;
+        if (!function.is_native or !containsModule(module_names, function.native_module_name.?)) continue;
+        const module_name = function.native_module_name.?;
         if (nativeResultShape(program, function.return_type)) |result| {
             if (structureForType(program, nativeBranchValueType(result.success_type))) |structure| {
                 try appendTransportIfNew(allocator, &output, &emitted_transports, module_name, structure, false);
@@ -89,7 +149,7 @@ fn renderHeader(
     }
 
     for (program.functions) |function| {
-        if (!function.is_native or !std.mem.eql(u8, function.native_module_name.?, module_name)) continue;
+        if (!function.is_native or !containsModule(module_names, function.native_module_name.?)) continue;
         try appendFunctionSignature(allocator, &output, program, function);
         try output.appendSlice(allocator, ";\n");
     }
@@ -99,6 +159,13 @@ fn renderHeader(
         "\n#ifdef __cplusplus\n}\n#endif\n\n#endif\n",
     );
     return output.toOwnedSlice(allocator);
+}
+
+fn containsModule(module_names: []const []const u8, module_name: []const u8) bool {
+    for (module_names) |candidate| {
+        if (std.mem.eql(u8, candidate, module_name)) return true;
+    }
+    return false;
 }
 
 fn appendGuardName(allocator: Allocator, output: *std.ArrayList(u8), module_name: []const u8) !void {
@@ -392,6 +459,9 @@ fn appendTransportDefinition(
         try inputTransportName(allocator, module_name, structure.source_name, structureHasString(structure))
     else
         try transportName(allocator, module_name, structure.source_name);
+    try output.appendSlice(allocator, "#define SILEX_NATIVE_TRANSPORT_");
+    try appendGuardName(allocator, output, name);
+    try output.appendSlice(allocator, " 1\n");
     try output.appendSlice(allocator, "typedef struct ");
     try output.appendSlice(allocator, name);
     try output.appendSlice(allocator, " {\n");
@@ -505,6 +575,52 @@ fn modulePath(allocator: Allocator, module_name: []const u8) ![]const u8 {
         if (character.* == '.') character.* = std.fs.path.sep;
     }
     return path;
+}
+
+test "selected runtimes receive an empty root header without native declarations" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{ .iterate = true });
+    defer temporary.cleanup();
+    const target_cache_dir = try std.fs.path.join(allocator, &.{
+        ".zig-cache",
+        "tmp",
+        &temporary.sub_path,
+        "target",
+    });
+    const project: ProjectModule.Project = .{
+        .program_name = "Main",
+        .target_module = 0,
+        .modules = &.{.{
+            .name = "Pure",
+            .sources = &.{"Pure.sx"},
+            .native_runtime_name = "Pure",
+        }},
+        .single_file = true,
+    };
+    const runtime: NativeDependency.ModuleRuntime = .{
+        .module_name = "Pure",
+        .module_directory = "Pure",
+        .manifest_path = "Pure/@Module.json",
+        .sources = &.{},
+        .include_dirs = &.{},
+        .defines = &.{},
+        .system_libraries = &.{},
+        .frameworks = &.{},
+    };
+    const program: Semantic.Program = .{
+        .enums = &.{},
+        .protocols = &.{},
+        .structures = &.{},
+        .functions = &.{},
+    };
+
+    const root = (try write(allocator, std.testing.io, program, project, &.{runtime}, target_cache_dir)).?;
+    const path = try std.fs.path.join(allocator, &.{ root, "SilexNative", "Pure.h" });
+    const header = try Io.Dir.cwd().readFileAlloc(std.testing.io, path, allocator, .limited(4096));
+    try std.testing.expect(std.mem.indexOf(u8, header, "#ifndef SILEX_NATIVE_PURE_H") != null);
+    try std.testing.expect(std.mem.indexOf(u8, header, "extern \"C\"") != null);
 }
 
 test "native headers are C compatible and preserve the string ABI" {

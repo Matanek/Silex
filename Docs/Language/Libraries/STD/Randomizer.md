@@ -43,6 +43,6 @@ sequence of values.
 
 The deterministic transition is implemented in Silex. Only the seed used by
 `create()` comes from the private native runtime configured by
-`STD/Module.json`.
+`STD/@Module.json`.
 
 [Back to STD](README.md)

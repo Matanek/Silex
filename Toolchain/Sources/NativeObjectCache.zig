@@ -500,7 +500,7 @@ test "package object key follows native inputs but ignores Silex-only changes" {
     const runtime: NativeDependency.ModuleRuntime = .{
         .module_name = "Fixture",
         .module_directory = root,
-        .manifest_path = "Module.json",
+        .manifest_path = "@Module.json",
         .sources = &.{.{ .kind = .c, .path = source }},
         .include_dirs = &.{root},
         .defines = &.{},
@@ -532,7 +532,7 @@ test "package object key follows native inputs but ignores Silex-only changes" {
     const copy_runtime: NativeDependency.ModuleRuntime = .{
         .module_name = "Fixture",
         .module_directory = copy_root,
-        .manifest_path = "Module.json",
+        .manifest_path = "@Module.json",
         .sources = &.{.{ .kind = .c, .path = copy_source }},
         .include_dirs = &.{copy_root},
         .defines = &.{},

@@ -112,7 +112,8 @@ const Resolver = struct {
             std.debug.print("silex: invalid lockfile at '{s}/Silex.lock': {t}\n", .{ canonical_root, err });
             return error.Reported;
         };
-        const manifest_path = try std.fs.path.join(self.allocator, &.{ canonical_root, "Module.json" });
+        try ModuleManifest.rejectLegacyInDirectory(self.allocator, self.io, canonical_root);
+        const manifest_path = try ModuleManifest.manifestPath(self.allocator, canonical_root);
         const root_manifest = loadOptionalManifest(self.allocator, self.io, manifest_path) catch |err| {
             std.debug.print("silex: invalid module manifest at '{s}': {t}\n", .{ manifest_path, err });
             return error.Reported;
@@ -252,7 +253,8 @@ const Resolver = struct {
             });
             return error.Reported;
         }
-        const manifest_path = try std.fs.path.join(self.allocator, &.{ canonical_root, "Module.json" });
+        try ModuleManifest.rejectLegacyInDirectory(self.allocator, self.io, canonical_root);
+        const manifest_path = try ModuleManifest.manifestPath(self.allocator, canonical_root);
         const manifest = ModuleManifest.load(self.allocator, self.io, manifest_path) catch |err| {
             std.debug.print("silex: invalid package manifest for {s} at '{s}': {t}\n", .{
                 try formatChain(self.allocator, chain),
@@ -338,9 +340,10 @@ const Resolver = struct {
             }
             return error.Reported;
         };
-        const manifest_path = try std.fs.path.join(self.allocator, &.{ checkout.root, "Module.json" });
+        try ModuleManifest.rejectLegacyInDirectory(self.allocator, self.io, checkout.root);
+        const manifest_path = try ModuleManifest.manifestPath(self.allocator, checkout.root);
         const manifest = ModuleManifest.load(self.allocator, self.io, manifest_path) catch {
-            std.debug.print("silex: Git checkout for {s} is incomplete: missing valid Module.json\n", .{
+            std.debug.print("silex: Git checkout for {s} is incomplete: missing valid @Module.json\n", .{
                 try formatChain(self.allocator, chain),
             });
             return error.Reported;

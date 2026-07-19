@@ -1,6 +1,5 @@
 #include <cstdint>
 #include <random>
-
 #include <SilexNative/STD.h>
 
 extern "C" std::int64_t silexNative_STD_native_seed() {

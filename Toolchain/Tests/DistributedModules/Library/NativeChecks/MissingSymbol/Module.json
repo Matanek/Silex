@@ -1,9 +1,0 @@
-{
-  "native": {
-    "sources": {
-      "c": [
-        "Runtime.c"
-      ]
-    }
-  }
-}

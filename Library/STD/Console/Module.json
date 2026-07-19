@@ -1,7 +1,0 @@
-{
-  "native": {
-    "sources": {
-      "cpp": ["Console.cpp", "Session.cpp"]
-    }
-  }
-}

@@ -3,6 +3,9 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
 
+pub const filename = "@Module.json";
+pub const legacy_filename = "Module.json";
+
 pub const Manifest = struct {
     author: ?[]const u8 = null,
     description: ?[]const u8 = null,
@@ -15,6 +18,23 @@ pub const Manifest = struct {
 pub fn load(allocator: Allocator, io: Io, path: []const u8) !Manifest {
     const contents = try Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(1024 * 1024));
     return parse(allocator, contents);
+}
+
+pub fn manifestPath(allocator: Allocator, directory: []const u8) ![]const u8 {
+    return std.fs.path.join(allocator, &.{ directory, filename });
+}
+
+pub fn rejectLegacyInDirectory(allocator: Allocator, io: Io, directory: []const u8) !void {
+    const legacy_path = try std.fs.path.join(allocator, &.{ directory, legacy_filename });
+    _ = Io.Dir.cwd().statFile(io, legacy_path, .{ .follow_symlinks = false }) catch |err| switch (err) {
+        error.FileNotFound, error.NotDir => return,
+        else => |other| return other,
+    };
+    std.debug.print(
+        "silex: legacy module manifest '{s}'; rename it to '{s}'\n",
+        .{ legacy_path, filename },
+    );
+    return error.Reported;
 }
 
 pub fn parse(allocator: Allocator, contents: []const u8) !Manifest {

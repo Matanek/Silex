@@ -101,8 +101,10 @@ func main() {
     let before_scaled_tick = clock.get_total_seconds()
     while clock.get_total_seconds() <= before_scaled_tick + 0.002 {}
     print(clock.tick() > 0.002)
+    clock.pause()
     let clock_total = clock.get_total_seconds()
     print(clock.get_total_milliseconds() == clock_total * 1_000.0)
+    clock.resume()
 
     clock.reset()
     let clock_is_reset = clock.get_total_seconds() == 0.0 && !clock.is_paused()

@@ -3,7 +3,7 @@
 Silex distributes the source of `STD` with the compiler. `STD` is a reserved
 root module: its modules and source units are compiled with the program when
 explicitly selected with `use`. They are versioned with Silex itself, so a
-project must not list `STD` in its `Module.json` dependencies.
+project must not list `STD` in its `@Module.json` dependencies.
 
 ```sx
 use STD.Randomizer as Randomizer

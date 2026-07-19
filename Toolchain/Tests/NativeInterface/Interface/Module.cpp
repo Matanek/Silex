@@ -1,4 +1,4 @@
-#include <SilexNative/Interface/Api.h>
+#include <SilexNative/Interface.h>
 
 extern "C" int32_t silexNative_Interface_Api_native_value(void) {
     return 42;

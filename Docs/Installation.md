@@ -34,7 +34,7 @@ so `use STD`, declarations such as `STD.Randomizer`, and submodules such as
 the project.
 The available APIs are indexed in the [library reference](Language.md#libraries).
 A directory-backed local or distributed module may provide an optional
-`Module.json`. Its `native` section is compiled and linked once when any module
+`@Module.json`. Its `native` section is compiled and linked once when any module
 that inherits it is loaded.
 
 ## Projects and manifests
@@ -42,7 +42,11 @@ that inherits it is loaded.
 For a small program, pass its entry source file directly. Its directory is the
 local project root: each subdirectory is a module, including a parent that only
 contains submodules, and the `.sx` files directly inside that directory belong
-to it. Using a parent does not recursively load all of its descendants.
+to it. Using a parent does not recursively load all of its descendants. A
+directory beginning with `@` is reserved for non-module infrastructure and is
+skipped by automatic module discovery; explicit native source and include paths
+may still point into it. A project can therefore use `@Native/`, `@Docs/`, or
+another infrastructure name without exposing it through `use` completion.
 
 Pass a JSON manifest when the target program itself spans several source files,
 or when the project needs to assign files to modules explicitly:
@@ -75,8 +79,8 @@ are relative to the manifest. A source belongs to one module only, and each
 module name has one provider. Files in the same module share their declarations.
 Every dotted module name also makes its parent names available as source-less
 modules: declaring `NK.Window` makes `NK` importable without an artificial
-source entry. A module can discover `Module.json` from the directory matching
-its logical name relative to the project manifest, such as `Math/Module.json`
+source entry. A module can discover `@Module.json` from the directory matching
+its logical name relative to the project manifest, such as `Math/@Module.json`
 for `Math`. The project manifest format is currently JSON.
 
 ## Command line
@@ -97,7 +101,7 @@ executable into `.silex/bin/` unless `-o` selects a path. `--emit-cpp` keeps
 readable intermediate output in `.silex/generated/`. `--target` accepts a Zig
 architecture, operating system, and ABI triple. `--native` adds a JSON-described
 link dependency with `name`, `sources`, and supported `targets`. It is separate
-from the optional `native` section of an automatically discovered `Module.json`,
+from the optional `native` section of an automatically discovered `@Module.json`,
 which authorizes that named module's private `native func` API.
 
 When a link is required, `compile` reports each native package compiled or
@@ -105,14 +109,16 @@ reused, then reports the application link separately. An unchanged local build
 is reported as up to date; internal cache paths are not part of this command's
 output contract.
 
-`module init` creates the optional `Module.json` for a directory-module without
+`module init` creates the optional `@Module.json` for a directory-module without
 changing any existing source. The plain form writes an empty manifest. With
 `--native`, it adds the portable `native.sources.cpp` configuration and creates
-`Module.cpp` only when that file does not already exist. Existing metadata and
-native sources are preserved; invalid manifests and path collisions are
-reported before any file is created.
+`@Native/Module.cpp` only when that file does not already exist. Existing
+metadata and native sources are preserved; invalid manifests and path
+collisions are reported before any file is created. An old `Module.json` found
+at a module location is rejected with an instruction to rename it to
+`@Module.json`.
 
-A root `Module.json` may also declare local package dependencies. Each entry
+A root `@Module.json` may also declare local package dependencies. Each entry
 maps an importable root module name to a package directory relative to that
 manifest:
 
@@ -127,7 +133,7 @@ manifest:
 ```
 
 Referenced packages declare matching `name` and Semantic `version` fields in
-their own `Module.json`. A package shared through Git uses `git` instead of
+their own `@Module.json`. A package shared through Git uses `git` instead of
 `path` and adds a version constraint:
 
 ```json
@@ -142,7 +148,7 @@ their own `Module.json`. A package shared through Git uses `git` instead of
 ```
 
 The first successful resolution writes `Silex.lock` beside the application's
-root `Module.json`. Later `compile` and `run` commands reuse the exact Git
+root `@Module.json`. Later `compile` and `run` commands reuse the exact Git
 commits in that file. `silex update` refreshes every dependency that does not
 declare `rev`; `silex update Foundation` refreshes only that package and the
 transitive changes its new checkout requires. A failed update leaves the old

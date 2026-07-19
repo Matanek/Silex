@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -11,20 +12,6 @@
 #include <string>
 #include <utility>
 
-#if !defined(SILEX_CONSOLE_STANDALONE_TEST)
-#include <SilexNative/STD/Console.h>
-#else
-struct SilexNative_STD_Console_NativeKeyEvent {
-    std::int64_t code;
-    bool shift;
-    bool control;
-    bool alt;
-    std::int64_t number;
-    char* text_bytes;
-    std::int64_t text_length;
-};
-#endif
-
 #if defined(_WIN32)
 #include <windows.h>
 #else
@@ -34,7 +21,60 @@ struct SilexNative_STD_Console_NativeKeyEvent {
 #include <unistd.h>
 #endif
 
+#if !defined(SILEX_CONSOLE_STANDALONE_TEST)
+#include <SilexNative/STD.h>
+#endif
+
+struct SilexNative_STD_Console_NativeKeyEvent;
+
 namespace {
+
+struct NativeKeyEventOutput {
+    std::int64_t code;
+    bool shift;
+    bool control;
+    bool alt;
+    std::int64_t number;
+    char* textBytes;
+    std::int64_t textLength;
+};
+
+#if defined(SILEX_NATIVE_TRANSPORT_SILEXNATIVE_STD_CONSOLE_NATIVEKEYEVENT)
+static_assert(
+    sizeof(NativeKeyEventOutput) == sizeof(SilexNative_STD_Console_NativeKeyEvent)
+);
+static_assert(
+    alignof(NativeKeyEventOutput) == alignof(SilexNative_STD_Console_NativeKeyEvent)
+);
+static_assert(
+    offsetof(NativeKeyEventOutput, code) ==
+    offsetof(SilexNative_STD_Console_NativeKeyEvent, code)
+);
+static_assert(
+    offsetof(NativeKeyEventOutput, shift) ==
+    offsetof(SilexNative_STD_Console_NativeKeyEvent, shift)
+);
+static_assert(
+    offsetof(NativeKeyEventOutput, control) ==
+    offsetof(SilexNative_STD_Console_NativeKeyEvent, control)
+);
+static_assert(
+    offsetof(NativeKeyEventOutput, alt) ==
+    offsetof(SilexNative_STD_Console_NativeKeyEvent, alt)
+);
+static_assert(
+    offsetof(NativeKeyEventOutput, number) ==
+    offsetof(SilexNative_STD_Console_NativeKeyEvent, number)
+);
+static_assert(
+    offsetof(NativeKeyEventOutput, textBytes) ==
+    offsetof(SilexNative_STD_Console_NativeKeyEvent, text_bytes)
+);
+static_assert(
+    offsetof(NativeKeyEventOutput, textLength) ==
+    offsetof(SilexNative_STD_Console_NativeKeyEvent, text_length)
+);
+#endif
 
 using Clock = std::chrono::steady_clock;
 
@@ -127,7 +167,7 @@ char* copyText(const std::string& text, const char* method) {
 void writeEvent(
     const Event& event,
     const char* method,
-    SilexNative_STD_Console_NativeKeyEvent* output
+    NativeKeyEventOutput* output
 ) {
     char* text = copyText(event.text, method);
     output->code = static_cast<std::int64_t>(event.code);
@@ -135,8 +175,8 @@ void writeEvent(
     output->control = event.control;
     output->alt = event.alt;
     output->number = event.number;
-    output->text_bytes = text;
-    output->text_length = static_cast<std::int64_t>(event.text.size());
+    output->textBytes = text;
+    output->textLength = static_cast<std::int64_t>(event.text.size());
 }
 
 [[maybe_unused]] std::string hexadecimal(
@@ -685,7 +725,7 @@ extern "C" void silexNative_STD_Console_native_session_read(
 #else
     const Event event = readPosixEvent(-1, "read_key");
 #endif
-    writeEvent(event, "read_key", output);
+    writeEvent(event, "read_key", reinterpret_cast<NativeKeyEventOutput*>(output));
 }
 
 extern "C" bool silexNative_STD_Console_native_session_poll(
@@ -701,7 +741,7 @@ extern "C" bool silexNative_STD_Console_native_session_poll(
     const Event event = readPosixEvent(timeoutMilliseconds, "poll_key");
 #endif
     if (event.code == EventCode::timeout) return false;
-    writeEvent(event, "poll_key", output);
+    writeEvent(event, "poll_key", reinterpret_cast<NativeKeyEventOutput*>(output));
     return true;
 }
 

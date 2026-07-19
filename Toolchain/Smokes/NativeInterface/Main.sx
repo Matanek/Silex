@@ -1,7 +1,9 @@
 use Interop.Api as Api
+use Interop.Status as Status
 
 func main() {
     print(Api.add(20, 22))
     print(Api.echo("Silex") == "Silex")
     print(Api.ready())
+    print(Status.code() == 7)
 }

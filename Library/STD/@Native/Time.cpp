@@ -1,7 +1,6 @@
 #include <chrono>
 #include <cstdint>
-
-#include <SilexNative/STD/Time.h>
+#include <SilexNative/STD.h>
 
 extern "C" std::int64_t silexNative_STD_Time_native_monotonic_microseconds() {
     const auto elapsed = std::chrono::steady_clock::now().time_since_epoch();
