@@ -1,0 +1,16 @@
+use NativeStructureStrings as Native
+
+func main() {
+    let first = Native.read(1)
+    let second = Native.read(2)
+    assert(first.sequence == 1, "first sequence")
+    assert(second.sequence == 2, "second sequence")
+    assert(first.title == "événement 🌟 1", "UTF-8 title")
+    assert(second.title == "événement 🌟 2", "independent title")
+    assert(first.detail == "A\0B", "embedded null")
+    assert(first.empty == "", "empty string")
+    print(first.title)
+    print(second.title)
+    print(first.detail == "A\0B")
+    print(first.empty == "")
+}

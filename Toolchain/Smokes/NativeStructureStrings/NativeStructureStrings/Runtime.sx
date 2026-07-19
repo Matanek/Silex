@@ -1,0 +1,27 @@
+pub struct NativeMessage {
+    let sequence:int
+    let title:str
+    let detail:str
+    let empty:str
+}
+
+native func native_read(sequence:int) NativeMessage
+native func native_negative_length() NativeMessage
+native func native_null_with_positive_length() NativeMessage
+native func native_invalid_utf8() NativeMessage
+
+pub func read(sequence:int) NativeMessage {
+    return native_read(sequence)
+}
+
+pub func negative_length() NativeMessage {
+    return native_negative_length()
+}
+
+pub func null_with_positive_length() NativeMessage {
+    return native_null_with_positive_length()
+}
+
+pub func invalid_utf8() NativeMessage {
+    return native_invalid_utf8()
+}

@@ -526,6 +526,7 @@ pub const NativeReturnStructure = struct {
 };
 
 pub const NativeReturnField = struct {
+    source_name: []const u8,
     generated_name: []const u8,
     type: Type,
 };
@@ -6902,7 +6903,7 @@ pub const Analyzer = struct {
         if (structure_type.is_class or structure_type.is_owner) return false;
         const structure = self.findStructureByGeneratedName(structure_type.generated_name) orelse return false;
         if (structure.is_generic or try self.isNonCopyableType(value)) return false;
-        for (structure.fields) |field| if (!isNativeScalarFieldType(field.type)) return false;
+        for (structure.fields) |field| if (!isNativeStructureFieldType(field.type)) return false;
         return true;
     }
 
@@ -6914,6 +6915,7 @@ pub const Analyzer = struct {
         const structure = self.findStructureByGeneratedName(structure_type.generated_name) orelse return null;
         var fields: std.ArrayList(NativeReturnField) = .empty;
         for (structure.fields) |field| try fields.append(self.allocator, .{
+            .source_name = field.source_name,
             .generated_name = field.generated_name,
             .type = field.type,
         });
@@ -7556,9 +7558,9 @@ fn isNativeScalarReturnType(value: Type) bool {
     };
 }
 
-fn isNativeScalarFieldType(value: Type) bool {
+fn isNativeStructureFieldType(value: Type) bool {
     return switch (value) {
-        .int, .int8, .int16, .int32, .uint8, .uint16, .uint32, .uint64, .float, .float64, .bool => true,
+        .int, .int8, .int16, .int32, .uint8, .uint16, .uint32, .uint64, .float, .float64, .bool, .str => true,
         else => false,
     };
 }
@@ -8321,7 +8323,7 @@ test "native ABI accepts string returns" {
     _ = try analyzer.analyze(program);
 }
 
-test "native ABI accepts scalar structure returns" {
+test "native ABI accepts scalar and string structure returns" {
     const Parser = @import("Parser.zig").Parser;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -8340,6 +8342,7 @@ test "native ABI accepts scalar structure returns" {
         \\    let decimal32:float
         \\    let decimal64:float64
         \\    let ready:bool
+        \\    let label:str
         \\}
         \\native func native_read() NativeScalars
         \\func main() {}
@@ -8353,7 +8356,6 @@ test "native ABI accepts scalar structure returns" {
 
 test "native ABI rejects non scalar structure returns" {
     const cases = [_][]const u8{
-        "struct Payload { let value:str } native func native_read() Payload; func main() {}",
         "struct Inner { let value:int } struct Payload { let value:Inner } native func native_read() Payload; func main() {}",
         "enum State { ready } struct Payload { let value:State } native func native_read() Payload; func main() {}",
         "class Payload {} native func native_read() Payload; func main() {}",

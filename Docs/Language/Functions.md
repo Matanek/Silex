@@ -154,17 +154,26 @@ symbol from the module and function name, so a native runtime never chooses an
 arbitrary C symbol.
 
 A native function may also return a copyable, non-generic structure whose
-stored fields are directly scalar booleans or numbers. Its generated C header
-defines a transport structure derived from the module and Silex type name; the
-native symbol receives an output pointer to that transport after its ordinary
-parameters. Silex zero-initializes the transport, calls the native symbol, then
-copies every field in declaration order into an independent Silex structure.
+stored fields are directly scalar booleans, numbers, or strings. Its generated
+C header defines a transport structure derived from the module and Silex type
+name; the native symbol receives an output pointer to that transport after its
+ordinary parameters. Each string field becomes an owned `char* <name>_bytes`
+and `int64_t <name>_length` pair. No `std::string` crosses the C symbol.
+
+Silex zero-initializes the transport, calls the native symbol, then copies every
+field in declaration order into an independent Silex structure. Each string
+buffer follows the same `malloc`/`free`, byte-length, embedded-null, empty-value,
+and UTF-8 rules as a direct `str` return. All buffers are released exactly once,
+including when an exception or an invalid string field prevents the return.
+The runtime error names both the native function and invalid field. Successive
+calls share no Silex string storage.
+
 The generated C transport—not the structure emitted in `Generated.cpp`—is the
-ABI. Static members and methods add no transport field. Strings, nested
-structures, enums, classes, protocols, collections, optionals, `Result`,
-functions, generic structures, and structures with `drop` remain unavailable
-in a native return structure. Structures remain unavailable as native
-parameters.
+ABI. Static members and methods add no transport field. Nested structures,
+enums, classes, protocols, collections, optionals, `Result`, functions, generic
+structures, and structures with `drop` remain unavailable in a native return
+structure. Strings in structures passed as parameters are not yet supported;
+structures remain unavailable as native parameters.
 
 Before compiling a native runtime, Silex generates its authoritative C
 interface beneath `.silex/build/`. Every module segment becomes a header-path
@@ -176,7 +185,7 @@ segment, so a C or C++ implementation of `STD.Console` includes:
 
 The generated header has ordinary C types from `<stdbool.h>` and `<stdint.h>`,
 includes guards, and a C++-protected `extern "C"` block. It contains the exact
-symbols and scalar, string, or scalar-structure ABI above, never
+symbols and scalar, string, or flat-structure ABI above, never
 generated-program types, `std::string`, or project paths. Its include root is
 supplied automatically to the native runtime that implements the module. A C++
 definition that disagrees with a generated declaration therefore fails while

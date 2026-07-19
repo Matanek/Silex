@@ -152,6 +152,14 @@ fn appendTransportDefinition(
         try output.appendSlice(allocator, "    uint8_t _silex_unused;\n");
     } else for (structure.fields) |field| {
         try output.appendSlice(allocator, "    ");
+        if (field.type == .str) {
+            try output.appendSlice(allocator, "char* ");
+            try output.appendSlice(allocator, field.source_name);
+            try output.appendSlice(allocator, "_bytes;\n    int64_t ");
+            try output.appendSlice(allocator, field.source_name);
+            try output.appendSlice(allocator, "_length;\n");
+            continue;
+        }
         try appendType(allocator, output, field.type);
         try output.append(allocator, ' ');
         try output.appendSlice(allocator, field.source_name);
@@ -292,4 +300,29 @@ test "native headers define scalar structure transports" {
         "void silexNative_STD_Console_native_dimensions(SilexNative_STD_Console_NativeDimensions* output);",
     ) != null);
     try std.testing.expect(std.mem.indexOf(u8, header, "cached") == null);
+}
+
+test "native headers define string structure fields as owned bytes and lengths" {
+    const Parser = @import("Parser.zig").Parser;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var parser = Parser.init(allocator,
+        \\struct NativeMessage { let code:int; let title:str; let detail:str }
+        \\native func native_message() NativeMessage
+        \\func main() {}
+    );
+    const ast = try parser.parse();
+    @constCast(ast.functions)[0].name = "Events.native_message";
+    var analyzer = Semantic.Analyzer.init(allocator);
+    analyzer.native_module_names = &.{"Events"};
+    const header = try renderHeader(allocator, try analyzer.analyze(ast), "Events");
+
+    try std.testing.expect(std.mem.indexOf(u8, header, "int64_t code;") != null);
+    try std.testing.expect(std.mem.indexOf(u8, header, "char* title_bytes;") != null);
+    try std.testing.expect(std.mem.indexOf(u8, header, "int64_t title_length;") != null);
+    try std.testing.expect(std.mem.indexOf(u8, header, "char* detail_bytes;") != null);
+    try std.testing.expect(std.mem.indexOf(u8, header, "int64_t detail_length;") != null);
+    try std.testing.expect(std.mem.indexOf(u8, header, "std::string") == null);
 }

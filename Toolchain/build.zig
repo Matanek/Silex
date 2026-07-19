@@ -2485,7 +2485,7 @@ pub fn build(b: *std.Build) void {
     incompatible_native_interface_command.addArgs(&.{ "compile", "Tests/NativeInterface/Main.sx" });
     incompatible_native_interface_command.expectExitCode(1);
     incompatible_native_interface_command.expectStdErrMatch(
-        "silex: native compilation failed for target '.*'",
+        "silex: native compilation failed for target '",
     );
 
     const native_structure_return_command = b.addRunArtifact(executable);
@@ -2496,8 +2496,40 @@ pub fn build(b: *std.Build) void {
         "1\n2\n-8\n-16\n-32\n8\n16\n32\n64\n1.5\n2.5\ntrue\n",
     ));
 
+    const native_structure_string_command = b.addRunArtifact(executable);
+    native_structure_string_command.step.dependOn(&native_structure_return_command.step);
+    native_structure_string_command.addArgs(&.{ "run", "Smokes/NativeStructureStrings/Main.sx" });
+    native_structure_string_command.expectStdOutEqual(hostText(
+        b,
+        "événement 🌟 1\névénement 🌟 2\ntrue\ntrue\n",
+    ));
+
+    const native_structure_string_negative_length_command = b.addRunArtifact(executable);
+    native_structure_string_negative_length_command.step.dependOn(&native_structure_string_command.step);
+    native_structure_string_negative_length_command.addArgs(&.{ "run", "Smokes/NativeStructureStrings/NegativeLength.sx" });
+    native_structure_string_negative_length_command.expectExitCode(1);
+    native_structure_string_negative_length_command.expectStdErrEqual(
+        "runtime error: native function 'NativeStructureStrings.native_negative_length' field 'detail' failed: returned a negative length\n",
+    );
+
+    const native_structure_string_null_pointer_command = b.addRunArtifact(executable);
+    native_structure_string_null_pointer_command.step.dependOn(&native_structure_string_negative_length_command.step);
+    native_structure_string_null_pointer_command.addArgs(&.{ "run", "Smokes/NativeStructureStrings/NullPointer.sx" });
+    native_structure_string_null_pointer_command.expectExitCode(1);
+    native_structure_string_null_pointer_command.expectStdErrEqual(
+        "runtime error: native function 'NativeStructureStrings.native_null_with_positive_length' field 'detail' failed: returned a null pointer with a positive length\n",
+    );
+
+    const native_structure_string_invalid_utf8_command = b.addRunArtifact(executable);
+    native_structure_string_invalid_utf8_command.step.dependOn(&native_structure_string_null_pointer_command.step);
+    native_structure_string_invalid_utf8_command.addArgs(&.{ "run", "Smokes/NativeStructureStrings/InvalidUtf8.sx" });
+    native_structure_string_invalid_utf8_command.expectExitCode(1);
+    native_structure_string_invalid_utf8_command.expectStdErrEqual(
+        "runtime error: native function 'NativeStructureStrings.native_invalid_utf8' field 'detail' failed: returned invalid UTF-8\n",
+    );
+
     const native_string_command = b.addRunArtifact(executable);
-    native_string_command.step.dependOn(&native_structure_return_command.step);
+    native_string_command.step.dependOn(&native_structure_string_invalid_utf8_command.step);
     native_string_command.addArgs(&.{ "run", "Smokes/NativeStrings/Main.sx" });
     native_string_command.expectStdOutEqual(hostText(b, "true\ntrue\ntrue\ntrue\ntrue\ntrue\n"));
 
@@ -2935,8 +2967,30 @@ pub fn build(b: *std.Build) void {
         ".silex/cross-native-smoke/LocalNative-x86_64-linux",
     });
 
+    const cross_native_structure_string_linux_smoke_command = b.addRunArtifact(executable);
+    cross_native_structure_string_linux_smoke_command.step.dependOn(&cross_local_native_smoke_command.step);
+    cross_native_structure_string_linux_smoke_command.addArgs(&.{
+        "compile",
+        "Smokes/NativeStructureStrings/Main.sx",
+        "--target",
+        "x86_64-linux-musl",
+        "-o",
+        ".silex/cross-native-smoke/NativeStructureStrings-x86_64-linux",
+    });
+
+    const cross_native_structure_string_windows_smoke_command = b.addRunArtifact(executable);
+    cross_native_structure_string_windows_smoke_command.step.dependOn(&cross_native_structure_string_linux_smoke_command.step);
+    cross_native_structure_string_windows_smoke_command.addArgs(&.{
+        "compile",
+        "Smokes/NativeStructureStrings/Main.sx",
+        "--target",
+        "x86_64-windows-gnu",
+        "-o",
+        ".silex/cross-native-smoke/NativeStructureStrings-x86_64-windows.exe",
+    });
+
     const cross_native_string_linux_smoke_command = b.addRunArtifact(executable);
-    cross_native_string_linux_smoke_command.step.dependOn(&cross_local_native_smoke_command.step);
+    cross_native_string_linux_smoke_command.step.dependOn(&cross_native_structure_string_windows_smoke_command.step);
     cross_native_string_linux_smoke_command.addArgs(&.{
         "compile",
         "Smokes/NativeStrings/Main.sx",
