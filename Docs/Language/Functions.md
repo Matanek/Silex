@@ -175,16 +175,24 @@ structures, and structures with `drop` remain unavailable in a native return
 structure.
 
 A copyable, non-generic structure whose stored fields are directly scalar
-booleans or numbers may also be passed by value to a native function. The bridge
-evaluates the Silex argument once, copies its fields in declaration order into
-an independent C transport, and passes `const SilexNative_Module_Type*`. That
-pointer is valid only for the duration of the call: the native function cannot
-modify the Silex value or retain its address. Input and output positions reuse
-the same named transport definition. Several structured arguments each receive
-their own transport. String fields, nested structures, enums, classes,
-protocols, collections, references, optionals, `Result`, functions, generic
-structures, and structures with `drop` remain unavailable as native structure
-parameters.
+booleans, numbers, or strings may also be passed by value to a native function.
+The bridge evaluates the Silex argument once, copies its fields in declaration
+order into an independent C transport, and passes a pointer to a constant
+transport. Scalar-only types reuse `const SilexNative_Module_Type*` in input and
+`SilexNative_Module_Type*` in output. When a type contains strings, its input
+uses a distinct `const SilexNative_Module_TypeInput*`: every string field is a
+borrowed `const char* <name>_bytes` and `int64_t <name>_length` view, while the
+ordinary output transport retains its owned `char*` fields.
+
+The input transport and each string view are valid only for the duration of the
+call: the native function cannot modify the Silex value or bytes, retain either
+pointer, or free a borrowed string. The bridge may expose Silex storage directly
+or use a temporary copy without changing this contract. Embedded null bytes and
+empty strings are represented by their lengths, exactly like direct string
+parameters. Several structured arguments each receive their own transport.
+Nested structures, enums, classes, protocols, collections, references,
+optionals, `Result`, functions, generic structures, and structures with `drop`
+remain unavailable as native structure parameters.
 
 A native function may return `T?` when `T` is one of the transferable return
 types above: a scalar boolean or number, `str`, or an admitted flat structure.

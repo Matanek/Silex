@@ -1,0 +1,31 @@
+use NativeStructureStringParameters as Native
+
+func main() {
+    let first = Native.NativeRequest(
+        path:"répertoire/🌟\0fin",
+        label:"premier",
+        empty:"",
+        mode:7
+    )
+    let first_result = Native.round_trip(first, 1)
+    assert(first_result.path == first.path, "UTF-8 path with embedded null")
+    assert(first_result.label == "premier #1", "first label")
+    assert(first_result.empty == "", "empty string")
+    assert(first_result.mode == 8, "first mode")
+    assert(first.label == "premier", "first input remains unchanged")
+
+    let second = Native.NativeRequest(
+        path:"二ième",
+        label:"second 🌍",
+        empty:"",
+        mode:20
+    )
+    let second_result = Native.round_trip(second, 2)
+    assert(second_result.path == "二ième", "second UTF-8 path")
+    assert(second_result.label == "second 🌍 #2", "second label")
+    assert(second_result.empty == "", "second empty string")
+    assert(second_result.mode == 22, "second mode")
+    assert(first_result.label == "premier #1", "successive calls are independent")
+    print(first_result.path == "répertoire/🌟\0fin")
+    print(second_result.label)
+}

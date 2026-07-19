@@ -70,11 +70,11 @@ fn renderHeader(
     for (program.functions) |function| {
         if (!function.is_native or !std.mem.eql(u8, function.native_module_name.?, module_name)) continue;
         if (returnedStructure(program, function)) |structure| {
-            try appendTransportIfNew(allocator, &output, &emitted_transports, module_name, structure);
+            try appendTransportIfNew(allocator, &output, &emitted_transports, module_name, structure, false);
         }
         for (function.parameters) |parameter| {
             if (structureForType(program, parameter.type)) |structure| {
-                try appendTransportIfNew(allocator, &output, &emitted_transports, module_name, structure);
+                try appendTransportIfNew(allocator, &output, &emitted_transports, module_name, structure, true);
             }
         }
     }
@@ -132,10 +132,11 @@ fn appendFunctionSignature(
         }
         if (structureForType(program, parameter.type)) |parameter_structure| {
             try output.appendSlice(allocator, "const ");
-            try output.appendSlice(allocator, try transportName(
+            try output.appendSlice(allocator, try inputTransportName(
                 allocator,
                 function.native_module_name.?,
                 parameter_structure.source_name,
+                structureHasString(parameter_structure),
             ));
             try output.appendSlice(allocator, "* ");
             try output.appendSlice(allocator, parameter.generated_name);
@@ -169,12 +170,17 @@ fn appendTransportIfNew(
     emitted: *std.ArrayList([]const u8),
     module_name: []const u8,
     structure: Semantic.Structure,
+    input: bool,
 ) !void {
-    for (emitted.items) |name| {
-        if (std.mem.eql(u8, name, structure.source_name)) return;
+    const transport_name = if (input)
+        try inputTransportName(allocator, module_name, structure.source_name, structureHasString(structure))
+    else
+        try transportName(allocator, module_name, structure.source_name);
+    for (emitted.items) |emitted_name| {
+        if (std.mem.eql(u8, emitted_name, transport_name)) return;
     }
-    try emitted.append(allocator, structure.source_name);
-    try appendTransportDefinition(allocator, output, module_name, structure);
+    try emitted.append(allocator, transport_name);
+    try appendTransportDefinition(allocator, output, module_name, structure, input);
     try output.append(allocator, '\n');
 }
 
@@ -183,8 +189,12 @@ fn appendTransportDefinition(
     output: *std.ArrayList(u8),
     module_name: []const u8,
     structure: Semantic.Structure,
+    input: bool,
 ) !void {
-    const name = try transportName(allocator, module_name, structure.source_name);
+    const name = if (input)
+        try inputTransportName(allocator, module_name, structure.source_name, structureHasString(structure))
+    else
+        try transportName(allocator, module_name, structure.source_name);
     try output.appendSlice(allocator, "typedef struct ");
     try output.appendSlice(allocator, name);
     try output.appendSlice(allocator, " {\n");
@@ -193,7 +203,7 @@ fn appendTransportDefinition(
     } else for (structure.fields) |field| {
         try output.appendSlice(allocator, "    ");
         if (field.type == .str) {
-            try output.appendSlice(allocator, "char* ");
+            try output.appendSlice(allocator, if (input) "const char* " else "char* ");
             try output.appendSlice(allocator, field.source_name);
             try output.appendSlice(allocator, "_bytes;\n    int64_t ");
             try output.appendSlice(allocator, field.source_name);
@@ -240,6 +250,22 @@ pub fn transportName(allocator: Allocator, module_name: []const u8, structure_na
         structure_name;
     try output.appendSlice(allocator, name);
     return output.toOwnedSlice(allocator);
+}
+
+pub fn inputTransportName(
+    allocator: Allocator,
+    module_name: []const u8,
+    structure_name: []const u8,
+    has_string_fields: bool,
+) ![]const u8 {
+    const base = try transportName(allocator, module_name, structure_name);
+    if (!has_string_fields) return base;
+    return std.fmt.allocPrint(allocator, "{s}Input", .{base});
+}
+
+fn structureHasString(structure: Semantic.Structure) bool {
+    for (structure.fields) |field| if (field.type == .str) return true;
+    return false;
 }
 
 fn appendType(allocator: Allocator, output: *std.ArrayList(u8), type_name: Semantic.Type) !void {
@@ -424,5 +450,40 @@ test "native headers reuse scalar structure transports for const parameters" {
         u8,
         header,
         "void silexNative_Geometry_native_round_trip(const SilexNative_Geometry_NativeBounds* silexValue0, const SilexNative_Geometry_NativeBounds* silexValue1, SilexNative_Geometry_NativeBounds* output);",
+    ) != null);
+}
+
+test "native headers separate borrowed string inputs from owned outputs" {
+    const Parser = @import("Parser.zig").Parser;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var parser = Parser.init(allocator,
+        \\struct NativeRequest { let path:str; let mode:int; let note:str }
+        \\native func native_round_trip(request:NativeRequest) NativeRequest
+        \\func main() {}
+    );
+    const ast = try parser.parse();
+    @constCast(ast.functions)[0].name = "Files.native_round_trip";
+    var analyzer = Semantic.Analyzer.init(allocator);
+    analyzer.native_module_names = &.{"Files"};
+    const header = try renderHeader(allocator, try analyzer.analyze(ast), "Files");
+
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        header,
+        "typedef struct SilexNative_Files_NativeRequest {\n    char* path_bytes;",
+    ) != null);
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        header,
+        "typedef struct SilexNative_Files_NativeRequestInput {\n    const char* path_bytes;",
+    ) != null);
+    try std.testing.expect(std.mem.indexOf(u8, header, "const char* note_bytes;") != null);
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        header,
+        "void silexNative_Files_native_round_trip(const SilexNative_Files_NativeRequestInput* silexValue0, SilexNative_Files_NativeRequest* output);",
     ) != null);
 }

@@ -1,0 +1,12 @@
+pub struct NativeRequest {
+    let path:str
+    let label:str
+    let empty:str
+    let mode:int
+}
+
+native func native_round_trip(request:NativeRequest, sequence:int) NativeRequest
+
+pub func round_trip(request:NativeRequest, sequence:int) NativeRequest {
+    return native_round_trip(request, sequence)
+}

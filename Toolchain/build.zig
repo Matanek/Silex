@@ -2554,8 +2554,13 @@ pub fn build(b: *std.Build) void {
     native_structure_parameter_command.addArgs(&.{ "run", "Smokes/NativeStructureParameters/Main.sx" });
     native_structure_parameter_command.expectStdOutEqual(hostText(b, "true\n"));
 
+    const native_structure_string_parameter_command = b.addRunArtifact(executable);
+    native_structure_string_parameter_command.step.dependOn(&native_structure_parameter_command.step);
+    native_structure_string_parameter_command.addArgs(&.{ "run", "Smokes/NativeStructureStringParameters/Main.sx" });
+    native_structure_string_parameter_command.expectStdOutEqual(hostText(b, "true\nsecond 🌍 #2\n"));
+
     const native_string_command = b.addRunArtifact(executable);
-    native_string_command.step.dependOn(&native_structure_parameter_command.step);
+    native_string_command.step.dependOn(&native_structure_string_parameter_command.step);
     native_string_command.addArgs(&.{ "run", "Smokes/NativeStrings/Main.sx" });
     native_string_command.expectStdOutEqual(hostText(b, "true\ntrue\ntrue\ntrue\ntrue\ntrue\n"));
 
@@ -3059,8 +3064,30 @@ pub fn build(b: *std.Build) void {
         ".silex/cross-native-smoke/NativeStructureParameters-x86_64-windows.exe",
     });
 
+    const cross_native_structure_string_parameter_linux_smoke_command = b.addRunArtifact(executable);
+    cross_native_structure_string_parameter_linux_smoke_command.step.dependOn(&cross_native_structure_parameter_windows_smoke_command.step);
+    cross_native_structure_string_parameter_linux_smoke_command.addArgs(&.{
+        "compile",
+        "Smokes/NativeStructureStringParameters/Main.sx",
+        "--target",
+        "x86_64-linux-musl",
+        "-o",
+        ".silex/cross-native-smoke/NativeStructureStringParameters-x86_64-linux",
+    });
+
+    const cross_native_structure_string_parameter_windows_smoke_command = b.addRunArtifact(executable);
+    cross_native_structure_string_parameter_windows_smoke_command.step.dependOn(&cross_native_structure_string_parameter_linux_smoke_command.step);
+    cross_native_structure_string_parameter_windows_smoke_command.addArgs(&.{
+        "compile",
+        "Smokes/NativeStructureStringParameters/Main.sx",
+        "--target",
+        "x86_64-windows-gnu",
+        "-o",
+        ".silex/cross-native-smoke/NativeStructureStringParameters-x86_64-windows.exe",
+    });
+
     const cross_native_string_linux_smoke_command = b.addRunArtifact(executable);
-    cross_native_string_linux_smoke_command.step.dependOn(&cross_native_structure_parameter_windows_smoke_command.step);
+    cross_native_string_linux_smoke_command.step.dependOn(&cross_native_structure_string_parameter_windows_smoke_command.step);
     cross_native_string_linux_smoke_command.addArgs(&.{
         "compile",
         "Smokes/NativeStrings/Main.sx",

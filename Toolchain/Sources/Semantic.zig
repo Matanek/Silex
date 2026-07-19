@@ -6953,7 +6953,7 @@ pub const Analyzer = struct {
         if (structure_type.is_class or structure_type.is_owner) return false;
         const structure = self.findStructureByGeneratedName(structure_type.generated_name) orelse return false;
         if (structure.is_generic or try self.isNonCopyableType(value)) return false;
-        for (structure.fields) |field| if (!isNativeScalarFieldType(field.type)) return false;
+        for (structure.fields) |field| if (!isNativeStructureFieldType(field.type)) return false;
         return true;
     }
 
@@ -7592,13 +7592,6 @@ fn isNativeScalarReturnType(value: Type) bool {
 fn isNativeStructureFieldType(value: Type) bool {
     return switch (value) {
         .int, .int8, .int16, .int32, .uint8, .uint16, .uint32, .uint64, .float, .float64, .bool, .str => true,
-        else => false,
-    };
-}
-
-fn isNativeScalarFieldType(value: Type) bool {
-    return switch (value) {
-        .int, .int8, .int16, .int32, .uint8, .uint16, .uint32, .uint64, .float, .float64, .bool => true,
         else => false,
     };
 }
@@ -8447,7 +8440,7 @@ test "native ABI rejects non scalar structure returns" {
     for (cases) |source| try expectNativeStructureReturnRejected(source);
 }
 
-test "native ABI accepts scalar structure parameters" {
+test "native ABI accepts scalar and string structure parameters" {
     const Parser = @import("Parser.zig").Parser;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -8466,6 +8459,8 @@ test "native ABI accepts scalar structure parameters" {
         \\    let decimal32:float
         \\    let decimal64:float64
         \\    let ready:bool
+        \\    let first:str
+        \\    let second:str
         \\}
         \\struct NativeBounds { let width:int; let height:int }
         \\native func native_accept(values:NativeScalars, first:NativeBounds, second:NativeBounds) bool
@@ -8480,7 +8475,6 @@ test "native ABI accepts scalar structure parameters" {
 
 test "native ABI rejects non scalar structure parameters" {
     const cases = [_][]const u8{
-        "struct Payload { let value:str } native func native_accept(value:Payload) bool; func main() {}",
         "struct Inner { let value:int } struct Payload { let value:Inner } native func native_accept(value:Payload) bool; func main() {}",
         "enum State { ready } struct Payload { let value:State } native func native_accept(value:Payload) bool; func main() {}",
         "class Payload {} native func native_accept(value:Payload) bool; func main() {}",
