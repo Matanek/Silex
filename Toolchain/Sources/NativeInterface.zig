@@ -69,6 +69,15 @@ fn renderHeader(
     var emitted_transports: std.ArrayList([]const u8) = .empty;
     for (program.functions) |function| {
         if (!function.is_native or !std.mem.eql(u8, function.native_module_name.?, module_name)) continue;
+        if (nativeResultShape(program, function.return_type)) |result| {
+            if (structureForType(program, nativeBranchValueType(result.success_type))) |structure| {
+                try appendTransportIfNew(allocator, &output, &emitted_transports, module_name, structure, false);
+            }
+            if (structureForType(program, nativeBranchValueType(result.failure_type))) |structure| {
+                try appendTransportIfNew(allocator, &output, &emitted_transports, module_name, structure, false);
+            }
+            try appendResultTransportIfNew(allocator, &output, &emitted_transports, program, function, result);
+        }
         if (returnedStructure(program, function)) |structure| {
             try appendTransportIfNew(allocator, &output, &emitted_transports, module_name, structure, false);
         }
@@ -105,10 +114,13 @@ fn appendFunctionSignature(
     program: Semantic.Program,
     function: Semantic.Function,
 ) !void {
+    const result = nativeResultShape(program, function.return_type);
     const structure = returnedStructure(program, function);
     const returned = nativeReturnValueType(function.return_type);
     const optional = function.return_type == .optional;
-    if (optional) {
+    if (result != null) {
+        try output.appendSlice(allocator, "void");
+    } else if (optional) {
         try output.appendSlice(allocator, "bool");
     } else if (returned == .str or structure != null) {
         try output.appendSlice(allocator, "void");
@@ -148,7 +160,15 @@ fn appendFunctionSignature(
         try output.appendSlice(allocator, parameter.generated_name);
         parameter_count += 1;
     }
-    if (returned == .str) {
+    if (result != null) {
+        if (parameter_count != 0) try output.appendSlice(allocator, ", ");
+        try output.appendSlice(allocator, try resultTransportName(
+            allocator,
+            function.native_module_name.?,
+            function.native_function_name.?,
+        ));
+        try output.appendSlice(allocator, "* output");
+    } else if (returned == .str) {
         if (parameter_count != 0) try output.appendSlice(allocator, ", ");
         try output.appendSlice(allocator, "char** output_bytes, int64_t* output_length");
     } else if (structure) |returned_structure| {
@@ -160,8 +180,110 @@ fn appendFunctionSignature(
         try appendType(allocator, output, returned);
         try output.appendSlice(allocator, "* output");
     }
-    if (parameter_count == 0 and returned != .str and structure == null and !optional) try output.appendSlice(allocator, "void");
+    if (parameter_count == 0 and result == null and returned != .str and structure == null and !optional) try output.appendSlice(allocator, "void");
     try output.append(allocator, ')');
+}
+
+const NativeResultShape = struct {
+    success_type: Semantic.Type,
+    failure_type: Semantic.Type,
+};
+
+fn nativeResultShape(program: Semantic.Program, value: Semantic.Type) ?NativeResultShape {
+    const enum_type = switch (value) {
+        .enumeration => |enumeration| enumeration,
+        else => return null,
+    };
+    if (!std.mem.startsWith(u8, enum_type.source_name, "Result<")) return null;
+    for (program.enums) |enumeration| {
+        if (!std.mem.eql(u8, enumeration.generated_name, enum_type.generated_name)) continue;
+        if (enumeration.variants.len != 2 or enumeration.variants[1].associated_types.len != 1 or
+            enumeration.variants[0].associated_types.len > 1)
+        {
+            return null;
+        }
+        return .{
+            .success_type = if (enumeration.variants[0].associated_types.len == 0)
+                .void
+            else
+                enumeration.variants[0].associated_types[0],
+            .failure_type = enumeration.variants[1].associated_types[0],
+        };
+    }
+    return null;
+}
+
+fn nativeBranchValueType(value: Semantic.Type) Semantic.Type {
+    return if (value == .optional) value.optional.* else value;
+}
+
+fn appendResultTransportIfNew(
+    allocator: Allocator,
+    output: *std.ArrayList(u8),
+    emitted: *std.ArrayList([]const u8),
+    program: Semantic.Program,
+    function: Semantic.Function,
+    result: NativeResultShape,
+) !void {
+    const name = try resultTransportName(allocator, function.native_module_name.?, function.native_function_name.?);
+    for (emitted.items) |emitted_name| if (std.mem.eql(u8, emitted_name, name)) return;
+    try emitted.append(allocator, name);
+
+    const tag_name = try std.fmt.allocPrint(allocator, "{s}Tag", .{name});
+    try output.appendSlice(allocator, "typedef enum ");
+    try output.appendSlice(allocator, tag_name);
+    try output.appendSlice(allocator, " {\n    ");
+    try output.appendSlice(allocator, tag_name);
+    try output.appendSlice(allocator, "_success = 0,\n    ");
+    try output.appendSlice(allocator, tag_name);
+    try output.appendSlice(allocator, "_failure = 1\n} ");
+    try output.appendSlice(allocator, tag_name);
+    try output.appendSlice(allocator, ";\n\ntypedef struct ");
+    try output.appendSlice(allocator, name);
+    try output.appendSlice(allocator, " {\n    ");
+    try output.appendSlice(allocator, tag_name);
+    try output.appendSlice(allocator, " tag;\n");
+    try appendResultBranchFields(allocator, output, program, function.native_module_name.?, "success", result.success_type);
+    try appendResultBranchFields(allocator, output, program, function.native_module_name.?, "failure", result.failure_type);
+    try output.appendSlice(allocator, "} ");
+    try output.appendSlice(allocator, name);
+    try output.appendSlice(allocator, ";\n\n");
+}
+
+fn appendResultBranchFields(
+    allocator: Allocator,
+    output: *std.ArrayList(u8),
+    program: Semantic.Program,
+    module_name: []const u8,
+    prefix: []const u8,
+    branch_type: Semantic.Type,
+) !void {
+    if (branch_type == .optional) {
+        try output.appendSlice(allocator, "    bool ");
+        try output.appendSlice(allocator, prefix);
+        try output.appendSlice(allocator, "_present;\n");
+    }
+    const value = nativeBranchValueType(branch_type);
+    if (value == .void) return;
+    if (value == .str) {
+        try output.appendSlice(allocator, "    char* ");
+        try output.appendSlice(allocator, prefix);
+        try output.appendSlice(allocator, "_bytes;\n    int64_t ");
+        try output.appendSlice(allocator, prefix);
+        try output.appendSlice(allocator, "_length;\n");
+    } else if (structureForType(program, value)) |structure| {
+        try output.appendSlice(allocator, "    ");
+        try output.appendSlice(allocator, try transportName(allocator, module_name, structure.source_name));
+        try output.append(allocator, ' ');
+        try output.appendSlice(allocator, prefix);
+        try output.appendSlice(allocator, "_value;\n");
+    } else {
+        try output.appendSlice(allocator, "    ");
+        try appendType(allocator, output, value);
+        try output.append(allocator, ' ');
+        try output.appendSlice(allocator, prefix);
+        try output.appendSlice(allocator, "_value;\n");
+    }
 }
 
 fn appendTransportIfNew(
@@ -261,6 +383,20 @@ pub fn inputTransportName(
     const base = try transportName(allocator, module_name, structure_name);
     if (!has_string_fields) return base;
     return std.fmt.allocPrint(allocator, "{s}Input", .{base});
+}
+
+pub fn resultTransportName(
+    allocator: Allocator,
+    module_name: []const u8,
+    function_name: []const u8,
+) ![]const u8 {
+    var output: std.ArrayList(u8) = .empty;
+    try output.appendSlice(allocator, "SilexNative_");
+    for (module_name) |character| try output.append(allocator, if (character == '.') '_' else character);
+    try output.append(allocator, '_');
+    try output.appendSlice(allocator, function_name);
+    try output.appendSlice(allocator, "Result");
+    return output.toOwnedSlice(allocator);
 }
 
 fn structureHasString(structure: Semantic.Structure) bool {
@@ -486,4 +622,37 @@ test "native headers separate borrowed string inputs from owned outputs" {
         header,
         "void silexNative_Files_native_round_trip(const SilexNative_Files_NativeRequestInput* silexValue0, SilexNative_Files_NativeRequest* output);",
     ) != null);
+}
+
+test "native headers expose tagged Result outputs" {
+    const Parser = @import("Parser.zig").Parser;
+    const Generics = @import("Generics.zig");
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var parser = Parser.init(allocator,
+        \\struct NativeFile { let handle:int; let path:str }
+        \\native func native_open(path:str) Result<NativeFile,str>
+        \\native func native_save() Result<void,str>
+        \\func main() {}
+    );
+    const ast = try parser.parse();
+    @constCast(ast.functions)[0].name = "Files.native_open";
+    @constCast(ast.functions)[1].name = "Files.native_save";
+    var specializer = Generics.Specializer.init(allocator, ast);
+    var analyzer = Semantic.Analyzer.init(allocator);
+    analyzer.native_module_names = &.{"Files"};
+    const header = try renderHeader(allocator, try analyzer.analyze(try specializer.specialize()), "Files");
+
+    try std.testing.expect(std.mem.indexOf(u8, header, "SilexNative_Files_native_openResultTag_success = 0") != null);
+    try std.testing.expect(std.mem.indexOf(u8, header, "SilexNative_Files_native_openResultTag_failure = 1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, header, "SilexNative_Files_NativeFile success_value;") != null);
+    try std.testing.expect(std.mem.indexOf(u8, header, "char* failure_bytes;") != null);
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        header,
+        "void silexNative_Files_native_open(const char* silexValue0Bytes, int64_t silexValue0Length, SilexNative_Files_native_openResult* output);",
+    ) != null);
+    try std.testing.expect(std.mem.indexOf(u8, header, "SilexNative_Files_native_saveResultTag tag;") != null);
 }

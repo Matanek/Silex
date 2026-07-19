@@ -1,0 +1,5 @@
+use NativeResults as Native
+
+func main() {
+    Native.invalid_tag()
+}

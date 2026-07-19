@@ -2559,8 +2559,40 @@ pub fn build(b: *std.Build) void {
     native_structure_string_parameter_command.addArgs(&.{ "run", "Smokes/NativeStructureStringParameters/Main.sx" });
     native_structure_string_parameter_command.expectStdOutEqual(hostText(b, "true\nsecond 🌍 #2\n"));
 
+    const native_result_command = b.addRunArtifact(executable);
+    native_result_command.step.dependOn(&native_structure_string_parameter_command.step);
+    native_result_command.addArgs(&.{ "run", "Smokes/NativeResults/Main.sx" });
+    native_result_command.expectStdOutEqual(hostText(
+        b,
+        "42\nété/🌟\nmissing:été/🌟\nmissing:try\nsaved\ndenied\n17\n-1\n",
+    ));
+
+    const native_result_invalid_tag_command = b.addRunArtifact(executable);
+    native_result_invalid_tag_command.step.dependOn(&native_result_command.step);
+    native_result_invalid_tag_command.addArgs(&.{ "run", "Smokes/NativeResults/InvalidTag.sx" });
+    native_result_invalid_tag_command.expectExitCode(1);
+    native_result_invalid_tag_command.expectStdErrEqual(
+        "runtime error: native function 'NativeResults.native_invalid_tag' failed: returned an unknown Result tag\n",
+    );
+
+    const native_result_inactive_owned_command = b.addRunArtifact(executable);
+    native_result_inactive_owned_command.step.dependOn(&native_result_invalid_tag_command.step);
+    native_result_inactive_owned_command.addArgs(&.{ "run", "Smokes/NativeResults/InactiveOwned.sx" });
+    native_result_inactive_owned_command.expectExitCode(1);
+    native_result_inactive_owned_command.expectStdErrEqual(
+        "runtime error: native function 'NativeResults.native_inactive_owned' failed: returned an owned buffer in the inactive failure branch\n",
+    );
+
+    const native_result_invalid_utf8_command = b.addRunArtifact(executable);
+    native_result_invalid_utf8_command.step.dependOn(&native_result_inactive_owned_command.step);
+    native_result_invalid_utf8_command.addArgs(&.{ "run", "Smokes/NativeResults/InvalidUtf8.sx" });
+    native_result_invalid_utf8_command.expectExitCode(1);
+    native_result_invalid_utf8_command.expectStdErrEqual(
+        "runtime error: native function 'NativeResults.native_invalid_utf8' failed: Result failure returned invalid UTF-8\n",
+    );
+
     const native_string_command = b.addRunArtifact(executable);
-    native_string_command.step.dependOn(&native_structure_string_parameter_command.step);
+    native_string_command.step.dependOn(&native_result_invalid_utf8_command.step);
     native_string_command.addArgs(&.{ "run", "Smokes/NativeStrings/Main.sx" });
     native_string_command.expectStdOutEqual(hostText(b, "true\ntrue\ntrue\ntrue\ntrue\ntrue\n"));
 
@@ -3086,8 +3118,30 @@ pub fn build(b: *std.Build) void {
         ".silex/cross-native-smoke/NativeStructureStringParameters-x86_64-windows.exe",
     });
 
+    const cross_native_result_linux_smoke_command = b.addRunArtifact(executable);
+    cross_native_result_linux_smoke_command.step.dependOn(&cross_native_structure_string_parameter_windows_smoke_command.step);
+    cross_native_result_linux_smoke_command.addArgs(&.{
+        "compile",
+        "Smokes/NativeResults/Main.sx",
+        "--target",
+        "x86_64-linux-musl",
+        "-o",
+        ".silex/cross-native-smoke/NativeResults-x86_64-linux",
+    });
+
+    const cross_native_result_windows_smoke_command = b.addRunArtifact(executable);
+    cross_native_result_windows_smoke_command.step.dependOn(&cross_native_result_linux_smoke_command.step);
+    cross_native_result_windows_smoke_command.addArgs(&.{
+        "compile",
+        "Smokes/NativeResults/Main.sx",
+        "--target",
+        "x86_64-windows-gnu",
+        "-o",
+        ".silex/cross-native-smoke/NativeResults-x86_64-windows.exe",
+    });
+
     const cross_native_string_linux_smoke_command = b.addRunArtifact(executable);
-    cross_native_string_linux_smoke_command.step.dependOn(&cross_native_structure_string_parameter_windows_smoke_command.step);
+    cross_native_string_linux_smoke_command.step.dependOn(&cross_native_result_windows_smoke_command.step);
     cross_native_string_linux_smoke_command.addArgs(&.{
         "compile",
         "Smokes/NativeStrings/Main.sx",

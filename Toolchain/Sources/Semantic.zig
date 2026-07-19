@@ -167,6 +167,7 @@ pub const Expression = struct {
         native_module_name: ?[]const u8,
         native_function_name: ?[]const u8,
         native_return_structure: ?NativeStructureTransport = null,
+        native_result: ?NativeResultTransport = null,
         native_parameter_structures: []const ?NativeStructureTransport = &.{},
     };
 
@@ -530,6 +531,14 @@ pub const NativeTransportField = struct {
     source_name: []const u8,
     generated_name: []const u8,
     type: Type,
+};
+
+pub const NativeResultTransport = struct {
+    enum_generated_name: []const u8,
+    success_type: Type,
+    failure_type: Type,
+    success_structure: ?NativeStructureTransport,
+    failure_structure: ?NativeStructureTransport,
 };
 
 pub const Constructor = struct {
@@ -3801,6 +3810,10 @@ pub const Analyzer = struct {
                     try self.nativeStructureTransport(function_symbol.return_type)
                 else
                     null,
+                .native_result = if (function_symbol.is_native)
+                    try self.nativeResultTransport(function_symbol.return_type)
+                else
+                    null,
                 .native_parameter_structures = if (function_symbol.is_native)
                     try self.nativeParameterStructures(function_symbol.parameter_types)
                 else
@@ -6900,7 +6913,15 @@ pub const Analyzer = struct {
     }
 
     fn isNativeReturnType(self: *const Analyzer, value: Type) Allocator.Error!bool {
-        if (value == .optional) return self.isNativeReturnType(value.optional.*);
+        if (self.resultShape(value)) |shape| {
+            return try self.isNativeResultBranchType(shape.success_type) and
+                try self.isNativeResultBranchType(shape.error_type);
+        }
+        return self.isNativeResultBranchType(value);
+    }
+
+    fn isNativeResultBranchType(self: *const Analyzer, value: Type) Allocator.Error!bool {
+        if (value == .optional) return self.isNativeResultBranchType(value.optional.*);
         if (isNativeScalarReturnType(value)) return true;
         const structure_type = switch (value) {
             .structure => |type_value| type_value,
@@ -6911,6 +6932,17 @@ pub const Analyzer = struct {
         if (structure.is_generic or try self.isNonCopyableType(value)) return false;
         for (structure.fields) |field| if (!isNativeStructureFieldType(field.type)) return false;
         return true;
+    }
+
+    fn nativeResultTransport(self: *const Analyzer, value: Type) Allocator.Error!?NativeResultTransport {
+        const shape = self.resultShape(value) orelse return null;
+        return .{
+            .enum_generated_name = shape.enum_symbol.generated_name,
+            .success_type = shape.success_type,
+            .failure_type = shape.error_type,
+            .success_structure = try self.nativeStructureTransport(shape.success_type),
+            .failure_structure = try self.nativeStructureTransport(shape.error_type),
+        };
     }
 
     fn nativeStructureTransport(self: *const Analyzer, value: Type) Allocator.Error!?NativeStructureTransport {
@@ -8422,6 +8454,66 @@ test "native ABI accepts scalar and string structure returns" {
     var analyzer = Analyzer.init(allocator);
     analyzer.native_module_names = &.{"Native"};
     _ = try analyzer.analyze(program);
+}
+
+test "native ABI accepts transferable Result returns" {
+    const Parser = @import("Parser.zig").Parser;
+    const Generics = @import("Generics.zig");
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var parser = Parser.init(allocator,
+        \\struct NativeFile { let handle:int }
+        \\native func native_open(path:str) Result<NativeFile,str>
+        \\native func native_save() Result<void,str>
+        \\native func native_optional() Result<int?,str>
+        \\func main() {}
+    );
+    const program = try parser.parse();
+    for (@constCast(program.functions)[0..3]) |*function| {
+        function.name = try std.fmt.allocPrint(allocator, "Native.{s}", .{function.name});
+    }
+    var specializer = Generics.Specializer.init(allocator, program);
+    var analyzer = Analyzer.init(allocator);
+    analyzer.native_module_names = &.{"Native"};
+    _ = try analyzer.analyze(try specializer.specialize());
+}
+
+test "native ABI rejects non transferable Result returns and Result parameters" {
+    const Parser = @import("Parser.zig").Parser;
+    const Generics = @import("Generics.zig");
+    const result_return_cases = [_][]const u8{
+        "class Value {} native func native_read() Result<Value,str>; func main() {}",
+        "native func native_read() Result<int[],str>; func main() {}",
+        "native func native_read() Result<int,func()>; func main() {}",
+        "native func native_read() Result<Result<int,str>,str>; func main() {}",
+    };
+    for (result_return_cases) |source| {
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+        const allocator = arena.allocator();
+        var parser = Parser.init(allocator, source);
+        const program = try parser.parse();
+        @constCast(program.functions)[0].name = "Native.native_read";
+        var specializer = Generics.Specializer.init(allocator, program);
+        var analyzer = Analyzer.init(allocator);
+        analyzer.native_module_names = &.{"Native"};
+        try std.testing.expectError(error.InvalidSource, analyzer.analyze(try specializer.specialize()));
+        try std.testing.expect(std.mem.startsWith(u8, analyzer.diagnostic.?.message, "native functions cannot return 'Result<"));
+    }
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var parser = Parser.init(allocator, "native func native_accept(value:Result<int,str>) bool; func main() {}");
+    const program = try parser.parse();
+    @constCast(program.functions)[0].name = "Native.native_accept";
+    var specializer = Generics.Specializer.init(allocator, program);
+    var analyzer = Analyzer.init(allocator);
+    analyzer.native_module_names = &.{"Native"};
+    try std.testing.expectError(error.InvalidSource, analyzer.analyze(try specializer.specialize()));
+    try std.testing.expect(std.mem.startsWith(u8, analyzer.diagnostic.?.message, "native parameter 'value' cannot use 'Result<"));
 }
 
 test "native ABI rejects non scalar structure returns" {

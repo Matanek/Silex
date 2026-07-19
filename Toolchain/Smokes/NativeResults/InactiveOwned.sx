@@ -1,0 +1,5 @@
+use NativeResults as Native
+
+func main() {
+    Native.inactive_owned()
+}

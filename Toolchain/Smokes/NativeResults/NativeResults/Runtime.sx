@@ -1,0 +1,41 @@
+pub struct NativeFile {
+    let handle:int
+    let path:str
+}
+
+native func native_open(path:str, succeeds:bool) Result<NativeFile,str>
+native func native_save(succeeds:bool) Result<void,str>
+native func native_optional(mode:int) Result<int?,str>
+native func native_invalid_tag() Result<int,str>
+native func native_inactive_owned() Result<int,str>
+native func native_invalid_utf8() Result<int,str>
+
+pub func open(path:str, succeeds:bool) Result<NativeFile,str> {
+    return native_open(path, succeeds)
+}
+
+pub func open_handle(path:str, succeeds:bool) Result<int,str> {
+    let file = try native_open(path, succeeds)
+    return Result<int,str>.success(file.handle)
+}
+
+pub func save(succeeds:bool) Result<void,str> {
+    try native_save(succeeds)
+    return Result<void,str>.success()
+}
+
+pub func optional(mode:int) Result<int?,str> {
+    return native_optional(mode)
+}
+
+pub func invalid_tag() Result<int,str> {
+    return native_invalid_tag()
+}
+
+pub func inactive_owned() Result<int,str> {
+    return native_inactive_owned()
+}
+
+pub func invalid_utf8() Result<int,str> {
+    return native_invalid_utf8()
+}

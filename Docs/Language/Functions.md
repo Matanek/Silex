@@ -148,8 +148,8 @@ positive length, is a runtime error naming the native function. The bridge
 also rejects invalid UTF-8 with `returned invalid UTF-8`; it frees the buffer
 on every valid and invalid return path. Embedded null bytes are preserved, so
 the length—not C string termination—defines the result. Collections,
-references, pointers, callbacks, `Result`, and other non-transferable values
-remain unavailable in native-function signatures. Silex derives the C symbol
+references, pointers, callbacks, `Result` parameters, and other non-transferable
+values remain unavailable in native-function signatures. Silex derives the C symbol
 from the module and function name, so a native runtime never chooses an
 arbitrary C symbol.
 
@@ -215,6 +215,27 @@ every transferred buffer, then reports a runtime error naming the native
 function and, for a structure, the offending field. Native optional parameters,
 nested optionals, `Result`, and additional transferable types are not introduced
 by this ABI.
+
+A native function may return `Result<T,E>` when both branches use the
+transferable return types above; `T` may also be `void`. Its generated header
+defines a function-specific output transport containing a `success`/`failure`
+tag and the output fields for both branches. Strings and string fields are owned
+outputs allocated with `malloc`, exactly as for a direct return. For example,
+`Result<NativeFile,str>` contains the flat `NativeFile` output transport for
+success and a `char*`/length pair for failure. The C symbol returns `void` and
+receives the complete Result transport as its final output pointer.
+
+Silex zero-initializes this transport, calls the native symbol, then validates
+the tag. It reads and converts only the active branch, frees all its owned
+buffers, and constructs the ordinary Silex `Result`; `match`, `try`,
+`map_error`, copying, moving, and destruction are unchanged after that boundary.
+An unknown tag, invalid active string data, an owned buffer in the inactive
+branch, or an owned buffer for an absent optional branch is a fatal native
+contract violation. Before reporting it, the bridge frees every buffer present
+in the transport. A native exception crossing the C symbol keeps the existing
+fatal behavior and is never translated to `failure`; native C++ code must select
+the failure tag explicitly for recoverable errors. `Result` parameters and
+nested Result branches remain unavailable.
 
 Before compiling a native runtime, Silex generates its authoritative C
 interface beneath `.silex/build/`. Every module segment becomes a header-path

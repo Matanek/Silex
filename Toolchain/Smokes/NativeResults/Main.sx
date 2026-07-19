@@ -1,0 +1,47 @@
+use NativeResults as Native
+
+func main() {
+    match Native.open("été/🌟", true) {
+        success(file) => {
+            print(file.handle)
+            print(file.path)
+        }
+        failure(error) => { print(error) }
+    }
+    match Native.open("été/🌟", false) {
+        success(file) => { print(file.handle) }
+        failure(error) => { print(error) }
+    }
+    match Native.open_handle("try", false) {
+        success(handle) => { print(handle) }
+        failure(error) => { print(error) }
+    }
+    match Native.save(true) {
+        success => { print("saved") }
+        failure(error) => { print(error) }
+    }
+    match Native.save(false) {
+        success => { print("unexpected") }
+        failure(error) => { print(error) }
+    }
+    match Native.optional(17) {
+        success(value) => {
+            if present = value {
+                print(present)
+            } else {
+                print(-1)
+            }
+        }
+        failure(error) => { print(error) }
+    }
+    match Native.optional(0) {
+        success(value) => {
+            if present = value {
+                print(present)
+            } else {
+                print(-1)
+            }
+        }
+        failure(error) => { print(error) }
+    }
+}

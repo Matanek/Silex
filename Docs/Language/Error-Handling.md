@@ -148,8 +148,10 @@ reference, or another non-independent value requires `var`.
 
 `Result` is a language type rather than an `STD` declaration or implicit
 module. Its name is reserved and cannot be declared or introduced by a type or
-module alias. It has no fields or methods and cannot cross a `native func`
-signature.
+module alias. It has no fields or methods. A `Result<T,E>` whose branches are
+already transferable may be returned by a `native func`; it cannot be passed as
+a native parameter. The native return transport and ownership contract are
+defined in [Functions](Functions.md#functions).
 
 ## The `main` boundary
 

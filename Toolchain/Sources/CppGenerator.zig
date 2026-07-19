@@ -47,6 +47,22 @@ pub fn generateWithSources(
     var emitted_native_transports: std.ArrayList([]const u8) = .empty;
     for (program.functions) |function| {
         if (!function.is_native) continue;
+        if (nativeResultShape(program, function.return_type)) |result| {
+            if (nativeStructureForType(program, nativeBranchValueType(result.success_type))) |structure| {
+                try generateNativeTransportIfNew(allocator, &output, &emitted_native_transports, function.native_module_name.?, structure, false);
+            }
+            if (nativeStructureForType(program, nativeBranchValueType(result.failure_type))) |structure| {
+                try generateNativeTransportIfNew(allocator, &output, &emitted_native_transports, function.native_module_name.?, structure, false);
+            }
+            try generateNativeResultTransportIfNew(
+                allocator,
+                &output,
+                &emitted_native_transports,
+                program,
+                function,
+                result,
+            );
+        }
         if (nativeReturnStructure(program, function)) |structure| {
             try generateNativeTransportIfNew(
                 allocator,
@@ -1008,7 +1024,7 @@ pub fn generateWithSources(
     const structure_order = try structureDefinitionOrder(allocator, program.structures);
     for (structure_order) |structure_index| {
         const structure = program.structures[structure_index];
-        const is_native_return = structureIsNativeReturn(program.functions, structure);
+        const is_native_return = structureIsNativeReturn(program, structure);
         try output.appendSlice(allocator, "struct ");
         try output.appendSlice(allocator, structure.generated_name);
         if (structure.is_class) {
@@ -1700,10 +1716,13 @@ fn generateNativeFunctionSignature(
     include_names: bool,
 ) !void {
     try output.appendSlice(allocator, "extern \"C\" ");
+    const result = nativeResultShape(program, function.return_type);
     const structure = nativeReturnStructure(program, function);
     const returned = nativeReturnValueType(function.return_type);
     const optional = function.return_type == .optional;
-    if (optional) {
+    if (result != null) {
+        try output.appendSlice(allocator, "void");
+    } else if (optional) {
         try output.appendSlice(allocator, "bool");
     } else if (returned == .str or structure != null) {
         try output.appendSlice(allocator, "void");
@@ -1747,7 +1766,16 @@ fn generateNativeFunctionSignature(
             }
         }
     }
-    if (returned == .str) {
+    if (result != null) {
+        if (function.parameters.len != 0) try output.appendSlice(allocator, ", ");
+        try output.appendSlice(allocator, try NativeInterface.resultTransportName(
+            allocator,
+            function.native_module_name.?,
+            function.native_function_name.?,
+        ));
+        try output.append(allocator, '*');
+        if (include_names) try output.appendSlice(allocator, " output");
+    } else if (returned == .str) {
         if (function.parameters.len != 0) try output.appendSlice(allocator, ", ");
         try output.appendSlice(allocator, "char**");
         if (include_names) try output.appendSlice(allocator, " output_bytes");
@@ -1835,6 +1863,108 @@ fn generateNativeTransportDefinition(
     try output.appendSlice(allocator, "};");
 }
 
+const NativeResultShape = struct {
+    success_type: Semantic.Type,
+    failure_type: Semantic.Type,
+};
+
+fn nativeResultShape(program: Semantic.Program, value: Semantic.Type) ?NativeResultShape {
+    const enum_type = switch (value) {
+        .enumeration => |enumeration| enumeration,
+        else => return null,
+    };
+    if (!std.mem.startsWith(u8, enum_type.source_name, "Result<")) return null;
+    for (program.enums) |enumeration| {
+        if (!std.mem.eql(u8, enumeration.generated_name, enum_type.generated_name)) continue;
+        if (enumeration.variants.len != 2 or enumeration.variants[1].associated_types.len != 1 or
+            enumeration.variants[0].associated_types.len > 1)
+        {
+            return null;
+        }
+        return .{
+            .success_type = if (enumeration.variants[0].associated_types.len == 0)
+                .void
+            else
+                enumeration.variants[0].associated_types[0],
+            .failure_type = enumeration.variants[1].associated_types[0],
+        };
+    }
+    return null;
+}
+
+fn nativeBranchValueType(value: Semantic.Type) Semantic.Type {
+    return if (value == .optional) value.optional.* else value;
+}
+
+fn generateNativeResultTransportIfNew(
+    allocator: Allocator,
+    output: *std.ArrayList(u8),
+    emitted: *std.ArrayList([]const u8),
+    program: Semantic.Program,
+    function: Semantic.Function,
+    result: NativeResultShape,
+) !void {
+    const name = try NativeInterface.resultTransportName(
+        allocator,
+        function.native_module_name.?,
+        function.native_function_name.?,
+    );
+    for (emitted.items) |emitted_name| if (std.mem.eql(u8, emitted_name, name)) return;
+    try emitted.append(allocator, name);
+
+    const tag_name = try std.fmt.allocPrint(allocator, "{s}Tag", .{name});
+    try output.appendSlice(allocator, "enum ");
+    try output.appendSlice(allocator, tag_name);
+    try output.appendSlice(allocator, " {\n    ");
+    try output.appendSlice(allocator, tag_name);
+    try output.appendSlice(allocator, "_success = 0,\n    ");
+    try output.appendSlice(allocator, tag_name);
+    try output.appendSlice(allocator, "_failure = 1\n};\n\nstruct ");
+    try output.appendSlice(allocator, name);
+    try output.appendSlice(allocator, " {\n    ");
+    try output.appendSlice(allocator, tag_name);
+    try output.appendSlice(allocator, " tag{};\n");
+    try generateNativeResultBranchFields(allocator, output, program, function.native_module_name.?, "success", result.success_type);
+    try generateNativeResultBranchFields(allocator, output, program, function.native_module_name.?, "failure", result.failure_type);
+    try output.appendSlice(allocator, "};\n\n");
+}
+
+fn generateNativeResultBranchFields(
+    allocator: Allocator,
+    output: *std.ArrayList(u8),
+    program: Semantic.Program,
+    module_name: []const u8,
+    prefix: []const u8,
+    branch_type: Semantic.Type,
+) !void {
+    if (branch_type == .optional) {
+        try output.appendSlice(allocator, "    bool ");
+        try output.appendSlice(allocator, prefix);
+        try output.appendSlice(allocator, "Present{};\n");
+    }
+    const value = nativeBranchValueType(branch_type);
+    if (value == .void) return;
+    if (value == .str) {
+        try output.appendSlice(allocator, "    char* ");
+        try output.appendSlice(allocator, prefix);
+        try output.appendSlice(allocator, "Bytes = nullptr;\n    std::int64_t ");
+        try output.appendSlice(allocator, prefix);
+        try output.appendSlice(allocator, "Length = 0;\n");
+    } else if (nativeStructureForType(program, value)) |structure| {
+        try output.appendSlice(allocator, "    ");
+        try output.appendSlice(allocator, try NativeInterface.transportName(allocator, module_name, structure.source_name));
+        try output.append(allocator, ' ');
+        try output.appendSlice(allocator, prefix);
+        try output.appendSlice(allocator, "Value{};\n");
+    } else {
+        try output.appendSlice(allocator, "    ");
+        try appendCppType(allocator, output, value);
+        try output.append(allocator, ' ');
+        try output.appendSlice(allocator, prefix);
+        try output.appendSlice(allocator, "Value{};\n");
+    }
+}
+
 fn nativeReturnStructure(program: Semantic.Program, function: Semantic.Function) ?Semantic.Structure {
     return nativeStructureForType(program, nativeReturnValueType(function.return_type));
 }
@@ -1850,9 +1980,16 @@ fn nativeStructureForType(program: Semantic.Program, value: Semantic.Type) ?Sema
     return null;
 }
 
-fn structureIsNativeReturn(functions: []const Semantic.Function, structure: Semantic.Structure) bool {
-    for (functions) |function| {
+fn structureIsNativeReturn(program: Semantic.Program, structure: Semantic.Structure) bool {
+    for (program.functions) |function| {
         if (!function.is_native) continue;
+        if (nativeResultShape(program, function.return_type)) |result| {
+            const branches = [_]Semantic.Type{ result.success_type, result.failure_type };
+            for (branches) |branch| {
+                const value = nativeBranchValueType(branch);
+                if (value == .structure and std.mem.eql(u8, value.structure.generated_name, structure.generated_name)) return true;
+            }
+        }
         const returned = nativeReturnValueType(function.return_type);
         if (returned != .structure) continue;
         if (std.mem.eql(u8, returned.structure.generated_name, structure.generated_name)) return true;
@@ -1962,12 +2099,387 @@ fn generateNativeArgument(
     }
 }
 
+const NativeResultOwnedAction = enum { raw_free, guard, reset };
+
+fn nativeResultBranchHasOwned(
+    branch_type: Semantic.Type,
+    structure: ?Semantic.NativeStructureTransport,
+) bool {
+    const value = nativeBranchValueType(branch_type);
+    if (value == .str) return true;
+    return structure != null and nativeTransportHasString(structure.?);
+}
+
+fn generateNativeResultOwnedAction(
+    allocator: Allocator,
+    output: *std.ArrayList(u8),
+    branch_name: []const u8,
+    branch_type: Semantic.Type,
+    structure: ?Semantic.NativeStructureTransport,
+    action: NativeResultOwnedAction,
+) GenerateError!void {
+    const value = nativeBranchValueType(branch_type);
+    if (value == .str) {
+        try generateNativeResultPointerAction(allocator, output, branch_name, null, action);
+    } else if (structure) |transport| {
+        for (transport.fields) |field| {
+            if (field.type != .str) continue;
+            try generateNativeResultPointerAction(allocator, output, branch_name, field.generated_name, action);
+        }
+    }
+}
+
+fn generateNativeResultPointerAction(
+    allocator: Allocator,
+    output: *std.ArrayList(u8),
+    branch_name: []const u8,
+    field_name: ?[]const u8,
+    action: NativeResultOwnedAction,
+) GenerateError!void {
+    switch (action) {
+        .raw_free => try output.appendSlice(allocator, "std::free("),
+        .guard => try output.appendSlice(allocator, "std::unique_ptr<char, decltype(&std::free)> silexNativeGuard_"),
+        .reset => try output.appendSlice(allocator, "silexNativeGuard_"),
+    }
+    if (action == .guard or action == .reset) {
+        try output.appendSlice(allocator, branch_name);
+        if (field_name) |field| {
+            try output.append(allocator, '_');
+            try output.appendSlice(allocator, field);
+        }
+    }
+    if (action == .reset) {
+        try output.appendSlice(allocator, ".reset();");
+        return;
+    }
+    if (action == .guard) try output.append(allocator, '{');
+    try output.appendSlice(allocator, "silexNativeOutput.");
+    try output.appendSlice(allocator, branch_name);
+    if (field_name) |field| {
+        try output.appendSlice(allocator, "Value.");
+        try output.appendSlice(allocator, field);
+        try output.appendSlice(allocator, "Bytes");
+    } else {
+        try output.appendSlice(allocator, "Bytes");
+    }
+    try output.appendSlice(allocator, if (action == .guard) ", &std::free};" else ");");
+}
+
+fn generateNativeResultOwnedCondition(
+    allocator: Allocator,
+    output: *std.ArrayList(u8),
+    branch_name: []const u8,
+    branch_type: Semantic.Type,
+    structure: ?Semantic.NativeStructureTransport,
+) GenerateError!void {
+    const value = nativeBranchValueType(branch_type);
+    if (value == .str) {
+        try output.appendSlice(allocator, "silexNativeOutput.");
+        try output.appendSlice(allocator, branch_name);
+        try output.appendSlice(allocator, "Bytes != nullptr");
+        return;
+    }
+    var count: usize = 0;
+    for (structure.?.fields) |field| {
+        if (field.type != .str) continue;
+        if (count != 0) try output.appendSlice(allocator, " || ");
+        try output.appendSlice(allocator, "silexNativeOutput.");
+        try output.appendSlice(allocator, branch_name);
+        try output.appendSlice(allocator, "Value.");
+        try output.appendSlice(allocator, field.generated_name);
+        try output.appendSlice(allocator, "Bytes != nullptr");
+        count += 1;
+    }
+}
+
+fn generateNativeResultFatal(
+    allocator: Allocator,
+    output: *std.ArrayList(u8),
+    module_name: []const u8,
+    function_name: []const u8,
+    message: []const u8,
+) GenerateError!void {
+    try output.appendSlice(allocator, "silexNativeCleanup();nativeFunctionRuntimeError(");
+    try appendCppByteStringLiteral(allocator, output, module_name);
+    try output.appendSlice(allocator, ", ");
+    try appendCppByteStringLiteral(allocator, output, function_name);
+    try output.appendSlice(allocator, ", ");
+    try appendCppByteStringLiteral(allocator, output, message);
+    try output.appendSlice(allocator, ");");
+}
+
+fn generateNativeResultStringValidation(
+    allocator: Allocator,
+    output: *std.ArrayList(u8),
+    module_name: []const u8,
+    function_name: []const u8,
+    branch_name: []const u8,
+    field_name: ?[]const u8,
+) GenerateError!void {
+    const label = if (field_name) |field|
+        try std.fmt.allocPrint(allocator, "{s}.{s}", .{ branch_name, field })
+    else
+        branch_name;
+    try output.appendSlice(allocator, "if (silexNativeOutput.");
+    try output.appendSlice(allocator, branch_name);
+    if (field_name) |field| {
+        try output.appendSlice(allocator, "Value.");
+        try output.appendSlice(allocator, field);
+    }
+    try output.appendSlice(allocator, "Length < 0) {");
+    try generateNativeResultFatal(allocator, output, module_name, function_name, try std.fmt.allocPrint(allocator, "Result {s} returned a negative length", .{label}));
+    try output.appendSlice(allocator, "}if (silexNativeOutput.");
+    try output.appendSlice(allocator, branch_name);
+    if (field_name) |field| {
+        try output.appendSlice(allocator, "Value.");
+        try output.appendSlice(allocator, field);
+    }
+    try output.appendSlice(allocator, "Bytes == nullptr && silexNativeOutput.");
+    try output.appendSlice(allocator, branch_name);
+    if (field_name) |field| {
+        try output.appendSlice(allocator, "Value.");
+        try output.appendSlice(allocator, field);
+    }
+    try output.appendSlice(allocator, "Length > 0) {");
+    try generateNativeResultFatal(allocator, output, module_name, function_name, try std.fmt.allocPrint(allocator, "Result {s} returned a null pointer with a positive length", .{label}));
+    try output.appendSlice(allocator, "}");
+}
+
+fn generateNativeResultStringConstruction(
+    allocator: Allocator,
+    output: *std.ArrayList(u8),
+    branch_name: []const u8,
+    field_name: ?[]const u8,
+) GenerateError!void {
+    try output.appendSlice(allocator, "std::string silexNativeString_");
+    try output.appendSlice(allocator, branch_name);
+    if (field_name) |field| {
+        try output.append(allocator, '_');
+        try output.appendSlice(allocator, field);
+    }
+    try output.appendSlice(allocator, " = silexNativeOutput.");
+    try output.appendSlice(allocator, branch_name);
+    if (field_name) |field| {
+        try output.appendSlice(allocator, "Value.");
+        try output.appendSlice(allocator, field);
+    }
+    try output.appendSlice(allocator, "Bytes == nullptr ? std::string{} : std::string{silexNativeOutput.");
+    try output.appendSlice(allocator, branch_name);
+    if (field_name) |field| {
+        try output.appendSlice(allocator, "Value.");
+        try output.appendSlice(allocator, field);
+    }
+    try output.appendSlice(allocator, "Bytes, static_cast<std::size_t>(silexNativeOutput.");
+    try output.appendSlice(allocator, branch_name);
+    if (field_name) |field| {
+        try output.appendSlice(allocator, "Value.");
+        try output.appendSlice(allocator, field);
+    }
+    try output.appendSlice(allocator, "Length)};");
+}
+
+fn generateNativeResultUtf8Validation(
+    allocator: Allocator,
+    output: *std.ArrayList(u8),
+    module_name: []const u8,
+    function_name: []const u8,
+    branch_name: []const u8,
+    field_name: ?[]const u8,
+) GenerateError!void {
+    try output.appendSlice(allocator, "if (!nativeStringIsValidUtf8(silexNativeString_");
+    try output.appendSlice(allocator, branch_name);
+    if (field_name) |field| {
+        try output.append(allocator, '_');
+        try output.appendSlice(allocator, field);
+    }
+    try output.appendSlice(allocator, ")) {nativeFunctionRuntimeError(");
+    try appendCppByteStringLiteral(allocator, output, module_name);
+    try output.appendSlice(allocator, ", ");
+    try appendCppByteStringLiteral(allocator, output, function_name);
+    try output.appendSlice(allocator, ", ");
+    const label = if (field_name) |field|
+        try std.fmt.allocPrint(allocator, "Result {s}.{s} returned invalid UTF-8", .{ branch_name, field })
+    else
+        try std.fmt.allocPrint(allocator, "Result {s} returned invalid UTF-8", .{branch_name});
+    try appendCppByteStringLiteral(allocator, output, label);
+    try output.appendSlice(allocator, ");}");
+}
+
+fn generateNativeResultBranchValue(
+    allocator: Allocator,
+    output: *std.ArrayList(u8),
+    branch_name: []const u8,
+    branch_type: Semantic.Type,
+    structure: ?Semantic.NativeStructureTransport,
+) GenerateError!void {
+    const value = nativeBranchValueType(branch_type);
+    if (branch_type == .optional) {
+        try output.appendSlice(allocator, "std::optional<");
+        try appendCppType(allocator, output, value);
+        try output.appendSlice(allocator, ">{");
+    }
+    if (value == .str) {
+        try output.appendSlice(allocator, "std::move(silexNativeString_");
+        try output.appendSlice(allocator, branch_name);
+        try output.append(allocator, ')');
+    } else if (structure) |transport| {
+        try output.appendSlice(allocator, transport.generated_name);
+        try output.appendSlice(allocator, "(SilexNativeReturnTag{}");
+        for (transport.fields) |field| {
+            if (field.type == .str) {
+                try output.appendSlice(allocator, ", std::move(silexNativeString_");
+                try output.appendSlice(allocator, branch_name);
+                try output.append(allocator, '_');
+                try output.appendSlice(allocator, field.generated_name);
+                try output.append(allocator, ')');
+            } else {
+                try output.appendSlice(allocator, ", silexNativeOutput.");
+                try output.appendSlice(allocator, branch_name);
+                try output.appendSlice(allocator, "Value.");
+                try output.appendSlice(allocator, field.generated_name);
+            }
+        }
+        try output.append(allocator, ')');
+    } else {
+        try output.appendSlice(allocator, "silexNativeOutput.");
+        try output.appendSlice(allocator, branch_name);
+        try output.appendSlice(allocator, "Value");
+    }
+    if (branch_type == .optional) try output.append(allocator, '}');
+}
+
+fn generateNativeResultBranchReturn(
+    allocator: Allocator,
+    output: *std.ArrayList(u8),
+    result: Semantic.NativeResultTransport,
+    branch_name: []const u8,
+    branch_index: usize,
+    branch_type: Semantic.Type,
+    structure: ?Semantic.NativeStructureTransport,
+    module_name: []const u8,
+    function_name: []const u8,
+) GenerateError!void {
+    const has_owned = nativeResultBranchHasOwned(branch_type, structure);
+    if (branch_type == .optional) {
+        try output.appendSlice(allocator, "if (!silexNativeOutput.");
+        try output.appendSlice(allocator, branch_name);
+        try output.appendSlice(allocator, "Present) {");
+        if (has_owned) {
+            try output.appendSlice(allocator, "if (");
+            try generateNativeResultOwnedCondition(allocator, output, branch_name, branch_type, structure);
+            try output.appendSlice(allocator, ") {");
+            try generateNativeResultFatal(allocator, output, module_name, function_name, try std.fmt.allocPrint(allocator, "Result {s} returned an owned buffer while reporting absence", .{branch_name}));
+            try output.appendSlice(allocator, "}");
+        }
+        try output.appendSlice(allocator, "silexNativeCleanup();return ");
+        try output.appendSlice(allocator, result.enum_generated_name);
+        try output.appendSlice(allocator, try std.fmt.allocPrint(allocator, "{{std::size_t{{{d}}}, std::optional<", .{branch_index}));
+        try appendCppType(allocator, output, nativeBranchValueType(branch_type));
+        try output.appendSlice(allocator, ">{}};}");
+    }
+
+    const value = nativeBranchValueType(branch_type);
+    if (value == .str) {
+        try generateNativeResultStringValidation(allocator, output, module_name, function_name, branch_name, null);
+        try generateNativeResultStringConstruction(allocator, output, branch_name, null);
+    } else if (structure) |transport| {
+        for (transport.fields) |field| if (field.type == .str) {
+            try generateNativeResultStringValidation(allocator, output, module_name, function_name, branch_name, field.generated_name);
+            try generateNativeResultStringConstruction(allocator, output, branch_name, field.generated_name);
+        };
+    }
+    try output.appendSlice(allocator, "silexNativeCleanup();");
+    if (value == .str) {
+        try generateNativeResultUtf8Validation(allocator, output, module_name, function_name, branch_name, null);
+    } else if (structure) |transport| {
+        for (transport.fields) |field| if (field.type == .str) {
+            try generateNativeResultUtf8Validation(allocator, output, module_name, function_name, branch_name, field.generated_name);
+        };
+    }
+    try output.appendSlice(allocator, "return ");
+    try output.appendSlice(allocator, result.enum_generated_name);
+    try output.appendSlice(allocator, try std.fmt.allocPrint(allocator, "{{std::size_t{{{d}}}", .{branch_index}));
+    if (value != .void) {
+        try output.appendSlice(allocator, ", ");
+        try generateNativeResultBranchValue(allocator, output, branch_name, branch_type, structure);
+    }
+    try output.appendSlice(allocator, "};");
+}
+
+fn generateNativeResultFunctionCall(
+    allocator: Allocator,
+    output: *std.ArrayList(u8),
+    call: Semantic.Expression.Call,
+    result: Semantic.NativeResultTransport,
+) GenerateError!void {
+    const module_name = call.native_module_name.?;
+    const function_name = call.native_function_name.?;
+    const transport_name = try NativeInterface.resultTransportName(allocator, module_name, function_name);
+    const tag_name = try std.fmt.allocPrint(allocator, "{s}Tag", .{transport_name});
+    try output.appendSlice(allocator, "callNativeFunction(");
+    try appendCppByteStringLiteral(allocator, output, module_name);
+    try output.appendSlice(allocator, ", ");
+    try appendCppByteStringLiteral(allocator, output, function_name);
+    try output.appendSlice(allocator, ", [&]() {");
+    try generateNativeArgumentPreludes(allocator, output, call);
+    try output.appendSlice(allocator, transport_name);
+    try output.appendSlice(allocator, " silexNativeOutput{};silexNativeOutput.tag = static_cast<");
+    try output.appendSlice(allocator, tag_name);
+    try output.appendSlice(allocator, ">(2);try {");
+    try output.appendSlice(allocator, call.generated_name);
+    try output.append(allocator, '(');
+    for (call.arguments, 0..) |_, index| {
+        if (index != 0) try output.appendSlice(allocator, ", ");
+        try generateNativeArgument(allocator, output, call, index);
+    }
+    if (call.arguments.len != 0) try output.appendSlice(allocator, ", ");
+    try output.appendSlice(allocator, "&silexNativeOutput);} catch (...) {");
+    try generateNativeResultOwnedAction(allocator, output, "success", result.success_type, result.success_structure, .raw_free);
+    try generateNativeResultOwnedAction(allocator, output, "failure", result.failure_type, result.failure_structure, .raw_free);
+    try output.appendSlice(allocator, "throw;}");
+    try generateNativeResultOwnedAction(allocator, output, "success", result.success_type, result.success_structure, .guard);
+    try generateNativeResultOwnedAction(allocator, output, "failure", result.failure_type, result.failure_structure, .guard);
+    try output.appendSlice(allocator, "auto silexNativeCleanup = [&]() {");
+    try generateNativeResultOwnedAction(allocator, output, "success", result.success_type, result.success_structure, .reset);
+    try generateNativeResultOwnedAction(allocator, output, "failure", result.failure_type, result.failure_structure, .reset);
+    try output.appendSlice(allocator, "};");
+
+    try output.appendSlice(allocator, "if (silexNativeOutput.tag == ");
+    try output.appendSlice(allocator, tag_name);
+    try output.appendSlice(allocator, "_success) {");
+    if (nativeResultBranchHasOwned(result.failure_type, result.failure_structure)) {
+        try output.appendSlice(allocator, "if (");
+        try generateNativeResultOwnedCondition(allocator, output, "failure", result.failure_type, result.failure_structure);
+        try output.appendSlice(allocator, ") {");
+        try generateNativeResultFatal(allocator, output, module_name, function_name, "returned an owned buffer in the inactive failure branch");
+        try output.appendSlice(allocator, "}");
+    }
+    try generateNativeResultBranchReturn(allocator, output, result, "success", 0, result.success_type, result.success_structure, module_name, function_name);
+    try output.appendSlice(allocator, "}if (silexNativeOutput.tag == ");
+    try output.appendSlice(allocator, tag_name);
+    try output.appendSlice(allocator, "_failure) {");
+    if (nativeResultBranchHasOwned(result.success_type, result.success_structure)) {
+        try output.appendSlice(allocator, "if (");
+        try generateNativeResultOwnedCondition(allocator, output, "success", result.success_type, result.success_structure);
+        try output.appendSlice(allocator, ") {");
+        try generateNativeResultFatal(allocator, output, module_name, function_name, "returned an owned buffer in the inactive success branch");
+        try output.appendSlice(allocator, "}");
+    }
+    try generateNativeResultBranchReturn(allocator, output, result, "failure", 1, result.failure_type, result.failure_structure, module_name, function_name);
+    try output.appendSlice(allocator, "}");
+    try generateNativeResultFatal(allocator, output, module_name, function_name, "returned an unknown Result tag");
+    try output.appendSlice(allocator, "})");
+}
+
 fn generateNativeFunctionCall(
     allocator: Allocator,
     output: *std.ArrayList(u8),
     call: Semantic.Expression.Call,
     return_type: Semantic.Type,
 ) GenerateError!void {
+    if (call.native_result) |result| {
+        return generateNativeResultFunctionCall(allocator, output, call, result);
+    }
     if (return_type == .optional) {
         return generateNativeOptionalFunctionCall(allocator, output, call, return_type.optional.*);
     }
@@ -4125,6 +4637,50 @@ test "generate borrowed string fields in native structure parameters" {
         cpp,
         "silexNative_Files_native_round_trip(&silexNativeInput0, &silexNativeOutput)",
     ) != null);
+}
+
+test "generate validated native Result bridges" {
+    const Parser = @import("Parser.zig").Parser;
+    const Generics = @import("Generics.zig");
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var parser = Parser.init(allocator,
+        \\struct NativeFile { let handle:int; let path:str }
+        \\native func native_open(path:str) Result<NativeFile,str>
+        \\native func native_save() Result<void,str>
+        \\func main() {
+        \\    let opened = native_open("file")
+        \\    let saved = native_save()
+        \\}
+    );
+    const ast = try parser.parse();
+    @constCast(ast.functions)[0].name = "Files.native_open";
+    @constCast(ast.functions)[1].name = "Files.native_save";
+    var specializer = Generics.Specializer.init(allocator, ast);
+    var analyzer = Semantic.Analyzer.init(allocator);
+    analyzer.native_module_names = &.{"Files"};
+    const cpp = try generate(allocator, try analyzer.analyze(try specializer.specialize()));
+
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "struct SilexNative_Files_native_openResult {") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "SilexNative_Files_NativeFile successValue{};") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "char* failureBytes = nullptr;") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "returned an owned buffer in the inactive failure branch") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "returned an unknown Result tag") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "std::free(silexNativeOutput.successValue.field1Bytes)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "std::move(silexNativeString_failure)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "SilexNative_Files_native_saveResult") != null);
+    try std.testing.expectEqual(@as(usize, 1), std.mem.count(
+        u8,
+        cpp,
+        "std::unique_ptr<char, decltype(&std::free)> silexNativeGuard_success_field1",
+    ));
+    try std.testing.expectEqual(@as(usize, 2), std.mem.count(
+        u8,
+        cpp,
+        "std::unique_ptr<char, decltype(&std::free)> silexNativeGuard_failure",
+    ));
 }
 
 test "generate recursive structural equality" {
