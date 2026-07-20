@@ -22,6 +22,7 @@ func main() {
   display control.
 - [System](System.md) — portable structured errors for system resources and
   I/O.
+- [Path](Path.md) — portable UTF-8 paths and deterministic lexical operations.
 - [Time](Time/README.md) — monotonic elapsed-time and logical-loop utilities.
   - [Stopwatch](Time/Stopwatch.md) measures bounded real durations.
   - [Clock](Time/Clock.md) drives scaled and pausable logical time.

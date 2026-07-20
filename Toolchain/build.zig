@@ -115,6 +115,23 @@ pub fn build(b: *std.Build) void {
         .name = "silex-system-error-integration",
         .root_module = system_error_test_module,
     });
+    const path_test_module = b.createModule(.{
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+        .link_libcpp = true,
+    });
+    path_test_module.addCSourceFiles(.{
+        .files = &.{
+            "Tests/PathIntegration.cpp",
+            "../Library/STD/@Native/Path.cpp",
+        },
+        .flags = &.{ "-std=c++23", "-Wall", "-Wextra", "-Werror", "-DSILEX_PATH_CORE_ONLY" },
+    });
+    const path_integration = b.addExecutable(.{
+        .name = "silex-path-integration",
+        .root_module = path_test_module,
+    });
     const clean_library_install = b.addExecutable(.{
         .name = "silex-clean-library-install",
         .root_module = b.createModule(.{
@@ -2248,6 +2265,8 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&invalid_public_include_path_command.step);
     const system_error_test_command = b.addRunArtifact(system_error_integration);
     test_step.dependOn(&system_error_test_command.step);
+    const path_test_command = b.addRunArtifact(path_integration);
+    test_step.dependOn(&path_test_command.step);
 
     const smoke_command = b.addRunArtifact(executable);
     smoke_command.step.dependOn(b.getInstallStep());
@@ -3241,9 +3260,14 @@ pub fn build(b: *std.Build) void {
     system_error_smoke_command.addArgs(&.{ "run", "Smokes/SystemErrors.sx" });
     system_error_smoke_command.expectStdOutEqual(hostText(b, "system errors ok\n"));
 
+    const path_smoke_command = b.addRunArtifact(executable);
+    path_smoke_command.step.dependOn(&system_error_smoke_command.step);
+    path_smoke_command.addArgs(&.{ "run", "Smokes/Paths.sx" });
+    path_smoke_command.expectStdOutEqual(hostText(b, "paths ok\n"));
+
     const smoke_step = b.step("smoke", "Compile and run the smoke program");
     smoke_step.dependOn(b.getInstallStep());
-    smoke_step.dependOn(&system_error_smoke_command.step);
+    smoke_step.dependOn(&path_smoke_command.step);
 
     const benchmark_suffix = if (b.graph.host.result.os.tag == .windows) ".exe" else "";
     const silex_benchmark_path = b.fmt("zig-out/bin/IntegerLoopsSilex{s}", .{benchmark_suffix});
@@ -3605,8 +3629,22 @@ pub fn build(b: *std.Build) void {
         "-o",      ".silex/cross-native-smoke/SystemErrors-x86_64-windows.exe",
     });
 
+    const cross_path_linux_smoke_command = b.addRunArtifact(executable);
+    cross_path_linux_smoke_command.step.dependOn(&cross_system_error_windows_smoke_command.step);
+    cross_path_linux_smoke_command.addArgs(&.{
+        "compile", "Smokes/Paths.sx",                         "--target", "x86_64-linux-musl",
+        "-o",      ".silex/cross-native-smoke/Paths-x86_64-linux",
+    });
+
+    const cross_path_windows_smoke_command = b.addRunArtifact(executable);
+    cross_path_windows_smoke_command.step.dependOn(&cross_path_linux_smoke_command.step);
+    cross_path_windows_smoke_command.addArgs(&.{
+        "compile", "Smokes/Paths.sx",                               "--target", "x86_64-windows-gnu",
+        "-o",      ".silex/cross-native-smoke/Paths-x86_64-windows.exe",
+    });
+
     const cross_isolated_time_linux_smoke_command = b.addRunArtifact(executable);
-    cross_isolated_time_linux_smoke_command.step.dependOn(&cross_system_error_windows_smoke_command.step);
+    cross_isolated_time_linux_smoke_command.step.dependOn(&cross_path_windows_smoke_command.step);
     cross_isolated_time_linux_smoke_command.addArgs(&.{
         "compile", "Smokes/IsolatedTime/Main.sx",                         "--target", "x86_64-linux-musl",
         "-o",      ".silex/cross-native-smoke/IsolatedTime-x86_64-linux",

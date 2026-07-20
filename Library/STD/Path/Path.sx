@@ -1,0 +1,107 @@
+use STD.System.Error
+use STD.System.ErrorKind
+
+pub use str as Path
+
+native func native_windows_semantics() bool
+native func native_validate(path:Path, windows:bool) NativePathResult
+native func native_normalize(path:Path, windows:bool) NativePathResult
+native func native_join(base:Path, child:Path, windows:bool) NativePathResult
+native func native_parent(path:Path, windows:bool) NativePathResult
+native func native_name(path:Path, windows:bool) NativePathResult
+native func native_stem(path:Path, windows:bool) NativePathResult
+native func native_extension(path:Path, windows:bool) NativePathResult
+native func native_is_absolute(path:Path, windows:bool) NativePathResult
+
+struct NativePathResult {
+    let succeeded:bool
+    let present:bool
+    let boolean:bool
+    let text:str
+    let detail:str
+}
+
+pub func validate(path:Path) Result<void, Error> {
+    let result = native_validate(path, native_windows_semantics())
+    if !result.succeeded {
+        return Result<void, Error>.failure(path_error("path.validate", path, result.detail))
+    }
+    return Result<void, Error>.success()
+}
+
+pub func normalize(path:Path) Result<Path, Error> {
+    let result = native_normalize(path, native_windows_semantics())
+    if !result.succeeded {
+        return Result<Path, Error>.failure(path_error("path.normalize", path, result.detail))
+    }
+    return Result<Path, Error>.success(result.text)
+}
+
+pub func join(base:Path, child:Path) Result<Path, Error> {
+    let result = native_join(base, child, native_windows_semantics())
+    if !result.succeeded {
+        return Result<Path, Error>.failure(path_error("path.join", base, result.detail))
+    }
+    return Result<Path, Error>.success(result.text)
+}
+
+pub func parent(path:Path) Result<Path?, Error> {
+    let result = native_parent(path, native_windows_semantics())
+    if !result.succeeded {
+        return Result<Path?, Error>.failure(path_error("path.parent", path, result.detail))
+    }
+    if result.present {
+        return Result<Path?, Error>.success(result.text)
+    }
+    return Result<Path?, Error>.success(null)
+}
+
+pub func name(path:Path) Result<str?, Error> {
+    let result = native_name(path, native_windows_semantics())
+    if !result.succeeded {
+        return Result<str?, Error>.failure(path_error("path.name", path, result.detail))
+    }
+    if result.present {
+        return Result<str?, Error>.success(result.text)
+    }
+    return Result<str?, Error>.success(null)
+}
+
+pub func stem(path:Path) Result<str?, Error> {
+    let result = native_stem(path, native_windows_semantics())
+    if !result.succeeded {
+        return Result<str?, Error>.failure(path_error("path.stem", path, result.detail))
+    }
+    if result.present {
+        return Result<str?, Error>.success(result.text)
+    }
+    return Result<str?, Error>.success(null)
+}
+
+pub func extension(path:Path) Result<str?, Error> {
+    let result = native_extension(path, native_windows_semantics())
+    if !result.succeeded {
+        return Result<str?, Error>.failure(path_error("path.extension", path, result.detail))
+    }
+    if result.present {
+        return Result<str?, Error>.success(result.text)
+    }
+    return Result<str?, Error>.success(null)
+}
+
+pub func is_absolute(path:Path) Result<bool, Error> {
+    let result = native_is_absolute(path, native_windows_semantics())
+    if !result.succeeded {
+        return Result<bool, Error>.failure(path_error("path.is_absolute", path, result.detail))
+    }
+    return Result<bool, Error>.success(result.boolean)
+}
+
+func path_error(operation:str, subject:Path, detail:str) Error {
+    return Error(
+        kind:ErrorKind.invalid_input(),
+        operation:operation,
+        subject:subject,
+        detail:detail
+    )
+}
