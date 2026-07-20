@@ -115,9 +115,20 @@ pub const Specializer = struct {
             try self.functions.append(self.allocator, try self.rewriteFunction(function, &.{}));
         }
 
+        var protocols: std.ArrayList(Ast.Protocol) = .empty;
+        for (self.program.protocols) |protocol| {
+            var requirements: std.ArrayList(Ast.Function) = .empty;
+            for (protocol.requirements) |requirement| {
+                try requirements.append(self.allocator, try self.rewriteFunction(requirement, &.{}));
+            }
+            var rewritten = protocol;
+            rewritten.requirements = try requirements.toOwnedSlice(self.allocator);
+            try protocols.append(self.allocator, rewritten);
+        }
+
         return .{
             .enums = try self.enums.toOwnedSlice(self.allocator),
-            .protocols = self.program.protocols,
+            .protocols = try protocols.toOwnedSlice(self.allocator),
             .structures = try self.structures.toOwnedSlice(self.allocator),
             .functions = try self.functions.toOwnedSlice(self.allocator),
         };
@@ -1208,6 +1219,24 @@ test "specialize protocol constrained generic functions" {
         if (std.mem.startsWith(u8, function.name, "label<")) found = true;
     }
     try std.testing.expect(found);
+}
+
+test "specialize generic types in protocol requirements" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var parser = Parser.init(allocator,
+        \\protocol Reader { func read(buffer:&uint8[..]) Result<int,str> }
+    );
+    var specializer = Specializer.init(allocator, try parser.parse());
+    const program = try specializer.specialize();
+    try std.testing.expectEqual(@as(usize, 1), program.protocols.len);
+    try std.testing.expect(program.protocols[0].requirements[0].return_type == .structure);
+    try std.testing.expect(std.mem.startsWith(
+        u8,
+        program.protocols[0].requirements[0].return_type.structure,
+        "Result<int, str>",
+    ));
 }
 
 test "reject a type argument without declared protocol conformance" {

@@ -1,0 +1,353 @@
+use STD.IO.Reader
+use STD.IO.Writer
+use STD.IO.copy
+use STD.IO.read_exact
+use STD.IO.read_to_end
+use STD.IO.write_all
+use STD.System.Error
+use STD.System.ErrorKind
+
+struct Source:Reader {
+    let bytes:uint8[]
+    var offset:int
+    let fragment:int
+    let fail_at:int
+    var calls:int
+
+    func read(buffer:&uint8[..]) Result<int, Error> {
+        if buffer.is_empty() {
+            return Result<int, Error>.success(0)
+        }
+        self.calls++
+        if self.offset == self.fail_at {
+            return Result<int, Error>.failure(injected_error("fake.read"))
+        }
+        if self.offset == self.bytes.count() {
+            return Result<int, Error>.success(0)
+        }
+        var count = self.bytes.count() - self.offset
+        if count > buffer.count() {
+            count = buffer.count()
+        }
+        if count > self.fragment {
+            count = self.fragment
+        }
+        var index = 0
+        while index < count {
+            buffer[index] = self.bytes[self.offset + index]
+            index++
+        }
+        self.offset += count
+        return Result<int, Error>.success(count)
+    }
+
+    drop {}
+}
+
+struct Sink:Writer {
+    var bytes:uint8[]
+    let fragment:int
+    let fail_at:int
+    let zero_at:int
+    var calls:int
+
+    func write(buffer:@uint8[..]) Result<int, Error> {
+        if buffer.is_empty() {
+            return Result<int, Error>.success(0)
+        }
+        self.calls++
+        if self.bytes.count() == self.fail_at {
+            return Result<int, Error>.failure(injected_error("fake.write"))
+        }
+        if self.bytes.count() == self.zero_at {
+            return Result<int, Error>.success(0)
+        }
+        var count = buffer.count()
+        if count > self.fragment {
+            count = self.fragment
+        }
+        var index = 0
+        while index < count {
+            let byte:uint8 = buffer[index]
+            self.bytes.append(byte)
+            index++
+        }
+        return Result<int, Error>.success(count)
+    }
+
+    drop {}
+}
+
+func source(values:int[], fragment:int, fail_at:int) Source {
+    var bytes:uint8[] = []
+    for value in values {
+        bytes.append(value as uint8)
+    }
+    return Source(bytes:bytes, offset:0, fragment:fragment, fail_at:fail_at, calls:0)
+}
+
+func sink(fragment:int, fail_at:int, zero_at:int) Sink {
+    return Sink(bytes:[], fragment:fragment, fail_at:fail_at, zero_at:zero_at, calls:0)
+}
+
+func empty_source(fragment:int, fail_at:int) Source {
+    let values:int[] = []
+    return source(values, fragment, fail_at)
+}
+
+func injected_error(operation:str) Error {
+    return Error(
+        kind:ErrorKind.permission_denied(),
+        operation:operation,
+        subject:null,
+        detail:"injected failure"
+    )
+}
+
+func read_exact_list<T:Reader>(reader:&T, buffer:&uint8[]) Result<void, Error> {
+    var view = &buffer[0:buffer.count()]
+    return read_exact<T>(reader, view)
+}
+
+func read_once<T:Reader>(reader:&T, buffer:&uint8[]) Result<int, Error> {
+    var view = &buffer[0:buffer.count()]
+    return reader.read(view)
+}
+
+func write_all_list<T:Writer>(writer:&T, buffer:@uint8[]) Result<void, Error> {
+    let view = @buffer[0:buffer.count()]
+    return write_all<T>(writer, view)
+}
+
+func expect_read_exact_success() {
+    var reader = source([1, 2, 3, 4], 1, -1)
+    var bytes:uint8[] = [9, 9, 9, 9]
+    match read_exact_list<Source>(reader, bytes) {
+        success => {}
+        failure(error) => {
+            panic(error.detail)
+        }
+    }
+    assert(
+        bytes.count() == 4 && bytes[0] == 1 && bytes[1] == 2 && bytes[2] == 3 && bytes[3] == 4,
+        "read_exact fills through partial reads"
+    )
+    assert(reader.offset == 4 && reader.calls == 4, "reader remains owned after borrowing")
+
+    var partial = source([7, 8], 1, -1)
+    var sentinels:uint8[] = [90, 91, 92, 93]
+    match read_once<Source>(partial, sentinels) {
+        success(count) => {
+            assert(count == 1, "partial reader count")
+        }
+        failure(error) => {
+            panic(error.detail)
+        }
+    }
+    assert(
+        sentinels[0] == 7 && sentinels[1] == 91 && sentinels[2] == 92 && sentinels[3] == 93,
+        "bytes after read count remain unchanged"
+    )
+
+    var empty = source([1], 1, -1)
+    var empty_buffer:uint8[] = []
+    match read_exact_list<Source>(empty, empty_buffer) {
+        success => {}
+        failure(error) => {
+            panic(error.detail)
+        }
+    }
+    assert(empty.calls == 0, "empty read_exact is a no-op")
+}
+
+func expect_read_failures() {
+    var short = source([1, 2], 1, -1)
+    var bytes:uint8[] = [0, 0, 0]
+    match read_exact_list<Source>(short, bytes) {
+        success => {
+            panic("short read unexpectedly succeeded")
+        }
+        failure(error) => {
+            match error.kind {
+                unexpected_end => {}
+                else => {
+                    panic("read_exact returned the wrong error")
+                }
+            }
+        }
+    }
+
+    var position = 0
+    while position <= 3 {
+        var reader = source([1, 2, 3], 1, position)
+        match read_to_end<Source>(reader, 10) {
+            success(unexpected_bytes) => {
+                panic("injected read unexpectedly succeeded")
+            }
+            failure(error) => {
+                assert(error.operation == "fake.read", "reader error is preserved")
+            }
+        }
+        position++
+    }
+}
+
+func expect_read_to_end() {
+    var reader = source([1, 2, 3, 4, 5], 2, -1)
+    match read_to_end<Source>(reader, 5) {
+        success(bytes) => {
+            assert(
+                bytes.count() == 5 && bytes[0] == 1 && bytes[1] == 2 && bytes[2] == 3 &&
+                    bytes[3] == 4 && bytes[4] == 5,
+                "read_to_end content"
+            )
+        }
+        failure(error) => {
+            panic(error.detail)
+        }
+    }
+    var empty = empty_source(1, -1)
+    match read_to_end<Source>(empty, 0) {
+        success(bytes) => {
+            assert(bytes.is_empty(), "empty stream")
+        }
+        failure(error) => {
+            panic(error.detail)
+        }
+    }
+    var limited = source([1, 2, 3], 3, -1)
+    match read_to_end<Source>(limited, 2) {
+        success(bytes) => {
+            panic("limit unexpectedly succeeded")
+        }
+        failure(error) => {
+            match error.kind {
+                limit_exceeded => {}
+                else => {
+                    panic("read_to_end returned the wrong limit error")
+                }
+            }
+        }
+    }
+    var invalid = empty_source(1, -1)
+    match read_to_end<Source>(invalid, -1) {
+        success(bytes) => {
+            panic("negative limit unexpectedly succeeded")
+        }
+        failure(error) => {
+            match error.kind {
+                invalid_input => {}
+                else => {
+                    panic("read_to_end returned the wrong input error")
+                }
+            }
+        }
+    }
+}
+
+func expect_write_all() {
+    var writer = sink(1, -1, -1)
+    let bytes:uint8[] = [4, 5, 6]
+    match write_all_list<Sink>(writer, bytes) {
+        success => {}
+        failure(error) => {
+            panic(error.detail)
+        }
+    }
+    assert(writer.bytes == bytes && writer.calls == 3, "write_all partial progress")
+
+    var empty = sink(1, -1, -1)
+    let empty_buffer:uint8[] = []
+    match write_all_list<Sink>(empty, empty_buffer) {
+        success => {}
+        failure(error) => {
+            panic(error.detail)
+        }
+    }
+    assert(empty.calls == 0, "empty write_all is a no-op")
+
+    var stalled = sink(3, -1, 0)
+    match write_all_list<Sink>(stalled, bytes) {
+        success => {
+            panic("zero write unexpectedly succeeded")
+        }
+        failure(error) => {
+            assert(error.operation == "io.write_all", "zero write operation")
+        }
+    }
+
+    var position = 0
+    while position < bytes.count() {
+        var failing = sink(1, position, -1)
+        match write_all_list<Sink>(failing, bytes) {
+            success => {
+                panic("injected write unexpectedly succeeded")
+            }
+            failure(error) => {
+                assert(error.operation == "fake.write", "writer error is preserved")
+                assert(failing.bytes.count() == position, "written prefix is exact")
+            }
+        }
+        position++
+    }
+}
+
+func expect_copy() {
+    var reader = source([10, 11, 12, 13, 14], 2, -1)
+    var writer = sink(1, -1, -1)
+    match copy<Source, Sink>(reader, writer, 5) {
+        success(count) => {
+            assert(count == 5, "copy count")
+        }
+        failure(error) => {
+            panic(error.detail)
+        }
+    }
+    assert(
+        writer.bytes.count() == 5 && writer.bytes[0] == 10 && writer.bytes[1] == 11 &&
+            writer.bytes[2] == 12 && writer.bytes[3] == 13 && writer.bytes[4] == 14,
+        "copy content"
+    )
+
+    var limited_reader = source([1, 2, 3], 3, -1)
+    var limited_writer = sink(3, -1, -1)
+    match copy<Source, Sink>(limited_reader, limited_writer, 2) {
+        success(count) => {
+            panic("copy limit unexpectedly succeeded")
+        }
+        failure(error) => {
+            match error.kind {
+                limit_exceeded => {}
+                else => {
+                    panic("copy returned the wrong limit error")
+                }
+            }
+        }
+    }
+    assert(limited_writer.bytes.is_empty(), "copy retains no byte beyond limit")
+
+    var invalid_reader = empty_source(1, -1)
+    var invalid_writer = sink(1, -1, -1)
+    match copy<Source, Sink>(invalid_reader, invalid_writer, -1) {
+        success(count) => {
+            panic("negative copy limit unexpectedly succeeded")
+        }
+        failure(error) => {
+            match error.kind {
+                invalid_input => {}
+                else => {
+                    panic("copy returned the wrong input error")
+                }
+            }
+        }
+    }
+}
+
+func main() {
+    expect_read_exact_success()
+    expect_read_failures()
+    expect_read_to_end()
+    expect_write_all()
+    expect_copy()
+    print("io streams ok")
+}

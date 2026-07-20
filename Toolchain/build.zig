@@ -3265,9 +3265,14 @@ pub fn build(b: *std.Build) void {
     path_smoke_command.addArgs(&.{ "run", "Smokes/Paths.sx" });
     path_smoke_command.expectStdOutEqual(hostText(b, "paths ok\n"));
 
+    const io_smoke_command = b.addRunArtifact(executable);
+    io_smoke_command.step.dependOn(&path_smoke_command.step);
+    io_smoke_command.addArgs(&.{ "run", "Smokes/IO.sx" });
+    io_smoke_command.expectStdOutEqual(hostText(b, "io streams ok\n"));
+
     const smoke_step = b.step("smoke", "Compile and run the smoke program");
     smoke_step.dependOn(b.getInstallStep());
-    smoke_step.dependOn(&path_smoke_command.step);
+    smoke_step.dependOn(&io_smoke_command.step);
 
     const benchmark_suffix = if (b.graph.host.result.os.tag == .windows) ".exe" else "";
     const silex_benchmark_path = b.fmt("zig-out/bin/IntegerLoopsSilex{s}", .{benchmark_suffix});
@@ -3643,8 +3648,22 @@ pub fn build(b: *std.Build) void {
         "-o",      ".silex/cross-native-smoke/Paths-x86_64-windows.exe",
     });
 
+    const cross_io_linux_smoke_command = b.addRunArtifact(executable);
+    cross_io_linux_smoke_command.step.dependOn(&cross_path_windows_smoke_command.step);
+    cross_io_linux_smoke_command.addArgs(&.{
+        "compile", "Smokes/IO.sx",                         "--target", "x86_64-linux-musl",
+        "-o",      ".silex/cross-native-smoke/IO-x86_64-linux",
+    });
+
+    const cross_io_windows_smoke_command = b.addRunArtifact(executable);
+    cross_io_windows_smoke_command.step.dependOn(&cross_io_linux_smoke_command.step);
+    cross_io_windows_smoke_command.addArgs(&.{
+        "compile", "Smokes/IO.sx",                               "--target", "x86_64-windows-gnu",
+        "-o",      ".silex/cross-native-smoke/IO-x86_64-windows.exe",
+    });
+
     const cross_isolated_time_linux_smoke_command = b.addRunArtifact(executable);
-    cross_isolated_time_linux_smoke_command.step.dependOn(&cross_path_windows_smoke_command.step);
+    cross_isolated_time_linux_smoke_command.step.dependOn(&cross_io_windows_smoke_command.step);
     cross_isolated_time_linux_smoke_command.addArgs(&.{
         "compile", "Smokes/IsolatedTime/Main.sx",                         "--target", "x86_64-linux-musl",
         "-o",      ".silex/cross-native-smoke/IsolatedTime-x86_64-linux",

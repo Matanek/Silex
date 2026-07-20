@@ -4697,6 +4697,22 @@ fn indent(allocator: Allocator, output: *std.ArrayList(u8), level: usize) !void 
     while (index < level) : (index += 1) try output.appendSlice(allocator, "    ");
 }
 
+test "read view parameters preserve const elements" {
+    var element: Semantic.Type = .uint8;
+    var output: std.ArrayList(u8) = .empty;
+    defer output.deinit(std.testing.allocator);
+    try appendCppParameterType(
+        std.testing.allocator,
+        &output,
+        .{ .view = &element },
+        .borrow,
+    );
+    try std.testing.expectEqualStrings(
+        "const SilexView<const std::uint8_t>&",
+        output.items,
+    );
+}
+
 fn cppType(type_name: Semantic.Type) []const u8 {
     return switch (type_name) {
         .void => "void",
@@ -4795,6 +4811,15 @@ fn appendCppParameterType(
     type_name: Semantic.Type,
     mode: Ast.ParameterMode,
 ) Allocator.Error!void {
+    if (type_name == .view) {
+        if (mode == .borrow) try output.appendSlice(allocator, "const ");
+        try output.appendSlice(allocator, "SilexView<");
+        if (mode == .borrow) try output.appendSlice(allocator, "const ");
+        try appendCppType(allocator, output, type_name.view.*);
+        try output.append(allocator, '>');
+        if (mode != .value) try output.append(allocator, '&');
+        return;
+    }
     if (mode == .borrow) try output.appendSlice(allocator, "const ");
     try appendCppType(allocator, output, type_name);
     if (mode != .value) try output.append(allocator, '&');
