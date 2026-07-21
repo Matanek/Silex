@@ -18,7 +18,7 @@ struct GenericBox<T> {
 }
 
 class ResourceHolder {
-    pub var resource:Resources.Resource
+    public var resource:Resources.Resource
 
     drop { print("holder drop") }
 }

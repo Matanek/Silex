@@ -1,0 +1,13 @@
+public struct Queue {
+    private var values:int[]
+    private var head:int
+    public var label:str
+
+    public static func create(label:str) Queue {
+        return Queue(values:[], head:0, label:label)
+    }
+
+    public func count() int {
+        return self.values.count() - self.head
+    }
+}

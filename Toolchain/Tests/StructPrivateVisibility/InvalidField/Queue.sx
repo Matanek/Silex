@@ -1,0 +1,7 @@
+public struct Queue {
+    private var values:int[]
+
+    public static func create() Queue {
+        return Queue(values:[])
+    }
+}

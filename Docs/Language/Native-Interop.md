@@ -11,12 +11,12 @@ redeclaring symbols or transport structures by hand.
 A public native function is directly callable by users of the module:
 
 ```sx
-pub native func pow(value:int) int
+public native func pow(value:int) int
 ```
 
 For a declaration in module `Math`, the generated header declares the C symbol
 `silexNative_Math_pow`. `use Math` exposes `Math.pow` exactly like an ordinary
-`pub func`; module resolution and editor completion do not expose the native
+`public func`; module resolution and editor completion do not expose the native
 implementation details.
 
 A private native function is intended to sit behind Silex code. Its name follows
@@ -25,7 +25,7 @@ the ordinary function naming rules; Silex imposes no `native_` prefix:
 ```sx
 native func pow_implementation(value:int) int
 
-pub func pow(value:int) int {
+public func pow(value:int) int {
     return pow_implementation(value)
 }
 ```
@@ -36,7 +36,7 @@ clear, but this convention is not part of the language or ABI.
 
 The wrapper is optional. It remains useful when the public operation validates
 arguments, translates errors, combines several native calls, or deliberately
-exposes different Silex types. A direct `pub native func` is preferable when
+exposes different Silex types. A direct `public native func` is preferable when
 the generated ABI already expresses the complete public contract.
 
 Both forms are top-level, have no Silex body, cannot be generic or overloaded,
@@ -49,12 +49,12 @@ section. A standalone main source cannot declare one.
 A module associates a nominal opaque type with its sole native destructor:
 
 ```sx
-pub native resource Buffer {
+public native resource Buffer {
     drop destroy_buffer
 }
 ```
 
-The declaration may be private by omitting `pub`. It is top-level,
+The declaration may be private by omitting `public`. It is top-level,
 non-generic, has no fields, initializer, inheritance or extension form, and is
 available only in a named module backed by native sources. Silex cannot inspect
 the pointer, convert it to an integer, or construct a `Buffer`; only a non-null
@@ -180,7 +180,7 @@ The compiler rejects these declarations before compiling the native sources.
 For the direct public declaration:
 
 ```sx
-pub native func pow(value:int) int
+public native func pow(value:int) int
 ```
 
 the generated C header contains the equivalent declaration:
@@ -283,11 +283,11 @@ returns exactly one `native resource` directly. The callback's function pointer
 and context keep the ordinary C shape:
 
 ```sx
-pub native resource Watch {
+public native resource Watch {
     drop stop_watch
 }
 
-pub native func start_watch(callback:deferred func(int)) Watch
+public native func start_watch(callback:deferred func(int)) Watch
 
 var total = 0
 let watch = start_watch(deferred func(value:int) {

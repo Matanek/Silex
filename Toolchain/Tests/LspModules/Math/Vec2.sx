@@ -1,4 +1,4 @@
-pub struct Vec2 {
+public struct Vec2 {
     static var creations:int
     var x:float
     var y:float
@@ -12,5 +12,5 @@ pub struct Vec2 {
     }
 }
 
-pub class Canvas {
+public class Canvas {
 }

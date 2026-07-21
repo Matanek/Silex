@@ -74,10 +74,10 @@ func main() {
         var partial_view = &partial[1:6]
         sort<int>(partial_view, ascending)
     }
-    assert(partial[0] == 90 && partial[1] == 1 && partial[2] == 2, "fixed-array sub-view first")
+    assert(partial[0] == 90 && partial[1] == 1 && partial[2] == 2, "fixed-array protected-view first")
     assert(
         partial[3] == 3 && partial[4] == 4 && partial[5] == 5 && partial[6] == 80,
-        "fixed-array sub-view last"
+        "fixed-array protected-view last"
     )
 
     var tokens:Token[] = [

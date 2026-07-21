@@ -1,13 +1,13 @@
-pub enum ParseError {
+public enum ParseError {
     empty
     invalid_character(str)
 }
 
-pub struct SaveError {
+public struct SaveError {
     let message:str
 }
 
-pub func parse_port(text:str) Result<int, ParseError> {
+public func parse_port(text:str) Result<int, ParseError> {
     if text.count() == 0 {
         return Result<int, ParseError>.failure(ParseError.empty())
     }
@@ -17,7 +17,7 @@ pub func parse_port(text:str) Result<int, ParseError> {
     return Result<int, ParseError>.success(8080)
 }
 
-pub func save(allowed:bool) Result<void, SaveError> {
+public func save(allowed:bool) Result<void, SaveError> {
     if allowed {
         return Result<void, SaveError>.success()
     }

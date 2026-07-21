@@ -1,4 +1,4 @@
 use ExtensionConformanceConflict.Second as Second
 
-pub func second() {
+public func second() {
 }

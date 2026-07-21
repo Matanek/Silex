@@ -1,5 +1,5 @@
 native func native_fail() void
 
-pub func fail() {
+public func fail() {
     native_fail()
 }

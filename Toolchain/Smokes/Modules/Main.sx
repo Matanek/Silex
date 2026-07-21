@@ -16,7 +16,7 @@ use Plugins.WindowWireStatus as WireStatus
 use Window.Session as NativeSession
 
 class LocalCounter : Window.Meter {
-    pub init(value:int) : super(value) {}
+    public init(value:int) : super(value) {}
 }
 
 func main() {

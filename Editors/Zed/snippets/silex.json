@@ -35,17 +35,17 @@
     "description": "Introduce a transparent name for a complete type"
   },
   "Public declaration": {
-    "prefix": "pub",
+    "prefix": "public",
     "body": [
-      "pub ${1:struct Name {}}",
+      "public ${1:struct Name {}}",
       "$0"
     ],
     "description": "Expose a module declaration"
   },
   "Public native function": {
-    "prefix": "pubnative",
+    "prefix": "publicnative",
     "body": [
-      "pub native func ${1:name}(${2}) ${3:void}",
+      "public native func ${1:name}(${2}) ${3:void}",
       "$0"
     ],
     "description": "Expose a module function implemented by its native runtime"
@@ -53,15 +53,15 @@
   "Deferred native registration": {
     "prefix": "deferrednative",
     "body": [
-      "pub native func ${1:register}(${2:callback}:deferred func(${3:int})) ${4:Resource}",
+      "public native func ${1:register}(${2:callback}:deferred func(${3:int})) ${4:Resource}",
       "$0"
     ],
     "description": "Declare a native registration whose callback is dispatched explicitly by Silex"
   },
   "Public native resource": {
-    "prefix": "pubresource",
+    "prefix": "publicresource",
     "body": [
-      "pub native resource ${1:Name} {",
+      "public native resource ${1:Name} {",
       "    drop ${2:destroy_name}",
       "}",
       "$0"
@@ -92,7 +92,7 @@
     "prefix": "extend",
     "body": [
       "extend ${1:Type} {",
-      "    pub func ${2:method}(${3})${4} {",
+      "    public func ${2:method}(${3})${4} {",
       "        $0",
       "    }",
       "}"
@@ -103,7 +103,7 @@
     "prefix": "extendgeneric",
     "body": [
       "extend ${1:Type} {",
-      "    pub func ${2:method}<${3:T}>(${4:value}:${3:T}) ${3:T} {",
+      "    public func ${2:method}<${3:T}>(${4:value}:${3:T}) ${3:T} {",
       "        $0",
       "    }",
       "}"
@@ -114,7 +114,7 @@
     "prefix": "extendprotocol",
     "body": [
       "extend ${1:Type} : ${2:Protocol} {",
-      "    pub func ${3:requirement}(${4})${5} {",
+      "    public func ${3:requirement}(${4})${5} {",
       "        $0",
       "    }",
       "}"
@@ -458,7 +458,7 @@
   "Override class method": {
     "prefix": "override",
     "body": [
-      "override pub func ${1:name}(${2}) {",
+      "override public func ${1:name}(${2}) {",
       "    $0",
       "}"
     ],
@@ -508,6 +508,22 @@
     ],
     "description": "Declare a shared-identity type"
   },
+  "Private member": {
+    "prefix": "private",
+    "body": [
+      "private var ${1:name}:${2:type}"
+    ],
+    "description": "Reserve a class or struct member to its declaring type"
+  },
+  "Private method": {
+    "prefix": "privatemethod",
+    "body": [
+      "private func ${1:name}(${2}) {",
+      "    $0",
+      "}"
+    ],
+    "description": "Reserve a method to its declaring type"
+  },
   "Subclass": {
     "prefix": "subclass",
     "body": [
@@ -518,25 +534,25 @@
     "description": "Declare a class with one base class"
   },
   "Public class member": {
-    "prefix": "pub",
+    "prefix": "public",
     "body": [
-      "pub var ${1:name}:${2:type}"
+      "public var ${1:name}:${2:type}"
     ],
     "description": "Expose a class member"
   },
   "Public class method": {
-    "prefix": "pubmethod",
+    "prefix": "publicmethod",
     "body": [
-      "pub func ${1:name}(${2}) {",
+      "public func ${1:name}(${2}) {",
       "    $0",
       "}"
     ],
     "description": "Expose a class method"
   },
   "Public static class method": {
-    "prefix": "pubstatic",
+    "prefix": "publicstatic",
     "body": [
-      "pub static func ${1:name}(${2}) ${3:type} {",
+      "public static func ${1:name}(${2}) ${3:type} {",
       "    return $0",
       "}"
     ],
@@ -550,16 +566,16 @@
     "description": "Declare storage shared by a struct type"
   },
   "Public static class field": {
-    "prefix": "pubstaticfield",
+    "prefix": "publicstaticfield",
     "body": [
-      "pub static var ${1:name}:${2:type}"
+      "public static var ${1:name}:${2:type}"
     ],
     "description": "Expose storage shared by a class type"
   },
   "Public class constructor": {
-    "prefix": "pubinit",
+    "prefix": "publicinit",
     "body": [
-      "pub init(${1}) {",
+      "public init(${1}) {",
       "    $0",
       "}"
     ],
@@ -568,7 +584,7 @@
   "Public class constructor with base": {
     "prefix": "initsuper",
     "body": [
-      "pub init(${1}) : super(${2}) {",
+      "public init(${1}) : super(${2}) {",
       "    $0",
       "}"
     ],
@@ -583,33 +599,33 @@
     ],
     "description": "Release class or unique structure resources at the end of their language lifetime"
   },
-  "Subclass class member": {
-    "prefix": "sub",
+  "Protected class member": {
+    "prefix": "protected",
     "body": [
-      "sub var ${1:name}:${2:type}"
+      "protected var ${1:name}:${2:type}"
     ],
     "description": "Expose a class member to future descendants"
   },
-  "Subclass class method": {
-    "prefix": "submethod",
+  "Protected class method": {
+    "prefix": "protectedmethod",
     "body": [
-      "sub func ${1:name}(${2}) {",
+      "protected func ${1:name}(${2}) {",
       "    $0",
       "}"
     ],
     "description": "Expose a class method to future descendants"
   },
-  "Subclass static class field": {
-    "prefix": "substaticfield",
+  "Protected static class field": {
+    "prefix": "protectedstaticfield",
     "body": [
-      "sub static var ${1:name}:${2:type}"
+      "protected static var ${1:name}:${2:type}"
     ],
     "description": "Expose shared class storage to future descendants"
   },
-  "Subclass class constructor": {
-    "prefix": "subinit",
+  "Protected class constructor": {
+    "prefix": "protectedinit",
     "body": [
-      "sub init(${1}) {",
+      "protected init(${1}) {",
       "    $0",
       "}"
     ],
@@ -636,7 +652,7 @@
   "Native borrowed view": {
     "prefix": "nativeview",
     "body": [
-      "pub native func ${1:values}(${2:resource}:@${3:Resource}) @${4:int}[..]"
+      "public native func ${1:values}(${2:resource}:@${3:Resource}) @${4:int}[..]"
     ],
     "description": "Declare a native contiguous view borrowed from an opaque resource"
   },

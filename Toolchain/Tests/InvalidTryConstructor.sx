@@ -9,7 +9,7 @@ func read() Result<int, Failure> {
 class Box {
     let value:int
 
-    pub init() {
+    public init() {
         self.value = try read()
     }
 }

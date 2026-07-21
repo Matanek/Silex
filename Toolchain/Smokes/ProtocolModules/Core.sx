@@ -1,8 +1,8 @@
-pub protocol Named {
+public protocol Named {
     func name() str
 }
 
-pub struct RemoteUser : Named {
+public struct RemoteUser : Named {
     let value:str
 
     func name() str {
@@ -10,6 +10,6 @@ pub struct RemoteUser : Named {
     }
 }
 
-pub func name_of<T : Named>(value:T) str {
+public func name_of<T : Named>(value:T) str {
     return value.name()
 }

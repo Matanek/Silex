@@ -2,6 +2,6 @@ use ExtensionConformanceConflict.Core as Core
 use ExtensionConformanceConflict.Types as Types
 
 extend Types.Sprite : Core.Drawable {
-    pub func draw() {
+    public func draw() {
     }
 }

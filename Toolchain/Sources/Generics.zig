@@ -1439,7 +1439,7 @@ test "accept inherited protocol conformance for a type argument" {
     const allocator = arena.allocator();
     var parser = Parser.init(allocator,
         \\protocol Named { func name() str }
-        \\class Entity : Named { pub func name() str { return "entity" } }
+        \\class Entity : Named { public func name() str { return "entity" } }
         \\class Player : Entity {}
         \\func label<T : Named>(value:T) str { return value.name() }
         \\func main() { var player = Player(); print(label<Player>(player)) }

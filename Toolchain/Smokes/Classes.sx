@@ -1,19 +1,19 @@
 class Player {
-    pub var health:int = 100
+    public var health:int = 100
 
-    pub func take_damage(amount:int) {
+    public func take_damage(amount:int) {
         self.health -= amount
     }
 }
 
 class Node {
-    pub var next:Node? = null
-    pub var links:Node[] = []
+    public var next:Node? = null
+    public var links:Node[] = []
 }
 
 class CallbackNode {
-    pub var value:int
-    pub var callback:func()
+    public var value:int
+    public var callback:func()
 }
 
 struct NodeSlot {
@@ -21,14 +21,14 @@ struct NodeSlot {
 }
 
 class WrappedNode {
-    pub var slot:NodeSlot = NodeSlot(node:null)
+    public var slot:NodeSlot = NodeSlot(node:null)
 }
 
 class Vault {
     var value:int = 40
-    sub var offset:int = 2
+    protected var offset:int = 2
 
-    sub func subtotal() int {
+    protected func subtotal() int {
         return self.value + self.offset
     }
 
@@ -36,11 +36,11 @@ class Vault {
         return self.subtotal()
     }
 
-    pub func read() int {
+    public func read() int {
         return self.total()
     }
 
-    pub func copy_from(other:Vault) {
+    public func copy_from(other:Vault) {
         self.value = other.value
     }
 }
@@ -49,20 +49,20 @@ class Session {
     var token:str
     var attempts:int = 1
 
-    pub init(token:str) {
+    public init(token:str) {
         self.token = token
     }
 
-    pub init(token:str, attempts:int) {
+    public init(token:str, attempts:int) {
         self.token = token
         self.attempts = attempts
     }
 
-    pub func get_token() str {
+    public func get_token() str {
         return self.token
     }
 
-    pub func get_attempts() int {
+    public func get_attempts() int {
         return self.attempts
     }
 }
@@ -71,11 +71,11 @@ class Match {
     var owner:Player
     var score:int
 
-    pub init(owner:Player) {
+    public init(owner:Player) {
         self.owner = owner
     }
 
-    pub func get_owner() Player {
+    public func get_owner() Player {
         return self.owner
     }
 }
@@ -83,7 +83,7 @@ class Match {
 class ConstructorCycle {
     var next:ConstructorCycle?
 
-    pub init() {
+    public init() {
         self.next = self
     }
 }
@@ -92,12 +92,12 @@ class ConstructorCallback {
     var value:int = 7
     var callback:func()
 
-    pub init() {
+    public init() {
         self.callback = func() {}
         self.callback = func() { assert(self.value == 7, "constructor self capture keeps the instance alive") }
     }
 
-    pub func invoke() {
+    public func invoke() {
         self.callback()
     }
 }
@@ -174,7 +174,7 @@ func main() {
     assert(game.get_owner().health == 100, "constructors initialize required class fields")
 
     var vault = Vault()
-    assert(vault.read() == 42, "public methods can use private and sub members")
+    assert(vault.read() == 42, "public methods can use private and protected members")
     var copied_vault = Vault()
     copied_vault.copy_from(vault)
     assert(copied_vault.read() == 42, "private fields are visible across instances of the declaring class")

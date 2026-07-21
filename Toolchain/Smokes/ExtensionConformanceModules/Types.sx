@@ -1,11 +1,11 @@
-pub class Sprite {
-    pub var value:int
+public class Sprite {
+    public var value:int
 
-    pub init(value:int) {
+    public init(value:int) {
         self.value = value
     }
 }
 
-pub struct Token {
+public struct Token {
     var value:int
 }

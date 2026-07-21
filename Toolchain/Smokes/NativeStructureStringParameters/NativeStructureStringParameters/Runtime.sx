@@ -1,4 +1,4 @@
-pub struct NativeRequest {
+public struct NativeRequest {
     let path:str
     let label:str
     let empty:str
@@ -7,6 +7,6 @@ pub struct NativeRequest {
 
 native func native_round_trip(request:NativeRequest, sequence:int) NativeRequest
 
-pub func round_trip(request:NativeRequest, sequence:int) NativeRequest {
+public func round_trip(request:NativeRequest, sequence:int) NativeRequest {
     return native_round_trip(request, sequence)
 }

@@ -1,4 +1,4 @@
 use ExtensionConformanceVisibility.Conformance as Conformance
 
-pub func bridge() {
+public func bridge() {
 }

@@ -12,11 +12,11 @@ resource type and its ownership through static generic constraints; they do not
 create a universal stream object.
 
 ```sx
-pub protocol Reader {
+public protocol Reader {
     func read(buffer:&uint8[..]) Result<int,System.Error>
 }
 
-pub protocol Writer {
+public protocol Writer {
     func write(buffer:@uint8[..]) Result<int,System.Error>
 }
 ```
@@ -33,10 +33,10 @@ retain its borrowed view after returning.
 The generic algorithms are:
 
 ```sx
-pub func read_exact<T:Reader>(reader:&T, buffer:&uint8[..]) Result<void,System.Error>
-pub func read_to_end<T:Reader>(reader:&T, maximum_bytes:int) Result<uint8[],System.Error>
-pub func write_all<T:Writer>(writer:&T, buffer:@uint8[..]) Result<void,System.Error>
-pub func copy<R:Reader, W:Writer>(reader:&R, writer:&W, maximum_bytes:int) Result<int,System.Error>
+public func read_exact<T:Reader>(reader:&T, buffer:&uint8[..]) Result<void,System.Error>
+public func read_to_end<T:Reader>(reader:&T, maximum_bytes:int) Result<uint8[],System.Error>
+public func write_all<T:Writer>(writer:&T, buffer:@uint8[..]) Result<void,System.Error>
+public func copy<R:Reader, W:Writer>(reader:&R, writer:&W, maximum_bytes:int) Result<int,System.Error>
 ```
 
 `read_exact` fills the complete view or returns `unexpected_end`. `write_all`

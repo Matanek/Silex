@@ -1,0 +1,9 @@
+use Queues
+
+extend Queues.Queue {
+    public func count() int {
+        return self.values.count()
+    }
+}
+
+func main() {}

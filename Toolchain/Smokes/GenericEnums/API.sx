@@ -1,2 +1,2 @@
-pub use Generic.Core.Outcome
-pub use Generic.Core.Bundle
+public use Generic.Core.Outcome
+public use Generic.Core.Bundle

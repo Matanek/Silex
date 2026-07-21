@@ -5644,7 +5644,7 @@ test "generate deferred callback queue ownership and cancellation" {
     const allocator = arena.allocator();
 
     var parser = Parser.init(allocator,
-        \\pub native resource Watch { drop stop_watch }
+        \\public native resource Watch { drop stop_watch }
         \\native func start_watch(callback:deferred func(int)) Watch
         \\func main() {
         \\    let watch = start_watch(deferred func(value:int) {})
@@ -6149,7 +6149,7 @@ test "generate class references identity access and cycle tracing" {
     const allocator = arena.allocator();
 
     var parser = Parser.init(allocator,
-        \\class Node { var next:Node? = null; pub func clear() { self.next = null } }
+        \\class Node { var next:Node? = null; public func clear() { self.next = null } }
         \\func main() { var first = Node(); var alias = first; alias.clear(); assert(first == alias) }
     );
     var analyzer = Semantic.Analyzer.init(allocator);
@@ -6172,7 +6172,7 @@ test "generate erased protocol storage witnesses and dynamic calls" {
     var parser = Parser.init(allocator,
         \\protocol Drawable { func draw() str }
         \\struct Icon : Drawable { func draw() str { return "icon" } }
-        \\class Player : Drawable { pub func draw() str { return "player" } }
+        \\class Player : Drawable { public func draw() str { return "player" } }
         \\func main() { var value:Drawable = Icon(); value = Player(); print(value.draw()) }
     );
     var analyzer = Semantic.Analyzer.init(allocator);

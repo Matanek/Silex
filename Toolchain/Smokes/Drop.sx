@@ -1,7 +1,7 @@
 class Probe {
     var label:str
 
-    pub init(label:str) {
+    public init(label:str) {
         self.label = label
     }
 
@@ -11,7 +11,7 @@ class Probe {
 }
 
 class CycleProbe {
-    pub var next:CycleProbe? = null
+    public var next:CycleProbe? = null
 
     drop {
         print("cycle")

@@ -1,5 +1,5 @@
 native func native_missing() int
 
-pub func call() int {
+public func call() int {
     return native_missing()
 }

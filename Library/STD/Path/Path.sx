@@ -1,7 +1,7 @@
 use STD.System.Error
 use STD.System.ErrorKind
 
-pub use str as Path
+public use str as Path
 
 native func native_windows_semantics() bool
 native func native_validate(path:Path, windows:bool) NativePathResult
@@ -21,7 +21,7 @@ struct NativePathResult {
     let detail:str
 }
 
-pub func validate(path:Path) Result<void, Error> {
+public func validate(path:Path) Result<void, Error> {
     let result = native_validate(path, native_windows_semantics())
     if !result.succeeded {
         return Result<void, Error>.failure(path_error("path.validate", path, result.detail))
@@ -29,7 +29,7 @@ pub func validate(path:Path) Result<void, Error> {
     return Result<void, Error>.success()
 }
 
-pub func normalize(path:Path) Result<Path, Error> {
+public func normalize(path:Path) Result<Path, Error> {
     let result = native_normalize(path, native_windows_semantics())
     if !result.succeeded {
         return Result<Path, Error>.failure(path_error("path.normalize", path, result.detail))
@@ -37,7 +37,7 @@ pub func normalize(path:Path) Result<Path, Error> {
     return Result<Path, Error>.success(result.text)
 }
 
-pub func join(base:Path, child:Path) Result<Path, Error> {
+public func join(base:Path, child:Path) Result<Path, Error> {
     let result = native_join(base, child, native_windows_semantics())
     if !result.succeeded {
         return Result<Path, Error>.failure(path_error("path.join", base, result.detail))
@@ -45,7 +45,7 @@ pub func join(base:Path, child:Path) Result<Path, Error> {
     return Result<Path, Error>.success(result.text)
 }
 
-pub func parent(path:Path) Result<Path?, Error> {
+public func parent(path:Path) Result<Path?, Error> {
     let result = native_parent(path, native_windows_semantics())
     if !result.succeeded {
         return Result<Path?, Error>.failure(path_error("path.parent", path, result.detail))
@@ -56,7 +56,7 @@ pub func parent(path:Path) Result<Path?, Error> {
     return Result<Path?, Error>.success(null)
 }
 
-pub func name(path:Path) Result<str?, Error> {
+public func name(path:Path) Result<str?, Error> {
     let result = native_name(path, native_windows_semantics())
     if !result.succeeded {
         return Result<str?, Error>.failure(path_error("path.name", path, result.detail))
@@ -67,7 +67,7 @@ pub func name(path:Path) Result<str?, Error> {
     return Result<str?, Error>.success(null)
 }
 
-pub func stem(path:Path) Result<str?, Error> {
+public func stem(path:Path) Result<str?, Error> {
     let result = native_stem(path, native_windows_semantics())
     if !result.succeeded {
         return Result<str?, Error>.failure(path_error("path.stem", path, result.detail))
@@ -78,7 +78,7 @@ pub func stem(path:Path) Result<str?, Error> {
     return Result<str?, Error>.success(null)
 }
 
-pub func extension(path:Path) Result<str?, Error> {
+public func extension(path:Path) Result<str?, Error> {
     let result = native_extension(path, native_windows_semantics())
     if !result.succeeded {
         return Result<str?, Error>.failure(path_error("path.extension", path, result.detail))
@@ -89,7 +89,7 @@ pub func extension(path:Path) Result<str?, Error> {
     return Result<str?, Error>.success(null)
 }
 
-pub func is_absolute(path:Path) Result<bool, Error> {
+public func is_absolute(path:Path) Result<bool, Error> {
     let result = native_is_absolute(path, native_windows_semantics())
     if !result.succeeded {
         return Result<bool, Error>.failure(path_error("path.is_absolute", path, result.detail))

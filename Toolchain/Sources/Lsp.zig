@@ -1522,9 +1522,16 @@ fn collectSemanticInfo(
                     member_index += 1;
                 }
                 if (declaration_index < tokens.len and
-                    (tokens[declaration_index].tag == .keyword_pub or tokens[declaration_index].tag == .keyword_sub))
+                    (tokens[declaration_index].tag == .keyword_private or
+                        tokens[declaration_index].tag == .keyword_protected or
+                        tokens[declaration_index].tag == .keyword_public))
                 {
-                    visibility = if (tokens[declaration_index].tag == .keyword_pub) .public_access else .subclass;
+                    visibility = switch (tokens[declaration_index].tag) {
+                        .keyword_private => .private_access,
+                        .keyword_protected => .subclass,
+                        .keyword_public => .public_access,
+                        else => unreachable,
+                    };
                     declaration_index += 1;
                     member_index += 1;
                 }
@@ -1720,7 +1727,7 @@ fn collectLocalExtensions(
             if (depth != 1) continue;
 
             var declaration_index = member_index;
-            if (tokens[declaration_index].tag == .keyword_pub) declaration_index += 1;
+            if (tokens[declaration_index].tag == .keyword_public) declaration_index += 1;
             var is_static = false;
             if (declaration_index < tokens.len and tokens[declaration_index].tag == .keyword_static) {
                 is_static = true;
@@ -2336,7 +2343,7 @@ fn collectPublicStructureMembers(
         });
         for (structure.fields) |field| {
             if (!structure.is_class and structure.drop != null) continue;
-            if (structure.is_class and field.visibility != .public_access) continue;
+            if (field.visibility != .public_access) continue;
             try info.members.append(allocator, .{
                 .structure = structure.name,
                 .name = field.name,
@@ -2350,7 +2357,7 @@ fn collectPublicStructureMembers(
         }
         for (structure.methods) |method| {
             const visibility = method.member_visibility orelse .public_access;
-            if (structure.is_class and visibility != .public_access) continue;
+            if (visibility != .public_access) continue;
             try info.members.append(allocator, .{
                 .structure = structure.name,
                 .name = method.name,
@@ -3042,8 +3049,9 @@ const language_completions = [_]CompletionItem{
     .{ .label = "move", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "deferred", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "use", .kind = 14, .detail = "Silex keyword" },
-    .{ .label = "pub", .kind = 14, .detail = "Silex keyword" },
-    .{ .label = "sub", .kind = 14, .detail = "Silex keyword" },
+    .{ .label = "private", .kind = 14, .detail = "Silex keyword" },
+    .{ .label = "protected", .kind = 14, .detail = "Silex keyword" },
+    .{ .label = "public", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "as", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "self", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "true", .kind = 14, .detail = "Silex keyword" },
@@ -3083,7 +3091,9 @@ test "completion items include language terms and document identifiers" {
     try std.testing.expect(containsCompletion(items, "override"));
     try std.testing.expect(containsCompletion(items, "static"));
     try std.testing.expect(containsCompletion(items, "super"));
-    try std.testing.expect(containsCompletion(items, "sub"));
+    try std.testing.expect(containsCompletion(items, "private"));
+    try std.testing.expect(containsCompletion(items, "protected"));
+    try std.testing.expect(containsCompletion(items, "public"));
     try std.testing.expect(containsCompletion(items, "elif"));
     try std.testing.expect(containsCompletion(items, "match"));
     try std.testing.expect(containsCompletion(items, "try"));
@@ -3115,7 +3125,7 @@ test "constrained generic completion exposes protocol requirements" {
 test "protocol value completion exposes only protocol requirements" {
     const source =
         \\protocol Drawable { func draw() }
-        \\class Player : Drawable { pub var score:int; pub func draw() {}; pub func jump() {} }
+        \\class Player : Drawable { public var score:int; public func draw() {}; public func jump() {} }
         \\func main() {
         \\    var drawable:Drawable = Player()
         \\    drawable.
@@ -3137,7 +3147,7 @@ test "protocol value completion exposes only protocol requirements" {
 test "member completion infers neutral iteration elements" {
     const source =
         \\protocol Drawable { func draw() }
-        \\class Player : Drawable { pub func draw() {}; pub func jump() {} }
+        \\class Player : Drawable { public func draw() {}; public func jump() {} }
         \\func main() {
         \\    let drawables:Drawable[] = [Player()]
         \\    for drawable in drawables {
@@ -3163,7 +3173,7 @@ test "local extension completion augments a used STD type" {
     const source =
         \\use STD.Randomizer as Randomizer
         \\extend Randomizer {
-        \\    pub func get_uint() uint { return self.get_int() as uint }
+        \\    public func get_uint() uint { return self.get_int() as uint }
         \\    static func seeded() Randomizer { return Randomizer.create(42) }
         \\}
         \\func main() {
@@ -3284,7 +3294,7 @@ test "module completion exposes public native functions" {
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Math/Runtime.sx",
-        .data = "pub native func pow(value:int) int\nnative func native_seed() int\n",
+        .data = "public native func pow(value:int) int\nnative func native_seed() int\n",
     });
 
     const relative_root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
@@ -3745,8 +3755,8 @@ test "member completion recognizes class declarations" {
     const source =
         \\class Player {
         \\    var secret:int = 1
-        \\    sub var energy:int = 50
-        \\    pub var health:int = 100
+        \\    protected var energy:int = 50
+        \\    public var health:int = 100
         \\    func reset() {}
         \\}
         \\func main() {
@@ -4014,8 +4024,8 @@ test "enum completion resolves public used types and module exports" {
 test "cascade completion after a static factory stays instance-only" {
     const source =
         \\class Client {
-        \\    pub static func create() Client { return Client() }
-        \\    pub func connect() {}
+        \\    public static func create() Client { return Client() }
+        \\    public func connect() {}
         \\}
         \\func main() {
         \\    var client = Client.create()..
@@ -4030,13 +4040,13 @@ test "cascade completion after a static factory stays instance-only" {
 test "member completion infers positional class construction and inherited methods" {
     const source =
         \\class Animal {
-        \\    sub var name:str
-        \\    sub init(name:str) { self.name = name }
-        \\    pub func get_name() str { return self.name }
+        \\    protected var name:str
+        \\    protected init(name:str) { self.name = name }
+        \\    public func get_name() str { return self.name }
         \\}
         \\class Dog : Animal {
-        \\    pub init(name:str) : super(name) {}
-        \\    pub func show() {}
+        \\    public init(name:str) : super(name) {}
+        \\    public func show() {}
         \\}
         \\func main() {
         \\    var animal = Dog("Kiki")
@@ -4050,12 +4060,12 @@ test "member completion infers positional class construction and inherited metho
     try std.testing.expect(!containsCompletion(items, "name"));
 }
 
-test "self completion includes private sub and public class members" {
+test "self completion includes private protected and public class members" {
     const source =
         \\class Player {
         \\    var secret:int = 1
-        \\    sub var energy:int = 50
-        \\    pub var health:int = 100
+        \\    protected var energy:int = 50
+        \\    public var health:int = 100
         \\    func reset() {
         \\        print(self.)
         \\    }
@@ -4073,7 +4083,7 @@ test "self completion includes private sub and public class members" {
 test "self completion resolves fields and methods of the enclosing structure" {
     const source =
         \\struct Counter {
-        \\    var value:int
+        \\    private var value:int
         \\
         \\    func current() int {
         \\        return self.
@@ -4084,6 +4094,28 @@ test "self completion resolves fields and methods of the enclosing structure" {
     defer std.testing.allocator.free(items);
     try std.testing.expect(containsCompletion(items, "value"));
     try std.testing.expect(containsCompletion(items, "current"));
+}
+
+test "external struct completion excludes private members" {
+    const source =
+        \\struct Vault {
+        \\    private var secret:int
+        \\    public var visible:int
+        \\    public static func create() Vault { return Vault(secret:1, visible:2) }
+        \\    private func hidden() int { return self.secret }
+        \\    public func read() int { return self.visible }
+        \\}
+        \\func main() {
+        \\    var vault = Vault.create()
+        \\    print(vault.)
+        \\}
+    ;
+    const items = try completionItems(std.testing.allocator, std.testing.io, source, .{ .line = 9, .character = 16 });
+    defer std.testing.allocator.free(items);
+    try std.testing.expect(containsCompletion(items, "visible"));
+    try std.testing.expect(containsCompletion(items, "read"));
+    try std.testing.expect(!containsCompletion(items, "secret"));
+    try std.testing.expect(!containsCompletion(items, "hidden"));
 }
 
 test "self completion resolves the target of a local extension" {
@@ -4128,12 +4160,12 @@ test "self completion resolves a used extension target" {
     try std.testing.expect(containsCompletion(items, "get_uint"));
 }
 
-test "self completion in an extension excludes private and sub class members" {
+test "self completion in an extension excludes private and protected class members" {
     const source =
         \\class Vault {
         \\    var secret:int
-        \\    sub var inherited:int
-        \\    pub var visible:int
+        \\    protected var inherited:int
+        \\    public var visible:int
         \\}
         \\extend Vault {
         \\    func inspect() {

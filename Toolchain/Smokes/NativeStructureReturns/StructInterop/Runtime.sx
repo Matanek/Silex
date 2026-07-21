@@ -1,4 +1,4 @@
-pub struct NativeScalars {
+public struct NativeScalars {
     let integer:int
     let signed8:int8
     let signed16:int16
@@ -14,6 +14,6 @@ pub struct NativeScalars {
 
 native func native_read(seed:int) NativeScalars
 
-pub func read(seed:int) NativeScalars {
+public func read(seed:int) NativeScalars {
     return native_read(seed)
 }

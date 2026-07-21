@@ -1,5 +1,5 @@
 class Client {
-    pub static func create() Client {
+    public static func create() Client {
         return Client()
     }
 }

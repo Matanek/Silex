@@ -1,14 +1,14 @@
-pub enum Status {
+public enum Status {
     idle
     ready(str)
 }
 
-pub enum WireStatus:int {
+public enum WireStatus:int {
     idle = 10
     ready = 20
 }
 
-pub struct Session {
+public struct Session {
     var active:bool = true
 
     static func inactive() Session {
@@ -16,7 +16,7 @@ pub struct Session {
     }
 }
 
-pub struct Pair<T> {
+public struct Pair<T> {
     var first:T
     var second:T
 
@@ -25,42 +25,42 @@ pub struct Pair<T> {
     }
 }
 
-pub use Pair<int> as IntPair
-pub use int[] as Integers
+public use Pair<int> as IntPair
+public use int[] as Integers
 
-pub class Meter {
+public class Meter {
     var value:int
 
-    sub init(value:int) {
+    protected init(value:int) {
         self.value = value
     }
 
-    pub static func create(value:int) Meter {
+    public static func create(value:int) Meter {
         return Meter(value)
     }
 
-    pub func increment() {
+    public func increment() {
         self.value += 1
     }
 
-    pub func current() int {
+    public func current() int {
         return self.value
     }
 }
 
-pub class Counter : Meter {
-    pub init(value:int) : super(value) {}
+public class Counter : Meter {
+    public init(value:int) : super(value) {}
 }
 
-pub func create_session() Session {
+public func create_session() Session {
     return Session()
 }
 
-pub func identity<T>(value:T) T {
+public func identity<T>(value:T) T {
     return value
 }
 
-pub func create_counter() Counter {
+public func create_counter() Counter {
     return Counter(0)
 }
 

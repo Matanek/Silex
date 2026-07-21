@@ -1,39 +1,39 @@
-pub native resource Buffer {
+public native resource Buffer {
     drop destroy_buffer
 }
 
-pub native resource Image {
+public native resource Image {
     drop release_image
 }
 
-pub native resource WindowHandle {
+public native resource WindowHandle {
     drop destroy_window
 }
 
-pub native resource Renderer {
+public native resource Renderer {
     drop destroy_renderer
 }
 
-pub native func create_buffer(value:int) Buffer
-pub native func maybe_buffer(present:bool, value:int) Buffer?
-pub native func try_buffer(succeeds:bool, value:int) Result<Buffer,str>
-pub native func inspect_buffer(buffer:@Buffer) int
-pub native func borrow_buffer(buffer:@Buffer) @Buffer
-pub native func buffer_values(buffer:@Buffer) @int[..]
-pub native func buffer_values_mut(buffer:&Buffer) &int[..]
-pub native func sum_values(values:@int[..]) int
-pub native func increment_values(values:&int[..]) void
-pub native func invalid_negative_view(buffer:@Buffer) @int[..]
-pub native func invalid_null_view(buffer:@Buffer) @int[..]
-pub native func update_buffer(buffer:&Buffer, value:int) void
-pub native func consume_buffer(buffer:Buffer) void
-pub native func live_buffers() int
-pub native func create_window(value:int) WindowHandle
-pub native func create_renderer(window:@WindowHandle) Renderer
-pub native func reset_lifetime_log() void
-pub native func lifetime_log_count() int
-pub native func lifetime_log_at(index:int) int
+public native func create_buffer(value:int) Buffer
+public native func maybe_buffer(present:bool, value:int) Buffer?
+public native func try_buffer(succeeds:bool, value:int) Result<Buffer,str>
+public native func inspect_buffer(buffer:@Buffer) int
+public native func borrow_buffer(buffer:@Buffer) @Buffer
+public native func buffer_values(buffer:@Buffer) @int[..]
+public native func buffer_values_mut(buffer:&Buffer) &int[..]
+public native func sum_values(values:@int[..]) int
+public native func increment_values(values:&int[..]) void
+public native func invalid_negative_view(buffer:@Buffer) @int[..]
+public native func invalid_null_view(buffer:@Buffer) @int[..]
+public native func update_buffer(buffer:&Buffer, value:int) void
+public native func consume_buffer(buffer:Buffer) void
+public native func live_buffers() int
+public native func create_window(value:int) WindowHandle
+public native func create_renderer(window:@WindowHandle) Renderer
+public native func reset_lifetime_log() void
+public native func lifetime_log_count() int
+public native func lifetime_log_at(index:int) int
 
-pub func create_renderer_wrapped(window:@WindowHandle) Renderer {
+public func create_renderer_wrapped(window:@WindowHandle) Renderer {
     return create_renderer(window)
 }

@@ -1,15 +1,15 @@
-pub struct Vec2 {
+public struct Vec2 {
     var x:float
     var y:float
 }
 
-pub struct Vec3 {
+public struct Vec3 {
     var x:float
     var y:float
     var z:float
 }
 
-pub struct Vec4 {
+public struct Vec4 {
     var x:float
     var y:float
     var z:float

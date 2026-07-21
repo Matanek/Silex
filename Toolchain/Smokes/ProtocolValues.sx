@@ -15,9 +15,9 @@ struct Icon : Describable {
 }
 
 class Player : Describable {
-    pub var name:str
+    public var name:str
 
-    pub func describe() str {
+    public func describe() str {
         return self.name
     }
 }
@@ -42,15 +42,15 @@ struct Label {
 class Link : Describable {
     var next:Describable?
 
-    pub init() {
+    public init() {
         self.next = null
     }
 
-    pub func describe() str {
+    public func describe() str {
         return "link"
     }
 
-    pub func connect(other:Describable) {
+    public func connect(other:Describable) {
         self.next = other
     }
 }

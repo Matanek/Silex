@@ -8,13 +8,13 @@ protocol Describable {
     func describe() str
 }
 
-pub protocol Drawable {
+public protocol Drawable {
     func draw()
 }
 ```
 
 Protocols follow ordinary module visibility. A private protocol is available
-inside its module; `pub protocol` can be used, renamed, or re-exported.
+inside its module; `public protocol` can be used, renamed, or re-exported.
 Requirements cannot currently be generic, static, constructors, fields, or
 default implementations. Protocol inheritance and generic protocols are not
 part of the current language.
@@ -33,11 +33,11 @@ struct User : Describable {
 }
 
 class Player : Entity, Describable, Drawable {
-    pub func describe() str {
+    public func describe() str {
         return "player"
     }
 
-    pub func draw() {
+    public func draw() {
     }
 }
 ```
@@ -50,7 +50,7 @@ from structures.
 The compiler verifies every declared conformance, even when no generic code
 uses it. A matching method has the same name, ordered parameter types, `@` or
 `&` markers, and return type. It must be an instance method and public.
-Structure methods are already public; a class implementation therefore writes `pub`.
+Structure methods are already public; a class implementation therefore writes `public`.
 An inherited public class method can satisfy a requirement. A child class also
 inherits every valid conformance of its base class.
 
@@ -71,7 +71,7 @@ An extension may list multiple protocols. Its requirement implementations are
 public instance methods and follow the same signature checks as a conformance
 written in the original type. A method without a visibility marker is public
 for a structure target and private for a class target, so a class implementation
-still requires `pub`. The conformance applies to the exact target only; unlike
+still requires `public`. The conformance applies to the exact target only; unlike
 a conformance in a class declaration, it is not inherited by descendant
 classes. One type-protocol pair has only one conformance provider throughout a
 compilation. See [Type extensions](Extensions.md#protocol-conformances) for

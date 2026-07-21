@@ -1,15 +1,15 @@
 use STD.System.Error
 use STD.System.ErrorKind
 
-pub protocol Reader {
+public protocol Reader {
     func read(buffer:&uint8[..]) Result<int, Error>
 }
 
-pub protocol Writer {
+public protocol Writer {
     func write(buffer:@uint8[..]) Result<int, Error>
 }
 
-pub func read_exact<T:Reader>(reader:&T, buffer:&uint8[..]) Result<void, Error> {
+public func read_exact<T:Reader>(reader:&T, buffer:&uint8[..]) Result<void, Error> {
     var offset = 0
     while offset < buffer.count() {
         let remaining_count = buffer.count() - offset
@@ -34,7 +34,7 @@ pub func read_exact<T:Reader>(reader:&T, buffer:&uint8[..]) Result<void, Error> 
     return Result<void, Error>.success()
 }
 
-pub func read_to_end<T:Reader>(reader:&T, maximum_bytes:int) Result<uint8[], Error> {
+public func read_to_end<T:Reader>(reader:&T, maximum_bytes:int) Result<uint8[], Error> {
     if maximum_bytes < 0 {
         return Result<uint8[], Error>.failure(invalid_limit("io.read_to_end"))
     }
@@ -69,7 +69,7 @@ pub func read_to_end<T:Reader>(reader:&T, maximum_bytes:int) Result<uint8[], Err
     panic("read_to_end loop terminated unexpectedly")
 }
 
-pub func write_all<T:Writer>(writer:&T, buffer:@uint8[..]) Result<void, Error> {
+public func write_all<T:Writer>(writer:&T, buffer:@uint8[..]) Result<void, Error> {
     var offset = 0
     while offset < buffer.count() {
         let remaining_count = buffer.count() - offset
@@ -90,7 +90,7 @@ pub func write_all<T:Writer>(writer:&T, buffer:@uint8[..]) Result<void, Error> {
     return Result<void, Error>.success()
 }
 
-pub func copy<R:Reader, W:Writer>(reader:&R, writer:&W, maximum_bytes:int) Result<int, Error> {
+public func copy<R:Reader, W:Writer>(reader:&R, writer:&W, maximum_bytes:int) Result<int, Error> {
     if maximum_bytes < 0 {
         return Result<int, Error>.failure(invalid_limit("io.copy"))
     }

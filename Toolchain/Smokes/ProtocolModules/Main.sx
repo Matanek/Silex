@@ -5,7 +5,7 @@ use Core.RemoteUser
 use Core.name_of
 
 class LocalUser : Named {
-    pub func name() str {
+    public func name() str {
         return "local"
     }
 }

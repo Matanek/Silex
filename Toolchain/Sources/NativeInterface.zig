@@ -1084,7 +1084,7 @@ test "native headers expose deferred callbacks with the synchronous C shape" {
     const allocator = arena.allocator();
 
     var parser = Parser.init(allocator,
-        \\pub native resource Watch { drop stop_watch }
+        \\public native resource Watch { drop stop_watch }
         \\native func start_watch(callback:deferred func(int)) Watch
         \\func main() {}
     );

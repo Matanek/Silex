@@ -23,11 +23,11 @@ extend Counter {
 }
 
 extend Box {
-    pub func keep<T>(value:T) T {
+    public func keep<T>(value:T) T {
         return value
     }
 
-    pub func doubled() int {
+    public func doubled() int {
         return self.value * 2
     }
 }

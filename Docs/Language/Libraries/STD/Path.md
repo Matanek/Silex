@@ -18,14 +18,14 @@ roots have the form `C:/` or `//server/share/`; letter case is preserved.
 The module provides:
 
 ```sx
-pub func validate(path:Path) Result<void,System.Error>
-pub func normalize(path:Path) Result<Path,System.Error>
-pub func join(base:Path, child:Path) Result<Path,System.Error>
-pub func parent(path:Path) Result<Path?,System.Error>
-pub func name(path:Path) Result<str?,System.Error>
-pub func stem(path:Path) Result<str?,System.Error>
-pub func extension(path:Path) Result<str?,System.Error>
-pub func is_absolute(path:Path) Result<bool,System.Error>
+public func validate(path:Path) Result<void,System.Error>
+public func normalize(path:Path) Result<Path,System.Error>
+public func join(base:Path, child:Path) Result<Path,System.Error>
+public func parent(path:Path) Result<Path?,System.Error>
+public func name(path:Path) Result<str?,System.Error>
+public func stem(path:Path) Result<str?,System.Error>
+public func extension(path:Path) Result<str?,System.Error>
+public func is_absolute(path:Path) Result<bool,System.Error>
 ```
 
 `normalize` is lexical. It condenses separators, removes `.`, resolves `..`

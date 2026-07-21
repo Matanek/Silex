@@ -1,4 +1,4 @@
-pub struct Vec3<T> {
+public struct Vec3<T> {
     var x:T
     var y:T
     var z:T
@@ -6,4 +6,4 @@ pub struct Vec3<T> {
     func reset() {}
 }
 
-pub use Vec3<int> as Vec3i
+public use Vec3<int> as Vec3i

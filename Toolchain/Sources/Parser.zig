@@ -37,7 +37,7 @@ pub const Parser = struct {
                 return self.rejectImport();
             } else if (self.current.tag == .keyword_use) {
                 try uses.append(self.allocator, try self.parseUse(false));
-            } else if (self.current.tag == .keyword_pub) {
+            } else if (self.current.tag == .keyword_public) {
                 try self.advance();
                 if (self.current.tag == .keyword_use) {
                     try uses.append(self.allocator, try self.parseUse(true));
@@ -58,7 +58,7 @@ pub const Parser = struct {
                     } else {
                         try functions.append(self.allocator, try self.parseNativeFunctionAfterNative(true));
                     }
-                } else return self.fail("expected 'enum', 'protocol', 'struct', 'class', 'func', 'native func', 'native resource', or 'use' after 'pub'");
+                } else return self.fail("expected 'enum', 'protocol', 'struct', 'class', 'func', 'native func', 'native resource', or 'use' after 'public'");
             } else if (self.current.tag == .keyword_enum) {
                 try enums.append(self.allocator, try self.parseEnum(false));
             } else if (self.current.tag == .keyword_protocol) {
@@ -117,9 +117,10 @@ pub const Parser = struct {
         try self.expect(.left_brace, "expected '{' after extended type");
         var methods: std.ArrayList(Ast.Function) = .empty;
         while (self.current.tag != .right_brace and self.current.tag != .end) {
-            if (self.current.tag == .keyword_sub) return self.fail("an extension method cannot use 'sub'");
+            if (self.current.tag == .keyword_protected) return self.fail("an extension method cannot use 'protected'");
+            if (self.current.tag == .keyword_private) return self.fail("an extension method cannot use 'private'");
             if (self.current.tag == .keyword_override) return self.fail("an extension method cannot use 'override'");
-            const is_public = self.current.tag == .keyword_pub;
+            const is_public = self.current.tag == .keyword_public;
             if (is_public) try self.advance();
             const is_static = self.current.tag == .keyword_static;
             if (is_static) try self.advance();
@@ -377,10 +378,19 @@ pub const Parser = struct {
                 try self.advance();
             }
             var visibility: Ast.MemberVisibility = if (is_class) .private_access else .public_access;
-            const has_visibility = self.current.tag == .keyword_pub or self.current.tag == .keyword_sub;
+            const has_visibility = self.current.tag == .keyword_private or
+                self.current.tag == .keyword_protected or
+                self.current.tag == .keyword_public;
             if (has_visibility) {
-                if (!is_class) return self.fail("struct members are already public and do not accept visibility modifiers");
-                visibility = if (self.current.tag == .keyword_pub) .public_access else .subclass;
+                if (!is_class and self.current.tag == .keyword_protected) {
+                    return self.fail("a struct member cannot use 'protected' because structs do not support inheritance");
+                }
+                visibility = switch (self.current.tag) {
+                    .keyword_private => .private_access,
+                    .keyword_protected => .subclass,
+                    .keyword_public => .public_access,
+                    else => unreachable,
+                };
                 try self.advance();
             }
             if (self.current.tag == .keyword_override) return self.fail("'override' must precede the method visibility");
@@ -2465,10 +2475,11 @@ test "parse class declarations with the structure member grammar" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     var parser = Parser.init(arena.allocator(),
-        \\pub class Player {
-        \\    pub var health:int = 100
-        \\    sub var velocity:int = 0
-        \\    pub func damage(amount:int) { self.health -= amount }
+        \\public class Player {
+        \\    private var id:int = 0
+        \\    public var health:int = 100
+        \\    protected var velocity:int = 0
+        \\    public func damage(amount:int) { self.health -= amount }
         \\}
         \\func main() {}
     );
@@ -2476,11 +2487,12 @@ test "parse class declarations with the structure member grammar" {
     try std.testing.expectEqual(@as(usize, 1), program.structures.len);
     try std.testing.expect(program.structures[0].is_public);
     try std.testing.expect(program.structures[0].is_class);
-    try std.testing.expectEqual(Ast.MemberVisibility.public_access, program.structures[0].fields[0].visibility);
-    try std.testing.expectEqual(Ast.MemberVisibility.subclass, program.structures[0].fields[1].visibility);
+    try std.testing.expectEqual(Ast.MemberVisibility.private_access, program.structures[0].fields[0].visibility);
+    try std.testing.expectEqual(Ast.MemberVisibility.public_access, program.structures[0].fields[1].visibility);
+    try std.testing.expectEqual(Ast.MemberVisibility.subclass, program.structures[0].fields[2].visibility);
     try std.testing.expectEqual(Ast.MemberVisibility.public_access, program.structures[0].methods[0].member_visibility.?);
     try std.testing.expectEqualStrings("Player", program.structures[0].name);
-    try std.testing.expectEqual(@as(usize, 2), program.structures[0].fields.len);
+    try std.testing.expectEqual(@as(usize, 3), program.structures[0].fields.len);
     try std.testing.expectEqual(@as(usize, 1), program.structures[0].methods.len);
 }
 
@@ -2490,15 +2502,17 @@ test "parse visible overloaded class constructors" {
     var parser = Parser.init(arena.allocator(),
         \\class Session {
         \\    var token:str
-        \\    pub init() { self.token = "" }
-        \\    sub init(token:str) { self.token = token }
+        \\    public init() { self.token = "" }
+        \\    protected init(token:str) { self.token = token }
+        \\    private init(token:str, attempts:int) { self.token = token }
         \\}
         \\func main() {}
     );
     const program = try parser.parse();
-    try std.testing.expectEqual(@as(usize, 2), program.structures[0].constructors.len);
+    try std.testing.expectEqual(@as(usize, 3), program.structures[0].constructors.len);
     try std.testing.expectEqual(Ast.MemberVisibility.public_access, program.structures[0].constructors[0].visibility);
     try std.testing.expectEqual(Ast.MemberVisibility.subclass, program.structures[0].constructors[1].visibility);
+    try std.testing.expectEqual(Ast.MemberVisibility.private_access, program.structures[0].constructors[2].visibility);
     try std.testing.expectEqual(@as(usize, 1), program.structures[0].constructors[1].parameters.len);
 }
 
@@ -2527,8 +2541,9 @@ test "reject invalid drop declarations and explicit calls" {
     const cases = [_]struct { source: []const u8, message: []const u8 }{
         .{ .source = "class Value { drop {} drop {} } func main() {}", .message = "a class can declare only one 'drop' block" },
         .{ .source = "struct Value { drop {} drop {} } func main() {}", .message = "a struct can declare only one 'drop' block" },
-        .{ .source = "class Value { pub drop {} } func main() {}", .message = "'drop' does not accept a visibility modifier" },
-        .{ .source = "class Value { sub drop {} } func main() {}", .message = "'drop' does not accept a visibility modifier" },
+        .{ .source = "class Value { public drop {} } func main() {}", .message = "'drop' does not accept a visibility modifier" },
+        .{ .source = "class Value { protected drop {} } func main() {}", .message = "'drop' does not accept a visibility modifier" },
+        .{ .source = "class Value { private drop {} } func main() {}", .message = "'drop' does not accept a visibility modifier" },
         .{ .source = "class Value { override drop {} } func main() {}", .message = "'override' cannot apply to 'drop'" },
         .{ .source = "class Value { drop() {} } func main() {}", .message = "'drop' must be followed by a block" },
         .{ .source = "class Value {} func main() { var value = Value(); value.drop() }", .message = "expected field name after '.'" },
@@ -2546,9 +2561,9 @@ test "parse class base and constructor super call" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     var parser = Parser.init(arena.allocator(),
-        \\class Entity { sub init(id:int) {} }
+        \\class Entity { protected init(id:int) {} }
         \\class Player : Entity {
-        \\    pub init(id:int, name:str) : super(id) {}
+        \\    public init(id:int, name:str) : super(id) {}
         \\}
         \\func main() {}
     );
@@ -2571,7 +2586,7 @@ test "parse protocols structure conformances and generic constraints" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     var parser = Parser.init(arena.allocator(),
-        \\pub protocol Describable {
+        \\public protocol Describable {
         \\    func describe() str
         \\    func write(value:&str)
         \\}
@@ -2614,14 +2629,31 @@ test "reject constructors on structs" {
     try std.testing.expectEqualStrings("custom constructors are available only in classes", parser.diagnostic.?.message);
 }
 
-test "reject class visibility modifiers on struct members" {
+test "parse struct visibility and reject protected members" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
-    var parser = Parser.init(arena.allocator(), "struct Position { pub var x:int } func main() {}");
-    try std.testing.expectError(error.InvalidSource, parser.parse());
+    var parser = Parser.init(arena.allocator(),
+        \\struct Position {
+        \\    private var x:int
+        \\    public var y:int
+        \\    var z:int
+        \\    private static var count:int
+        \\    public func read() int { return self.y }
+        \\}
+        \\func main() {}
+    );
+    const program = try parser.parse();
+    try std.testing.expectEqual(Ast.MemberVisibility.private_access, program.structures[0].fields[0].visibility);
+    try std.testing.expectEqual(Ast.MemberVisibility.public_access, program.structures[0].fields[1].visibility);
+    try std.testing.expectEqual(Ast.MemberVisibility.public_access, program.structures[0].fields[2].visibility);
+    try std.testing.expectEqual(Ast.MemberVisibility.private_access, program.structures[0].fields[3].visibility);
+    try std.testing.expectEqual(Ast.MemberVisibility.public_access, program.structures[0].methods[0].member_visibility.?);
+
+    var protected_member = Parser.init(arena.allocator(), "struct Position { protected var x:int } func main() {}");
+    try std.testing.expectError(error.InvalidSource, protected_member.parse());
     try std.testing.expectEqualStrings(
-        "struct members are already public and do not accept visibility modifiers",
-        parser.diagnostic.?.message,
+        "a struct member cannot use 'protected' because structs do not support inheritance",
+        protected_member.diagnostic.?.message,
     );
 }
 
@@ -2921,7 +2953,7 @@ test "parse public and private native functions" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     var parser = Parser.init(arena.allocator(),
-        \\pub native func pow(value:int) int
+        \\public native func pow(value:int) int
         \\native func native_seed() int
     );
     const program = try parser.parse();
@@ -2939,7 +2971,7 @@ test "parse public and private opaque native resources" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     var parser = Parser.init(arena.allocator(),
-        \\pub native resource Buffer {
+        \\public native resource Buffer {
         \\    drop destroy_buffer
         \\}
         \\native resource Image { drop release_image }
@@ -3039,9 +3071,9 @@ test "parse override methods and direct super calls" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     var parser = Parser.init(arena.allocator(),
-        \\class Base { sub func update(value:int) int { return value } }
+        \\class Base { protected func update(value:int) int { return value } }
         \\class Child : Base {
-        \\    override pub func update(value:int) int { return super.update(value) }
+        \\    override public func update(value:int) int { return super.update(value) }
         \\}
         \\func main() {}
     );
@@ -3075,7 +3107,7 @@ test "parse static methods and generic static calls" {
 test "reject override on static method" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
-    var parser = Parser.init(arena.allocator(), "class Factory { override pub static func create() {} }");
+    var parser = Parser.init(arena.allocator(), "class Factory { override public static func create() {} }");
     try std.testing.expectError(error.InvalidSource, parser.parse());
     try std.testing.expectEqualStrings("a static method cannot use 'override'", parser.diagnostic.?.message);
 }
@@ -3102,7 +3134,7 @@ test "parse static fields and generic static field access" {
 test "override must precede method visibility" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
-    var parser = Parser.init(arena.allocator(), "class Child { pub override func update() {} }");
+    var parser = Parser.init(arena.allocator(), "class Child { public override func update() {} }");
     try std.testing.expectError(error.InvalidSource, parser.parse());
     try std.testing.expectEqualStrings("'override' must precede the method visibility", parser.diagnostic.?.message);
 }
@@ -3457,7 +3489,7 @@ test "parse type extensions and reject stateful members" {
     defer arena.deinit();
     var parser = Parser.init(arena.allocator(),
         \\extend STD.Randomizer {
-        \\    pub func get_uint() uint { return self.get_int() as uint }
+        \\    public func get_uint() uint { return self.get_int() as uint }
         \\    static func seeded() Randomizer { return Randomizer.create() }
         \\}
         \\func main() {}
@@ -3473,7 +3505,7 @@ test "parse type extensions and reject stateful members" {
 
     var generic_method = Parser.init(arena.allocator(),
         \\extend Randomizer {
-        \\    pub func choose<T>(values:@T[..]) @values:T { return @values[0] }
+        \\    public func choose<T>(values:@T[..]) @values:T { return @values[0] }
         \\    func select<Key, Value:Comparable>(key:Key, fallback:Value?) Value? { return fallback }
         \\}
         \\func main() {}
@@ -3491,9 +3523,13 @@ test "parse type extensions and reject stateful members" {
     try std.testing.expectError(error.InvalidSource, field.parse());
     try std.testing.expectEqualStrings("an extension cannot declare a field", field.diagnostic.?.message);
 
-    var subclass = Parser.init(arena.allocator(), "extend Randomizer { sub func next() {} } func main() {}");
+    var subclass = Parser.init(arena.allocator(), "extend Randomizer { protected func next() {} } func main() {}");
     try std.testing.expectError(error.InvalidSource, subclass.parse());
-    try std.testing.expectEqualStrings("an extension method cannot use 'sub'", subclass.diagnostic.?.message);
+    try std.testing.expectEqualStrings("an extension method cannot use 'protected'", subclass.diagnostic.?.message);
+
+    var private_method = Parser.init(arena.allocator(), "extend Randomizer { private func next() {} } func main() {}");
+    try std.testing.expectError(error.InvalidSource, private_method.parse());
+    try std.testing.expectEqualStrings("an extension method cannot use 'private'", private_method.diagnostic.?.message);
 
     var constructor = Parser.init(arena.allocator(), "extend Randomizer { init() {} } func main() {}");
     try std.testing.expectError(error.InvalidSource, constructor.parse());
@@ -3517,7 +3553,7 @@ test "parse protocol conformances on a type extension" {
     defer arena.deinit();
     var parser = Parser.init(arena.allocator(),
         \\extend Sprite : Drawable, UI.Renderable {
-        \\    pub func draw() {}
+        \\    public func draw() {}
         \\}
         \\func main() {}
     );

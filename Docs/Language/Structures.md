@@ -2,9 +2,10 @@
 
 A `struct` is a nominal value type with typed fields and optional field
 defaults. Its fields and methods are public by default, except for the storage
-of a unique resource structure described below; class-only member markers
-`pub` and `sub` are not written in a structure. Every field starts with `let`
-or `var`; the older `name:type` form is invalid.
+of a unique resource structure described below. A member may write `public`
+explicitly or use `private` to reserve access to the declaring structure;
+`protected` is unavailable because structures do not support inheritance.
+Every field starts with `let` or `var`; the older `name:type` form is invalid.
 
 ```sx
 struct Position {
@@ -21,6 +22,30 @@ allowed, including in a multiline initializer, and a field value may itself be
 another initializer. `Position()` supplies no field explicitly. Omitted fields
 use an explicit default first, then the intrinsic value of their type. Unknown,
 repeated, and incompatible field values are rejected.
+
+If a structure declares at least one private instance field, its complete
+named initializer is private too. Only methods and static methods declared
+directly in that structure may invoke it; neighboring functions, extensions,
+other types, and other modules construct the value through a public factory:
+
+```sx
+public struct Queue {
+    private var values:int[]
+    private var head:int
+
+    public static func create() Queue {
+        return Queue(values:[], head:0)
+    }
+
+    public func count() int {
+        return self.values.count() - self.head
+    }
+}
+```
+
+A private field remains part of the value's layout, copying, equality, and
+destruction. A private static field does not close the instance initializer.
+Extensions never gain private access, including inside the declaring module.
 
 Arguments are either all positional or all named. Positional arguments invoke a
 function or callable value and cannot initialize a structure; named fields
@@ -150,14 +175,19 @@ instances; retained class references and cycles are therefore released under
 the ordinary `drop` and cycle-collection rules. Silex currently provides no
 concurrency model, atomic access, or implicit synchronization for this storage.
 
-Structure static fields are public and do not accept `pub` or `sub`. Class
-visibility and inheritance rules are described in [Classes](Classes.md).
+Structure static fields are public by default and accept explicit `public` or
+`private`. Class visibility and inheritance rules are described in
+[Classes](Classes.md).
 
 ## Methods
 
 Methods declare `self` explicitly. A method becomes mutating if it writes
 through `self` or calls another mutating method on it. This property propagates
 through recursive calls; a mutating method requires a `var` receiver.
+
+Structure methods are public by default. `private func` reserves an instance
+method to the declaring structure, while `private static func` does the same
+for a static method. `public` may always be written explicitly.
 
 ```sx
 struct Counter {
@@ -232,7 +262,7 @@ ordinary value-copy semantics described above.
 native func native_file_open(path:str) int
 native func native_file_close(handle:int)
 
-pub struct File {
+public struct File {
     let handle:int
     let path:str
 

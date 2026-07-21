@@ -2,6 +2,6 @@ use ExtensionConformanceVisibility.Core as Core
 use ExtensionConformanceVisibility.Types as Types
 
 extend Types.Sprite : Core.Drawable {
-    pub func draw() {
+    public func draw() {
     }
 }

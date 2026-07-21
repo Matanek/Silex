@@ -6,7 +6,7 @@ use Core.Box
 use STD.Randomizer as Randomizer
 
 extend Randomizer {
-    pub func get_uint() uint {
+    public func get_uint() uint {
         return self.get_int() as uint
     }
 }

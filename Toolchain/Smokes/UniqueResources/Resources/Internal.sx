@@ -1,4 +1,4 @@
-pub func internal_access(label:int) {
+public func internal_access(label:int) {
     let resource = Resource(handle:native_open(label), label:label)
     print(resource.handle)
 }

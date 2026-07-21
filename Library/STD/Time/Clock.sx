@@ -1,6 +1,6 @@
 use Internal
 
-pub struct Clock {
+public struct Clock {
     var last_microseconds:int
     var pending_seconds:float
     var total_seconds:float

@@ -8,11 +8,11 @@ The target may be local or selected with `use`:
 use STD.Randomizer as Randomizer
 
 extend Randomizer {
-    pub func get_uint() uint {
+    public func get_uint() uint {
         return self.get_int() as uint
     }
 
-    pub static func seeded(seed:int) Randomizer {
+    public static func seeded(seed:int) Randomizer {
         return Randomizer.create(seed)
     }
 }
@@ -41,7 +41,7 @@ signature and body are specialized before ordinary overload selection:
 
 ```sx
 extend Randomizer {
-    pub func choose<T>(values:@T[..]) @T {
+    public func choose<T>(values:@T[..]) @T {
         return Algorithms.choose<T>(self, values)
     }
 }
@@ -85,7 +85,7 @@ generic constraint wherever that extension is active. Requirement methods must
 be public instance methods with the ordinary matching signature. They may
 already belong to the target or be declared in an extension. An unmarked
 extension method follows its target's member default: public for a structure
-and private for a class. A class extension therefore writes `pub func` when its
+and private for a class. A class extension therefore writes `public func` when its
 method satisfies a protocol requirement.
 
 A conformance extension applies only to its exact nominal target. A class
@@ -104,7 +104,7 @@ unambiguous.
 An unmarked method takes the target's default member visibility. A structure
 extension method is therefore public and becomes active in a source file that
 directly selects its declaring module or source unit. A class extension method
-remains private to that module unless it uses `pub`. The explicit marker
+remains private to that module unless it uses `public`. The explicit marker
 remains accepted for structure extensions even though it is redundant there:
 
 ```sx
@@ -124,7 +124,7 @@ module, unit, or declaration it wants directly, following the ordinary
 file-scoped dependency rules.
 
 An extension has the access rights of an outside caller. Its body can use only
-the target's `pub` members, never private or `sub` members, even when the
+the target's `public` members, never private or `protected` members, even when the
 extension is declared in the module that owns the type.
 
 ## Coherence and limits
@@ -136,7 +136,7 @@ the diagnostic names both extension modules instead of choosing according to
 source or dependency order. Different signatures remain ordinary overloads.
 
 Extensions add behavior only. They cannot declare fields, constructors,
-`drop`, `override`, or `sub` members. Names after `:` must be protocols and can
+`drop`, `override`, or `protected` members. Names after `:` must be protocols and can
 never add a base class. Extensions cannot target an enum, protocol, scalar,
 collection, generic type, or one specialization of a generic type. Generic
 methods remain unavailable directly in a structure or class, as static

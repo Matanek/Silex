@@ -23,13 +23,13 @@ struct Description<T : Describable> {
 }
 
 class Entity {
-    pub func describe() str {
+    public func describe() str {
         return "player"
     }
 }
 
 class Player : Entity, Describable, Drawable {
-    pub func draw() {
+    public func draw() {
         print("draw")
     }
 }

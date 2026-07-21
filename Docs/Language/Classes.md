@@ -12,11 +12,11 @@ reverse declaration order.
 class Player {
     var health:int = 100
 
-    pub func take_damage(amount:int) {
+    public func take_damage(amount:int) {
         self.health -= amount
     }
 
-    pub func get_health() int {
+    public func get_health() int {
         return self.health
     }
 }
@@ -34,7 +34,7 @@ starts with `let` or `var`.
 Construction is explicit: a non-optional declaration such as
 `var player:Player` is invalid, because a class has no intrinsic instance.
 `var player:Player?` is valid and starts as `null` under the ordinary
-optional-value rules. A class may be declared `pub`.
+optional-value rules. A class may be declared `public`.
 
 ## Constructors
 
@@ -46,16 +46,16 @@ class Session {
     var token:str
     var attempts:int = 1
 
-    pub init(token:str) {
+    public init(token:str) {
         self.token = token
     }
 
-    pub init(token:str, attempts:int) {
+    public init(token:str, attempts:int) {
         self.token = token
         self.attempts = attempts
     }
 
-    pub func get_token() str {
+    public func get_token() str {
         return self.token
     }
 }
@@ -65,8 +65,9 @@ var retried = Session("def", 3)
 ```
 
 Constructor arguments are positional and overload selection follows function
-rules. A constructor is private without a marker, `sub` for the declaring class
-and future descendants, and `pub` for ordinary callers. It cannot be invoked as
+rules. A constructor is private without a marker or with explicit `private`,
+`protected` for the declaring class and future descendants, and `public` for
+ordinary callers. It cannot be invoked as
 an instance method or return a value.
 
 Before the constructor body, every `var` field receives its declared default or
@@ -87,7 +88,7 @@ missing overloads:
 class Session {
     var token:str
 
-    pub init(token:str) {
+    public init(token:str) {
         self.token = token
     }
 }
@@ -105,7 +106,8 @@ constructors.
 
 `static func` declares a function attached to a class rather than to one of its
 instances. Visibility precedes `static`; the canonical forms are
-`pub static func`, `sub static func`, and the unmarked private form:
+`public static func`, `protected static func`, and `private static func` or the
+unmarked private form:
 
 ```sx
 class Session {
@@ -115,7 +117,7 @@ class Session {
         self.token = token
     }
 
-    pub static func open(token:str) Session {
+    public static func open(token:str) Session {
         return Session(token)
     }
 }
@@ -137,10 +139,10 @@ receiver and static methods are never candidates after `..`.
 ## Static fields
 
 Class storage uses the canonical forms `static var shared:Session?`,
-`pub static let limit:int = 10`, and `sub static var count:int`. Like every
+`public static let limit:int = 10`, and `protected static var count:int`. Like every
 class member, a static field is private without a marker. It is accessed only
 through the exact type that declares it and is not inherited. A descendant may
-use an accessible `sub` field by explicitly qualifying that declaring type.
+use an accessible `protected` field by explicitly qualifying that declaring type.
 
 ```sx
 class Services {
@@ -148,7 +150,7 @@ class Services {
 
     init() {}
 
-    pub static func instance() Services {
+    public static func instance() Services {
         if var current = Services.shared {
             return current
         }
@@ -176,13 +178,13 @@ object:
 
 ```sx
 class Entity {
-    sub var position:int
+    protected var position:int
 
-    sub init(position:int) {
+    protected init(position:int) {
         self.position = position
     }
 
-    pub func advance(delta:int) {
+    public func advance(delta:int) {
         self.position += delta
     }
 }
@@ -190,7 +192,7 @@ class Entity {
 class Player : Entity {
     var name:str
 
-    pub init(name:str, position:int) : super(position) {
+    public init(name:str, position:int) : super(position) {
         self.name = name
     }
 }
@@ -215,23 +217,23 @@ class Icon : Drawable {
 See [Protocols](Protocols.md) for the nominal conformance and method-signature
 rules.
 
-The `: super(...)` suffix selects a `sub` or `pub` constructor of the immediate
+The `: super(...)` suffix selects a `protected` or `public` constructor of the immediate
 base with positional overload rules. A private base constructor is not
 accessible. Omitting the suffix means `: super()` and is valid only when the
 base has an accessible zero-argument construction. The complete base is built
 before the child's declared field values and constructor body. Base
 constructors are never inherited as constructors of the child. Only the
 constructor of the class that declares a `let` field may initialize it; a child
-may read an inherited `sub let` field but cannot replace it.
+may read an inherited `protected let` field but cannot replace it.
 
 When a base has no custom constructor, `super()` uses its historical field
 construction only if every required base field has a declared or intrinsic
 value. A child without custom constructors keeps the named initializer for its
-own `pub` fields when that same base construction is available. Inherited
+own `public` fields when that same base construction is available. Inherited
 fields never become named arguments of the child initializer.
 
-An inherited `pub` method remains available through the child. Code in a child
-may also use `sub` fields and methods declared anywhere in its base chain,
+An inherited `public` method remains available through the child. Code in a child
+may also use `protected` fields and methods declared anywhere in its base chain,
 including through another instance from that hierarchy. Private members remain
 exclusive to their declaring class. A child field cannot reuse an inherited
 field name. An identical accessible inherited method signature requires the
@@ -260,21 +262,21 @@ collection is created.
 
 ## Method overriding and dynamic dispatch
 
-Every `sub` or `pub` instance method can be overridden. The child writes
+Every `protected` or `public` instance method can be overridden. The child writes
 `override` before the visibility marker, and keeps the same ordered parameter
 types, `&` markers, and return type. An override cannot reduce visibility: a
-`pub` method remains `pub`, while a `sub` method may remain `sub` or become
-`pub`. The base method needs no prior marker such as `virtual`.
+`public` method remains `public`, while a `protected` method may remain `protected` or become
+`public`. The base method needs no prior marker such as `virtual`.
 
 ```sx
 class Entity {
-    pub func update() {
+    public func update() {
         print("entity")
     }
 }
 
 class Player : Entity {
-    override pub func update() {
+    override public func update() {
         super.update()
         print("player")
     }
@@ -307,32 +309,32 @@ Every class field and method is private by default. A private member is
 accessible from methods of its declaring class, including through another
 instance of that same class, but not from other code in the module.
 
-For an instance field, visibility precedes mutability: `pub var name:str`,
-`sub let generation:int`, or the private form `let id:int`. For a static field,
-visibility precedes `static`: `pub static var count:int` or
-`sub static let limit:int = 10`.
+For an instance field, visibility precedes mutability: `public var name:str`,
+`protected let generation:int`, or `private let id:int`. For a static field,
+visibility precedes `static`: `public static var count:int`,
+`protected static let limit:int = 10`, or `private static var cache:int`.
 
-`pub` exposes a member everywhere the class is visible. `sub` reserves a member
+`public` exposes a member everywhere the class is visible. `protected` reserves a member
 for its declaring class and descendants:
 
 ```sx
-pub class Session {
+public class Session {
     var secret:str = ""
-    sub var generation:int = 0
-    pub var token:str
+    protected var generation:int = 0
+    public var token:str
 
-    pub func reset_from(other:Session) {
+    public func reset_from(other:Session) {
         self.secret = other.secret
         self.generation = other.generation
     }
 }
 ```
 
-There is no explicit `private` keyword: the absence of a marker is the
-canonical private form.
+The absence of a marker remains private. The explicit `private` form is also
+accepted so classes and structures share one visibility vocabulary.
 
-A named initializer is also an external member access. It can name only `pub`
-fields, while private and `sub` fields must obtain their declared defaults:
+A named initializer is also an external member access. It can name only `public`
+fields, while private and `protected` fields must obtain their declared defaults:
 
 ```sx
 var session = Session(token:"abc") // accepted
@@ -340,8 +342,8 @@ Session(secret:"abc", token:"def") // rejected: secret is private
 ```
 
 A private required field without a default can be established by a visible
-custom constructor. Structure members remain public by default; `pub` and
-`sub` member markers are specific to classes.
+custom constructor. Structure members remain public by default but accept
+explicit `private` and `public`; only `protected` remains specific to classes.
 
 ## Bindings and shared mutation
 
@@ -397,7 +399,7 @@ A class may declare one automatic `drop` block for native resources:
 class Texture {
     var handle:SDL.Texture
 
-    pub init(renderer:Renderer) {
+    public init(renderer:Renderer) {
         self.handle = SDL.create_texture(renderer.get_handle())
     }
 

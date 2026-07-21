@@ -1,5 +1,5 @@
 native func native_answer() int
 
-pub func answer() int {
+public func answer() int {
     return native_answer()
 }

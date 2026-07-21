@@ -1,16 +1,16 @@
-pub protocol Drawable {
+public protocol Drawable {
     func draw() int
 }
 
-pub protocol Named {
+public protocol Named {
     func name() str
 }
 
-pub func render<T : Drawable>(value:T) int {
+public func render<T : Drawable>(value:T) int {
     return value.draw()
 }
 
-pub struct Renderer<T : Drawable> {
+public struct Renderer<T : Drawable> {
     var value:T
 
     func render() int {

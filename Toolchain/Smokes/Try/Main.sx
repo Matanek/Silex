@@ -9,7 +9,7 @@ use ReadError as TargetError
 class ScopeProbe {
     let label:str
 
-    pub init(label:str) {
+    public init(label:str) {
         self.label = label
     }
 

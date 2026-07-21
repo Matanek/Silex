@@ -1,0 +1,5 @@
+use Queues
+
+func main() {
+    let queue = Queues.Queue(values:[], head:0, label:"invalid")
+}

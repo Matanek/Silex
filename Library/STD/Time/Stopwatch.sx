@@ -1,6 +1,6 @@
 use Internal
 
-pub struct Stopwatch {
+public struct Stopwatch {
     var last_microseconds:int
     var elapsed_seconds:float
     var running:bool

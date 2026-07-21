@@ -1,5 +1,5 @@
 native func native_ready() bool
 
-pub func ready() bool {
+public func ready() bool {
     return native_ready()
 }

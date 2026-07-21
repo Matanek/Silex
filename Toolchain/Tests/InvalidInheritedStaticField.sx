@@ -1,5 +1,5 @@
 class Base {
-    pub static var value:int
+    public static var value:int
 }
 
 class Child : Base {}

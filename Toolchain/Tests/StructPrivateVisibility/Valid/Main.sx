@@ -1,0 +1,7 @@
+use Queues
+
+func main() {
+    var queue = Queues.Queue.create("ready")
+    queue.label = "active"
+    assert(queue.count() == 0, "private queue storage remains usable through its API")
+}

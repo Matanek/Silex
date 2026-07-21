@@ -1,1 +1,1 @@
-pub native func half(value:int) int
+public native func half(value:int) int

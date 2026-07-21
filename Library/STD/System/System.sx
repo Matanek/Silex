@@ -1,4 +1,4 @@
-pub enum ErrorKind {
+public enum ErrorKind {
     not_found
     already_exists
     permission_denied
@@ -32,7 +32,7 @@ pub enum ErrorKind {
     other
 }
 
-pub struct Error {
+public struct Error {
     let kind:ErrorKind
     let operation:str
     let subject:str?

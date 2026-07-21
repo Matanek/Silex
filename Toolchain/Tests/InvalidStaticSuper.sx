@@ -1,11 +1,11 @@
 class Base {
-    pub func value() int {
+    public func value() int {
         return 1
     }
 }
 
 class Child : Base {
-    pub static func value() int {
+    public static func value() int {
         return super.value()
     }
 }

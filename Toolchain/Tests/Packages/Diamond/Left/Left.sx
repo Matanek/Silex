@@ -1,5 +1,5 @@
 use Common
 
-pub func value() int {
+public func value() int {
     return Common.base() + 1
 }

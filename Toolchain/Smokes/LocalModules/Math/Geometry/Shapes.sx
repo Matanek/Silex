@@ -1,5 +1,5 @@
 use Math.Vec3
 
-pub struct Ray {
+public struct Ray {
     var origin:Vec3
 }

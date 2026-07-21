@@ -481,8 +481,8 @@ pub const Loader = struct {
             var lines = std.mem.splitScalar(u8, source, '\n');
             while (lines.next()) |source_line| {
                 const line = std.mem.trim(u8, source_line, " \t\r");
-                if (!std.mem.startsWith(u8, line, "pub use ")) continue;
-                const declaration = line["pub use ".len..];
+                if (!std.mem.startsWith(u8, line, "public use ")) continue;
+                const declaration = line["public use ".len..];
                 const alias_marker = std.mem.indexOf(u8, declaration, " as ");
                 const exported_name = if (alias_marker) |index|
                     std.mem.trim(u8, declaration[index + " as ".len ..], " \t\r")
@@ -510,7 +510,7 @@ pub const Loader = struct {
                 continue;
             }
             if (depth != 0) continue;
-            if (token.tag == .keyword_pub) {
+            if (token.tag == .keyword_public) {
                 is_public = true;
                 continue;
             }
@@ -1384,11 +1384,11 @@ test "source unit selection loads only its transitive sibling closure" {
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "AlphaExtensions.sx",
-        .data = "use Alpha\nextend Alpha { pub func doubled() int { return 84 } }\n",
+        .data = "use Alpha\nextend Alpha { public func doubled() int { return 84 } }\n",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Broken.sx",
-        .data = "pub struct Broken {\n",
+        .data = "public struct Broken {\n",
     });
 
     var environ = EnvironMap.init(allocator);
@@ -1426,11 +1426,11 @@ test "a differently named declaration selects its providing source unit" {
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "API.sx",
-        .data = "pub struct Renamed {}\n",
+        .data = "public struct Renamed {}\n",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Neighbor.sx",
-        .data = "pub struct Neighbor {}\n",
+        .data = "public struct Neighbor {}\n",
     });
 
     var environ = EnvironMap.init(allocator);
@@ -1460,7 +1460,7 @@ test "a source unit and declaration from another unit are ambiguous" {
     });
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = "use Lib.Thing\nfunc main() {}\n" });
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Thing.sx", .data = "func helper() {}\n" });
-    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Other.sx", .data = "pub struct Thing {}\n" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Other.sx", .data = "public struct Thing {}\n" });
 
     var environ = EnvironMap.init(allocator);
     const project_path = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "project.json" });

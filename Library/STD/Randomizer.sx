@@ -1,21 +1,21 @@
 native func native_seed() int
 
-pub class Randomizer {
+public class Randomizer {
     var state:int
 
     init(seed:int) {
         self.state = seed
     }
 
-    pub static func create() Randomizer {
+    public static func create() Randomizer {
         return Randomizer(native_seed())
     }
 
-    pub static func create(seed:int) Randomizer {
+    public static func create(seed:int) Randomizer {
         return Randomizer(seed)
     }
 
-    pub func get_int() int {
+    public func get_int() int {
         var value:uint
         if self.state < 0 {
             let minimum:int = -9223372036854775808
@@ -37,7 +37,7 @@ pub class Randomizer {
         return self.state
     }
 
-    pub func get_int(minimum:int, maximum:int) int {
+    public func get_int(minimum:int, maximum:int) int {
         if minimum >= maximum {
             panic("get_int(minimum, maximum) requires minimum < maximum")
         }
@@ -58,12 +58,12 @@ pub class Randomizer {
         panic("get_int(minimum, maximum) could not produce a value")
     }
 
-    pub func get_float() float {
+    public func get_float() float {
         let bits:uint = (self.get_int() as uint) & 0xFF_FFFF
         return (bits as float) / 16777216.0
     }
 
-    pub func get_float(minimum:float, maximum:float) float {
+    public func get_float(minimum:float, maximum:float) float {
         if minimum - minimum != 0.0 || maximum - maximum != 0.0 {
             panic("get_float(minimum, maximum) requires finite bounds")
         }
@@ -86,7 +86,7 @@ pub class Randomizer {
         panic("get_float(minimum, maximum) could not produce a value")
     }
 
-    pub func get_bool() bool {
+    public func get_bool() bool {
         return self.get_int() % 2 == 0
     }
 }

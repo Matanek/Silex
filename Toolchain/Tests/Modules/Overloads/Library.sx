@@ -1,11 +1,11 @@
-pub struct Value {
+public struct Value {
     var count:int
 }
 
-pub func measure() int {
+public func measure() int {
     return 1
 }
 
-pub func measure(value:int) int {
+public func measure(value:int) int {
     return value
 }

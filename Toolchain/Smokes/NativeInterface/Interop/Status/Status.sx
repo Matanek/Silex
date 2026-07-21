@@ -1,5 +1,5 @@
 native func native_code() int
 
-pub func code() int {
+public func code() int {
     return native_code()
 }

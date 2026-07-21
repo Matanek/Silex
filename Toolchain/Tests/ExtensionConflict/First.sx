@@ -2,7 +2,7 @@ use ExtensionConflict.Core as Core
 use Core.Value
 
 extend Value {
-    pub func read<T>(value:T) T {
+    public func read<T>(value:T) T {
         return value
     }
 }

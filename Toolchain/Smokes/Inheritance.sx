@@ -1,25 +1,25 @@
 class Entity {
     var id:int
-    sub var position:int
+    protected var position:int
 
-    sub init(id:int, position:int) {
+    protected init(id:int, position:int) {
         self.id = id
         self.position = position
     }
 
-    pub func advance(delta:int) {
+    public func advance(delta:int) {
         self.position += delta
     }
 
-    pub func get_position() int {
+    public func get_position() int {
         return self.position
     }
 
-    pub func classify(value:int) int {
+    public func classify(value:int) int {
         return value
     }
 
-    pub func describe() int {
+    public func describe() int {
         return 10
     }
 
@@ -27,7 +27,7 @@ class Entity {
         return 30
     }
 
-    pub func expose_secret() int {
+    public func expose_secret() int {
         return self.secret()
     }
 }
@@ -35,23 +35,23 @@ class Entity {
 class Player : Entity {
     var name:str
 
-    pub init(id:int, name:str, position:int) : super(id, position) {
+    public init(id:int, name:str, position:int) : super(id, position) {
         self.name = name
     }
 
-    pub func copy_position(other:Entity) {
+    public func copy_position(other:Entity) {
         self.position = other.position
     }
 
-    pub func classify(value:str) int {
+    public func classify(value:str) int {
         return 2
     }
 
-    override pub func describe() int {
+    override public func describe() int {
         return super.describe() + 1
     }
 
-    pub func secret() int {
+    public func secret() int {
         return 40
     }
 }
@@ -59,11 +59,11 @@ class Player : Entity {
 class ElitePlayer : Player {
     var rank:int
 
-    pub init(id:int, name:str, position:int, rank:int) : super(id, name, position) {
+    public init(id:int, name:str, position:int, rank:int) : super(id, name, position) {
         self.rank = rank
     }
 
-    override pub func describe() int {
+    override public func describe() int {
         return super.describe() + 1
     }
 }
@@ -71,95 +71,95 @@ class ElitePlayer : Player {
 class EntityHolder {
     var entity:Entity
 
-    pub init(entity:Entity) {
+    public init(entity:Entity) {
         self.entity = entity
     }
 
-    pub func describe() int {
+    public func describe() int {
         return self.entity.describe()
     }
 }
 
 class ConstructorBase {
-    sub init(marker:&int) {
+    protected init(marker:&int) {
         self.probe(marker)
     }
 
-    pub func probe(marker:&int) {
+    public func probe(marker:&int) {
         marker = 1
     }
 }
 
 class ConstructorChild : ConstructorBase {
-    pub init(marker:&int) : super(marker) {
+    public init(marker:&int) : super(marker) {
         assert(marker == 1, "base construction does not dispatch into the child")
     }
 
-    override pub func probe(marker:&int) {
+    override public func probe(marker:&int) {
         marker = 2
     }
 }
 
 class TickBase {
-    pub func tick() {}
+    public func tick() {}
 }
 
 class TickChild : TickBase {
     var count:int = 0
 
-    override pub func tick() {
+    override public func tick() {
         self.count += 1
     }
 
-    pub func get_count() int {
+    public func get_count() int {
         return self.count
     }
 }
 
 class DefaultBase {
-    sub var generation:int = 7
+    protected var generation:int = 7
 
-    pub func get_generation() int {
+    public func get_generation() int {
         return self.generation
     }
 }
 
 class DefaultChild : DefaultBase {
-    pub var label:str
+    public var label:str
 }
 
 class IntrinsicBase {
-    sub var count:int
+    protected var count:int
 
-    pub func get_count() int {
+    public func get_count() int {
         return self.count
     }
 }
 
 class IntrinsicChild : IntrinsicBase {
-    pub init() : super() {}
+    public init() : super() {}
 }
 
 class ForwardChild : ForwardBase {
-    pub init() : super() {}
+    public init() : super() {}
 }
 
 class ForwardBase {
-    sub init() {}
+    protected init() {}
 
-    pub func ready() bool {
+    public func ready() bool {
         return true
     }
 }
 
 class OrderedBase {
-    sub init(order:&int) {
+    protected init(order:&int) {
         order = 1
     }
 }
 
 class OrderedChild : OrderedBase {
-    pub init(order:&int) : super(order) {
+    public init(order:&int) : super(order) {
         assert(order == 1, "base constructor runs first")
         order = 2
     }
@@ -168,15 +168,15 @@ class OrderedChild : OrderedBase {
 class NodeBase {
     var next:NodeBase? = null
 
-    sub init() {}
+    protected init() {}
 
-    pub func connect(other:NodeBase) {
+    public func connect(other:NodeBase) {
         self.next = other
     }
 }
 
 class DerivedNode : NodeBase {
-    pub init() {}
+    public init() {}
 }
 
 func update(entity:Entity) {

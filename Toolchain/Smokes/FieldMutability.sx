@@ -4,35 +4,35 @@ struct Settings {
 }
 
 class Generation {
-    sub let value:int
+    protected let value:int
 
-    sub init(value:int) {
+    protected init(value:int) {
         self.value = value
     }
 
-    pub func get_value() int {
+    public func get_value() int {
         return self.value
     }
 }
 
 class User : Generation {
     let id:int
-    pub var name:str
-    pub let enabled:bool = true
+    public var name:str
+    public let enabled:bool = true
 
-    pub init(id:int, name:str) : super(1) {
+    public init(id:int, name:str) : super(1) {
         self.id = id
         self.name = name
     }
 
-    pub func get_id() int {
+    public func get_id() int {
         return self.id
     }
 }
 
 class Label {
-    pub let text:str
-    pub let ready:bool
+    public let text:str
+    public let ready:bool
 }
 
 func main() {

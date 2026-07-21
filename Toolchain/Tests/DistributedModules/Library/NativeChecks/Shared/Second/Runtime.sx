@@ -1,5 +1,5 @@
 native func native_second() int
 
-pub func value() int {
+public func value() int {
     return native_second()
 }

@@ -1,5 +1,5 @@
 native func native_copy(value:str) str
 
-pub func copy(value:str) str {
+public func copy(value:str) str {
     return native_copy(value)
 }

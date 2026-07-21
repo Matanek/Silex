@@ -3,13 +3,13 @@ protocol Drawable {
 }
 
 class Player {
-    pub var name:str
+    public var name:str
 
-    pub func rename(name:str) {
+    public func rename(name:str) {
         self.name = name
     }
 
-    pub func get_name() str {
+    public func get_name() str {
         return self.name
     }
 }
@@ -23,7 +23,7 @@ struct Sprite : Drawable {
 }
 
 class Image : Drawable {
-    pub func draw() str {
+    public func draw() str {
         return "Image"
     }
 }

@@ -1,5 +1,5 @@
 extend Widget {
-    pub func neighboring() int {
+    public func neighboring() int {
         return 99
     }
 }

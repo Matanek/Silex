@@ -41,7 +41,7 @@ class Services {
         self.identifier = identifier
     }
 
-    pub static func instance() Services {
+    public static func instance() Services {
         if var current = Services.shared {
             return current
         }
@@ -51,30 +51,30 @@ class Services {
         return created
     }
 
-    pub func get_identifier() int {
+    public func get_identifier() int {
         return self.identifier
     }
 }
 
 class BaseState {
-    sub static var count:int
-    pub static var public_count:int
+    protected static var count:int
+    public static var public_count:int
 
-    pub static func value() int {
+    public static func value() int {
         return BaseState.count
     }
 }
 
 class ChildState : BaseState {
-    pub static func increment_base() {
+    public static func increment_base() {
         BaseState.count++
     }
 }
 
 class Node {
-    pub var next:Node?
+    public var next:Node?
 
-    pub init() {}
+    public init() {}
 }
 
 struct RetainedGraph {
@@ -106,7 +106,7 @@ func main() {
 
     ChildState.increment_base()
     BaseState.public_count = 2
-    assert(BaseState.value() == 1, "a descendant qualifies a visible sub static field by its declaring type")
+    assert(BaseState.value() == 1, "a descendant qualifies a visible protected static field by its declaring type")
     assert(BaseState.public_count == 2, "a public class static field is visible to callers")
 
     var parent = Node()

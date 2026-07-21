@@ -1,0 +1,6 @@
+use Queues
+
+func main() {
+    let queue = Queues.Queue.create()
+    print(queue.values.count())
+}

@@ -82,7 +82,7 @@ declaration from the same module:
 ```sx
 use Internal
 
-pub struct Stopwatch {
+public struct Stopwatch {
 }
 ```
 
@@ -132,19 +132,19 @@ cycles are rejected. A type alias cannot be called or used as a runtime value,
 except that an alias whose underlying type is a structure, class, or enum can
 use that type's ordinary initializer or variant constructors.
 
-`pub use <type> as <name>` exports the transparent alias. A consumer may
+`public use <type> as <name>` exports the transparent alias. A consumer may
 qualify, use, rename, or re-export it like another public type declaration.
 The source type is resolved in the file declaring the alias and is not
 reinterpreted in the consumer. Type aliases cannot currently declare their own
 type parameters.
 
-Declarations are private by default. `pub` exposes an enum, protocol, structure,
-class, or function, while `pub use` re-exports an existing declaration or type alias
+Declarations are private by default. `public` exposes an enum, protocol, structure,
+class, or function, while `public use` re-exports an existing declaration or type alias
 under the current module name. Every variant of a public enum follows the
-visibility of its enum. Modules cannot currently be re-exported with `pub use`.
+visibility of its enum. Modules cannot currently be re-exported with `public use`.
 
-For a class, declaration and member visibility are independent: `pub class`
-exposes the type outside its module, while only its `pub` members are accessible
+For a class, declaration and member visibility are independent: `public class`
+exposes the type outside its module, while only its `public` members are accessible
 outside the class. See [Classes](Classes.md).
 
 A public structure that declares `drop` exposes its type and methods but keeps
@@ -207,7 +207,7 @@ root interface directly:
 `STD.Time.native_monotonic_microseconds` becomes
 `silexNative_STD_Time_native_monotonic_microseconds`.
 
-`Console.sx` uses `pub native func` directly when its public Silex signature is
+`Console.sx` uses `public native func` directly when its public Silex signature is
 the complete native contract. Scalar and string operations include `write`,
 `flush`, and `is_interactive`; `get_dimensions() Dimensions?` and
 `read_line() str?` exercise optional flat-structure and string returns.

@@ -1,4 +1,4 @@
-pub enum ReadError {
+public enum ReadError {
     denied(str)
 }
 
@@ -6,7 +6,7 @@ struct Calls {
     static var count:int
 }
 
-pub func read(allowed:bool) Result<int, ReadError> {
+public func read(allowed:bool) Result<int, ReadError> {
     Calls.count++
     if allowed {
         return Result<int, ReadError>.success(40)
@@ -14,11 +14,11 @@ pub func read(allowed:bool) Result<int, ReadError> {
     return Result<int, ReadError>.failure(ReadError.denied("denied"))
 }
 
-pub func call_count() int {
+public func call_count() int {
     return Calls.count
 }
 
-pub func save(allowed:bool) Result<void, ReadError> {
+public func save(allowed:bool) Result<void, ReadError> {
     if allowed {
         return Result<void, ReadError>.success()
     }

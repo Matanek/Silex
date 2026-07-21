@@ -1,10 +1,10 @@
 native func native_add(left:int, right:int) int
 native func native_echo(value:str) str
 
-pub func add(left:int, right:int) int {
+public func add(left:int, right:int) int {
     return native_add(left, right)
 }
 
-pub func echo(value:str) str {
+public func echo(value:str) str {
     return native_echo(value)
 }

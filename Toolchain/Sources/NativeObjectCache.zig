@@ -474,7 +474,7 @@ test "package object key follows native inputs but ignores Silex-only changes" {
         .data = "#include <Header.h>\nint value(void) { return VALUE; }\n",
     });
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Header.h", .data = "#define VALUE 1\n" });
-    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Only.sx", .data = "pub func value() int { return 1 }\n" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Only.sx", .data = "public func value() int { return 1 }\n" });
     const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
     const source = try std.fs.path.join(allocator, &.{ root, "Source.c" });
     const graph: PackageGraph.Graph = .{
@@ -534,7 +534,7 @@ test "package object key follows native inputs but ignores Silex-only changes" {
     const copied = try makePlan(allocator, std.testing.io, copy_graph, &.{copy_runtime}, TargetModule.Target.native(), &.{"-O2"});
     try std.testing.expectEqualSlices(u8, &first.entries[0].key, &copied.entries[0].key);
 
-    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Only.sx", .data = "pub func value() int { return 2 }\n" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Only.sx", .data = "public func value() int { return 2 }\n" });
     const after_silex = try makePlan(allocator, std.testing.io, graph, &.{runtime}, TargetModule.Target.native(), &.{"-O2"});
     try std.testing.expectEqualSlices(u8, &first.entries[0].key, &after_silex.entries[0].key);
 

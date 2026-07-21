@@ -315,7 +315,7 @@ pub const Resolver = struct {
                 if (use_value.is_public) {
                     const message = try std.fmt.allocPrint(
                         self.allocator,
-                        "module '{s}' cannot be re-exported with 'pub use'",
+                        "module '{s}' cannot be re-exported with 'public use'",
                         .{self.project.modules[module_index].name},
                     );
                     return self.fail(use_value.position, message);

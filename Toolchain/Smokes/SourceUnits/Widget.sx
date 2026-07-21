@@ -1,7 +1,7 @@
 use Internal
 use WidgetExtensions
 
-pub struct Widget {
+public struct Widget {
     var value:int
 
     static func create() Widget {

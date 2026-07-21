@@ -2,14 +2,14 @@ native func native_checksum(bytes:uint8[]) uint64
 native func native_fixed_checksum(bytes:uint8[4]) uint64
 native func native_write_block(bytes:uint8[4]) Result<void,str>
 
-pub func checksum(bytes:uint8[]) uint64 {
+public func checksum(bytes:uint8[]) uint64 {
     return native_checksum(bytes)
 }
 
-pub func fixed_checksum(bytes:uint8[4]) uint64 {
+public func fixed_checksum(bytes:uint8[4]) uint64 {
     return native_fixed_checksum(bytes)
 }
 
-pub func write_block(bytes:uint8[4]) Result<void,str> {
+public func write_block(bytes:uint8[4]) Result<void,str> {
     return native_write_block(bytes)
 }

@@ -16,7 +16,7 @@ use STD.Algorithms
 ## In-place sort
 
 ```sx
-pub func sort<T>(
+public func sort<T>(
     values:&T[..],
     before:func(@T, @T) bool,
 )
@@ -52,19 +52,19 @@ not provided.
 ## Random collection algorithms
 
 ```sx
-pub func choose<T>(
+public func choose<T>(
     randomizer:Randomizer,
     values:@T[..],
 ) @T
 
-pub func shuffle<T>(
+public func shuffle<T>(
     randomizer:Randomizer,
     values:&T[..],
 )
 
 extend Randomizer {
-    pub func choose<T>(values:@T[..]) @T
-    pub func shuffle<T>(values:&T[..])
+    public func choose<T>(values:@T[..]) @T
+    public func shuffle<T>(values:&T[..])
 }
 ```
 

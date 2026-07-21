@@ -28,15 +28,15 @@ class Session {
         self.token = token
     }
 
-    pub static func open(token:str) Session {
+    public static func open(token:str) Session {
         return Session(token)
     }
 
-    pub static func copy(other:Session) Session {
+    public static func copy(other:Session) Session {
         return Session(other.token)
     }
 
-    pub func get_token() str {
+    public func get_token() str {
         return self.token
     }
 }
@@ -50,38 +50,38 @@ struct Box<T> {
 }
 
 class BaseFactory {
-    pub static func label() str {
+    public static func label() str {
         return "base"
     }
 
-    sub static func protected_label() str {
+    protected static func protected_label() str {
         return "protected"
     }
 }
 
 class ChildFactory : BaseFactory {
-    pub static func label() str {
+    public static func label() str {
         return "child"
     }
 
-    pub static func base_label() str {
+    public static func base_label() str {
         return BaseFactory.protected_label()
     }
 }
 
 class Client {
-    pub var connected:bool
-    pub var timeout:int
+    public var connected:bool
+    public var timeout:int
 
-    pub static func create() Client {
+    public static func create() Client {
         return Client()
     }
 
-    pub func connect() {
+    public func connect() {
         self.connected = true
     }
 
-    pub func set_timeout(value:int) {
+    public func set_timeout(value:int) {
         self.timeout = value
     }
 }
@@ -115,7 +115,7 @@ func main() {
 
     assert(BaseFactory.label() == "base", "a base static method belongs to its declaring type")
     assert(ChildFactory.label() == "child", "a child static method is an independent declaration")
-    assert(ChildFactory.base_label() == "protected", "a child static method can call a visible sub static method explicitly")
+    assert(ChildFactory.base_label() == "protected", "a child static method can call a visible protected static method explicitly")
 
     var client = Client.create()..connect()..set_timeout(10)
     assert(client.connected && client.timeout == 10, "a static factory result starts an ordinary value cascade")

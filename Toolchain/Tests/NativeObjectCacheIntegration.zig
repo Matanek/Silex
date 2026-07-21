@@ -53,7 +53,7 @@ pub fn main(init: std.process.Init) !void {
         vendor,
         "Vendor.sx",
         "native func native_value() int\n\n" ++
-            "pub func value() int {\n" ++
+            "public func value() int {\n" ++
             "    return native_value()\n" ++
             "}\n\n",
     );
@@ -74,7 +74,7 @@ pub fn main(init: std.process.Init) !void {
         "Vendor.sx",
         "native func native_value() int\n" ++
             "native func native_unused(value:int) int\n\n" ++
-            "pub func value() int {\n" ++
+            "public func value() int {\n" ++
             "    return native_value()\n" ++
             "}\n\n",
     );
@@ -168,7 +168,7 @@ fn createVendor(allocator: Allocator, io: Io, root: []const u8, value: u8) !void
         root,
         "Vendor.sx",
         "native func native_value() int\n\n" ++
-            "pub func value() int {\n" ++
+            "public func value() int {\n" ++
             "    return native_value()\n" ++
             "}\n",
     );

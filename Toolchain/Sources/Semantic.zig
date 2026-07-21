@@ -5850,8 +5850,8 @@ pub const Analyzer = struct {
         const message = switch (visibility) {
             .private_access => try std.fmt.allocPrint(
                 self.allocator,
-                "{s} '{s}' is private in class '{s}'",
-                .{ member_kind, member_name, structure.source_name },
+                "{s} '{s}' is private in {s} '{s}'",
+                .{ member_kind, member_name, if (structure.is_class) "class" else "struct", structure.source_name },
             ),
             .subclass => try std.fmt.allocPrint(
                 self.allocator,
@@ -5884,6 +5884,23 @@ pub const Analyzer = struct {
                 .{structure.source_name},
             );
             return self.fail(initializer.name_position, message);
+        }
+        if (!structure.is_class) {
+            var has_private_field = false;
+            for (structure.fields) |field| {
+                if (field.visibility == .private_access) {
+                    has_private_field = true;
+                    break;
+                }
+            }
+            if (has_private_field and !self.memberVisibleFromCurrentContext(structure_index, .private_access)) {
+                const message = try std.fmt.allocPrint(
+                    self.allocator,
+                    "initializer of struct '{s}' is private because it declares private fields",
+                    .{structure.source_name},
+                );
+                return self.fail(initializer.name_position, message);
+            }
         }
         if (structure.is_class and structure.constructors.len != 0) {
             const message = try std.fmt.allocPrint(
@@ -9048,11 +9065,11 @@ test "static methods have no self or super and are not inherited" {
         "'self' is not available inside a static method",
     );
     try expectResolvedSemanticError(
-        "class Base { pub static func create() Base { return Base() } } class Child : Base {} func main() { let child = Child.create() }",
+        "class Base { public static func create() Base { return Base() } } class Child : Base {} func main() { let child = Child.create() }",
         "type 'Child' has no static method 'create'",
     );
     try expectResolvedSemanticError(
-        "class Base { pub func value() int { return 1 } } class Child : Base { pub static func value() int { return super.value() } } func main() {}",
+        "class Base { public func value() int { return 1 } } class Child : Base { public static func value() int { return super.value() } } func main() {}",
         "'super' is not available inside a static method",
     );
 }
@@ -9061,29 +9078,29 @@ test "let class fields initialize exactly once in their declaring constructor" {
     try expectSemanticSuccess(
         \\class User {
         \\    let id:int
-        \\    pub var name:str
-        \\    pub init(id:int, name:str) { self.id = id; self.name = name }
+        \\    public var name:str
+        \\    public init(id:int, name:str) { self.id = id; self.name = name }
         \\}
         \\func main() { var user = User(1, "Ada"); user.name = "Grace" }
     );
     try expectSemanticError(
-        "class User { let id:int; pub init(id:int) { self.id = id; self.id = id } } func main() {}",
+        "class User { let id:int; public init(id:int) { self.id = id; self.id = id } } func main() {}",
         "field 'id' is initialized more than once",
     );
     try expectSemanticError(
-        "class User { let id:int; pub init(assign:bool) { if assign { self.id = 1 } } } func main() {}",
+        "class User { let id:int; public init(assign:bool) { if assign { self.id = 1 } } } func main() {}",
         "constructor of class 'User' leaves field 'id' without a value",
     );
     try expectSemanticError(
-        "class User { let id:int; pub init(assign:bool) { if assign { self.id = 1 } self.id = 2 } } func main() {}",
+        "class User { let id:int; public init(assign:bool) { if assign { self.id = 1 } self.id = 2 } } func main() {}",
         "field 'id' may be initialized more than once",
     );
     try expectSemanticError(
-        "class User { let id:int = 1; pub init() { self.id = 2 } } func main() {}",
+        "class User { let id:int = 1; public init() { self.id = 2 } } func main() {}",
         "cannot mutate let field 'id'",
     );
     try expectSemanticError(
-        "class Base { sub let id:int; sub init(id:int) { self.id = id } } class Child : Base { pub init() : super(1) { self.id = 2 } } func main() {}",
+        "class Base { protected let id:int; protected init(id:int) { self.id = id } } class Child : Base { public init() : super(1) { self.id = 2 } } func main() {}",
         "cannot mutate let field 'id'",
     );
 }
@@ -9116,8 +9133,8 @@ test "validate protocol conformances and inherited public requirements" {
         \\protocol Describable { func describe() str }
         \\protocol Drawable { func draw() }
         \\struct User : Describable { func describe() str { return "user" } }
-        \\class Entity { pub func describe() str { return "entity" } }
-        \\class Player : Entity, Describable, Drawable { pub func draw() {} }
+        \\class Entity { public func describe() str { return "entity" } }
+        \\class Player : Entity, Describable, Drawable { public func draw() {} }
         \\class Child : Player {}
         \\func main() {}
     );
@@ -9145,7 +9162,7 @@ test "analyze dynamic protocol values and reject values outside their contract" 
     try expectSemanticSuccess(
         \\protocol Drawable { func draw() str }
         \\struct Icon : Drawable { var name:str; func draw() str { return self.name } }
-        \\class Player : Drawable { pub func draw() str { return "player" } }
+        \\class Player : Drawable { public func draw() str { return "player" } }
         \\func render(value:Drawable) str { return value.draw() }
         \\func make() Drawable { return Icon(name:"icon") }
         \\func main() {
@@ -9174,7 +9191,7 @@ test "analyze local type extensions with mutation and static methods" {
         \\struct Counter { var value:int }
         \\extend Counter {
         \\    func increment() int { self.value += 1; return self.value }
-        \\    pub static func zero() Counter { return Counter(value:0) }
+        \\    public static func zero() Counter { return Counter(value:0) }
         \\}
         \\func main() {
         \\    var counter = Counter.zero()
@@ -9185,24 +9202,24 @@ test "analyze local type extensions with mutation and static methods" {
 
 test "extensions use only public members and do not participate in inheritance" {
     try expectResolvedSemanticError(
-        \\class Vault { var secret:int; pub init() { self.secret = 1 } }
-        \\extend Vault { pub func reveal() int { return self.secret } }
+        \\class Vault { var secret:int; public init() { self.secret = 1 } }
+        \\extend Vault { public func reveal() int { return self.secret } }
         \\func main() {}
     , "field 'secret' is private in class 'Vault'");
     try expectResolvedSemanticError(
-        \\class Entity { sub func hidden() {} }
-        \\extend Entity { pub func expose() { self.hidden() } }
+        \\class Entity { protected func hidden() {} }
+        \\extend Entity { public func expose() { self.hidden() } }
         \\func main() {}
     , "method 'hidden' is accessible only from class 'Entity' and its descendants");
     try expectResolvedSemanticError(
         \\class Entity {}
-        \\extend Entity { pub func ping() {} }
+        \\extend Entity { public func ping() {} }
         \\class Player : Entity {}
         \\func main() { var player = Player(); player.ping() }
     , "class 'Player' has no method 'ping'");
     try expectResolvedSemanticError(
         \\struct Value { func read() int { return 1 } }
-        \\extend Value { pub func read() int { return 2 } }
+        \\extend Value { public func read() int { return 2 } }
         \\func main() {}
     , "extension method 'read' conflicts with an existing callable shape on type 'Value'");
 }
@@ -9219,7 +9236,7 @@ test "extension conformances support dynamic values and multiple protocols" {
         \\    func name() str { return "sprite" }
         \\}
         \\extend Existing : Drawable {}
-        \\extend Button : Drawable { pub func draw() int { return 9 } }
+        \\extend Button : Drawable { public func draw() int { return 9 } }
         \\func main() {
         \\    var sprite = Sprite(value:42)
         \\    var drawable:Drawable = sprite
@@ -9250,7 +9267,7 @@ test "extension conformances use target visibility defaults and apply to the exa
     try expectResolvedSemanticError(
         \\protocol Drawable { func draw() }
         \\class Entity {}
-        \\extend Entity : Drawable { pub func draw() {} }
+        \\extend Entity : Drawable { public func draw() {} }
         \\class Player : Entity {}
         \\func main() { var drawable:Drawable = Player() }
     , "expected 'Drawable', found 'Player'");
@@ -9290,7 +9307,7 @@ test "public native functions use ordinary API names" {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var parser = Parser.init(allocator, "pub native func pow(value:int) int\nfunc main() {}\n");
+    var parser = Parser.init(allocator, "public native func pow(value:int) int\nfunc main() {}\n");
     const program = try parser.parse();
     @constCast(program.functions)[0].name = "Math.pow";
     var analyzer = Analyzer.init(allocator);
@@ -9640,7 +9657,7 @@ test "classes have shared-reference types and are never independent let values" 
     const allocator = arena.allocator();
 
     var parser = Parser.init(allocator,
-        \\class Player { pub var health:int = 100 }
+        \\class Player { public var health:int = 100 }
         \\func main() { var player = Player(); var alias = player; alias.health -= 1 }
     );
     var analyzer = Analyzer.init(allocator);
@@ -9670,7 +9687,7 @@ test "classes have shared-reference types and are never independent let values" 
     );
 }
 
-test "class members are private by default and pub exposes them" {
+test "class members are private by default and public exposes them" {
     const Parser = @import("Parser.zig").Parser;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -9679,10 +9696,10 @@ test "class members are private by default and pub exposes them" {
     var parser = Parser.init(allocator,
         \\class Vault {
         \\    var value:int = 40
-        \\    sub var offset:int = 2
+        \\    protected var offset:int = 2
         \\    func total() int { return self.value + self.offset }
-        \\    pub func read() int { return self.total() }
-        \\    pub func copy_from(other:Vault) { self.value = other.value }
+        \\    public func read() int { return self.total() }
+        \\    public func copy_from(other:Vault) { self.value = other.value }
         \\}
         \\func main() { var first = Vault(); var second = Vault(); second.copy_from(first); print(second.read()) }
     );
@@ -9701,7 +9718,7 @@ test "class members are private by default and pub exposes them" {
         "method 'reset' is private in class 'Vault'",
     );
     try expectResolvedSemanticError(
-        "class Vault { sub var value:int = 1 } func main() { var vault = Vault(); print(vault.value) }",
+        "class Vault { protected var value:int = 1 } func main() { var vault = Vault(); print(vault.value) }",
         "field 'value' is accessible only from class 'Vault' and its descendants",
     );
     try expectResolvedSemanticError(
@@ -9722,6 +9739,66 @@ test "class members are private by default and pub exposes them" {
     );
 }
 
+test "struct private members protect copyable storage and close aggregate initialization" {
+    const Parser = @import("Parser.zig").Parser;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var parser = Parser.init(allocator,
+        \\struct Queue {
+        \\    private var values:int[]
+        \\    private var head:int
+        \\    private static var creations:int
+        \\    public var label:str
+        \\    public static func create(label:str) Queue {
+        \\        Queue.creations += 1
+        \\        return Queue(values:[], head:0, label:label)
+        \\    }
+        \\    public func count() int { return self.values.count() - self.head }
+        \\    private func hidden_count() int { return self.count() }
+        \\}
+        \\func main() {
+        \\    var first = Queue.create("ready")
+        \\    first.label = "updated"
+        \\    let second = first
+        \\    assert(first == second, "private fields keep structural equality")
+        \\    print(first.count())
+        \\}
+    );
+    var analyzer = Analyzer.init(allocator);
+    const program = try analyzer.analyze(try resolveSingleTestProgram(allocator, try parser.parse()));
+    try std.testing.expectEqual(Ast.MemberVisibility.private_access, program.structures[0].fields[0].visibility);
+    try std.testing.expectEqual(Ast.MemberVisibility.public_access, program.structures[0].fields[2].visibility);
+    try std.testing.expectEqual(Ast.MemberVisibility.private_access, program.structures[0].static_fields[0].visibility);
+    try std.testing.expectEqual(Ast.MemberVisibility.private_access, program.structures[0].methods[2].visibility);
+
+    try expectResolvedSemanticError(
+        "struct Vault { private var value:int; public static func create() Vault { return Vault(value:1) } } func main() { let vault = Vault.create(); print(vault.value) }",
+        "field 'value' is private in struct 'Vault'",
+    );
+    try expectResolvedSemanticError(
+        "struct Vault { private var value:int; private func read() int { return self.value } public static func create() Vault { return Vault(value:1) } } func main() { let vault = Vault.create(); print(vault.read()) }",
+        "method 'read' is private in struct 'Vault'",
+    );
+    try expectResolvedSemanticError(
+        "struct Vault { private var value:int = 1; public var label:str } func main() { let vault = Vault(label:\"x\") }",
+        "initializer of struct 'Vault' is private because it declares private fields",
+    );
+    try expectResolvedSemanticError(
+        "struct Vault { private var value:int } func make() Vault { return Vault(value:1) } func main() {}",
+        "initializer of struct 'Vault' is private because it declares private fields",
+    );
+    try expectResolvedSemanticError(
+        "struct Vault { private var value:int; public static func create() Vault { return Vault(value:1) } } extend Vault { public func reveal() int { return self.value } } func main() {}",
+        "field 'value' is private in struct 'Vault'",
+    );
+    try expectResolvedSemanticError(
+        "struct Vault { private static var value:int; public static func create() int { return Vault.value } } func main() { print(Vault.value) }",
+        "static field 'value' is private in struct 'Vault'",
+    );
+}
+
 test "class constructors overload and establish private state" {
     const Parser = @import("Parser.zig").Parser;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
@@ -9729,14 +9806,14 @@ test "class constructors overload and establish private state" {
     const allocator = arena.allocator();
 
     var parser = Parser.init(allocator,
-        \\class Player { pub var health:int = 100 }
+        \\class Player { public var health:int = 100 }
         \\class Match {
         \\    var owner:Player
         \\    var count:int = 1
-        \\    pub init(owner:Player) { self.owner = owner }
-        \\    pub init(owner:Player, count:int) { self.owner = owner; self.count = count }
-        \\    pub func get_owner() Player { return self.owner }
-        \\    pub func get_count() int { return self.count }
+        \\    public init(owner:Player) { self.owner = owner }
+        \\    public init(owner:Player, count:int) { self.owner = owner; self.count = count }
+        \\    public func get_owner() Player { return self.owner }
+        \\    public func get_count() int { return self.count }
         \\}
         \\func main() { var first = Match(Player()); var second = Match(Player(), 2); print(second.get_count()) }
     );
@@ -9746,11 +9823,11 @@ test "class constructors overload and establish private state" {
     try std.testing.expect(program.functions[0].statements[0].variable_declaration.initializer.value == .class_initializer);
 
     try expectResolvedSemanticError(
-        "class Session { var token:str; pub init(token:str) { self.token = token } } func main() { var session = Session() }",
+        "class Session { var token:str; public init(token:str) { self.token = token } } func main() { var session = Session() }",
         "no compatible constructor for 'Session'; visible constructors: Session(str)",
     );
     try expectResolvedSemanticError(
-        "class Session { pub var token:str; pub init(token:str) { self.token = token } } func main() { var session = Session(token:\"abc\") }",
+        "class Session { public var token:str; public init(token:str) { self.token = token } } func main() { var session = Session(token:\"abc\") }",
         "class 'Session' declares custom constructors and cannot use a named field initializer",
     );
     try expectResolvedSemanticError(
@@ -9761,19 +9838,19 @@ test "class constructors overload and establish private state" {
 
 test "class constructors require complete initialization on every path" {
     try expectResolvedSemanticError(
-        "class Player {} class Match { var owner:Player; pub init(owner:Player, assign:bool) { if assign { self.owner = owner } } } func main() {}",
+        "class Player {} class Match { var owner:Player; public init(owner:Player, assign:bool) { if assign { self.owner = owner } } } func main() {}",
         "constructor of class 'Match' leaves field 'owner' without a value",
     );
     try expectResolvedSemanticError(
-        "class Player {} class Match { var owner:Player; pub init(owner:Player) { print(self.owner == owner); self.owner = owner } } func main() {}",
+        "class Player {} class Match { var owner:Player; public init(owner:Player) { print(self.owner == owner); self.owner = owner } } func main() {}",
         "field 'owner' is read before it is initialized",
     );
     try expectResolvedSemanticError(
-        "class Player {} class Match { var owner:Player; pub init(owner:Player) { self.inspect(); self.owner = owner } func inspect() {} } func main() {}",
+        "class Player {} class Match { var owner:Player; public init(owner:Player) { self.inspect(); self.owner = owner } func inspect() {} } func main() {}",
         "an instance method cannot be called before every class field is initialized",
     );
     try expectResolvedSemanticError(
-        "class Player {} class Match { var owner:Player; pub init(owner:Player) { var alias = self; self.owner = owner } } func main() {}",
+        "class Player {} class Match { var owner:Player; public init(owner:Player) { var alias = self; self.owner = owner } } func main() {}",
         "'self' cannot escape before every class field is initialized",
     );
 }
@@ -9829,7 +9906,7 @@ test "noncopyable values compose through fields enums optionals collections clas
 
     try expectSemanticSuccess(declaration ++
         \\struct Holder { var resource:Resource }
-        \\class Owner { pub var resource:Resource }
+        \\class Owner { public var resource:Resource }
         \\enum Slot { full(Holder); empty }
         \\func consume(value:Resource) {}
         \\func consume_holder(value:Holder) {}
@@ -10131,14 +10208,14 @@ test "class inheritance constructs one base and converts references upward" {
     var parser = Parser.init(allocator,
         \\class Entity {
         \\    var id:int
-        \\    sub var position:int
-        \\    sub init(id:int, position:int) { self.id = id; self.position = position }
-        \\    pub func advance(delta:int) { self.position += delta }
+        \\    protected var position:int
+        \\    protected init(id:int, position:int) { self.id = id; self.position = position }
+        \\    public func advance(delta:int) { self.position += delta }
         \\}
         \\class Player : Entity {
         \\    var name:str
-        \\    pub init(id:int, name:str, position:int) : super(id, position) { self.name = name }
-        \\    pub func copy_position(other:Entity) { self.position = other.position }
+        \\    public init(id:int, name:str, position:int) : super(id, position) { self.name = name }
+        \\    public func copy_position(other:Entity) { self.position = other.position }
         \\}
         \\func update(entity:Entity) { entity.advance(1) }
         \\func main() {
@@ -10157,19 +10234,19 @@ test "class inheritance constructs one base and converts references upward" {
     try std.testing.expect(program.functions[1].statements[1].variable_declaration.initializer.value == .conversion);
 
     try expectResolvedSemanticError(
-        "class Base { var value:int; sub init() {} } class Child : Base { var value:int; pub init() : super() {} } func main() {}",
+        "class Base { var value:int; protected init() {} } class Child : Base { var value:int; public init() : super() {} } func main() {}",
         "field 'value' in class 'Child' collides with an inherited field",
     );
     try expectResolvedSemanticError(
-        "class Base { func hidden() {} } class Child : Base { pub init() {} pub func reveal() { self.hidden() } } func main() {}",
+        "class Base { func hidden() {} } class Child : Base { public init() {} public func reveal() { self.hidden() } } func main() {}",
         "method 'hidden' is private in class 'Base'",
     );
     try expectResolvedSemanticError(
-        "class Base { var hidden:int } class Child : Base { pub init() {} pub func reveal() int { return self.hidden } } func main() {}",
+        "class Base { var hidden:int } class Child : Base { public init() {} public func reveal() int { return self.hidden } } func main() {}",
         "field 'hidden' is private in class 'Base'",
     );
     try expectResolvedSemanticError(
-        "class Base { init() {} } class Child : Base { pub init() : super() {} } func main() {}",
+        "class Base { init() {} } class Child : Base { public init() : super() {} } func main() {}",
         "constructor of base class 'Base' is private",
     );
     try expectResolvedSemanticError(
@@ -10177,7 +10254,7 @@ test "class inheritance constructs one base and converts references upward" {
         "inheritance cycle involving class 'First'",
     );
     try expectResolvedSemanticError(
-        "class Base { pub func act() {} } class Child : Base { pub func act() {} } func main() {}",
+        "class Base { public func act() {} } class Child : Base { public func act() {} } func main() {}",
         "method 'act' matches an inherited signature; declare it with 'override'",
     );
     try expectResolvedSemanticError(
@@ -10193,11 +10270,11 @@ test "class inheritance constructs one base and converts references upward" {
         "base type 'Value' is not a class",
     );
     try expectResolvedSemanticError(
-        "class Dependency {} class Base { var dependency:Dependency } class Child : Base { pub init() {} } func main() {}",
+        "class Dependency {} class Base { var dependency:Dependency } class Child : Base { public init() {} } func main() {}",
         "base class 'Base' cannot be constructed with 'super()'",
     );
     try expectResolvedSemanticError(
-        "class Root { pub init() : super() {} } func main() {}",
+        "class Root { public init() : super() {} } func main() {}",
         "constructor 'super' call requires a base class",
     );
 }
@@ -10210,9 +10287,9 @@ test "class overrides share a dynamic slot and super selects the base implementa
 
     var parser = Parser.init(allocator,
         \\class Child : Base {
-        \\    override pub func value(input:int) int { return super.value(input) + 1 }
+        \\    override public func value(input:int) int { return super.value(input) + 1 }
         \\}
-        \\class Base { pub func value(input:int) int { return input } }
+        \\class Base { public func value(input:int) int { return input } }
         \\func main() {}
     );
     var analyzer = Analyzer.init(allocator);
@@ -10223,27 +10300,27 @@ test "class overrides share a dynamic slot and super selects the base implementa
     try std.testing.expect(returned.value.binary.left.value == .super_method_call);
 
     try expectResolvedSemanticError(
-        "class Base { pub func act() {} } class Child : Base { override pub func other() {} } func main() {}",
+        "class Base { public func act() {} } class Child : Base { override public func other() {} } func main() {}",
         "override method 'other' has no compatible inherited method",
     );
     try expectResolvedSemanticError(
-        "class Base { pub func value() int { return 1 } } class Child : Base { override pub func value() str { return \"x\" } } func main() {}",
+        "class Base { public func value() int { return 1 } } class Child : Base { override public func value() str { return \"x\" } } func main() {}",
         "override method 'value' must return 'int'",
     );
     try expectResolvedSemanticError(
-        "class Base { pub func act() {} } class Child : Base { override sub func act() {} } func main() {}",
+        "class Base { public func act() {} } class Child : Base { override protected func act() {} } func main() {}",
         "override method 'act' cannot reduce inherited visibility",
     );
     try expectResolvedSemanticError(
-        "class Base { func hidden() {} } class Child : Base { override pub func hidden() {} } func main() {}",
+        "class Base { func hidden() {} } class Child : Base { override public func hidden() {} } func main() {}",
         "private method 'hidden' cannot be overridden",
     );
     try expectResolvedSemanticError(
-        "class Base {} class Child : Base { pub func act() { super.missing() } } func main() {}",
+        "class Base {} class Child : Base { public func act() { super.missing() } } func main() {}",
         "base class has no method 'missing'",
     );
     try expectResolvedSemanticError(
-        "class Base { pub func classify(value:int) {} } class Child : Base { pub func classify(value:str) {} } func main() { var value:Base = Child(); value.classify(\"child\") }",
+        "class Base { public func classify(value:int) {} } class Child : Base { public func classify(value:str) {} } func main() { var value:Base = Child(); value.classify(\"child\") }",
         "no compatible signature for method 'classify'; visible signatures: classify(int)",
     );
 }
@@ -10266,7 +10343,7 @@ test "let accepts non-independent elements only through a local collection shell
     const allocator = arena.allocator();
 
     var parser = Parser.init(allocator,
-        \\class Player { pub var value:int; pub func show() {} }
+        \\class Player { public var value:int; public func show() {} }
         \\func main() {
         \\    let players:Player[] = [Player()]
         \\    players[0].show()
@@ -10995,7 +11072,7 @@ test "deferred native registrations transfer callbacks and expose dispatch" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const program = try analyzeDeferredNativeTest(arena.allocator(),
-        \\pub native resource Watch { drop stop_watch }
+        \\public native resource Watch { drop stop_watch }
         \\native func start_watch(callback:deferred func(int)) Watch
         \\func main() {
         \\    var total = 0
@@ -11011,7 +11088,7 @@ test "deferred native registrations transfer callbacks and expose dispatch" {
 
 test "deferred callbacks enforce scalar void signatures" {
     const resource =
-        \\pub native resource Watch { drop stop_watch }
+        \\public native resource Watch { drop stop_watch }
     ;
     try expectDeferredNativeError(
         resource ++ "\nnative func start_watch(callback:deferred func(int) bool) Watch\nfunc main() {}",
@@ -11056,7 +11133,7 @@ test "deferred callbacks are unique and cannot be called or stored" {
 
 test "deferred registration requires one callback and one direct resource return" {
     const resource =
-        \\pub native resource Watch { drop stop_watch }
+        \\public native resource Watch { drop stop_watch }
     ;
     try expectDeferredNativeError(
         resource ++ "\nnative func start_watch(first:deferred func(), second:deferred func()) Watch\nfunc main() {}",
@@ -11082,7 +11159,7 @@ test "deferred registration requires one callback and one direct resource return
 
 test "deferred registration requires move and propagates capture lifetime" {
     const resource =
-        \\pub native resource Watch { drop stop_watch }
+        \\public native resource Watch { drop stop_watch }
         \\native func start_watch(callback:deferred func(int)) Watch
     ;
     try expectDeferredNativeError(
@@ -11117,7 +11194,7 @@ test "deferred registration requires move and propagates capture lifetime" {
 
 test "deferred subscriptions cannot transfer ownership to ordinary native calls" {
     try expectDeferredNativeError(
-        \\pub native resource Watch { drop stop_watch }
+        \\public native resource Watch { drop stop_watch }
         \\native func start_watch(callback:deferred func()) Watch
         \\native func retain_watch(watch:Watch) void
         \\func main() {
@@ -11131,8 +11208,8 @@ test "deferred subscriptions cannot transfer ownership to ordinary native calls"
 
 test "dispatch callbacks rejects ordinary and destroyed resources" {
     const declarations =
-        \\pub native resource Watch { drop stop_watch }
-        \\pub native resource Other { drop stop_other }
+        \\public native resource Watch { drop stop_watch }
+        \\public native resource Other { drop stop_other }
         \\native func start_watch(callback:deferred func()) Watch
         \\native func create_watch() Watch
         \\native func create_other() Other
@@ -11171,7 +11248,7 @@ test "dispatch callbacks rejects ordinary and destroyed resources" {
 
 test "deferred resource provenance follows moves and aggregate fields" {
     try expectDeferredNativeSuccess(
-        \\pub native resource Watch { drop stop_watch }
+        \\public native resource Watch { drop stop_watch }
         \\native func start_watch(callback:deferred func()) Watch
         \\native func create_watch() Watch
         \\struct Watches { var subscription:Watch; var ordinary:Watch }
@@ -11190,7 +11267,7 @@ test "deferred resource provenance follows moves and aggregate fields" {
         \\}
     );
     try expectDeferredNativeSuccess(
-        \\pub native resource Watch { drop stop_watch }
+        \\public native resource Watch { drop stop_watch }
         \\native func start_watch(callback:deferred func()) Watch
         \\func main() {
         \\    let watch = subscribe()
@@ -11199,7 +11276,7 @@ test "deferred resource provenance follows moves and aggregate fields" {
         \\func subscribe() Watch { return start_watch(deferred func() {}) }
     );
     try expectDeferredNativeSuccess(
-        \\pub native resource Watch { drop stop_watch }
+        \\public native resource Watch { drop stop_watch }
         \\native func start_watch(callback:deferred func()) Watch
         \\func subscribe() Watch { return start_watch(deferred func() {}) }
         \\func main() {
@@ -11208,7 +11285,7 @@ test "deferred resource provenance follows moves and aggregate fields" {
         \\}
     );
     try expectDeferredNativeError(
-        \\pub native resource Watch { drop stop_watch }
+        \\public native resource Watch { drop stop_watch }
         \\native func start_watch(callback:deferred func()) Watch
         \\native func create_watch() Watch
         \\func maybe_subscribe(use_deferred:bool) Watch {

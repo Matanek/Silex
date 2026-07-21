@@ -1,1 +1,1 @@
-pub struct Vec3 {}
+public struct Vec3 {}

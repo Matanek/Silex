@@ -1,11 +1,11 @@
-pub struct Counter {
+public struct Counter {
     var value:int
 }
 
-pub class Box {
-    pub var value:int
+public class Box {
+    public var value:int
 
-    pub init(value:int) {
+    public init(value:int) {
         self.value = value
     }
 }

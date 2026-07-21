@@ -21,7 +21,7 @@ struct Box<T> {
 }
 
 class Player {
-    pub var name:str
+    public var name:str
 }
 
 func main() {

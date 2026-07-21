@@ -5,7 +5,7 @@ extend Math.Vec2 {
         return self.length_squared()
     }
 
-    pub static func origin() Math.Vec2 {
+    public static func origin() Math.Vec2 {
         return Math.Vec2()
     }
 }

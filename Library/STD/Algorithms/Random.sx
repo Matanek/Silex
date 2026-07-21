@@ -1,6 +1,6 @@
 use STD.Randomizer as Randomizer
 
-pub func choose<T>(randomizer:Randomizer, values:@T[..]) @T {
+public func choose<T>(randomizer:Randomizer, values:@T[..]) @T {
     if values.is_empty() {
         panic("Algorithms.choose requires a non-empty collection")
     }
@@ -8,7 +8,7 @@ pub func choose<T>(randomizer:Randomizer, values:@T[..]) @T {
     return @values[index]
 }
 
-pub func shuffle<T>(randomizer:Randomizer, values:&T[..]) {
+public func shuffle<T>(randomizer:Randomizer, values:&T[..]) {
     var end = values.count() - 1
     while end > 0 {
         let selected = randomizer.get_int(0, end + 1)
@@ -18,11 +18,11 @@ pub func shuffle<T>(randomizer:Randomizer, values:&T[..]) {
 }
 
 extend Randomizer {
-    pub func choose<T>(values:@T[..]) @T {
+    public func choose<T>(values:@T[..]) @T {
         return choose<T>(self, values)
     }
 
-    pub func shuffle<T>(values:&T[..]) {
+    public func shuffle<T>(values:&T[..]) {
         shuffle<T>(self, values)
     }
 }

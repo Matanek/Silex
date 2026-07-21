@@ -18,7 +18,7 @@ func sift_down<T>(values:&T[..], start:int, end:int, before:func(@T, @T) bool) {
     }
 }
 
-pub func sort<T>(values:&T[..], before:func(@T, @T) bool) {
+public func sort<T>(values:&T[..], before:func(@T, @T) bool) {
     let count = values.count()
     if count < 2 {
         return

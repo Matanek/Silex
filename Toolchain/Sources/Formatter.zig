@@ -773,10 +773,10 @@ test "generic extension methods keep canonical type parameters and calls" {
     defer arena.deinit();
     const result = try formatSource(
         arena.allocator(),
-        "extend Box { pub func choose < T : Named > (value : T) T { return value } } func main(){var box=Box();print(box.choose < int > (1))}",
+        "extend Box { public func choose < T : Named > (value : T) T { return value } } func main(){var box=Box();print(box.choose < int > (1))}",
     );
     try std.testing.expectEqualStrings(
-        "extend Box {\n    pub func choose<T:Named>(value:T) T {\n        return value\n    }\n}\n\nfunc main() {\n    var box = Box()\n    print(box.choose<int>(1))\n}\n",
+        "extend Box {\n    public func choose<T:Named>(value:T) T {\n        return value\n    }\n}\n\nfunc main() {\n    var box = Box()\n    print(box.choose<int>(1))\n}\n",
         result.text,
     );
 }

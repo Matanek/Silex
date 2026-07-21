@@ -722,7 +722,7 @@ pub fn build(b: *std.Build) void {
     extension_conflict_command.addArgs(&.{ "compile", "Tests/ExtensionConflict/silex.json" });
     extension_conflict_command.expectExitCode(1);
     extension_conflict_command.expectStdErrEqual(
-        "Tests/ExtensionConflict/Second.sx:5:14: error: extension method 'read<int>' from module 'ExtensionConflict.Second' conflicts with module 'ExtensionConflict.First' on type 'ExtensionConflict.Core.Value'\n",
+        "Tests/ExtensionConflict/Second.sx:5:17: error: extension method 'read<int>' from module 'ExtensionConflict.Second' conflicts with module 'ExtensionConflict.First' on type 'ExtensionConflict.Core.Value'\n",
     );
 
     const extension_conformance_visibility_command = b.addRunArtifact(executable);
@@ -742,7 +742,7 @@ pub fn build(b: *std.Build) void {
     const invalid_private_super_constructor_command = b.addRunArtifact(executable);
     invalid_private_super_constructor_command.addArgs(&.{ "compile", "Tests/InvalidPrivateSuperConstructor.sx" });
     invalid_private_super_constructor_command.expectExitCode(1);
-    invalid_private_super_constructor_command.expectStdErrEqual("Tests/InvalidPrivateSuperConstructor.sx:6:18: error: constructor of base class 'Base' is private\n");
+    invalid_private_super_constructor_command.expectStdErrEqual("Tests/InvalidPrivateSuperConstructor.sx:6:21: error: constructor of base class 'Base' is private\n");
 
     const invalid_class_collection_covariance_command = b.addRunArtifact(executable);
     invalid_class_collection_covariance_command.addArgs(&.{ "compile", "Tests/InvalidClassCollectionCovariance.sx" });
@@ -772,7 +772,26 @@ pub fn build(b: *std.Build) void {
     const invalid_struct_member_visibility_command = b.addRunArtifact(executable);
     invalid_struct_member_visibility_command.addArgs(&.{ "compile", "Tests/InvalidStructMemberVisibility.sx" });
     invalid_struct_member_visibility_command.expectExitCode(1);
-    invalid_struct_member_visibility_command.expectStdErrEqual("Tests/InvalidStructMemberVisibility.sx:2:5: error: struct members are already public and do not accept visibility modifiers\n");
+    invalid_struct_member_visibility_command.expectStdErrEqual("Tests/InvalidStructMemberVisibility.sx:2:5: error: a struct member cannot use 'protected' because structs do not support inheritance\n");
+
+    const struct_private_visibility_command = b.addRunArtifact(executable);
+    struct_private_visibility_command.addArgs(&.{ "compile", "Tests/StructPrivateVisibility/Valid/silex.json" });
+    struct_private_visibility_command.expectExitCode(0);
+
+    const invalid_private_struct_initializer_command = b.addRunArtifact(executable);
+    invalid_private_struct_initializer_command.addArgs(&.{ "compile", "Tests/StructPrivateVisibility/InvalidInitializer/silex.json" });
+    invalid_private_struct_initializer_command.expectExitCode(1);
+    invalid_private_struct_initializer_command.expectStdErrEqual("Tests/StructPrivateVisibility/InvalidInitializer/Main.sx:4:24: error: initializer of struct 'Queues.Queue' is private because it declares private fields\n");
+
+    const invalid_private_struct_field_command = b.addRunArtifact(executable);
+    invalid_private_struct_field_command.addArgs(&.{ "compile", "Tests/StructPrivateVisibility/InvalidField/silex.json" });
+    invalid_private_struct_field_command.expectExitCode(1);
+    invalid_private_struct_field_command.expectStdErrEqual("Tests/StructPrivateVisibility/InvalidField/Main.sx:5:17: error: field 'values' is private in struct 'Queues.Queue'\n");
+
+    const invalid_private_struct_extension_command = b.addRunArtifact(executable);
+    invalid_private_struct_extension_command.addArgs(&.{ "compile", "Tests/StructPrivateVisibility/InvalidExtension/silex.json" });
+    invalid_private_struct_extension_command.expectExitCode(1);
+    invalid_private_struct_extension_command.expectStdErrEqual("Tests/StructPrivateVisibility/InvalidExtension/Main.sx:5:21: error: field 'values' is private in struct 'Queues.Queue'\n");
 
     const invalid_assertion_condition_command = b.addRunArtifact(executable);
     invalid_assertion_condition_command.addArgs(&.{ "compile", "Tests/InvalidAssertionCondition.sx" });
@@ -1692,7 +1711,7 @@ pub fn build(b: *std.Build) void {
         "silex: native compilation failed for target 'x86_64-linux-musl'; target support, SDKs, or native sources may be unavailable or incomplete\n",
     );
     backend_discovered_target_failure_command.expectStdErrMatch(b.fmt(
-        "silex: backend details: .silex{c}build{c}v44{c}x86_64-linux-musl{c}",
+        "silex: backend details: .silex{c}build{c}v45{c}x86_64-linux-musl{c}",
         .{
             std.fs.path.sep,
             std.fs.path.sep,
@@ -1783,7 +1802,7 @@ pub fn build(b: *std.Build) void {
     public_module_use_command.addArgs(&.{ "compile", "Tests/Modules/PublicModuleUse/project.json" });
     public_module_use_command.expectExitCode(1);
     public_module_use_command.expectStdErrEqual(
-        "Tests/Modules/PublicModuleUse/Main.sx:1:5: error: module 'Lib.Child' cannot be re-exported with 'pub use'\n",
+        "Tests/Modules/PublicModuleUse/Main.sx:1:8: error: module 'Lib.Child' cannot be re-exported with 'public use'\n",
     );
 
     const local_source_unit_command = b.addRunArtifact(executable);
@@ -1930,7 +1949,7 @@ pub fn build(b: *std.Build) void {
     invalid_let_field_missing_initialization_command.addArgs(&.{ "compile", "Tests/InvalidLetFieldMissingInitialization.sx" });
     invalid_let_field_missing_initialization_command.expectExitCode(1);
     invalid_let_field_missing_initialization_command.expectStdErrEqual(
-        "Tests/InvalidLetFieldMissingInitialization.sx:4:9: error: constructor of class 'User' leaves field 'id' without a value\n",
+        "Tests/InvalidLetFieldMissingInitialization.sx:4:12: error: constructor of class 'User' leaves field 'id' without a value\n",
     );
 
     const invalid_let_field_independence_command = b.addRunArtifact(executable);
@@ -1953,7 +1972,7 @@ pub fn build(b: *std.Build) void {
     const invalid_static_override_command = b.addRunArtifact(executable);
     invalid_static_override_command.addArgs(&.{ "compile", "Tests/InvalidStaticOverride.sx" });
     invalid_static_override_command.expectExitCode(1);
-    invalid_static_override_command.expectStdErrEqual("Tests/InvalidStaticOverride.sx:2:18: error: a static method cannot use 'override'\n");
+    invalid_static_override_command.expectStdErrEqual("Tests/InvalidStaticOverride.sx:2:21: error: a static method cannot use 'override'\n");
 
     const invalid_static_by_instance_command = b.addRunArtifact(executable);
     invalid_static_by_instance_command.addArgs(&.{ "compile", "Tests/InvalidStaticByInstance.sx" });
@@ -2124,6 +2143,10 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&invalid_sub_class_field_command.step);
     test_step.dependOn(&invalid_private_class_initializer_command.step);
     test_step.dependOn(&invalid_struct_member_visibility_command.step);
+    test_step.dependOn(&struct_private_visibility_command.step);
+    test_step.dependOn(&invalid_private_struct_initializer_command.step);
+    test_step.dependOn(&invalid_private_struct_field_command.step);
+    test_step.dependOn(&invalid_private_struct_extension_command.step);
     test_step.dependOn(&invalid_assertion_condition_command.step);
     test_step.dependOn(&invalid_assertion_message_command.step);
     test_step.dependOn(&assertion_failure_command.step);
@@ -3682,42 +3705,42 @@ pub fn build(b: *std.Build) void {
     const cross_system_error_linux_smoke_command = b.addRunArtifact(executable);
     cross_system_error_linux_smoke_command.step.dependOn(&cross_isolated_std_windows_smoke_command.step);
     cross_system_error_linux_smoke_command.addArgs(&.{
-        "compile", "Smokes/SystemErrors.sx",                         "--target", "x86_64-linux-musl",
+        "compile", "Smokes/SystemErrors.sx",                              "--target", "x86_64-linux-musl",
         "-o",      ".silex/cross-native-smoke/SystemErrors-x86_64-linux",
     });
 
     const cross_system_error_windows_smoke_command = b.addRunArtifact(executable);
     cross_system_error_windows_smoke_command.step.dependOn(&cross_system_error_linux_smoke_command.step);
     cross_system_error_windows_smoke_command.addArgs(&.{
-        "compile", "Smokes/SystemErrors.sx",                               "--target", "x86_64-windows-gnu",
+        "compile", "Smokes/SystemErrors.sx",                                    "--target", "x86_64-windows-gnu",
         "-o",      ".silex/cross-native-smoke/SystemErrors-x86_64-windows.exe",
     });
 
     const cross_path_linux_smoke_command = b.addRunArtifact(executable);
     cross_path_linux_smoke_command.step.dependOn(&cross_system_error_windows_smoke_command.step);
     cross_path_linux_smoke_command.addArgs(&.{
-        "compile", "Smokes/Paths.sx",                         "--target", "x86_64-linux-musl",
+        "compile", "Smokes/Paths.sx",                              "--target", "x86_64-linux-musl",
         "-o",      ".silex/cross-native-smoke/Paths-x86_64-linux",
     });
 
     const cross_path_windows_smoke_command = b.addRunArtifact(executable);
     cross_path_windows_smoke_command.step.dependOn(&cross_path_linux_smoke_command.step);
     cross_path_windows_smoke_command.addArgs(&.{
-        "compile", "Smokes/Paths.sx",                               "--target", "x86_64-windows-gnu",
+        "compile", "Smokes/Paths.sx",                                    "--target", "x86_64-windows-gnu",
         "-o",      ".silex/cross-native-smoke/Paths-x86_64-windows.exe",
     });
 
     const cross_io_linux_smoke_command = b.addRunArtifact(executable);
     cross_io_linux_smoke_command.step.dependOn(&cross_path_windows_smoke_command.step);
     cross_io_linux_smoke_command.addArgs(&.{
-        "compile", "Smokes/IO.sx",                         "--target", "x86_64-linux-musl",
+        "compile", "Smokes/IO.sx",                              "--target", "x86_64-linux-musl",
         "-o",      ".silex/cross-native-smoke/IO-x86_64-linux",
     });
 
     const cross_io_windows_smoke_command = b.addRunArtifact(executable);
     cross_io_windows_smoke_command.step.dependOn(&cross_io_linux_smoke_command.step);
     cross_io_windows_smoke_command.addArgs(&.{
-        "compile", "Smokes/IO.sx",                               "--target", "x86_64-windows-gnu",
+        "compile", "Smokes/IO.sx",                                    "--target", "x86_64-windows-gnu",
         "-o",      ".silex/cross-native-smoke/IO-x86_64-windows.exe",
     });
 

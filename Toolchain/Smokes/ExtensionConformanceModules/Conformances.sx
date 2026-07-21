@@ -2,11 +2,11 @@ use ExtensionConformanceChecks.Core as Core
 use ExtensionConformanceChecks.Types as Types
 
 extend Types.Sprite : Core.Drawable, Core.Named {
-    pub func draw() int {
+    public func draw() int {
         return self.value
     }
 
-    pub func name() str {
+    public func name() str {
         return "sprite"
     }
 }

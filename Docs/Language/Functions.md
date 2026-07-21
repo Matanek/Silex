@@ -127,11 +127,11 @@ func require_positive(value:int) int {
 `native func` declares a private, top-level function implemented by a named
 module's native runtime rather than by a Silex body. Its name follows the
 ordinary function naming rules; `native_` is only an optional library
-convention. `pub native func` instead exposes the native implementation
+convention. `public native func` instead exposes the native implementation
 directly as an ordinary public module function:
 
 ```sx
-pub native func pow(value:int) int
+public native func pow(value:int) int
 ```
 
 The local or distributed module, or one of its parents, must contain a
@@ -347,7 +347,7 @@ Methods are functions declared inside a structure or class. An instance method
 receives the explicit `self` value. A `static func` method is selected through
 its complete type and has no receiver. See [Structures](Structures.md) and
 [Classes](Classes.md). Structure methods are public by default. Class methods
-are private by default and use `pub` for general access or `sub` for access by
+are private by default and use `public` for general access or `protected` for access by
 future descendants; visibility precedes `static`.
 
 ## Function values and lambdas

@@ -2,7 +2,7 @@ use STD.Algorithms
 use STD.Randomizer as Randomizer
 
 class Tracker {
-    pub var dropped:int = 0
+    public var dropped:int = 0
 }
 
 struct Token {
@@ -45,11 +45,11 @@ func check_choose() {
         let view = @bounded[1:4]
         let selected:@int = Algorithms.choose<int>(bounded_randomizer, view)
         let expected = bounded[1 + bounded_index]
-        assert(int_matches(selected, expected), "choose respects sub-view bounds")
+        assert(int_matches(selected, expected), "choose respects protected-view bounds")
     }
     assert(
         bounded_randomizer.get_int() == bounded_expected.get_int(),
-        "sub-view choose performs exactly one draw"
+        "protected-view choose performs exactly one draw"
     )
 
     var method_randomizer = Randomizer.create(73)

@@ -1,4 +1,4 @@
-pub native resource Watch {
+public native resource Watch {
     drop stop_watch
 }
 
@@ -62,7 +62,7 @@ func verify_returned_subscription() {
     assert(runtime_counts_zero(), "returned subscription releases native state")
 }
 
-pub func trigger_null_return() {
+public func trigger_null_return() {
     var captured = 0
     let watch = start_null_watch(deferred func(value:int) {
         captured += value
@@ -232,7 +232,7 @@ func verify_concurrent_cancellation() {
     assert(runtime_counts_zero(), "cancellation joins workers and releases all state")
 }
 
-pub func verify() {
+public func verify() {
     verify_no_hidden_retention()
     verify_returned_subscription()
     verify_basics()

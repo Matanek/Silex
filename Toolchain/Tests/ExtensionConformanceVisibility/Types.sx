@@ -1,2 +1,2 @@
-pub struct Sprite {
+public struct Sprite {
 }

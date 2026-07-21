@@ -1,4 +1,4 @@
-pub struct NativeScalars {
+public struct NativeScalars {
     var integer:int
     var signed8:int8
     var signed16:int16
@@ -12,7 +12,7 @@ pub struct NativeScalars {
     var ready:bool
 }
 
-pub struct NativeBounds {
+public struct NativeBounds {
     var width:int
     var height:int
 }
@@ -24,7 +24,7 @@ native func native_verify(
     marker:int
 ) bool
 
-pub func verify(
+public func verify(
     values:NativeScalars,
     first:NativeBounds,
     second:NativeBounds,

@@ -1,14 +1,14 @@
 use NK.Window
 
-pub use NK.Window.Session as WindowSession
-pub use NK.Window.Pair as WindowPair
-pub use NK.Window.IntPair as WindowIntPair
-pub use NK.Window.Integers as WindowIntegers
-pub use NK.Window.Status as WindowStatus
-pub use NK.Window.WireStatus as WindowWireStatus
-pub use NK.Window.create_session as raw_create
-pub use NK.Window.identity as WindowIdentity
+public use NK.Window.Session as WindowSession
+public use NK.Window.Pair as WindowPair
+public use NK.Window.IntPair as WindowIntPair
+public use NK.Window.Integers as WindowIntegers
+public use NK.Window.Status as WindowStatus
+public use NK.Window.WireStatus as WindowWireStatus
+public use NK.Window.create_session as raw_create
+public use NK.Window.identity as WindowIdentity
 
-pub func create_window() WindowSession {
+public func create_window() WindowSession {
     return Window.create_session()
 }

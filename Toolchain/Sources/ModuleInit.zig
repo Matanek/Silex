@@ -241,13 +241,13 @@ test "plain initialization preserves an existing Silex module" {
     var temporary = std.testing.tmpDir(.{});
     defer temporary.cleanup();
     try temporary.dir.createDir(std.testing.io, "Core", .default_dir);
-    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Core/Runtime.sx", .data = "pub func value() int { return 1 }\n" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Core/Runtime.sx", .data = "public func value() int { return 1 }\n" });
     const directory = try testPath(allocator, temporary.sub_path, "Core");
 
     _ = try initialize(allocator, std.testing.io, directory, false);
 
     const source = try temporary.dir.readFileAlloc(std.testing.io, "Core/Runtime.sx", allocator, .limited(1024));
-    try std.testing.expectEqualStrings("pub func value() int { return 1 }\n", source);
+    try std.testing.expectEqualStrings("public func value() int { return 1 }\n", source);
 }
 
 test "native initialization preserves metadata and creates @Native source" {

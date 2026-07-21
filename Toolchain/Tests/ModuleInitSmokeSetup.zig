@@ -31,7 +31,7 @@ pub fn main(init: std.process.Init) !void {
         .data =
         \\native func native_value() int
         \\
-        \\pub func value() int {
+        \\public func value() int {
         \\    return native_value()
         \\}
         \\
