@@ -629,7 +629,13 @@ pub const Parser = struct {
             null;
         if (reference_mode) |_| try self.advance();
         var provenance: ?[]const u8 = null;
-        const type_name = if (reference_mode != null and self.current.tag == .identifier) reference: {
+        const type_name = if (reference_mode != null and self.current.tag == .keyword_self) reference: {
+            provenance = "self";
+            try self.advance();
+            if (self.current.tag != .colon) return self.fail("expected ':' after 'self' return provenance");
+            try self.advance();
+            break :reference try self.parseTypeNameAfter("expected function return type after provenance");
+        } else if (reference_mode != null and self.current.tag == .identifier) reference: {
             const first = try self.parseQualifiedName("expected function return type");
             if (self.current.tag == .colon) {
                 provenance = first;
@@ -3169,6 +3175,21 @@ test "parse generic structure declarations types and invocations" {
     try std.testing.expectEqual(@as(usize, 2), initializer.type_arguments.len);
     try std.testing.expect(initializer.type_arguments[1] == .generic_structure);
     try std.testing.expect(program.functions[0].statements[2].print.argument.value == .binary);
+}
+
+test "parse self-qualified borrowed method returns" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(),
+        \\struct Store<T> {
+        \\    var value:T
+        \\    func inspect(other:@T) @self:T { return @self.value }
+        \\    func edit(other:@T) &self:T { return &self.value }
+        \\}
+    );
+    const program = try parser.parse();
+    try std.testing.expectEqualStrings("self", program.structures[0].methods[0].return_type.reference.provenance.?);
+    try std.testing.expectEqualStrings("self", program.structures[0].methods[1].return_type.reference.provenance.?);
 }
 
 test "reject duplicate generic structure parameters" {

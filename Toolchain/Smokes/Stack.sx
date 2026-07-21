@@ -1,0 +1,85 @@
+use STD.Collections.Stack as Stack
+
+class Tracker {
+    public var dropped:int[]
+}
+
+class Tracked {
+    var tracker:Tracker
+    let identifier:int
+
+    public static func create(tracker:Tracker, identifier:int) Tracked {
+        return Tracked(tracker:tracker, identifier:identifier)
+    }
+
+    public func id() int {
+        return self.identifier
+    }
+
+    drop {
+        self.tracker.dropped.append(self.identifier)
+    }
+}
+
+func required(value:int?) int {
+    if present = value {
+        return present
+    }
+    panic("expected a stacked value")
+}
+
+func equals(value:@int, expected:int) bool {
+    return value >= expected && value <= expected
+}
+
+func replace(value:&int, replacement:int) {
+    value = replacement
+}
+
+func main() {
+    var stack = Stack<int>.create()
+    assert(stack.is_empty() && stack.pop() == null, "empty stack")
+    stack.reserve(40)
+    assert(stack.capacity() >= 40, "stack reserve")
+
+    var index = 0
+    while index < 40 {
+        stack.push(index)
+        index++
+    }
+    index = 39
+    while index >= 0 {
+        assert(required(stack.pop()) == index, "LIFO order")
+        index--
+    }
+
+    stack.push(7)
+    if true {
+        let top = stack.peek()
+        let top_again = stack.peek()
+        assert(equals(top, 7) && equals(top_again, 7), "shared top borrows")
+    }
+    if true {
+        var top = stack.peek()
+        replace(top, 8)
+    }
+    assert(required(stack.pop()) == 8, "mutable top borrow")
+
+    var left = Stack<int>.create()
+    left.push(1)
+    left.push(2)
+    var right = left
+    assert(required(right.pop()) == 2, "copied stack pop")
+    right.push(3)
+    assert(left.count() == 2 && right.count() == 2, "stack copies diverge")
+
+    var tracker = Tracker(dropped:[])
+    var tracked = Stack<Tracked>.create()
+    tracked.push(Tracked.create(tracker, 1))
+    tracked.push(Tracked.create(tracker, 2))
+    tracked.push(Tracked.create(tracker, 3))
+    tracked.pop()
+    assert(tracker.dropped ==[3], "pop releases the top")
+    tracked.clear()
+    assert(tracker.dropped ==[3, 2, 1], "clear destroys from top to base")
+}

@@ -1,3 +1,5 @@
+use STD.Collections.Queue as Queue
+
 native func native_session_create() int
 native func native_session_close(handle:int) void
 native func native_session_is_open(handle:int) bool
@@ -60,6 +62,26 @@ public struct Session {
             return event_from_native(native_event)
         }
         return null
+    }
+
+    public func poll_keys(maximum_count:int, timeout_milliseconds:int) Queue<KeyEvent> {
+        if maximum_count <= 0 {
+            panic("Console.Session.poll_keys requires a positive maximum count")
+        }
+        var events = Queue<KeyEvent>.create(maximum_count)
+        if first = self.poll_key(timeout_milliseconds) {
+            events.enqueue(first)
+        } else {
+            return events
+        }
+        while events.count() < maximum_count {
+            if event = self.poll_key(0) {
+                events.enqueue(event)
+            } else {
+                return events
+            }
+        }
+        return events
     }
 
     func enter_alternate_screen() {

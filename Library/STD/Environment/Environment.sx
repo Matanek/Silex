@@ -1,0 +1,150 @@
+use STD.System.Error as Error
+use STD.System.ErrorKind as ErrorKind
+use STD.Text.UTF8.decode as decode_utf8
+
+public struct Variable {
+    let name:str
+    let value:str
+}
+
+struct NativeLookupResult {
+    let succeeded:bool
+    let error_kind:int
+    let present:bool
+    let value:str
+    let detail:str
+}
+
+struct NativeOperationResult {
+    let succeeded:bool
+    let error_kind:int
+    let detail:str
+}
+
+native func native_get(name:str) NativeLookupResult
+native func native_set(name:str, value:str) NativeOperationResult
+native func native_remove(name:str) NativeOperationResult
+native func native_visit_variables(visitor:func(int, int)) NativeOperationResult
+
+public func get(name:str) Result<str?, Error> {
+    let native = native_get(name)
+    if !native.succeeded {
+        return Result<str?, Error>.failure(system_error(
+            "environment.get", name, native.error_kind, native.detail
+        ))
+    }
+    if native.present {
+        return Result<str?, Error>.success(native.value)
+    }
+    return Result<str?, Error>.success(null)
+}
+
+public func set(name:str, value:str) Result<void, Error> {
+    return operation_result(
+        native_set(name, value), "environment.set", name
+    )
+}
+
+public func remove(name:str) Result<void, Error> {
+    return operation_result(native_remove(name), "environment.remove", name)
+}
+
+public func variables() Result<Variable[], Error> {
+    var result:Variable[] = []
+    var phase = 0
+    var remaining = 0
+    var bytes:uint8[] = []
+    var name = ""
+    let native = native_visit_variables(func(first:int, second:int) {
+        if first != 0 {
+            phase = first
+            remaining = second
+            bytes = []
+            if remaining == 0 {
+                if phase == 1 {
+                    name = ""
+                } else {
+                    result.append(Variable(name:name, value:""))
+                }
+            }
+        } else {
+            bytes.append(second as uint8)
+            remaining--
+            if remaining == 0 {
+                let view = @bytes[0:bytes.count()]
+                match decode_utf8(view) {
+                    failure(error) => { panic("native environment entry is not valid UTF-8") }
+                    success(text) => {
+                        if phase == 1 {
+                            name = text
+                        } else {
+                            result.append(Variable(name:name, value:text))
+                        }
+                    }
+                }
+            }
+        }
+    })
+    if !native.succeeded {
+        return Result<Variable[], Error>.failure(system_error(
+            "environment.variables", "", native.error_kind, native.detail
+        ))
+    }
+    return Result<Variable[], Error>.success(result)
+}
+
+func operation_result(
+    native:NativeOperationResult,
+    operation:str,
+    subject:str
+) Result<void, Error> {
+    if !native.succeeded {
+        return Result<void, Error>.failure(system_error(
+            operation, subject, native.error_kind, native.detail
+        ))
+    }
+    return Result<void, Error>.success()
+}
+
+func system_error(operation:str, subject:str, kind:int, detail:str) Error {
+    return Error(
+        kind:error_kind(kind),
+        operation:operation,
+        subject:subject,
+        detail:detail
+    )
+}
+
+func error_kind(kind:int) ErrorKind {
+    if kind == 0 { return ErrorKind.not_found() }
+    if kind == 1 { return ErrorKind.already_exists() }
+    if kind == 2 { return ErrorKind.permission_denied() }
+    if kind == 3 { return ErrorKind.invalid_input() }
+    if kind == 4 { return ErrorKind.invalid_data() }
+    if kind == 5 { return ErrorKind.name_too_long() }
+    if kind == 6 { return ErrorKind.unexpected_end() }
+    if kind == 7 { return ErrorKind.limit_exceeded() }
+    if kind == 8 { return ErrorKind.not_directory() }
+    if kind == 9 { return ErrorKind.is_directory() }
+    if kind == 10 { return ErrorKind.directory_not_empty() }
+    if kind == 11 { return ErrorKind.resource_busy() }
+    if kind == 12 { return ErrorKind.resource_exhausted() }
+    if kind == 13 { return ErrorKind.too_many_open_files() }
+    if kind == 14 { return ErrorKind.read_only_file_system() }
+    if kind == 15 { return ErrorKind.cross_device() }
+    if kind == 16 { return ErrorKind.interrupted() }
+    if kind == 17 { return ErrorKind.would_block() }
+    if kind == 18 { return ErrorKind.timed_out() }
+    if kind == 19 { return ErrorKind.broken_pipe() }
+    if kind == 20 { return ErrorKind.message_too_large() }
+    if kind == 21 { return ErrorKind.address_in_use() }
+    if kind == 22 { return ErrorKind.address_unavailable() }
+    if kind == 23 { return ErrorKind.network_unreachable() }
+    if kind == 24 { return ErrorKind.host_unreachable() }
+    if kind == 25 { return ErrorKind.connection_refused() }
+    if kind == 26 { return ErrorKind.connection_aborted() }
+    if kind == 27 { return ErrorKind.connection_reset() }
+    if kind == 28 { return ErrorKind.not_connected() }
+    if kind == 29 { return ErrorKind.unsupported() }
+    return ErrorKind.other()
+}

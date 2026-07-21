@@ -1,0 +1,31 @@
+use STD.Text.Grapheme.boundaries as grapheme_boundaries
+use STD.Text.Grapheme.count as grapheme_count
+use STD.Text.Grapheme.split as grapheme_split
+
+func joined(parts:str[]) str {
+    var result = ""
+    for part in parts {
+        result += part
+    }
+    return result
+}
+
+func verify(text:str, scalars:int, graphemes:int, label:str) {
+    assert(text.count() == scalars, "scalar count")
+    assert(grapheme_count(text) == graphemes, "grapheme count")
+    assert(joined(grapheme_split(text)) == text, "exact grapheme round trip")
+    print(label)
+}
+
+func main() {
+    verify("é", 2, 1, "2/1")
+    verify("👩🏽‍💻", 4, 1, "4/1")
+    verify("🇫🇷", 2, 1, "2/1")
+    verify("\r\n", 2, 1, "2/1")
+    verify("각", 1, 1, "1/1")
+    verify("a\0b", 3, 3, "3/3")
+
+    assert(grapheme_boundaries("") == [0], "empty boundaries")
+    assert(grapheme_split("").is_empty(), "empty split")
+    assert(grapheme_boundaries("é🇫🇷") == [0, 3, 11], "UTF-8 byte offsets")
+}

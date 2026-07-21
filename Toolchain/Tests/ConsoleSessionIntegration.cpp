@@ -262,7 +262,7 @@ std::size_t occurrences(const std::string& text, const std::string& value) {
 
 bool containsExpectedEvents(const std::string& output) {
     constexpr const char* expected[] = {
-        "true\r\ntrue\r\n\x1b[?1049h",
+        "true\r\ntrue\r\n\x1b[?1049h4\r\n",
         "---:character:é\r\n",
         "---:arrow_up\r\n",
         "SC-:arrow_up\r\n",

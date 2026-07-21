@@ -1,0 +1,11 @@
+use STD.Collections.Stack as Stack
+
+func equals(value:@int, expected:int) bool {
+    return value >= expected && value <= expected
+}
+
+func main() {
+    var stack = Stack<int>.create()
+    let value:@int = stack.peek()
+    print(equals(value, 0))
+}

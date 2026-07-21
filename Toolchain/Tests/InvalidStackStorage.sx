@@ -1,0 +1,6 @@
+use STD.Collections.Stack as Stack
+
+func main() {
+    var stack = Stack<int>.create()
+    stack.storage.append(1)
+}

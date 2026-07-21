@@ -307,6 +307,7 @@ pub const Specializer = struct {
                 .target = try self.rewriteTypePointer(reference.target.*, bindings, position),
                 .mutable = reference.mutable,
                 .provenance = reference.provenance,
+                .generic_target = reference.generic_target or reference.target.* == .type_parameter,
             } },
             .function => |function| function_type: {
                 var parameters: std.ArrayList(Ast.TypeName) = .empty;
@@ -365,6 +366,7 @@ pub const Specializer = struct {
                 .target = try self.rewriteTypePointer(reference.target.*, bindings, position),
                 .mutable = reference.mutable,
                 .provenance = reference.provenance,
+                .generic_target = reference.generic_target or reference.target.* == .type_parameter,
             } },
             .function => |function| .{ .function = (try self.rewriteType(.{ .function = function }, bindings, position)).function },
             .optional => |contained| .{ .optional = try self.rewriteTypePointer(contained.*, bindings, position) },

@@ -1,0 +1,222 @@
+use STD.Iteration.Iterator as Iterator
+
+struct Search {
+    let index:int
+    let previous:int
+    let bucket:int
+}
+
+public struct Entry<Key, Value> {
+    let key:Key
+    let value:Value
+}
+
+public struct Dictionary<Key, Value> {
+    private var hash:func(@Key) uint
+    private var equal:func(@Key, @Key) bool
+    private var buckets:int[]
+    private var hashes:uint[]
+    private var keys:Key[]
+    private var values:Value[]
+    private var next:int[]
+
+    public static func create(
+        hash:func(@Key) uint,
+        equal:func(@Key, @Key) bool,
+    ) Dictionary<Key, Value> {
+        return Dictionary<Key, Value>(
+            hash:hash,
+            equal:equal,
+            buckets:[],
+            hashes:[],
+            keys:[],
+            values:[],
+            next:[]
+        )
+    }
+
+    public static func create(
+        hash:func(@Key) uint,
+        equal:func(@Key, @Key) bool,
+        minimum_capacity:int,
+    ) Dictionary<Key, Value> {
+        if minimum_capacity < 0 {
+            panic("Dictionary.create requires a non-negative minimum capacity")
+        }
+        var result = Dictionary<Key, Value>.create(hash, equal)
+        result.reserve(minimum_capacity)
+        return result
+    }
+
+    public func count() int {
+        return self.keys.count()
+    }
+
+    public func capacity() int {
+        return self.buckets.count() * 3 / 4
+    }
+
+    public func is_empty() bool {
+        return self.keys.is_empty()
+    }
+
+    public func contains_key(key:@Key) bool {
+        return self.search(key).index >= 0
+    }
+
+    public func at(key:@Key) &self:Value {
+        let index = self.search(key).index
+        if index < 0 {
+            panic("Dictionary.at requires an existing key")
+        }
+        return &self.values[index]
+    }
+
+    public func insert(key:Key, value:Value) Value? {
+        let existing = self.search(key).index
+        if existing >= 0 {
+            return self.values.replace(existing, value)
+        }
+        self.ensure_capacity(self.count() + 1)
+        let hash_value = self.hash(key)
+        let bucket = self.bucket_for(hash_value)
+        self.hashes.append(hash_value)
+        self.keys.append(key)
+        self.values.append(value)
+        self.next.append(self.buckets[bucket])
+        self.buckets[bucket] = self.count() - 1
+        return null
+    }
+
+    public func remove(key:@Key) Value? {
+        let removed = self.take_entry(key)
+        if entry = removed {
+            return entry.value
+        }
+        return null
+    }
+
+    public func take_entry(key:@Key) Entry<Key, Value>? {
+        let found = self.search(key)
+        if found.index < 0 {
+            return null
+        }
+
+        let removed_index = found.index
+        let last_index = self.count() - 1
+        if found.previous < 0 {
+            self.buckets[found.bucket] = self.next[removed_index]
+        } else {
+            self.next[found.previous] = self.next[removed_index]
+        }
+        if removed_index != last_index {
+            self.redirect_index(self.hashes[last_index], last_index, removed_index)
+        }
+
+        let removed_key = self.keys.replace(removed_index, self.keys[-1])
+        let removed_value = self.values.replace(removed_index, self.values[-1])
+        self.hashes.replace(removed_index, self.hashes[-1])
+        self.next.replace(removed_index, self.next[-1])
+        self.keys.take_last()
+        self.values.take_last()
+        self.hashes.take_last()
+        self.next.take_last()
+        return Entry<Key, Value>(key:removed_key, value:removed_value)
+    }
+
+    public func reserve(minimum_capacity:int) {
+        if minimum_capacity < 0 {
+            panic("Dictionary.reserve requires a non-negative minimum capacity")
+        }
+        if minimum_capacity > self.capacity() {
+            self.rebuild(minimum_capacity)
+        }
+    }
+
+    public func clear() {
+        self.hashes.clear()
+        self.keys.clear()
+        self.values.clear()
+        self.next.clear()
+        var index = 0
+        while index < self.buckets.count() {
+            self.buckets[index] = -1
+            index++
+        }
+    }
+
+    public func iterator() Iterator<Entry<Key, Value>> {
+        var result = Iterator<Entry<Key, Value>>.empty()
+        var index = 0
+        while index < self.count() {
+            result.push(Entry<Key, Value>(key:self.keys[index], value:self.values[index]))
+            index++
+        }
+        return result
+    }
+
+    private func search(key:@Key) Search {
+        if self.buckets.is_empty() {
+            return Search(index:-1, previous:-1, bucket:0)
+        }
+        let hash_value = self.hash(key)
+        let bucket = self.bucket_for(hash_value)
+        var previous = -1
+        var index = self.buckets[bucket]
+        while index >= 0 {
+            if self.hashes[index] == hash_value && self.equal(self.keys[index], key) {
+                return Search(index:index, previous:previous, bucket:bucket)
+            }
+            previous = index
+            index = self.next[index]
+        }
+        return Search(index:-1, previous:previous, bucket:bucket)
+    }
+
+    private func bucket_for(hash_value:uint) int {
+        return (hash_value % (self.buckets.count() as uint)) as int
+    }
+
+    private func ensure_capacity(required:int) {
+        if required > self.capacity() {
+            self.rebuild(required)
+        }
+    }
+
+    private func rebuild(minimum_capacity:int) {
+        var bucket_count = 8
+        while bucket_count * 3 / 4 < minimum_capacity {
+            bucket_count *= 2
+        }
+        var buckets:int[] = []
+        var index = 0
+        while index < bucket_count {
+            buckets.append(-1)
+            index++
+        }
+        self.buckets = buckets
+        self.next.clear()
+        index = 0
+        while index < self.count() {
+            let bucket = self.bucket_for(self.hashes[index])
+            self.next.append(self.buckets[bucket])
+            self.buckets[bucket] = index
+            index++
+        }
+    }
+
+    private func redirect_index(hash_value:uint, previous_index:int, replacement_index:int) {
+        let bucket = self.bucket_for(hash_value)
+        var previous = -1
+        var index = self.buckets[bucket]
+        while index != previous_index {
+            previous = index
+            index = self.next[index]
+        }
+        if previous < 0 {
+            self.buckets[bucket] = replacement_index
+        } else {
+            self.next[previous] = replacement_index
+        }
+    }
+}

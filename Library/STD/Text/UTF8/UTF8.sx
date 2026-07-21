@@ -1,0 +1,160 @@
+native func native_bytes(text:str) uint8[]
+native func native_string(values:@uint8[..]) str
+
+public enum DecodeErrorKind {
+    invalid_leading_byte
+    invalid_continuation
+    truncated_sequence
+    overlong_sequence
+    surrogate
+    out_of_range
+}
+
+public struct DecodeError {
+    let kind:DecodeErrorKind
+    let byte_offset:int
+}
+
+public enum ScalarErrorKind {
+    surrogate
+    out_of_range
+}
+
+public struct ScalarError {
+    let kind:ScalarErrorKind
+    let scalar_index:int
+}
+
+public func bytes(text:str) uint8[] {
+    return native_bytes(text)
+}
+
+public func decode(values:@uint8[..]) Result<str, DecodeError> {
+    var index = 0
+    while index < values.count() {
+        let first:uint8 = values[index]
+        if first <= 127 {
+            index++
+            continue
+        }
+        var length = 0
+        if first >= 194 && first <= 223 {
+            length = 2
+        } elif first >= 224 && first <= 239 {
+            length = 3
+        } elif first >= 240 && first <= 244 {
+            length = 4
+        } elif first == 192 || first == 193 {
+            return decode_failure(DecodeErrorKind.overlong_sequence(), index)
+        } elif first >= 245 && first <= 247 {
+            return decode_failure(DecodeErrorKind.out_of_range(), index)
+        } else {
+            return decode_failure(DecodeErrorKind.invalid_leading_byte(), index)
+        }
+        if index + length > values.count() {
+            return decode_failure(DecodeErrorKind.truncated_sequence(), index)
+        }
+        var continuation_index = 1
+        while continuation_index < length {
+            let continuation:uint8 = values[index + continuation_index]
+            if continuation < 128 || continuation > 191 {
+                return decode_failure(
+                    DecodeErrorKind.invalid_continuation(),
+                    index + continuation_index
+                )
+            }
+            continuation_index++
+        }
+        let second:uint8 = values[index + 1]
+        if first == 224 && second < 160 {
+            return decode_failure(DecodeErrorKind.overlong_sequence(), index)
+        }
+        if first == 237 && second >= 160 {
+            return decode_failure(DecodeErrorKind.surrogate(), index)
+        }
+        if first == 240 && second < 144 {
+            return decode_failure(DecodeErrorKind.overlong_sequence(), index)
+        }
+        if first == 244 && second > 143 {
+            return decode_failure(DecodeErrorKind.out_of_range(), index)
+        }
+        index += length
+    }
+    return Result<str, DecodeError>.success(native_string(values))
+}
+
+public func scalars(text:str) uint32[] {
+    let encoded = bytes(text)
+    var result:uint32[] = []
+    var index = 0
+    while index < encoded.count() {
+        let first:uint32 = encoded[index] as uint32
+        if first <= 127 {
+            result.append(first)
+            index++
+        } elif first <= 223 {
+            let second:uint32 = encoded[index + 1] as uint32
+            result.append(((first & 31) << 6) + (second & 63))
+            index += 2
+        } elif first <= 239 {
+            let second:uint32 = encoded[index + 1] as uint32
+            let third:uint32 = encoded[index + 2] as uint32
+            result.append(((first & 15) << 12) + ((second & 63) << 6) + (third & 63))
+            index += 3
+        } else {
+            let second:uint32 = encoded[index + 1] as uint32
+            let third:uint32 = encoded[index + 2] as uint32
+            let fourth:uint32 = encoded[index + 3] as uint32
+            result.append(
+                ((first & 7) << 18) +
+                ((second & 63) << 12) +
+                ((third & 63) << 6) +
+                (fourth & 63)
+            )
+            index += 4
+        }
+    }
+    return result
+}
+
+public func from_scalars(values:@uint32[..]) Result<str, ScalarError> {
+    var encoded:uint8[] = []
+    var index = 0
+    while index < values.count() {
+        let scalar:uint32 = values[index]
+        if scalar >= 55296 && scalar <= 57343 {
+            return Result<str, ScalarError>.failure(ScalarError(
+                kind:ScalarErrorKind.surrogate(),
+                scalar_index:index
+            ))
+        }
+        if scalar > 1114111 {
+            return Result<str, ScalarError>.failure(ScalarError(
+                kind:ScalarErrorKind.out_of_range(),
+                scalar_index:index
+            ))
+        }
+        if scalar <= 127 {
+            encoded.append(scalar as uint8)
+        } elif scalar <= 2047 {
+            encoded.append((192 + (scalar >> 6)) as uint8)
+            encoded.append((128 + (scalar & 63)) as uint8)
+        } elif scalar <= 65535 {
+            encoded.append((224 + (scalar >> 12)) as uint8)
+            encoded.append((128 + ((scalar >> 6) & 63)) as uint8)
+            encoded.append((128 + (scalar & 63)) as uint8)
+        } else {
+            encoded.append((240 + (scalar >> 18)) as uint8)
+            encoded.append((128 + ((scalar >> 12) & 63)) as uint8)
+            encoded.append((128 + ((scalar >> 6) & 63)) as uint8)
+            encoded.append((128 + (scalar & 63)) as uint8)
+        }
+        index++
+    }
+    let view = @encoded[0:encoded.count()]
+    return Result<str, ScalarError>.success(native_string(view))
+}
+
+func decode_failure(kind:DecodeErrorKind, byte_offset:int) Result<str, DecodeError> {
+    return Result<str, DecodeError>.failure(DecodeError(kind:kind, byte_offset:byte_offset))
+}

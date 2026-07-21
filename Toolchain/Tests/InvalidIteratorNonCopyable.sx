@@ -1,0 +1,12 @@
+use STD.Iteration.Iterator as Iterator
+
+struct Resource {
+    let handle:int
+    drop {}
+}
+
+func main() {
+    var iterator = Iterator<Resource>.empty()
+    var copy = iterator
+    print(copy.remaining())
+}

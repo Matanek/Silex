@@ -1,0 +1,12 @@
+use STD.Algorithms.map as map
+use STD.Iteration.Iterator as Iterator
+
+func wrong(value:@str) int {
+    return value.count()
+}
+
+func main() {
+    var values = Iterator<int>.empty()
+    var result = map<int, int>(values, wrong)
+    print(result.remaining())
+}

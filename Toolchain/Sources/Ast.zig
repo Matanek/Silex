@@ -74,6 +74,7 @@ pub const TypeName = union(enum) {
         target: *TypeName,
         mutable: bool,
         provenance: ?[]const u8 = null,
+        generic_target: bool = false,
     };
 
     pub const FunctionType = struct {

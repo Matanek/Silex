@@ -1,0 +1,136 @@
+use STD.Iteration.Iterator as Iterator
+use STD.Iteration.iterate as iterate
+use STD.Collections.Queue as Queue
+use STD.Collections.Stack as Stack
+use STD.Collections.Dictionary as Dictionary
+use STD.Collections.Set as Set
+use STD.Collections.hash_int as hash_int
+use STD.Collections.equal_int as equal_int
+
+class Tracker {
+    public var dropped:int[]
+}
+
+class Tracked {
+    var tracker:Tracker
+    let identifier:int
+
+    public static func create(tracker:Tracker, identifier:int) Tracked {
+        return Tracked(tracker:tracker, identifier:identifier)
+    }
+
+    public func id() int {
+        return self.identifier
+    }
+
+    drop {
+        self.tracker.dropped.append(self.identifier)
+    }
+}
+
+func required(value:int?) int {
+    if present = value {
+        return present
+    }
+    panic("expected an iterator value")
+}
+
+func advance(iterator:Iterator<int>) Iterator<int> {
+    iterator.next()
+    return iterator
+}
+
+func assert_sequence(iterator:Iterator<int>, expected:int[]) {
+    var index = 0
+    while value = iterator.next() {
+        assert(index < expected.count() && value == expected[index], "iterator order")
+        index++
+    }
+    assert(index == expected.count(), "iterator length")
+}
+
+func main() {
+    var empty = Iterator<int>.empty()
+    assert(empty.is_empty() && empty.remaining() == 0, "empty iterator")
+    assert(empty.next() == null && empty.next() == null, "stable exhaustion")
+    empty.push(4)
+    assert(required(empty.next()) == 4 && empty.next() == null, "push after exhaustion")
+
+    var original = Iterator<int>.empty()
+    original.push(1)
+    original.push(2)
+    original.push(3)
+    assert(required(original.next()) == 1, "first advancement")
+    var copy = original
+    assert(required(copy.next()) == 2, "copied cursor")
+    copy.push(4)
+    assert(original.remaining() == 2 && copy.remaining() == 2, "independent iterator copies")
+    var returned = advance(original)
+    assert(required(returned.next()) == 3, "iterator passes through ordinary functions")
+
+    var tracker = Tracker(dropped:[])
+    var tracked = Iterator<Tracked>.empty()
+    tracked.push(Tracked.create(tracker, 1))
+    if true {
+        if var item = tracked.next() {
+            assert(item.id() == 1, "class element returned")
+        } else {
+            panic("expected a tracked iterator value")
+        }
+    }
+    assert(tracker.dropped ==[1], "returned element is no longer retained")
+
+    var queue = Queue<int>.create()
+    queue.enqueue(1)
+    queue.enqueue(2)
+    queue.enqueue(3)
+    queue.dequeue()
+    queue.enqueue(4)
+    var queue_iterator = queue.iterator()
+    queue.enqueue(5)
+    assert_sequence(queue_iterator, [2, 3, 4])
+    assert(queue.count() == 4, "queue snapshot does not mutate source")
+
+    var stack = Stack<int>.create()
+    stack.push(1)
+    stack.push(2)
+    stack.push(3)
+    var stack_iterator = stack.iterator()
+    stack.pop()
+    assert_sequence(stack_iterator, [3, 2, 1])
+
+    var dictionary = Dictionary<int, int>.create(hash_int, equal_int)
+    dictionary.insert(1, 10)
+    dictionary.insert(2, 20)
+    var dictionary_iterator = dictionary.iterator()
+    dictionary.clear()
+    var dictionary_total = 0
+    while entry = dictionary_iterator.next() {
+        dictionary_total += entry.key + entry.value
+    }
+    assert(dictionary_total == 33, "dictionary entry snapshot")
+
+    var set = Set<int>.create(hash_int, equal_int)
+    set.insert(5)
+    set.insert(6)
+    var set_iterator = set.iterator()
+    set.clear()
+    var set_total = 0
+    while value = set_iterator.next() {
+        set_total += value
+    }
+    assert(set_total == 11, "set element snapshot")
+
+    var list:int[] = [7, 8, 9]
+    var list_iterator = iterate<int>(list)
+    list[0] = 70
+    assert_sequence(list_iterator, [7, 8, 9])
+    var fixed:int[3] = [10, 11, 12]
+    var view_iterator = Iterator<int>.empty()
+    if true {
+        let fixed_view = @fixed[0:fixed.count()]
+        view_iterator = iterate<int>(fixed_view)
+    }
+    fixed[0] = 100
+    assert_sequence(view_iterator, [10, 11, 12])
+}

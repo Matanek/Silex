@@ -1,14 +1,44 @@
 {
   "native": {
+    "defines": {
+      "UTF8PROC_STATIC": "1"
+    },
     "sources": {
+      "c": [
+        "@Native/Unicode/utf8proc/utf8proc.c"
+      ],
       "cpp": [
         "@Native/Console.cpp",
+        "@Native/Environment.cpp",
+        "@Native/File.cpp",
+        "@Native/FileSystem.cpp",
+        "@Native/Hashing.cpp",
+        "@Native/JSON.cpp",
+        "@Native/Network.cpp",
         "@Native/Session.cpp",
         "@Native/Randomizer.cpp",
         "@Native/Path.cpp",
+        "@Native/Process.cpp",
         "@Native/System.cpp",
+        "@Native/Subprocess.cpp",
+        "@Native/TCP.cpp",
+        "@Native/UDP.cpp",
+        "@Native/Text.cpp",
         "@Native/Time.cpp"
       ]
+    },
+    "targets": {
+      "linux": {
+        "system_libraries": [
+          "pthread"
+        ]
+      },
+      "windows": {
+        "system_libraries": [
+          "shell32",
+          "ws2_32"
+        ]
+      }
     }
   }
 }

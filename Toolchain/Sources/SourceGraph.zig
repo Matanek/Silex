@@ -1,4 +1,5 @@
 const std = @import("std");
+const build_options = @import("build_options");
 const Ast = @import("Ast.zig");
 const LexerModule = @import("Lexer.zig");
 const ModuleDiscovery = @import("ModuleDiscovery.zig");
@@ -61,6 +62,17 @@ const NativeRuntime = struct {
 
 const Provider = enum { application, local, package, distributed };
 
+pub fn canonicalPath(allocator: Allocator, io: Io, path: []const u8) ![]const u8 {
+    return Io.Dir.cwd().realPathFileAlloc(io, path, allocator) catch |err| switch (err) {
+        error.FileNotFound => {
+            const parent = std.fs.path.dirname(path) orelse ".";
+            const canonical_parent = try Io.Dir.cwd().realPathFileAlloc(io, parent, allocator);
+            return std.fs.path.join(allocator, &.{ canonical_parent, std.fs.path.basename(path) });
+        },
+        else => |other| return other,
+    };
+}
+
 const ModuleAlias = struct {
     qualifier: []const u8,
     module_name: []const u8,
@@ -74,6 +86,13 @@ pub const Loaded = struct {
     files: []const Modules.File,
 };
 
+pub const Overlay = struct {
+    path: []const u8,
+    text: []const u8,
+};
+
+pub const Mode = enum { compiler, editor };
+
 pub const Loader = struct {
     allocator: Allocator,
     io: Io,
@@ -84,15 +103,32 @@ pub const Loader = struct {
     file_states: std.ArrayList(FileState) = .empty,
     diagnostic: ?Source.Diagnostic = null,
     package_graph: ?PackageGraph.Graph = null,
+    overlays: []const Overlay = &.{},
+    mode: Mode = .compiler,
 
     pub fn init(allocator: Allocator, io: Io, environ_map: *const EnvironMap) Loader {
         return .{ .allocator = allocator, .io = io, .environ_map = environ_map };
     }
 
     pub fn load(self: *Loader, input_path: []const u8) !Loaded {
-        var project = try ProjectModule.load(self.allocator, self.io, input_path);
+        const project = try ProjectModule.load(self.allocator, self.io, input_path);
         const project_root = std.fs.path.dirname(input_path) orelse ".";
-        self.package_graph = try PackageGraph.resolve(self.allocator, self.io, self.environ_map, project_root, .normal);
+        return self.loadProject(project, project_root);
+    }
+
+    pub fn loadProject(
+        self: *Loader,
+        initial_project: ProjectModule.Project,
+        project_root: []const u8,
+    ) !Loaded {
+        var project = initial_project;
+        self.package_graph = try PackageGraph.resolve(
+            self.allocator,
+            self.io,
+            self.environ_map,
+            project_root,
+            if (self.mode == .editor) .editor else .normal,
+        );
         const loads_local_modules = project.single_file;
         var modules: std.ArrayList(ModuleBuilder) = .empty;
         for (project.modules) |module| {
@@ -476,7 +512,7 @@ pub const Loader = struct {
     }
 
     fn unitDeclares(self: *Loader, source_path: []const u8, name: []const u8, public_only: bool) !bool {
-        const source = Io.Dir.cwd().readFileAlloc(self.io, source_path, self.allocator, .limited(16 * 1024 * 1024)) catch return false;
+        const source = self.readSource(source_path) catch return false;
         if (public_only) {
             var lines = std.mem.splitScalar(u8, source, '\n');
             while (lines.next()) |source_line| {
@@ -979,7 +1015,7 @@ pub const Loader = struct {
     }
 
     fn appendFile(self: *Loader, source_path: []const u8, module_index: usize, unit_name: []const u8) !usize {
-        const source = Io.Dir.cwd().readFileAlloc(self.io, source_path, self.allocator, .limited(16 * 1024 * 1024)) catch |err| {
+        const source = self.readSource(source_path) catch |err| {
             std.debug.print("silex: unable to read '{s}': {t}\n", .{ source_path, err });
             return error.Reported;
         };
@@ -1001,6 +1037,20 @@ pub const Loader = struct {
         });
         try self.file_states.append(self.allocator, .{});
         return file_index;
+    }
+
+    fn readSource(self: *Loader, source_path: []const u8) ![]const u8 {
+        for (self.overlays) |overlay| {
+            if (std.mem.eql(u8, overlay.path, source_path)) return overlay.text;
+            const canonical = canonicalPath(self.allocator, self.io, source_path) catch continue;
+            if (std.mem.eql(u8, overlay.path, canonical)) return overlay.text;
+        }
+        return Io.Dir.cwd().readFileAlloc(
+            self.io,
+            source_path,
+            self.allocator,
+            .limited(16 * 1024 * 1024),
+        );
     }
 
     fn finishActivationClosures(self: *Loader) !void {
@@ -1175,6 +1225,7 @@ fn packageModulePath(
 
 fn localModulePath(allocator: Allocator, root: []const u8, module_name: []const u8) ![]const u8 {
     const relative_path = try allocator.dupe(u8, module_name);
+    defer allocator.free(relative_path);
     for (relative_path) |*character| {
         if (character.* == '.') character.* = std.fs.path.sep;
     }
@@ -1240,6 +1291,7 @@ fn nativeModuleManifestPath(allocator: Allocator, io: Io, module_directory: []co
 }
 
 test "native runtime uses @Module.json and ignores metadata-only or incorrectly cased manifests" {
+    if (!build_options.run_source_graph_tests) return;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -1315,6 +1367,7 @@ test "native runtime uses @Module.json and ignores metadata-only or incorrectly 
 }
 
 test "local module paths follow their logical segments" {
+    if (!build_options.run_source_graph_tests) return;
     const path = try localModulePath(std.testing.allocator, "Sandbox", "Math.Geometry");
     defer std.testing.allocator.free(path);
     const expected = try std.fs.path.join(std.testing.allocator, &.{ "Sandbox", "Math", "Geometry" });
@@ -1323,11 +1376,13 @@ test "local module paths follow their logical segments" {
 }
 
 test "use paths select a declaration from their parent module" {
+    if (!build_options.run_source_graph_tests) return;
     try std.testing.expectEqualStrings("Math.Geometry", moduleNameFromUse("Math.Geometry.Ray").?);
     try std.testing.expect(moduleNameFromUse("Vec3") == null);
 }
 
 test "use paths expand module aliases" {
+    if (!build_options.run_source_graph_tests) return;
     const aliases = &[_]ModuleAlias{
         .{ .qualifier = "Standard", .module_name = "STD" },
         .{ .qualifier = "Time", .module_name = "STD.Time" },
@@ -1342,6 +1397,7 @@ test "use paths expand module aliases" {
 }
 
 test "qualified paths expand parent module aliases" {
+    if (!build_options.run_source_graph_tests) return;
     const aliases = &[_]ModuleAlias{.{ .qualifier = "Standard", .module_name = "STD" }};
 
     const canonical = (try canonicalAliasedPath(
@@ -1355,6 +1411,7 @@ test "qualified paths expand parent module aliases" {
 }
 
 test "source unit selection loads only its transitive sibling closure" {
+    if (!build_options.run_source_graph_tests) return;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -1405,6 +1462,7 @@ test "source unit selection loads only its transitive sibling closure" {
 }
 
 test "a differently named declaration selects its providing source unit" {
+    if (!build_options.run_source_graph_tests) return;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -1443,6 +1501,7 @@ test "a differently named declaration selects its providing source unit" {
 }
 
 test "a source unit and declaration from another unit are ambiguous" {
+    if (!build_options.run_source_graph_tests) return;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();

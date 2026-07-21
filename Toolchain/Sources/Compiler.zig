@@ -4,8 +4,8 @@ const build_options = @import("build_options");
 const CppGenerator = @import("CppGenerator.zig");
 const CompilationDatabase = @import("CompilationDatabase.zig");
 const NativeInterface = @import("NativeInterface.zig");
-const Generics = @import("Generics.zig");
 const Semantic = @import("Semantic.zig");
+const Frontend = @import("Frontend.zig");
 const TargetModule = @import("Target.zig");
 const NativeDependency = @import("NativeDependency.zig");
 const NativeCommand = @import("NativeCommand.zig");
@@ -13,8 +13,6 @@ const NativeObjectCache = @import("NativeObjectCache.zig");
 const ModuleManifest = @import("ModuleManifest.zig");
 const PackageGraph = @import("PackageGraph.zig");
 const ProjectModule = @import("Project.zig");
-const Modules = @import("Modules.zig");
-const SourceGraph = @import("SourceGraph.zig");
 
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
@@ -56,36 +54,18 @@ pub fn compile(
     target: TargetModule.Target,
     native_dependencies: []const NativeDependency.Dependency,
 ) !Compilation {
-    var loader = SourceGraph.Loader.init(allocator, io, environ_map);
-    const loaded = loader.load(input_path) catch |err| switch (err) {
-        error.InvalidSource => return report(loader.source_paths.items, loader.diagnostic.?),
-        else => |other| return other,
+    const outcome = try Frontend.analyze(allocator, io, environ_map, input_path, .compiler, &.{});
+    const frontend = switch (outcome) {
+        .success => |snapshot| snapshot,
+        .failure => |failure| return report(failure.source_paths, failure.diagnostic),
     };
-    const project = loaded.project;
-    const source_paths = loaded.source_paths;
-    const source_contents = loaded.source_contents;
-    const files = loaded.files;
-    const loaded_module_runtimes = try loadModuleRuntimes(allocator, io, project, loaded.package_graph, target);
-    const native_module_names = try nativeModuleNames(allocator, project);
-    const canonical_source_paths = try canonicalizeSourcePaths(allocator, io, source_paths);
-    var resolver = Modules.Resolver.init(allocator, project, files);
-    const ast = resolver.resolve() catch |err| switch (err) {
-        error.InvalidSource => return report(source_paths, resolver.diagnostic.?),
-        else => |other| return other,
-    };
-
-    var specializer = Generics.Specializer.init(allocator, ast);
-    const specialized_ast = specializer.specialize() catch |err| switch (err) {
-        error.InvalidSource => return report(source_paths, specializer.diagnostic.?),
-        else => |other| return other,
-    };
-
-    var analyzer = Semantic.Analyzer.init(allocator);
-    analyzer.native_module_names = native_module_names;
-    const program = analyzer.analyze(specialized_ast) catch |err| switch (err) {
-        error.InvalidSource => return report(source_paths, analyzer.diagnostic.?),
-        else => |other| return other,
-    };
+    const project = frontend.project;
+    const source_paths = frontend.source_paths;
+    const canonical_source_paths = source_paths;
+    const source_contents = frontend.source_contents;
+    const package_graph = frontend.package_graph;
+    const program = frontend.program;
+    const loaded_module_runtimes = try loadModuleRuntimes(allocator, io, project, package_graph, target);
 
     const cpp = try CppGenerator.generateWithSources(allocator, program, canonical_source_paths);
     const artifact_root = "";
@@ -132,7 +112,7 @@ pub fn compile(
     const object_plan = try NativeObjectCache.makePlan(
         allocator,
         io,
-        loaded.package_graph,
+        package_graph,
         module_runtimes,
         target,
         default_native_configuration.compilerFlags(),
@@ -281,14 +261,6 @@ pub fn compile(
         .reused_packages = reused_packages,
         .target = target,
     };
-}
-
-fn nativeModuleNames(allocator: Allocator, project: ProjectModule.Project) ![]const []const u8 {
-    var names: std.ArrayList([]const u8) = .empty;
-    for (project.modules) |module| {
-        if (module.module_manifest_path != null) try names.append(allocator, module.name);
-    }
-    return names.toOwnedSlice(allocator);
 }
 
 fn hasCompilationDatabaseSources(
@@ -785,14 +757,6 @@ fn cacheKey(
     var digest: [std.crypto.hash.sha2.Sha256.digest_length]u8 = undefined;
     hasher.final(&digest);
     return std.fmt.bytesToHex(digest, .lower);
-}
-
-fn canonicalizeSourcePaths(allocator: Allocator, io: Io, source_paths: []const []const u8) ![]const []const u8 {
-    const canonical = try allocator.alloc([]const u8, source_paths.len);
-    for (source_paths, 0..) |source_path, index| {
-        canonical[index] = try Io.Dir.cwd().realPathFileAlloc(io, source_path, allocator);
-    }
-    return canonical;
 }
 
 fn cleanObsoleteCacheLayouts(allocator: Allocator, io: Io, cache_root: []const u8) !void {

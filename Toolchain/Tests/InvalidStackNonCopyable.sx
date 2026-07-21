@@ -1,0 +1,11 @@
+use STD.Collections.Stack as Stack
+
+struct Resource {
+    let handle:int
+    drop {}
+}
+
+func main() {
+    var stack = Stack<Resource>.create()
+    stack.push(Resource(handle:1))
+}

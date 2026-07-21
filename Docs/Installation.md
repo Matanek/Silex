@@ -83,6 +83,47 @@ source entry. A module can discover `@Module.json` from the directory matching
 its logical name relative to the project manifest, such as `Math/@Module.json`
 for `Math`. The project manifest format is currently JSON.
 
+## Editor project selection
+
+The Zed extension starts `silex lsp` and uses the same project front-end as the
+compiler. Unsaved text from every open source unit takes priority over the
+corresponding file on disk, so a diagnostic or navigation result describes one
+coherent in-memory project rather than a document parsed in isolation.
+
+By default, the server chooses the closest JSON project manifest that directly
+lists the open `.sx` file in `modules[].sources`. If none does, it treats that
+file as the input described for small programs above. When two manifests at the
+same directory level contain the file, configure the project explicitly rather
+than relying on an arbitrary choice. LSP clients can pass either form below in
+their initialization options:
+
+```json
+{
+  "silex.project": "path/to/project.json"
+}
+```
+
+```json
+{
+  "silex": {
+    "project": "path/to/project.json"
+  }
+}
+```
+
+An absolute path is used directly; a relative path starts at the first
+workspace folder. The explicit project applies to documents it actually loads.
+An unrelated `.sx` document still uses ordinary discovery.
+
+The editor front-end does not write `.silex/`, `compile_commands.json`, native
+interfaces, package locks or executables. Git dependencies must already have a
+locked revision and materialized checkout; editing never performs `update` or
+a download. Definition and references may navigate to resolved package and
+distributed-library sources, but rename remains limited to application and
+local-module sources inside the workspace. A source opened through navigation
+stays attached to the project that resolved it; opening a distributed native
+unit therefore does not produce standalone-project diagnostics.
+
 ## Command line
 
 ```text

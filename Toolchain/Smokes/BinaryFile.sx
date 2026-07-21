@@ -1,0 +1,154 @@
+use STD.File as Files
+use STD.File.Access as Access
+use STD.File.Creation as Creation
+use STD.File.SeekFrom as SeekFrom
+use STD.File.OpenOptions as OpenOptions
+use STD.File.open as open
+use STD.File.close as close
+use STD.File.read_all as read_all
+use STD.File.write_all as write_all
+use STD.System.Error as Error
+
+func opened(result:Result<Files.File, Error>) Files.File {
+    match move result {
+        success(var file) => { return move file }
+        failure(error) => { panic("expected file open success") }
+    }
+}
+
+func require_void(result:Result<void, Error>) {
+    match result {
+        success => {}
+        failure(error) => { panic("expected file operation success") }
+    }
+}
+
+func required_int(result:Result<int, Error>) int {
+    match result {
+        success(value) => { return value }
+        failure(error) => { panic("expected integer file result") }
+    }
+}
+
+func required_bytes(result:Result<uint8[], Error>) uint8[] {
+    match result {
+        success(bytes) => { return bytes }
+        failure(error) => { panic("expected file bytes") }
+    }
+}
+
+func read_once(file:&Files.File, buffer:&uint8[]) Result<int, Error> {
+    var view = &buffer[0:buffer.count()]
+    return file.read(view)
+}
+
+func expect_error(result:Result<Files.File, Error>, expected:int) {
+    match move result {
+        success(file) => { panic("expected file open failure") }
+        failure(error) => {
+            let kind = match error.kind {
+                not_found => 1
+                already_exists => 2
+                invalid_input => 3
+                else => 99
+            }
+            assert(kind == expected, "file error kind")
+        }
+    }
+}
+
+func automatic_close(path:str) {
+    var file = opened(open(path, OpenOptions(
+        access:Access.write(),
+        creation:Creation.create_or_truncate(),
+        append:false
+    )))
+    let value:uint8[] = [42]
+    let view = @value[0:value.count()]
+    assert(required_int(file.write(view)) == 1, "automatic file write")
+}
+
+func main() {
+    let path = ".silex/file-smoke.bin"
+    let automatic_path = ".silex/file-smoke-automatic.bin"
+    let missing = ".silex/file-smoke-never-created.bin"
+
+    var file = opened(open(path, OpenOptions(
+        access:Access.read_write(),
+        creation:Creation.create_or_truncate(),
+        append:false
+    )))
+    let first:uint8[] = [1, 2]
+    let second:uint8[] = [3, 4]
+    let first_view = @first[0:first.count()]
+    let second_view = @second[0:second.count()]
+    assert(required_int(file.write(first_view)) == 2, "first partial write")
+    assert(required_int(file.write(second_view)) == 2, "second partial write")
+    require_void(file.flush())
+    assert(required_int(file.position()) == 4, "position after writes")
+    assert(required_int(file.length()) == 4, "length after writes")
+    assert(required_int(file.seek(0, SeekFrom.start())) == 0, "seek start")
+
+    var buffer:uint8[] = [0, 0, 0, 0, 0, 0]
+    assert(required_int(read_once(file, buffer)) == 4, "partial read")
+    let initial:uint8[] = [1, 2, 3, 4]
+    assert(buffer[0:4] == initial, "read bytes")
+    assert(required_int(read_once(file, buffer)) == 0, "EOF")
+
+    require_void(file.set_length(6))
+    assert(required_int(file.length()) == 6, "extended length")
+    assert(required_int(file.seek(-2, SeekFrom.end())) == 4, "seek from end")
+    assert(required_int(read_once(file, buffer)) == 2, "read extended zeros")
+    assert(buffer[0] == 0 && buffer[1] == 0, "extended bytes are zero")
+    require_void(file.set_length(3))
+    assert(required_int(file.length()) == 3, "truncated length")
+    assert(required_int(file.seek(9223372036854775807, SeekFrom.start())) == 9223372036854775807, "large position")
+    require_void(close(move file))
+
+    var append_file = opened(open(path, OpenOptions(
+        access:Access.write(),
+        creation:Creation.open_existing(),
+        append:true
+    )))
+    assert(required_int(append_file.seek(0, SeekFrom.start())) == 0, "append seek remains observable")
+    let appended:uint8[] = [9]
+    let appended_view = @appended[0:appended.count()]
+    assert(required_int(append_file.write(appended_view)) == 1, "append write")
+    require_void(close(move append_file))
+    let expected:uint8[] = [1, 2, 3, 9]
+    assert(required_bytes(read_all(path, 4)) == expected, "append targets end")
+
+    expect_error(open(path, OpenOptions(
+        access:Access.write(), creation:Creation.create_new(), append:false
+    )), 2)
+    expect_error(open(missing, OpenOptions(
+        access:Access.write(), creation:Creation.truncate_existing(), append:false
+    )), 1)
+    expect_error(open(missing, OpenOptions(
+        access:Access.read(), creation:Creation.open_existing(), append:false
+    )), 1)
+    expect_error(open(path, OpenOptions(
+        access:Access.read(), creation:Creation.open_or_create(), append:false
+    )), 3)
+    expect_error(open(path, OpenOptions(
+        access:Access.write(), creation:Creation.create_or_truncate(), append:true
+    )), 3)
+
+    automatic_close(automatic_path)
+    let automatic_expected:uint8[] = [42]
+    assert(required_bytes(read_all(automatic_path, 1)) == automatic_expected, "automatic close persisted bytes")
+
+    let replacement:uint8[] = [7, 8, 0, 255]
+    let replacement_view = @replacement[0:replacement.count()]
+    require_void(write_all(path, replacement_view))
+    assert(required_bytes(read_all(path, replacement.count())) == replacement, "convenience round trip")
+    match read_all(path, replacement.count() - 1) {
+        success(bytes) => { panic("expected read limit failure") }
+        failure(error) => {
+            match error.kind {
+                limit_exceeded => {}
+                else => { panic("expected limit_exceeded") }
+            }
+        }
+    }
+}

@@ -38,10 +38,11 @@ func main() {
     print(session.poll_key(0) == null)
     session.enter_alternate_screen()
     session.enter_alternate_screen()
-    print(describe(session.read_key()))
-    print(describe(session.read_key()))
-    print(describe(session.read_key()))
-    print(describe(session.read_key()))
+    var initial_events = session.poll_keys(4, 1000)
+    print(initial_events.count())
+    while event = initial_events.dequeue() {
+        print(describe(event))
+    }
     print(describe(session.read_key()))
     print(describe(session.read_key()))
     let function_event = session.read_key()

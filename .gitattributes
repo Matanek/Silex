@@ -1,0 +1,3 @@
+Library/STD/@Native/Unicode/Data/** whitespace=-trailing-space
+Library/STD/@Native/Unicode/utf8proc/utf8proc_data.c whitespace=-trailing-space
+Toolchain/Tests/UnicodeData/** whitespace=-trailing-space

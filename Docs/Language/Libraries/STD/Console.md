@@ -73,6 +73,16 @@ while running {
 duration; zero is non-blocking and a negative duration is a runtime error. A
 poll that expires preserves a partial escape sequence for the following call.
 
+`poll_keys(maximum_count:int, timeout_milliseconds:int) Queue<KeyEvent>` waits
+only for its first event, then performs non-blocking polls until the queue
+reaches the positive maximum or no event is immediately available. The next
+`dequeue` is the first event observed. The result owns its events and remains
+valid after another poll or after the session closes. For `k` returned events,
+construction takes O(k) time and storage; it never pre-reads beyond the
+requested maximum. A non-positive maximum panics with
+`Console.Session.poll_keys requires a positive maximum count`, while timeout
+validation is identical to `poll_key`.
+
 `Key` distinguishes Unicode `character(str)`, Enter, Escape, Tab, Backspace,
 Delete, the four arrows, Home, End, Page Up, Page Down, `function(int)` from F1
 through F24, and `unknown(str)`. A character contains exactly one UTF-8 scalar.

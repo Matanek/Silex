@@ -780,6 +780,7 @@ pub const Resolver = struct {
                 .target = try self.transformTypePointer(reference.target.*, position),
                 .mutable = reference.mutable,
                 .provenance = reference.provenance,
+                .generic_target = reference.generic_target,
             } },
             .function => |function| function_type: {
                 var parameters: std.ArrayList(Ast.TypeName) = .empty;
@@ -825,6 +826,7 @@ pub const Resolver = struct {
                 .target = try self.transformTypePointer(reference.target.*, position),
                 .mutable = reference.mutable,
                 .provenance = reference.provenance,
+                .generic_target = reference.generic_target,
             } },
             .optional => |contained| .{ .optional = try self.transformTypePointer(contained.*, position) },
             else => value,
@@ -1075,6 +1077,14 @@ pub const Resolver = struct {
         var result = try self.allocator.create(Ast.Expression);
         result.position = expression.position;
         result.value = switch (expression.value) {
+            .identifier => |name| identifier: {
+                if (self.findLocal(name)) break :identifier .{ .identifier = name };
+                if ((try self.visibleDeclarationKind(expression.position.file, name)) == .function) {
+                    const declarations = try self.visibleFunctionDeclarations(expression.position.file, name, expression.position);
+                    break :identifier .{ .identifier = declarations[0].canonical_name };
+                }
+                break :identifier .{ .identifier = name };
+            },
             .call => |call| call: {
                 const type_arguments = try self.transformTypeArguments(call.type_arguments, call.name_position);
                 if (std.mem.eql(u8, call.name, "map_error") and call.named_fields != null) {
@@ -1301,6 +1311,13 @@ pub const Resolver = struct {
             },
             .member_access => |member| member_access: {
                 if (try self.expressionPath(member.object)) |prefix| {
+                    const path = try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ prefix, member.name });
+                    if (self.looksQualified(expression.position.file, path) and
+                        (try self.visibleDeclarationKind(expression.position.file, path)) == .function)
+                    {
+                        const declarations = try self.visibleFunctionDeclarations(expression.position.file, path, member.name_position);
+                        break :member_access .{ .identifier = declarations[0].canonical_name };
+                    }
                     if (try self.staticOwnerType(expression.position.file, prefix, member.name_position)) |owner| {
                         break :member_access .{ .static_field_access = .{
                             .owner = owner,

@@ -313,7 +313,7 @@ module.exports = grammar({
     borrowed_return_type: ($) =>
       seq(
         field("mode", choice("@", "&")),
-        optional(seq(field("provenance", $.identifier), ":")),
+        optional(seq(field("provenance", choice($.identifier, $.self_expression)), ":")),
         field("target", $.type),
       ),
     reference_type: ($) =>

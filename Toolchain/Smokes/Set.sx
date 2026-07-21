@@ -1,0 +1,106 @@
+use STD.Collections.Set as Set
+use STD.Collections.hash_int as hash_int
+use STD.Collections.equal_int as equal_int
+use STD.Collections.hash_str as hash_str
+use STD.Collections.equal_str as equal_str
+
+struct Token {
+    let id:int
+    let spelling:str
+}
+
+func hash_token(value:@Token) uint {
+    return value.id as uint
+}
+
+func equal_token(left:@Token, right:@Token) bool {
+    return left.id == right.id
+}
+
+func collide(value:@int) uint {
+    return 0
+}
+
+func required_token(value:Token?) Token {
+    if token = value {
+        return token
+    }
+    panic("expected a stored token")
+}
+
+func verify_captured_callbacks() {
+    var hash_calls = 0
+    if true {
+        var hash = func(value:@int) uint {
+            hash_calls++
+            return value as uint
+        }
+        var equal = func(left:@int, right:@int) bool {
+            return left == right
+        }
+        var values = Set<int>.create(hash, equal, 128)
+        var index = 0
+        while index < 128 {
+            values.insert(index)
+            index++
+        }
+        index = 0
+        while index < 128 {
+            assert(values.contains(index), "captured callback membership")
+            index++
+        }
+    }
+    assert(hash_calls < 1024, "set delegates hashed lookup")
+}
+
+func main() {
+    var flags:bool[] = [true, false]
+    flags.append(true)
+    if true {
+        let flag_view = @flags[0:2]
+        assert(flag_view[0] && !flag_view[1], "bool list keeps contiguous references")
+    }
+    assert(!flags.replace(1, true) && flags.take_last(), "bool list mutation")
+
+    var values = Set<int>.create(hash_int, equal_int, 2)
+    assert(values.is_empty() && values.capacity() >= 2, "empty set")
+    assert(values.insert(1), "first insertion")
+    assert(!values.insert(1), "duplicate insertion")
+    assert(values.contains(1) && !values.contains(2), "membership")
+    assert(values.remove(1) && !values.remove(1), "boolean removal")
+
+    var representatives = Set<Token>.create(hash_token, equal_token)
+    assert(representatives.insert(Token(id:7, spelling:"first")), "new representative")
+    assert(!representatives.insert(Token(id:7, spelling:"second")), "equal duplicate")
+    let stored = required_token(representatives.take(Token(id:7, spelling:"query")))
+    assert(stored.spelling == "first", "take returns first representative")
+
+    var collisions = Set<int>.create(collide, equal_int)
+    var index = 0
+    while index < 100 {
+        assert(collisions.insert(index), "colliding insertion")
+        index++
+    }
+    index = 0
+    while index < 100 {
+        assert(collisions.contains(index), "colliding membership")
+        index++
+    }
+
+    var left = collisions
+    var right = left
+    right.remove(0)
+    right.insert(100)
+    assert(left.contains(0) && !left.contains(100), "set copy stays independent")
+    assert(!right.contains(0) && right.contains(100), "set copy diverges")
+
+    var strings = Set<str>.create(hash_str, equal_str)
+    strings.insert("é")
+    strings.insert("hello")
+    assert(strings.contains("é") && strings.contains("hello"), "standard string callbacks")
+    strings.reserve(300)
+    assert(strings.capacity() >= 300, "set reserve")
+    strings.clear()
+    assert(strings.is_empty() && strings.capacity() >= 300, "clear retains capacity")
+    verify_captured_callbacks()
+}

@@ -1,0 +1,101 @@
+use STD.Environment.get as environment_get
+use STD.Environment.set as environment_set
+use STD.Environment.remove as environment_remove
+use STD.Environment.variables as environment_variables
+use STD.System.Error as Error
+use STD.Text.UTF8.bytes as utf8_bytes
+
+func require_void(result:Result<void, Error>) {
+    match result {
+        success => {}
+        failure(error) => { panic(error.detail) }
+    }
+}
+
+func required_optional(result:Result<str?, Error>) str? {
+    match result {
+        success(value) => { return value }
+        failure(error) => { panic(error.detail) }
+    }
+    return null
+}
+
+func expect_invalid(result:Result<void, Error>) {
+    match result {
+        success => { panic("expected invalid environment input") }
+        failure(error) => {
+            match error.kind {
+                invalid_input => {}
+                else => { panic("expected invalid_input") }
+            }
+        }
+    }
+}
+
+func bytes_before_or_equal(left:str, right:str) bool {
+    let a = utf8_bytes(left)
+    let b = utf8_bytes(right)
+    var index = 0
+    while index < a.count() && index < b.count() {
+        if a[index] < b[index] { return true }
+        if a[index] > b[index] { return false }
+        index++
+    }
+    return a.count() <= b.count()
+}
+
+func restore(name:str, value:str?) {
+    if let present = value {
+        require_void(environment_set(name, present))
+    } else {
+        require_void(environment_remove(name))
+    }
+}
+
+func main() {
+    let upper = "SILEX_STD_ENVIRONMENT_SMOKE_7F3A"
+    let lower = "silex_std_environment_smoke_7f3a"
+    let original_upper = required_optional(environment_get(upper))
+    let original_lower = required_optional(environment_get(lower))
+
+    require_void(environment_remove(upper))
+    require_void(environment_remove(lower))
+    assert(required_optional(environment_get(upper)) == null, "removed variable absent")
+
+    require_void(environment_set(upper, ""))
+    assert(required_optional(environment_get(upper)) == "", "empty value remains present")
+    require_void(environment_set(upper, "one"))
+    assert(required_optional(environment_get(upper)) == "one", "created variable")
+
+    let folds_case = required_optional(environment_get(lower)) == "one"
+    require_void(environment_set(lower, "two"))
+    if folds_case {
+        assert(required_optional(environment_get(upper)) == "two", "Windows name comparison")
+    } else {
+        assert(required_optional(environment_get(upper)) == "one", "POSIX name comparison")
+        assert(required_optional(environment_get(lower)) == "two", "POSIX distinct case")
+    }
+
+    match environment_variables() {
+        failure(error) => { panic(error.detail) }
+        success(values) => {
+            var index = 1
+            while index < values.count() {
+                assert(
+                    bytes_before_or_equal(values[index - 1].name, values[index].name),
+                    "environment variables sorted by UTF-8 bytes"
+                )
+                index++
+            }
+        }
+    }
+
+    expect_invalid(environment_set("", "value"))
+    expect_invalid(environment_set("BAD=NAME", "value"))
+    expect_invalid(environment_set("BAD_VALUE", "bad\0value"))
+
+    require_void(environment_remove(upper))
+    require_void(environment_remove(lower))
+    restore(upper, original_upper)
+    restore(lower, original_lower)
+}

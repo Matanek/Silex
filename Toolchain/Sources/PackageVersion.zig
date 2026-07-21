@@ -72,16 +72,16 @@ fn parseComponent(text: []const u8) !usize {
 }
 
 test "exact and caret constraints follow the supported Semantic Versioning subset" {
-    try std.testing.expect(tryMatches("=1.2.3", "1.2.3"));
-    try std.testing.expect(!tryMatches("=1.2.3", "1.2.4"));
-    try std.testing.expect(tryMatches("^1.2", "1.9.9"));
-    try std.testing.expect(!tryMatches("^1.2", "2.0.0"));
-    try std.testing.expect(tryMatches("^0.2", "0.2.9"));
-    try std.testing.expect(!tryMatches("^0.2", "0.3.0"));
-    try std.testing.expect(tryMatches("^0.0.3", "0.0.3"));
-    try std.testing.expect(!tryMatches("^0.0.3", "0.0.4"));
-    try std.testing.expect(!tryMatches("^1.2", "1.3.0-beta"));
-    try std.testing.expect(tryMatches("^1.2.0-beta", "1.2.0-beta.2"));
+    try std.testing.expect(try tryMatches("=1.2.3", "1.2.3"));
+    try std.testing.expect(!try tryMatches("=1.2.3", "1.2.4"));
+    try std.testing.expect(try tryMatches("^1.2", "1.9.9"));
+    try std.testing.expect(!try tryMatches("^1.2", "2.0.0"));
+    try std.testing.expect(try tryMatches("^0.2", "0.2.9"));
+    try std.testing.expect(!try tryMatches("^0.2", "0.3.0"));
+    try std.testing.expect(try tryMatches("^0.0.3", "0.0.3"));
+    try std.testing.expect(!try tryMatches("^0.0.3", "0.0.4"));
+    try std.testing.expect(!try tryMatches("^1.2", "1.3.0-beta"));
+    try std.testing.expect(try tryMatches("^1.2.0-beta", "1.2.0-beta.2"));
     try std.testing.expectError(error.InvalidVersionConstraint, Constraint.parse("1.2.3"));
     try std.testing.expectError(error.InvalidVersionConstraint, Constraint.parse(">=1.2"));
 }

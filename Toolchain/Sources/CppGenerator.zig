@@ -855,6 +855,111 @@ pub fn generateWithSources(
         \\    std::vector<T> values_;
         \\};
         \\
+        \\template <>
+        \\class SilexList<bool> {
+        \\public:
+        \\    using value_type = bool;
+        \\    using iterator = bool*;
+        \\    using const_iterator = const bool*;
+        \\
+        \\    SilexList() = default;
+        \\    SilexList(std::initializer_list<bool> values) {
+        \\        reserve(values.size());
+        \\        for (bool value : values) push_back(value);
+        \\    }
+        \\    SilexList(const SilexList& other) { copyFrom(other); }
+        \\    SilexList& operator=(const SilexList& other) {
+        \\        if (this != &other) copyFrom(other);
+        \\        return *this;
+        \\    }
+        \\    SilexList(SilexList&& other) noexcept
+        \\        : values_(std::move(other.values_)), size_(other.size_), capacity_(other.capacity_) {
+        \\        other.size_ = 0;
+        \\        other.capacity_ = 0;
+        \\    }
+        \\    SilexList& operator=(SilexList&& other) noexcept {
+        \\        if (this == &other) return *this;
+        \\        values_ = std::move(other.values_);
+        \\        size_ = other.size_;
+        \\        capacity_ = other.capacity_;
+        \\        other.size_ = 0;
+        \\        other.capacity_ = 0;
+        \\        return *this;
+        \\    }
+        \\
+        \\    std::size_t size() const { return size_; }
+        \\    bool empty() const { return size_ == 0; }
+        \\    const bool* data() const { return values_.get(); }
+        \\    bool* data() { return values_.get(); }
+        \\    bool operator==(const SilexList& other) const {
+        \\        if (size_ != other.size_) return false;
+        \\        for (std::size_t index = 0; index < size_; ++index) {
+        \\            if (values_[index] != other.values_[index]) return false;
+        \\        }
+        \\        return true;
+        \\    }
+        \\    bool operator!=(const SilexList& other) const { return !(*this == other); }
+        \\    const_iterator begin() const { return values_.get(); }
+        \\    const_iterator end() const { return size_ == 0 ? values_.get() : values_.get() + size_; }
+        \\    iterator begin() { return values_.get(); }
+        \\    iterator end() { return size_ == 0 ? values_.get() : values_.get() + size_; }
+        \\    const bool& operator[](std::size_t index) const { return values_[index]; }
+        \\    bool& operator[](std::size_t index) { return values_[index]; }
+        \\    void reserve(std::size_t count) {
+        \\        if (count <= capacity_) return;
+        \\        auto replacement = std::make_unique<bool[]>(count);
+        \\        for (std::size_t index = 0; index < size_; ++index) replacement[index] = values_[index];
+        \\        values_ = std::move(replacement);
+        \\        capacity_ = count;
+        \\    }
+        \\    void push_back(bool value) {
+        \\        if (size_ == capacity_) reserve(capacity_ == 0 ? 4 : capacity_ * 2);
+        \\        values_[size_++] = value;
+        \\    }
+        \\    iterator insert(iterator position, bool value) {
+        \\        const std::size_t offset = position == nullptr ? 0 : static_cast<std::size_t>(position - begin());
+        \\        if (size_ == capacity_) reserve(capacity_ == 0 ? 4 : capacity_ * 2);
+        \\        for (std::size_t index = size_; index > offset; --index) values_[index] = values_[index - 1];
+        \\        values_[offset] = value;
+        \\        ++size_;
+        \\        return begin() + offset;
+        \\    }
+        \\    template <typename Iterator>
+        \\    iterator insert(iterator position, Iterator first, Iterator last) {
+        \\        const std::size_t offset = position == nullptr ? 0 : static_cast<std::size_t>(position - begin());
+        \\        std::size_t inserted = 0;
+        \\        while (first != last) {
+        \\            insert(begin() + offset + inserted, static_cast<bool>(*first));
+        \\            ++first;
+        \\            ++inserted;
+        \\        }
+        \\        return begin() + offset;
+        \\    }
+        \\    iterator erase(iterator position) {
+        \\        const std::size_t offset = static_cast<std::size_t>(position - begin());
+        \\        for (std::size_t index = offset + 1; index < size_; ++index) values_[index - 1] = values_[index];
+        \\        --size_;
+        \\        return offset == size_ ? end() : begin() + offset;
+        \\    }
+        \\    void pop_back() { --size_; }
+        \\    void clear() { size_ = 0; }
+        \\    void silexTrace(const SilexTraceVisitor&) const {}
+        \\    void silexClear() { clear(); }
+        \\
+        \\private:
+        \\    void copyFrom(const SilexList& other) {
+        \\        if (other.size_ > capacity_) {
+        \\            values_ = std::make_unique<bool[]>(other.size_);
+        \\            capacity_ = other.size_;
+        \\        }
+        \\        size_ = other.size_;
+        \\        for (std::size_t index = 0; index < size_; ++index) values_[index] = other.values_[index];
+        \\    }
+        \\    std::unique_ptr<bool[]> values_;
+        \\    std::size_t size_ { 0 };
+        \\    std::size_t capacity_ { 0 };
+        \\};
+        \\
         \\template <typename T, typename... Values>
         \\SilexList<T> silexMakeList(Values&&... values) {
         \\    SilexList<T> result;
@@ -1127,10 +1232,11 @@ pub fn generateWithSources(
         \\    return value;
         \\}
         \\
-        \\template <typename Collection, typename T>
-        \\T silexCollectionReplace(Collection& values, std::int64_t index, T value, SilexSourceLocation location) {
+        \\template <typename Collection, typename Value>
+        \\typename Collection::value_type silexCollectionReplace(Collection& values, std::int64_t index, Value value, SilexSourceLocation location) {
+        \\    using T = typename Collection::value_type;
         \\    const auto offset = silexCollectionOffset(values.size(), index, false, location);
-        \\    return std::exchange(values[offset], std::move(value));
+        \\    return std::exchange(values[offset], T(std::move(value)));
         \\}
         \\
         \\template <typename Collection>
@@ -1570,6 +1676,8 @@ pub fn generateWithSources(
             if (structure.is_class or !structure.equality_comparable) continue;
             try generateStructureEqualitySignature(allocator, &output, structure, false);
             try output.appendSlice(allocator, ";\n");
+            try generateStructureOperatorEqualitySignature(allocator, &output, structure, false);
+            try output.appendSlice(allocator, ";\n");
         }
         try output.append(allocator, '\n');
         for (program.structures) |structure| {
@@ -1585,6 +1693,13 @@ pub fn generateWithSources(
                 }
             }
             try output.appendSlice(allocator, ";\n}\n\n");
+        }
+        for (program.structures) |structure| {
+            if (structure.is_class or !structure.equality_comparable) continue;
+            try generateStructureOperatorEqualitySignature(allocator, &output, structure, true);
+            try output.appendSlice(allocator, " {\n    return ");
+            try generateStructureEqualityName(allocator, &output, structure.generated_name);
+            try output.appendSlice(allocator, "(left, right);\n}\n\n");
         }
     }
     for (program.functions) |function| {
@@ -1701,7 +1816,33 @@ pub fn generateWithSources(
         \\
         \\} // namespace SilexGenerated
         \\
-        \\int main() {
+        \\namespace {
+        \\int silexRuntimeArgumentCountValue = 0;
+        \\char** silexRuntimeArgumentValues = nullptr;
+        \\}
+        \\
+        \\extern "C" std::int64_t silexRuntimeArgumentCount() {
+        \\    return silexRuntimeArgumentCountValue;
+        \\}
+        \\
+        \\extern "C" const char* silexRuntimeArgumentValue(
+        \\    std::int64_t index,
+        \\    std::int64_t* length
+        \\) {
+        \\    if (index < 0 || index >= silexRuntimeArgumentCountValue) {
+        \\        *length = 0;
+        \\        return nullptr;
+        \\    }
+        \\    const char* value = silexRuntimeArgumentValues[index];
+        \\    std::int64_t count = 0;
+        \\    while (value[count] != '\0') ++count;
+        \\    *length = count;
+        \\    return value;
+        \\}
+        \\
+        \\int main(int argumentCount, char** argumentValues) {
+        \\    silexRuntimeArgumentCountValue = argumentCount;
+        \\    silexRuntimeArgumentValues = argumentValues;
     );
     try output.appendSlice(allocator, if (main_returns_result)
         "    const auto result = SilexGenerated::silexMain();\n"
@@ -1941,7 +2082,10 @@ fn generateMethodSignature(
         }
     }
     try output.append(allocator, ')');
-    if (!method.is_static and !method.is_mutating) try output.appendSlice(allocator, " const");
+    const mutable_return = method.return_type == .reference and method.return_type.reference.mutable;
+    if (!method.is_static and !method.is_mutating and !method.requires_mutable_codegen and !mutable_return) {
+        try output.appendSlice(allocator, " const");
+    }
 }
 
 fn generateBaseInitializer(
@@ -2620,7 +2764,9 @@ fn generateNativeArgument(
                 try output.appendSlice(allocator, "; silexNativeDropResource.silexCancelDeferred(); return silexNativeDropResource.silexReleaseNativeHandle(); }())");
                 return;
             }
+            try output.append(allocator, '(');
             try generateExpression(allocator, output, argument);
+            try output.append(allocator, ')');
             try output.appendSlice(allocator, if (call.native_parameter_modes[index] == .value) ".silexReleaseNativeHandle()" else ".silexBorrowNativeHandle()");
             return;
         }
@@ -3683,6 +3829,23 @@ fn generateStructureEqualityName(allocator: Allocator, output: *std.ArrayList(u8
     try output.appendSlice(allocator, generated_name);
 }
 
+fn generateStructureOperatorEqualitySignature(
+    allocator: Allocator,
+    output: *std.ArrayList(u8),
+    structure: Semantic.Structure,
+    include_names: bool,
+) !void {
+    try output.appendSlice(allocator, "bool operator==(const ");
+    try output.appendSlice(allocator, structure.generated_name);
+    try output.appendSlice(allocator, "&");
+    if (include_names) try output.appendSlice(allocator, " left");
+    try output.appendSlice(allocator, ", const ");
+    try output.appendSlice(allocator, structure.generated_name);
+    try output.appendSlice(allocator, "&");
+    if (include_names) try output.appendSlice(allocator, " right");
+    try output.append(allocator, ')');
+}
+
 fn generateStructureFieldEquality(
     allocator: Allocator,
     output: *std.ArrayList(u8),
@@ -3812,7 +3975,7 @@ fn generateTryPreludes(
             if (call.owner) |owner| try generateTryPreludes(allocator, output, owner, indentation);
             for (call.arguments) |argument| try generateTryPreludes(allocator, output, argument, indentation);
         },
-        .lambda => {},
+        .lambda, .function_reference => {},
         .method_call => |call| {
             try generateTryPreludes(allocator, output, call.object, indentation);
             for (call.arguments) |argument| try generateTryPreludes(allocator, output, argument, indentation);
@@ -4699,8 +4862,14 @@ fn generateExpression(allocator: Allocator, output: *std.ArrayList(u8), expressi
             if (member.object.value == .owner_self) {
                 try output.appendSlice(allocator, "silexOwner.");
             } else if (member.object.value != .self) {
-                try generateExpression(allocator, output, member.object);
-                try output.appendSlice(allocator, if (isClassType(member.object.type) or member.object.type == .reference) "->" else ".");
+                if (member.object.type == .reference and isClassType(member.object.type.reference.target.*)) {
+                    try output.appendSlice(allocator, "(*");
+                    try generateExpression(allocator, output, member.object);
+                    try output.appendSlice(allocator, ")->");
+                } else {
+                    try generateExpression(allocator, output, member.object);
+                    try output.appendSlice(allocator, if (isClassType(member.object.type) or member.object.type == .reference) "->" else ".");
+                }
             }
             try output.appendSlice(allocator, member.generated_name);
         },
@@ -4737,6 +4906,24 @@ fn generateExpression(allocator: Allocator, output: *std.ArrayList(u8), expressi
                 try generateExpression(allocator, output, member.object);
             }
             try output.append(allocator, ')');
+        },
+        .function_reference => |generated_name| {
+            try output.appendSlice(allocator, "silexMakeFunction<");
+            try appendCppType(allocator, output, expression.type);
+            try output.appendSlice(allocator, ">([](");
+            for (expression.type.function.parameters, expression.type.function.parameter_modes, 0..) |parameter, mode, index| {
+                if (index != 0) try output.appendSlice(allocator, ", ");
+                try appendCppParameterType(allocator, output, parameter, mode);
+                try output.appendSlice(allocator, try std.fmt.allocPrint(allocator, " silexFunctionArgument{d}", .{index}));
+            }
+            try output.appendSlice(allocator, ") { return ");
+            try output.appendSlice(allocator, generated_name);
+            try output.append(allocator, '(');
+            for (expression.type.function.parameters, 0..) |_, index| {
+                if (index != 0) try output.appendSlice(allocator, ", ");
+                try output.appendSlice(allocator, try std.fmt.allocPrint(allocator, "silexFunctionArgument{d}", .{index}));
+            }
+            try output.appendSlice(allocator, "); })");
         },
         .adapt_function => |value| {
             try output.appendSlice(allocator, "silexMakeFunction<");
@@ -5713,6 +5900,39 @@ test "generate owned uint8 list native returns" {
     try std.testing.expect(std.mem.indexOf(u8, cpp, "std::move(silexNativeBytes_success)") != null);
 }
 
+test "generate native resource self arguments in extension methods" {
+    const Parser = @import("Parser.zig").Parser;
+    const Modules = @import("Modules.zig");
+    const Project = @import("Project.zig").Project;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var parser = Parser.init(allocator,
+        \\public native resource File { drop discard_file }
+        \\native func native_read(file:&File, buffer:&uint8[..]) Result<int,str>
+        \\extend File {
+        \\    public func read(buffer:&uint8[..]) Result<int,str> {
+        \\        return native_read(self, buffer)
+        \\    }
+        \\}
+        \\func main() {}
+    );
+    const project = Project{
+        .program_name = "Files",
+        .target_module = 0,
+        .modules = &.{.{ .name = "Files", .sources = &.{"Files.sx"} }},
+        .single_file = false,
+    };
+    var resolver = Modules.Resolver.init(allocator, project, &.{.{ .module_index = 0, .program = try parser.parse() }});
+    var analyzer = Semantic.Analyzer.init(allocator);
+    analyzer.native_module_names = &.{"Files"};
+    const cpp = try generate(allocator, try analyzer.analyze(try resolver.resolve()));
+
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "(*this).silexBorrowNativeHandle()") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "*this.silexBorrowNativeHandle()") == null);
+}
+
 test "generate validated native Result bridges" {
     const Parser = @import("Parser.zig").Parser;
     const Generics = @import("Generics.zig");
@@ -6140,6 +6360,8 @@ test "generate value structs and member access" {
     try std.testing.expect(std.mem.indexOf(u8, cpp, "namespace SilexGenerated {") != null);
     try std.testing.expect(std.mem.indexOf(u8, cpp, "int silexMain()") != null);
     try std.testing.expect(std.mem.indexOf(u8, cpp, "const int result = SilexGenerated::silexMain();") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "int main(int argumentCount, char** argumentValues)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "silexRuntimeArgumentCountValue = argumentCount;") != null);
 }
 
 test "generate class references identity access and cycle tracing" {

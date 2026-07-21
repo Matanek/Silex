@@ -1,0 +1,86 @@
+use STD.Collections.Queue as Queue
+
+class Box {
+    public var value:int
+}
+
+func required(value:int?) int {
+    if present = value {
+        return present
+    }
+    panic("expected a queued value")
+}
+
+func equals(value:@int, expected:int) bool {
+    return value >= expected && value <= expected
+}
+
+func replace(value:&int, replacement:int) {
+    value = replacement
+}
+
+func main() {
+    var queue = Queue<int>.create(0)
+    assert(queue.is_empty() && queue.count() == 0 && queue.capacity() == 0, "empty queue")
+
+    var index = 0
+    while index < 40 {
+        queue.enqueue(index)
+        index++
+    }
+    assert(queue.count() == 40 && queue.capacity() >= 40, "queue grows")
+
+    index = 0
+    while index < 20 {
+        assert(required(queue.dequeue()) == index, "first FIFO segment")
+        queue.enqueue(40 + index)
+        index++
+    }
+
+    index = 20
+    while index < 60 {
+        assert(required(queue.dequeue()) == index, "wrapped FIFO segment")
+        index++
+    }
+    assert(queue.dequeue() == null && queue.is_empty(), "empty dequeue")
+
+    queue.reserve(100)
+    assert(queue.capacity() >= 100, "reserve")
+    queue.enqueue(7)
+    if true {
+        let observed = queue.peek()
+        let observed_again = queue.peek()
+        assert(equals(observed, 7) && equals(observed_again, 7), "shared head borrows")
+    }
+    assert(required(queue.dequeue()) == 7, "head remains queued")
+
+    var mutable = Queue<int>.create()
+    mutable.enqueue(1)
+    if true {
+        var mutable_head = mutable.peek()
+        replace(mutable_head, 10)
+    }
+    assert(required(mutable.dequeue()) == 10, "mutable head borrow")
+
+    var boxes = Queue<Box>.create()
+    boxes.enqueue(Box(value:4))
+    if true {
+        var box = boxes.peek()
+        box.value = 5
+    }
+    assert(boxes.dequeue()?.value == 5, "generic mutable borrow supports class elements")
+
+    var left = Queue<int>.create()
+    left.enqueue(1)
+    left.enqueue(2)
+    var right = left
+    assert(required(right.dequeue()) == 1, "copied queue can dequeue")
+    right.enqueue(3)
+    assert(left.count() == 2, "copied queue remains independent")
+    assert(right.count() == 2, "copied queue diverges")
+    var cleared = Queue<int>.create()
+    cleared.enqueue(1)
+    cleared.enqueue(2)
+    cleared.clear()
+    assert(cleared.is_empty() && cleared.capacity() >= 2, "clear retains capacity")
+}

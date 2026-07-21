@@ -1,0 +1,19 @@
+use STD.Collections.Set as Set
+
+struct Resource {
+    let handle:int
+    drop {}
+}
+
+func hash_resource(value:@Resource) uint {
+    return value.handle as uint
+}
+
+func equal_resource(left:@Resource, right:@Resource) bool {
+    return left.handle == right.handle
+}
+
+func main() {
+    var values = Set<Resource>.create(hash_resource, equal_resource)
+    values.insert(Resource(handle:1))
+}

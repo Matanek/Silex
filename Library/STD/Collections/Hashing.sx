@@ -1,0 +1,39 @@
+native func native_hash_str(value:str) uint
+
+public func hash_bool(value:@bool) uint {
+    if value {
+        return 1
+    }
+    return 0
+}
+
+public func equal_bool(left:@bool, right:@bool) bool {
+    return left == right
+}
+
+public func hash_int(value:@int) uint {
+    if value < 0 {
+        return ((-(value + 1)) as uint) * 2 + 1
+    }
+    return (value as uint) * 2
+}
+
+public func equal_int(left:@int, right:@int) bool {
+    return left == right
+}
+
+public func hash_uint(value:@uint) uint {
+    return value ^ 0
+}
+
+public func equal_uint(left:@uint, right:@uint) bool {
+    return left == right
+}
+
+public func hash_str(value:@str) uint {
+    return native_hash_str(value)
+}
+
+public func equal_str(left:@str, right:@str) bool {
+    return left == right
+}

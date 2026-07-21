@@ -1,0 +1,25 @@
+native func native_visit_boundaries(text:str, visitor:func(int)) void
+native func native_slice(text:str, start:int, end:int) str
+
+public func boundaries(text:str) int[] {
+    var result:int[] = [0]
+    native_visit_boundaries(text, func(offset:int) {
+        result.append(offset)
+    })
+    return result
+}
+
+public func count(text:str) int {
+    return boundaries(text).count() - 1
+}
+
+public func split(text:str) str[] {
+    let offsets = boundaries(text)
+    var result:str[] = []
+    var index = 0
+    while index + 1 < offsets.count() {
+        result.append(native_slice(text, offsets[index], offsets[index + 1]))
+        index++
+    }
+    return result
+}

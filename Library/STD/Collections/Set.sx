@@ -1,0 +1,80 @@
+use STD.Collections.Dictionary as Dictionary
+use STD.Iteration.Iterator as Iterator
+
+public struct Set<T> {
+    private var entries:Dictionary<T, bool>
+
+    public static func create(
+        hash:func(@T) uint,
+        equal:func(@T, @T) bool,
+    ) Set<T> {
+        var entries = Dictionary<T, bool>.create(hash, equal)
+        return Set<T>(entries:entries)
+    }
+
+    public static func create(
+        hash:func(@T) uint,
+        equal:func(@T, @T) bool,
+        minimum_capacity:int,
+    ) Set<T> {
+        if minimum_capacity < 0 {
+            panic("Set.create requires a non-negative minimum capacity")
+        }
+        var entries = Dictionary<T, bool>.create(hash, equal, minimum_capacity)
+        return Set<T>(entries:entries)
+    }
+
+    public func count() int {
+        return self.entries.count()
+    }
+
+    public func capacity() int {
+        return self.entries.capacity()
+    }
+
+    public func is_empty() bool {
+        return self.entries.is_empty()
+    }
+
+    public func contains(value:@T) bool {
+        return self.entries.contains_key(value)
+    }
+
+    public func insert(value:T) bool {
+        let previous = self.entries.insert(value, true)
+        return previous == null
+    }
+
+    public func remove(value:@T) bool {
+        let previous = self.entries.remove(value)
+        return previous != null
+    }
+
+    public func take(value:@T) T? {
+        let removed = self.entries.take_entry(value)
+        if entry = removed {
+            return entry.key
+        }
+        return null
+    }
+
+    public func reserve(minimum_capacity:int) {
+        if minimum_capacity < 0 {
+            panic("Set.reserve requires a non-negative minimum capacity")
+        }
+        self.entries.reserve(minimum_capacity)
+    }
+
+    public func clear() {
+        self.entries.clear()
+    }
+
+    public func iterator() Iterator<T> {
+        var result = Iterator<T>.empty()
+        var entries = self.entries.iterator()
+        while entry = entries.next() {
+            result.push(entry.key)
+        }
+        return result
+    }
+}

@@ -171,12 +171,28 @@ With several possible roots it is qualified symbolically, for example
 `@first:State`. A shared result may originate from `@` or `&`; a mutable result
 requires `&`. Calls propagate the actual root through successive wrappers.
 
-The result can be inferred or annotated locally as `let view:@State` or
-`var edit:&State`. Shared aliases can coexist and be copied; mutable aliases are
-exclusive and cannot be copied. Member access stays direct (`view.field`) with
-no visible dereference operator. The alias keeps its root borrowed until the end
-of its lexical scope, preventing incompatible access, mutation, replacement,
-`move`, or destruction.
+The result can be inferred or annotated locally. A newly produced mutable
+borrowed return carries the maximum capability `&T`; an unannotated local keeps
+or weakens that capability according to its declaration:
+
+```sx
+let view = owner.edit() // inferred @State
+var edit = owner.edit() // inferred &State
+```
+
+The same one-way weakening is available explicitly with
+`let view:@State = owner.edit()`. `var edit:&State` keeps the mutable return,
+while `let edit:&State` remains invalid. An already stored mutable alias cannot
+be copied or weakened by a second declaration, and a shared `@T` can never be
+strengthened into `&T`.
+
+Weakening changes the active borrow itself: the `let` form records a shared
+borrow, so other compatible reads may coexist; the `var` form remains
+exclusive. Existing receiver rules still apply and an immutable owner does not
+become a mutable place merely because a return can be weakened. Member access
+stays direct (`view.field`) with no visible dereference operator. The alias
+keeps its root borrowed until the end of its lexical scope, preventing
+incompatible access, mutation, replacement, `move`, or destruction.
 
 Reference types remain forbidden in fields, collections, optionals, enums,
 static storage, lambda captures and deferred callbacks. They are controlled

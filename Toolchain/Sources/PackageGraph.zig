@@ -9,6 +9,7 @@ const EnvironMap = std.process.Environ.Map;
 
 pub const Mode = union(enum) {
     normal,
+    editor,
     update_all,
     update_one: []const u8,
 };
@@ -155,7 +156,7 @@ const Resolver = struct {
             packages[index] = builder.package;
         }
         const graph: Graph = .{ .packages = packages, .explicit = explicit };
-        if (self.saw_dependency) {
+        if (self.saw_dependency and self.mode != .editor) {
             const generated_lock = try makeLock(self.allocator, graph);
             if (self.lock == null or !locksEqual(self.lock.?, generated_lock)) {
                 PackageLock.writeAtomic(self.allocator, self.io, canonical_root, generated_lock) catch |err| {
@@ -295,7 +296,7 @@ const Resolver = struct {
             return error.Reported;
         };
         const refresh = switch (self.mode) {
-            .normal => false,
+            .normal, .editor => false,
             .update_all => origin.rev == null,
             .update_one => |name| block: {
                 if (std.mem.eql(u8, name, dependency_name)) {
@@ -316,7 +317,28 @@ const Resolver = struct {
                 null
         else
             null;
-        const checkout = PackageLock.materialize(
+        const checkout = if (self.mode == .editor) editor_checkout: {
+            const revision = locked_revision orelse origin.rev orelse {
+                std.debug.print(
+                    "silex: editor analysis cannot resolve {s} without a locked or explicit Git revision\n",
+                    .{try formatChain(self.allocator, chain)},
+                );
+                return error.Reported;
+            };
+            break :editor_checkout (try PackageLock.findCheckout(
+                self.allocator,
+                self.io,
+                self.environ_map,
+                canonical_origin,
+                revision,
+            )) orelse {
+                std.debug.print(
+                    "silex: editor analysis requires the existing checkout for {s}; run 'silex update' explicitly\n",
+                    .{try formatChain(self.allocator, chain)},
+                );
+                return error.Reported;
+            };
+        } else PackageLock.materialize(
             self.allocator,
             self.io,
             self.environ_map,

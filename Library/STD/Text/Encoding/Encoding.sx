@@ -1,0 +1,255 @@
+use STD.Text.UTF8.bytes as utf8_bytes
+use STD.Text.UTF8.decode as utf8_decode
+use STD.Text.UTF8.scalars as utf8_scalars
+use STD.Text.UTF8.from_scalars as utf8_from_scalars
+
+public enum Kind {
+    utf8
+    utf16_little_endian
+    utf16_big_endian
+    utf32_little_endian
+    utf32_big_endian
+}
+
+public enum ErrorKind {
+    invalid_length
+    invalid_sequence
+    unexpected_bom
+}
+
+public struct Error {
+    let kind:ErrorKind
+    let byte_offset:int
+}
+
+public func encode(text:str, encoding:Kind) uint8[] {
+    let encoding_code = kind_code(encoding)
+    if encoding_code == 1 {
+        return utf8_bytes(text)
+    }
+    let values = utf8_scalars(text)
+    var result:uint8[] = []
+    for scalar in values {
+        if encoding_code == 2 || encoding_code == 3 {
+            if scalar <= 65535 {
+                append_uint16(result, scalar, encoding_code == 2)
+            } else {
+                let adjusted = scalar - 65536
+                append_uint16(result, 55296 + (adjusted >> 10), encoding_code == 2)
+                append_uint16(result, 56320 + (adjusted & 1023), encoding_code == 2)
+            }
+        } else {
+            append_uint32(result, scalar, encoding_code == 4)
+        }
+    }
+    return result
+}
+
+public func encode_with_bom(text:str, encoding:Kind) uint8[] {
+    var result = bom(encoding)
+    let payload = encode(text, encoding)
+    for byte in payload {
+        result.append(byte)
+    }
+    return result
+}
+
+public func decode(values:@uint8[..], encoding:Kind) Result<str, Error> {
+    let encoding_code = kind_code(encoding)
+    var start = 0
+    if has_bom(values, encoding) {
+        start = bom(encoding).count()
+    } elif let detected = detect_bom(values) {
+        if kind_code(detected) != encoding_code {
+            return failure(ErrorKind.unexpected_bom(), 0)
+        }
+    }
+
+    if encoding_code == 1 {
+        let payload = @values[start:values.count()]
+        match utf8_decode(payload) {
+            success(text) => { return Result<str, Error>.success(text) }
+            failure(error) => {
+                return failure(ErrorKind.invalid_sequence(), start + error.byte_offset)
+            }
+        }
+    }
+    if encoding_code == 2 || encoding_code == 3 {
+        return decode_utf16(values, start, encoding_code == 2)
+    }
+    return decode_utf32(values, start, encoding_code == 4)
+}
+
+func has_bom(values:@uint8[..], encoding:Kind) bool {
+    let signature = bom(encoding)
+    if values.count() < signature.count() {
+        return false
+    }
+    var index = 0
+    while index < signature.count() {
+        if values[index] != signature[index] {
+            return false
+        }
+        index++
+    }
+    return true
+}
+
+public func detect_bom(values:@uint8[..]) Kind? {
+    if values.count() >= 4 {
+        if values[0] == 0 && values[1] == 0 && values[2] == 254 && values[3] == 255 {
+            return Kind.utf32_big_endian()
+        }
+        if values[0] == 255 && values[1] == 254 && values[2] == 0 && values[3] == 0 {
+            return Kind.utf32_little_endian()
+        }
+    }
+    if values.count() >= 3 && values[0] == 239 && values[1] == 187 && values[2] == 191 {
+        return Kind.utf8()
+    }
+    if values.count() >= 2 {
+        if values[0] == 254 && values[1] == 255 {
+            return Kind.utf16_big_endian()
+        }
+        if values[0] == 255 && values[1] == 254 {
+            return Kind.utf16_little_endian()
+        }
+    }
+    return null
+}
+
+func bom(encoding:Kind) uint8[] {
+    let encoding_code = kind_code(encoding)
+    if encoding_code == 1 {
+        return [239, 187, 191]
+    }
+    if encoding_code == 2 {
+        return [255, 254]
+    }
+    if encoding_code == 3 {
+        return [254, 255]
+    }
+    if encoding_code == 4 {
+        return [255, 254, 0, 0]
+    }
+    return [0, 0, 254, 255]
+}
+
+func kind_code(encoding:Kind) int {
+    return match encoding {
+        utf8 => 1
+        utf16_little_endian => 2
+        utf16_big_endian => 3
+        utf32_little_endian => 4
+        utf32_big_endian => 5
+    }
+}
+
+func append_uint16(result:&uint8[], value:uint32, little_endian:bool) {
+    let low = (value & 255) as uint8
+    let high = ((value >> 8) & 255) as uint8
+    if little_endian {
+        result.append(low)
+        result.append(high)
+    } else {
+        result.append(high)
+        result.append(low)
+    }
+}
+
+func append_uint32(result:&uint8[], value:uint32, little_endian:bool) {
+    let first = (value & 255) as uint8
+    let second = ((value >> 8) & 255) as uint8
+    let third = ((value >> 16) & 255) as uint8
+    let fourth = ((value >> 24) & 255) as uint8
+    if little_endian {
+        result.append(first)
+        result.append(second)
+        result.append(third)
+        result.append(fourth)
+    } else {
+        result.append(fourth)
+        result.append(third)
+        result.append(second)
+        result.append(first)
+    }
+}
+
+func read_uint16(values:@uint8[..], offset:int, little_endian:bool) uint32 {
+    let first = values[offset] as uint32
+    let second = values[offset + 1] as uint32
+    if little_endian {
+        return first + (second << 8)
+    }
+    return (first << 8) + second
+}
+
+func read_uint32(values:@uint8[..], offset:int, little_endian:bool) uint32 {
+    let first = values[offset] as uint32
+    let second = values[offset + 1] as uint32
+    let third = values[offset + 2] as uint32
+    let fourth = values[offset + 3] as uint32
+    if little_endian {
+        return first + (second << 8) + (third << 16) + (fourth << 24)
+    }
+    return (first << 24) + (second << 16) + (third << 8) + fourth
+}
+
+func decode_utf16(values:@uint8[..], start:int, little_endian:bool) Result<str, Error> {
+    let length = values.count() - start
+    if length % 2 != 0 {
+        return failure(ErrorKind.invalid_length(), start + (length / 2) * 2)
+    }
+    var scalars:uint32[] = []
+    var offset = start
+    while offset < values.count() {
+        let unit = read_uint16(values, offset, little_endian)
+        if unit >= 55296 && unit <= 56319 {
+            if offset + 3 >= values.count() {
+                return failure(ErrorKind.invalid_sequence(), offset)
+            }
+            let low = read_uint16(values, offset + 2, little_endian)
+            if low < 56320 || low > 57343 {
+                return failure(ErrorKind.invalid_sequence(), offset)
+            }
+            scalars.append(65536 + ((unit - 55296) << 10) + (low - 56320))
+            offset += 4
+        } elif unit >= 56320 && unit <= 57343 {
+            return failure(ErrorKind.invalid_sequence(), offset)
+        } else {
+            scalars.append(unit)
+            offset += 2
+        }
+    }
+    return scalar_string(scalars)
+}
+
+func decode_utf32(values:@uint8[..], start:int, little_endian:bool) Result<str, Error> {
+    let length = values.count() - start
+    if length % 4 != 0 {
+        return failure(ErrorKind.invalid_length(), start + (length / 4) * 4)
+    }
+    var scalars:uint32[] = []
+    var offset = start
+    while offset < values.count() {
+        let scalar = read_uint32(values, offset, little_endian)
+        if scalar > 1114111 || (scalar >= 55296 && scalar <= 57343) {
+            return failure(ErrorKind.invalid_sequence(), offset)
+        }
+        scalars.append(scalar)
+        offset += 4
+    }
+    return scalar_string(scalars)
+}
+
+func scalar_string(values:uint32[]) Result<str, Error> {
+    let view = @values[0:values.count()]
+    match utf8_from_scalars(view) {
+        success(text) => { return Result<str, Error>.success(text) }
+        failure(error) => { panic("validated Unicode scalar rejected") }
+    }
+}
+
+func failure(kind:ErrorKind, byte_offset:int) Result<str, Error> {
+    return Result<str, Error>.failure(Error(kind:kind, byte_offset:byte_offset))
+}

@@ -1,0 +1,121 @@
+use STD.System.Error as Error
+use STD.System.ErrorKind as ErrorKind
+
+public enum Family {
+    any
+    ipv4
+    ipv6
+}
+public enum Transport {
+    stream
+    datagram
+}
+public enum IpAddress {
+    ipv4(uint8[4])
+    ipv6(uint8[16])
+}
+public struct Endpoint {
+    let address:IpAddress
+    let port:uint16
+    let scope_id:uint32
+}
+public struct ResolveOptions {
+    let family:Family
+    let transport:Transport
+}
+struct NativeResult {
+    let succeeded:bool
+    let kind:int
+    let detail:str
+}
+
+native func native_parse_ip(text:str, visitor:func(int)) NativeResult
+native func native_format_ip(family:int, bytes:@uint8[..]) str
+native func native_format_endpoint(family:int, port:int, scope:int, bytes:@uint8[..]) str
+native func native_resolve(host:str, port:int, family:int, transport:int, visitor:func(int)) NativeResult
+
+public func parse_ip(text:str) Result<IpAddress, Error> {
+    var family = 0
+    var index = 0
+    var bytes:uint8[16]
+    let native = native_parse_ip(text, func(value:int) {
+        if family == 0 { family = value } else { bytes[index] = value as uint8; index++ }
+    })
+    if !native.succeeded { return Result<IpAddress, Error>.failure(network_error("network.parse_ip", text, native)) }
+    if family == 4 { return Result<IpAddress, Error>.success(IpAddress.ipv4([bytes[0],bytes[1],bytes[2],bytes[3]])) }
+    return Result<IpAddress, Error>.success(IpAddress.ipv6(bytes))
+}
+
+public func format_ip(address:IpAddress) str {
+    return match address {
+        ipv4(bytes) => format_ipv4_bytes(bytes)
+        ipv6(bytes) => format_ipv6_bytes(bytes)
+    }
+}
+
+public func format_endpoint(endpoint:Endpoint) str {
+    return match endpoint.address {
+        ipv4(bytes) => format_ipv4_endpoint(bytes, endpoint.port, endpoint.scope_id)
+        ipv6(bytes) => format_ipv6_endpoint(bytes, endpoint.port, endpoint.scope_id)
+    }
+}
+func format_ipv4_bytes(bytes:uint8[4]) str {
+    let view = @bytes[0:4]
+    return native_format_ip(4, view)
+}
+func format_ipv6_bytes(bytes:uint8[16]) str {
+    let view = @bytes[0:16]
+    return native_format_ip(6, view)
+}
+func format_ipv4_endpoint(bytes:uint8[4], port:uint16, scope:uint32) str {
+    let view = @bytes[0:4]
+    return native_format_endpoint(4, port as int, scope as int, view)
+}
+func format_ipv6_endpoint(bytes:uint8[16], port:uint16, scope:uint32) str {
+    let view = @bytes[0:16]
+    return native_format_endpoint(6, port as int, scope as int, view)
+}
+
+public func resolve(host:str, port:uint16, options:ResolveOptions) Result<Endpoint[], Error> {
+    var result:Endpoint[] = []
+    var fields:int[] = []
+    let native = native_resolve(host, port as int, family_code(options.family), transport_code(options.transport), func(value:int) {
+        fields.append(value)
+        if fields.count() == 19 {
+            var bytes:uint8[16]
+            var index = 0
+            while index < 16 { bytes[index] = fields[index + 3] as uint8; index++ }
+            var address = IpAddress.ipv6(bytes)
+            if fields[0] == 4 {
+                address = IpAddress.ipv4([bytes[0],bytes[1],bytes[2],bytes[3]])
+            }
+            result.append(Endpoint(address:address, port:fields[1] as uint16, scope_id:fields[2] as uint32))
+            fields = []
+        }
+    })
+    if !native.succeeded { return Result<Endpoint[], Error>.failure(network_error("network.resolve", host, native)) }
+    return Result<Endpoint[], Error>.success(result)
+}
+func family_code(value:Family) int {
+    return match value {
+        any => 0
+        ipv4 => 4
+        ipv6 => 6
+    }
+}
+func transport_code(value:Transport) int {
+    return match value {
+        stream => 1
+        datagram => 2
+    }
+}
+func network_error(operation:str, subject:str, native:NativeResult) Error {
+    return Error(kind:error_kind(native.kind),operation:operation,subject:subject,detail:native.detail)
+}
+func error_kind(kind:int) ErrorKind {
+    if kind==0{return ErrorKind.not_found()} if kind==2{return ErrorKind.permission_denied()}
+    if kind==3{return ErrorKind.invalid_input()} if kind==4{return ErrorKind.invalid_data()}
+    if kind==12{return ErrorKind.resource_exhausted()} if kind==18{return ErrorKind.timed_out()}
+    if kind==23{return ErrorKind.network_unreachable()} if kind==24{return ErrorKind.host_unreachable()}
+    return ErrorKind.other()
+}

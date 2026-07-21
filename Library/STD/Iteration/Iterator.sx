@@ -1,0 +1,49 @@
+public struct Iterator<T> {
+    private var values:T?[]
+    private var next_index:int
+
+    public static func empty() Iterator<T> {
+        return Iterator<T>(values:[], next_index:0)
+    }
+
+    public func push(value:T) {
+        self.values.append(value)
+    }
+
+    public func next() T? {
+        if self.next_index >= self.values.count() {
+            return null
+        }
+        var value = self.values.replace(self.next_index, null)
+        self.next_index++
+        return value
+    }
+
+    public func remaining() int {
+        return self.values.count() - self.next_index
+    }
+
+    public func is_empty() bool {
+        return self.remaining() == 0
+    }
+}
+
+public func iterate<T>(values:@T[]) Iterator<T> {
+    var result = Iterator<T>.empty()
+    var index = 0
+    while index < values.count() {
+        result.push(values[index])
+        index++
+    }
+    return result
+}
+
+public func iterate<T>(values:@T[..]) Iterator<T> {
+    var result = Iterator<T>.empty()
+    var index = 0
+    while index < values.count() {
+        result.push(values[index])
+        index++
+    }
+    return result
+}

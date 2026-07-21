@@ -40,7 +40,7 @@ fn runCli(init: std.process.Init) !u8 {
     if (std.mem.eql(u8, args[1], "update")) return updateCommand(allocator, init.io, init.environ_map, args[2..]);
     if (std.mem.eql(u8, args[1], "module")) return moduleCommand(allocator, init.io, args[2..]);
     if (std.mem.eql(u8, args[1], "clean")) return cleanCommand(allocator, init.io, args[2..]);
-    if (std.mem.eql(u8, args[1], "lsp")) return Lsp.run(allocator, init.io);
+    if (std.mem.eql(u8, args[1], "lsp")) return Lsp.run(allocator, init.io, init.environ_map);
 
     std.debug.print("silex: unknown command '{s}'\n\n{s}", .{ args[1], usage });
     return 1;

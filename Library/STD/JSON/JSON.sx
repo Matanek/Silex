@@ -1,0 +1,212 @@
+public enum Kind {
+    null_value
+    boolean
+    string
+    number
+    array
+    object
+}
+public enum Format {
+    compact
+    pretty
+}
+public enum BuildError {
+    invalid_number(str)
+    non_finite_number
+    duplicate_member(str)
+}
+public enum ParseErrorKind {
+    unexpected_end
+    unexpected_token
+    invalid_escape
+    invalid_unicode_escape
+    invalid_number
+    duplicate_member
+    trailing_data
+    depth_limit
+}
+public struct ParseError {
+    let kind:ParseErrorKind
+    let byte_offset:int
+    let line:int
+    let column:int
+    let detail:str
+}
+public struct Member {
+    let name:str
+    var value:Value
+}
+
+native func native_release(value:uint) void
+struct NativeBuildFailure {
+    let kind:int
+    let text:str
+}
+struct NativeParseFailure {
+    let kind:int
+    let byte_offset:int
+    let line:int
+    let column:int
+    let detail:str
+}
+native func native_null() uint
+native func native_boolean(value:bool) uint
+native func native_string(value:str) uint
+native func native_number_text(value:str) Result<uint, NativeBuildFailure>
+native func native_number_int(value:int) uint
+native func native_number_uint(value:uint) uint
+native func native_number_float(value:float64) Result<uint, NativeBuildFailure>
+native func native_array() uint
+native func native_array_append(target:uint, value:uint) void
+native func native_object() uint
+native func native_object_append(target:uint, name:str, value:uint) Result<void, NativeBuildFailure>
+native func native_kind(value:uint) int
+native func native_boolean_value(value:uint) bool
+native func native_text_value(value:uint) str
+native func native_count(value:uint) int
+native func native_child(value:uint, index:int) uint
+native func native_member_name(value:uint, index:int) str
+native func native_parse(text:str, maximum_depth:int) Result<uint, NativeParseFailure>
+native func native_stringify(value:uint, pretty:bool) str
+
+public class Value {
+    var native:uint
+    init(native:uint) { self.native = native }
+
+    drop { native_release(self.native) }
+
+    public static func null_value() Value {
+        var native = native_null()
+        return Value(native)
+    }
+    public static func boolean(value:bool) Value {
+        var native = native_boolean(value)
+        return Value(native)
+    }
+    public static func string(value:str) Value {
+        var native = native_string(value)
+        return Value(native)
+    }
+    public static func number_text(value:str) Result<Value, BuildError> {
+        match native_number_text(value) {
+            success(native) => { return Result<Value, BuildError>.success(Value(native)) }
+            failure(error) => { return Result<Value, BuildError>.failure(build_error(error)) }
+        }
+    }
+    public static func number(value:int) Value {
+        var native = native_number_int(value)
+        return Value(native)
+    }
+    public static func number(value:uint) Value {
+        var native = native_number_uint(value)
+        return Value(native)
+    }
+    public static func number(value:float64) Result<Value, BuildError> {
+        match native_number_float(value) {
+            success(native) => { return Result<Value, BuildError>.success(Value(native)) }
+            failure(error) => { return Result<Value, BuildError>.failure(build_error(error)) }
+        }
+    }
+    public static func array(values:Value[]) Value {
+        var native = native_array()
+        for value in values { native_array_append(native, value.native) }
+        return Value(native)
+    }
+    public static func object(members:Member[]) Result<Value, BuildError> {
+        var native = native_object()
+        for member in members {
+            match native_object_append(native, member.name, member.value.native) {
+                success => {}
+                failure(error) => { return Result<Value, BuildError>.failure(build_error(error)) }
+            }
+        }
+        return Result<Value, BuildError>.success(Value(native))
+    }
+    public func kind() Kind {
+        let raw = native_kind(self.native)
+        if raw == 1 { return Kind.null_value() }
+        if raw == 2 { return Kind.boolean() }
+        if raw == 3 { return Kind.string() }
+        if raw == 4 { return Kind.number() }
+        if raw == 5 { return Kind.array() }
+        return Kind.object()
+    }
+    public func as_boolean() bool? {
+        if native_kind(self.native) != 2 { return null }
+        return native_boolean_value(self.native)
+    }
+    public func as_string() str? {
+        if native_kind(self.native) != 3 { return null }
+        return native_text_value(self.native)
+    }
+    public func as_number_text() str? {
+        if native_kind(self.native) != 4 { return null }
+        return native_text_value(self.native)
+    }
+    public func as_array() Value[]? {
+        if native_kind(self.native) != 5 { return null }
+        var result:Value[] = []
+        var index = 0
+        while index < native_count(self.native) {
+            var child = native_child(self.native, index)
+            result.append(Value(child))
+            index++
+        }
+        return result
+    }
+    public func as_object() Member[]? {
+        if native_kind(self.native) != 6 { return null }
+        var result:Member[] = []
+        var index = 0
+        while index < native_count(self.native) {
+            var child = native_child(self.native, index)
+            result.append(Member(
+                name:native_member_name(self.native, index),
+                value:Value(child)
+            ))
+            index++
+        }
+        return result
+    }
+    public func encoded(pretty:bool) str {
+        return native_stringify(self.native, pretty)
+    }
+    public static func parse_text(text:str, maximum_depth:int) Result<Value, ParseError> {
+        match native_parse(text, maximum_depth) {
+            success(native) => { return Result<Value, ParseError>.success(Value(native)) }
+            failure(error) => {
+                return Result<Value, ParseError>.failure(ParseError(
+                    kind:parse_kind(error.kind), byte_offset:error.byte_offset,
+                    line:error.line, column:error.column, detail:error.detail
+                ))
+            }
+        }
+    }
+}
+
+public func parse(text:str) Result<Value, ParseError> { return parse(text, 128) }
+public func parse(text:str, maximum_depth:int) Result<Value, ParseError> {
+    return Value.parse_text(text, maximum_depth)
+}
+public func stringify(value:Value, format:Format) str {
+    let pretty = match format {
+        compact => false
+        pretty => true
+    }
+    return value.encoded(pretty)
+}
+func build_error(error:NativeBuildFailure) BuildError {
+    if error.kind == 1 { return BuildError.invalid_number(error.text) }
+    if error.kind == 2 { return BuildError.non_finite_number() }
+    return BuildError.duplicate_member(error.text)
+}
+func parse_kind(kind:int) ParseErrorKind {
+    if kind == 1 { return ParseErrorKind.unexpected_end() }
+    if kind == 2 { return ParseErrorKind.unexpected_token() }
+    if kind == 3 { return ParseErrorKind.invalid_escape() }
+    if kind == 4 { return ParseErrorKind.invalid_unicode_escape() }
+    if kind == 5 { return ParseErrorKind.invalid_number() }
+    if kind == 6 { return ParseErrorKind.duplicate_member() }
+    if kind == 7 { return ParseErrorKind.trailing_data() }
+    return ParseErrorKind.depth_limit()
+}

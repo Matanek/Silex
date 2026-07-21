@@ -1,0 +1,41 @@
+native func native_normalize(text:str, form:int) str
+native func native_lowercase(text:str) str
+native func native_uppercase(text:str) str
+native func native_case_fold(text:str) str
+
+public enum Normalization {
+    nfc
+    nfd
+    nfkc
+    nfkd
+}
+
+public func normalize(text:str, form:Normalization) str {
+    let raw_form = match form {
+        nfc => 0
+        nfd => 1
+        nfkc => 2
+        nfkd => 3
+    }
+    return native_normalize(text, raw_form)
+}
+
+public func is_normalized(text:str, form:Normalization) bool {
+    return text == normalize(text, form)
+}
+
+public func lowercase(text:str) str {
+    return native_lowercase(text)
+}
+
+public func uppercase(text:str) str {
+    return native_uppercase(text)
+}
+
+public func case_fold(text:str) str {
+    return native_case_fold(text)
+}
+
+public func unicode_version() str {
+    return "17.0.0"
+}

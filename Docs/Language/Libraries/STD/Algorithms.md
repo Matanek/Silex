@@ -13,6 +13,36 @@ algorithms, with:
 use STD.Algorithms
 ```
 
+## Search and quantification
+
+`any<T>`, `all<T>`, `count_where<T>`, `find<T>`, and `contains<T>` consume a
+local copy of an owned `Iterator<T>`. The caller's cursor is never advanced,
+and only the values remaining at the time of that copy are inspected.
+
+`any` returns `false` for an empty source and stops at the first matching
+value. `all` returns `true` for an empty source and stops at the first rejected
+value. `count_where` calls its predicate once per value. `find` returns the
+first matching value, while `contains` uses its explicit equality callback as
+`equal(element, expected)` and does not hide `==` or hashing.
+
+For `r` remaining values these functions are O(r) in the worst case and O(1)
+in auxiliary storage outside the iterator parameter's value copy. Predicates
+receive temporary read borrows. Captures follow ordinary callback lifetime
+rules, and a panic propagates without replaying a callback.
+
+## Transformation and filtering
+
+`map<T, U>` calls its transform exactly once for every remaining value and
+returns an owned `Iterator<U>` in the same order. `filter<T>` calls its
+predicate once per remaining value and copies accepted values into a new
+`Iterator<T>`. Empty inputs produce empty outputs.
+
+Both functions evaluate immediately, advance only their local iterator copy,
+and leave the original collection and caller cursor unchanged. For `r`
+remaining values they take O(r) time. `map` stores exactly `r` results;
+`filter` stores between zero and `r`. They provide no lazy chain, flattening,
+or mutable in-place transformation.
+
 ## In-place sort
 
 ```sx

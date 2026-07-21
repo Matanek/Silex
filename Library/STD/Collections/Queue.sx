@@ -1,0 +1,109 @@
+use STD.Iteration.Iterator as Iterator
+
+public struct Queue<T> {
+    private var front:T[]
+    private var back:T[]
+    private var reserved_capacity:int
+
+    public static func create() Queue<T> {
+        return Queue<T>(front:[], back:[], reserved_capacity:0)
+    }
+
+    public static func create(minimum_capacity:int) Queue<T> {
+        if minimum_capacity < 0 {
+            panic("Queue.create requires a non-negative minimum capacity")
+        }
+        return Queue<T>(front:[], back:[], reserved_capacity:minimum_capacity)
+    }
+
+    public func count() int {
+        return self.front.count() + self.back.count()
+    }
+
+    public func capacity() int {
+        let count = self.count()
+        if self.reserved_capacity < count {
+            return count
+        }
+        return self.reserved_capacity
+    }
+
+    public func is_empty() bool {
+        return self.front.is_empty() && self.back.is_empty()
+    }
+
+    public func enqueue(value:T) {
+        if self.is_empty() {
+            self.front.append(value)
+        } else {
+            self.back.append(value)
+        }
+        let count = self.count()
+        if count > self.reserved_capacity {
+            var capacity = self.reserved_capacity
+            if capacity < 4 {
+                capacity = 4
+            }
+            while capacity < count {
+                capacity *= 2
+            }
+            self.reserved_capacity = capacity
+        }
+    }
+
+    public func dequeue() T? {
+        self.prepare_front()
+        if self.front.is_empty() {
+            return null
+        }
+        var value = self.front.take_last()
+        self.prepare_front()
+        return value
+    }
+
+    public func peek() &T {
+        if self.front.is_empty() {
+            panic("Queue.peek requires a value")
+        }
+        return &self.front[-1]
+    }
+
+    public func reserve(minimum_capacity:int) {
+        if minimum_capacity < 0 {
+            panic("Queue.reserve requires a non-negative minimum capacity")
+        }
+        if minimum_capacity > self.reserved_capacity {
+            self.reserved_capacity = minimum_capacity
+        }
+    }
+
+    public func clear() {
+        while !self.is_empty() {
+            self.dequeue()
+        }
+    }
+
+    public func iterator() Iterator<T> {
+        var result = Iterator<T>.empty()
+        var index = self.front.count() - 1
+        while index >= 0 {
+            result.push(self.front[index])
+            index--
+        }
+        index = 0
+        while index < self.back.count() {
+            result.push(self.back[index])
+            index++
+        }
+        return result
+    }
+
+    private func prepare_front() {
+        if !self.front.is_empty() {
+            return
+        }
+        while !self.back.is_empty() {
+            self.front.append(self.back.take_last())
+        }
+    }
+}

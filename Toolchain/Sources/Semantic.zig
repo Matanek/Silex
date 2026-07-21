@@ -139,6 +139,7 @@ pub const Expression = struct {
         match_expression: Match,
         member_access: MemberAccess,
         bound_function: MemberAccess,
+        function_reference: []const u8,
         adapt_function: *Expression,
         optional_wrap: *Expression,
         optional_unwrap: Variable,
@@ -317,6 +318,8 @@ pub const Expression = struct {
         };
 
         pub const Binding = struct {
+            source_name: []const u8 = "",
+            position: Source.Position = .{ .line = 1, .column = 1 },
             generated_name: []const u8,
             type: Type,
             mutability: Ast.Mutability,
@@ -395,6 +398,8 @@ pub const Statement = union(enum) {
     };
 
     pub const VariableDeclaration = struct {
+        source_name: []const u8 = "",
+        position: Source.Position = .{ .line = 1, .column = 1 },
         generated_name: []const u8,
         type: Type,
         is_noncopyable: bool,
@@ -433,6 +438,8 @@ pub const Statement = union(enum) {
     };
 
     pub const ConditionalBinding = struct {
+        source_name: []const u8 = "",
+        position: Source.Position = .{ .line = 1, .column = 1 },
         source: *Expression,
         temporary_name: []const u8,
         generated_name: []const u8,
@@ -443,6 +450,8 @@ pub const Statement = union(enum) {
     };
 
     pub const For = struct {
+        source_name: []const u8 = "",
+        position: Source.Position = .{ .line = 1, .column = 1 },
         generated_name: []const u8,
         element_type: Type,
         element_noncopyable: bool,
@@ -578,6 +587,8 @@ pub const Drop = struct {
 };
 
 pub const Parameter = struct {
+    source_name: []const u8 = "",
+    position: Source.Position = .{ .line = 1, .column = 1 },
     generated_name: []const u8,
     type: Type,
     mode: Ast.ParameterMode,
@@ -604,6 +615,7 @@ pub const Method = struct {
     parameters: []const Parameter,
     statements: []const Statement,
     is_mutating: bool,
+    requires_mutable_codegen: bool,
     visibility: Ast.MemberVisibility,
     is_override: bool,
     is_static: bool,
@@ -799,8 +811,10 @@ const MethodSymbol = struct {
     extension_module_name: ?[]const u8,
     return_borrow_parameter: ?usize = null,
     direct_mutation: bool = false,
+    direct_mutable_codegen: bool = false,
     dependencies: []const MethodId = &.{},
     is_mutating: bool = false,
+    requires_mutable_codegen: bool = false,
 };
 
 const MethodCandidate = struct {
@@ -859,6 +873,7 @@ const FieldInitialization = enum {
 pub const Analyzer = struct {
     allocator: Allocator,
     native_module_names: []const []const u8 = &.{},
+    require_main: bool = true,
     next_symbol_id: usize = 0,
     functions: std.ArrayList(FunctionSymbol) = .empty,
     enums: std.ArrayList(EnumSymbol) = .empty,
@@ -873,6 +888,7 @@ pub const Analyzer = struct {
     current_method_static: bool = false,
     current_extension: bool = false,
     current_method_direct_mutation: bool = false,
+    current_method_direct_mutable_codegen: bool = false,
     current_method_dependencies: std.ArrayList(MethodId) = .empty,
     current_self_state: BindingState = .{},
     loop_depth: usize = 0,
@@ -1031,6 +1047,7 @@ pub const Analyzer = struct {
         for (structures.items, self.structures.items) |*structure, symbol| {
             for (structure.methods, symbol.methods) |*method_value, method_symbol| {
                 method_value.is_mutating = method_symbol.is_mutating;
+                method_value.requires_mutable_codegen = method_symbol.requires_mutable_codegen;
             }
         }
         const result = Program{
@@ -1843,6 +1860,7 @@ pub const Analyzer = struct {
                 .deferred_callback_index = deferred_callback_index,
             });
         }
+        if (!self.require_main) return;
         if (main_count == 0) return self.fail(.{ .line = 1, .column = 1 }, "missing 'main' function");
         if (main_count > 1) return self.fail(.{ .line = 1, .column = 1 }, "'main' cannot be overloaded");
         const main = self.findFunction("main").?;
@@ -1964,6 +1982,8 @@ pub const Analyzer = struct {
             state.borrowed_parameter = mode == .borrow;
             try scope.symbols.append(self.allocator, .{ .source_name = parameter.name, .generated_name = generated_name, .type = parameter_type, .mutability = if (mode == .borrow) .immutable else .mutable, .state = state, .scope_depth = scope.depth });
             try parameters.append(self.allocator, .{
+                .source_name = parameter.name,
+                .position = parameter.position,
                 .generated_name = generated_name,
                 .type = parameter_type,
                 .mode = mode,
@@ -2047,6 +2067,7 @@ pub const Analyzer = struct {
         self.current_method_static = symbol.is_static;
         self.current_extension = symbol.extension_visible_files != null;
         self.current_method_direct_mutation = false;
+        self.current_method_direct_mutable_codegen = false;
         self.current_method_dependencies = .empty;
         self.current_self_state = .{};
         self.loop_depth = 0;
@@ -2072,6 +2093,8 @@ pub const Analyzer = struct {
                 .scope_depth = scope.depth,
             });
             try parameters.append(self.allocator, .{
+                .source_name = parameter.name,
+                .position = parameter.position,
                 .generated_name = generated_name,
                 .type = parameter_type,
                 .mode = mode,
@@ -2084,7 +2107,6 @@ pub const Analyzer = struct {
             if (symbol.return_borrow_parameter) |index| scope.symbols.items[index].state else &self.current_self_state
         else
             null;
-        if (symbol.return_type == .reference and symbol.return_type.reference.mutable) self.current_method_direct_mutation = true;
         defer self.current_return_borrow_root = null;
         const method_statements = try self.statements(ast.statements, &scope);
         self.releaseScopeBorrows(&scope);
@@ -2093,6 +2115,7 @@ pub const Analyzer = struct {
             return self.fail(ast.name_position, message);
         }
         self.structures.items[structure_index].methods[method_index].direct_mutation = self.current_method_direct_mutation;
+        self.structures.items[structure_index].methods[method_index].direct_mutable_codegen = self.current_method_direct_mutable_codegen;
         self.structures.items[structure_index].methods[method_index].dependencies = try self.current_method_dependencies.toOwnedSlice(self.allocator);
         return .{
             .generated_name = symbol.generated_name,
@@ -2100,6 +2123,7 @@ pub const Analyzer = struct {
             .parameters = try parameters.toOwnedSlice(self.allocator),
             .statements = method_statements,
             .is_mutating = false,
+            .requires_mutable_codegen = false,
             .visibility = symbol.visibility,
             .is_override = symbol.is_override,
             .is_static = symbol.is_static,
@@ -2146,6 +2170,8 @@ pub const Analyzer = struct {
                 .scope_depth = scope.depth,
             });
             try parameters.append(self.allocator, .{
+                .source_name = parameter.name,
+                .position = parameter.position,
                 .generated_name = generated_name,
                 .type = parameter_type,
                 .mode = mode,
@@ -2422,7 +2448,7 @@ pub const Analyzer = struct {
         initialized: []const FieldInitialization,
     ) AnalyzeError!void {
         switch (expression_value.value) {
-            .integer, .floating, .boolean, .null, .string, .cascade_target, .variable, .static_field_access, .optional_unwrap => {},
+            .integer, .floating, .boolean, .null, .string, .cascade_target, .variable, .static_field_access, .optional_unwrap, .function_reference => {},
             .self, .owner_self => if (!allFieldsInitialized(initialized)) {
                 return self.fail(expression_value.position, "'self' cannot escape before every class field is initialized");
             },
@@ -2628,7 +2654,17 @@ pub const Analyzer = struct {
             const position = if (declaration.initializer) |value| value.position else declaration.name_position;
             return self.fail(position, "variable initializer cannot have type 'void'");
         }
-        const declared_type = declared_annotation_type orelse initializer.type;
+        const declared_type = declared_annotation_type orelse inferred: {
+            if (declaration.mutability == .immutable and initializer.type == .reference and
+                initializer.type.reference.mutable and initializer.owns_borrow)
+            {
+                break :inferred Type{ .reference = .{
+                    .target = initializer.type.reference.target,
+                    .mutable = false,
+                } };
+            }
+            break :inferred initializer.type;
+        };
         initializer = try self.coerce(initializer, declared_type);
         if (!typeEqual(declared_type, initializer.type)) {
             const message = try typeMismatchMessage(self.allocator, declared_type, initializer.type);
@@ -2689,6 +2725,8 @@ pub const Analyzer = struct {
         });
 
         return .{ .variable_declaration = .{
+            .source_name = declaration.name,
+            .position = declaration.name_position,
             .generated_name = generated_name,
             .type = declared_type,
             .is_noncopyable = try self.isNonCopyableType(declared_type),
@@ -3260,6 +3298,8 @@ pub const Analyzer = struct {
                     .control_binding = true,
                 });
                 break :binding_condition .{ .binding = .{
+                    .source_name = binding.name,
+                    .position = binding.name_position,
                     .source = source,
                     .temporary_name = temporary_name,
                     .generated_name = generated_name,
@@ -3436,6 +3476,8 @@ pub const Analyzer = struct {
         try exits.appendSlice(self.allocator, flow.break_states.items);
         try self.mergeOwnerStates(tracked, exits.items);
         return .{ .for_statement = .{
+            .source_name = ast.name,
+            .position = ast.name_position,
             .generated_name = generated_name,
             .element_type = element_type,
             .element_noncopyable = element_noncopyable,
@@ -3524,7 +3566,7 @@ pub const Analyzer = struct {
             .null => self.newExpression(.{ .type = .null, .position = ast.position, .value = .null }),
             .string => |value| self.stringExpression(ast.position, value),
             .sequence_literal => |values| self.sequenceLiteralExpression(values, ast.position, scope, null),
-            .identifier => |name| self.variableExpression(ast.position, name, scope),
+            .identifier => |name| self.identifierExpression(ast.position, name, scope),
             .self => self.selfExpression(ast.position),
             .call => |call| self.callExpression(call, scope),
             .value_call => |call| self.valueCallExpression(call, scope),
@@ -3587,7 +3629,82 @@ pub const Analyzer = struct {
         if (ast.value == .sequence_literal) return self.sequenceLiteralExpression(ast.value.sequence_literal, ast.position, scope, expected_type);
         if (ast.value == .cascade) return self.cascadeExpression(ast.value.cascade, scope, expected_type);
         if (ast.value == .lambda) return self.lambdaExpression(ast.value.lambda, scope, expected_type);
+        if (expected_type != null and expected_type.? == .function and ast.value == .identifier and
+            findSymbol(scope, ast.value.identifier) == null)
+        {
+            return self.functionReferenceExpression(ast.position, ast.value.identifier, expected_type.?);
+        }
         return self.expressionForBorrow(ast, scope);
+    }
+
+    fn functionReferenceExpression(
+        self: *Analyzer,
+        position: Source.Position,
+        name: []const u8,
+        expected_type: Type,
+    ) AnalyzeError!*Expression {
+        var match: ?FunctionSymbol = null;
+        for (self.functions.items) |function_symbol| {
+            if (!std.mem.eql(u8, function_symbol.source_name, name) or function_symbol.is_main or function_symbol.is_native) continue;
+            if (function_symbol.parameter_types.len != expected_type.function.parameters.len or
+                function_symbol.parameter_modes.len != expected_type.function.parameter_modes.len or
+                !typeEqual(function_symbol.return_type, expected_type.function.return_type.*)) continue;
+            var compatible = true;
+            for (function_symbol.parameter_types, expected_type.function.parameters) |actual, expected| {
+                if (!typeEqual(actual, expected)) compatible = false;
+            }
+            for (function_symbol.parameter_modes, expected_type.function.parameter_modes) |actual, expected| {
+                if (actual != expected) compatible = false;
+            }
+            if (!compatible) continue;
+            if (match != null) {
+                const message = try std.fmt.allocPrint(self.allocator, "function reference '{s}' is ambiguous for the expected signature", .{name});
+                return self.fail(position, message);
+            }
+            match = function_symbol;
+        }
+        const function_symbol = match orelse {
+            const message = try std.fmt.allocPrint(self.allocator, "no function '{s}' matches the expected function type", .{name});
+            return self.fail(position, message);
+        };
+        return self.newExpression(.{
+            .type = expected_type,
+            .position = position,
+            .value = .{ .function_reference = function_symbol.generated_name },
+        });
+    }
+
+    fn identifierExpression(
+        self: *Analyzer,
+        position: Source.Position,
+        name: []const u8,
+        scope: *const Scope,
+    ) AnalyzeError!*Expression {
+        if (findSymbol(scope, name) != null) return self.variableExpression(position, name, scope);
+        var match: ?FunctionSymbol = null;
+        for (self.functions.items) |function_symbol| {
+            if (!std.mem.eql(u8, function_symbol.source_name, name) or function_symbol.is_main or function_symbol.is_native) continue;
+            if (match != null) {
+                const message = try std.fmt.allocPrint(self.allocator, "function reference '{s}' requires an expected type to select an overload", .{name});
+                return self.fail(position, message);
+            }
+            match = function_symbol;
+        }
+        if (match) |function_symbol| {
+            const return_type = try self.allocator.create(Type);
+            return_type.* = function_symbol.return_type;
+            const function_type: Type = .{ .function = .{
+                .parameters = function_symbol.parameter_types,
+                .parameter_modes = function_symbol.parameter_modes,
+                .return_type = return_type,
+            } };
+            return self.newExpression(.{
+                .type = function_type,
+                .position = position,
+                .value = .{ .function_reference = function_symbol.generated_name },
+            });
+        }
+        return self.variableExpression(position, name, scope);
     }
 
     fn integerExpression(self: *Analyzer, position: Source.Position, lexeme: []const u8) AnalyzeError!*Expression {
@@ -4315,6 +4432,8 @@ pub const Analyzer = struct {
                 .scope_depth = scope.depth,
             });
             try parameters.append(self.allocator, .{
+                .source_name = parameter.name,
+                .position = parameter.position,
                 .generated_name = generated_name,
                 .type = parameter_type,
                 .mode = parameter.mode,
@@ -4395,7 +4514,9 @@ pub const Analyzer = struct {
                 const field = field_candidate.symbol;
                 if (field.type == .function) {
                     try self.requireFieldAccess(field_candidate.structure_index, declaring_structure, field, call.name_position);
-                    if (call.object.value == .self and self.current_method_index != null) self.current_method_direct_mutation = true;
+                    if (call.object.value == .self and self.current_method_index != null) {
+                        self.current_method_direct_mutable_codegen = true;
+                    }
                     const callee = try self.newExpression(.{
                         .type = field.type,
                         .position = call.name_position,
@@ -4903,6 +5024,8 @@ pub const Analyzer = struct {
                     .control_binding = true,
                 });
                 try bindings.append(self.allocator, .{
+                    .source_name = ast_binding.name,
+                    .position = ast_binding.position,
                     .generated_name = generated_name,
                     .type = binding_type,
                     .mutability = if (mode == .borrow) .immutable else ast_binding.mutability,
@@ -5971,6 +6094,16 @@ pub const Analyzer = struct {
                 const position = if (matching) |field| field.value.position else initializer.name_position;
                 return self.fail(position, message);
             }
+            if (expected_field.type == .function and expected_field.type.function.owner != null and
+                value.type.function.owner == null)
+            {
+                value = try self.newExpression(.{
+                    .type = expected_field.type,
+                    .position = value.position,
+                    .lifetime_depth = value.lifetime_depth,
+                    .value = .{ .adapt_function = value },
+                });
+            }
             if (matching) |field| try self.rejectUniqueOwnerArgument(value, field.value.position);
             try values.append(self.allocator, value);
             for (value.deferred_resource_paths) |path| {
@@ -6531,6 +6664,47 @@ pub const Analyzer = struct {
                 }
             }
         }
+
+        for (self.structures.items) |*structure| {
+            for (structure.methods) |*method_symbol| {
+                method_symbol.requires_mutable_codegen = method_symbol.direct_mutable_codegen;
+            }
+        }
+        changed = true;
+        while (changed) {
+            changed = false;
+            for (self.structures.items) |*structure| {
+                for (structure.methods) |*method_symbol| {
+                    if (method_symbol.requires_mutable_codegen) continue;
+                    for (method_symbol.dependencies) |dependency| {
+                        if (self.methodSymbol(dependency).requires_mutable_codegen) {
+                            method_symbol.requires_mutable_codegen = true;
+                            changed = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            for (self.structures.items) |*structure| {
+                if (!structure.is_class) continue;
+                for (structure.methods) |*method_symbol| {
+                    if (method_symbol.requires_mutable_codegen) continue;
+                    for (self.structures.items) |candidate_structure| {
+                        if (!candidate_structure.is_class) continue;
+                        for (candidate_structure.methods) |candidate| {
+                            if (candidate.requires_mutable_codegen and
+                                std.mem.eql(u8, candidate.generated_name, method_symbol.generated_name))
+                            {
+                                method_symbol.requires_mutable_codegen = true;
+                                changed = true;
+                                break;
+                            }
+                        }
+                        if (method_symbol.requires_mutable_codegen) break;
+                    }
+                }
+            }
+        }
     }
 
     fn methodSymbol(self: *const Analyzer, id: MethodId) *const MethodSymbol {
@@ -6629,10 +6803,14 @@ pub const Analyzer = struct {
             .method_call => |call| {
                 try self.validateExpression(call.object);
                 for (call.arguments) |argument| try self.validateExpression(argument);
-                if (!self.methodSymbol(call.method_id).is_mutating) return;
+                const called_method = self.methodSymbol(call.method_id);
+                const mutable_return = called_method.return_type == .reference and called_method.return_type.reference.mutable;
+                if (!called_method.is_mutating and !mutable_return) return;
+                const kept_mutable_return = expression_value.type == .reference and expression_value.type.reference.mutable;
                 switch (call.receiver) {
                     .self, .mutable, .cascade_temporary => {},
-                    .borrowed_self => return self.fail(call.position, "cannot mutate 'self' while one of its collections is iterated"),
+                    .borrowed_self => if (called_method.is_mutating or kept_mutable_return)
+                        return self.fail(call.position, "cannot mutate 'self' while one of its collections is iterated"),
                     .immutable => |receiver| {
                         const message = if (receiver.control_binding)
                             try std.fmt.allocPrint(self.allocator, "cannot mutate immutable control binding '{s}'; use 'var' in the header", .{receiver.name})
@@ -6644,7 +6822,7 @@ pub const Analyzer = struct {
                         const message = try std.fmt.allocPrint(self.allocator, "cannot call mutating method '{s}' through let field '{s}'", .{ call.source_name, name });
                         return self.fail(call.position, message);
                     },
-                    .borrowed => |name| {
+                    .borrowed => |name| if (called_method.is_mutating or kept_mutable_return) {
                         const message = try std.fmt.allocPrint(self.allocator, "cannot mutate borrowed variable '{s}'", .{name});
                         return self.fail(call.position, message);
                     },
@@ -6707,6 +6885,7 @@ pub const Analyzer = struct {
             },
             .member_access => |member| try self.validateExpression(member.object),
             .bound_function => |member| try self.validateExpression(member.object),
+            .function_reference => {},
             .adapt_function => |value| try self.validateExpression(value),
             .index_access => |access| {
                 try self.validateExpression(access.object);
@@ -7223,6 +7402,20 @@ pub const Analyzer = struct {
                 };
                 if (!std.math.isFinite(value)) return self.fail(expression_value.position, "float literal is outside the range of 'float'");
             }
+            return expression_value;
+        }
+        if (expression_value.type == .reference and target_type == .reference and
+            expression_value.type.reference.mutable and !target_type.reference.mutable and
+            typeEqual(expression_value.type.reference.target.*, target_type.reference.target.*) and
+            expression_value.owns_borrow)
+        {
+            const mutable_borrow = expression_value.borrow orelse return expression_value;
+            if (!mutable_borrow.mutable) return expression_value;
+            releaseBorrow(mutable_borrow);
+            const shared_borrow = Borrow{ .root = mutable_borrow.root, .mutable = false };
+            if (shared_borrow.root) |root| root.immutable_borrows += 1;
+            expression_value.type = target_type;
+            expression_value.borrow = shared_borrow;
             return expression_value;
         }
         if (target_type == .protocol and expression_value.type == .structure) {
@@ -7962,7 +8155,7 @@ fn typeFromReference(
     const target = try self.allocator.create(Type);
     target.* = try typeFromAnnotation(self, reference.target.*, position);
     if (target.* == .reference) return self.fail(position, "a reference cannot target another reference");
-    if (target.* == .structure and target.*.structure.is_class) {
+    if (target.* == .structure and target.*.structure.is_class and !reference.generic_target) {
         const message = try std.fmt.allocPrint(
             self.allocator,
             "class '{s}' already has reference semantics; '&{s}' is invalid",
@@ -10027,6 +10220,53 @@ test "borrowed returns preserve provenance through functions methods and local a
         \\struct Holder { let view:@State }
         \\func main() {}
     , "a struct field cannot have a reference type");
+}
+
+test "mutable borrowed returns infer shared let and mutable var aliases" {
+    const source =
+        \\struct State { var value:int }
+        \\struct Owner {
+        \\    var state:State
+        \\    func access() &State { return &self.state }
+        \\}
+    ;
+    try expectSemanticSuccess(source ++
+        \\func observe(owner:&Owner) {
+        \\    let first = owner.access()
+        \\    let second = owner.access()
+        \\    let explicit:@State = owner.access()
+        \\    print(first.value + second.value + explicit.value)
+        \\}
+        \\func edit(owner:&Owner) {
+        \\    var value = owner.access()
+        \\    value.value = 2
+        \\}
+        \\func main() {
+        \\    var owner = Owner(state:State(value:1))
+        \\    observe(owner)
+        \\    edit(owner)
+        \\}
+    );
+    try expectResolvedSemanticError(source ++
+        \\func main() {
+        \\    var owner = Owner(state:State(value:1))
+        \\    let value = owner.access()
+        \\    value.value = 2
+        \\}
+    , "cannot assign to immutable variable 'value'");
+    try expectResolvedSemanticError(source ++
+        \\func main() {
+        \\    var owner = Owner(state:State(value:1))
+        \\    let value:&State = owner.access()
+        \\}
+    , "a mutable reference must be declared with 'var'");
+    try expectResolvedSemanticError(source ++
+        \\func main() {
+        \\    var owner = Owner(state:State(value:1))
+        \\    var mutable = owner.access()
+        \\    let shared:@State = mutable
+        \\}
+    , "expected 'reference@', found 'reference&'");
 }
 
 test "noncopyable containers require explicit whole-value transfer" {

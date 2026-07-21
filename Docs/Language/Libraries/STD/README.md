@@ -28,6 +28,32 @@ func main() {
   I/O.
 - [Path](Path.md) — portable UTF-8 paths and deterministic lexical operations.
 - [IO](IO.md) — synchronous binary stream contracts and bounded algorithms.
+- [File](File.md) — owned seekable binary files, explicit creation policies,
+  and bounded whole-file helpers.
+- [FileSystem](FileSystem.md) — deterministic directory discovery, metadata,
+  and explicit non-recursive filesystem mutations.
+- [Environment](Environment.md) — copied process variables with strict Unicode,
+  platform name comparison, and deterministic enumeration.
+- [Process](Process.md) — arguments, current directory, executable image path,
+  and native identifier of the current process.
+- [Subprocess](Subprocess.md) — exact blocking child execution with binary
+  stdin, concurrent captured outputs, controlled environment, and hard limit.
+- [JSON](JSON.md) — immutable ordered DOM, strict RFC 8259 parsing, exact number
+  lexemes, and deterministic compact or pretty serialization.
+- [Network](Network.md) — portable IP addresses, scoped endpoints, blocking
+  resolution, and the synchronous TCP/UDP modules.
+- [Queue](Queue.md) — generic FIFO value container with amortized constant-time
+  head operations.
+- [Stack](Stack.md) — generic LIFO value container with constant-time top
+  operations.
+- [Dictionary](Dictionary.md) — generic hash table with value semantics and
+  caller-provided hash and equality functions.
+- [Set](Set.md) — generic hash set that preserves the first representative of
+  each equivalence class.
+- [Iterator](Iterator.md) — owned snapshots for standard collections, lists,
+  and contiguous views.
+- [Text](Text.md) — strict UTF conversions, scalar access, normalization,
+  casing, and grapheme segmentation.
 - [Time](Time/README.md) — monotonic elapsed-time and logical-loop utilities.
   - [Stopwatch](Time/Stopwatch.md) measures bounded real durations.
   - [Clock](Time/Clock.md) drives scaled and pausable logical time.

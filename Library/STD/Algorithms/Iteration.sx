@@ -1,0 +1,65 @@
+use STD.Iteration.Iterator as Iterator
+
+public func any<T>(values:Iterator<T>, predicate:func(@T) bool) bool {
+    while value = values.next() {
+        if predicate(value) {
+            return true
+        }
+    }
+    return false
+}
+
+public func all<T>(values:Iterator<T>, predicate:func(@T) bool) bool {
+    while value = values.next() {
+        if !predicate(value) {
+            return false
+        }
+    }
+    return true
+}
+
+public func count_where<T>(values:Iterator<T>, predicate:func(@T) bool) int {
+    var count = 0
+    while value = values.next() {
+        if predicate(value) {
+            count++
+        }
+    }
+    return count
+}
+
+public func find<T>(values:Iterator<T>, predicate:func(@T) bool) T? {
+    while value = values.next() {
+        if predicate(value) {
+            return value
+        }
+    }
+    return null
+}
+
+public func contains<T>(values:Iterator<T>, expected:@T, equal:func(@T, @T) bool) bool {
+    while value = values.next() {
+        if equal(value, expected) {
+            return true
+        }
+    }
+    return false
+}
+
+public func map<T, U>(values:Iterator<T>, transform:func(@T) U) Iterator<U> {
+    var result = Iterator<U>.empty()
+    while value = values.next() {
+        result.push(transform(value))
+    }
+    return result
+}
+
+public func filter<T>(values:Iterator<T>, predicate:func(@T) bool) Iterator<T> {
+    var result = Iterator<T>.empty()
+    while value = values.next() {
+        if predicate(value) {
+            result.push(value)
+        }
+    }
+    return result
+}

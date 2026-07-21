@@ -1,5 +1,5 @@
 const std = @import("std");
-const silex_version = "0.24.0";
+const silex_version = "0.26.0";
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
@@ -10,6 +10,7 @@ pub fn build(b: *std.Build) void {
     build_options.addOption([]const u8, "developer_zig", b.graph.zig_exe);
     build_options.addOption([]const u8, "developer_standard_library_root", b.getInstallPath(.prefix, "lib/silex"));
     build_options.addOption(bool, "repository_compilation_database", false);
+    build_options.addOption(bool, "run_source_graph_tests", true);
 
     const module = b.createModule(.{
         .root_source_file = b.path("Sources/Main.zig"),
@@ -32,6 +33,7 @@ pub fn build(b: *std.Build) void {
         b.pathFromRoot("Tests/DistributedModules/Library"),
     );
     native_module_test_options.addOption(bool, "repository_compilation_database", false);
+    native_module_test_options.addOption(bool, "run_source_graph_tests", true);
     const native_module_test_module = b.createModule(.{
         .root_source_file = b.path("Sources/Main.zig"),
         .target = target,
@@ -132,6 +134,127 @@ pub fn build(b: *std.Build) void {
         .name = "silex-path-integration",
         .root_module = path_test_module,
     });
+    const unicode_test_module = b.createModule(.{
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+        .link_libcpp = true,
+    });
+    unicode_test_module.addCSourceFiles(.{
+        .files = &.{
+            "Tests/UnicodeConformance.cpp",
+            "../Library/STD/@Native/Text.cpp",
+        },
+        .flags = &.{ "-std=c++23", "-Wall", "-Wextra", "-Werror" },
+    });
+    unicode_test_module.addCSourceFile(.{
+        .file = b.path("../Library/STD/@Native/Unicode/utf8proc/utf8proc.c"),
+        .flags = &.{ "-Wall", "-Wextra", "-Werror" },
+    });
+    const unicode_conformance = b.addExecutable(.{
+        .name = "silex-unicode-conformance",
+        .root_module = unicode_test_module,
+    });
+    const file_native_test_module = b.createModule(.{
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+        .link_libcpp = true,
+    });
+    file_native_test_module.addCSourceFiles(.{
+        .files = &.{
+            "Tests/FileNativeIntegration.cpp",
+            "../Library/STD/@Native/System.cpp",
+        },
+        .flags = &.{ "-std=c++23", "-Wall", "-Wextra", "-Werror" },
+    });
+    const file_native_integration = b.addExecutable(.{
+        .name = "silex-file-native-integration",
+        .root_module = file_native_test_module,
+    });
+    const filesystem_native_test_module = b.createModule(.{
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+        .link_libcpp = true,
+    });
+    filesystem_native_test_module.addCSourceFiles(.{
+        .files = &.{
+            "Tests/FileSystemNativeIntegration.cpp",
+            "../Library/STD/@Native/System.cpp",
+        },
+        .flags = &.{ "-std=c++23", "-Wall", "-Wextra", "-Werror", "-DUTF8PROC_STATIC=1" },
+    });
+    filesystem_native_test_module.addCSourceFile(.{
+        .file = b.path("../Library/STD/@Native/Unicode/utf8proc/utf8proc.c"),
+        .flags = &.{ "-Wall", "-Wextra", "-Werror", "-DUTF8PROC_STATIC=1" },
+    });
+    const filesystem_native_integration = b.addExecutable(.{
+        .name = "silex-filesystem-native-integration",
+        .root_module = filesystem_native_test_module,
+    });
+    const environment_native_test_module = b.createModule(.{
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+        .link_libcpp = true,
+    });
+    environment_native_test_module.addCSourceFiles(.{
+        .files = &.{
+            "Tests/EnvironmentNativeIntegration.cpp",
+            "../Library/STD/@Native/System.cpp",
+        },
+        .flags = &.{ "-std=c++23", "-Wall", "-Wextra", "-Werror", "-DUTF8PROC_STATIC=1" },
+    });
+    environment_native_test_module.addCSourceFile(.{
+        .file = b.path("../Library/STD/@Native/Unicode/utf8proc/utf8proc.c"),
+        .flags = &.{ "-Wall", "-Wextra", "-Werror", "-DUTF8PROC_STATIC=1" },
+    });
+    const environment_native_integration = b.addExecutable(.{
+        .name = "silex-environment-native-integration",
+        .root_module = environment_native_test_module,
+    });
+    const process_native_test_module = b.createModule(.{
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+        .link_libcpp = true,
+    });
+    process_native_test_module.addCSourceFiles(.{
+        .files = &.{
+            "Tests/ProcessNativeIntegration.cpp",
+            "../Library/STD/@Native/System.cpp",
+        },
+        .flags = &.{ "-std=c++23", "-Wall", "-Wextra", "-Werror", "-DUTF8PROC_STATIC=1" },
+    });
+    process_native_test_module.addCSourceFile(.{
+        .file = b.path("../Library/STD/@Native/Unicode/utf8proc/utf8proc.c"),
+        .flags = &.{ "-Wall", "-Wextra", "-Werror", "-DUTF8PROC_STATIC=1" },
+    });
+    const process_native_integration = b.addExecutable(.{
+        .name = "silex-process-native-integration",
+        .root_module = process_native_test_module,
+    });
+    const subprocess_child_module = b.createModule(.{
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+        .link_libcpp = true,
+    });
+    subprocess_child_module.addCSourceFile(.{
+        .file = b.path("Tests/SubprocessChild.cpp"),
+        .flags = &.{ "-std=c++23", "-Wall", "-Wextra", "-Werror" },
+    });
+    const subprocess_child = b.addExecutable(.{
+        .name = "silex-subprocess-child",
+        .root_module = subprocess_child_module,
+    });
+    const tcp_native_test_module = b.createModule(.{ .target = target, .optimize = optimize, .link_libc = true, .link_libcpp = true });
+    tcp_native_test_module.addCSourceFiles(.{ .files = &.{ "Tests/TCPNativeIntegration.cpp", "../Library/STD/@Native/System.cpp" }, .flags = &.{ "-std=c++23", "-Wall", "-Wextra", "-Werror" } });
+    const tcp_native_integration = b.addExecutable(.{ .name = "silex-tcp-native-integration", .root_module = tcp_native_test_module });
+    const udp_native_test_module = b.createModule(.{ .target = target, .optimize = optimize, .link_libc = true, .link_libcpp = true });
+    udp_native_test_module.addCSourceFiles(.{ .files = &.{ "Tests/UDPNativeIntegration.cpp", "../Library/STD/@Native/System.cpp" }, .flags = &.{ "-std=c++23", "-Wall", "-Wextra", "-Werror" } });
+    const udp_native_integration = b.addExecutable(.{ .name = "silex-udp-native-integration", .root_module = udp_native_test_module });
     const clean_library_install = b.addExecutable(.{
         .name = "silex-clean-library-install",
         .root_module = b.createModule(.{
@@ -151,6 +274,7 @@ pub fn build(b: *std.Build) void {
         b.pathFromRoot("../Library"),
     );
     repository_database_options.addOption(bool, "repository_compilation_database", true);
+    repository_database_options.addOption(bool, "run_source_graph_tests", true);
     const repository_database_module = b.createModule(.{
         .root_source_file = b.path("Sources/Main.zig"),
         .target = target,
@@ -216,12 +340,21 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    lsp_test_module.addOptions("build_options", build_options);
+    const lsp_test_options = b.addOptions();
+    lsp_test_options.addOption([]const u8, "silex_version", silex_version);
+    lsp_test_options.addOption([]const u8, "developer_zig", b.graph.zig_exe);
+    lsp_test_options.addOption([]const u8, "developer_standard_library_root", b.getInstallPath(.prefix, "lib/silex"));
+    lsp_test_options.addOption(bool, "repository_compilation_database", false);
+    lsp_test_options.addOption(bool, "run_source_graph_tests", false);
+    lsp_test_module.addOptions("build_options", lsp_test_options);
     const lsp_tests = b.addTest(.{
         .root_module = lsp_test_module,
     });
     const lsp_test_command = b.addRunArtifact(lsp_tests);
     lsp_test_command.step.dependOn(b.getInstallStep());
+    // Lsp imports the shared front-end, so its test binary also contains the
+    // SourceGraph tests. Serialize both deterministic temporary namespaces.
+    lsp_test_command.step.dependOn(&test_command.step);
 
     const lsp_protocol_command = b.addRunArtifact(executable);
     lsp_protocol_command.addArg("lsp");
@@ -234,10 +367,10 @@ pub fn build(b: *std.Build) void {
             "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/formatting\",\"params\":{\"textDocument\":{\"uri\":\"file:///tmp/FormattingMemory.sx\"},\"options\":{\"tabSize\":99,\"insertSpaces\":false}}}",
     });
     lsp_protocol_command.expectStdOutEqual(
-        "Content-Length: 288\r\n\r\n" ++
-            "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"capabilities\":{\"positionEncoding\":\"utf-8\",\"textDocumentSync\":1,\"documentFormattingProvider\":true,\"completionProvider\":{\"triggerCharacters\":[\".\"]},\"signatureHelpProvider\":{\"triggerCharacters\":[\"(\",\",\"]}},\"serverInfo\":{\"name\":\"Silex\",\"version\":\"0.24.0\"}}}" ++
-            "Content-Length: 128\r\n\r\n" ++
-            "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/publishDiagnostics\",\"params\":{\"uri\":\"file:///tmp/FormattingMemory.sx\",\"diagnostics\":[]}}" ++
+        "Content-Length: 403\r\n\r\n" ++
+            "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"capabilities\":{\"positionEncoding\":\"utf-8\",\"textDocumentSync\":1,\"documentFormattingProvider\":true,\"completionProvider\":{\"triggerCharacters\":[\".\"]},\"signatureHelpProvider\":{\"triggerCharacters\":[\"(\",\",\"]},\"definitionProvider\":true,\"referencesProvider\":true,\"renameProvider\":{\"prepareProvider\":true},\"hoverProvider\":true},\"serverInfo\":{\"name\":\"Silex\",\"version\":\"0.26.0\"}}}" ++
+            "Content-Length: 136\r\n\r\n" ++
+            "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/publishDiagnostics\",\"params\":{\"uri\":\"file:///private/tmp/FormattingMemory.sx\",\"diagnostics\":[]}}" ++
             "Content-Length: 157\r\n\r\n" ++
             "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":[{\"range\":{\"start\":{\"line\":0,\"character\":0},\"end\":{\"line\":0,\"character\":21}},\"newText\":\"func main() {\\n    print(1)\\n}\\n\"}]}",
     );
@@ -251,8 +384,8 @@ pub fn build(b: *std.Build) void {
             "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"textDocument/formatting\",\"params\":{\"textDocument\":{\"uri\":\"file:///tmp/Canonical.sx\"},\"options\":{\"tabSize\":4,\"insertSpaces\":true}}}",
     });
     lsp_canonical_formatting_command.expectStdOutEqual(
-        "Content-Length: 121\r\n\r\n" ++
-            "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/publishDiagnostics\",\"params\":{\"uri\":\"file:///tmp/Canonical.sx\",\"diagnostics\":[]}}" ++
+        "Content-Length: 129\r\n\r\n" ++
+            "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/publishDiagnostics\",\"params\":{\"uri\":\"file:///private/tmp/Canonical.sx\",\"diagnostics\":[]}}" ++
             "Content-Length: 36\r\n\r\n" ++
             "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}",
     );
@@ -266,8 +399,8 @@ pub fn build(b: *std.Build) void {
             "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"textDocument/formatting\",\"params\":{\"textDocument\":{\"uri\":\"file:///tmp/CrLf.sx\"},\"options\":{\"tabSize\":4,\"insertSpaces\":true}}}",
     });
     lsp_crlf_formatting_command.expectStdOutEqual(
-        "Content-Length: 116\r\n\r\n" ++
-            "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/publishDiagnostics\",\"params\":{\"uri\":\"file:///tmp/CrLf.sx\",\"diagnostics\":[]}}" ++
+        "Content-Length: 124\r\n\r\n" ++
+            "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/publishDiagnostics\",\"params\":{\"uri\":\"file:///private/tmp/CrLf.sx\",\"diagnostics\":[]}}" ++
             "Content-Length: 140\r\n\r\n" ++
             "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[{\"range\":{\"start\":{\"line\":0,\"character\":0},\"end\":{\"line\":1,\"character\":1}},\"newText\":\"func main() {}\\n\"}]}",
     );
@@ -281,16 +414,16 @@ pub fn build(b: *std.Build) void {
             "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"textDocument/formatting\",\"params\":{\"textDocument\":{\"uri\":\"file:///tmp/Invalid.sx\"},\"options\":{\"tabSize\":4,\"insertSpaces\":true}}}",
     });
     lsp_invalid_formatting_command.expectStdOutEqual(
-        "Content-Length: 262\r\n\r\n" ++
-            "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/publishDiagnostics\",\"params\":{\"uri\":\"file:///tmp/Invalid.sx\",\"diagnostics\":[{\"range\":{\"start\":{\"line\":0,\"character\":11},\"end\":{\"line\":0,\"character\":12}},\"severity\":1,\"source\":\"silex\",\"message\":\"expected parameter name\"}]}}" ++
+        "Content-Length: 270\r\n\r\n" ++
+            "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/publishDiagnostics\",\"params\":{\"uri\":\"file:///private/tmp/Invalid.sx\",\"diagnostics\":[{\"range\":{\"start\":{\"line\":0,\"character\":11},\"end\":{\"line\":0,\"character\":12}},\"severity\":1,\"source\":\"silex\",\"message\":\"expected parameter name\"}]}}" ++
             "Content-Length: 166\r\n\r\n" ++
             "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32803,\"message\":\"1:12: error: expected parameter name\",\"data\":{\"line\":1,\"column\":12,\"diagnostic\":\"expected parameter name\"}}}",
     );
 
     const lint_open_message =
-        "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file:///tmp/UnsavedLint.sx\",\"languageId\":\"silex\",\"version\":1,\"text\":\"struct bad_type {}\\nfunc BadFunction() { return; print(1) }\\n\"}}}";
+        "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file:///tmp/UnsavedLint.sx\",\"languageId\":\"silex\",\"version\":1,\"text\":\"struct bad_type {}\\nfunc BadFunction() { return; print(1) }\\nfunc main() {}\\n\"}}}";
     const lint_change_message =
-        "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didChange\",\"params\":{\"textDocument\":{\"uri\":\"file:///tmp/UnsavedLint.sx\",\"version\":2},\"contentChanges\":[{\"text\":\"struct GoodType {}\\nfunc good_function() {}\\n\"}]}}";
+        "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didChange\",\"params\":{\"textDocument\":{\"uri\":\"file:///tmp/UnsavedLint.sx\",\"version\":2},\"contentChanges\":[{\"text\":\"struct GoodType {}\\nfunc good_function() {}\\nfunc main() {}\\n\"}]}}";
     const lint_close_message =
         "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didClose\",\"params\":{\"textDocument\":{\"uri\":\"file:///tmp/UnsavedLint.sx\"}}}";
     const lint_protocol_command = b.addRunArtifact(executable);
@@ -300,16 +433,16 @@ pub fn build(b: *std.Build) void {
         .{ lint_open_message.len, lint_open_message, lint_change_message.len, lint_change_message, lint_close_message.len, lint_close_message },
     ) });
     const lint_warning_notification =
-        "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/publishDiagnostics\",\"params\":{\"uri\":\"file:///tmp/UnsavedLint.sx\",\"diagnostics\":[{\"range\":{\"start\":{\"line\":0,\"character\":7},\"end\":{\"line\":0,\"character\":8}},\"severity\":2,\"source\":\"silex lint\",\"code\":\"naming/type\",\"message\":\"type name 'bad_type' should use PascalCase\"},{\"range\":{\"start\":{\"line\":1,\"character\":5},\"end\":{\"line\":1,\"character\":6}},\"severity\":2,\"source\":\"silex lint\",\"code\":\"naming/value\",\"message\":\"function name 'BadFunction' should use snake_case\"},{\"range\":{\"start\":{\"line\":1,\"character\":29},\"end\":{\"line\":1,\"character\":30}},\"severity\":2,\"source\":\"silex lint\",\"code\":\"control-flow/unreachable\",\"message\":\"statement is unreachable\"}]}}";
+        "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/publishDiagnostics\",\"params\":{\"uri\":\"file:///private/tmp/UnsavedLint.sx\",\"diagnostics\":[{\"range\":{\"start\":{\"line\":0,\"character\":7},\"end\":{\"line\":0,\"character\":8}},\"severity\":2,\"source\":\"silex lint\",\"code\":\"naming/type\",\"message\":\"type name 'bad_type' should use PascalCase\"},{\"range\":{\"start\":{\"line\":1,\"character\":5},\"end\":{\"line\":1,\"character\":6}},\"severity\":2,\"source\":\"silex lint\",\"code\":\"naming/value\",\"message\":\"function name 'BadFunction' should use snake_case\"},{\"range\":{\"start\":{\"line\":1,\"character\":29},\"end\":{\"line\":1,\"character\":30}},\"severity\":2,\"source\":\"silex lint\",\"code\":\"control-flow/unreachable\",\"message\":\"statement is unreachable\"}]}}";
     const lint_empty_notification =
-        "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/publishDiagnostics\",\"params\":{\"uri\":\"file:///tmp/UnsavedLint.sx\",\"diagnostics\":[]}}";
+        "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/publishDiagnostics\",\"params\":{\"uri\":\"file:///private/tmp/UnsavedLint.sx\",\"diagnostics\":[]}}";
     lint_protocol_command.expectStdOutEqual(b.fmt(
         "Content-Length: {d}\r\n\r\n{s}Content-Length: {d}\r\n\r\n{s}Content-Length: {d}\r\n\r\n{s}",
         .{ lint_warning_notification.len, lint_warning_notification, lint_empty_notification.len, lint_empty_notification, lint_empty_notification.len, lint_empty_notification },
     ));
 
     const unicode_lint_message =
-        "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file:///tmp/UnicodeLint.sx\",\"languageId\":\"silex\",\"version\":1,\"text\":\"func good() { print(\\\"😀\\\"); let BadValue = 1 }\"}}}";
+        "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file:///tmp/UnicodeLint.sx\",\"languageId\":\"silex\",\"version\":1,\"text\":\"func main() { print(\\\"😀\\\"); let BadValue = 1 }\"}}}";
     const unicode_lint_protocol_command = b.addRunArtifact(executable);
     unicode_lint_protocol_command.addArg("lsp");
     unicode_lint_protocol_command.setStdIn(.{ .bytes = b.fmt(
@@ -317,7 +450,7 @@ pub fn build(b: *std.Build) void {
         .{ unicode_lint_message.len, unicode_lint_message },
     ) });
     const unicode_lint_notification =
-        "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/publishDiagnostics\",\"params\":{\"uri\":\"file:///tmp/UnicodeLint.sx\",\"diagnostics\":[{\"range\":{\"start\":{\"line\":0,\"character\":31},\"end\":{\"line\":0,\"character\":32}},\"severity\":2,\"source\":\"silex lint\",\"code\":\"naming/value\",\"message\":\"variable name 'BadValue' should use snake_case\"}]}}";
+        "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/publishDiagnostics\",\"params\":{\"uri\":\"file:///private/tmp/UnicodeLint.sx\",\"diagnostics\":[{\"range\":{\"start\":{\"line\":0,\"character\":31},\"end\":{\"line\":0,\"character\":32}},\"severity\":2,\"source\":\"silex lint\",\"code\":\"naming/value\",\"message\":\"variable name 'BadValue' should use snake_case\"}]}}";
     unicode_lint_protocol_command.expectStdOutEqual(b.fmt(
         "Content-Length: {d}\r\n\r\n{s}",
         .{ unicode_lint_notification.len, unicode_lint_notification },
@@ -2034,6 +2167,113 @@ pub fn build(b: *std.Build) void {
     invalid_inherited_static_field_command.expectExitCode(1);
     invalid_inherited_static_field_command.expectStdErrEqual("Tests/InvalidInheritedStaticField.sx:8:17: error: type 'Child' has no static field 'value'\n");
 
+    const iterator_source = b.getInstallPath(.prefix, "lib/silex/STD/Iteration/Iterator.sx");
+    const queue_source = b.getInstallPath(.prefix, "lib/silex/STD/Collections/Queue.sx");
+    const invalid_queue_noncopyable_command = b.addRunArtifact(executable);
+    invalid_queue_noncopyable_command.addArgs(&.{ "compile", "Tests/InvalidQueueNonCopyable.sx" });
+    invalid_queue_noncopyable_command.expectExitCode(1);
+    invalid_queue_noncopyable_command.expectStdErrEqual(b.fmt(
+        "{s}:10:28: error: noncopyable value 'optional' must be passed with 'move'\n",
+        .{iterator_source},
+    ));
+
+    const invalid_queue_storage_command = b.addRunArtifact(executable);
+    invalid_queue_storage_command.addArgs(&.{ "compile", "Tests/InvalidQueueStorage.sx" });
+    invalid_queue_storage_command.expectExitCode(1);
+    invalid_queue_storage_command.expectStdErrEqual(
+        "Tests/InvalidQueueStorage.sx:5:11: error: field 'front' is private in struct 'STD.Collections.Queue<int>'\n",
+    );
+
+    const invalid_queue_borrow_mutation_command = b.addRunArtifact(executable);
+    invalid_queue_borrow_mutation_command.addArgs(&.{ "compile", "Tests/InvalidQueueBorrowMutation.sx" });
+    invalid_queue_borrow_mutation_command.expectExitCode(1);
+    invalid_queue_borrow_mutation_command.expectStdErrEqual(
+        "Tests/InvalidQueueBorrowMutation.sx:11:11: error: cannot mutate borrowed variable 'queue'\n",
+    );
+
+    const stack_source = b.getInstallPath(.prefix, "lib/silex/STD/Collections/Stack.sx");
+    const invalid_stack_noncopyable_command = b.addRunArtifact(executable);
+    invalid_stack_noncopyable_command.addArgs(&.{ "compile", "Tests/InvalidStackNonCopyable.sx" });
+    invalid_stack_noncopyable_command.expectExitCode(1);
+    invalid_stack_noncopyable_command.expectStdErrEqual(b.fmt(
+        "{s}:10:28: error: noncopyable value 'optional' must be passed with 'move'\n",
+        .{iterator_source},
+    ));
+
+    const invalid_stack_storage_command = b.addRunArtifact(executable);
+    invalid_stack_storage_command.addArgs(&.{ "compile", "Tests/InvalidStackStorage.sx" });
+    invalid_stack_storage_command.expectExitCode(1);
+    invalid_stack_storage_command.expectStdErrEqual(
+        "Tests/InvalidStackStorage.sx:5:11: error: field 'storage' is private in struct 'STD.Collections.Stack<int>'\n",
+    );
+
+    const invalid_stack_borrow_mutation_command = b.addRunArtifact(executable);
+    invalid_stack_borrow_mutation_command.addArgs(&.{ "compile", "Tests/InvalidStackBorrowMutation.sx" });
+    invalid_stack_borrow_mutation_command.expectExitCode(1);
+    invalid_stack_borrow_mutation_command.expectStdErrEqual(
+        "Tests/InvalidStackBorrowMutation.sx:11:11: error: cannot mutate borrowed variable 'stack'\n",
+    );
+
+    const dictionary_source = b.getInstallPath(.prefix, "lib/silex/STD/Collections/Dictionary.sx");
+    const invalid_dictionary_noncopyable_command = b.addRunArtifact(executable);
+    invalid_dictionary_noncopyable_command.addArgs(&.{ "compile", "Tests/InvalidDictionaryNonCopyable.sx" });
+    invalid_dictionary_noncopyable_command.expectExitCode(1);
+    invalid_dictionary_noncopyable_command.expectStdErrEqual(b.fmt(
+        "{s}:10:28: error: noncopyable value 'optional' must be passed with 'move'\n",
+        .{iterator_source},
+    ));
+
+    const invalid_dictionary_storage_command = b.addRunArtifact(executable);
+    invalid_dictionary_storage_command.addArgs(&.{ "compile", "Tests/InvalidDictionaryStorage.sx" });
+    invalid_dictionary_storage_command.expectExitCode(1);
+    invalid_dictionary_storage_command.expectStdErrEqual(
+        "Tests/InvalidDictionaryStorage.sx:7:18: error: field 'buckets' is private in struct 'STD.Collections.Dictionary<int, int>'\n",
+    );
+
+    const invalid_dictionary_borrow_mutation_command = b.addRunArtifact(executable);
+    invalid_dictionary_borrow_mutation_command.addArgs(&.{ "compile", "Tests/InvalidDictionaryBorrowMutation.sx" });
+    invalid_dictionary_borrow_mutation_command.expectExitCode(1);
+    invalid_dictionary_borrow_mutation_command.expectStdErrEqual(
+        "Tests/InvalidDictionaryBorrowMutation.sx:13:12: error: cannot mutate borrowed variable 'values'\n",
+    );
+
+    const invalid_set_noncopyable_command = b.addRunArtifact(executable);
+    invalid_set_noncopyable_command.addArgs(&.{ "compile", "Tests/InvalidSetNonCopyable.sx" });
+    invalid_set_noncopyable_command.expectExitCode(1);
+    invalid_set_noncopyable_command.expectStdErrEqual(b.fmt(
+        "{s}:10:28: error: noncopyable value 'optional' must be passed with 'move'\n",
+        .{iterator_source},
+    ));
+
+    const invalid_set_storage_command = b.addRunArtifact(executable);
+    invalid_set_storage_command.addArgs(&.{ "compile", "Tests/InvalidSetStorage.sx" });
+    invalid_set_storage_command.expectExitCode(1);
+    invalid_set_storage_command.expectStdErrEqual(
+        "Tests/InvalidSetStorage.sx:7:18: error: field 'entries' is private in struct 'STD.Collections.Set<int>'\n",
+    );
+
+    const invalid_iterator_noncopyable_command = b.addRunArtifact(executable);
+    invalid_iterator_noncopyable_command.addArgs(&.{ "compile", "Tests/InvalidIteratorNonCopyable.sx" });
+    invalid_iterator_noncopyable_command.expectExitCode(1);
+    invalid_iterator_noncopyable_command.expectStdErrEqual(b.fmt(
+        "{s}:10:28: error: noncopyable value 'optional' must be passed with 'move'\n",
+        .{iterator_source},
+    ));
+
+    const invalid_iterator_storage_command = b.addRunArtifact(executable);
+    invalid_iterator_storage_command.addArgs(&.{ "compile", "Tests/InvalidIteratorStorage.sx" });
+    invalid_iterator_storage_command.expectExitCode(1);
+    invalid_iterator_storage_command.expectStdErrEqual(
+        "Tests/InvalidIteratorStorage.sx:5:20: error: field 'next_index' is private in struct 'STD.Iteration.Iterator<int>'\n",
+    );
+
+    const invalid_iterator_map_callback_command = b.addRunArtifact(executable);
+    invalid_iterator_map_callback_command.addArgs(&.{ "compile", "Tests/InvalidIteratorMapCallback.sx" });
+    invalid_iterator_map_callback_command.expectExitCode(1);
+    invalid_iterator_map_callback_command.expectStdErrEqual(
+        "Tests/InvalidIteratorMapCallback.sx:10:18: error: no compatible signature for function 'STD.Algorithms.map<int, int>'; visible signatures: map<int, int>(STD.Iteration.Iterator<int>, func(@int) int)\n",
+    );
+
     const test_step = b.step("test", "Run the toolchain tests");
     test_step.dependOn(b.getInstallStep());
     test_step.dependOn(&test_command.step);
@@ -2044,6 +2284,20 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&lsp_canonical_formatting_command.step);
     test_step.dependOn(&lsp_crlf_formatting_command.step);
     test_step.dependOn(&lsp_invalid_formatting_command.step);
+    test_step.dependOn(&invalid_queue_noncopyable_command.step);
+    test_step.dependOn(&invalid_queue_storage_command.step);
+    test_step.dependOn(&invalid_queue_borrow_mutation_command.step);
+    test_step.dependOn(&invalid_stack_noncopyable_command.step);
+    test_step.dependOn(&invalid_stack_storage_command.step);
+    test_step.dependOn(&invalid_stack_borrow_mutation_command.step);
+    test_step.dependOn(&invalid_dictionary_noncopyable_command.step);
+    test_step.dependOn(&invalid_dictionary_storage_command.step);
+    test_step.dependOn(&invalid_dictionary_borrow_mutation_command.step);
+    test_step.dependOn(&invalid_set_noncopyable_command.step);
+    test_step.dependOn(&invalid_set_storage_command.step);
+    test_step.dependOn(&invalid_iterator_noncopyable_command.step);
+    test_step.dependOn(&invalid_iterator_storage_command.step);
+    test_step.dependOn(&invalid_iterator_map_callback_command.step);
     test_step.dependOn(&lint_protocol_command.step);
     test_step.dependOn(&unicode_lint_protocol_command.step);
     test_step.dependOn(&missing_field_mutability_command.step);
@@ -2307,6 +2561,26 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&system_error_test_command.step);
     const path_test_command = b.addRunArtifact(path_integration);
     test_step.dependOn(&path_test_command.step);
+    const unicode_conformance_command = b.addRunArtifact(unicode_conformance);
+    unicode_conformance_command.addFileArg(b.path("Tests/UnicodeData/17.0.0/NormalizationTest.txt"));
+    unicode_conformance_command.addFileArg(b.path("../Library/STD/@Native/Unicode/Data/17.0.0/CaseFolding.txt"));
+    unicode_conformance_command.addFileArg(b.path("../Library/STD/@Native/Unicode/Data/17.0.0/SpecialCasing.txt"));
+    unicode_conformance_command.addFileArg(b.path("Tests/UnicodeData/17.0.0/GraphemeBreakTest.txt"));
+    test_step.dependOn(&unicode_conformance_command.step);
+    const file_native_test_command = b.addRunArtifact(file_native_integration);
+    file_native_test_command.addArg(".zig-cache/file-native-integration.bin");
+    test_step.dependOn(&file_native_test_command.step);
+    const filesystem_native_test_command = b.addRunArtifact(filesystem_native_integration);
+    filesystem_native_test_command.addArg(".zig-cache/filesystem-native-integration");
+    test_step.dependOn(&filesystem_native_test_command.step);
+    const environment_native_test_command = b.addRunArtifact(environment_native_integration);
+    test_step.dependOn(&environment_native_test_command.step);
+    const process_native_test_command = b.addRunArtifact(process_native_integration);
+    test_step.dependOn(&process_native_test_command.step);
+    const tcp_native_test_command = b.addRunArtifact(tcp_native_integration);
+    test_step.dependOn(&tcp_native_test_command.step);
+    const udp_native_test_command = b.addRunArtifact(udp_native_integration);
+    test_step.dependOn(&udp_native_test_command.step);
 
     const smoke_command = b.addRunArtifact(executable);
     smoke_command.step.dependOn(b.getInstallStep());
@@ -3352,9 +3626,229 @@ pub fn build(b: *std.Build) void {
     io_smoke_command.addArgs(&.{ "run", "Smokes/IO.sx" });
     io_smoke_command.expectStdOutEqual(hostText(b, "io streams ok\n"));
 
+    const queue_smoke_command = b.addRunArtifact(executable);
+    queue_smoke_command.step.dependOn(&io_smoke_command.step);
+    queue_smoke_command.addArgs(&.{ "run", "Smokes/Queue.sx" });
+    queue_smoke_command.expectStdOutEqual(hostText(b, ""));
+
+    const stack_smoke_command = b.addRunArtifact(executable);
+    stack_smoke_command.step.dependOn(&queue_smoke_command.step);
+    stack_smoke_command.addArgs(&.{ "run", "Smokes/Stack.sx" });
+    stack_smoke_command.expectStdOutEqual(hostText(b, ""));
+
+    const dictionary_smoke_command = b.addRunArtifact(executable);
+    dictionary_smoke_command.step.dependOn(&stack_smoke_command.step);
+    dictionary_smoke_command.addArgs(&.{ "run", "Smokes/Dictionary.sx" });
+    dictionary_smoke_command.expectStdOutEqual(hostText(b, ""));
+
+    const set_smoke_command = b.addRunArtifact(executable);
+    set_smoke_command.step.dependOn(&dictionary_smoke_command.step);
+    set_smoke_command.addArgs(&.{ "run", "Smokes/Set.sx" });
+    set_smoke_command.expectStdOutEqual(hostText(b, ""));
+
+    const iterator_smoke_command = b.addRunArtifact(executable);
+    iterator_smoke_command.step.dependOn(&set_smoke_command.step);
+    iterator_smoke_command.addArgs(&.{ "run", "Smokes/Iterator.sx" });
+    iterator_smoke_command.expectStdOutEqual(hostText(b, ""));
+
+    const iterator_search_smoke_command = b.addRunArtifact(executable);
+    iterator_search_smoke_command.step.dependOn(&iterator_smoke_command.step);
+    iterator_search_smoke_command.addArgs(&.{ "run", "Smokes/IteratorSearch.sx" });
+    iterator_search_smoke_command.expectStdOutEqual(hostText(b, ""));
+
+    const iterator_transform_smoke_command = b.addRunArtifact(executable);
+    iterator_transform_smoke_command.step.dependOn(&iterator_search_smoke_command.step);
+    iterator_transform_smoke_command.addArgs(&.{ "run", "Smokes/IteratorTransform.sx" });
+    iterator_transform_smoke_command.expectStdOutEqual(hostText(b, ""));
+
+    const utf8_smoke_command = b.addRunArtifact(executable);
+    utf8_smoke_command.step.dependOn(&iterator_transform_smoke_command.step);
+    utf8_smoke_command.addArgs(&.{ "run", "Smokes/UTF8.sx" });
+    utf8_smoke_command.expectStdOutEqual(hostText(b, ""));
+
+    const unicode_text_smoke_command = b.addRunArtifact(executable);
+    unicode_text_smoke_command.step.dependOn(&utf8_smoke_command.step);
+    unicode_text_smoke_command.addArgs(&.{ "run", "Smokes/UnicodeText.sx" });
+    unicode_text_smoke_command.expectStdOutEqual(hostText(b, ""));
+
+    const grapheme_smoke_command = b.addRunArtifact(executable);
+    grapheme_smoke_command.step.dependOn(&unicode_text_smoke_command.step);
+    grapheme_smoke_command.addArgs(&.{ "run", "Smokes/Grapheme.sx" });
+    grapheme_smoke_command.expectStdOutEqual(hostText(b, "2/1\n4/1\n2/1\n2/1\n1/1\n3/3\n"));
+
+    const encoding_smoke_command = b.addRunArtifact(executable);
+    encoding_smoke_command.step.dependOn(&grapheme_smoke_command.step);
+    encoding_smoke_command.addArgs(&.{ "run", "Smokes/Encoding.sx" });
+    encoding_smoke_command.expectStdOutEqual(hostText(b, ""));
+
+    const file_smoke_command = b.addRunArtifact(executable);
+    file_smoke_command.step.dependOn(&encoding_smoke_command.step);
+    file_smoke_command.addArgs(&.{ "run", "Smokes/BinaryFile.sx" });
+    file_smoke_command.expectStdOutEqual(hostText(b, ""));
+
+    const filesystem_smoke_command = b.addRunArtifact(executable);
+    filesystem_smoke_command.step.dependOn(&file_smoke_command.step);
+    filesystem_smoke_command.addArgs(&.{ "run", "Smokes/FileSystem.sx" });
+    filesystem_smoke_command.expectStdOutEqual(hostText(b, ""));
+
+    const environment_smoke_command = b.addRunArtifact(executable);
+    environment_smoke_command.step.dependOn(&filesystem_smoke_command.step);
+    environment_smoke_command.addArgs(&.{ "run", "Smokes/Environment.sx" });
+    environment_smoke_command.expectStdOutEqual(hostText(b, ""));
+
+    const process_smoke_compile_command = b.addRunArtifact(executable);
+    process_smoke_compile_command.step.dependOn(&environment_smoke_command.step);
+    process_smoke_compile_command.addArgs(&.{
+        "compile",
+        "Smokes/Process.sx",
+        "-o",
+        ".silex/process-smoke-bin",
+    });
+    const process_smoke_command = b.addSystemCommand(&.{
+        ".silex/process-smoke-bin",
+        "space value",
+        "",
+        "été",
+    });
+    process_smoke_command.step.dependOn(&process_smoke_compile_command.step);
+    process_smoke_command.expectStdOutEqual("");
+
+    const subprocess_smoke_compile_command = b.addRunArtifact(executable);
+    subprocess_smoke_compile_command.step.dependOn(&process_smoke_command.step);
+    subprocess_smoke_compile_command.addArgs(&.{
+        "compile",
+        "Smokes/Subprocess.sx",
+        "-o",
+        ".silex/subprocess-smoke-bin",
+    });
+    const subprocess_smoke_command = b.addSystemCommand(&.{".silex/subprocess-smoke-bin"});
+    subprocess_smoke_command.step.dependOn(&subprocess_smoke_compile_command.step);
+    subprocess_smoke_command.addFileArg(subprocess_child.getEmittedBin());
+    subprocess_smoke_command.expectStdOutEqual("");
+
+    const json_smoke_command = b.addRunArtifact(executable);
+    json_smoke_command.step.dependOn(&subprocess_smoke_command.step);
+    json_smoke_command.addArgs(&.{ "run", "Smokes/JSON.sx" });
+    json_smoke_command.expectStdOutEqual(hostText(b, ""));
+
+    const network_address_smoke_command = b.addRunArtifact(executable);
+    network_address_smoke_command.step.dependOn(&json_smoke_command.step);
+    network_address_smoke_command.addArgs(&.{ "run", "Smokes/NetworkAddress.sx" });
+    network_address_smoke_command.expectStdOutEqual(hostText(b, ""));
+
+    const network_tcp_smoke_command = b.addRunArtifact(executable);
+    network_tcp_smoke_command.step.dependOn(&network_address_smoke_command.step);
+    network_tcp_smoke_command.addArgs(&.{ "run", "Smokes/NetworkTCP.sx" });
+    network_tcp_smoke_command.expectStdOutEqual(hostText(b, ""));
+
+    const network_udp_smoke_command = b.addRunArtifact(executable);
+    network_udp_smoke_command.step.dependOn(&network_tcp_smoke_command.step);
+    network_udp_smoke_command.addArgs(&.{ "run", "Smokes/NetworkUDP.sx" });
+    network_udp_smoke_command.expectStdOutEqual(hostText(b, ""));
+
+    const queue_negative_create_command = b.addRunArtifact(executable);
+    queue_negative_create_command.step.dependOn(&network_udp_smoke_command.step);
+    queue_negative_create_command.addArgs(&.{ "run", "Smokes/QueueErrors/NegativeCreate.sx" });
+    queue_negative_create_command.expectExitCode(1);
+    queue_negative_create_command.expectStdErrEqual(hostText(b, b.fmt(
+        "{s}:14:13: runtime error: Queue.create requires a non-negative minimum capacity\n",
+        .{queue_source},
+    )));
+
+    const queue_negative_reserve_command = b.addRunArtifact(executable);
+    queue_negative_reserve_command.step.dependOn(&queue_negative_create_command.step);
+    queue_negative_reserve_command.addArgs(&.{ "run", "Smokes/QueueErrors/NegativeReserve.sx" });
+    queue_negative_reserve_command.expectExitCode(1);
+    queue_negative_reserve_command.expectStdErrEqual(hostText(b, b.fmt(
+        "{s}:73:13: runtime error: Queue.reserve requires a non-negative minimum capacity\n",
+        .{queue_source},
+    )));
+
+    const queue_peek_empty_command = b.addRunArtifact(executable);
+    queue_peek_empty_command.step.dependOn(&queue_negative_reserve_command.step);
+    queue_peek_empty_command.addArgs(&.{ "run", "Smokes/QueueErrors/PeekEmpty.sx" });
+    queue_peek_empty_command.expectExitCode(1);
+    queue_peek_empty_command.expectStdErrEqual(hostText(b, b.fmt(
+        "{s}:66:13: runtime error: Queue.peek requires a value\n",
+        .{queue_source},
+    )));
+
+    const stack_negative_create_command = b.addRunArtifact(executable);
+    stack_negative_create_command.step.dependOn(&queue_peek_empty_command.step);
+    stack_negative_create_command.addArgs(&.{ "run", "Smokes/StackErrors/NegativeCreate.sx" });
+    stack_negative_create_command.expectExitCode(1);
+    stack_negative_create_command.expectStdErrEqual(hostText(b, b.fmt(
+        "{s}:13:13: runtime error: Stack.create requires a non-negative minimum capacity\n",
+        .{stack_source},
+    )));
+
+    const stack_negative_reserve_command = b.addRunArtifact(executable);
+    stack_negative_reserve_command.step.dependOn(&stack_negative_create_command.step);
+    stack_negative_reserve_command.addArgs(&.{ "run", "Smokes/StackErrors/NegativeReserve.sx" });
+    stack_negative_reserve_command.expectExitCode(1);
+    stack_negative_reserve_command.expectStdErrEqual(hostText(b, b.fmt(
+        "{s}:65:13: runtime error: Stack.reserve requires a non-negative minimum capacity\n",
+        .{stack_source},
+    )));
+
+    const stack_peek_empty_command = b.addRunArtifact(executable);
+    stack_peek_empty_command.step.dependOn(&stack_negative_reserve_command.step);
+    stack_peek_empty_command.addArgs(&.{ "run", "Smokes/StackErrors/PeekEmpty.sx" });
+    stack_peek_empty_command.expectExitCode(1);
+    stack_peek_empty_command.expectStdErrEqual(hostText(b, b.fmt(
+        "{s}:58:13: runtime error: Stack.peek requires a value\n",
+        .{stack_source},
+    )));
+
+    const dictionary_negative_create_command = b.addRunArtifact(executable);
+    dictionary_negative_create_command.step.dependOn(&stack_peek_empty_command.step);
+    dictionary_negative_create_command.addArgs(&.{ "run", "Smokes/DictionaryErrors/NegativeCreate.sx" });
+    dictionary_negative_create_command.expectExitCode(1);
+    dictionary_negative_create_command.expectStdErrEqual(hostText(b, b.fmt(
+        "{s}:44:13: runtime error: Dictionary.create requires a non-negative minimum capacity\n",
+        .{dictionary_source},
+    )));
+
+    const dictionary_negative_reserve_command = b.addRunArtifact(executable);
+    dictionary_negative_reserve_command.step.dependOn(&dictionary_negative_create_command.step);
+    dictionary_negative_reserve_command.addArgs(&.{ "run", "Smokes/DictionaryErrors/NegativeReserve.sx" });
+    dictionary_negative_reserve_command.expectExitCode(1);
+    dictionary_negative_reserve_command.expectStdErrEqual(hostText(b, b.fmt(
+        "{s}:129:13: runtime error: Dictionary.reserve requires a non-negative minimum capacity\n",
+        .{dictionary_source},
+    )));
+
+    const dictionary_at_absent_command = b.addRunArtifact(executable);
+    dictionary_at_absent_command.step.dependOn(&dictionary_negative_reserve_command.step);
+    dictionary_at_absent_command.addArgs(&.{ "run", "Smokes/DictionaryErrors/AtAbsent.sx" });
+    dictionary_at_absent_command.expectExitCode(1);
+    dictionary_at_absent_command.expectStdErrEqual(hostText(b, b.fmt(
+        "{s}:70:13: runtime error: Dictionary.at requires an existing key\n",
+        .{dictionary_source},
+    )));
+
+    const set_source = b.getInstallPath(.prefix, "lib/silex/STD/Collections/Set.sx");
+    const set_negative_create_command = b.addRunArtifact(executable);
+    set_negative_create_command.step.dependOn(&dictionary_at_absent_command.step);
+    set_negative_create_command.addArgs(&.{ "run", "Smokes/SetErrors/NegativeCreate.sx" });
+    set_negative_create_command.expectExitCode(1);
+    set_negative_create_command.expectStdErrEqual(hostText(b, b.fmt(
+        "{s}:21:13: runtime error: Set.create requires a non-negative minimum capacity\n",
+        .{set_source},
+    )));
+
+    const set_negative_reserve_command = b.addRunArtifact(executable);
+    set_negative_reserve_command.step.dependOn(&set_negative_create_command.step);
+    set_negative_reserve_command.addArgs(&.{ "run", "Smokes/SetErrors/NegativeReserve.sx" });
+    set_negative_reserve_command.expectExitCode(1);
+    set_negative_reserve_command.expectStdErrEqual(hostText(b, b.fmt(
+        "{s}:63:13: runtime error: Set.reserve requires a non-negative minimum capacity\n",
+        .{set_source},
+    )));
+
     const smoke_step = b.step("smoke", "Compile and run the smoke program");
     smoke_step.dependOn(b.getInstallStep());
-    smoke_step.dependOn(&io_smoke_command.step);
+    smoke_step.dependOn(&set_negative_reserve_command.step);
 
     const benchmark_suffix = if (b.graph.host.result.os.tag == .windows) ".exe" else "";
     const silex_benchmark_path = b.fmt("zig-out/bin/IntegerLoopsSilex{s}", .{benchmark_suffix});
@@ -3783,6 +4277,7 @@ pub fn build(b: *std.Build) void {
     distribution_options.addOption([]const u8, "developer_zig", "");
     distribution_options.addOption([]const u8, "developer_standard_library_root", "");
     distribution_options.addOption(bool, "repository_compilation_database", false);
+    distribution_options.addOption(bool, "run_source_graph_tests", true);
     const distribution_module = b.createModule(.{
         .root_source_file = b.path("Sources/Main.zig"),
         .target = b.graph.host,

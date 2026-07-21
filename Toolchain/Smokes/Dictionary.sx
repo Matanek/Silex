@@ -1,0 +1,126 @@
+use STD.Collections.Dictionary as Dictionary
+use STD.Collections.hash_bool as hash_bool
+use STD.Collections.equal_bool as standard_equal_bool
+use STD.Collections.hash_int as standard_hash_int
+use STD.Collections.equal_int as standard_equal_int
+use STD.Collections.hash_uint as hash_uint
+use STD.Collections.equal_uint as standard_equal_uint
+use STD.Collections.hash_str as standard_hash_str
+use STD.Collections.equal_str as standard_equal_str
+
+func collide(value:@int) uint {
+    return 0
+}
+
+func equal_int(left:@int, right:@int) bool {
+    return left == right
+}
+
+func equals_str(value:@str, expected:str) bool {
+    return value == expected
+}
+
+func replace_str(value:&str, replacement:str) {
+    value = replacement
+}
+
+func required(value:str?) str {
+    if present = value {
+        return present
+    }
+    panic("expected a dictionary value")
+}
+
+func verify_captured_callbacks() {
+    var hash_calls = 0
+    var equality_calls = 0
+    if true {
+        var hash = func(value:@int) uint {
+            hash_calls++
+            return value as uint
+        }
+        var equal = func(left:@int, right:@int) bool {
+            equality_calls++
+            return left == right
+        }
+        var measured = Dictionary<int, int>.create(hash, equal, 256)
+        var index = 0
+        while index < 256 {
+            measured.insert(index, index)
+            index++
+        }
+        var copy = measured
+        index = 0
+        while index < 256 {
+            assert(copy.contains_key(index), "captured callback lookup")
+            index++
+        }
+        copy.remove(0)
+        assert(measured.contains_key(0), "callback-bearing copy is independent")
+    }
+    assert(hash_calls < 2048, "distributed hash keeps average lookup bounded")
+    assert(equality_calls < 1024, "distributed equality keeps average lookup bounded")
+}
+
+func main() {
+    var values = Dictionary<int, str>.create(standard_hash_int, standard_equal_int, 2)
+    assert(values.is_empty() && values.capacity() >= 2, "empty dictionary")
+    assert(values.insert(1, "one") == null, "insert absent key")
+    assert(values.insert(2, "two") == null, "insert second key")
+    assert(values.contains_key(1) && !values.contains_key(3), "key presence")
+    if true {
+        let one = values.at(1)
+        let two = values.at(2)
+        assert(equals_str(one, "one") && equals_str(two, "two"), "shared lookups")
+    }
+    if true {
+        var two = values.at(2)
+        replace_str(two, "second")
+    }
+    assert(required(values.insert(2, "deux")) == "second", "replacement returns old value")
+    assert(required(values.remove(1)) == "one", "remove returns value")
+    assert(values.remove(1) == null, "remove absent key")
+
+    var collisions = Dictionary<int, int>.create(collide, equal_int)
+    var index = 0
+    while index < 100 {
+        collisions.insert(index, index * 10)
+        index++
+    }
+    index = 0
+    while index < 100 {
+        let expected = index * 10
+        let actual = collisions.at(index)
+        assert(equal_int(actual, expected), "full collision lookup")
+        index++
+    }
+    if entry = collisions.take_entry(42) {
+        assert(entry.key == 42 && entry.value == 420, "take_entry returns stored pair")
+    } else {
+        panic("expected stored entry")
+    }
+    collisions.insert(142, 1420)
+    assert(collisions.contains_key(142), "reuse after removal")
+
+    var left = values
+    var right = left
+    right.insert(3, "three")
+    right.remove(2)
+    assert(left.count() == 1 && left.contains_key(2), "dictionary copy remains independent")
+    assert(right.count() == 1 && right.contains_key(3), "dictionary copy diverges")
+
+    var strings = Dictionary<str, int>.create(standard_hash_str, standard_equal_str)
+    strings.insert("é", 1)
+    strings.insert("hello", 2)
+    assert(strings.contains_key("é") && strings.contains_key("hello"), "UTF-8 string hashing")
+    assert(standard_hash_str("stable") == 4567693929835203094, "deterministic string hash")
+    assert(standard_hash_str("é") == 775207407765167617, "string hash uses UTF-8 bytes")
+    assert(standard_equal_bool(true, true) && !standard_equal_bool(true, false), "bool callbacks")
+    assert(standard_equal_uint(4, 4) && hash_uint(4) == 4, "uint callbacks")
+
+    values.reserve(200)
+    assert(values.capacity() >= 200, "dictionary reserve")
+    values.clear()
+    assert(values.is_empty() && values.capacity() >= 200, "clear retains capacity")
+    verify_captured_callbacks()
+}

@@ -1,0 +1,11 @@
+use STD.Collections.Queue as Queue
+
+struct Resource {
+    let handle:int
+    drop {}
+}
+
+func main() {
+    var queue = Queue<Resource>.create()
+    queue.enqueue(Resource(handle:1))
+}

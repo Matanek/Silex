@@ -1,0 +1,202 @@
+use STD.IO as IO
+use STD.Network.Endpoint as Endpoint
+use STD.Network.Family as Family
+use STD.Network.IpAddress as IpAddress
+use STD.Network.ResolveOptions as ResolveOptions
+use STD.Network.Transport as Transport
+use STD.Network.resolve as resolve
+use STD.System.Error as Error
+use STD.System.ErrorKind as ErrorKind
+use STD.Time.Stopwatch as Stopwatch
+
+public native resource Stream { drop discard_stream }
+public native resource Listener { drop discard_listener }
+public struct StreamOptions {
+    let read_timeout_milliseconds:int?
+    let write_timeout_milliseconds:int?
+}
+public struct ConnectOptions {
+    let connect_timeout_milliseconds:int?
+    let stream:StreamOptions
+}
+public struct Accepted {
+    let stream:Stream
+    let peer:Endpoint
+}
+struct NativeFailure {
+    let kind:int
+    let detail:str
+}
+native func native_connect(family:int,bytes:@uint8[..],port:int,scope:int,connect_timeout:int,read_timeout:int,write_timeout:int) Result<Stream,NativeFailure>
+native func native_listen(family:int,bytes:@uint8[..],port:int,scope:int,backlog:int) Result<Listener,NativeFailure>
+native func native_accept(listener:&Listener,timeout:int,read_timeout:int,write_timeout:int) Result<Stream,NativeFailure>
+native func native_read(stream:&Stream,buffer:&uint8[..]) Result<int,NativeFailure>
+native func native_write(stream:&Stream,buffer:@uint8[..]) Result<int,NativeFailure>
+native func native_shutdown(stream:&Stream,write:bool) Result<void,NativeFailure>
+native func native_close_stream(stream:Stream) Result<void,NativeFailure>
+native func native_close_listener(listener:Listener) Result<void,NativeFailure>
+native func native_stream_endpoint(stream:@Stream,peer:bool,visitor:func(int)) NativeOperation
+native func native_listener_endpoint(listener:@Listener,visitor:func(int)) NativeOperation
+native func native_subject(host:str,port:int) str
+struct NativeOperation {
+    let succeeded:bool
+    let kind:int
+    let detail:str
+}
+
+public func connect(endpoint:Endpoint,options:ConnectOptions) Result<Stream,Error> {
+    let connect_timeout=try timeout(options.connect_timeout_milliseconds,"tcp.connect")
+    let read_timeout=try timeout(options.stream.read_timeout_milliseconds,"tcp.connect")
+    let write_timeout=try timeout(options.stream.write_timeout_milliseconds,"tcp.connect")
+    return connect_endpoint(endpoint,connect_timeout,read_timeout,write_timeout,"tcp.connect")
+}
+public func connect(host:str,port:uint16,options:ConnectOptions) Result<Stream,Error> {
+    let connect_timeout=try timeout(options.connect_timeout_milliseconds,"tcp.connect")
+    let read_timeout=try timeout(options.stream.read_timeout_milliseconds,"tcp.connect")
+    let write_timeout=try timeout(options.stream.write_timeout_milliseconds,"tcp.connect")
+    let endpoints=try resolve(host,port,ResolveOptions(family:Family.any(),transport:Transport.stream()))
+    let subject=native_subject(host,port as int)
+    var stopwatch=Stopwatch()
+    if connect_timeout>=0 { stopwatch.start() }
+    var last:Error?=null
+    for endpoint in endpoints {
+        var remaining=connect_timeout
+        if connect_timeout>=0 {
+            remaining=connect_timeout-(stopwatch.get_elapsed_milliseconds() as int)
+            if remaining<0 { remaining=0 }
+        }
+        match connect_endpoint(endpoint,remaining,read_timeout,write_timeout,"tcp.connect") {
+            success(var stream)=>{return Result<Stream,Error>.success(move stream)}
+            failure(error)=>{last=Error(kind:error.kind,operation:error.operation,subject:subject,detail:error.detail)}
+        }
+    }
+    if let error=last{return Result<Stream,Error>.failure(error)}
+    return Result<Stream,Error>.failure(Error(kind:ErrorKind.not_found(),operation:"tcp.connect",subject:host,detail:"no endpoint"))
+}
+public func listen(endpoint:Endpoint,backlog:int) Result<Listener,Error> {
+    if backlog<=0{return Result<Listener,Error>.failure(invalid("tcp.listen","backlog must be positive"))}
+    return listen_endpoint(endpoint,backlog)
+}
+public func accept(listener:&Listener,timeout_milliseconds:int?,stream_options:StreamOptions) Result<Accepted,Error> {
+    let wait=try timeout(timeout_milliseconds,"tcp.accept")
+    let read=try timeout(stream_options.read_timeout_milliseconds,"tcp.accept")
+    let write=try timeout(stream_options.write_timeout_milliseconds,"tcp.accept")
+    match native_accept(listener,wait,read,write) {
+        failure(error)=>{return Result<Accepted,Error>.failure(convert("tcp.accept",error))}
+        success(var stream)=>{let peer=try endpoint_stream(stream,true);return Result<Accepted,Error>.success(Accepted(stream:move stream,peer:peer))}
+    }
+}
+public func local_endpoint(listener:@Listener) Result<Endpoint,Error> {
+    return endpoint_listener(listener)
+}
+public func close(stream:Stream) Result<void,Error> {
+    match native_close_stream(move stream) {
+        success => { return Result<void,Error>.success() }
+        failure(error) => { return Result<void,Error>.failure(convert("tcp.close",error)) }
+    }
+}
+public func close(listener:Listener) Result<void,Error> {
+    match native_close_listener(move listener) {
+        success => { return Result<void,Error>.success() }
+        failure(error) => { return Result<void,Error>.failure(convert("tcp.close",error)) }
+    }
+}
+
+extend Stream : IO.Reader,IO.Writer {
+    public func read(buffer:&uint8[..]) Result<int,Error> {
+        match native_read(self,buffer) {
+            success(count)=>{return Result<int,Error>.success(count)}
+            failure(error)=>{return Result<int,Error>.failure(convert("tcp.read",error))}
+        }
+    }
+    public func write(buffer:@uint8[..]) Result<int,Error> {
+        match native_write(self,buffer) {
+            success(count)=>{return Result<int,Error>.success(count)}
+            failure(error)=>{return Result<int,Error>.failure(convert("tcp.write",error))}
+        }
+    }
+    public func shutdown_read() Result<void,Error> { return shutdown(self,false) }
+    public func shutdown_write() Result<void,Error> { return shutdown(self,true) }
+    public func local_endpoint() Result<Endpoint,Error> { return endpoint_stream(self,false) }
+    public func peer_endpoint() Result<Endpoint,Error> { return endpoint_stream(self,true) }
+}
+func shutdown(stream:&Stream,write:bool) Result<void,Error> {
+    match native_shutdown(stream,write) {
+        success=>{return Result<void,Error>.success()}
+        failure(error)=>{return Result<void,Error>.failure(convert("tcp.shutdown",error))}
+    }
+}
+func timeout(value:int?,operation:str) Result<int,Error> {
+    if let present=value { if present<0{return Result<int,Error>.failure(invalid(operation,"timeout must be non-negative"))} return Result<int,Error>.success(present) }
+    return Result<int,Error>.success(-1)
+}
+func connect_endpoint(endpoint:Endpoint,c:int,r:int,w:int,operation:str) Result<Stream,Error> {
+    return match endpoint.address {
+        ipv4(bytes)=>connect4(bytes,endpoint,c,r,w,operation)
+        ipv6(bytes)=>connect6(bytes,endpoint,c,r,w,operation)
+    }
+}
+func connect4(bytes:uint8[4],endpoint:Endpoint,c:int,r:int,w:int,operation:str) Result<Stream,Error> {
+    if endpoint.scope_id!=0{return Result<Stream,Error>.failure(invalid(operation,"IPv4 scope must be zero"))}
+    let view=@bytes[0:4]
+    match native_connect(4,view,endpoint.port as int,0,c,r,w) {
+        success(var stream)=>{return Result<Stream,Error>.success(move stream)}
+        failure(error)=>{return Result<Stream,Error>.failure(convert(operation,error))}
+    }
+}
+func connect6(bytes:uint8[16],endpoint:Endpoint,c:int,r:int,w:int,operation:str) Result<Stream,Error> {
+    let view=@bytes[0:16]
+    match native_connect(6,view,endpoint.port as int,endpoint.scope_id as int,c,r,w) {
+        success(var stream)=>{return Result<Stream,Error>.success(move stream)}
+        failure(error)=>{return Result<Stream,Error>.failure(convert(operation,error))}
+    }
+}
+func listen_endpoint(endpoint:Endpoint,backlog:int) Result<Listener,Error> {
+    return match endpoint.address {
+        ipv4(bytes)=>listen4(bytes,endpoint,backlog)
+        ipv6(bytes)=>listen6(bytes,endpoint,backlog)
+    }
+}
+func listen4(bytes:uint8[4],endpoint:Endpoint,backlog:int) Result<Listener,Error> {
+    if endpoint.scope_id!=0{return Result<Listener,Error>.failure(invalid("tcp.listen","IPv4 scope must be zero"))}
+    let view=@bytes[0:4]
+    match native_listen(4,view,endpoint.port as int,0,backlog) {
+        success(var listener)=>{return Result<Listener,Error>.success(move listener)}
+        failure(error)=>{return Result<Listener,Error>.failure(convert("tcp.listen",error))}
+    }
+}
+func listen6(bytes:uint8[16],endpoint:Endpoint,backlog:int) Result<Listener,Error> {
+    let view=@bytes[0:16]
+    match native_listen(6,view,endpoint.port as int,endpoint.scope_id as int,backlog) {
+        success(var listener)=>{return Result<Listener,Error>.success(move listener)}
+        failure(error)=>{return Result<Listener,Error>.failure(convert("tcp.listen",error))}
+    }
+}
+func endpoint_stream(stream:@Stream,peer:bool) Result<Endpoint,Error> {
+    var fields:int[]=[]
+    let native=native_stream_endpoint(stream,peer,func(value:int){fields.append(value)})
+    if !native.succeeded{return Result<Endpoint,Error>.failure(operation_error("tcp.endpoint",native))}
+    return Result<Endpoint,Error>.success(endpoint_from_fields(fields))
+}
+func endpoint_listener(listener:@Listener) Result<Endpoint,Error> {
+    var fields:int[]=[]
+    let native=native_listener_endpoint(listener,func(value:int){fields.append(value)})
+    if !native.succeeded{return Result<Endpoint,Error>.failure(operation_error("tcp.endpoint",native))}
+    return Result<Endpoint,Error>.success(endpoint_from_fields(fields))
+}
+func endpoint_from_fields(fields:int[]) Endpoint {
+    var bytes:uint8[16]
+    var index=0
+    while index<16{bytes[index]=fields[index+3] as uint8;index++}
+    var address=IpAddress.ipv6(bytes)
+    if fields[0]==4{address=IpAddress.ipv4([bytes[0],bytes[1],bytes[2],bytes[3]])}
+    return Endpoint(address:address,port:fields[1] as uint16,scope_id:fields[2] as uint32)
+}
+func invalid(operation:str,detail:str) Error{return Error(kind:ErrorKind.invalid_input(),operation:operation,subject:null,detail:detail)}
+func convert(operation:str,native:NativeFailure) Error{return Error(kind:error_kind(native.kind),operation:operation,subject:null,detail:native.detail)}
+func operation_error(operation:str,native:NativeOperation) Error{return Error(kind:error_kind(native.kind),operation:operation,subject:null,detail:native.detail)}
+func error_kind(kind:int) ErrorKind {
+    if kind==18{return ErrorKind.timed_out()} if kind==19{return ErrorKind.broken_pipe()} if kind==25{return ErrorKind.connection_refused()}
+    if kind==27{return ErrorKind.connection_reset()} if kind==28{return ErrorKind.not_connected()} if kind==21{return ErrorKind.address_in_use()}
+    if kind==22{return ErrorKind.address_unavailable()} if kind==3{return ErrorKind.invalid_input()} return ErrorKind.other()
+}

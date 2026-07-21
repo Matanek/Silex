@@ -172,6 +172,22 @@ pub fn materialize(
     return .{ .root = destination, .revision = exact_revision };
 }
 
+/// Finds an already materialized checkout without creating cache directories,
+/// invoking Git, or changing any package state. Editor analyses use this path
+/// so opening a project can never download a dependency.
+pub fn findCheckout(
+    allocator: Allocator,
+    io: Io,
+    environ_map: *const EnvironMap,
+    origin: []const u8,
+    revision: []const u8,
+) !?Checkout {
+    const packages_root = try cacheRoot(allocator, environ_map);
+    const destination = try checkoutPath(allocator, packages_root, origin, revision);
+    if (!try checkoutComplete(allocator, io, destination)) return null;
+    return .{ .root = destination, .revision = revision };
+}
+
 fn installCheckout(
     allocator: Allocator,
     io: Io,

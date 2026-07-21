@@ -1,0 +1,161 @@
+use STD.Network.Endpoint as Endpoint
+use STD.Network.Family as Family
+use STD.Network.IpAddress as IpAddress
+use STD.System.Error as Error
+use STD.System.ErrorKind as ErrorKind
+
+public native resource Socket { drop discard_socket }
+
+public struct Receive {
+    let count:int
+    let sender:Endpoint
+    let truncated:bool
+}
+
+public struct Options {
+    let read_timeout_milliseconds:int?
+    let write_timeout_milliseconds:int?
+}
+
+struct NativeFailure {
+    let kind:int
+    let detail:str
+}
+
+struct NativeOperation {
+    let succeeded:bool
+    let kind:int
+    let detail:str
+}
+
+struct NativeReceiveOperation {
+    let succeeded:bool
+    let kind:int
+    let detail:str
+    let count:int
+    let truncated:bool
+}
+
+native func native_bind(family:int,bytes:@uint8[..],port:int,scope:int,read_timeout:int,write_timeout:int) Result<Socket,NativeFailure>
+native func native_open(family:int,read_timeout:int,write_timeout:int) Result<Socket,NativeFailure>
+native func native_send_to(socket:&Socket,bytes:@uint8[..],family:int,address:@uint8[..],port:int,scope:int) Result<void,NativeFailure>
+native func native_receive_from(socket:&Socket,buffer:&uint8[..],visitor:func(int)) NativeReceiveOperation
+native func native_local_endpoint(socket:@Socket,visitor:func(int)) NativeOperation
+native func native_close(socket:Socket) Result<void,NativeFailure>
+
+public func bind(endpoint:Endpoint,options:Options) Result<Socket,Error> {
+    let read=try timeout(options.read_timeout_milliseconds,"udp.bind")
+    let write=try timeout(options.write_timeout_milliseconds,"udp.bind")
+    return match endpoint.address {
+        ipv4(bytes)=>bind4(bytes,endpoint,read,write)
+        ipv6(bytes)=>bind6(bytes,endpoint,read,write)
+    }
+}
+
+public func open(family:Family,options:Options) Result<Socket,Error> {
+    let read=try timeout(options.read_timeout_milliseconds,"udp.open")
+    let write=try timeout(options.write_timeout_milliseconds,"udp.open")
+    var code=0
+    match family {
+        any=>{return Result<Socket,Error>.failure(invalid("udp.open","a concrete address family is required"))}
+        ipv4=>{code=4}
+        ipv6=>{code=6}
+    }
+    match native_open(code,read,write) {
+        success(var socket)=>{return Result<Socket,Error>.success(move socket)}
+        failure(error)=>{return Result<Socket,Error>.failure(convert("udp.open",error))}
+    }
+}
+
+public func send_to(socket:&Socket,bytes:@uint8[..],endpoint:Endpoint) Result<void,Error> {
+    return match endpoint.address {
+        ipv4(address)=>send4(socket,bytes,address,endpoint)
+        ipv6(address)=>send6(socket,bytes,address,endpoint)
+    }
+}
+
+public func receive_from(socket:&Socket,buffer:&uint8[..]) Result<Receive,Error> {
+    var fields:int[]=[]
+    let native=native_receive_from(socket,buffer,func(value:int){fields.append(value)})
+    if !native.succeeded{return Result<Receive,Error>.failure(receive_error("udp.receive_from",native))}
+    return Result<Receive,Error>.success(Receive(count:native.count,sender:endpoint_from_fields(fields),truncated:native.truncated))
+}
+
+public func local_endpoint(socket:@Socket) Result<Endpoint,Error> {
+    var fields:int[]=[]
+    let native=native_local_endpoint(socket,func(value:int){fields.append(value)})
+    if !native.succeeded{return Result<Endpoint,Error>.failure(operation_error("udp.local_endpoint",native))}
+    return Result<Endpoint,Error>.success(endpoint_from_fields(fields))
+}
+
+public func close(socket:Socket) Result<void,Error> {
+    match native_close(move socket) {
+        success=>{return Result<void,Error>.success()}
+        failure(error)=>{return Result<void,Error>.failure(convert("udp.close",error))}
+    }
+}
+
+func bind4(bytes:uint8[4],endpoint:Endpoint,read:int,write:int) Result<Socket,Error> {
+    if endpoint.scope_id!=0{return Result<Socket,Error>.failure(invalid("udp.bind","IPv4 scope must be zero"))}
+    let view=@bytes[0:4]
+    match native_bind(4,view,endpoint.port as int,0,read,write) {
+        success(var socket)=>{return Result<Socket,Error>.success(move socket)}
+        failure(error)=>{return Result<Socket,Error>.failure(convert("udp.bind",error))}
+    }
+}
+
+func bind6(bytes:uint8[16],endpoint:Endpoint,read:int,write:int) Result<Socket,Error> {
+    let view=@bytes[0:16]
+    match native_bind(6,view,endpoint.port as int,endpoint.scope_id as int,read,write) {
+        success(var socket)=>{return Result<Socket,Error>.success(move socket)}
+        failure(error)=>{return Result<Socket,Error>.failure(convert("udp.bind",error))}
+    }
+}
+
+func send4(socket:&Socket,bytes:@uint8[..],address:uint8[4],endpoint:Endpoint) Result<void,Error> {
+    if endpoint.scope_id!=0{return Result<void,Error>.failure(invalid("udp.send_to","IPv4 scope must be zero"))}
+    let view=@address[0:4]
+    return sent(native_send_to(socket,bytes,4,view,endpoint.port as int,0))
+}
+
+func send6(socket:&Socket,bytes:@uint8[..],address:uint8[16],endpoint:Endpoint) Result<void,Error> {
+    let view=@address[0:16]
+    return sent(native_send_to(socket,bytes,6,view,endpoint.port as int,endpoint.scope_id as int))
+}
+
+func sent(result:Result<void,NativeFailure>) Result<void,Error> {
+    match result {
+        success=>{return Result<void,Error>.success()}
+        failure(error)=>{return Result<void,Error>.failure(convert("udp.send_to",error))}
+    }
+}
+
+func timeout(value:int?,operation:str) Result<int,Error> {
+    if let present=value {
+        if present<0{return Result<int,Error>.failure(invalid(operation,"timeout must be non-negative"))}
+        return Result<int,Error>.success(present)
+    }
+    return Result<int,Error>.success(-1)
+}
+
+func endpoint_from_fields(fields:int[]) Endpoint {
+    var bytes:uint8[16]
+    var index=0
+    while index<16{bytes[index]=fields[index+3] as uint8;index++}
+    var address=IpAddress.ipv6(bytes)
+    if fields[0]==4{address=IpAddress.ipv4([bytes[0],bytes[1],bytes[2],bytes[3]])}
+    return Endpoint(address:address,port:fields[1] as uint16,scope_id:fields[2] as uint32)
+}
+
+func invalid(operation:str,detail:str) Error{return Error(kind:ErrorKind.invalid_input(),operation:operation,subject:null,detail:detail)}
+func convert(operation:str,native:NativeFailure) Error{return Error(kind:error_kind(native.kind),operation:operation,subject:null,detail:native.detail)}
+func operation_error(operation:str,native:NativeOperation) Error{return Error(kind:error_kind(native.kind),operation:operation,subject:null,detail:native.detail)}
+func receive_error(operation:str,native:NativeReceiveOperation) Error{return Error(kind:error_kind(native.kind),operation:operation,subject:null,detail:native.detail)}
+func error_kind(kind:int) ErrorKind {
+    if kind==2{return ErrorKind.permission_denied()} if kind==3{return ErrorKind.invalid_input()}
+    if kind==12{return ErrorKind.resource_exhausted()} if kind==13{return ErrorKind.too_many_open_files()}
+    if kind==18{return ErrorKind.timed_out()} if kind==20{return ErrorKind.message_too_large()}
+    if kind==21{return ErrorKind.address_in_use()} if kind==22{return ErrorKind.address_unavailable()}
+    if kind==23{return ErrorKind.network_unreachable()} if kind==24{return ErrorKind.host_unreachable()}
+    return ErrorKind.other()
+}

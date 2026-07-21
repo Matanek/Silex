@@ -1,0 +1,11 @@
+use STD.Collections.Queue as Queue
+
+func equals(value:@int, expected:int) bool {
+    return value >= expected && value <= expected
+}
+
+func main() {
+    var queue = Queue<int>.create()
+    let value:@int = queue.peek()
+    print(equals(value, 0))
+}

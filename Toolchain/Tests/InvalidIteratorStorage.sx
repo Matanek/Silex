@@ -1,0 +1,6 @@
+use STD.Iteration.Iterator as Iterator
+
+func main() {
+    var iterator = Iterator<int>.empty()
+    print(iterator.next_index)
+}
