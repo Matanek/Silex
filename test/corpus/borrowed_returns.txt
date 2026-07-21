@@ -14,6 +14,14 @@ func choose(first:@Owner, second:@Owner) @first:State {
     return @first.state
 }
 
+struct Store {
+    var state:State
+
+    func choose(other:@State) @self:State {
+        return @self.state
+    }
+}
+
 ---
 
 (source_file
@@ -85,4 +93,33 @@ func choose(first:@Owner, second:@Owner) @first:State {
               operand: (expression
                 (member_expression
                   object: (identifier)
-                  field: (identifier))))))))))
+                  field: (identifier)))))))))
+  (structure_definition
+    name: (identifier)
+    (structure_field
+      name: (identifier)
+      type: (type
+        (named_type
+          (type_identifier))))
+    (function_definition
+      name: (identifier)
+      (parameter_list
+        (parameter
+          name: (identifier)
+          type: (type
+            (named_type
+              (type_identifier)))))
+      return_type: (borrowed_return_type
+        provenance: (self_expression)
+        target: (type
+          (named_type
+            (type_identifier))))
+      body: (block
+        (statement
+          (return_statement
+            value: (expression
+              (read_reference_expression
+                operand: (expression
+                  (member_expression
+                    object: (self_expression)
+                    field: (identifier)))))))))))
