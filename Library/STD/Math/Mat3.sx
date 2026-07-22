@@ -1,0 +1,106 @@
+use STD.Math
+use STD.Math.Vec3 as Vec3
+
+public struct Mat3 {
+    var x:Vec3
+    var y:Vec3
+    var z:Vec3
+
+    init() {
+        self.x = Vec3(1.0, 0.0, 0.0)
+        self.y = Vec3(0.0, 1.0, 0.0)
+        self.z = Vec3(0.0, 0.0, 1.0)
+    }
+
+    init(diagonal:float) {
+        self.x = Vec3(diagonal, 0.0, 0.0)
+        self.y = Vec3(0.0, diagonal, 0.0)
+        self.z = Vec3(0.0, 0.0, diagonal)
+    }
+
+    init(x:Vec3, y:Vec3, z:Vec3) {
+        self.x = x
+        self.y = y
+        self.z = z
+    }
+
+    func row(index:int) Vec3 {
+        if index == 0 {
+            return Vec3(self.x.x, self.y.x, self.z.x)
+        }
+        if index == 1 {
+            return Vec3(self.x.y, self.y.y, self.z.y)
+        }
+        if index == 2 {
+            return Vec3(self.x.z, self.y.z, self.z.z)
+        }
+        panic("Mat3 row index out of bounds")
+    }
+
+    func transposed() Mat3 {
+        return Mat3(self.row(0), self.row(1), self.row(2))
+    }
+
+    func add(other:Mat3) Mat3 {
+        return Mat3(self.x.add(other.x), self.y.add(other.y), self.z.add(other.z))
+    }
+
+    func subtract(other:Mat3) Mat3 {
+        return Mat3(
+            self.x.subtract(other.x),
+            self.y.subtract(other.y),
+            self.z.subtract(other.z)
+        )
+    }
+
+    func multiply(scalar:float) Mat3 {
+        return Mat3(
+            self.x.multiply(scalar),
+            self.y.multiply(scalar),
+            self.z.multiply(scalar)
+        )
+    }
+
+    func multiply(vector:Vec3) Vec3 {
+        return self.x.multiply(vector.x).add(
+            self.y.multiply(vector.y)
+        ).add(self.z.multiply(vector.z))
+    }
+
+    func multiply(other:Mat3) Mat3 {
+        return Mat3(
+            self.multiply(other.x),
+            self.multiply(other.y),
+            self.multiply(other.z)
+        )
+    }
+
+    func determinant() float {
+        return self.x.dot(self.y.cross(self.z))
+    }
+
+    func inverted() Mat3 {
+        let row0 = self.row(0)
+        let row1 = self.row(1)
+        let row2 = self.row(2)
+        let inverse0 = row1.cross(row2)
+        let inverse1 = row2.cross(row0)
+        let inverse2 = row0.cross(row1)
+        let determinant = row0.dot(inverse0)
+
+        if Math.abs(determinant) <= Math.epsilon() {
+            return Mat3.identity()
+        }
+        return Mat3(inverse0, inverse1, inverse2).multiply(1.0 / determinant)
+    }
+}
+
+extend Mat3 {
+    static func identity() Mat3 {
+        return Mat3()
+    }
+
+    static func zero() Mat3 {
+        return Mat3(0.0)
+    }
+}

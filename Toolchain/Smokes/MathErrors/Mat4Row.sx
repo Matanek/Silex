@@ -1,0 +1,5 @@
+use STD.Math
+
+func main() {
+    Math.Mat4.identity().row(4)
+}

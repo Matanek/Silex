@@ -1,0 +1,5 @@
+use STD.Math
+
+func main() {
+    Math.Mat3.identity().row(3)
+}

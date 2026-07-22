@@ -16,6 +16,8 @@ func main() {
 
 ## APIs
 
+- [Math](Math.md) — scalar `float32` operations, vectors, matrices,
+  transformations, projections, and quaternions.
 - [Randomizer](Randomizer.md) — reproducible pseudo-random values for games,
   simulations, tests, and the random collection algorithms.
 - [Algorithms](Algorithms.md) — generic in-place sorting, borrowed random

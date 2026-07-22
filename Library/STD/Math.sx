@@ -1,0 +1,75 @@
+public native func sqrt(value:float) float
+public native func sin(value:float) float
+public native func cos(value:float) float
+public native func tan(value:float) float
+public native func asin(value:float) float
+public native func atan2(y:float, x:float) float
+
+public func pi() float {
+    return 3.1415927
+}
+
+public func half_pi() float {
+    return pi() * 0.5
+}
+
+public func two_pi() float {
+    return pi() * 2.0
+}
+
+public func epsilon() float {
+    return 0.000001
+}
+
+public func radians(degrees:float) float {
+    return degrees * (pi() / 180.0)
+}
+
+public func degrees(radians:float) float {
+    return radians * (180.0 / pi())
+}
+
+public func min(left:float, right:float) float {
+    if left < right {
+        return left
+    }
+    return right
+}
+
+public func max(left:float, right:float) float {
+    if left > right {
+        return left
+    }
+    return right
+}
+
+public func clamp(value:float, minimum:float, maximum:float) float {
+    return min(max(value, minimum), maximum)
+}
+
+public func saturate(value:float) float {
+    return clamp(value, 0.0, 1.0)
+}
+
+public func abs(value:float) float {
+    if value < 0.0 {
+        return -value
+    }
+    return value
+}
+
+public func lerp(start:float, end:float, amount:float) float {
+    return start + (end - start) * amount
+}
+
+public func mix(start:float, end:float, amount:float) float {
+    return lerp(start, end, amount)
+}
+
+public func nearly_equal(left:float, right:float) bool {
+    return nearly_equal(left, right, epsilon())
+}
+
+public func nearly_equal(left:float, right:float, tolerance:float) bool {
+    return abs(left - right) <= tolerance
+}

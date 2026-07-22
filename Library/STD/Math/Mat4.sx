@@ -1,0 +1,375 @@
+use STD.Math
+use STD.Math.Vec3 as Vec3
+use STD.Math.Vec4 as Vec4
+use STD.Math.Mat3 as Mat3
+
+public struct Mat4 {
+    var x:Vec4
+    var y:Vec4
+    var z:Vec4
+    var w:Vec4
+
+    init() {
+        self.x = Vec4(1.0, 0.0, 0.0, 0.0)
+        self.y = Vec4(0.0, 1.0, 0.0, 0.0)
+        self.z = Vec4(0.0, 0.0, 1.0, 0.0)
+        self.w = Vec4(0.0, 0.0, 0.0, 1.0)
+    }
+
+    init(diagonal:float) {
+        self.x = Vec4(diagonal, 0.0, 0.0, 0.0)
+        self.y = Vec4(0.0, diagonal, 0.0, 0.0)
+        self.z = Vec4(0.0, 0.0, diagonal, 0.0)
+        self.w = Vec4(0.0, 0.0, 0.0, diagonal)
+    }
+
+    init(x:Vec4, y:Vec4, z:Vec4, w:Vec4) {
+        self.x = x
+        self.y = y
+        self.z = z
+        self.w = w
+    }
+
+    init(value:Mat3) {
+        self.x = Vec4(value.x, 0.0)
+        self.y = Vec4(value.y, 0.0)
+        self.z = Vec4(value.z, 0.0)
+        self.w = Vec4(0.0, 0.0, 0.0, 1.0)
+    }
+
+    func row(index:int) Vec4 {
+        if index == 0 {
+            return Vec4(self.x.x, self.y.x, self.z.x, self.w.x)
+        }
+        if index == 1 {
+            return Vec4(self.x.y, self.y.y, self.z.y, self.w.y)
+        }
+        if index == 2 {
+            return Vec4(self.x.z, self.y.z, self.z.z, self.w.z)
+        }
+        if index == 3 {
+            return Vec4(self.x.w, self.y.w, self.z.w, self.w.w)
+        }
+        panic("Mat4 row index out of bounds")
+    }
+
+    func transposed() Mat4 {
+        return Mat4(self.row(0), self.row(1), self.row(2), self.row(3))
+    }
+
+    func add(other:Mat4) Mat4 {
+        return Mat4(
+            self.x.add(other.x),
+            self.y.add(other.y),
+            self.z.add(other.z),
+            self.w.add(other.w)
+        )
+    }
+
+    func subtract(other:Mat4) Mat4 {
+        return Mat4(
+            self.x.subtract(other.x),
+            self.y.subtract(other.y),
+            self.z.subtract(other.z),
+            self.w.subtract(other.w)
+        )
+    }
+
+    func multiply(scalar:float) Mat4 {
+        return Mat4(
+            self.x.multiply(scalar),
+            self.y.multiply(scalar),
+            self.z.multiply(scalar),
+            self.w.multiply(scalar)
+        )
+    }
+
+    func multiply(vector:Vec4) Vec4 {
+        return self.x.multiply(vector.x).add(
+            self.y.multiply(vector.y)
+        ).add(
+            self.z.multiply(vector.z)
+        ).add(self.w.multiply(vector.w))
+    }
+
+    func multiply(other:Mat4) Mat4 {
+        return Mat4(
+            self.multiply(other.x),
+            self.multiply(other.y),
+            self.multiply(other.z),
+            self.multiply(other.w)
+        )
+    }
+
+    func inverted() Mat4 {
+        let values:float[16] = [
+            self.x.x, self.x.y, self.x.z, self.x.w,
+            self.y.x, self.y.y, self.y.z, self.y.w,
+            self.z.x, self.z.y, self.z.z, self.z.w,
+            self.w.x, self.w.y, self.w.z, self.w.w
+        ]
+        var inverse:float[16]
+
+        inverse[0] = (
+            values[5] * values[10] * values[15] -
+                values[5] * values[11] * values[14] -
+                values[9] * values[6] * values[15] +
+                values[9] * values[7] * values[14] +
+                values[13] * values[6] * values[11] -
+                values[13] * values[7] * values[10]
+        )
+        inverse[4] = (
+            -values[4] * values[10] * values[15] +
+                values[4] * values[11] * values[14] +
+                values[8] * values[6] * values[15] -
+                values[8] * values[7] * values[14] -
+                values[12] * values[6] * values[11] +
+                values[12] * values[7] * values[10]
+        )
+        inverse[8] = (
+            values[4] * values[9] * values[15] -
+                values[4] * values[11] * values[13] -
+                values[8] * values[5] * values[15] +
+                values[8] * values[7] * values[13] +
+                values[12] * values[5] * values[11] -
+                values[12] * values[7] * values[9]
+        )
+        inverse[12] = (
+            -values[4] * values[9] * values[14] +
+                values[4] * values[10] * values[13] +
+                values[8] * values[5] * values[14] -
+                values[8] * values[6] * values[13] -
+                values[12] * values[5] * values[10] +
+                values[12] * values[6] * values[9]
+        )
+        inverse[1] = (
+            -values[1] * values[10] * values[15] +
+                values[1] * values[11] * values[14] +
+                values[9] * values[2] * values[15] -
+                values[9] * values[3] * values[14] -
+                values[13] * values[2] * values[11] +
+                values[13] * values[3] * values[10]
+        )
+        inverse[5] = (
+            values[0] * values[10] * values[15] -
+                values[0] * values[11] * values[14] -
+                values[8] * values[2] * values[15] +
+                values[8] * values[3] * values[14] +
+                values[12] * values[2] * values[11] -
+                values[12] * values[3] * values[10]
+        )
+        inverse[9] = (
+            -values[0] * values[9] * values[15] +
+                values[0] * values[11] * values[13] +
+                values[8] * values[1] * values[15] -
+                values[8] * values[3] * values[13] -
+                values[12] * values[1] * values[11] +
+                values[12] * values[3] * values[9]
+        )
+        inverse[13] = (
+            values[0] * values[9] * values[14] -
+                values[0] * values[10] * values[13] -
+                values[8] * values[1] * values[14] +
+                values[8] * values[2] * values[13] +
+                values[12] * values[1] * values[10] -
+                values[12] * values[2] * values[9]
+        )
+        inverse[2] = (
+            values[1] * values[6] * values[15] -
+                values[1] * values[7] * values[14] -
+                values[5] * values[2] * values[15] +
+                values[5] * values[3] * values[14] +
+                values[13] * values[2] * values[7] -
+                values[13] * values[3] * values[6]
+        )
+        inverse[6] = (
+            -values[0] * values[6] * values[15] +
+                values[0] * values[7] * values[14] +
+                values[4] * values[2] * values[15] -
+                values[4] * values[3] * values[14] -
+                values[12] * values[2] * values[7] +
+                values[12] * values[3] * values[6]
+        )
+        inverse[10] = (
+            values[0] * values[5] * values[15] -
+                values[0] * values[7] * values[13] -
+                values[4] * values[1] * values[15] +
+                values[4] * values[3] * values[13] +
+                values[12] * values[1] * values[7] -
+                values[12] * values[3] * values[5]
+        )
+        inverse[14] = (
+            -values[0] * values[5] * values[14] +
+                values[0] * values[6] * values[13] +
+                values[4] * values[1] * values[14] -
+                values[4] * values[2] * values[13] -
+                values[12] * values[1] * values[6] +
+                values[12] * values[2] * values[5]
+        )
+        inverse[3] = (
+            -values[1] * values[6] * values[11] +
+                values[1] * values[7] * values[10] +
+                values[5] * values[2] * values[11] -
+                values[5] * values[3] * values[10] -
+                values[9] * values[2] * values[7] +
+                values[9] * values[3] * values[6]
+        )
+        inverse[7] = (
+            values[0] * values[6] * values[11] -
+                values[0] * values[7] * values[10] -
+                values[4] * values[2] * values[11] +
+                values[4] * values[3] * values[10] +
+                values[8] * values[2] * values[7] -
+                values[8] * values[3] * values[6]
+        )
+        inverse[11] = (
+            -values[0] * values[5] * values[11] +
+                values[0] * values[7] * values[9] +
+                values[4] * values[1] * values[11] -
+                values[4] * values[3] * values[9] -
+                values[8] * values[1] * values[7] +
+                values[8] * values[3] * values[5]
+        )
+        inverse[15] = (
+            values[0] * values[5] * values[10] -
+                values[0] * values[6] * values[9] -
+                values[4] * values[1] * values[10] +
+                values[4] * values[2] * values[9] +
+                values[8] * values[1] * values[6] -
+                values[8] * values[2] * values[5]
+        )
+
+        let determinant = (
+            values[0] * inverse[0] +
+                values[1] * inverse[4] +
+                values[2] * inverse[8] +
+                values[3] * inverse[12]
+        )
+        if Math.abs(determinant) <= Math.epsilon() {
+            return Mat4.identity()
+        }
+
+        let scale = 1.0 / determinant
+        return Mat4(
+            Vec4(inverse[0] * scale, inverse[1] * scale, inverse[2] * scale, inverse[3] * scale),
+            Vec4(inverse[4] * scale, inverse[5] * scale, inverse[6] * scale, inverse[7] * scale),
+            Vec4(inverse[8] * scale, inverse[9] * scale, inverse[10] * scale, inverse[11] * scale),
+            Vec4(inverse[12] * scale, inverse[13] * scale, inverse[14] * scale, inverse[15] * scale)
+        )
+    }
+}
+
+extend Mat4 {
+    static func identity() Mat4 {
+        return Mat4()
+    }
+
+    static func zero() Mat4 {
+        return Mat4(0.0)
+    }
+
+    static func translation(value:Vec3) Mat4 {
+        return Mat4(
+            Vec4(1.0, 0.0, 0.0, 0.0),
+            Vec4(0.0, 1.0, 0.0, 0.0),
+            Vec4(0.0, 0.0, 1.0, 0.0),
+            Vec4(value, 1.0)
+        )
+    }
+
+    static func scaling(value:Vec3) Mat4 {
+        return Mat4(
+            Vec4(value.x, 0.0, 0.0, 0.0),
+            Vec4(0.0, value.y, 0.0, 0.0),
+            Vec4(0.0, 0.0, value.z, 0.0),
+            Vec4(0.0, 0.0, 0.0, 1.0)
+        )
+    }
+
+    static func rotation(radians:float, axis:Vec3) Mat4 {
+        let normalized_axis = axis.normalized()
+        let cosine = Math.cos(radians)
+        let sine = Math.sin(radians)
+        let complement = 1.0 - cosine
+
+        return Mat4(
+            Vec4(
+            complement * normalized_axis.x * normalized_axis.x + cosine,
+            complement * normalized_axis.x * normalized_axis.y + sine * normalized_axis.z,
+            complement * normalized_axis.x * normalized_axis.z - sine * normalized_axis.y,
+            0.0
+        ),
+            Vec4(
+            complement * normalized_axis.x * normalized_axis.y - sine * normalized_axis.z,
+            complement * normalized_axis.y * normalized_axis.y + cosine,
+            complement * normalized_axis.y * normalized_axis.z + sine * normalized_axis.x,
+            0.0
+        ),
+            Vec4(
+            complement * normalized_axis.x * normalized_axis.z + sine * normalized_axis.y,
+            complement * normalized_axis.y * normalized_axis.z - sine * normalized_axis.x,
+            complement * normalized_axis.z * normalized_axis.z + cosine,
+            0.0
+        ),
+            Vec4(0.0, 0.0, 0.0, 1.0)
+        )
+    }
+
+    static func transform(translation:Vec3, rotation:Mat3, scaling:Vec3) Mat4 {
+        return Mat4(
+            Vec4(rotation.x.multiply(scaling.x), 0.0),
+            Vec4(rotation.y.multiply(scaling.y), 0.0),
+            Vec4(rotation.z.multiply(scaling.z), 0.0),
+            Vec4(translation, 1.0)
+        )
+    }
+
+    static func perspective(
+        vertical_fov_radians:float,
+        aspect_ratio:float,
+        near_plane:float,
+        far_plane:float
+    ) Mat4 {
+        let focal_length = 1.0 / Math.tan(vertical_fov_radians * 0.5)
+        let depth_range = near_plane - far_plane
+        return Mat4(
+            Vec4(focal_length / aspect_ratio, 0.0, 0.0, 0.0),
+            Vec4(0.0, focal_length, 0.0, 0.0),
+            Vec4(0.0, 0.0, (far_plane + near_plane) / depth_range, -1.0),
+            Vec4(0.0, 0.0, (2.0 * far_plane * near_plane) / depth_range, 0.0)
+        )
+    }
+
+    static func orthographic(
+        left:float,
+        right:float,
+        bottom:float,
+        top:float,
+        near_plane:float,
+        far_plane:float
+    ) Mat4 {
+        return Mat4(
+            Vec4(2.0 / (right - left), 0.0, 0.0, 0.0),
+            Vec4(0.0, 2.0 / (top - bottom), 0.0, 0.0),
+            Vec4(0.0, 0.0, -2.0 / (far_plane - near_plane), 0.0),
+            Vec4(
+            - (right + left) / (right - left),
+            - (top + bottom) / (top - bottom),
+            - (far_plane + near_plane) / (far_plane - near_plane),
+            1.0
+        )
+        )
+    }
+
+    static func look_at(eye:Vec3, target:Vec3, up:Vec3) Mat4 {
+        let front = target.subtract(eye).normalized()
+        let right = front.cross(up).normalized()
+        let camera_up = right.cross(front)
+        return Mat4(
+            Vec4(right.x, camera_up.x, -front.x, 0.0),
+            Vec4(right.y, camera_up.y, -front.y, 0.0),
+            Vec4(right.z, camera_up.z, -front.z, 0.0),
+            Vec4(-right.dot(eye), -camera_up.dot(eye), front.dot(eye), 1.0)
+        )
+    }
+}

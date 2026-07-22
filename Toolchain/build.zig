@@ -3099,9 +3099,26 @@ pub fn build(b: *std.Build) void {
     file_namespaces_command.addArgs(&.{ "run", "Smokes/FileNamespaces/Main.sx" });
     file_namespaces_command.expectStdOutEqual(hostText(b, "42\n"));
 
-    const standard_library_output = "1065361344\n1152851127339773951\n508277857751731680\n6637030065269067181\n7345633470618427510\n8792660973527785782\n1082269761\n1152992998833853505\n1954144627577988649\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n1301891922867780472\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n";
+    const math_command = b.addRunArtifact(executable);
+    math_command.step.dependOn(&file_namespaces_command.step);
+    math_command.addArgs(&.{ "run", "Smokes/Math.sx" });
+    math_command.expectStdOutEqual(hostText(b, ""));
+
+    const mat3_row_error_command = b.addRunArtifact(executable);
+    mat3_row_error_command.step.dependOn(&math_command.step);
+    mat3_row_error_command.addArgs(&.{ "run", "Smokes/MathErrors/Mat3Row.sx" });
+    mat3_row_error_command.expectExitCode(1);
+    mat3_row_error_command.expectStdErrMatch("runtime error: Mat3 row index out of bounds\n");
+
+    const mat4_row_error_command = b.addRunArtifact(executable);
+    mat4_row_error_command.step.dependOn(&mat3_row_error_command.step);
+    mat4_row_error_command.addArgs(&.{ "run", "Smokes/MathErrors/Mat4Row.sx" });
+    mat4_row_error_command.expectExitCode(1);
+    mat4_row_error_command.expectStdErrMatch("runtime error: Mat4 row index out of bounds\n");
+
+    const standard_library_output = "1065361344\n1152851127339773951\n508277857751731680\n6637030065269067181\n7345633470618427510\n8792660973527785782\n1082269761\n1152992998833853505\n1954144627577988649\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n1301891922867780472\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n";
     const standard_library_command = b.addRunArtifact(executable);
-    standard_library_command.step.dependOn(&file_namespaces_command.step);
+    standard_library_command.step.dependOn(&mat4_row_error_command.step);
     standard_library_command.addArgs(&.{ "run", "Smokes/StandardLibrary/Main.sx" });
     standard_library_command.expectStdOutEqual(hostText(
         b,

@@ -39,6 +39,7 @@ pub const Symbol = struct {
     is_static: bool = false,
     is_public: bool = false,
     visibility: ?Ast.MemberVisibility = null,
+    alias_target_kind: ?Kind = null,
     rename_group: usize,
 };
 
@@ -184,7 +185,6 @@ const Builder = struct {
     }
 
     fn addProgramDeclarations(self: *Builder, ast: Ast.Program, program: Semantic.Program) !void {
-        try self.addUseSymbols();
         for (ast.enums, program.enums) |ast_enum, enumeration| {
             const enum_id = try self.addSymbol(
                 sourceSpelling(ast_enum.name),
@@ -291,6 +291,7 @@ const Builder = struct {
             self.symbols.items[function_id].is_public = function.is_public;
             try self.addParameters(function.parameters, semantic_function.parameters);
         }
+        try self.addUseSymbols();
     }
 
     fn addUseSymbols(self: *Builder) !void {
@@ -308,7 +309,38 @@ const Builder = struct {
             );
             const id = try self.addSymbol(name, key, kind, position, try useDetail(self.allocator, use_value, name));
             self.symbols.items[id].is_public = use_value.is_public;
+            self.symbols.items[id].alias_target_kind = switch (use_value.target) {
+                .type => .type,
+                .declaration => |path| self.declarationKind(file.module_index, path) orelse if (self.moduleNamed(path)) .module else null,
+            };
         };
+    }
+
+    fn declarationKind(self: *const Builder, current_module: usize, path: []const u8) ?Kind {
+        const target_module, const name = if (self.moduleIndexNamed(path)) |module_index|
+            .{ module_index, sourceSpelling(path) }
+        else if (std.mem.lastIndexOfScalar(u8, path, '.')) |separator|
+            .{ self.moduleIndexNamed(path[0..separator]) orelse return null, path[separator + 1 ..] }
+        else
+            .{ current_module, path };
+        var result: ?Kind = null;
+        for (self.files) |file| {
+            if (file.module_index != target_module) continue;
+            for (file.program.structures) |value| if (std.mem.eql(u8, sourceSpelling(value.name), name))
+                trySetDeclarationKind(&result, .type) catch return null;
+            for (file.program.enums) |value| if (std.mem.eql(u8, sourceSpelling(value.name), name))
+                trySetDeclarationKind(&result, .enumeration) catch return null;
+            for (file.program.protocols) |value| if (std.mem.eql(u8, sourceSpelling(value.name), name))
+                trySetDeclarationKind(&result, .protocol) catch return null;
+            for (file.program.functions) |value| if (std.mem.eql(u8, sourceSpelling(value.name), name))
+                trySetDeclarationKind(&result, .function) catch return null;
+        }
+        return result;
+    }
+
+    fn moduleIndexNamed(self: *const Builder, name: []const u8) ?usize {
+        for (self.project.modules, 0..) |module, index| if (std.mem.eql(u8, module.name, name)) return index;
+        return null;
     }
 
     fn moduleNamed(self: *const Builder, name: []const u8) bool {
@@ -621,6 +653,24 @@ const Builder = struct {
                 const token = lexer.next() catch break;
                 if (token.tag == .end) break;
                 if (token.tag != .identifier or self.hasOccurrence(token.position)) continue;
+                var local_alias: ?usize = null;
+                var local_alias_ambiguous = false;
+                for (self.symbols.items) |symbol| {
+                    if ((symbol.kind != .alias and symbol.kind != .module) or symbol.definition.file != file or
+                        !std.mem.eql(u8, sourceSpelling(symbol.name), token.lexeme))
+                    {
+                        continue;
+                    }
+                    if (local_alias != null and local_alias.? != symbol.id) {
+                        local_alias_ambiguous = true;
+                        break;
+                    }
+                    local_alias = symbol.id;
+                }
+                if (!local_alias_ambiguous) if (local_alias) |id| {
+                    try self.addOccurrence(id, token.position, false);
+                    continue;
+                };
                 var match: ?usize = null;
                 var ambiguous = false;
                 for (self.symbols.items) |symbol| {
@@ -644,6 +694,11 @@ const Builder = struct {
         return false;
     }
 };
+
+fn trySetDeclarationKind(result: *?Kind, kind: Kind) error{Ambiguous}!void {
+    if (result.* != null and result.*.? != kind) return error.Ambiguous;
+    result.* = kind;
+}
 
 pub fn build(
     allocator: Allocator,

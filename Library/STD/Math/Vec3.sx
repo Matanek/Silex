@@ -1,0 +1,167 @@
+use STD.Math
+
+public struct Vec3 {
+    var x:float
+    var y:float
+    var z:float
+
+    init() {}
+
+    init(value:float) {
+        self.x = value
+        self.y = value
+        self.z = value
+    }
+
+    init(x:float, y:float, z:float) {
+        self.x = x
+        self.y = y
+        self.z = z
+    }
+
+    func add(other:Vec3) Vec3 {
+        return Vec3(self.x + other.x, self.y + other.y, self.z + other.z)
+    }
+
+    func subtract(other:Vec3) Vec3 {
+        return Vec3(self.x - other.x, self.y - other.y, self.z - other.z)
+    }
+
+    func multiply(other:Vec3) Vec3 {
+        return Vec3(self.x * other.x, self.y * other.y, self.z * other.z)
+    }
+
+    func multiply(scalar:float) Vec3 {
+        return Vec3(self.x * scalar, self.y * scalar, self.z * scalar)
+    }
+
+    func divide(other:Vec3) Vec3 {
+        return Vec3(self.x / other.x, self.y / other.y, self.z / other.z)
+    }
+
+    func divide(scalar:float) Vec3 {
+        return Vec3(self.x / scalar, self.y / scalar, self.z / scalar)
+    }
+
+    func negated() Vec3 {
+        return Vec3(-self.x, -self.y, -self.z)
+    }
+
+    func dot(other:Vec3) float {
+        return self.x * other.x + self.y * other.y + self.z * other.z
+    }
+
+    func cross(other:Vec3) Vec3 {
+        return Vec3(
+            self.y * other.z - self.z * other.y,
+            self.z * other.x - self.x * other.z,
+            self.x * other.y - self.y * other.x
+        )
+    }
+
+    func length_squared() float {
+        return self.dot(self)
+    }
+
+    func length() float {
+        return Math.sqrt(self.length_squared())
+    }
+
+    func distance(other:Vec3) float {
+        return self.subtract(other).length()
+    }
+
+    func normalized() Vec3 {
+        let length = self.length()
+        if length <= Math.epsilon() {
+            return Vec3.zero()
+        }
+        return self.divide(length)
+    }
+
+    func lerp(other:Vec3, amount:float) Vec3 {
+        return Vec3(
+            Math.lerp(self.x, other.x, amount),
+            Math.lerp(self.y, other.y, amount),
+            Math.lerp(self.z, other.z, amount)
+        )
+    }
+
+    func mix(other:Vec3, amount:float) Vec3 {
+        return self.lerp(other, amount)
+    }
+
+    func minimum(other:Vec3) Vec3 {
+        return Vec3(
+            Math.min(self.x, other.x),
+            Math.min(self.y, other.y),
+            Math.min(self.z, other.z)
+        )
+    }
+
+    func maximum(other:Vec3) Vec3 {
+        return Vec3(
+            Math.max(self.x, other.x),
+            Math.max(self.y, other.y),
+            Math.max(self.z, other.z)
+        )
+    }
+
+    func clamped(minimum:Vec3, maximum:Vec3) Vec3 {
+        return Vec3(
+            Math.clamp(self.x, minimum.x, maximum.x),
+            Math.clamp(self.y, minimum.y, maximum.y),
+            Math.clamp(self.z, minimum.z, maximum.z)
+        )
+    }
+
+    func nearly_equal(other:Vec3) bool {
+        return self.nearly_equal(other, Math.epsilon())
+    }
+
+    func nearly_equal(other:Vec3, tolerance:float) bool {
+        return Math.nearly_equal(
+            self.x,
+            other.x,
+            tolerance
+        ) && Math.nearly_equal(
+            self.y,
+            other.y,
+            tolerance
+        ) && Math.nearly_equal(self.z, other.z, tolerance)
+    }
+}
+
+extend Vec3 {
+    static func zero() Vec3 {
+        return Vec3()
+    }
+
+    static func one() Vec3 {
+        return Vec3(1.0)
+    }
+
+    static func left() Vec3 {
+        return Vec3(-1.0, 0.0, 0.0)
+    }
+
+    static func right() Vec3 {
+        return Vec3(1.0, 0.0, 0.0)
+    }
+
+    static func up() Vec3 {
+        return Vec3(0.0, 1.0, 0.0)
+    }
+
+    static func down() Vec3 {
+        return Vec3(0.0, -1.0, 0.0)
+    }
+
+    static func front() Vec3 {
+        return Vec3(0.0, 0.0, -1.0)
+    }
+
+    static func back() Vec3 {
+        return Vec3(0.0, 0.0, 1.0)
+    }
+}

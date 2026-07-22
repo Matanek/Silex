@@ -1,0 +1,215 @@
+use STD.Math
+use STD.Math.Vec2 as Vec2
+use STD.Math.Vec3 as Vec3
+use STD.Math.Vec4 as Vec4
+use STD.Math.Quat as Quat
+use STD.Math.Mat3 as Mat3
+use STD.Math.Mat4 as Mat4
+
+func main() {
+    assert(Math.nearly_equal(Math.pi(), 3.1415927), "pi")
+    assert(Math.nearly_equal(Math.half_pi(), 1.5707964), "half pi")
+    assert(Math.nearly_equal(Math.two_pi(), 6.2831855), "two pi")
+    assert(Math.epsilon() == 0.000001, "epsilon")
+
+    assert(Math.nearly_equal(Math.radians(180.0), Math.pi()), "degrees to radians")
+    assert(Math.nearly_equal(Math.degrees(Math.pi()), 180.0), "radians to degrees")
+
+    assert(Math.min(-2.0, 3.0) == -2.0, "minimum")
+    assert(Math.max(-2.0, 3.0) == 3.0, "maximum")
+    assert(Math.clamp(2.0, -1.0, 1.0) == 1.0, "clamp")
+    assert(Math.saturate(-0.5) == 0.0, "saturate low")
+    assert(Math.saturate(1.5) == 1.0, "saturate high")
+    assert(Math.abs(-4.0) == 4.0, "absolute value")
+    assert(Math.lerp(10.0, 20.0, 0.25) == 12.5, "linear interpolation")
+    assert(Math.mix(10.0, 20.0, 0.25) == 12.5, "mix")
+    assert(Math.nearly_equal(1.0, 1.0000005), "default tolerance")
+    assert(!Math.nearly_equal(1.0, 1.01, 0.001), "explicit tolerance")
+
+    assert(Math.sqrt(25.0) == 5.0, "square root")
+    assert(Math.nearly_equal(Math.sin(Math.half_pi()), 1.0), "sine")
+    assert(Math.nearly_equal(Math.cos(0.0), 1.0), "cosine")
+    assert(Math.nearly_equal(Math.tan(Math.radians(45.0)), 1.0), "tangent")
+    assert(Math.nearly_equal(Math.asin(1.0), Math.half_pi()), "arc sine")
+    assert(Math.nearly_equal(Math.atan2(1.0, 0.0), Math.half_pi()), "two-argument arc tangent")
+
+    let invalid = Math.sqrt(-1.0)
+    assert(invalid != invalid, "negative square root returns NaN")
+
+    let vector2 = Math.Vec2(3.0, 4.0)
+    assert(vector2.length() == 5.0, "Vec2 through parent namespace")
+    assert(Vec2.one() == Vec2(1.0), "direct Vec2 import")
+    assert(Vec2.left().add(Vec2.right()) == Vec2.zero(), "Vec2 directions")
+    assert(Vec2.up().add(Vec2.down()) == Vec2.zero(), "Vec2 vertical directions")
+    assert(vector2.add(Vec2(1.0, 2.0)) == Vec2(4.0, 6.0), "Vec2 addition")
+    assert(vector2.subtract(Vec2(1.0, 2.0)) == Vec2(2.0, 2.0), "Vec2 subtraction")
+    assert(vector2.multiply(Vec2(2.0, 3.0)) == Vec2(6.0, 12.0), "Vec2 component multiplication")
+    assert(vector2.multiply(2.0) == Vec2(6.0, 8.0), "Vec2 scalar multiplication")
+    assert(vector2.divide(Vec2(3.0, 2.0)) == Vec2(1.0, 2.0), "Vec2 component division")
+    assert(vector2.divide(2.0) == Vec2(1.5, 2.0), "Vec2 scalar division")
+    assert(vector2.negated() == Vec2(-3.0, -4.0), "Vec2 negation")
+    assert(vector2.dot(Vec2(2.0, 1.0)) == 10.0, "Vec2 dot product")
+    assert(vector2.length_squared() == 25.0, "Vec2 squared length")
+    assert(vector2.distance(Vec2.zero()) == 5.0, "Vec2 distance")
+    assert(vector2.normalized().nearly_equal(Vec2(0.6, 0.8)), "Vec2 normalization")
+    assert(Vec2.zero().normalized() == Vec2.zero(), "zero Vec2 normalization")
+    assert(Vec2.zero().lerp(Vec2(2.0), 0.25) == Vec2(0.5), "Vec2 interpolation")
+    assert(Vec2.zero().mix(Vec2(2.0), 0.25) == Vec2(0.5), "Vec2 mix")
+    assert(Vec2(1.0, 4.0).minimum(Vec2(2.0, 3.0)) == Vec2(1.0, 3.0), "Vec2 minimum")
+    assert(Vec2(1.0, 4.0).maximum(Vec2(2.0, 3.0)) == Vec2(2.0, 4.0), "Vec2 maximum")
+    assert(Vec2(-2.0, 3.0).clamped(Vec2(-1.0), Vec2.one()) == Vec2(-1.0, 1.0), "Vec2 clamp")
+    assert(!Vec2.zero().nearly_equal(Vec2(0.01), 0.001), "Vec2 explicit tolerance")
+
+    let vector3 = Math.Vec3(1.0, 0.0, 0.0)
+    assert(Vec3.one() == Vec3(1.0), "direct Vec3 import")
+    assert(Vec3.left().add(Vec3.right()) == Vec3.zero(), "Vec3 horizontal directions")
+    assert(Vec3.up().add(Vec3.down()) == Vec3.zero(), "Vec3 vertical directions")
+    assert(Vec3.front().add(Vec3.back()) == Vec3.zero(), "Vec3 depth directions")
+    assert(vector3.cross(Math.Vec3.up()) == Vec3(0.0, 0.0, 1.0), "Vec3 cross")
+    assert(Vec3(2.0, 0.0, 0.0).normalized() == Vec3.right(), "Vec3 normalization")
+    assert(Vec3.zero().normalized() == Vec3.zero(), "zero Vec3 normalization")
+
+    let vector4 = Math.Vec4(vector3, 1.0)
+    assert(Vec4.one() == Vec4(1.0), "direct Vec4 import")
+    assert(
+        Vec4.unit_x().add(Vec4.unit_y()).add(Vec4.unit_z()).add(Vec4.unit_w()) == Vec4.one(),
+        "Vec4 units"
+    )
+    assert(vector4.xyz() == vector3, "Vec4 xyz")
+    assert(Vec4(0.0, 3.0, 0.0, 4.0).length() == 5.0, "Vec4 length")
+    assert(Vec4.zero().normalized() == Vec4.zero(), "zero Vec4 normalization")
+
+    let matrix3 = Math.Mat3(
+        Vec3(1.0, 2.0, 3.0),
+        Vec3(4.0, 5.0, 6.0),
+        Vec3(7.0, 8.0, 10.0)
+    )
+    assert(Mat3.identity().determinant() == 1.0, "direct Mat3 import")
+    assert(Math.Mat3(2.0).multiply(Vec3.one()) == Vec3(2.0), "Mat3 diagonal vector multiplication")
+    assert(matrix3.row(1) == Vec3(2.0, 5.0, 8.0), "Mat3 row")
+    assert(matrix3.transposed().x == Vec3(1.0, 4.0, 7.0), "Mat3 transpose")
+    assert(matrix3.determinant() == -3.0, "Mat3 determinant")
+    assert(
+        matrix3.multiply(matrix3.inverted()).x.nearly_equal(Vec3.right()),
+        "Mat3 inverse first column"
+    )
+    assert(
+        matrix3.multiply(matrix3.inverted()).y.nearly_equal(Vec3.up()),
+        "Mat3 inverse second column"
+    )
+    assert(
+        matrix3.multiply(matrix3.inverted()).z.nearly_equal(Vec3.back()),
+        "Mat3 inverse third column"
+    )
+    assert(Mat3.zero().inverted() == Mat3.identity(), "singular Mat3 inverse")
+    assert(Mat3.identity().add(Mat3.identity()) == Mat3(2.0), "Mat3 addition")
+    assert(Mat3(2.0).subtract(Mat3.identity()) == Mat3.identity(), "Mat3 subtraction")
+    assert(Mat3.identity().multiply(3.0) == Mat3(3.0), "Mat3 scalar multiplication")
+
+    let identity_quaternion = Math.Quat.identity()
+    assert(Quat().w == 1.0, "direct Quat import")
+    assert(
+        identity_quaternion.add(identity_quaternion) == Quat(0.0, 0.0, 0.0, 2.0),
+        "quaternion addition"
+    )
+    assert(
+        identity_quaternion.subtract(identity_quaternion) == Quat(0.0, 0.0, 0.0, 0.0),
+        "quaternion subtraction"
+    )
+    assert(identity_quaternion.multiply(2.0).w == 2.0, "quaternion scalar multiplication")
+    assert(
+        identity_quaternion.multiply(identity_quaternion) == identity_quaternion,
+        "quaternion multiplication"
+    )
+    assert(
+        Quat(1.0, 2.0, 3.0, 4.0).conjugated() == Quat(-1.0, -2.0, -3.0, 4.0),
+        "quaternion conjugate"
+    )
+    assert(identity_quaternion.dot(identity_quaternion) == 1.0, "quaternion dot product")
+    assert(identity_quaternion.length_squared() == 1.0, "quaternion squared length")
+    assert(identity_quaternion.length() == 1.0, "quaternion length")
+    assert(Quat(0.0, 0.0, 0.0, 2.0).normalized() == identity_quaternion, "quaternion normalization")
+    assert(
+        Quat(0.0, 0.0, 0.0, 0.0).normalized() == identity_quaternion,
+        "zero quaternion normalization"
+    )
+    assert(Quat(0.0, 0.0, 0.0, 0.0).inverted() == identity_quaternion, "zero quaternion inverse")
+
+    let quarter_turn = Quat.angle_axis(Math.half_pi(), Vec3.back())
+    assert(quarter_turn.rotate(Vec3.right()).nearly_equal(Vec3.up()), "quaternion vector rotation")
+    assert(
+        quarter_turn.to_mat3().multiply(Vec3.right()).nearly_equal(Vec3.up()),
+        "quaternion matrix conversion"
+    )
+    let quaternion_product = quarter_turn.multiply(quarter_turn.inverted())
+    assert(Math.nearly_equal(quaternion_product.x, 0.0), "quaternion inverse x")
+    assert(Math.nearly_equal(quaternion_product.y, 0.0), "quaternion inverse y")
+    assert(Math.nearly_equal(quaternion_product.z, 0.0), "quaternion inverse z")
+    assert(Math.nearly_equal(quaternion_product.w, 1.0), "quaternion inverse w")
+
+    let point = Math.Vec4(1.0, 2.0, 3.0, 1.0)
+    assert(Mat4.identity().multiply(point) == point, "direct Mat4 import")
+    assert(Mat4(Mat3(2.0)).z == Vec4(0.0, 0.0, 2.0, 0.0), "Mat4 from Mat3")
+    assert(
+        Math.Mat4(2.0).multiply(point) == Vec4(2.0, 4.0, 6.0, 2.0),
+        "Mat4 diagonal vector multiplication"
+    )
+    assert(Mat4.identity().row(2) == Vec4.unit_z(), "Mat4 row")
+    assert(Mat4.identity().transposed() == Mat4.identity(), "Mat4 transpose")
+    assert(Mat4.identity().add(Mat4.identity()) == Mat4(2.0), "Mat4 addition")
+    assert(Mat4(2.0).subtract(Mat4.identity()) == Mat4.identity(), "Mat4 subtraction")
+    assert(Mat4.identity().multiply(3.0) == Mat4(3.0), "Mat4 scalar multiplication")
+    assert(Mat4.identity().multiply(Mat4(2.0)) == Mat4(2.0), "Mat4 matrix multiplication")
+    assert(Mat4.zero().inverted() == Mat4.identity(), "singular Mat4 inverse")
+
+    let translation = Mat4.translation(Vec3(2.0, 3.0, 4.0))
+    assert(translation.multiply(point) == Vec4(3.0, 5.0, 7.0, 1.0), "translation matrix")
+    assert(
+        translation.multiply(translation.inverted()).x.nearly_equal(Vec4.unit_x()),
+        "Mat4 inverse first column"
+    )
+    assert(
+        translation.multiply(translation.inverted()).w.nearly_equal(Vec4.unit_w()),
+        "Mat4 inverse fourth column"
+    )
+    assert(
+        Mat4.scaling(Vec3(2.0, 3.0, 4.0)).multiply(point) == Vec4(2.0, 6.0, 12.0, 1.0),
+        "scaling matrix"
+    )
+    assert(
+        Mat4.rotation(
+        Math.half_pi(),
+        Vec3.back()
+    ).multiply(Vec4(Vec3.right(), 1.0)).xyz().nearly_equal(Vec3.up()),
+        "rotation matrix"
+    )
+
+    let transform = Mat4.transform(Vec3(2.0, 3.0, 4.0), quarter_turn.to_mat3(), Vec3(2.0))
+    assert(
+        transform.multiply(Vec4(Vec3.right(), 1.0)).xyz().nearly_equal(Vec3(2.0, 5.0, 4.0)),
+        "composed transform"
+    )
+    let inverse_transform = transform.multiply(transform.inverted())
+    assert(inverse_transform.x.nearly_equal(Vec4.unit_x()), "transform inverse first column")
+    assert(inverse_transform.y.nearly_equal(Vec4.unit_y()), "transform inverse second column")
+    assert(inverse_transform.z.nearly_equal(Vec4.unit_z()), "transform inverse third column")
+    assert(inverse_transform.w.nearly_equal(Vec4.unit_w()), "transform inverse fourth column")
+
+    let perspective = Mat4.perspective(Math.half_pi(), 2.0, 1.0, 11.0)
+    assert(Math.nearly_equal(perspective.x.x, 0.5), "perspective horizontal scale")
+    assert(Math.nearly_equal(perspective.y.y, 1.0), "perspective vertical scale")
+    assert(Math.nearly_equal(perspective.z.z, -1.2), "perspective depth scale")
+    assert(Math.nearly_equal(perspective.w.z, -2.2), "perspective depth translation")
+
+    let orthographic = Mat4.orthographic(-2.0, 2.0, -1.0, 1.0, 1.0, 11.0)
+    assert(Math.nearly_equal(orthographic.x.x, 0.5), "orthographic horizontal scale")
+    assert(Math.nearly_equal(orthographic.y.y, 1.0), "orthographic vertical scale")
+    assert(Math.nearly_equal(orthographic.z.z, -0.2), "orthographic depth scale")
+    assert(Math.nearly_equal(orthographic.w.z, -1.2), "orthographic depth translation")
+
+    let view = Mat4.look_at(Vec3.zero(), Vec3.front(), Vec3.up())
+    assert(view.x.nearly_equal(Vec4.unit_x()), "look-at first column")
+    assert(view.y.nearly_equal(Vec4.unit_y()), "look-at second column")
+    assert(view.z.nearly_equal(Vec4.unit_z()), "look-at third column")
+    assert(view.w.nearly_equal(Vec4.unit_w()), "look-at fourth column")
+}

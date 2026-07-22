@@ -1619,11 +1619,12 @@ fn semanticTokenKind(
     source: []const u8,
     end_offset: usize,
 ) ?SemanticTokenKind {
-    if (followedByInvocation(source, end_offset)) return switch (symbol.kind) {
+    const kind = if (symbol.kind == .alias) symbol.alias_target_kind orelse return null else symbol.kind;
+    if (followedByInvocation(source, end_offset)) return switch (kind) {
         .method, .requirement => if (symbol.is_static) .function else .method,
         else => .function,
     };
-    return switch (symbol.kind) {
+    return switch (kind) {
         .module => .namespace,
         .type, .enumeration, .protocol, .type_parameter => .type,
         .variant => .enum_member,
@@ -1633,7 +1634,7 @@ fn semanticTokenKind(
         .field => .property,
         .parameter => .parameter,
         .variable, .binding => .variable,
-        .alias => null,
+        .alias => unreachable,
     };
 }
 
@@ -2728,12 +2729,13 @@ fn appendModuleExportCompletion(
 ) !void {
     const label = try std.fmt.allocPrint(allocator, "{s}.{s}", .{ qualifier, name });
     if (containsCompletion(items.items, label)) return;
+    const insertion = try allocator.dupe(u8, name);
     try items.append(allocator, .{
         .label = label,
         .kind = kind,
         .detail = detail,
-        .insertText = name,
-        .filterText = name,
+        .insertText = insertion,
+        .filterText = insertion,
     });
 }
 
@@ -2774,9 +2776,9 @@ fn localModuleCompletionItems(
         return try allocator.alloc(CompletionItem, 0);
 
     var items: std.ArrayList(CompletionItem) = .empty;
-    try collectModules(allocator, io, project_root, "", prefix, "Silex local module", &items);
+    try collectRootModules(allocator, io, project_root, prefix, "Silex local module", &items);
     if (StandardLibrary.root(allocator, io) catch null) |standard_library_root| {
-        try collectModules(allocator, io, standard_library_root, "", prefix, "Silex standard module", &items);
+        try collectRootModules(allocator, io, standard_library_root, prefix, "Silex standard module", &items);
     }
     std.mem.sort(CompletionItem, items.items, {}, struct {
         fn lessThan(_: void, left: CompletionItem, right: CompletionItem) bool {
@@ -2794,9 +2796,6 @@ fn useCompletionItems(
     prefix: []const u8,
 ) ![]const CompletionItem {
     var items: std.ArrayList(CompletionItem) = .empty;
-    const modules = try localModuleCompletionItems(allocator, io, uri, prefix);
-    try items.appendSlice(allocator, modules);
-
     if (std.mem.lastIndexOfScalar(u8, prefix, '.')) |separator| {
         const qualifier = prefix[0..separator];
         const module_path = try usedModulePath(allocator, source, qualifier) orelse qualifier;
@@ -2812,16 +2811,11 @@ fn useCompletionItems(
             },
             .use_path,
         );
-        for (exports) |candidate| {
-            var duplicate = false;
-            for (items.items) |existing| {
-                if (std.mem.eql(u8, existing.label, candidate.label)) {
-                    duplicate = true;
-                    break;
-                }
-            }
-            if (!duplicate) try items.append(allocator, candidate);
-        }
+        const children = try unqualifiedModuleCompletionItems(allocator, exports);
+        try items.appendSlice(allocator, children);
+    } else {
+        const modules = try localModuleCompletionItems(allocator, io, uri, prefix);
+        try items.appendSlice(allocator, modules);
     }
 
     std.mem.sort(CompletionItem, items.items, {}, struct {
@@ -2832,11 +2826,10 @@ fn useCompletionItems(
     return items.toOwnedSlice(allocator);
 }
 
-fn collectModules(
+fn collectRootModules(
     allocator: Allocator,
     io: Io,
     directory_path: []const u8,
-    module_name: []const u8,
     prefix: []const u8,
     detail: []const u8,
     items: *std.ArrayList(CompletionItem),
@@ -2856,35 +2849,29 @@ fn collectModules(
         }
     }
 
-    if (module_name.len > 0 and std.mem.startsWith(u8, module_name, prefix)) {
-        if (!containsCompletion(items.items, module_name)) try items.append(allocator, .{
-            .label = module_name,
-            .kind = 9,
-            .detail = detail,
-        });
-    }
-
-    for (source_stems.items) |stem| {
-        const source_module = if (module_name.len == 0)
-            stem
-        else
-            try std.fmt.allocPrint(allocator, "{s}.{s}", .{ module_name, stem });
-        if (std.mem.startsWith(u8, source_module, prefix) and !containsCompletion(items.items, source_module)) {
+    for (child_directories.items) |child_name| {
+        if (std.mem.startsWith(u8, child_name, prefix) and !containsCompletion(items.items, child_name)) {
             try items.append(allocator, .{
-                .label = source_module,
+                .label = child_name,
                 .kind = 9,
                 .detail = detail,
+                .insertText = child_name,
+                .filterText = child_name,
             });
         }
     }
 
-    for (child_directories.items) |child_name| {
-        const child_path = try std.fs.path.join(allocator, &.{ directory_path, child_name });
-        const child_module = if (module_name.len == 0)
-            child_name
-        else
-            try std.fmt.allocPrint(allocator, "{s}.{s}", .{ module_name, child_name });
-        try collectModules(allocator, io, child_path, child_module, prefix, detail, items);
+    for (source_stems.items) |stem| {
+        const child_name = firstPathSegment(stem);
+        if (std.mem.startsWith(u8, child_name, prefix) and !containsCompletion(items.items, child_name)) {
+            try items.append(allocator, .{
+                .label = child_name,
+                .kind = 9,
+                .detail = detail,
+                .insertText = child_name,
+                .filterText = child_name,
+            });
+        }
     }
 }
 
@@ -3213,15 +3200,19 @@ test "semantic tokens distinguish namespaces types calls methods and properties"
     });
     const source =
         \\use Math
+        \\use Math.Vec3 as Vec3
         \\use Text
+        \\use Text as Words
         \\struct Configuration { var strict:bool }
         \\func accepts(configuration:Configuration) bool { return configuration.strict }
         \\func main() {
         \\    let expected = Configuration(strict:true)
         \\    let vector = Math.Vec3(1, 2, 3)
         \\    let powered = Math.Vec3.pow(vector)
+        \\    let aliased_powered = Vec3.pow(vector)
         \\    let magnitude = vector.magnitude()
         \\    let normalized = Text.normalize("é", Text.Normalization.nfc())
+        \\    let aliased_normalized = Words.normalize("é", Text.Normalization.nfc())
         \\    print(powered.x)
         \\}
     ;
@@ -3273,11 +3264,34 @@ test "semantic tokens distinguish namespaces types calls methods and properties"
         return error.TestUnexpectedResult;
     try expectSemanticTokenAt(source, tokens.data, constructor, "Configuration".len, .function);
 
+    const type_alias_definition = std.mem.indexOf(u8, source, "as Vec3") orelse
+        return error.TestUnexpectedResult;
+    try expectSemanticTokenAt(
+        source,
+        tokens.data,
+        type_alias_definition + "as ".len,
+        "Vec3".len,
+        .type,
+    );
+    const namespace_alias_definition = std.mem.indexOf(u8, source, "as Words") orelse
+        return error.TestUnexpectedResult;
+    try expectSemanticTokenAt(
+        source,
+        tokens.data,
+        namespace_alias_definition + "as ".len,
+        "Words".len,
+        .namespace,
+    );
+
     const static_call = std.mem.indexOf(u8, source, "Math.Vec3.pow(vector)") orelse
         return error.TestUnexpectedResult;
     try expectSemanticTokenAt(source, tokens.data, static_call, "Math".len, .namespace);
     try expectSemanticTokenAt(source, tokens.data, static_call + "Math.".len, "Vec3".len, .type);
     try expectSemanticTokenAt(source, tokens.data, static_call + "Math.Vec3.".len, "pow".len, .function);
+    const aliased_static_call = std.mem.indexOf(u8, source, "Vec3.pow(vector)") orelse
+        return error.TestUnexpectedResult;
+    try expectSemanticTokenAt(source, tokens.data, aliased_static_call, "Vec3".len, .type);
+    try expectSemanticTokenAt(source, tokens.data, aliased_static_call + "Vec3.".len, "pow".len, .function);
 
     const method_call = std.mem.indexOf(u8, source, "vector.magnitude()") orelse
         return error.TestUnexpectedResult;
@@ -3288,6 +3302,10 @@ test "semantic tokens distinguish namespaces types calls methods and properties"
         return error.TestUnexpectedResult;
     try expectSemanticTokenAt(source, tokens.data, text_call, "Text".len, .namespace);
     try expectSemanticTokenAt(source, tokens.data, text_call + "Text.".len, "normalize".len, .function);
+    const aliased_text_call = std.mem.indexOf(u8, source, "Words.normalize") orelse
+        return error.TestUnexpectedResult;
+    try expectSemanticTokenAt(source, tokens.data, aliased_text_call, "Words".len, .namespace);
+    try expectSemanticTokenAt(source, tokens.data, aliased_text_call + "Words.".len, "normalize".len, .function);
 
     const variant_call = std.mem.indexOf(u8, source, "Text.Normalization.nfc()") orelse
         return error.TestUnexpectedResult;
@@ -3311,6 +3329,64 @@ test "semantic tokens distinguish namespaces types calls methods and properties"
         return error.TestUnexpectedResult;
     try expectSemanticTokenAt(source, tokens.data, field_access, "powered".len, .variable);
     try expectSemanticTokenAt(source, tokens.data, field_access + "powered.".len, "x".len, .property);
+}
+
+test "semantic tokens classify principal type and namespace aliases" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var environ_map = std.process.Environ.Map.init(allocator);
+
+    const path = try SourceGraph.canonicalPath(
+        allocator,
+        std.testing.io,
+        "Smokes/AlgorithmsChooseEmpty.sx",
+    );
+    const source = try Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        path,
+        allocator,
+        .limited(max_message_size),
+    );
+    const snapshot = switch (try Frontend.analyze(
+        allocator,
+        std.testing.io,
+        &environ_map,
+        path,
+        .editor,
+        &.{},
+    )) {
+        .success => |value| value,
+        .failure => return error.TestUnexpectedResult,
+    };
+    const file = snapshotFile(&snapshot, path) orelse return error.TestUnexpectedResult;
+    const tokens = try semanticTokenData(allocator, snapshot.index, file, source, .utf16);
+
+    const namespace_definition = std.mem.indexOf(u8, source, "as Algorithms") orelse
+        return error.TestUnexpectedResult;
+    try expectSemanticTokenAt(
+        source,
+        tokens,
+        namespace_definition + "as ".len,
+        "Algorithms".len,
+        .namespace,
+    );
+    const type_definition = std.mem.indexOf(u8, source, "as Randomizer") orelse
+        return error.TestUnexpectedResult;
+    try expectSemanticTokenAt(
+        source,
+        tokens,
+        type_definition + "as ".len,
+        "Randomizer".len,
+        .type,
+    );
+
+    const type_reference = std.mem.indexOf(u8, source, "Randomizer.create") orelse
+        return error.TestUnexpectedResult;
+    try expectSemanticTokenAt(source, tokens, type_reference, "Randomizer".len, .type);
+    const namespace_reference = std.mem.indexOf(u8, source, "Algorithms.choose") orelse
+        return error.TestUnexpectedResult;
+    try expectSemanticTokenAt(source, tokens, namespace_reference, "Algorithms".len, .namespace);
 }
 
 test "semantic tokens resolve distributed namespaces and intermediate enum types" {
@@ -4133,6 +4209,74 @@ test "struct constructor completion closes fields and exposes overload signature
     try std.testing.expectEqual(@as(usize, 2), signatures.signatures.len);
     try std.testing.expectEqualStrings("init Point(value:int)", signatures.signatures[0].label);
     try std.testing.expectEqualStrings("init Point(x:int, y:int)", signatures.signatures[1].label);
+}
+
+test "use completion proposes one module segment and inserts only that segment" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{ .iterate = true });
+    defer temporary.cleanup();
+
+    try temporary.dir.createDir(std.testing.io, "Library", .default_dir);
+    try temporary.dir.createDir(std.testing.io, "Library/Vectors", .default_dir);
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = "func main() {}\n" });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Library/Math.sx",
+        .data = "public func square(value:int) int { return value * value }\n",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Library/Vectors/Vec3.sx",
+        .data = "public struct Vec3 {}\n",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Library/Console.Session.sx",
+        .data = "public struct Session {}\n",
+    });
+
+    const relative_root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const main_path = try SourceGraph.canonicalPath(
+        allocator,
+        std.testing.io,
+        try std.fs.path.join(allocator, &.{ relative_root, "Main.sx" }),
+    );
+    const uri = try uriFromPath(allocator, main_path);
+
+    const root_items = try useCompletionItems(allocator, std.testing.io, uri, "use Lib", "Lib");
+    try std.testing.expect(containsCompletion(root_items, "Library"));
+    try std.testing.expect(!containsCompletion(root_items, "Library.Math"));
+    for (root_items) |item| {
+        if (!std.mem.eql(u8, item.label, "Library")) continue;
+        try std.testing.expectEqualStrings("Library", item.insertText.?);
+        try std.testing.expectEqualStrings("Library", item.filterText.?);
+    }
+
+    const library_items = try useCompletionItems(allocator, std.testing.io, uri, "use Library.", "Library.");
+    try std.testing.expect(containsCompletion(library_items, "Math"));
+    try std.testing.expect(containsCompletion(library_items, "Vectors"));
+    try std.testing.expect(containsCompletion(library_items, "Console"));
+    try std.testing.expect(!containsCompletion(library_items, "Library.Math"));
+    try std.testing.expect(!containsCompletion(library_items, "Console.Session"));
+    for (library_items) |item| {
+        if (!std.mem.eql(u8, item.label, "Math")) continue;
+        try std.testing.expectEqualStrings("Math", item.insertText.?);
+        try std.testing.expectEqualStrings("Math", item.filterText.?);
+    }
+
+    const filtered_items = try useCompletionItems(allocator, std.testing.io, uri, "use Library.M", "Library.M");
+    try std.testing.expectEqual(@as(usize, 1), filtered_items.len);
+    try std.testing.expectEqualStrings("Math", filtered_items[0].label);
+    try std.testing.expectEqualStrings("Math", filtered_items[0].insertText.?);
+
+    const compact_items = try useCompletionItems(
+        allocator,
+        std.testing.io,
+        uri,
+        "use Library.Console.",
+        "Library.Console.",
+    );
+    try std.testing.expect(containsCompletion(compact_items, "Session"));
+    try std.testing.expect(!containsCompletion(compact_items, "Library.Console.Session"));
 }
 
 test "module completion separates file declarations from child namespaces and expands dotted stems" {

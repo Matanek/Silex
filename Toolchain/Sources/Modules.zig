@@ -491,12 +491,14 @@ pub const Resolver = struct {
         for (self.file_infos) |file| if (file.module_index == module_index) {
             for (file.dependencies.items) |dependency| {
                 if (dependency.module_index != module_index) {
-                    if (self.project.modules[dependency.module_index].package_index ==
-                        self.project.modules[module_index].package_index and
+                    const is_sibling_cycle = states[dependency.module_index] == .visiting and
+                        self.project.modules[dependency.module_index].package_index ==
+                            self.project.modules[module_index].package_index and
                         sameModuleParent(
                             self.project.modules[dependency.module_index].name,
                             self.project.modules[module_index].name,
-                        )) continue;
+                        );
+                    if (is_sibling_cycle) continue;
                     try self.visitModule(dependency.module_index, states, stack, result);
                 }
             }

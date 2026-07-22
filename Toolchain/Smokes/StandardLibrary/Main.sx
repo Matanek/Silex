@@ -1,4 +1,5 @@
 use STD
+use STD.Math
 
 use STD.Randomizer as Randomizer
 
@@ -110,6 +111,7 @@ func main() {
     let clock_is_reset = clock.get_total_seconds() == 0.0 && !clock.is_paused()
     print(clock_is_reset && clock.get_time_scale() == 2.0 && clock.tick() == 0.0)
 
+    print(Math.Vec3(3.0, 4.0, 0.0).length() == Math.sqrt(25.0))
     print(stopwatch..reset()..start().is_running())
     stopwatch.stop()
 }

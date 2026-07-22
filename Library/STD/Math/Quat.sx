@@ -1,0 +1,134 @@
+use STD.Math
+use STD.Math.Vec3 as Vec3
+use STD.Math.Mat3 as Mat3
+
+public struct Quat {
+    var x:float
+    var y:float
+    var z:float
+    var w:float
+
+    init() {
+        self.w = 1.0
+    }
+
+    init(x:float, y:float, z:float, w:float) {
+        self.x = x
+        self.y = y
+        self.z = z
+        self.w = w
+    }
+
+    init(xyz:Vec3, w:float) {
+        self.x = xyz.x
+        self.y = xyz.y
+        self.z = xyz.z
+        self.w = w
+    }
+
+    func add(other:Quat) Quat {
+        return Quat(
+            self.x + other.x,
+            self.y + other.y,
+            self.z + other.z,
+            self.w + other.w
+        )
+    }
+
+    func subtract(other:Quat) Quat {
+        return Quat(
+            self.x - other.x,
+            self.y - other.y,
+            self.z - other.z,
+            self.w - other.w
+        )
+    }
+
+    func multiply(scalar:float) Quat {
+        return Quat(self.x * scalar, self.y * scalar, self.z * scalar, self.w * scalar)
+    }
+
+    func multiply(other:Quat) Quat {
+        return Quat(
+            self.w * other.x + self.x * other.w + self.y * other.z - self.z * other.y,
+            self.w * other.y - self.x * other.z + self.y * other.w + self.z * other.x,
+            self.w * other.z + self.x * other.y - self.y * other.x + self.z * other.w,
+            self.w * other.w - self.x * other.x - self.y * other.y - self.z * other.z
+        )
+    }
+
+    func conjugated() Quat {
+        return Quat(-self.x, -self.y, -self.z, self.w)
+    }
+
+    func dot(other:Quat) float {
+        return self.x * other.x + self.y * other.y + self.z * other.z + self.w * other.w
+    }
+
+    func length_squared() float {
+        return self.dot(self)
+    }
+
+    func length() float {
+        return Math.sqrt(self.length_squared())
+    }
+
+    func normalized() Quat {
+        let length = self.length()
+        if length <= Math.epsilon() {
+            return Quat.identity()
+        }
+        return self.multiply(1.0 / length)
+    }
+
+    func inverted() Quat {
+        let length_squared = self.length_squared()
+        if length_squared <= Math.epsilon() {
+            return Quat.identity()
+        }
+        return self.conjugated().multiply(1.0 / length_squared)
+    }
+
+    func rotate(vector:Vec3) Vec3 {
+        let imaginary = Vec3(self.x, self.y, self.z)
+        let twice_cross = imaginary.cross(vector).multiply(2.0)
+        return vector.add(twice_cross.multiply(self.w)).add(imaginary.cross(twice_cross))
+    }
+
+    func to_mat3() Mat3 {
+        let rotation = self.normalized()
+        let xx = rotation.x * rotation.x
+        let yy = rotation.y * rotation.y
+        let zz = rotation.z * rotation.z
+        let xy = rotation.x * rotation.y
+        let xz = rotation.x * rotation.z
+        let yz = rotation.y * rotation.z
+        let wx = rotation.w * rotation.x
+        let wy = rotation.w * rotation.y
+        let wz = rotation.w * rotation.z
+
+        return Mat3(
+            Vec3(1.0 - 2.0 * (yy + zz), 2.0 * (xy + wz), 2.0 * (xz - wy)),
+            Vec3(2.0 * (xy - wz), 1.0 - 2.0 * (xx + zz), 2.0 * (yz + wx)),
+            Vec3(2.0 * (xz + wy), 2.0 * (yz - wx), 1.0 - 2.0 * (xx + yy))
+        )
+    }
+}
+
+extend Quat {
+    static func identity() Quat {
+        return Quat()
+    }
+
+    static func angle_axis(radians:float, axis:Vec3) Quat {
+        let normalized_axis = axis.normalized()
+        let half_angle = radians * 0.5
+        let sine = Math.sin(half_angle)
+        return Quat(
+            normalized_axis.x * sine,
+            normalized_axis.y * sine,
+            normalized_axis.z * sine,
+            Math.cos(half_angle)
+        ).normalized()
+    }
+}

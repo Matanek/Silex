@@ -1,0 +1,134 @@
+use STD.Math
+
+public struct Vec2 {
+    var x:float
+    var y:float
+
+    init() {}
+
+    init(value:float) {
+        self.x = value
+        self.y = value
+    }
+
+    init(x:float, y:float) {
+        self.x = x
+        self.y = y
+    }
+
+    func add(other:Vec2) Vec2 {
+        return Vec2(self.x + other.x, self.y + other.y)
+    }
+
+    func subtract(other:Vec2) Vec2 {
+        return Vec2(self.x - other.x, self.y - other.y)
+    }
+
+    func multiply(other:Vec2) Vec2 {
+        return Vec2(self.x * other.x, self.y * other.y)
+    }
+
+    func multiply(scalar:float) Vec2 {
+        return Vec2(self.x * scalar, self.y * scalar)
+    }
+
+    func divide(other:Vec2) Vec2 {
+        return Vec2(self.x / other.x, self.y / other.y)
+    }
+
+    func divide(scalar:float) Vec2 {
+        return Vec2(self.x / scalar, self.y / scalar)
+    }
+
+    func negated() Vec2 {
+        return Vec2(-self.x, -self.y)
+    }
+
+    func dot(other:Vec2) float {
+        return self.x * other.x + self.y * other.y
+    }
+
+    func length_squared() float {
+        return self.dot(self)
+    }
+
+    func length() float {
+        return Math.sqrt(self.length_squared())
+    }
+
+    func distance(other:Vec2) float {
+        return self.subtract(other).length()
+    }
+
+    func normalized() Vec2 {
+        let length = self.length()
+        if length <= Math.epsilon() {
+            return Vec2.zero()
+        }
+        return self.divide(length)
+    }
+
+    func lerp(other:Vec2, amount:float) Vec2 {
+        return Vec2(
+            Math.lerp(self.x, other.x, amount),
+            Math.lerp(self.y, other.y, amount)
+        )
+    }
+
+    func mix(other:Vec2, amount:float) Vec2 {
+        return self.lerp(other, amount)
+    }
+
+    func minimum(other:Vec2) Vec2 {
+        return Vec2(Math.min(self.x, other.x), Math.min(self.y, other.y))
+    }
+
+    func maximum(other:Vec2) Vec2 {
+        return Vec2(Math.max(self.x, other.x), Math.max(self.y, other.y))
+    }
+
+    func clamped(minimum:Vec2, maximum:Vec2) Vec2 {
+        return Vec2(
+            Math.clamp(self.x, minimum.x, maximum.x),
+            Math.clamp(self.y, minimum.y, maximum.y)
+        )
+    }
+
+    func nearly_equal(other:Vec2) bool {
+        return self.nearly_equal(other, Math.epsilon())
+    }
+
+    func nearly_equal(other:Vec2, tolerance:float) bool {
+        return Math.nearly_equal(
+            self.x,
+            other.x,
+            tolerance
+        ) && Math.nearly_equal(self.y, other.y, tolerance)
+    }
+}
+
+extend Vec2 {
+    static func zero() Vec2 {
+        return Vec2()
+    }
+
+    static func one() Vec2 {
+        return Vec2(1.0)
+    }
+
+    static func left() Vec2 {
+        return Vec2(-1.0, 0.0)
+    }
+
+    static func right() Vec2 {
+        return Vec2(1.0, 0.0)
+    }
+
+    static func up() Vec2 {
+        return Vec2(0.0, 1.0)
+    }
+
+    static func down() Vec2 {
+        return Vec2(0.0, -1.0)
+    }
+}
