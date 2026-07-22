@@ -173,26 +173,31 @@ fn compileAndPublish(
     try Io.Dir.cwd().createDirPath(io, temporary_path);
     errdefer Io.Dir.cwd().deleteTree(io, temporary_path) catch {};
 
+    var requests: std.ArrayList(NativeCommand.CompileRequest) = .empty;
     var object_index: usize = 0;
     for (runtimes) |runtime| {
         if (runtime.package_index != entry.package_index) continue;
         for (runtime.sources) |source| {
             const destination = try objectPath(allocator, temporary_path, object_index);
-            try compileObject(
-                allocator,
-                io,
-                zig_path,
-                target,
-                compiler_flags,
-                runtime,
-                source,
-                destination,
-                backend_log_path,
-            );
+            try requests.append(allocator, .{
+                .runtime = runtime,
+                .source = source,
+                .output_path = destination,
+            });
             object_index += 1;
-            progress.completeOne();
         }
     }
+    std.debug.assert(object_index == entry.object_count);
+    try NativeCommand.compileObjects(
+        allocator,
+        io,
+        zig_path,
+        target,
+        compiler_flags,
+        requests.items,
+        backend_log_path,
+        progress,
+    );
     const marker = try std.fmt.allocPrint(allocator, "{d}\n", .{entry.object_count});
     const marker_path = try std.fs.path.join(allocator, &.{ temporary_path, ".complete" });
     try Io.Dir.cwd().writeFile(io, .{ .sub_path = marker_path, .data = marker });
@@ -243,40 +248,6 @@ fn useConcurrentPublication(
     Io.Dir.cwd().deleteTree(io, temporary_path) catch {};
     if (!try entryComplete(allocator, io, entry_path, object_count)) return error.SharedObjectCacheIncomplete;
     return false;
-}
-
-fn compileObject(
-    allocator: Allocator,
-    io: Io,
-    zig_path: []const u8,
-    target: TargetModule.Target,
-    compiler_flags: []const []const u8,
-    runtime: NativeDependency.ModuleRuntime,
-    source: NativeDependency.SourceFile,
-    destination: []const u8,
-    backend_log_path: []const u8,
-) !void {
-    const arguments = try NativeCommand.compileArguments(
-        allocator,
-        zig_path,
-        target,
-        compiler_flags,
-        runtime,
-        source,
-        destination,
-    );
-
-    const result = try std.process.run(allocator, io, .{
-        .argv = arguments,
-        .stdout_limit = .limited(16 * 1024 * 1024),
-        .stderr_limit = .limited(16 * 1024 * 1024),
-    });
-    if (!termSucceeded(result.term)) {
-        try Io.Dir.cwd().writeFile(io, .{ .sub_path = backend_log_path, .data = result.stderr });
-        return error.NativeObjectCompilationFailed;
-    }
-    if (result.stdout.len > 0) try Io.File.stdout().writeStreamingAll(io, result.stdout);
-    if (result.stderr.len > 0) try Io.File.stderr().writeStreamingAll(io, result.stderr);
 }
 
 fn entryComplete(allocator: Allocator, io: Io, entry_path: []const u8, expected_count: usize) !bool {
@@ -440,13 +411,6 @@ fn hashTarget(hasher: *std.crypto.hash.sha2.Sha256, target: TargetModule.Target)
         hasher.update("\x00triple\x00");
         hasher.update(triple);
     }
-}
-
-fn termSucceeded(term: std.process.Child.Term) bool {
-    return switch (term) {
-        .exited => |code| code == 0,
-        else => false,
-    };
 }
 
 test "include parser recognizes literal C and C++ includes" {

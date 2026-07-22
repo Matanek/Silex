@@ -605,37 +605,36 @@ fn compileLocalRuntimeObjects(
     progress: std.Progress.Node,
 ) ![]const []const u8 {
     var objects: std.ArrayList([]const u8) = .empty;
+    var requests: std.ArrayList(NativeCommand.CompileRequest) = .empty;
     for (runtimes, 0..) |runtime, runtime_index| {
         if (runtime.package_index != 0) continue;
         for (runtime.sources, 0..) |source, source_index| {
             const object_name = try std.fmt.allocPrint(allocator, "native-{d}-{d}.o", .{ runtime_index, source_index });
             const object_path = try std.fs.path.join(allocator, &.{ cache_dir, object_name });
-            const arguments = try NativeCommand.compileArguments(
-                allocator,
-                zig_path,
-                target,
-                default_native_configuration.compilerFlags(),
-                runtime,
-                source,
-                object_path,
-            );
-
-            const result = try std.process.run(allocator, io, .{
-                .argv = arguments,
-                .stdout_limit = .limited(16 * 1024 * 1024),
-                .stderr_limit = .limited(16 * 1024 * 1024),
-            });
-            if (exitCode(result.term) != 0) {
-                try Io.Dir.cwd().writeFile(io, .{ .sub_path = backend_log_path, .data = result.stderr });
-                reportNativeBackendFailure(target_name, backend_log_path);
-                return error.Reported;
-            }
-            if (result.stdout.len > 0) try Io.File.stdout().writeStreamingAll(io, result.stdout);
-            if (result.stderr.len > 0) try Io.File.stderr().writeStreamingAll(io, result.stderr);
             try objects.append(allocator, object_path);
-            progress.completeOne();
+            try requests.append(allocator, .{
+                .runtime = runtime,
+                .source = source,
+                .output_path = object_path,
+            });
         }
     }
+    NativeCommand.compileObjects(
+        allocator,
+        io,
+        zig_path,
+        target,
+        default_native_configuration.compilerFlags(),
+        requests.items,
+        backend_log_path,
+        progress,
+    ) catch |err| switch (err) {
+        error.NativeObjectCompilationFailed => {
+            reportNativeBackendFailure(target_name, backend_log_path);
+            return error.Reported;
+        },
+        else => |other| return other,
+    };
     return objects.toOwnedSlice(allocator);
 }
 

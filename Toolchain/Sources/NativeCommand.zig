@@ -3,6 +3,15 @@ const NativeDependency = @import("NativeDependency.zig");
 const TargetModule = @import("Target.zig");
 
 const Allocator = std.mem.Allocator;
+const Io = std.Io;
+
+const max_concurrent_compilations = 8;
+
+pub const CompileRequest = struct {
+    runtime: NativeDependency.ModuleRuntime,
+    source: NativeDependency.SourceFile,
+    output_path: []const u8,
+};
 
 pub fn compileArguments(
     allocator: Allocator,
@@ -33,6 +42,104 @@ pub fn compileArguments(
     try arguments.appendSlice(allocator, &.{ "-c", source.path });
     if (output_path) |output| try arguments.appendSlice(allocator, &.{ "-o", output });
     return arguments.toOwnedSlice(allocator);
+}
+
+pub fn compileObjects(
+    allocator: Allocator,
+    io: Io,
+    zig_path: []const u8,
+    target: TargetModule.Target,
+    compiler_flags: []const []const u8,
+    requests: []const CompileRequest,
+    backend_log_path: []const u8,
+    progress: std.Progress.Node,
+) !void {
+    const Job = struct {
+        future: Io.Future(std.process.RunError!std.process.RunResult),
+        progress: std.Progress.Node,
+    };
+
+    var request_index: usize = 0;
+    while (request_index < requests.len) {
+        var jobs: [max_concurrent_compilations]Job = undefined;
+        var job_count: usize = 0;
+        while (job_count < jobs.len and request_index < requests.len) : ({
+            job_count += 1;
+            request_index += 1;
+        }) {
+            const request = requests[request_index];
+            const arguments = try compileArguments(
+                allocator,
+                zig_path,
+                target,
+                compiler_flags,
+                request.runtime,
+                request.source,
+                request.output_path,
+            );
+            const step = progress.start(std.fs.path.basename(request.source.path), 0);
+            jobs[job_count] = .{
+                .future = io.async(runCompile, .{ io, arguments, step }),
+                .progress = step,
+            };
+        }
+
+        var first_run_error: ?std.process.RunError = null;
+        var first_backend_failure: ?[]const u8 = null;
+        var completed_jobs: usize = 0;
+        defer for (jobs[completed_jobs..job_count]) |*job| {
+            if (job.future.cancel(io)) |result| {
+                std.heap.c_allocator.free(result.stdout);
+                std.heap.c_allocator.free(result.stderr);
+            } else |_| {}
+            job.progress.end();
+        };
+        for (jobs[0..job_count]) |*job| {
+            const outcome = job.future.await(io);
+            completed_jobs += 1;
+            job.progress.end();
+            progress.completeOne();
+            const result = outcome catch |err| {
+                if (first_run_error == null) first_run_error = err;
+                continue;
+            };
+            defer std.heap.c_allocator.free(result.stdout);
+            defer std.heap.c_allocator.free(result.stderr);
+            if (!termSucceeded(result.term)) {
+                if (first_backend_failure == null) {
+                    first_backend_failure = try allocator.dupe(u8, result.stderr);
+                }
+                continue;
+            }
+            if (result.stdout.len > 0) try Io.File.stdout().writeStreamingAll(io, result.stdout);
+            if (result.stderr.len > 0) try Io.File.stderr().writeStreamingAll(io, result.stderr);
+        }
+        if (first_run_error) |err| return err;
+        if (first_backend_failure) |backend_output| {
+            try Io.Dir.cwd().writeFile(io, .{ .sub_path = backend_log_path, .data = backend_output });
+            return error.NativeObjectCompilationFailed;
+        }
+    }
+}
+
+fn runCompile(
+    io: Io,
+    arguments: []const []const u8,
+    progress: std.Progress.Node,
+) std.process.RunError!std.process.RunResult {
+    return std.process.run(std.heap.c_allocator, io, .{
+        .argv = arguments,
+        .stdout_limit = .limited(16 * 1024 * 1024),
+        .stderr_limit = .limited(16 * 1024 * 1024),
+        .progress_node = progress,
+    });
+}
+
+fn termSucceeded(term: std.process.Child.Term) bool {
+    return switch (term) {
+        .exited => |code| code == 0,
+        else => false,
+    };
 }
 
 test "native command preserves the C++ compilation contract" {
