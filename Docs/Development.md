@@ -72,7 +72,8 @@ error therefore follows the same resolved program and first diagnostic as
 `silex lint`.
 
 Each successful project snapshot contains the symbol identities used by
-definition, references, hover, completion, signature help and rename:
+definition, references, hover, semantic highlighting, completion, signature
+help and rename:
 
 - definition and references cross all loaded source files and can open local
   modules, resolved packages and the distributed library read-only. Opening
@@ -81,6 +82,15 @@ definition, references, hover, completion, signature help and rename:
 - hover shows the canonical Silex contract, logical module, source path and
   origin. Ordinary `//` comments and similarly named Markdown pages are not
   treated as documentation prose;
+- semantic highlighting distinguishes namespaces, types, enum members,
+  functions, methods, properties, parameters and variables from those resolved
+  identities. The immediate target of `(...)` is highlighted as a call,
+  including a structure, class or enum-variant constructor; an instance method
+  remains a method call, while a static method uses the function category.
+  Tree-sitter supplies the same call-oriented fallback for a document that has
+  no current successful semantic snapshot. Zed disables semantic tokens by
+  default; select its `combined` mode for Silex to overlay these resolved
+  categories on the syntax highlighting;
 - completion uses compiler-resolved scopes, owners and visibility. Discovery
   immediately after `use`, or after a visible namespace qualifier such as
   `Math.`, remains filesystem-based because the child module may not belong to

@@ -513,7 +513,6 @@ const Builder = struct {
                 for (value.arguments) |argument| try self.recordExpression(argument);
             },
             .static_method_call => |value| {
-                try self.recordKey(value.owner_generated_name, expression.position);
                 try self.recordKeyKind(value.generated_name, expression.position, .method);
                 for (value.arguments) |argument| try self.recordExpression(argument);
             },

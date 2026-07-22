@@ -21,6 +21,16 @@ const Io = std.Io;
 const protocol_version = "2.0";
 const max_message_size = 16 * 1024 * 1024;
 const completion_trigger_characters = [_][]const u8{"."};
+const semantic_token_types = [_][]const u8{
+    "namespace",
+    "type",
+    "enumMember",
+    "function",
+    "method",
+    "property",
+    "parameter",
+    "variable",
+};
 const module_analysis_directory = ".silex-lsp";
 
 const Document = struct {
@@ -68,6 +78,27 @@ const SignatureHelpResult = struct {
     signatures: []const SignatureInformation,
     activeSignature: usize = 0,
     activeParameter: usize = 0,
+};
+
+const SemanticTokenKind = enum(u32) {
+    namespace,
+    type,
+    enum_member,
+    function,
+    method,
+    property,
+    parameter,
+    variable,
+};
+
+const SemanticTokenSpan = struct {
+    position: Position,
+    length: usize,
+    kind: SemanticTokenKind,
+};
+
+const SemanticTokens = struct {
+    data: []const u32,
 };
 
 const Location = struct {
@@ -231,6 +262,13 @@ const Server = struct {
                     .referencesProvider = true,
                     .renameProvider = .{ .prepareProvider = true },
                     .hoverProvider = true,
+                    .semanticTokensProvider = .{
+                        .legend = .{
+                            .tokenTypes = &semantic_token_types,
+                            .tokenModifiers = &[_][]const u8{},
+                        },
+                        .full = true,
+                    },
                 },
                 .serverInfo = .{
                     .name = "Silex",
@@ -341,6 +379,12 @@ const Server = struct {
 
         if (std.mem.eql(u8, request.method, "textDocument/signatureHelp")) {
             const result = if (request.params) |params| try self.signatureHelp(params) else SignatureHelpResult{ .signatures = &.{} };
+            if (request.id) |id| try self.reply(id, result);
+            return;
+        }
+
+        if (std.mem.eql(u8, request.method, "textDocument/semanticTokens/full")) {
+            const result = if (request.params) |params| try self.semanticTokens(params) else SemanticTokens{ .data = &.{} };
             if (request.id) |id| try self.reply(id, result);
             return;
         }
@@ -1337,6 +1381,21 @@ const Server = struct {
         };
     }
 
+    fn semanticTokens(self: *Server, params: std.json.Value) !SemanticTokens {
+        const uri = textDocumentUri(params) orelse return .{ .data = &.{} };
+        const document = self.findDocument(uri) orelse return .{ .data = &.{} };
+        const project = self.projectForDocument(document) orelse return .{ .data = &.{} };
+        const snapshot = if (project.current) |*value| value else return .{ .data = &.{} };
+        const file = snapshotFile(snapshot, document.path) orelse return .{ .data = &.{} };
+        return .{ .data = try semanticTokenData(
+            self.allocator,
+            snapshot.index,
+            file,
+            document.text,
+            self.position_encoding,
+        ) };
+    }
+
     fn openVersion(self: *const Server, path: []const u8) ?i64 {
         for (self.documents.items) |document| if (std.mem.eql(u8, document.path, path)) return document.version;
         return null;
@@ -1496,6 +1555,92 @@ fn sourceByteOffset(source: []const u8, position: Source.Position) usize {
         offset = newline + 1;
     }
     return @min(source.len, offset + position.column -| 1);
+}
+
+fn semanticTokenData(
+    allocator: Allocator,
+    index: SymbolIndex.Index,
+    file: usize,
+    source: []const u8,
+    encoding: PositionEncoding,
+) ![]const u32 {
+    var spans: std.ArrayList(SemanticTokenSpan) = .empty;
+    for (index.occurrences) |occurrence| {
+        if (occurrence.position.file != file) continue;
+        const symbol = index.symbol(occurrence.symbol);
+        const start_offset = sourceByteOffset(source, occurrence.position);
+        const end_offset = start_offset + occurrence.length;
+        if (end_offset > source.len or
+            !std.mem.eql(u8, source[start_offset..end_offset], symbol.name))
+        {
+            continue;
+        }
+        const start = encodedPositionAtByteOffset(source, start_offset, encoding) orelse continue;
+        const end = encodedPositionAtByteOffset(source, end_offset, encoding) orelse continue;
+        if (start.line != end.line or end.character <= start.character) continue;
+        const kind = semanticTokenKind(symbol, source, end_offset) orelse continue;
+        try spans.append(allocator, .{
+            .position = start,
+            .length = end.character - start.character,
+            .kind = kind,
+        });
+    }
+    std.mem.sort(SemanticTokenSpan, spans.items, {}, struct {
+        fn lessThan(_: void, left: SemanticTokenSpan, right: SemanticTokenSpan) bool {
+            if (left.position.line != right.position.line) return left.position.line < right.position.line;
+            return left.position.character < right.position.character;
+        }
+    }.lessThan);
+
+    var data: std.ArrayList(u32) = .empty;
+    var previous_line: usize = 0;
+    var previous_start: usize = 0;
+    for (spans.items) |span| {
+        const delta_line = span.position.line - previous_line;
+        const delta_start = if (delta_line == 0)
+            span.position.character - previous_start
+        else
+            span.position.character;
+        try data.appendSlice(allocator, &.{
+            @intCast(delta_line),
+            @intCast(delta_start),
+            @intCast(span.length),
+            @intFromEnum(span.kind),
+            0,
+        });
+        previous_line = span.position.line;
+        previous_start = span.position.character;
+    }
+    return data.toOwnedSlice(allocator);
+}
+
+fn semanticTokenKind(
+    symbol: SymbolIndex.Symbol,
+    source: []const u8,
+    end_offset: usize,
+) ?SemanticTokenKind {
+    if (followedByInvocation(source, end_offset)) return switch (symbol.kind) {
+        .method, .requirement => if (symbol.is_static) .function else .method,
+        else => .function,
+    };
+    return switch (symbol.kind) {
+        .module => .namespace,
+        .type, .enumeration, .protocol, .type_parameter => .type,
+        .variant => .enum_member,
+        .constructor, .function => .function,
+        .requirement => .method,
+        .method => if (symbol.is_static) .function else .method,
+        .field => .property,
+        .parameter => .parameter,
+        .variable, .binding => .variable,
+        .alias => null,
+    };
+}
+
+fn followedByInvocation(source: []const u8, end_offset: usize) bool {
+    var offset = end_offset;
+    while (offset < source.len and std.ascii.isWhitespace(source[offset])) offset += 1;
+    return offset < source.len and source[offset] == '(';
 }
 
 fn pathWithin(path: []const u8, root: []const u8) bool {
@@ -2864,6 +3009,32 @@ fn containsCompletion(items: []const CompletionItem, label: []const u8) bool {
     return false;
 }
 
+fn expectSemanticTokenAt(
+    source: []const u8,
+    data: []const u32,
+    byte_offset: usize,
+    byte_length: usize,
+    expected: SemanticTokenKind,
+) !void {
+    const requested = encodedPositionAtByteOffset(source, byte_offset, .utf16) orelse
+        return error.TestUnexpectedResult;
+    const requested_end = encodedPositionAtByteOffset(source, byte_offset + byte_length, .utf16) orelse
+        return error.TestUnexpectedResult;
+    var line: usize = 0;
+    var start: usize = 0;
+    var index: usize = 0;
+    while (index + 4 < data.len) : (index += 5) {
+        const delta_line: usize = data[index];
+        line += delta_line;
+        start = if (delta_line == 0) start + data[index + 1] else data[index + 1];
+        if (line != requested.line or start != requested.character) continue;
+        try std.testing.expectEqual(requested_end.character - requested.character, data[index + 2]);
+        try std.testing.expectEqual(@intFromEnum(expected), data[index + 3]);
+        return;
+    }
+    return error.TestUnexpectedResult;
+}
+
 const language_completions = [_]CompletionItem{
     .{ .label = "func", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "struct", .kind = 14, .detail = "Silex keyword" },
@@ -3004,6 +3175,257 @@ test "position encoding negotiation defaults to UTF-16 and accepts client encodi
         .{},
     );
     try std.testing.expectEqual(PositionEncoding.utf8, negotiatedPositionEncoding(parsed));
+}
+
+test "semantic tokens distinguish namespaces types calls methods and properties" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var environ_map = std.process.Environ.Map.init(allocator);
+    var server = Server.init(allocator, std.testing.io, &environ_map);
+    var temporary = std.testing.tmpDir(.{ .iterate = true });
+    defer temporary.cleanup();
+
+    try temporary.dir.createDir(std.testing.io, "Math", .default_dir);
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Math/Vec3.sx",
+        .data =
+        \\public struct Vec3 {
+        \\    public var x:int
+        \\    public var y:int
+        \\    public var z:int
+        \\    public init(x:int, y:int, z:int) {
+        \\        self.x = x
+        \\        self.y = y
+        \\        self.z = z
+        \\    }
+        \\    public static func pow(value:Vec3) Vec3 { return value }
+        \\    public func magnitude() int { return self.x }
+        \\}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Text.sx",
+        .data =
+        \\public enum Normalization { nfc }
+        \\public func normalize(text:str, form:Normalization) str { return text }
+        ,
+    });
+    const source =
+        \\use Math
+        \\use Text
+        \\struct Configuration { var strict:bool }
+        \\func accepts(configuration:Configuration) bool { return configuration.strict }
+        \\func main() {
+        \\    let expected = Configuration(strict:true)
+        \\    let vector = Math.Vec3(1, 2, 3)
+        \\    let powered = Math.Vec3.pow(vector)
+        \\    let magnitude = vector.magnitude()
+        \\    let normalized = Text.normalize("é", Text.Normalization.nfc())
+        \\    print(powered.x)
+        \\}
+    ;
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = source });
+    const relative_root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const main_path = try SourceGraph.canonicalPath(
+        allocator,
+        std.testing.io,
+        try std.fs.path.join(allocator, &.{ relative_root, "Main.sx" }),
+    );
+    const uri = try uriFromPath(allocator, main_path);
+    const snapshot = switch (try Frontend.analyze(
+        allocator,
+        std.testing.io,
+        &environ_map,
+        main_path,
+        .editor,
+        &.{},
+    )) {
+        .success => |value| value,
+        .failure => return error.TestUnexpectedResult,
+    };
+    try server.workspace_roots.append(
+        allocator,
+        try SourceGraph.canonicalPath(allocator, std.testing.io, relative_root),
+    );
+    try server.setDocument(uri, source, 1);
+    try server.projects.append(allocator, .{
+        .input_path = main_path,
+        .current = snapshot,
+        .last_success = snapshot,
+        .last_versions = try allocator.dupe(VersionStamp, &.{.{ .path = main_path, .version = 1 }}),
+    });
+    const params = try testRequestParams(allocator, uri, .{ .line = 0, .character = 0 }, "");
+    const tokens = try server.semanticTokens(params);
+
+    const annotation = std.mem.indexOf(u8, source, "configuration:Configuration") orelse
+        return error.TestUnexpectedResult;
+    try expectSemanticTokenAt(source, tokens.data, annotation, "configuration".len, .parameter);
+    try expectSemanticTokenAt(
+        source,
+        tokens.data,
+        annotation + "configuration:".len,
+        "Configuration".len,
+        .type,
+    );
+
+    const constructor = std.mem.indexOf(u8, source, "Configuration(strict:true)") orelse
+        return error.TestUnexpectedResult;
+    try expectSemanticTokenAt(source, tokens.data, constructor, "Configuration".len, .function);
+
+    const static_call = std.mem.indexOf(u8, source, "Math.Vec3.pow(vector)") orelse
+        return error.TestUnexpectedResult;
+    try expectSemanticTokenAt(source, tokens.data, static_call, "Math".len, .namespace);
+    try expectSemanticTokenAt(source, tokens.data, static_call + "Math.".len, "Vec3".len, .type);
+    try expectSemanticTokenAt(source, tokens.data, static_call + "Math.Vec3.".len, "pow".len, .function);
+
+    const method_call = std.mem.indexOf(u8, source, "vector.magnitude()") orelse
+        return error.TestUnexpectedResult;
+    try expectSemanticTokenAt(source, tokens.data, method_call, "vector".len, .variable);
+    try expectSemanticTokenAt(source, tokens.data, method_call + "vector.".len, "magnitude".len, .method);
+
+    const text_call = std.mem.indexOf(u8, source, "Text.normalize") orelse
+        return error.TestUnexpectedResult;
+    try expectSemanticTokenAt(source, tokens.data, text_call, "Text".len, .namespace);
+    try expectSemanticTokenAt(source, tokens.data, text_call + "Text.".len, "normalize".len, .function);
+
+    const variant_call = std.mem.indexOf(u8, source, "Text.Normalization.nfc()") orelse
+        return error.TestUnexpectedResult;
+    try expectSemanticTokenAt(source, tokens.data, variant_call, "Text".len, .namespace);
+    try expectSemanticTokenAt(
+        source,
+        tokens.data,
+        variant_call + "Text.".len,
+        "Normalization".len,
+        .type,
+    );
+    try expectSemanticTokenAt(
+        source,
+        tokens.data,
+        variant_call + "Text.Normalization.".len,
+        "nfc".len,
+        .function,
+    );
+
+    const field_access = std.mem.indexOf(u8, source, "powered.x") orelse
+        return error.TestUnexpectedResult;
+    try expectSemanticTokenAt(source, tokens.data, field_access, "powered".len, .variable);
+    try expectSemanticTokenAt(source, tokens.data, field_access + "powered.".len, "x".len, .property);
+}
+
+test "semantic tokens resolve distributed namespaces and intermediate enum types" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var environ_map = std.process.Environ.Map.init(allocator);
+
+    const system_path = try SourceGraph.canonicalPath(
+        allocator,
+        std.testing.io,
+        "Smokes/SystemErrors.sx",
+    );
+    const system_source = try Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        system_path,
+        allocator,
+        .limited(max_message_size),
+    );
+    const system_snapshot = switch (try Frontend.analyze(
+        allocator,
+        std.testing.io,
+        &environ_map,
+        system_path,
+        .editor,
+        &.{},
+    )) {
+        .success => |value| value,
+        .failure => return error.TestUnexpectedResult,
+    };
+    const system_file = snapshotFile(&system_snapshot, system_path) orelse
+        return error.TestUnexpectedResult;
+    const system_tokens = try semanticTokenData(
+        allocator,
+        system_snapshot.index,
+        system_file,
+        system_source,
+        .utf16,
+    );
+    const error_kind_call = std.mem.indexOf(u8, system_source, "System.ErrorKind.not_found()") orelse
+        return error.TestUnexpectedResult;
+    try expectSemanticTokenAt(system_source, system_tokens, error_kind_call, "System".len, .namespace);
+    try expectSemanticTokenAt(
+        system_source,
+        system_tokens,
+        error_kind_call + "System.".len,
+        "ErrorKind".len,
+        .type,
+    );
+    try expectSemanticTokenAt(
+        system_source,
+        system_tokens,
+        error_kind_call + "System.ErrorKind.".len,
+        "not_found".len,
+        .function,
+    );
+
+    const text_path = try SourceGraph.canonicalPath(
+        allocator,
+        std.testing.io,
+        "Smokes/UnicodeText.sx",
+    );
+    const text_source = try Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        text_path,
+        allocator,
+        .limited(max_message_size),
+    );
+    const text_snapshot = switch (try Frontend.analyze(
+        allocator,
+        std.testing.io,
+        &environ_map,
+        text_path,
+        .editor,
+        &.{},
+    )) {
+        .success => |value| value,
+        .failure => return error.TestUnexpectedResult,
+    };
+    const text_file = snapshotFile(&text_snapshot, text_path) orelse
+        return error.TestUnexpectedResult;
+    const text_tokens = try semanticTokenData(
+        allocator,
+        text_snapshot.index,
+        text_file,
+        text_source,
+        .utf16,
+    );
+    const normalize_call = std.mem.indexOf(u8, text_source, "Text.normalize") orelse
+        return error.TestUnexpectedResult;
+    try expectSemanticTokenAt(text_source, text_tokens, normalize_call, "Text".len, .namespace);
+    try expectSemanticTokenAt(
+        text_source,
+        text_tokens,
+        normalize_call + "Text.".len,
+        "normalize".len,
+        .function,
+    );
+    const normalization_call = std.mem.indexOf(u8, text_source, "Text.Normalization.nfc()") orelse
+        return error.TestUnexpectedResult;
+    try expectSemanticTokenAt(text_source, text_tokens, normalization_call, "Text".len, .namespace);
+    try expectSemanticTokenAt(
+        text_source,
+        text_tokens,
+        normalization_call + "Text.".len,
+        "Normalization".len,
+        .type,
+    );
+    try expectSemanticTokenAt(
+        text_source,
+        text_tokens,
+        normalization_call + "Text.Normalization.".len,
+        "nfc".len,
+        .function,
+    );
 }
 
 test "formatting returns one full document edit identical to the shared formatter" {

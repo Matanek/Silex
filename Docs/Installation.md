@@ -91,6 +91,22 @@ compiler. Unsaved text from every open source file takes priority over the
 corresponding file on disk, so a diagnostic or navigation result describes one
 coherent in-memory project rather than a document parsed in isolation.
 
+Zed does not request semantic tokens by default. Enable its combined mode for
+Silex so resolved namespaces, types, calls and members refine the Tree-sitter
+highlighting without replacing its syntax-level fallback:
+
+```json
+{
+  "languages": {
+    "Silex": {
+      "semantic_tokens": "combined"
+    }
+  }
+}
+```
+
+Restart the Silex language server after changing this setting.
+
 By default, the server chooses the closest JSON project manifest that directly
 lists the open `.sx` file in `modules[].sources`. If none does, it treats that
 file as the input described for small programs above. When two manifests at the
