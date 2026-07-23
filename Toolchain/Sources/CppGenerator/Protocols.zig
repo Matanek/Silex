@@ -347,6 +347,9 @@ pub fn generateNativeFunctionSignature(
     function: Semantic.Function,
     include_names: bool,
 ) !void {
+    if (function.is_native_generic) {
+        return self.generateNativeGenericFunctionSignature(allocator, output, program, function, include_names);
+    }
     try output.appendSlice(allocator, "extern \"C\" ");
     const result = self.nativeResultShape(program, function.return_type);
     const structure = self.nativeReturnStructure(program, function);
@@ -480,6 +483,68 @@ pub fn generateNativeFunctionSignature(
         try self.appendCppType(allocator, output, returned);
         try output.append(allocator, '*');
         if (include_names) try output.appendSlice(allocator, " output");
+    }
+    try output.append(allocator, ')');
+}
+
+pub fn generateNativeGenericFunctionSignature(
+    self: anytype,
+    allocator: Allocator,
+    output: *std.ArrayList(u8),
+    program: Semantic.Program,
+    function: Semantic.Function,
+    include_names: bool,
+) !void {
+    try output.appendSlice(allocator, "extern \"C\" ");
+    if (self.nativeReturnStructure(program, function)) |structure| {
+        try output.appendSlice(allocator, try NativeInterface.transportName(allocator, function.native_module_name.?, structure.source_name));
+        try output.append(allocator, '*');
+    } else {
+        try output.appendSlice(allocator, "void");
+    }
+    try output.append(allocator, ' ');
+    try output.appendSlice(allocator, function.generated_name);
+    try output.append(allocator, '(');
+    for (function.parameters, 0..) |parameter, index| {
+        if (index != 0) try output.appendSlice(allocator, ", ");
+        if (parameter.type == .function) {
+            if (parameter.type.function.isolated) {
+                try output.appendSlice(allocator, "void* (*");
+                if (include_names) try output.appendSlice(allocator, parameter.generated_name);
+                try output.appendSlice(allocator, ")(void*), void*");
+                if (include_names) {
+                    try output.append(allocator, ' ');
+                    try output.appendSlice(allocator, parameter.generated_name);
+                    try output.appendSlice(allocator, "_context");
+                }
+                try output.appendSlice(allocator, ", void (*");
+                if (include_names) try output.appendSlice(allocator, parameter.generated_name);
+                try output.appendSlice(allocator, "_destroy)(void*)");
+            } else {
+                try output.appendSlice(allocator, "void (*");
+                if (include_names) try output.appendSlice(allocator, parameter.generated_name);
+                try output.appendSlice(allocator, ")(void*, void*), void*");
+                if (include_names) {
+                    try output.append(allocator, ' ');
+                    try output.appendSlice(allocator, parameter.generated_name);
+                    try output.appendSlice(allocator, "_context");
+                }
+            }
+            continue;
+        }
+        const structure = self.nativeStructureForType(program, parameter.type).?;
+        if (parameter.mode == .borrow) try output.appendSlice(allocator, "const ");
+        try output.appendSlice(allocator, try NativeInterface.inputTransportName(
+            allocator,
+            function.native_module_name.?,
+            structure.source_name,
+            false,
+        ));
+        try output.append(allocator, '*');
+        if (include_names) {
+            try output.append(allocator, ' ');
+            try output.appendSlice(allocator, parameter.generated_name);
+        }
     }
     try output.append(allocator, ')');
 }

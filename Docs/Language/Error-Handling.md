@@ -56,9 +56,10 @@ it, while binary operators bind after it. Thus `try parse_port(text) + 1` means
 `(try parse_port(text)) + 1`.
 
 When the `Result` is noncopyable, `try` consumes it. A temporary call remains
-`try load()`, while a named result is written `try move result`. Success moves
-`T` into the surrounding expression and failure moves `E` into the early
-return.
+`try load()`, while a named result is written `try move result`. A copyable
+named result normally remains available after `try result`; `try move result`
+may instead consume it explicitly. Success transfers `T` into the surrounding
+expression and failure transfers `E` into the early return.
 
 For `Result<void,E>`, `try operation()` is a complete statement:
 
@@ -89,7 +90,7 @@ enum AppError {
     storage(IOError)
 }
 
-let config = try map_error<Config, ParseError, AppError>(
+let config = try map_error(
     parse_config(text),
     func(error:ParseError) AppError {
         return AppError.input(error)
@@ -103,10 +104,11 @@ and its `F` result becomes the new failure. The transformation is an ordinary
 function value: its captures follow the usual lifetime rules, and it is neither
 stored nor called after `map_error` returns.
 
-`Result<void,E>` uses the overload with two explicit type arguments:
+`Result<void,E>` selects the corresponding overload from the result and
+transformation types:
 
 ```sx
-let saved = map_error<IOError, AppError>(
+let saved = map_error(
     save(),
     func(error:IOError) AppError {
         return AppError.storage(error)
@@ -118,7 +120,8 @@ let saved = map_error<IOError, AppError>(
 recovery. A transformation that calls `panic` or fails an `assert` remains
 fatal. The function is intrinsic rather than declared by `STD`; its call name
 is reserved and cannot be shadowed by a function, module alias, or local
-binding. As with other generic functions, all type arguments are explicit.
+binding. As with other generic functions, all type arguments may instead be
+written explicitly when the call needs to state or disambiguate them.
 For a noncopyable result, a named argument is supplied with `move`; the returned
 `Result` owns either the original success value or the transformed error.
 

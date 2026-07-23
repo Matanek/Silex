@@ -770,6 +770,24 @@ test "class members are private by default and public exposes them" {
     );
 }
 
+test "internal members are shared by declarations in the same source file" {
+    try expectSemanticSuccess(
+        \\class Handle {
+        \\    internal var value:int
+        \\    internal init(value:int) { self.value = value }
+        \\    internal func read() int { return self.value }
+        \\}
+        \\class Friend {
+        \\    func inspect() int {
+        \\        var handle = Handle(7)
+        \\        handle.value = handle.read()
+        \\        return handle.value
+        \\    }
+        \\}
+        \\func main() {}
+    );
+}
+
 test "struct private members protect copyable storage and close aggregate initialization" {
     const Parser = @import("../Parser.zig").Parser;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);

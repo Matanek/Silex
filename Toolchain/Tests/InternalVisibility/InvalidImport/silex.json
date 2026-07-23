@@ -1,0 +1,7 @@
+{
+  "target": "InternalVisibility.App.Main",
+  "modules": [
+    { "name": "InternalVisibility", "sources": ["Library.sx"] },
+    { "name": "InternalVisibility.App", "sources": ["Main.sx"] }
+  ]
+}

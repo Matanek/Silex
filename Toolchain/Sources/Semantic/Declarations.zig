@@ -531,6 +531,7 @@ pub fn collectStructureNames(self: anytype, ast_structures: []const Ast.Structur
             else
                 try std.fmt.allocPrint(self.allocator, "SilexStruct{d}", .{structure_index}),
             .is_class = ast_structure.is_class,
+            .is_static_class = ast_structure.is_static_class,
             .is_owner = !ast_structure.is_class and (ast_structure.drop != null or ast_structure.is_native_resource),
             .is_native_resource = ast_structure.is_native_resource,
             .native_module_name = native_module_name,
@@ -819,11 +820,15 @@ pub fn collectFunctions(self: anytype, ast_functions: []const Ast.Function) Anal
     for (ast_functions, 0..) |ast_function, index| {
         const is_main = std.mem.eql(u8, ast_function.name, "main");
         if (is_main) main_count += 1;
+        const native_declaration_name = if (ast_function.is_native_generic)
+            ast_function.name[0 .. std.mem.indexOfScalar(u8, ast_function.name, '<') orelse ast_function.name.len]
+        else
+            ast_function.name;
         const native_module_name = if (ast_function.is_native)
-            ast_function.module_name orelse moduleName(ast_function.name)
+            ast_function.module_name orelse moduleName(native_declaration_name)
         else
             null;
-        const native_function_name = if (ast_function.is_native) lastNameSegment(ast_function.name) else null;
+        const native_function_name = if (ast_function.is_native) lastNameSegment(native_declaration_name) else null;
         if (ast_function.is_native) {
             const module_name = native_module_name orelse return self.fail(
                 ast_function.position,
@@ -837,6 +842,9 @@ pub fn collectFunctions(self: anytype, ast_functions: []const Ast.Function) Anal
                 );
                 return self.fail(ast_function.position, message);
             }
+        }
+        if (ast_function.is_native_generic and !ast_function.is_internal) {
+            return self.fail(ast_function.position, "a generic native function must be 'internal'");
         }
         var parameter_types: std.ArrayList(Type) = .empty;
         var parameter_modes: std.ArrayList(Ast.ParameterMode) = .empty;
@@ -863,12 +871,21 @@ pub fn collectFunctions(self: anytype, ast_functions: []const Ast.Function) Anal
         const return_type = try typeFromReturn(self, ast_function.return_type, ast_function.position);
         if (return_type == .view) return self.fail(ast_function.position, "a view type must be borrowed as '@T[..]' or '&T[..]'");
         var deferred_callback_index: ?usize = null;
+        var isolated_callback_index: ?usize = null;
         for (parameter_types.items, 0..) |parameter_type, parameter_index| {
-            if (parameter_type != .function or !parameter_type.function.deferred) continue;
-            if (deferred_callback_index != null) {
-                return self.fail(ast_function.position, "a native deferred registration requires exactly one 'deferred func' parameter");
+            if (parameter_type != .function) continue;
+            if (parameter_type.function.deferred) {
+                if (deferred_callback_index != null) {
+                    return self.fail(ast_function.position, "a native deferred registration requires exactly one 'deferred func' parameter");
+                }
+                deferred_callback_index = parameter_index;
             }
-            deferred_callback_index = parameter_index;
+            if (parameter_type.function.isolated) {
+                if (isolated_callback_index != null) {
+                    return self.fail(ast_function.position, "a native isolated registration requires exactly one 'isolated func' parameter");
+                }
+                isolated_callback_index = parameter_index;
+            }
         }
         if (deferred_callback_index != null) {
             if (!ast_function.is_native) {
@@ -876,6 +893,42 @@ pub fn collectFunctions(self: anytype, ast_functions: []const Ast.Function) Anal
             }
             if (!self.isNativeResourceType(return_type)) {
                 return self.fail(ast_function.position, "a native deferred registration must return one native resource directly");
+            }
+        }
+        if (isolated_callback_index != null) {
+            if (ast_function.is_native) {
+                if (deferred_callback_index != null) {
+                    return self.fail(ast_function.position, "a native registration cannot combine 'deferred func' and 'isolated func'");
+                }
+                if (!self.isNativeResourceType(return_type)) {
+                    return self.fail(ast_function.position, "a native isolated registration must return one native resource directly");
+                }
+            }
+        }
+        if (ast_function.is_native_generic) {
+            var callback_count: usize = 0;
+            for (parameter_types.items) |parameter_type| {
+                if (parameter_type == .function) {
+                    callback_count += 1;
+                    const callback = parameter_type.function;
+                    const producer = callback.isolated and
+                        callback.parameters.len == 0 and
+                        callback.return_type.* != .void and
+                        self.isNativeResourceType(return_type);
+                    const consumer = !callback.isolated and
+                        !callback.deferred and
+                        callback.parameters.len == 1 and
+                        callback.return_type.* == .void and
+                        return_type == .void;
+                    if (!producer and !consumer) {
+                        return self.fail(ast_function.position, "a generic native function must use either 'isolated func() T' returning a native resource or 'func(T)' returning void");
+                    }
+                } else if (!self.isNativeResourceType(parameter_type)) {
+                    return self.fail(ast_function.position, "a generic native function can only combine one erased callback with native resource parameters");
+                }
+            }
+            if (callback_count != 1) {
+                return self.fail(ast_function.position, "a generic native function requires exactly one erased callback parameter");
             }
         }
         var return_borrow_parameter: ?usize = null;
@@ -912,7 +965,8 @@ pub fn collectFunctions(self: anytype, ast_functions: []const Ast.Function) Anal
                 return self.fail(ast_function.position, message);
             }
             for (ast_function.parameters, parameter_types.items, parameter_modes.items) |parameter, parameter_type, mode| {
-                if (!try self.isNativeParameterType(parameter_type) or
+                if ((!try self.isNativeParameterType(parameter_type) and
+                    !(ast_function.is_native_generic and parameter_type == .function)) or
                     (mode != .value and !self.isNativeResourceType(parameter_type) and parameter_type != .view))
                 {
                     const parameter_name = try allocatedTypeName(self.allocator, parameter_type);
@@ -940,7 +994,7 @@ pub fn collectFunctions(self: anytype, ast_functions: []const Ast.Function) Anal
             .generated_name = if (is_main)
                 "main"
             else if (ast_function.is_native)
-                try nativeSymbol(self.allocator, ast_function.name)
+                try nativeSymbol(self.allocator, native_declaration_name)
             else
                 try std.fmt.allocPrint(self.allocator, "silexFunction{d}", .{index}),
             .return_type = return_type,
@@ -950,6 +1004,7 @@ pub fn collectFunctions(self: anytype, ast_functions: []const Ast.Function) Anal
             .position = ast_function.name_position,
             .is_main = is_main,
             .is_native = ast_function.is_native,
+            .is_native_generic = ast_function.is_native_generic,
             .is_native_resource_drop = ast_function.is_native_resource_drop,
             .native_module_name = native_module_name,
             .native_function_name = native_function_name,

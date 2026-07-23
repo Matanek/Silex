@@ -6,6 +6,23 @@ struct Box<T> {
     }
 }
 
+class GenericBase {
+    public func retained<T>(value:T) T {
+        return value
+    }
+}
+
+class GenericCatalog : GenericBase {}
+
+extend GenericCatalog {
+    public func first_or<T>(values:T[], fallback:T) T {
+        if values.count() == 0 {
+            return fallback
+        }
+        return values[0]
+    }
+}
+
 func identity<T>(value:T) T {
     return value
 }
@@ -47,6 +64,26 @@ func replace<T>(target:&T, value:T) {
     target = value
 }
 
+func first<T>(values:T[]) T {
+    return values[0]
+}
+
+func fixed_first<T>(values:T[2]) T {
+    return values[0]
+}
+
+func unboxed<T>(box:Box<T>) T {
+    return box.value
+}
+
+func transformed<T>(value:T, callback:func(T) T) T {
+    return callback(value)
+}
+
+func optional<T>(value:T?) T? {
+    return value
+}
+
 func concrete_or_generic(value:int) int {
     return value + 1
 }
@@ -56,21 +93,37 @@ func concrete_or_generic<T>(value:T) T {
 }
 
 func main() {
-    print(identity<int>(42))
+    print(identity(42))
     print(identity<int>(7))
-    print(identity<str>("Ada"))
+    var name = "Ada"
+    print(identity(name))
 
-    let box = boxed<str>("Grace")
+    let box = boxed("Grace")
     print(box.copied())
 
-    print(choose<int, str>(9, "Silex"))
-    print(select<int>(3))
-    print(select<int>(3, 4))
-    print(factorial<int>(5))
-    print(local_copy<str>("local"))
+    print(choose(9, "Silex"))
+    print(select(3))
+    print(select(3, 4))
+    print(factorial(5))
+    print(local_copy("local"))
     var changed = 10
-    replace<int>(changed, 11)
+    replace(changed, 11)
     print(changed)
     print(concrete_or_generic(4))
-    print(concrete_or_generic<str>("generic"))
+    print(concrete_or_generic("generic"))
+
+    var values:int[] = [12, 13]
+    print(first(values))
+    let fixed:int[2] = [14, 15]
+    print(fixed_first(fixed))
+    print(unboxed(Box<int>(value:16)))
+    print(transformed(8, func(value:int) int { return value * 2 }))
+    let maybe:int? = 17
+    assert(optional(maybe) != null, "optional generic inference")
+
+    var catalog = GenericCatalog()
+    print(catalog.retained(18))
+    print(catalog.retained<str>("class"))
+    print(catalog.first_or([19], 0))
+    print(catalog.first_or<str>(["extend"], "fallback"))
 }

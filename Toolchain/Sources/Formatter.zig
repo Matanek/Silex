@@ -137,8 +137,10 @@ const Formatter = struct {
     prior_tag: ?TokenTag = null,
     previous_generic_open: bool = false,
     continuation_levels: usize = 0,
+    brace_continuations: std.ArrayList(usize) = .empty,
 
     fn render(self: *Formatter) ![]const u8 {
+        defer self.brace_continuations.deinit(self.allocator);
         var index: usize = 0;
         var previous: ?TokenTag = null;
         while (index < self.pieces.len) : (index += 1) {
@@ -184,6 +186,10 @@ const Formatter = struct {
                 .left_brace => {
                     if (self.needsSpace(previous, token.tag)) try self.space();
                     try self.write("{");
+                    const carried_continuation = if (self.delimiter_depth > 0) self.continuation_levels else 0;
+                    try self.brace_continuations.append(self.allocator, carried_continuation);
+                    self.indent += carried_continuation;
+                    self.continuation_levels = 0;
                     self.brace_depth += 1;
                     if (next == .right_brace) {
                         // Empty blocks stay compact.
@@ -198,6 +204,8 @@ const Formatter = struct {
                         try self.newline(false);
                     }
                     try self.write("}");
+                    const carried_continuation = self.brace_continuations.pop() orelse 0;
+                    self.indent -|= carried_continuation;
                     self.brace_depth -|= 1;
                     if (next == .keyword_else or next == .keyword_elif) {
                         try self.space();
@@ -452,7 +460,7 @@ fn canEndLine(tag: TokenTag, next: TokenTag, generic_angle: bool) bool {
 
 fn isTypeListToken(tag: TokenTag) bool {
     return switch (tag) {
-        .identifier, .keyword_void, .keyword_int, .keyword_int8, .keyword_int16, .keyword_int32, .keyword_int64, .keyword_uint, .keyword_uint8, .keyword_uint16, .keyword_uint32, .keyword_uint64, .keyword_float, .keyword_float32, .keyword_float64, .keyword_bool, .keyword_str, .keyword_func, .keyword_deferred, .comma, .colon, .dot, .less, .greater, .shift_right, .left_parenthesis, .right_parenthesis, .left_bracket, .right_bracket, .question, .amp, .at => true,
+        .identifier, .keyword_void, .keyword_int, .keyword_int8, .keyword_int16, .keyword_int32, .keyword_int64, .keyword_uint, .keyword_uint8, .keyword_uint16, .keyword_uint32, .keyword_uint64, .keyword_float, .keyword_float32, .keyword_float64, .keyword_bool, .keyword_str, .keyword_func, .keyword_deferred, .keyword_isolated, .comma, .colon, .dot, .less, .greater, .shift_right, .left_parenthesis, .right_parenthesis, .left_bracket, .right_bracket, .question, .amp, .at => true,
         else => false,
     };
 }
@@ -688,6 +696,19 @@ test "canonical source is stable and preserves comments and literal spelling" {
     try std.testing.expectEqualStrings(first.text, second.text);
 }
 
+test "internal declarations and members keep canonical spacing" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const result = try formatSource(
+        arena.allocator(),
+        "internal class Handle{internal var value : int\npublic init(value : int){self.value=value}\ninternal func read() int{return self.value}}",
+    );
+    try std.testing.expectEqualStrings(
+        "internal class Handle {\n    internal var value:int\n    public init(value:int) {\n        self.value = value\n    }\n    internal func read() int {\n        return self.value\n    }\n}\n",
+        result.text,
+    );
+}
+
 test "control parentheses and else if use their canonical forms" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -704,6 +725,19 @@ test "deferred callbacks keep their canonical type and literal spelling" {
     );
     try std.testing.expectEqualStrings(
         "func main() {\n    var callback:deferred func(int) = deferred func(value:int) {\n        print(value)\n    }\n}\n",
+        result.text,
+    );
+}
+
+test "isolated callback blocks keep call continuation indentation" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const result = try formatSource(
+        arena.allocator(),
+        "func main(){register(\nisolated func(){\nlet value=1\nprint(value)\n}\n)}",
+    );
+    try std.testing.expectEqualStrings(
+        "func main() {\n    register(\n        isolated func() {\n            let value = 1\n            print(value)\n        }\n    )\n}\n",
         result.text,
     );
 }

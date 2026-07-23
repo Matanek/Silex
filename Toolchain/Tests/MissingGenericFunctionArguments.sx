@@ -1,7 +1,7 @@
-func identity<T>(value:T) T {
-    return value
+func create<T>() int {
+    return 1
 }
 
 func main() {
-    print(identity(1))
+    print(create())
 }

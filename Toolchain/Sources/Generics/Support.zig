@@ -6,6 +6,7 @@ pub const Source = Types.Source;
 pub const Allocator = Types.Allocator;
 pub const SpecializeError = Types.SpecializeError;
 pub const Binding = Types.Binding;
+pub const InferredLocal = Types.InferredLocal;
 pub const State = Types.State;
 pub const StructureSpecialization = Types.StructureSpecialization;
 pub const EnumSpecialization = Types.EnumSpecialization;
@@ -33,6 +34,27 @@ pub fn fileSetContains(files: []const usize, target: usize) bool {
 
 pub fn positionsEqual(left: Source.Position, right: Source.Position) bool {
     return left.file == right.file and left.line == right.line and left.column == right.column;
+}
+
+pub fn methodOwnerMatches(
+    self: anytype,
+    actual_owner: ?[]const u8,
+    candidate_owner: []const u8,
+    inherited: bool,
+) bool {
+    const actual = actual_owner orelse return true;
+    if (std.mem.eql(u8, actual, candidate_owner)) return true;
+    if (!inherited) return false;
+
+    var current = self.findAvailableStructure(actual);
+    var depth: usize = 0;
+    while (current) |structure| : (depth += 1) {
+        if (depth >= self.program.structures.len + self.structures.items.len) return false;
+        const base = structure.base orelse return false;
+        if (std.mem.eql(u8, base.name, candidate_owner)) return true;
+        current = self.findAvailableStructure(base.name);
+    }
+    return false;
 }
 
 pub fn typeNameToReturnType(value: Ast.TypeName) Ast.ReturnType {

@@ -259,6 +259,13 @@ pub fn build(b: *std.Build) void {
     const udp_native_test_module = b.createModule(.{ .target = target, .optimize = optimize, .link_libc = true, .link_libcpp = true });
     udp_native_test_module.addCSourceFiles(.{ .files = &.{ "Tests/UDPNativeIntegration.cpp", "../Library/STD/@Native/System.cpp" }, .flags = &.{ "-std=c++23", "-Wall", "-Wextra", "-Werror" } });
     const udp_native_integration = b.addExecutable(.{ .name = "silex-udp-native-integration", .root_module = udp_native_test_module });
+    const threading_native_test_module = b.createModule(.{ .target = target, .optimize = optimize, .link_libc = true, .link_libcpp = true });
+    threading_native_test_module.addIncludePath(b.path("../Library/STD/@Native/Includes"));
+    threading_native_test_module.addCSourceFiles(.{
+        .files = &.{ "Tests/ThreadingNativeIntegration.cpp", "../Library/STD/@Native/Threading.cpp" },
+        .flags = &.{ "-std=c++23", "-Wall", "-Wextra", "-Werror" },
+    });
+    const threading_native_integration = b.addExecutable(.{ .name = "silex-threading-native-integration", .root_module = threading_native_test_module });
     const clean_library_install = b.addExecutable(.{
         .name = "silex-clean-library-install",
         .root_module = b.createModule(.{
@@ -864,6 +871,31 @@ pub fn build(b: *std.Build) void {
     extension_visibility_command.addArgs(&.{ "compile", "Tests/ExtensionVisibility/silex.json" });
     extension_visibility_command.expectExitCode(0);
 
+    const internal_visibility_command = b.addRunArtifact(executable);
+    internal_visibility_command.addArgs(&.{ "compile", "Tests/InternalVisibility/Valid/silex.json" });
+    internal_visibility_command.expectExitCode(0);
+
+    const invalid_internal_import_command = b.addRunArtifact(executable);
+    invalid_internal_import_command.addArgs(&.{ "compile", "Tests/InternalVisibility/InvalidImport/silex.json" });
+    invalid_internal_import_command.expectExitCode(1);
+    invalid_internal_import_command.expectStdErrEqual(
+        "Tests/InternalVisibility/InvalidImport/Main.sx:1:1: error: namespace 'InternalVisibility.Library' has no selectable declaration 'Handle'\n",
+    );
+
+    const invalid_internal_member_command = b.addRunArtifact(executable);
+    invalid_internal_member_command.addArgs(&.{ "compile", "Tests/InternalVisibility/InvalidMember/silex.json" });
+    invalid_internal_member_command.expectExitCode(1);
+    invalid_internal_member_command.expectStdErrEqual(
+        "Tests/InternalVisibility/InvalidMember/Main.sx:5:12: error: method 'secret' is internal to its source file\n",
+    );
+
+    const invalid_internal_public_input_command = b.addRunArtifact(executable);
+    invalid_internal_public_input_command.addArgs(&.{ "compile", "Tests/InternalVisibility/InvalidPublicInput/silex.json" });
+    invalid_internal_public_input_command.expectExitCode(1);
+    invalid_internal_public_input_command.expectStdErrEqual(
+        "Tests/InternalVisibility/InvalidPublicInput/Library.sx:6:25: error: public method 'consume' cannot expose internal input type 'Handle'\n",
+    );
+
     const generic_extension_private_command = b.addRunArtifact(executable);
     generic_extension_private_command.addArgs(&.{ "compile", "Tests/GenericExtensionPrivate/silex.json" });
     generic_extension_private_command.expectExitCode(1);
@@ -1390,12 +1422,8 @@ pub fn build(b: *std.Build) void {
         "Tests/ReservedTryIdentifier.sx:2:9: error: expected variable name\n",
     );
 
-    const missing_map_error_type_arguments_command = b.addRunArtifact(executable);
-    missing_map_error_type_arguments_command.addArgs(&.{ "compile", "Tests/MissingMapErrorTypeArguments.sx" });
-    missing_map_error_type_arguments_command.expectExitCode(1);
-    missing_map_error_type_arguments_command.expectStdErrEqual(
-        "Tests/MissingMapErrorTypeArguments.sx:9:18: error: generic function 'map_error' requires explicit type arguments\n",
-    );
+    const inferred_map_error_type_arguments_command = b.addRunArtifact(executable);
+    inferred_map_error_type_arguments_command.addArgs(&.{ "compile", "Tests/InferredMapErrorTypeArguments.sx" });
 
     const invalid_map_error_result_type_command = b.addRunArtifact(executable);
     invalid_map_error_result_type_command.addArgs(&.{ "compile", "Tests/InvalidMapErrorResultType.sx" });
@@ -1457,7 +1485,7 @@ pub fn build(b: *std.Build) void {
     missing_generic_function_arguments_command.addArgs(&.{ "compile", "Tests/MissingGenericFunctionArguments.sx" });
     missing_generic_function_arguments_command.expectExitCode(1);
     missing_generic_function_arguments_command.expectStdErrEqual(
-        "Tests/MissingGenericFunctionArguments.sx:6:11: error: generic function 'identity' requires explicit type arguments\n",
+        "Tests/MissingGenericFunctionArguments.sx:6:11: error: generic function 'create' cannot infer all type arguments; use explicit '<...>'\n",
     );
 
     const unexpected_generic_function_arguments_command = b.addRunArtifact(executable);
@@ -2153,6 +2181,16 @@ pub fn build(b: *std.Build) void {
     invalid_static_self_command.expectExitCode(1);
     invalid_static_self_command.expectStdErrEqual("Tests/InvalidStaticSelf.sx:3:16: error: 'self' is not available inside a static method\n");
 
+    const invalid_static_class_construction_command = b.addRunArtifact(executable);
+    invalid_static_class_construction_command.addArgs(&.{ "compile", "Tests/InvalidStaticClassConstruction.sx" });
+    invalid_static_class_construction_command.expectExitCode(1);
+    invalid_static_class_construction_command.expectStdErrEqual("Tests/InvalidStaticClassConstruction.sx:6:17: error: static class 'Tasks' cannot be constructed\n");
+
+    const invalid_static_class_extension_command = b.addRunArtifact(executable);
+    invalid_static_class_extension_command.addArgs(&.{ "compile", "Tests/InvalidStaticClassExtension.sx" });
+    invalid_static_class_extension_command.expectExitCode(1);
+    invalid_static_class_extension_command.expectStdErrEqual("Tests/InvalidStaticClassExtension.sx:5:8: error: a static class cannot be extended\n");
+
     const invalid_static_super_command = b.addRunArtifact(executable);
     invalid_static_super_command.addArgs(&.{ "compile", "Tests/InvalidStaticSuper.sx" });
     invalid_static_super_command.expectExitCode(1);
@@ -2363,6 +2401,8 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&invalid_let_field_missing_initialization_command.step);
     test_step.dependOn(&invalid_let_field_independence_command.step);
     test_step.dependOn(&invalid_static_self_command.step);
+    test_step.dependOn(&invalid_static_class_construction_command.step);
+    test_step.dependOn(&invalid_static_class_extension_command.step);
     test_step.dependOn(&invalid_static_super_command.step);
     test_step.dependOn(&invalid_static_override_command.step);
     test_step.dependOn(&invalid_static_by_instance_command.step);
@@ -2445,6 +2485,10 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&unique_resource_field_visibility_command.step);
     test_step.dependOn(&unique_resource_extension_visibility_command.step);
     test_step.dependOn(&extension_visibility_command.step);
+    test_step.dependOn(&internal_visibility_command.step);
+    test_step.dependOn(&invalid_internal_import_command.step);
+    test_step.dependOn(&invalid_internal_member_command.step);
+    test_step.dependOn(&invalid_internal_public_input_command.step);
     test_step.dependOn(&generic_extension_private_command.step);
     test_step.dependOn(&extension_conflict_command.step);
     test_step.dependOn(&extension_conformance_visibility_command.step);
@@ -2522,7 +2566,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&invalid_try_named_noncopyable_result_command.step);
     test_step.dependOn(&noncopyable_result_command.step);
     test_step.dependOn(&reserved_try_identifier_command.step);
-    test_step.dependOn(&missing_map_error_type_arguments_command.step);
+    test_step.dependOn(&inferred_map_error_type_arguments_command.step);
     test_step.dependOn(&invalid_map_error_result_type_command.step);
     test_step.dependOn(&invalid_map_error_transform_command.step);
     test_step.dependOn(&invalid_map_error_named_noncopyable_command.step);
@@ -2646,6 +2690,8 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&tcp_native_test_command.step);
     const udp_native_test_command = b.addRunArtifact(udp_native_integration);
     test_step.dependOn(&udp_native_test_command.step);
+    const threading_native_test_command = b.addRunArtifact(threading_native_integration);
+    test_step.dependOn(&threading_native_test_command.step);
 
     // A dependency of `test` is otherwise a sibling of the install step and
     // may start while the distributed library is being replaced.
@@ -2687,8 +2733,45 @@ pub fn build(b: *std.Build) void {
     independent_let_values_command.addArgs(&.{ "run", "Smokes/IndependentLetValues.sx" });
     independent_let_values_command.expectStdOutEqual(hostText(b, "independent let\n"));
 
+    const threading_task_command = b.addRunArtifact(executable);
+    threading_task_command.step.dependOn(&independent_let_values_command.step);
+    threading_task_command.addArgs(&.{ "run", "Smokes/ThreadingTask.sx" });
+    threading_task_command.expectStdOutEqual(hostText(b, "threading task\n"));
+
+    const threading_task_manager_command = b.addRunArtifact(executable);
+    threading_task_manager_command.step.dependOn(&threading_task_command.step);
+    threading_task_manager_command.addArgs(&.{ "run", "Smokes/ThreadingTaskManager.sx" });
+    threading_task_manager_command.expectStdOutEqual(hostText(
+        b,
+        "task worker\ntask worker\ntask worker\ntask worker\ntask worker\nthreading task manager\n",
+    ));
+
+    const threading_source = b.getInstallPath(.prefix, "lib/silex/STD/Threading.sx");
+    const shared_threading_task_command = b.addRunArtifact(executable);
+    shared_threading_task_command.step.dependOn(&threading_task_manager_command.step);
+    shared_threading_task_command.addArgs(&.{ "compile", "Smokes/ThreadingErrors/SharedTask.sx" });
+    shared_threading_task_command.expectExitCode(1);
+    shared_threading_task_command.expectStdErrEqual(b.fmt(
+        "{s}:57:13: error: type 'SharedTask.Shared' is not an independent value and cannot be bound with 'let'; use 'var'\n",
+        .{threading_source},
+    ));
+
+    const unsafe_threading_task_command = b.addRunArtifact(executable);
+    unsafe_threading_task_command.step.dependOn(&shared_threading_task_command.step);
+    unsafe_threading_task_command.addArgs(&.{ "compile", "Smokes/ThreadingErrors/UnsafeTask.sx" });
+    unsafe_threading_task_command.expectExitCode(1);
+    unsafe_threading_task_command.expectStdErrEqual(hostText(
+        b,
+        "Smokes/ThreadingErrors/UnsafeTask.sx:7:16: error: an 'isolated func' cannot access a 'static var'\n",
+    ));
+
+    const threading_manager_lifetime_command = b.addRunArtifact(executable);
+    threading_manager_lifetime_command.step.dependOn(&unsafe_threading_task_command.step);
+    threading_manager_lifetime_command.addArgs(&.{ "run", "Smokes/ThreadingManagerLifetime.sx" });
+    threading_manager_lifetime_command.expectStdOutEqual(hostText(b, "retained manager\nretained manager\nafter global manager\n"));
+
     const classes_command = b.addRunArtifact(executable);
-    classes_command.step.dependOn(&independent_let_values_command.step);
+    classes_command.step.dependOn(&threading_manager_lifetime_command.step);
     classes_command.addArgs(&.{ "run", "Smokes/Classes.sx" });
     classes_command.expectStdOutEqual(hostText(b, "classes\n"));
 
@@ -2827,7 +2910,7 @@ pub fn build(b: *std.Build) void {
     const generic_functions_command = b.addRunArtifact(executable);
     generic_functions_command.step.dependOn(&main_result_assert_command.step);
     generic_functions_command.addArgs(&.{ "run", "Smokes/GenericFunctions.sx" });
-    generic_functions_command.expectStdOutEqual(hostText(b, "42\n7\nAda\nGrace\n9\nSilex\n3\n3\n4\n120\nlocal\n11\n5\ngeneric\n"));
+    generic_functions_command.expectStdOutEqual(hostText(b, "42\n7\nAda\nGrace\n9\nSilex\n3\n3\n4\n120\nlocal\n11\n5\ngeneric\n12\n14\n16\n16\n18\nclass\n19\nextend\n"));
 
     const protocols_command = b.addRunArtifact(executable);
     protocols_command.step.dependOn(&generic_functions_command.step);
@@ -3338,8 +3421,16 @@ pub fn build(b: *std.Build) void {
     native_callback_command.addArgs(&.{ "run", "Smokes/NativeCallbacks/Main.sx" });
     native_callback_command.expectStdOutEqual(hostText(b, "native callbacks ok\n"));
 
+    const native_isolated_callback_command = b.addRunArtifact(executable);
+    native_isolated_callback_command.step.dependOn(&native_callback_command.step);
+    native_isolated_callback_command.addArgs(&.{ "run", "Smokes/NativeIsolatedCallbacks/Main.sx" });
+    native_isolated_callback_command.expectStdOutEqual(hostText(
+        b,
+        "native isolated worker\nnative isolated callbacks ok\n",
+    ));
+
     const native_deferred_callback_command = b.addRunArtifact(executable);
-    native_deferred_callback_command.step.dependOn(&native_callback_command.step);
+    native_deferred_callback_command.step.dependOn(&native_isolated_callback_command.step);
     native_deferred_callback_command.addArgs(&.{ "run", "Smokes/NativeDeferredCallbacks/Main.sx" });
     native_deferred_callback_command.expectStdOutEqual(hostText(b, "native deferred callbacks ok\n"));
 

@@ -143,6 +143,13 @@ pub fn nativeDeferredCallbackIndex(_: anytype, arguments: []const *Semantic.Expr
     return null;
 }
 
+pub fn nativeIsolatedCallbackIndex(_: anytype, arguments: []const *Semantic.Expression) ?usize {
+    for (arguments, 0..) |argument, index| {
+        if (argument.type == .function and argument.type.function.isolated) return index;
+    }
+    return null;
+}
+
 pub fn isNativeCallbackScalarType(_: anytype, value: Semantic.Type) bool {
     return switch (value) {
         .int, .int8, .int16, .int32, .uint8, .uint16, .uint32, .uint64, .float, .float64, .bool => true,
@@ -360,15 +367,24 @@ pub fn generateNativeArgumentPreludes(
             continue;
         }
         if (self.isNativeCallbackType(argument.type)) {
-            try output.appendSlice(allocator, if (argument.type.function.deferred) "auto silexNativeDeferred" else "auto silexNativeCallback");
+            try output.appendSlice(allocator, if (argument.type.function.deferred)
+                "auto silexNativeDeferred"
+            else if (argument.type.function.isolated)
+                "auto silexNativeIsolated"
+            else
+                "auto silexNativeCallback");
             try output.appendSlice(allocator, try std.fmt.allocPrint(allocator, "{d}", .{index}));
             if (argument.type.function.deferred) {
                 try output.appendSlice(allocator, " = std::make_shared<");
                 try self.appendCppDeferredCallbackStateType(allocator, output, argument.type.function);
                 try output.appendSlice(allocator, ">(");
+            } else if (argument.type.function.isolated) {
+                try output.appendSlice(allocator, " = std::make_shared<");
+                try self.appendCppType(allocator, output, argument.type);
+                try output.appendSlice(allocator, ">(");
             } else try output.appendSlice(allocator, " = ");
             try self.generateExpression(allocator, output, argument);
-            try output.appendSlice(allocator, if (argument.type.function.deferred) ");" else ";");
+            try output.appendSlice(allocator, if (argument.type.function.deferred or argument.type.function.isolated) ");" else ";");
             continue;
         }
         const structure = parameter_structure orelse continue;

@@ -3,8 +3,9 @@
 A `struct` is a nominal value type with typed fields and optional field
 defaults. Its fields and methods are public by default, except for the storage
 of a unique resource structure described below. A member may write `public`
-explicitly or use `private` to reserve access to the declaring structure;
-`protected` is unavailable because structures do not support inheritance.
+explicitly, use `internal` to share access with declarations in the same file,
+or use `private` to reserve access to the declaring structure; `protected` is
+unavailable because structures do not support inheritance.
 Every field starts with `let` or `var`; the older `name:type` form is invalid.
 
 ```sx
@@ -88,8 +89,9 @@ let uniform = Position(1)
 ```
 
 A structure constructor is public without a marker or with explicit `public`.
-`private init` reserves construction to methods and static methods declared
-directly in the structure, which can expose selected factories. `protected` and
+`internal init` permits construction throughout the same file, while
+`private init` reserves it to methods and static methods declared directly in
+the structure, which can expose selected factories. `protected` and
 `: super(...)` are invalid because structures do not support inheritance.
 
 Declaring any `init` closes the named aggregate initializer completely. Every
@@ -168,9 +170,10 @@ Silex checks every concrete specialization with its ordinary type rules. One
 protocol can constrain a type parameter, for example
 `struct Box<T : Serializable>`. Only explicitly conforming arguments can create
 that specialization. Unconstrained parameters retain their existing behavior.
-Generic classes and methods with their own type parameters are not currently
-part of the language. Free generic functions are described in
-[Functions](Functions.md), and constraints in [Protocols](Protocols.md).
+Generic class declarations are not currently part of the language. Instance
+methods declared in a non-generic structure or class may have their own type
+parameters, under the rules described in [Functions](Functions.md). Constraints
+are described in [Protocols](Protocols.md).
 
 A `var` field can be changed only through a mutable receiver. A structure
 binding declared with `var` therefore permits writes to its `var` fields, while
@@ -226,8 +229,8 @@ instances; retained class references and cycles are therefore released under
 the ordinary `drop` and cycle-collection rules. Silex currently provides no
 concurrency model, atomic access, or implicit synchronization for this storage.
 
-Structure static fields are public by default and accept explicit `public` or
-`private`. Class visibility and inheritance rules are described in
+Structure static fields are public by default and accept explicit `public`,
+`internal`, or `private`. Class visibility and inheritance rules are described in
 [Classes](Classes.md).
 
 ## Methods
@@ -236,9 +239,10 @@ Methods declare `self` explicitly. A method becomes mutating if it writes
 through `self` or calls another mutating method on it. This property propagates
 through recursive calls; a mutating method requires a `var` receiver.
 
-Structure methods are public by default. `private func` reserves an instance
-method to the declaring structure, while `private static func` does the same
-for a static method. `public` may always be written explicitly.
+Structure methods are public by default. `internal func` confines an instance
+method to its source file. `private func` reserves it to the declaring
+structure, while the same modifiers apply to static methods. `public` may
+always be written explicitly.
 
 ```sx
 struct Counter {
@@ -352,8 +356,9 @@ func close(file:File) {}
 close(File.open("notes.txt"))
 ```
 
-A named owner never transfers implicitly. Prefix `move` names the complete
-local binding or ordinary parameter whose ownership is transferred:
+A named owner never transfers implicitly. The general `move` expression names
+the complete local binding or ordinary parameter whose ownership is
+transferred:
 
 ```sx
 func forward(file:File) File {
@@ -365,23 +370,20 @@ let second = move first
 close(move second)
 ```
 
-`move` accepts the complete name of any recursively noncopyable local or
-parameter. It rejects ordinary copyable values, `self`, static storage, fields,
-indexed elements, partial values, and captured outer bindings. A noncopyable
-A parameter of a noncopyable type cannot use `&T`; the value also cannot be
-captured by a lambda, converted to a dynamic protocol value, or compared for
-equality.
+Unlike an ordinary copyable value, a named owner must use `move` because no
+independent copy can exist. `move` also accepts copyable locals and parameters
+as an optional explicit transfer; its complete rules are described in
+[Explicit transfers](Values-and-References.md#explicit-transfers). A parameter
+of a noncopyable type cannot use `&T`; the value also cannot be captured by a
+lambda, converted to a dynamic protocol value, or compared for equality.
 Named owner arguments and returns must spell `move` at the transfer site. A
 `resource:@Resource` parameter may inspect the same owner through an ordinary
 `resource` argument without transferring or copying it; the
 owner remains available after the call.
 
-After `move file`, that binding is consumed: it cannot be read, mutated, moved
-again, referenced, or destroyed. A consumed `var` can receive a new temporary or
-transferred owner and becomes available again; a consumed `let` cannot be
-assigned. Assigning an available owner `var` first evaluates the new owner,
-runs the destination's `drop` exactly once, then installs the new owner. Moving
-a binding into itself is invalid.
+After `move file`, that binding follows the ordinary consumed-state rules. For
+an owner, assigning an available destination `var` first evaluates the new
+owner, runs the destination's `drop` exactly once, then installs the new owner.
 
 An active `@` reference blocks `move` and `&` on the same owner until the call
 returns. The referenced parameter itself cannot be moved, mutated, returned,

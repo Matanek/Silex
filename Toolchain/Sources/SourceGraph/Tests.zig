@@ -324,3 +324,30 @@ test "a declaration in a neighboring file does not collide with a file namespace
     try std.testing.expectEqual(@as(usize, 2), loaded.files.len);
     try std.testing.expectEqualStrings("Thing", loaded.files[1].unit_name);
 }
+
+test "a public static class is selectable from a single-file namespace" {
+    if (!build_options.run_source_graph_tests) return;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{ .iterate = true });
+    defer temporary.cleanup();
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "project.json",
+        .data =
+        \\{"target":"App.Main","modules":[
+        \\  {"name":"Library.Tasks","sources":["Tasks.sx"]},
+        \\  {"name":"App","sources":["Main.sx"]}
+        \\]}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = "use Library.Tasks.TaskManager\nfunc main() {}\n" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Tasks.sx", .data = "public static class TaskManager { public static func submit() {} }\n" });
+
+    var environ = EnvironMap.init(allocator);
+    const project_path = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "project.json" });
+    var loader = Loader.init(allocator, std.testing.io, &environ);
+    const loaded = try loader.load(project_path);
+    try std.testing.expectEqual(@as(usize, 2), loaded.files.len);
+}

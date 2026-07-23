@@ -42,6 +42,25 @@
     ],
     "description": "Expose a module declaration"
   },
+  "Internal declaration": {
+    "prefix": "internal",
+    "body": [
+      "internal ${1:class Name {}}",
+      "$0"
+    ],
+    "description": "Keep a declaration accessible only from its source file"
+  },
+  "Static class": {
+    "prefix": "staticclass",
+    "body": [
+      "public static class ${1:Name} {",
+      "    public static func ${2:operation}(${3})${4} {",
+      "        $0",
+      "    }",
+      "}"
+    ],
+    "description": "Declare a non-constructible namespace of static state and operations"
+  },
   "Public native function": {
     "prefix": "publicnative",
     "body": [
@@ -57,6 +76,14 @@
       "$0"
     ],
     "description": "Declare a native registration whose callback is dispatched explicitly by Silex"
+  },
+  "Isolated native registration": {
+    "prefix": "isolatednative",
+    "body": [
+      "public native func ${1:register}(${2:callback}:isolated func()) ${3:Resource}",
+      "$0"
+    ],
+    "description": "Declare a native registration that runs one independent Silex callback on a worker"
   },
   "Public native resource": {
     "prefix": "publicresource",
@@ -446,6 +473,15 @@
     ],
     "description": "Declare a struct method with an explicit return type"
   },
+  "Generic instance method": {
+    "prefix": "methodgeneric",
+    "body": [
+      "public func ${1:name}<${2:T}>(${3:value}:$2) $2 {",
+      "    return $3",
+      "}"
+    ],
+    "description": "Declare a generic instance method in a struct or class"
+  },
   "Static method": {
     "prefix": "staticmethod",
     "body": [
@@ -523,6 +559,22 @@
       "}"
     ],
     "description": "Reserve a method to its declaring type"
+  },
+  "Internal member": {
+    "prefix": "internalmember",
+    "body": [
+      "internal var ${1:name}:${2:type}"
+    ],
+    "description": "Share a member with declarations in the same source file"
+  },
+  "Internal method": {
+    "prefix": "internalmethod",
+    "body": [
+      "internal func ${1:name}(${2}) {",
+      "    $0",
+      "}"
+    ],
+    "description": "Share a method with declarations in the same source file"
   },
   "Subclass": {
     "prefix": "subclass",

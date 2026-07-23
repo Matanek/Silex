@@ -233,8 +233,17 @@ fn renderHeaderForModules(
         try appendTransportIfNew(allocator, &output, &emitted_transports, structure.native_module_name.?, structure, false);
     }
 
+    var emitted_functions: std.ArrayList([]const u8) = .empty;
     for (program.functions) |function| {
         if (!function.is_native or !containsModule(module_names, function.native_module_name.?)) continue;
+        if (function.is_native_generic) {
+            var duplicate = false;
+            for (emitted_functions.items) |generated_name| {
+                if (std.mem.eql(u8, generated_name, function.generated_name)) duplicate = true;
+            }
+            if (duplicate) continue;
+            try emitted_functions.append(allocator, function.generated_name);
+        }
         try appendFunctionSignature(allocator, &output, program, function);
         try output.appendSlice(allocator, ";\n");
     }
@@ -265,6 +274,9 @@ fn appendFunctionSignature(
     program: Semantic.Program,
     function: Semantic.Function,
 ) !void {
+    if (function.is_native_generic) {
+        return appendGenericFunctionSignature(allocator, output, program, function);
+    }
     const result = nativeResultShape(program, function.return_type);
     const structure = returnedStructure(program, function);
     const returned = nativeReturnValueType(function.return_type);
@@ -379,6 +391,56 @@ fn appendFunctionSignature(
         try output.appendSlice(allocator, "* output");
     }
     if (parameter_count == 0 and result == null and returned_view == null and returned != .str and !returns_bytes and structure == null and !optional) try output.appendSlice(allocator, "void");
+    try output.append(allocator, ')');
+}
+
+fn appendGenericFunctionSignature(
+    allocator: Allocator,
+    output: *std.ArrayList(u8),
+    program: Semantic.Program,
+    function: Semantic.Function,
+) !void {
+    const returned_structure = returnedStructure(program, function);
+    if (returned_structure) |structure| {
+        try output.appendSlice(allocator, try transportName(allocator, function.native_module_name.?, structure.source_name));
+        try output.append(allocator, '*');
+    } else {
+        try output.appendSlice(allocator, "void");
+    }
+    try output.append(allocator, ' ');
+    try output.appendSlice(allocator, function.generated_name);
+    try output.append(allocator, '(');
+    for (function.parameters, 0..) |parameter, index| {
+        if (index != 0) try output.appendSlice(allocator, ", ");
+        if (parameter.type == .function) {
+            if (parameter.type.function.isolated) {
+                try output.appendSlice(allocator, "void* (*");
+                try output.appendSlice(allocator, parameter.generated_name);
+                try output.appendSlice(allocator, ")(void*), void* ");
+                try output.appendSlice(allocator, parameter.generated_name);
+                try output.appendSlice(allocator, "_context, void (*");
+                try output.appendSlice(allocator, parameter.generated_name);
+                try output.appendSlice(allocator, "_destroy)(void*)");
+            } else {
+                try output.appendSlice(allocator, "void (*");
+                try output.appendSlice(allocator, parameter.generated_name);
+                try output.appendSlice(allocator, ")(void*, void*), void* ");
+                try output.appendSlice(allocator, parameter.generated_name);
+                try output.appendSlice(allocator, "_context");
+            }
+            continue;
+        }
+        const structure = structureForType(program, parameter.type).?;
+        if (parameter.mode == .borrow) try output.appendSlice(allocator, "const ");
+        try output.appendSlice(allocator, try inputTransportName(
+            allocator,
+            function.native_module_name.?,
+            structure.source_name,
+            false,
+        ));
+        try output.appendSlice(allocator, "* ");
+        try output.appendSlice(allocator, parameter.generated_name);
+    }
     try output.append(allocator, ')');
 }
 

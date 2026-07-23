@@ -2,6 +2,7 @@ const Types = @import("Types.zig");
 const Support = @import("Support.zig");
 const Declarations = @import("Declarations.zig");
 const Transform = @import("Transform.zig");
+const Visibility = @import("Visibility.zig");
 const Resolution = @import("Resolution.zig");
 const std = Types.std;
 const Ast = Types.Ast;
@@ -88,6 +89,9 @@ pub const Resolver = struct {
                     var found = false;
                     for (structures.items) |*structure| {
                         if (!std.mem.eql(u8, structure.name, transformed.target)) continue;
+                        if (structure.is_static_class) {
+                            return self.fail(extension.target_position, "a static class cannot be extended");
+                        }
                         if (structure.type_parameters.len != 0) {
                             return self.fail(extension.target_position, "generic structures cannot be extended");
                         }
@@ -104,13 +108,15 @@ pub const Resolver = struct {
                 }
             }
         }
-        return .{
+        const result: Ast.Program = .{
             .enums = try enums.toOwnedSlice(self.allocator),
             .protocols = try protocols.toOwnedSlice(self.allocator),
             .extensions = try extensions.toOwnedSlice(self.allocator),
             .structures = try structures.toOwnedSlice(self.allocator),
             .functions = try functions.toOwnedSlice(self.allocator),
         };
+        try self.validatePublicInputs(result);
+        return result;
     }
 
     pub const transformExtension = Declarations.transformExtension;
@@ -159,6 +165,12 @@ pub const Resolver = struct {
     pub const transformExpressions = Transform.transformExpressions;
     pub const transformFieldInitializers = Transform.transformFieldInitializers;
     pub const transformAliasInvocation = Transform.transformAliasInvocation;
+    pub const validatePublicInputs = Visibility.validatePublicInputs;
+    pub const validateCallableInputs = Visibility.validateCallableInputs;
+    pub const failInternalInput = Visibility.failInternalInput;
+    pub const internalTypeDeclaration = Visibility.internalTypeDeclaration;
+    pub const internalReturnDeclaration = Visibility.internalReturnDeclaration;
+    pub const internalNamedDeclaration = Visibility.internalNamedDeclaration;
     pub const resolveUses = Resolution.resolveUses;
     pub const expressionPath = Resolution.expressionPath;
     pub const staticOwnerType = Resolution.staticOwnerType;
@@ -176,9 +188,12 @@ pub const Resolver = struct {
     pub const findModule = Resolution.findModule;
     pub const internalAccess = Resolution.internalAccess;
     pub const declarationsNamed = Resolution.declarationsNamed;
+    pub const declarationsNamedVisibleFrom = Resolution.declarationsNamedVisibleFrom;
     pub const findDirect = Resolution.findDirect;
+    pub const findDirectVisibleFrom = Resolution.findDirectVisibleFrom;
     pub const findDirectByPosition = Resolution.findDirectByPosition;
     pub const declarationIsClass = Resolution.declarationIsClass;
+    pub const declarationIsStaticClass = Resolution.declarationIsStaticClass;
     pub const declarationHasConstructors = Resolution.declarationHasConstructors;
     pub const declarationIsEnum = Resolution.declarationIsEnum;
     pub const findExport = Resolution.findExport;

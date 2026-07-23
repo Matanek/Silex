@@ -535,11 +535,11 @@ pub fn variableExpression(
         const message = try std.fmt.allocPrint(self.allocator, "unknown variable '{s}'", .{name});
         return self.fail(position, message);
     };
-    if (try self.isNonCopyableType(symbol.type) and !symbol.state.owner_available) {
+    if (!symbol.state.owner_available) {
         const consumed_at = symbol.state.consumed_at.?;
         const message = try std.fmt.allocPrint(
             self.allocator,
-            "noncopyable value '{s}' was consumed by 'move' at {d}:{d}",
+            "value '{s}' was consumed by 'move' at {d}:{d}",
             .{ name, consumed_at.line, consumed_at.column },
         );
         return self.fail(position, message);
@@ -572,6 +572,10 @@ pub fn selfExpression(self: anytype, position: Source.Position) AnalyzeError!*Ex
     const structure_index = self.current_structure_index orelse return self.fail(position, "'self' is only available inside a method or constructor");
     if (self.current_self_state.mutable_borrow) return self.fail(position, "cannot access 'self' while one of its collections is mutably iterated");
     const structure = self.structures.items[structure_index];
+    var isolated_context = self.current_lambda;
+    while (isolated_context) |lambda| : (isolated_context = lambda.parent) {
+        if (lambda.isolated) return self.fail(position, "'self' cannot be captured by an 'isolated func'");
+    }
     if (self.current_lambda != null and try self.isNonCopyableType(.{ .structure = self.structureType(structure_index) })) {
         const message = try std.fmt.allocPrint(
             self.allocator,
@@ -883,6 +887,7 @@ pub fn callExpression(self: anytype, call: Ast.Expression.Call, scope: *const Sc
             .generated_name = function_symbol.generated_name,
             .arguments = try arguments.toOwnedSlice(self.allocator),
             .is_native = function_symbol.is_native,
+            .is_native_generic = function_symbol.is_native_generic,
             .native_module_name = function_symbol.native_module_name,
             .native_function_name = function_symbol.native_function_name,
             .native_return_structure = if (function_symbol.is_native)
@@ -1015,6 +1020,11 @@ pub fn lambdaExpression(
     parent_scope: *const Scope,
     expected_type: ?Type,
 ) AnalyzeError!*Expression {
+    const contextual_isolated = if (expected_type) |expected|
+        expected == .function and expected.function.isolated and !lambda.deferred
+    else
+        false;
+    const isolated = lambda.isolated or contextual_isolated;
     var parameter_types: std.ArrayList(Type) = .empty;
     var parameter_modes: std.ArrayList(Ast.ParameterMode) = .empty;
     var parameters: std.ArrayList(Parameter) = .empty;
@@ -1059,6 +1069,7 @@ pub fn lambdaExpression(
     return_pointer.* = return_type;
     var lambda_type: Type = .{ .function = .{
         .deferred = lambda.deferred,
+        .isolated = isolated,
         .parameters = try parameter_types.toOwnedSlice(self.allocator),
         .parameter_modes = try parameter_modes.toOwnedSlice(self.allocator),
         .return_type = return_pointer,
@@ -1073,6 +1084,7 @@ pub fn lambdaExpression(
 
     var context = LambdaContext{
         .local_depth = scope.depth,
+        .isolated = isolated,
         .owner_self = lambda_type.function.owner != null,
         .parent = self.current_lambda,
     };
@@ -1101,6 +1113,7 @@ pub fn lambdaExpression(
         .lifetime_depth = context.lifetime_depth,
         .value = .{ .lambda = .{
             .parameters = try parameters.toOwnedSlice(self.allocator),
+            .isolated = isolated,
             .return_type = return_type,
             .statements = body,
             .captures = try context.captures.toOwnedSlice(self.allocator),

@@ -395,6 +395,79 @@ test "parse class declarations with the structure member grammar" {
     try std.testing.expectEqual(@as(usize, 1), program.structures[0].methods.len);
 }
 
+test "parse static classes and reject instance state" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(),
+        \\public static class Tasks {
+        \\    static var count:int
+        \\    public static func submit<T>(task:T) T { return task }
+        \\}
+        \\func main() {}
+    );
+    const program = try parser.parse();
+    try std.testing.expect(program.structures[0].is_class);
+    try std.testing.expect(program.structures[0].is_static_class);
+    try std.testing.expect(program.structures[0].fields[0].is_static);
+    try std.testing.expect(program.structures[0].methods[0].is_static);
+    try std.testing.expectEqual(@as(usize, 1), program.structures[0].methods[0].type_parameters.len);
+
+    var instance_field = Parser.init(arena.allocator(), "static class Tasks { var count:int }");
+    try std.testing.expectError(error.InvalidSource, instance_field.parse());
+    try std.testing.expectEqualStrings("a static class can declare only static fields", instance_field.diagnostic.?.message);
+
+    var instance_method = Parser.init(arena.allocator(), "static class Tasks { func submit() {} }");
+    try std.testing.expectError(error.InvalidSource, instance_method.parse());
+    try std.testing.expectEqualStrings("a static class can declare only static methods", instance_method.diagnostic.?.message);
+}
+
+test "parse internal types functions and members" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(),
+        \\internal enum State { ready }
+        \\internal protocol Work { func execute() }
+        \\internal struct Value { internal var number:int }
+        \\internal class Handle {
+        \\    internal static var count:int
+        \\    public init() {}
+        \\    internal init(value:int) {}
+        \\    internal func join() {}
+        \\}
+        \\internal func make() Handle { return Handle() }
+        \\internal native resource NativeHandle { drop release_handle }
+        \\internal native func poll(handle:@NativeHandle) bool
+        \\func main() {}
+    );
+    const program = try parser.parse();
+    try std.testing.expect(program.enums[0].is_internal);
+    try std.testing.expect(program.protocols[0].is_internal);
+    try std.testing.expect(program.structures[0].is_internal);
+    try std.testing.expect(program.structures[1].is_internal);
+    try std.testing.expectEqual(Ast.MemberVisibility.internal_access, program.structures[0].fields[0].visibility);
+    try std.testing.expectEqual(Ast.MemberVisibility.internal_access, program.structures[1].fields[0].visibility);
+    try std.testing.expectEqual(Ast.MemberVisibility.public_access, program.structures[1].constructors[0].visibility);
+    try std.testing.expectEqual(Ast.MemberVisibility.internal_access, program.structures[1].constructors[1].visibility);
+    try std.testing.expectEqual(Ast.MemberVisibility.internal_access, program.structures[1].methods[0].member_visibility.?);
+    try std.testing.expect(program.structures[2].is_internal);
+    try std.testing.expect(program.functions[0].is_internal);
+    try std.testing.expect(program.functions[1].is_internal);
+    try std.testing.expect(program.functions[2].is_internal);
+
+    var implicit_members = Parser.init(arena.allocator(),
+        \\internal class FileType {
+        \\    let value:int
+        \\    init(value:int) { self.value = value }
+        \\    func read() int { return self.value }
+        \\}
+        \\func main() {}
+    );
+    const implicit_program = try implicit_members.parse();
+    try std.testing.expectEqual(Ast.MemberVisibility.internal_access, implicit_program.structures[0].fields[0].visibility);
+    try std.testing.expectEqual(Ast.MemberVisibility.internal_access, implicit_program.structures[0].constructors[0].visibility);
+    try std.testing.expectEqual(Ast.MemberVisibility.internal_access, implicit_program.structures[0].methods[0].member_visibility.?);
+}
+
 test "parse visible overloaded class constructors" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -443,6 +516,7 @@ test "reject invalid drop declarations and explicit calls" {
         .{ .source = "class Value { public drop {} } func main() {}", .message = "'drop' does not accept a visibility modifier" },
         .{ .source = "class Value { protected drop {} } func main() {}", .message = "'drop' does not accept a visibility modifier" },
         .{ .source = "class Value { private drop {} } func main() {}", .message = "'drop' does not accept a visibility modifier" },
+        .{ .source = "class Value { internal drop {} } func main() {}", .message = "'drop' does not accept a visibility modifier" },
         .{ .source = "class Value { override drop {} } func main() {}", .message = "'override' cannot apply to 'drop'" },
         .{ .source = "class Value { drop() {} } func main() {}", .message = "'drop' must be followed by a block" },
         .{ .source = "class Value {} func main() { var value = Value(); value.drop() }", .message = "expected field name after '.'" },

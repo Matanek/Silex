@@ -5,7 +5,8 @@ have value semantics. Assignment, an ordinary function argument, a return
 value, a field, and an indexed element never create observable shared mutable
 state. A structure declaring `drop` is the noncopyable exception: it owns one
 unique local resource. A temporary transfers implicitly into its destination;
-a named owner transfers only through `move`. See
+a named owner transfers only through `move`. Copyable values may also be moved
+explicitly when their source is no longer needed. See
 [Structures](Structures.md#unique-resource-structures).
 
 Function values are copied as values too, but a capturing lambda contains
@@ -20,7 +21,13 @@ native registration, and a named value transfers with `move`. Its captures are
 then owned indirectly by the returned subscription resource until that resource
 is destroyed. See [Native interoperability](Native-Interop.md#deferred-callbacks).
 
-This shared captured state also means a function value is not independent and
+`isolated func(...) R` instead owns copies of its captured `let` values. Its
+signature and captures must remain recursively independent, so the value may be
+bound with `let`, copied, passed, stored and called in Silex. A native
+registration may retain one behind the returned native resource while a worker
+executes it. See [Native interoperability](Native-Interop.md#isolated-callbacks).
+
+Shared captures mean an ordinary function value is not independent and
 cannot be bound directly with `let`, or inside an ordinary containing value.
 A local `let` collection is the exception: its storage is immutable even when
 its elements are not independent.
@@ -35,6 +42,8 @@ recursively preserve the independent value behaviour. The same rule applies to
 array and list fields, static storage, and collections nested inside another
 ordinary value. A local array or list binding may instead use `let` to protect
 only its own collection storage. Class references do not otherwise qualify.
+Isolated function values are the function exception because their captures are
+owned copies rather than shared lexical borrows.
 
 ```sx
 var first:int[] = [1]
@@ -49,6 +58,36 @@ The compiler may optimize list copies internally, but the value behaviour above
 is guaranteed, including for nested lists and structures that contain lists.
 Copying a list of classes copies its class references: the list remains a
 distinct container value, while its elements retain their shared identities.
+
+## Explicit transfers
+
+Ordinary assignment, argument passing and returns copy copyable values. Prefix
+`move` instead transfers a complete local binding or ordinary parameter:
+
+```sx
+var original = Payload(values:[1, 2, 3])
+let copied = original
+let transferred = move original
+```
+
+`copied` receives an independent value copy. `transferred` receives the value
+previously owned by `original`, and `original` is consumed. It cannot be read,
+modified, borrowed or moved again. A consumed `var` may be assigned a new value
+and becomes available again; a consumed `let` cannot be reassigned. Availability
+is checked through branches and loops, and moving a binding into itself is
+invalid.
+
+The explicit transfer is optional for copyable values and mandatory for a named
+noncopyable owner. It accepts scalars, strings, lists, fixed arrays, structures,
+enums, classes, protocols and function values when they are complete local
+bindings or parameters. It rejects `self`, static storage, fields, indexed
+elements, captured outer bindings, references, views and actively borrowed
+values.
+
+The C++ backend uses the type's move construction or move assignment. Scalars
+may cost the same as a copy, while a list transfers its allocated storage
+without allocating and copying all its elements. Structures apply the same rule
+recursively to their fields.
 
 A dynamic protocol value follows the contained kind. When it contains a
 structure, assignment copies an independent structure value. When it contains
@@ -195,11 +234,12 @@ keeps its root borrowed until the end of its lexical scope, preventing
 incompatible access, mutation, replacement, `move`, or destruction.
 
 Reference types remain forbidden in fields, collections, optionals, enums,
-static storage, lambda captures and deferred callbacks. They are controlled
-aliases, not pointers or independently storable values. Ordinary assignment is
+static storage, ordinary lambda captures and deferred callbacks. An isolated
+callback admits only owned copies of recursively independent `let` values.
+References are controlled aliases, not pointers or independently storable values. Ordinary assignment is
 the value-copy operation for ordinary values. The distinct `move name`
-expression transfers a complete unique-resource local or parameter; it is not
-a general replacement for copying.
+expression explicitly transfers and consumes a complete local or parameter;
+see [Explicit transfers](#explicit-transfers).
 
 A class reference already has shared identity and cannot be declared as an
 `&ClassName` parameter. `&ClassName?` remains valid because it aliases the

@@ -1,0 +1,29 @@
+public native resource Operation {
+    drop discard_operation
+}
+
+native func start_operation(callback:isolated func()) Operation
+native func reset_observations() void
+native func invocation_count() int
+native func destroyed_count() int
+native func ran_on_worker() bool
+native func live_worker_count() int
+
+public func verify() {
+    reset_observations()
+    let values:int[] = [1, 2, 3]
+    let operation = start_operation(isolated func() {
+        var total = 0
+        for value in values {
+            total += value
+        }
+        print("native isolated worker")
+        assert(total == 6, "isolated callback owns its list capture")
+    })
+
+    discard_operation(operation)
+    assert(invocation_count() == 1, "isolated callback runs exactly once")
+    assert(destroyed_count() == 1, "isolated operation destroys exactly once")
+    assert(ran_on_worker(), "isolated callback runs on a worker thread")
+    assert(live_worker_count() == 0, "operation destruction waits for quiescence")
+}

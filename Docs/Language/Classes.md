@@ -34,7 +34,93 @@ starts with `let` or `var`.
 Construction is explicit: a non-optional declaration such as
 `var player:Player` is invalid, because a class has no intrinsic instance.
 `var player:Player?` is valid and starts as `null` under the ordinary
-optional-value rules. A class may be declared `public`.
+optional-value rules. A class may be declared `public` or `internal`; an
+internal class is nameable only in its source file.
+
+## Generic classes and methods
+
+A class may declare type parameters and use them in its fields, constructors,
+methods, and generic base class. Each concrete specialization keeps ordinary
+class identity semantics:
+
+```sx
+class Box<T> {
+    let value:T
+
+    public init(value:T) {
+        self.value = value
+    }
+
+    public func get() T {
+        return self.value
+    }
+}
+
+var number = Box<int>(42)
+var text = Box<str>("Silex")
+```
+
+As for generic structures, class type arguments are explicit. A generic class
+may extend a compatible specialization of a generic base class.
+
+A method in a generic class uses the class type parameters. A method in a
+non-generic class may additionally declare its own type parameters. Generic
+methods inside a generic class are not yet supported.
+
+Generic methods follow the same inference, explicit argument, constraint, and
+specialization rules as a generic function or structure method:
+
+```sx
+class Catalog {
+    public func identity<T>(value:T) T {
+        return value
+    }
+
+    public static func make<T>(value:T) T {
+        return value
+    }
+}
+
+var catalog = Catalog()
+let inferred = catalog.identity(42)
+let explicit = catalog.identity<str>("Silex")
+let static_inferred = Catalog.make(42)
+let static_explicit = Catalog.make<str>("Silex")
+```
+
+The specialized method keeps its ordinary class visibility. A visible generic
+method declared by a base class is therefore available through a descendant.
+Generic instance and static methods are also allowed in class extensions, but extension
+methods remain statically resolved for their exact target and are not
+inherited; see [Type
+extensions](Extensions.md#generic-extension-methods).
+
+Constructors, native methods, protocol requirements, and `override`
+relationships do not declare their own type parameters.
+
+## Static classes
+
+`static class` declares a visible type qualifier without instances. It groups
+one shared state and the operations that manage it:
+
+```sx
+public static class Tasks {
+    static var submitted:int
+
+    public static func submit<T>(task:T) {
+        Tasks.submitted++
+    }
+}
+
+Tasks.submit(MyTask())
+Tasks.submit<MyTask>(MyTask())
+```
+
+A static class contains only `static` fields and `static func` methods. It has
+no `init`, `drop`, `self`, base class, protocol conformance, `protected` member,
+or extension, and `Tasks()` is rejected. Its generic static methods use the
+same inference and explicit `<...>` forms as other generic callables. The class
+itself may be `public`, `internal`, or file-private; it is not generic.
 
 ## Constructors
 
@@ -66,9 +152,11 @@ var retried = Session("def", 3)
 
 Constructor arguments are positional and overload selection follows function
 rules. A constructor is private without a marker or with explicit `private`,
-`protected` for the declaring class and future descendants, and `public` for
-ordinary callers. It cannot be invoked as
-an instance method or return a value.
+`internal` for every declaration in the same file, `protected` for the
+declaring class and future descendants, and `public` for ordinary callers. Its
+effective visibility cannot exceed that of the class: a `public init` in an
+`internal class` is already file-confined. It cannot be invoked as an instance
+method or return a value.
 
 Before the constructor body, every `var` field receives its declared default or
 its type's intrinsic value when one exists. A `var` field with neither must be
@@ -306,17 +394,23 @@ private method, while calls written in the child use the child's method.
 
 ## Member visibility
 
-Every class field and method is private by default. A private member is
+Every field, method, and constructor of an ordinary class is private by
+default. In an `internal class`, an unmarked member is instead `internal`,
+because the type itself is already confined to that source file; explicit
+`private` remains available. A private member is
 accessible from methods of its declaring class, including through another
 instance of that same class, but not from other code in the module.
 
 For an instance field, visibility precedes mutability: `public var name:str`,
-`protected let generation:int`, or `private let id:int`. For a static field,
-visibility precedes `static`: `public static var count:int`,
+`internal var state:int`, `protected let generation:int`, or
+`private let id:int`. For a static field, visibility precedes `static`:
+`public static var count:int`, `internal static let state:int`,
 `protected static let limit:int = 10`, or `private static var cache:int`.
 
-`public` exposes a member everywhere the class is visible. `protected` reserves a member
-for its declaring class and descendants:
+`public` exposes a member everywhere the class is visible. `internal` shares a
+member with every declaration in the same source file, which provides a
+friend-like boundary without listing friend types. `protected` reserves a
+member for its declaring class and descendants:
 
 ```sx
 public class Session {
@@ -332,7 +426,8 @@ public class Session {
 ```
 
 The absence of a marker remains private. The explicit `private` form is also
-accepted so classes and structures share one visibility vocabulary.
+accepted so classes and structures share one visibility vocabulary. No member
+can be more visible in practice than its declaring class.
 
 A named initializer is also an external member access. It can name only `public`
 fields, while private and `protected` fields must obtain their declared defaults:

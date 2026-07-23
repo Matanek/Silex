@@ -1,0 +1,27 @@
+internal class Handle {
+    internal var done:bool
+
+    public init() {
+        self.done = false
+    }
+
+    internal func finish() {
+        self.done = true
+    }
+
+    public func complete() {
+        assert(self.done, "opaque internal result keeps its public API")
+    }
+}
+
+internal func prepare(handle:Handle) {
+    handle.finish()
+}
+
+public class Manager {
+    public func submit() Handle {
+        var handle = Handle()
+        prepare(handle)
+        return handle
+    }
+}

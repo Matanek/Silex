@@ -247,6 +247,14 @@ pub fn recordSymbolCapture(self: anytype, symbol: *const Symbol, position: Sourc
     var lambda_context = self.current_lambda;
     while (lambda_context) |lambda| : (lambda_context = lambda.parent) {
         if (symbol.scope_depth < lambda.local_depth) {
+            if (lambda.isolated and symbol.mutability == .mutable) {
+                const message = try std.fmt.allocPrint(
+                    self.allocator,
+                    "mutable value '{s}' cannot be captured by an 'isolated func'; bind an independent snapshot with 'let'",
+                    .{symbol.source_name},
+                );
+                return self.fail(position, message);
+            }
             if (symbol.state.borrowed_parameter) {
                 return self.fail(position, "a read-reference parameter cannot be captured by a lambda");
             }
@@ -258,7 +266,28 @@ pub fn recordSymbolCapture(self: anytype, symbol: *const Symbol, position: Sourc
                 );
                 return self.fail(position, message);
             }
-            const by_value = try self.typeContainsClass(symbol.type);
+            if (lambda.isolated) {
+                var field_path: std.ArrayList([]const u8) = .empty;
+                defer field_path.deinit(self.allocator);
+                var visiting = std.StringHashMap(void).init(self.allocator);
+                defer visiting.deinit();
+                if (try self.nonIndependentType(symbol.type, &field_path, &visiting)) |cause| {
+                    const message = if (field_path.items.len == 0)
+                        try std.fmt.allocPrint(
+                            self.allocator,
+                            "value '{s}' of type '{s}' cannot be captured by an 'isolated func'",
+                            .{ symbol.source_name, typeName(cause) },
+                        )
+                    else
+                        try std.fmt.allocPrint(
+                            self.allocator,
+                            "value '{s}' cannot be captured by an 'isolated func' because field '{s}' reaches '{s}'",
+                            .{ symbol.source_name, try std.mem.join(self.allocator, ".", field_path.items), typeName(cause) },
+                        );
+                    return self.fail(position, message);
+                }
+            }
+            const by_value = lambda.isolated or try self.typeContainsClass(symbol.type);
             if (by_value) symbol.state.capture_box = true;
             try self.recordLambdaCapture(lambda, symbol.generated_name, by_value);
             lambda.lifetime_depth = @max(lambda.lifetime_depth, symbol.scope_depth);

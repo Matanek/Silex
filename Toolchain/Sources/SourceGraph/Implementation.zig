@@ -580,6 +580,7 @@ pub const Loader = struct {
                 is_public = true;
                 continue;
             }
+            if (token.tag == .keyword_static) continue;
             const declares = token.tag == .keyword_struct or token.tag == .keyword_class or
                 token.tag == .keyword_protocol or token.tag == .keyword_enum or token.tag == .keyword_func;
             if (declares) {

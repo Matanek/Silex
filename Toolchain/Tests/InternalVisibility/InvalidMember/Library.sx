@@ -1,0 +1,11 @@
+internal class Handle {
+    public init() {}
+
+    internal func secret() {}
+}
+
+public class Manager {
+    public func submit() Handle {
+        return Handle()
+    }
+}

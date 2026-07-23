@@ -410,6 +410,7 @@ pub fn structureType(self: anytype, structure_index: usize) StructureType {
         .source_name = structure.source_name,
         .generated_name = structure.generated_name,
         .is_class = structure.is_class,
+        .is_static_class = structure.is_static_class,
         .is_owner = structure.is_owner,
     };
 }
@@ -487,7 +488,7 @@ pub fn implicitBaseInitialization(self: anytype, structure_index: usize) Analyze
     if (base.constructors.len != 0) {
         for (base.constructors) |constructor_symbol| {
             if (constructor_symbol.parameter_types.len == 0 and
-                self.memberVisibleFrom(structure_index, base_index, constructor_symbol.visibility))
+                self.memberVisibleFrom(structure_index, base_index, constructor_symbol.visibility, structure.position.file))
             {
                 return .{
                     .available = true,
@@ -523,10 +524,12 @@ pub fn memberVisibleFromCurrentContext(
     self: anytype,
     structure_index: usize,
     visibility: Ast.MemberVisibility,
+    access_file: usize,
 ) bool {
+    if (visibility == .internal_access) return self.structures.items[structure_index].position.file == access_file;
     if (self.current_extension) return visibility == .public_access;
     const current_index = self.current_structure_index orelse return visibility == .public_access;
-    return self.memberVisibleFrom(current_index, structure_index, visibility);
+    return self.memberVisibleFrom(current_index, structure_index, visibility, access_file);
 }
 
 pub fn memberVisibleFrom(
@@ -534,10 +537,12 @@ pub fn memberVisibleFrom(
     current_index: usize,
     declaring_index: usize,
     visibility: Ast.MemberVisibility,
+    access_file: usize,
 ) bool {
     return switch (visibility) {
         .public_access => true,
         .private_access => current_index == declaring_index,
+        .internal_access => self.structures.items[declaring_index].position.file == access_file,
         .subclass => current_index == declaring_index or self.isDescendantOf(current_index, declaring_index),
     };
 }
@@ -566,7 +571,7 @@ pub fn requireFieldAccess(
         );
         return self.fail(position, message);
     }
-    if (self.memberVisibleFromCurrentContext(structure_index, field.visibility)) return;
+    if (self.memberVisibleFromCurrentContext(structure_index, field.visibility, position.file)) return;
     return self.failMemberAccess("field", structure, field.source_name, field.visibility, position);
 }
 
@@ -590,6 +595,11 @@ pub fn failMemberAccess(
             "{s} '{s}' is private in {s} '{s}'",
             .{ member_kind, member_name, if (structure.is_class) "class" else "struct", structure.source_name },
         ),
+        .internal_access => try std.fmt.allocPrint(
+            self.allocator,
+            "{s} '{s}' is internal to its source file",
+            .{ member_kind, member_name },
+        ),
         .subclass => try std.fmt.allocPrint(
             self.allocator,
             "{s} '{s}' is accessible only from class '{s}' and its descendants",
@@ -610,6 +620,10 @@ pub fn structureInitializerExpression(
         return self.fail(initializer.name_position, message);
     };
     const structure_index = self.findStructureIndexByGeneratedName(structure.generated_name).?;
+    if (structure.is_static_class) {
+        const message = try std.fmt.allocPrint(self.allocator, "static class '{s}' cannot be constructed", .{structure.source_name});
+        return self.fail(initializer.name_position, message);
+    }
     if (structure.is_native_resource) {
         const message = try std.fmt.allocPrint(self.allocator, "native resource '{s}' cannot be constructed in Silex", .{structure.source_name});
         return self.fail(initializer.name_position, message);
@@ -630,7 +644,7 @@ pub fn structureInitializerExpression(
                 break;
             }
         }
-        if (has_private_field and !self.memberVisibleFromCurrentContext(structure_index, .private_access)) {
+        if (has_private_field and !self.memberVisibleFromCurrentContext(structure_index, .private_access, initializer.name_position.file)) {
             const message = try std.fmt.allocPrint(
                 self.allocator,
                 "initializer of struct '{s}' is private because it declares private fields",
@@ -679,6 +693,7 @@ pub fn structureInitializerExpression(
 
     var values: std.ArrayList(*Expression) = .empty;
     var deferred_resource_paths: std.ArrayList(DeferredResourcePath) = .empty;
+    var resource_dependencies: std.ArrayList(*BindingState) = .empty;
     var lifetime_depth: usize = 0;
     for (structure.fields) |expected_field| {
         var matching: ?Ast.Expression.FieldInitializer = null;
@@ -720,6 +735,13 @@ pub fn structureInitializerExpression(
         }
         if (matching) |field| try self.rejectUniqueOwnerArgument(value, field.value.position);
         try values.append(self.allocator, value);
+        for (value.resource_dependencies) |dependency| {
+            var found = false;
+            for (resource_dependencies.items) |existing| {
+                if (existing == dependency) found = true;
+            }
+            if (!found) try resource_dependencies.append(self.allocator, dependency);
+        }
         for (value.deferred_resource_paths) |path| {
             const prefixed = try self.allocator.alloc([]const u8, path.len + 1);
             prefixed[0] = expected_field.generated_name;
@@ -732,6 +754,7 @@ pub fn structureInitializerExpression(
         .type = .{ .structure = self.structureType(structure_index) },
         .position = initializer.name_position,
         .lifetime_depth = lifetime_depth,
+        .resource_dependencies = try resource_dependencies.toOwnedSlice(self.allocator),
         .deferred_resource_paths = try deferred_resource_paths.toOwnedSlice(self.allocator),
         .value = .{ .structure_initializer = .{
             .generated_name = structure.generated_name,
@@ -749,6 +772,10 @@ pub fn classInitializerExpression(
         const message = try std.fmt.allocPrint(self.allocator, "unknown type '{s}'", .{initializer.name});
         return self.fail(initializer.name_position, message);
     };
+    if (structure.is_static_class) {
+        const message = try std.fmt.allocPrint(self.allocator, "static class '{s}' cannot be constructed", .{structure.source_name});
+        return self.fail(initializer.name_position, message);
+    }
     if (structure.constructors.len == 0) {
         if (initializer.arguments.len != 0) {
             const message = try std.fmt.allocPrint(
@@ -769,7 +796,7 @@ pub fn classInitializerExpression(
     var candidates: std.ArrayList(ConstructorCandidate) = .empty;
     var inaccessible: ?ConstructorSymbol = null;
     for (structure.constructors, 0..) |constructor_symbol, index| {
-        if (self.memberVisibleFromCurrentContext(structure_index, constructor_symbol.visibility)) {
+        if (self.memberVisibleFromCurrentContext(structure_index, constructor_symbol.visibility, initializer.name_position.file)) {
             try candidates.append(self.allocator, .{ .symbol = constructor_symbol, .index = index });
         } else {
             inaccessible = constructor_symbol;
@@ -781,6 +808,11 @@ pub fn classInitializerExpression(
             .private_access => try std.fmt.allocPrint(
                 self.allocator,
                 "constructor of {s} '{s}' is private",
+                .{ if (structure.is_class) "class" else "struct", structure.source_name },
+            ),
+            .internal_access => try std.fmt.allocPrint(
+                self.allocator,
+                "constructor of {s} '{s}' is internal to its source file",
                 .{ if (structure.is_class) "class" else "struct", structure.source_name },
             ),
             .subclass => try std.fmt.allocPrint(self.allocator, "constructor of class '{s}' is accessible only from that class and its descendants", .{structure.source_name}),
@@ -1205,7 +1237,8 @@ pub fn nonIndependentType(
     visiting: *std.StringHashMap(void),
 ) Allocator.Error!?Type {
     return switch (type_value) {
-        .function, .reference, .protocol => type_value,
+        .function => |function| if (function.isolated) null else type_value,
+        .reference, .protocol => type_value,
         .optional => |contained| self.nonIndependentType(contained.*, field_path, visiting),
         .list => |element| self.nonIndependentType(element.*, field_path, visiting),
         .fixed_array => |array| self.nonIndependentType(array.element.*, field_path, visiting),

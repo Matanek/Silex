@@ -40,7 +40,14 @@ pub fn transformStructure(self: anytype, structure: Ast.Structure) !Ast.Structur
         try fields.append(self.allocator, copy);
     }
     var methods: std.ArrayList(Ast.Function) = .empty;
-    for (structure.methods) |method| try methods.append(self.allocator, try self.transformFunctionBody(method, method.name));
+    for (structure.methods) |method| {
+        const previous_method_type_parameters = self.current_type_parameters;
+        if (method.type_parameters.len != 0) self.current_type_parameters = method.type_parameters;
+        defer self.current_type_parameters = previous_method_type_parameters;
+        var transformed = try self.transformFunctionBody(method, method.name);
+        transformed.type_parameters = try self.transformTypeParameters(method.type_parameters);
+        try methods.append(self.allocator, transformed);
+    }
     var constructors: std.ArrayList(Ast.Constructor) = .empty;
     for (structure.constructors) |constructor| {
         try self.pushLocalScope();
@@ -235,6 +242,7 @@ pub fn transformType(self: anytype, value: Ast.TypeName, position: Source.Positi
             for (function.parameters) |parameter| try parameters.append(self.allocator, try self.transformType(parameter, position));
             break :function_type .{ .function = .{
                 .deferred = function.deferred,
+                .isolated = function.isolated,
                 .parameters = try parameters.toOwnedSlice(self.allocator),
                 .parameter_modes = try self.allocator.dupe(Ast.ParameterMode, function.parameter_modes),
                 .return_type = if (function.return_type) |return_type| try self.transformTypePointer(return_type.*, position) else null,
@@ -547,6 +555,10 @@ pub fn transformExpression(self: anytype, expression: *const Ast.Expression) any
                     return self.fail(call.name_position, message);
                 }
                 const declaration = try self.resolveName(expression.position.file, call.name, .structure, call.name_position);
+                if (self.declarationIsStaticClass(declaration)) {
+                    const message = try std.fmt.allocPrint(self.allocator, "static class '{s}' cannot be constructed", .{call.name});
+                    return self.fail(call.name_position, message);
+                }
                 break :call .{ .structure_initializer = .{
                     .name = declaration.canonical_name,
                     .name_position = call.name_position,
@@ -578,8 +590,11 @@ pub fn transformExpression(self: anytype, expression: *const Ast.Expression) any
             }
             if ((try self.visibleDeclarationKind(expression.position.file, call.name)) == .structure) {
                 const declaration = try self.resolveName(expression.position.file, call.name, .structure, call.name_position);
+                if (self.declarationIsStaticClass(declaration)) {
+                    const message = try std.fmt.allocPrint(self.allocator, "static class '{s}' cannot be constructed", .{call.name});
+                    return self.fail(call.name_position, message);
+                }
                 if (self.declarationIsClass(declaration) or self.declarationHasConstructors(declaration)) {
-                    if (self.declarationIsClass(declaration) and type_arguments.len != 0) return self.fail(call.name_position, "generic classes are not supported");
                     break :call .{ .class_initializer = .{
                         .name = declaration.canonical_name,
                         .name_position = call.name_position,
@@ -625,6 +640,7 @@ pub fn transformExpression(self: anytype, expression: *const Ast.Expression) any
             break :lambda_expression .{ .lambda = .{
                 .position = lambda.position,
                 .deferred = lambda.deferred,
+                .isolated = lambda.isolated,
                 .parameters = try parameters.toOwnedSlice(self.allocator),
                 .return_type = try self.transformReturnType(lambda.return_type, lambda.position),
                 .statements = try self.transformStatementsInCurrentScope(lambda.statements),
@@ -680,12 +696,12 @@ pub fn transformExpression(self: anytype, expression: *const Ast.Expression) any
                         call.name_position,
                     )) |owner| {
                         if (call.named_fields != null) return self.fail(call.name_position, "static methods do not accept named arguments");
-                        if (type_arguments.len != 0) return self.fail(call.name_position, "generic methods are not supported");
                         break :method .{ .static_method_call = .{
                             .owner = owner,
                             .owner_position = call.object.position,
                             .name = call.name,
                             .name_position = call.name_position,
+                            .type_arguments = type_arguments,
                             .arguments = try self.transformExpressions(call.arguments),
                         } };
                     }
@@ -700,6 +716,10 @@ pub fn transformExpression(self: anytype, expression: *const Ast.Expression) any
                             return self.fail(call.name_position, message);
                         }
                         const declaration = try self.resolveName(expression.position.file, path, .structure, call.name_position);
+                        if (self.declarationIsStaticClass(declaration)) {
+                            const message = try std.fmt.allocPrint(self.allocator, "static class '{s}' cannot be constructed", .{path});
+                            return self.fail(call.name_position, message);
+                        }
                         break :method .{ .structure_initializer = .{
                             .name = declaration.canonical_name,
                             .name_position = call.name_position,
@@ -709,8 +729,11 @@ pub fn transformExpression(self: anytype, expression: *const Ast.Expression) any
                     }
                     if ((try self.visibleDeclarationKind(expression.position.file, path)) == .structure) {
                         const declaration = try self.resolveName(expression.position.file, path, .structure, call.name_position);
+                        if (self.declarationIsStaticClass(declaration)) {
+                            const message = try std.fmt.allocPrint(self.allocator, "static class '{s}' cannot be constructed", .{path});
+                            return self.fail(call.name_position, message);
+                        }
                         if (self.declarationIsClass(declaration) or self.declarationHasConstructors(declaration)) {
-                            if (self.declarationIsClass(declaration) and type_arguments.len != 0) return self.fail(call.name_position, "generic classes are not supported");
                             break :method .{ .class_initializer = .{
                                 .name = declaration.canonical_name,
                                 .name_position = call.name_position,
@@ -755,6 +778,7 @@ pub fn transformExpression(self: anytype, expression: *const Ast.Expression) any
             .owner_position = call.owner_position,
             .name = call.name,
             .name_position = call.name_position,
+            .type_arguments = try self.transformTypeArguments(call.type_arguments, call.name_position),
             .arguments = try self.transformExpressions(call.arguments),
             .named_fields = if (call.named_fields) |fields| try self.transformFieldInitializers(fields) else null,
         } },
@@ -936,6 +960,11 @@ pub fn transformAliasInvocation(
             } };
         },
         .structure => |name| structure_initializer: {
+            const declaration = self.findDeclarationByCanonicalName(name, .structure).?;
+            if (self.declarationIsStaticClass(declaration)) {
+                const message = try std.fmt.allocPrint(self.allocator, "static class '{s}' cannot be constructed", .{name});
+                return self.fail(position, message);
+            }
             if (named_fields) |fields| {
                 break :structure_initializer .{ .structure_initializer = .{
                     .name = name,
@@ -943,7 +972,6 @@ pub fn transformAliasInvocation(
                     .fields = try self.transformFieldInitializers(fields),
                 } };
             }
-            const declaration = self.findDeclarationByCanonicalName(name, .structure).?;
             if (self.declarationIsClass(declaration) or self.declarationHasConstructors(declaration)) {
                 break :structure_initializer .{ .class_initializer = .{
                     .name = name,

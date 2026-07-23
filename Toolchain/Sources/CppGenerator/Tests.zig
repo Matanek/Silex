@@ -88,6 +88,8 @@ test "generate typed variables and control flow" {
     try std.testing.expect(std.mem.indexOf(u8, cpp, "if (!(silexValue0 < std::int64_t{3}))") != null);
     try std.testing.expect(std.mem.indexOf(u8, cpp, "} else {") != null);
     try std.testing.expect(std.mem.indexOf(u8, cpp, "std::string{\"yes\"}") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "inline std::recursive_mutex silexOutputMutex;") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "std::scoped_lock silexOutputLock(silexOutputMutex);") != null);
 }
 
 test "generate negative collection indexes and ordered slices" {
@@ -448,6 +450,40 @@ test "generate deferred callback queue ownership and cancellation" {
     try std.testing.expect(std.mem.indexOf(u8, cpp, "silexDestroyedDeferredCallbackEvents.fetch_add(1") != null);
     try std.testing.expect(std.mem.indexOf(u8, cpp, "silexCancelledDeferredCallbackEnqueues.fetch_add(1") != null);
     try std.testing.expect(std.mem.indexOf(u8, cpp, "ready.swap(pending)") != null);
+}
+
+test "generate isolated callback ownership and direct worker trampoline" {
+    const Parser = @import("../Parser.zig").Parser;
+    const Modules = @import("../Modules.zig");
+    const Project = @import("../Project.zig").Project;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var parser = Parser.init(allocator,
+        \\public native resource Operation { drop discard_operation }
+        \\native func start_operation(callback:isolated func()) Operation
+        \\func main() {
+        \\    let value = 1
+        \\    let operation = start_operation(isolated func() { assert(value == 1, "value") })
+        \\}
+    );
+    const project = Project{
+        .program_name = "Workers",
+        .target_module = 0,
+        .modules = &.{.{ .name = "Workers", .sources = &.{"Workers.sx"} }},
+        .single_file = false,
+    };
+    var resolver = Modules.Resolver.init(allocator, project, &.{.{ .module_index = 0, .program = try parser.parse() }});
+    var analyzer = Semantic.Analyzer.init(allocator);
+    analyzer.native_module_names = &.{"Workers"};
+    const cpp = try generate(allocator, try analyzer.analyze(try resolver.resolve()));
+
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "std::make_shared<SilexFunction<void()>>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "silexNativeCallback();}, silexNativeIsolated0.get()") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "SilexIsolatedCallbackTag{}, std::move(silexNativeIsolated0)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "drop(handle)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "retained.reset()") != null);
 }
 
 test "generate owned uint8 list native returns" {
@@ -1047,6 +1083,28 @@ test "generate unique resource struct as movable RAII value" {
     try std.testing.expect(std.mem.indexOf(u8, cpp, "silexOwnsResource(std::exchange(other.silexOwnsResource, false))") != null);
     try std.testing.expect(std.mem.indexOf(u8, cpp, "if (silexOwnsResource) silexDropResource();") != null);
     try std.testing.expect(std.mem.indexOf(u8, cpp, "std::move(silexValue") != null);
+}
+
+test "generate explicit move for copyable structure storage" {
+    const Parser = @import("../Parser.zig").Parser;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var parser = Parser.init(allocator,
+        \\struct Payload { var values:int[] }
+        \\func main() {
+        \\    var source = Payload(values:[1, 2, 3])
+        \\    let copied = source
+        \\    let transferred = move source
+        \\    print(copied.values[0] + transferred.values[0])
+        \\}
+    );
+    var analyzer = Semantic.Analyzer.init(allocator);
+    const cpp = try generate(allocator, try analyzer.analyze(try resolveSingleTestProgram(allocator, try parser.parse())));
+
+    try std.testing.expect(std.mem.indexOf(u8, cpp, " = std::move(silexValue") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, " = silexValue") != null);
 }
 
 test "generate inferred const and mutating methods" {

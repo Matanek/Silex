@@ -477,6 +477,443 @@ pub fn useCompletionItems(
     return items.toOwnedSlice(allocator);
 }
 
+pub fn visibleUseCompletionItems(
+    self: anytype,
+    allocator: Allocator,
+    io: Io,
+    uri: []const u8,
+    source: []const u8,
+) ![]const CompletionItem {
+    var items: std.ArrayList(CompletionItem) = .empty;
+    var lines = std.mem.splitScalar(u8, source, '\n');
+    while (lines.next()) |source_line| {
+        var line = std.mem.trim(u8, source_line, " \t\r");
+        if (self.directiveBody(line, "public")) |public_body| line = public_body;
+        var declaration = self.directiveBody(line, "use") orelse continue;
+        if (std.mem.indexOf(u8, declaration, "//")) |comment| declaration = declaration[0..comment];
+
+        var words = std.mem.tokenizeAny(u8, declaration, " \t\r");
+        const raw_target = words.next() orelse continue;
+        const target = std.mem.trimEnd(u8, raw_target, ";");
+        if (target.len == 0) continue;
+        const separator = words.next();
+        const raw_alias = if (separator != null and std.mem.eql(u8, separator.?, "as")) words.next() else null;
+        const alias = if (raw_alias) |value| std.mem.trimEnd(u8, value, ";") else null;
+        const visible_name = alias orelse self.lastPathSegment(target);
+        if (!self.validIdentifier(visible_name) or self.containsCompletion(items.items, visible_name)) continue;
+
+        var module_path = true;
+        for (target) |character| {
+            if (!self.isIdentifierContinue(character) and character != '.') {
+                module_path = false;
+                break;
+            }
+        }
+        var found = false;
+        if (module_path) {
+            const candidates = try self.useCompletionItems(allocator, io, uri, source, target);
+            const target_name = self.lastPathSegment(target);
+            for (candidates) |candidate| {
+                if (!std.mem.eql(u8, candidate.label, target_name)) continue;
+                var item = candidate;
+                item.label = visible_name;
+                item.insertText = visible_name;
+                item.filterText = visible_name;
+                try items.append(allocator, item);
+                found = true;
+                break;
+            }
+        }
+        if (!found and alias != null) try items.append(allocator, .{
+            .label = visible_name,
+            .kind = 7,
+            .detail = "Silex used type",
+            .insertText = visible_name,
+            .filterText = visible_name,
+        });
+    }
+    return items.toOwnedSlice(allocator);
+}
+
+pub fn visibleUseTarget(self: anytype, source: []const u8, visible_name: []const u8) ?[]const u8 {
+    var lines = std.mem.splitScalar(u8, source, '\n');
+    while (lines.next()) |source_line| {
+        var line = std.mem.trim(u8, source_line, " \t\r");
+        if (self.directiveBody(line, "public")) |public_body| line = public_body;
+        var declaration = self.directiveBody(line, "use") orelse continue;
+        if (std.mem.indexOf(u8, declaration, "//")) |comment| declaration = declaration[0..comment];
+
+        var words = std.mem.tokenizeAny(u8, declaration, " \t\r");
+        const raw_target = words.next() orelse continue;
+        const target = std.mem.trimEnd(u8, raw_target, ";");
+        if (target.len == 0) continue;
+        const separator = words.next();
+        const raw_alias = if (separator != null and std.mem.eql(u8, separator.?, "as")) words.next() else null;
+        const alias = if (raw_alias) |value| std.mem.trimEnd(u8, value, ";") else null;
+        if (std.mem.eql(u8, alias orelse self.lastPathSegment(target), visible_name)) return target;
+    }
+    return null;
+}
+
+pub fn importedTypeStaticCompletionItems(
+    self: anytype,
+    allocator: Allocator,
+    io: Io,
+    uri: []const u8,
+    source: []const u8,
+    visible_name: []const u8,
+    prefix: []const u8,
+) !?[]const CompletionItem {
+    const target = self.visibleUseTarget(source, visible_name) orelse
+        try self.usedModulePath(allocator, source, visible_name) orelse return null;
+    const separator = std.mem.lastIndexOfScalar(u8, target, '.') orelse return null;
+    const module_path = target[0..separator];
+    const type_name = target[separator + 1 ..];
+    if (type_name.len == 0) return null;
+    const source_path = try self.filePathFromUri(allocator, uri) orelse return null;
+    const project_root = std.fs.path.dirname(source_path) orelse return null;
+    const module_root = try self.moduleCompletionRoot(allocator, io, project_root, module_path) orelse return null;
+    const module_sources = try self.namespaceSourcePaths(allocator, io, module_root, module_path);
+
+    for (module_sources) |module_source_path| {
+        const module_source = Io.Dir.cwd().readFileAlloc(
+            io,
+            module_source_path,
+            allocator,
+            .limited(max_message_size),
+        ) catch continue;
+        var parser = ParserModule.Parser.init(allocator, module_source);
+        const program = parser.parse() catch continue;
+        for (program.structures) |structure| {
+            if (!structure.is_public or !std.mem.eql(u8, structure.name, type_name)) continue;
+            var items: std.ArrayList(CompletionItem) = .empty;
+            for (structure.fields) |field| {
+                if (!field.is_static or field.visibility != .public_access or
+                    !std.mem.startsWith(u8, field.name, prefix) or self.containsCompletion(items.items, field.name))
+                {
+                    continue;
+                }
+                try items.append(allocator, .{
+                    .label = field.name,
+                    .kind = 5,
+                    .detail = "Silex public static field",
+                });
+            }
+            for (structure.methods) |method| {
+                if (!method.is_static or method.member_visibility != .public_access or
+                    !std.mem.startsWith(u8, method.name, prefix) or self.containsCompletion(items.items, method.name))
+                {
+                    continue;
+                }
+                try items.append(allocator, .{
+                    .label = method.name,
+                    .kind = 3,
+                    .detail = try SymbolIndex.functionDetail(allocator, method),
+                });
+            }
+            return try items.toOwnedSlice(allocator);
+        }
+    }
+    return null;
+}
+
+const CurrentLambdaParameter = struct {
+    name: []const u8,
+    type_name: []const u8,
+};
+
+const ActiveLambdaParameter = struct {
+    value: CurrentLambdaParameter,
+    scope_depth: usize,
+};
+
+fn appendCurrentLambdaParameter(
+    allocator: Allocator,
+    pending: *std.ArrayList(CurrentLambdaParameter),
+    name: ?[]const u8,
+    type_name: ?[]const u8,
+) !void {
+    if (name == null or type_name == null) return;
+    try pending.append(allocator, .{ .name = name.?, .type_name = type_name.? });
+}
+
+fn currentLambdaParameters(
+    allocator: Allocator,
+    source: []const u8,
+    cursor: usize,
+) ![]const CurrentLambdaParameter {
+    var lexer = LexerModule.Lexer.init(source);
+    var active: std.ArrayList(ActiveLambdaParameter) = .empty;
+    defer active.deinit(allocator);
+    var pending: std.ArrayList(CurrentLambdaParameter) = .empty;
+    defer pending.deinit(allocator);
+    var brace_depth: usize = 0;
+    var function_pending = false;
+    var parsing_parameters = false;
+    var parameter_depth: usize = 0;
+    var awaiting_body = false;
+    var parameter_name: ?[]const u8 = null;
+    var parameter_type: ?[]const u8 = null;
+    var after_colon = false;
+    var type_segment_expected = false;
+
+    while (true) {
+        const token = lexer.next() catch break;
+        if (token.tag == .end or token.start >= @min(cursor, source.len)) break;
+
+        if (parsing_parameters) {
+            switch (token.tag) {
+                .left_parenthesis => parameter_depth += 1,
+                .right_parenthesis => {
+                    parameter_depth -|= 1;
+                    if (parameter_depth == 0) {
+                        try appendCurrentLambdaParameter(allocator, &pending, parameter_name, parameter_type);
+                        parameter_name = null;
+                        parameter_type = null;
+                        after_colon = false;
+                        type_segment_expected = false;
+                        parsing_parameters = false;
+                        awaiting_body = true;
+                    }
+                },
+                .comma => if (parameter_depth == 1) {
+                    try appendCurrentLambdaParameter(allocator, &pending, parameter_name, parameter_type);
+                    parameter_name = null;
+                    parameter_type = null;
+                    after_colon = false;
+                    type_segment_expected = false;
+                },
+                .colon => if (parameter_depth == 1 and parameter_name != null) {
+                    after_colon = true;
+                },
+                .dot => if (parameter_depth == 1 and after_colon and parameter_type != null) {
+                    type_segment_expected = true;
+                },
+                .identifier => if (parameter_depth == 1) {
+                    if (parameter_name == null and !after_colon) {
+                        parameter_name = token.lexeme;
+                    } else if (after_colon and (parameter_type == null or type_segment_expected)) {
+                        parameter_type = token.lexeme;
+                        type_segment_expected = false;
+                    }
+                },
+                else => if (parameter_depth == 1 and after_colon and parameter_type == null and
+                    token.lexeme.len != 0 and std.ascii.isAlphabetic(token.lexeme[0]))
+                {
+                    parameter_type = token.lexeme;
+                },
+            }
+            continue;
+        }
+
+        if (function_pending) {
+            function_pending = false;
+            if (token.tag == .left_parenthesis) {
+                pending.clearRetainingCapacity();
+                parsing_parameters = true;
+                parameter_depth = 1;
+                parameter_name = null;
+                parameter_type = null;
+                after_colon = false;
+                type_segment_expected = false;
+                continue;
+            }
+        }
+
+        if (awaiting_body) switch (token.tag) {
+            .equal, .comma, .right_parenthesis, .right_bracket, .semicolon => {
+                awaiting_body = false;
+                pending.clearRetainingCapacity();
+            },
+            else => {},
+        };
+
+        switch (token.tag) {
+            .keyword_func => if (!awaiting_body) {
+                function_pending = true;
+            },
+            .left_brace => {
+                brace_depth += 1;
+                if (awaiting_body) {
+                    for (pending.items) |parameter| try active.append(allocator, .{
+                        .value = parameter,
+                        .scope_depth = brace_depth,
+                    });
+                    pending.clearRetainingCapacity();
+                    awaiting_body = false;
+                }
+            },
+            .right_brace => {
+                var index = active.items.len;
+                while (index > 0) {
+                    index -= 1;
+                    if (active.items[index].scope_depth == brace_depth) _ = active.orderedRemove(index);
+                }
+                brace_depth -|= 1;
+            },
+            else => {},
+        }
+    }
+
+    const result = try allocator.alloc(CurrentLambdaParameter, active.items.len);
+    for (active.items, result) |parameter, *destination| destination.* = parameter.value;
+    return result;
+}
+
+pub fn currentLambdaParameterCompletionItems(
+    self: anytype,
+    allocator: Allocator,
+    source: []const u8,
+    cursor: usize,
+    prefix: []const u8,
+) ![]const CompletionItem {
+    const parameters = try currentLambdaParameters(allocator, source, cursor);
+    defer allocator.free(parameters);
+    var items: std.ArrayList(CompletionItem) = .empty;
+    var index = parameters.len;
+    while (index > 0) {
+        index -= 1;
+        const parameter = parameters[index];
+        if (!std.mem.startsWith(u8, parameter.name, prefix) or self.containsCompletion(items.items, parameter.name)) continue;
+        try items.append(allocator, .{
+            .label = parameter.name,
+            .kind = 6,
+            .detail = try std.fmt.allocPrint(allocator, "{s}:{s}", .{ parameter.name, parameter.type_name }),
+        });
+    }
+    return items.toOwnedSlice(allocator);
+}
+
+pub fn currentLambdaParameterType(
+    _: anytype,
+    allocator: Allocator,
+    source: []const u8,
+    cursor: usize,
+    name: []const u8,
+) !?[]const u8 {
+    const parameters = try currentLambdaParameters(allocator, source, cursor);
+    defer allocator.free(parameters);
+    var index = parameters.len;
+    while (index > 0) {
+        index -= 1;
+        if (std.mem.eql(u8, parameters[index].name, name)) return parameters[index].type_name;
+    }
+    return null;
+}
+
+const SelfCompletionScope = struct {
+    opening: usize,
+    depth: usize,
+};
+
+fn enclosingSelfCompletionScope(source: []const u8, cursor: usize) ?SelfCompletionScope {
+    var lexer = LexerModule.Lexer.init(source);
+    var depth: usize = 0;
+    var expects_structure_name = false;
+    var pending_structure = false;
+    var active_scope: ?SelfCompletionScope = null;
+
+    while (true) {
+        const token = lexer.next() catch return active_scope;
+        if (token.start >= @min(cursor, source.len)) return active_scope;
+        switch (token.tag) {
+            .keyword_struct, .keyword_class => {
+                expects_structure_name = true;
+                pending_structure = false;
+            },
+            .identifier => {
+                if (expects_structure_name) {
+                    expects_structure_name = false;
+                    pending_structure = true;
+                }
+            },
+            .left_brace => {
+                depth += 1;
+                if (pending_structure) {
+                    active_scope = .{ .opening = token.start, .depth = depth };
+                    pending_structure = false;
+                }
+            },
+            .right_brace => {
+                if (active_scope) |scope| {
+                    if (scope.depth == depth) active_scope = null;
+                }
+                depth -|= 1;
+            },
+            .end => return active_scope,
+            else => {},
+        }
+    }
+}
+
+const SelfMemberKind = enum { field, method };
+
+pub fn currentSelfCompletionItems(
+    self: anytype,
+    allocator: Allocator,
+    source: []const u8,
+    cursor: usize,
+    prefix: []const u8,
+) !?[]const CompletionItem {
+    const scope = enclosingSelfCompletionScope(source, cursor) orelse return null;
+    var items: std.ArrayList(CompletionItem) = .empty;
+    var lexer = LexerModule.Lexer.init(source);
+    var depth: usize = 0;
+    var inside_scope = false;
+    var static_member = false;
+    var expected_member: ?struct { kind: SelfMemberKind, is_static: bool } = null;
+
+    while (true) {
+        const token = lexer.next() catch break;
+        if (token.tag == .left_brace) {
+            depth += 1;
+            if (token.start == scope.opening) inside_scope = true;
+            continue;
+        }
+        if (token.tag == .right_brace) {
+            if (inside_scope and depth == scope.depth) break;
+            depth -|= 1;
+            continue;
+        }
+        if (token.tag == .end) break;
+        if (!inside_scope or depth != scope.depth) continue;
+
+        if (expected_member) |expected| {
+            expected_member = null;
+            if (token.tag == .identifier and !expected.is_static and
+                std.mem.startsWith(u8, token.lexeme, prefix) and
+                !self.containsCompletion(items.items, token.lexeme))
+            {
+                try items.append(allocator, .{
+                    .label = token.lexeme,
+                    .kind = if (expected.kind == .field) 5 else 3,
+                    .detail = if (expected.kind == .field)
+                        "Silex instance field"
+                    else
+                        "Silex instance method",
+                });
+            }
+            static_member = false;
+            continue;
+        }
+
+        switch (token.tag) {
+            .keyword_static => static_member = true,
+            .keyword_let, .keyword_var => {
+                expected_member = .{ .kind = .field, .is_static = static_member };
+                static_member = false;
+            },
+            .keyword_func => {
+                expected_member = .{ .kind = .method, .is_static = static_member };
+                static_member = false;
+            },
+            .semicolon => static_member = false,
+            else => {},
+        }
+    }
+    return try items.toOwnedSlice(allocator);
+}
+
 pub fn collectRootModules(
     self: anytype,
     allocator: Allocator,
@@ -705,6 +1142,7 @@ pub const language_completions = [_]CompletionItem{
     .{ .label = "deferred", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "use", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "private", .kind = 14, .detail = "Silex keyword" },
+    .{ .label = "internal", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "protected", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "public", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "as", .kind = 14, .detail = "Silex keyword" },

@@ -18,6 +18,7 @@ pub const TokenTag = enum {
     keyword_try,
     keyword_move,
     keyword_deferred,
+    keyword_isolated,
     keyword_struct,
     keyword_class,
     keyword_protocol,
@@ -54,6 +55,7 @@ pub const TokenTag = enum {
     keyword_panic,
     keyword_use,
     keyword_private,
+    keyword_internal,
     keyword_protected,
     keyword_public,
     keyword_as,
@@ -491,6 +493,7 @@ fn keywordTag(lexeme: []const u8) ?TokenTag {
         .{ "try", TokenTag.keyword_try },
         .{ "move", TokenTag.keyword_move },
         .{ "deferred", TokenTag.keyword_deferred },
+        .{ "isolated", TokenTag.keyword_isolated },
         .{ "struct", TokenTag.keyword_struct },
         .{ "class", TokenTag.keyword_class },
         .{ "protocol", TokenTag.keyword_protocol },
@@ -527,6 +530,7 @@ fn keywordTag(lexeme: []const u8) ?TokenTag {
         .{ "panic", TokenTag.keyword_panic },
         .{ "use", TokenTag.keyword_use },
         .{ "private", TokenTag.keyword_private },
+        .{ "internal", TokenTag.keyword_internal },
         .{ "protected", TokenTag.keyword_protected },
         .{ "public", TokenTag.keyword_public },
         .{ "as", TokenTag.keyword_as },
@@ -579,8 +583,9 @@ test "reserve extend keyword" {
 }
 
 test "reserve visibility keywords" {
-    var lexer = Lexer.init("private protected public pub sub");
+    var lexer = Lexer.init("private internal protected public pub sub");
     try std.testing.expectEqual(TokenTag.keyword_private, (try lexer.next()).tag);
+    try std.testing.expectEqual(TokenTag.keyword_internal, (try lexer.next()).tag);
     try std.testing.expectEqual(TokenTag.keyword_protected, (try lexer.next()).tag);
     try std.testing.expectEqual(TokenTag.keyword_public, (try lexer.next()).tag);
     try std.testing.expectEqual(TokenTag.identifier, (try lexer.next()).tag);
@@ -632,6 +637,12 @@ test "recognize reserved move keyword" {
 test "recognize deferred keyword" {
     var lexer = Lexer.init("deferred func");
     try std.testing.expectEqual(TokenTag.keyword_deferred, (try lexer.next()).tag);
+    try std.testing.expectEqual(TokenTag.keyword_func, (try lexer.next()).tag);
+}
+
+test "recognize isolated keyword" {
+    var lexer = Lexer.init("isolated func");
+    try std.testing.expectEqual(TokenTag.keyword_isolated, (try lexer.next()).tag);
     try std.testing.expectEqual(TokenTag.keyword_func, (try lexer.next()).tag);
 }
 

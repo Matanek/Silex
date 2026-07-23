@@ -23,6 +23,7 @@ pub const Declaration = struct {
     canonical_name: []const u8,
     kind: Kind,
     is_public: bool,
+    is_internal: bool,
     position: Source.Position,
     aliased_type: ?Ast.TypeName = null,
 };

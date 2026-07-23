@@ -39,8 +39,14 @@ pub fn resolveUses(
             if (std.mem.eql(u8, binding.local_name, path)) try used.append(self.allocator, binding.declaration);
         }
         if (used.items.len != 0) return used.toOwnedSlice(self.allocator);
-        const declarations = try self.declarationsNamed(file.module_index, path, null, false);
+        const declarations = try self.declarationsNamedVisibleFrom(file.module_index, path, null, false, file.file_index);
         if (declarations.len != 0) return declarations;
+        if (self.findDirect(file.module_index, path, null)) |declaration| {
+            if (declaration.is_internal) {
+                const message = try std.fmt.allocPrint(self.allocator, "declaration '{s}' is internal to its source file", .{path});
+                return self.fail(position, message);
+            }
+        }
         const message = try std.fmt.allocPrint(self.allocator, "unknown declaration '{s}'", .{path});
         return self.fail(position, message);
     }
@@ -50,13 +56,20 @@ pub fn resolveUses(
     };
     const is_current = target.module_index == file.module_index;
     const internal_access = self.internalAccess(file, target.module_index);
-    const declarations = try self.declarationsNamed(
+    const declarations = try self.declarationsNamedVisibleFrom(
         target.module_index,
         target.public_name,
         null,
         !is_current and !internal_access,
+        file.file_index,
     );
     if (declarations.len != 0) return declarations;
+    if (self.findDirect(target.module_index, target.public_name, null)) |declaration| {
+        if (declaration.is_internal and declaration.position.file != file.file_index) {
+            const message = try std.fmt.allocPrint(self.allocator, "declaration '{s}' is internal to its source file", .{target.public_name});
+            return self.fail(position, message);
+        }
+    }
     if (!is_current and !internal_access and
         (try self.declarationsNamed(target.module_index, target.public_name, null, false)).len != 0)
     {
@@ -107,14 +120,14 @@ pub fn looksQualified(self: anytype, file_index: usize, path: []const u8) bool {
 pub fn visibleDeclarationKind(self: anytype, file_index: usize, name: []const u8) !?Kind {
     const file = &self.file_infos[file_index];
     if (std.mem.indexOfScalar(u8, name, '.') == null) {
-        if (self.findDirect(file.module_index, name, null)) |declaration| return declaration.kind;
+        if (self.findDirectVisibleFrom(file.module_index, name, null, file.file_index)) |declaration| return declaration.kind;
         for (file.uses.items) |binding| {
             if (std.mem.eql(u8, binding.local_name, name)) return binding.declaration.kind;
         }
         return null;
     }
     const target = try self.qualifiedExpressionTarget(file, name) orelse return null;
-    if (self.findDirect(target.module_index, target.public_name, null)) |declaration| return declaration.kind;
+    if (self.findDirectVisibleFrom(target.module_index, target.public_name, null, file.file_index)) |declaration| return declaration.kind;
     return null;
 }
 
@@ -126,7 +139,7 @@ pub fn visibleFunctionDeclarations(
 ) ![]const *const Declaration {
     const file = &self.file_infos[file_index];
     if (std.mem.indexOfScalar(u8, name, '.') == null) {
-        const direct = try self.declarationsNamed(file.module_index, name, .function, false);
+        const direct = try self.declarationsNamedVisibleFrom(file.module_index, name, .function, false, file.file_index);
         if (direct.len != 0) return direct;
         var used: std.ArrayList(*const Declaration) = .empty;
         for (file.uses.items) |binding| {
@@ -141,11 +154,12 @@ pub fn visibleFunctionDeclarations(
 
     if (try self.qualifiedExpressionTarget(file, name)) |target| {
         const private_access = self.internalAccess(file, target.module_index);
-        const declarations = try self.declarationsNamed(
+        const declarations = try self.declarationsNamedVisibleFrom(
             target.module_index,
             target.public_name,
             .function,
             !private_access,
+            file.file_index,
         );
         if (declarations.len != 0) return declarations;
     }
@@ -156,18 +170,23 @@ pub fn visibleFunctionDeclarations(
 pub fn resolveName(self: anytype, file_index: usize, name: []const u8, kind: Kind, position: Source.Position) !*const Declaration {
     const file = &self.file_infos[file_index];
     if (std.mem.indexOfScalar(u8, name, '.') != null) return self.resolveQualified(file, name, kind, position);
-    if (self.findDirect(file.module_index, name, kind)) |declaration| return declaration;
+    if (self.findDirectVisibleFrom(file.module_index, name, kind, file.file_index)) |declaration| return declaration;
     for (file.uses.items) |binding| {
         if (std.mem.eql(u8, binding.local_name, name) and binding.declaration.kind == kind) return binding.declaration;
     }
     if (kind == .protocol) {
-        if (self.findDirect(file.module_index, name, null) != null) {
+        if (self.findDirectVisibleFrom(file.module_index, name, null, file.file_index) != null) {
             return self.fail(position, try std.fmt.allocPrint(self.allocator, "declaration '{s}' is not a protocol", .{name}));
         }
         for (file.uses.items) |binding| {
             if (std.mem.eql(u8, binding.local_name, name)) {
                 return self.fail(position, try std.fmt.allocPrint(self.allocator, "declaration '{s}' is not a protocol", .{name}));
             }
+        }
+    }
+    if (self.findDirect(file.module_index, name, kind)) |declaration| {
+        if (declaration.is_internal) {
+            return self.fail(position, try std.fmt.allocPrint(self.allocator, "declaration '{s}' is internal to its source file", .{name}));
         }
     }
     const label = switch (kind) {
@@ -196,9 +215,15 @@ pub fn resolveQualified(
         }
         const internal_access = self.internalAccess(file, target.module_index);
         if (target.module_index == file.module_index or internal_access) {
-            if (self.findDirect(target.module_index, target.public_name, kind)) |declaration| return declaration;
+            if (self.findDirectVisibleFrom(target.module_index, target.public_name, kind, file.file_index)) |declaration| return declaration;
         } else if (self.findExport(target.module_index, target.public_name, kind)) |export_value| {
             return export_value.declaration;
+        }
+        if (self.findDirect(target.module_index, target.public_name, kind)) |declaration| {
+            if (declaration.is_internal and declaration.position.file != file.file_index) {
+                const message = try std.fmt.allocPrint(self.allocator, "declaration '{s}' is internal to its source file", .{target.public_name});
+                return self.fail(position, message);
+            }
         }
         if (target.module_index != file.module_index and self.findDirect(target.module_index, target.public_name, kind) != null) {
             const message = try std.fmt.allocPrint(self.allocator, "declaration '{s}' is private in module '{s}'", .{
@@ -358,11 +383,45 @@ pub fn declarationsNamed(
     return result.toOwnedSlice(self.allocator);
 }
 
+pub fn declarationsNamedVisibleFrom(
+    self: anytype,
+    module_index: usize,
+    name: []const u8,
+    kind: ?Kind,
+    public_only: bool,
+    file_index: usize,
+) ![]const *const Declaration {
+    const declarations = try self.declarationsNamed(module_index, name, kind, public_only);
+    var result: std.ArrayList(*const Declaration) = .empty;
+    for (declarations) |declaration| {
+        if (declaration.is_internal and declaration.position.file != file_index) continue;
+        try result.append(self.allocator, declaration);
+    }
+    return result.toOwnedSlice(self.allocator);
+}
+
 pub fn findDirect(self: anytype, module_index: usize, name: []const u8, kind: ?Kind) ?*const Declaration {
     for (self.declarations.items) |*declaration| {
         if (kind == null and declaration.kind == .type_alias) continue;
         if (declaration.module_index == module_index and (kind == null or declaration.kind == kind.?) and
             std.mem.eql(u8, declaration.source_name, name)) return declaration;
+    }
+    return null;
+}
+
+pub fn findDirectVisibleFrom(
+    self: anytype,
+    module_index: usize,
+    name: []const u8,
+    kind: ?Kind,
+    file_index: usize,
+) ?*const Declaration {
+    for (self.declarations.items) |*declaration| {
+        if (kind == null and declaration.kind == .type_alias) continue;
+        if (declaration.module_index != module_index or (kind != null and declaration.kind != kind.?) or
+            !std.mem.eql(u8, declaration.source_name, name)) continue;
+        if (declaration.is_internal and declaration.position.file != file_index) continue;
+        return declaration;
     }
     return null;
 }
@@ -384,6 +443,21 @@ pub fn declarationIsClass(self: anytype, declaration: *const Declaration) bool {
                 structure.name_position.column == declaration.position.column)
             {
                 return structure.is_class;
+            }
+        }
+    }
+    return false;
+}
+
+pub fn declarationIsStaticClass(self: anytype, declaration: *const Declaration) bool {
+    if (declaration.kind != .structure) return false;
+    for (self.files) |file| {
+        for (file.program.structures) |structure| {
+            if (structure.name_position.file == declaration.position.file and
+                structure.name_position.line == declaration.position.line and
+                structure.name_position.column == declaration.position.column)
+            {
+                return structure.is_static_class;
             }
         }
     }

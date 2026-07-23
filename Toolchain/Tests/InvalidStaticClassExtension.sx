@@ -1,0 +1,9 @@
+static class Tasks {
+    public static func run() {}
+}
+
+extend Tasks {
+    public static func stop() {}
+}
+
+func main() {}

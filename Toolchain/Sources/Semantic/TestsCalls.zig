@@ -571,7 +571,7 @@ test "read references reject mutation conflicts and escape" {
     );
     try expectResolvedSemanticError(
         resource ++ "func conflict(first:@Resource, second:Resource) {} func main() { let value = Resource(handle:1); conflict(value, move value) }",
-        "cannot move borrowed noncopyable value 'value'",
+        "cannot move borrowed value 'value'",
     );
     try expectResolvedSemanticError(
         "func conflict(first:@int, second:&int) {} func main() { var value = 1; conflict(value, value) }",
@@ -627,6 +627,118 @@ test "deferred native registrations transfer callbacks and expose dispatch" {
     try std.testing.expect(program.functions[1].deferred_callback_index != null);
     try std.testing.expectEqual(@as(usize, 0), program.functions[1].deferred_callback_index.?);
     try std.testing.expectEqual(Type.int, program.functions[2].statements[3].assertion.condition.value.binary.left.type);
+}
+
+test "isolated native registrations accept independent captures and safe transitive calls" {
+    try expectDeferredNativeSuccess(
+        \\public native resource Operation { drop discard_operation }
+        \\native func start_operation(callback:isolated func()) Operation
+        \\func sum(values:int[]) int {
+        \\    var total = 0
+        \\    for value in values { total += value }
+        \\    return total
+        \\}
+        \\func report(value:int) { print(value) }
+        \\func main() {
+        \\    let values:int[] = [1, 2, 3]
+        \\    let operation = start_operation(isolated func() {
+        \\        let total = sum(values)
+        \\        report(total)
+        \\        assert(total == 6, "isolated")
+        \\    })
+        \\}
+    );
+}
+
+test "isolated callbacks reject mutable captures and accept stored values" {
+    const registration =
+        \\public native resource Operation { drop discard_operation }
+        \\native func start_operation(callback:isolated func()) Operation
+    ;
+    try expectDeferredNativeError(
+        registration ++ "\nfunc main() { var value = 1; let operation = start_operation(isolated func() { assert(value == 1, \"value\") }) }",
+        "mutable value 'value' cannot be captured by an 'isolated func'; bind an independent snapshot with 'let'",
+    );
+    try expectDeferredNativeSuccess(
+        registration ++
+            "\nfunc invoke(callback:isolated func()) { callback() }" ++
+            "\nfunc main() { let callback:isolated func() = isolated func() {}; invoke(callback); let operation = start_operation(callback) }",
+    );
+}
+
+test "isolated callbacks allow native calls and reject shared values" {
+    const registration =
+        \\public native resource Operation { drop discard_operation }
+        \\native func start_operation(callback:isolated func()) Operation
+        \\native func native_operation() void
+    ;
+    try expectDeferredNativeSuccess(
+        registration ++ "\nfunc main() { let operation = start_operation(isolated func() { native_operation() }) }",
+    );
+    try expectDeferredNativeSuccess(
+        registration ++ "\nfunc native_helper() { native_operation() } func main() { let operation = start_operation(isolated func() { native_helper() }) }",
+    );
+    try expectDeferredNativeError(
+        registration ++ "\nclass Shared {} func main() { let operation = start_operation(isolated func() { var shared = Shared() }) }",
+        "an 'isolated func' can only manipulate independent values",
+    );
+}
+
+test "isolated registrations require a single direct resource owner" {
+    const resource =
+        \\public native resource Operation { drop discard_operation }
+    ;
+    try expectDeferredNativeError(
+        resource ++ "\nnative func start(first:isolated func(), second:isolated func()) Operation\nfunc main() {}",
+        "a native isolated registration requires exactly one 'isolated func' parameter",
+    );
+    try expectDeferredNativeError(
+        "native func start(callback:isolated func()) void\nfunc main() {}",
+        "a native isolated registration must return one native resource directly",
+    );
+    try expectDeferredNativeSuccess(
+        "func consume(callback:isolated func()) { callback() }\nfunc main() { consume(func() {}) }",
+    );
+}
+
+test "isolated resource dependencies cross aggregate wrappers and prevent manager moves" {
+    try expectDeferredNativeError(
+        \\public native resource Manager { drop destroy_manager }
+        \\public native resource Operation { drop discard_operation }
+        \\native func create_manager() Manager
+        \\native func start_operation(manager:@Manager, callback:isolated func()) Operation
+        \\struct Handle { let native:Operation }
+        \\func main() {
+        \\    var manager = create_manager()
+        \\    var handle = Handle(native:start_operation(manager, isolated func() {}))
+        \\    var moved = move manager
+        \\}
+    ,
+        "cannot move a native resource while acquired resources still depend on it",
+    );
+}
+
+test "resource dependencies returned by methods preserve receiver lifetime" {
+    try expectDeferredNativeError(
+        \\public native resource Manager { drop destroy_manager }
+        \\public native resource Operation { drop discard_operation }
+        \\native func create_manager() Manager
+        \\native func start_operation(manager:@Manager, callback:isolated func()) Operation
+        \\struct Handle { let native:Operation }
+        \\struct Scheduler {
+        \\    let native:Manager
+        \\    func schedule() Handle {
+        \\        return Handle(native:start_operation(self.native, isolated func() {}))
+        \\    }
+        \\}
+        \\func main() {
+        \\    var scheduler = Scheduler(native:create_manager())
+        \\    var handle = scheduler.schedule()
+        \\    var moved = move scheduler
+        \\}
+    ,
+        "cannot move a native resource while acquired resources still depend on it",
+    );
 }
 
 test "deferred callbacks enforce scalar void signatures" {
@@ -786,7 +898,7 @@ test "dispatch callbacks rejects ordinary and destroyed resources" {
     var analyzer = Analyzer.init(allocator);
     analyzer.native_module_names = &.{"Test"};
     try std.testing.expectError(error.InvalidSource, analyzer.analyze(try resolveDeferredNativeTestProgram(allocator, try parser.parse())));
-    try std.testing.expect(std.mem.startsWith(u8, analyzer.diagnostic.?.message, "noncopyable value 'watch' was consumed by 'move'"));
+    try std.testing.expect(std.mem.startsWith(u8, analyzer.diagnostic.?.message, "value 'watch' was consumed by 'move'"));
 }
 
 test "deferred resource provenance follows moves and aggregate fields" {

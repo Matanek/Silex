@@ -957,6 +957,360 @@ test "qualified completion lists local namespace children while the source is in
     try std.testing.expectEqual(@as(usize, 0), hidden_completions.len);
 }
 
+test "unqualified completion keeps type uses from the current invalid buffer" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var environ_map = std.process.Environ.Map.init(allocator);
+    var server = Server.init(allocator, std.testing.io, &environ_map);
+    var temporary = std.testing.tmpDir(.{ .iterate = true });
+    defer temporary.cleanup();
+
+    const valid_source = "func main() { var value = 1; print(value) }\n";
+    const incomplete_source =
+        \\use STD.Threading.Task
+        \\use STD.Threading.TaskManager
+        \\
+        \\func main() {
+        \\    var selected = Ta
+        \\    var handle = TaskManager.su
+        \\    print(missing)
+        \\}
+    ;
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = valid_source });
+    const relative_root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const main_path = try SourceGraph.canonicalPath(
+        allocator,
+        std.testing.io,
+        try std.fs.path.join(allocator, &.{ relative_root, "Main.sx" }),
+    );
+    const uri = try helpers.uriFromPath(allocator, main_path);
+    const snapshot = switch (try Frontend.analyze(
+        allocator,
+        std.testing.io,
+        &environ_map,
+        main_path,
+        .editor,
+        &.{},
+    )) {
+        .success => |value| value,
+        .failure => return error.TestUnexpectedResult,
+    };
+    try server.workspace_roots.append(allocator, try SourceGraph.canonicalPath(allocator, std.testing.io, relative_root));
+    try server.setDocument(uri, incomplete_source, 2);
+    try server.projects.append(allocator, .{
+        .input_path = main_path,
+        .last_success = snapshot,
+        .last_versions = try allocator.dupe(VersionStamp, &.{.{ .path = main_path, .version = 1 }}),
+    });
+
+    const cursor = (std.mem.indexOf(u8, incomplete_source, "Ta") orelse return error.TestUnexpectedResult) + "Ta".len;
+    const position = helpers.encodedPositionAtByteOffset(incomplete_source, cursor, .utf16).?;
+    const request = try testRequestParams(allocator, uri, position, "");
+    const completions = try server.completion(request);
+    try std.testing.expect(helpers.containsCompletion(completions, "Task"));
+    try std.testing.expect(helpers.containsCompletion(completions, "TaskManager"));
+    try std.testing.expect(!helpers.containsCompletion(completions, "TaskHandle"));
+
+    const static_cursor = (std.mem.indexOf(u8, incomplete_source, "TaskManager.su") orelse return error.TestUnexpectedResult) + "TaskManager.su".len;
+    const static_position = helpers.encodedPositionAtByteOffset(incomplete_source, static_cursor, .utf16).?;
+    const static_request = try testRequestParams(allocator, uri, static_position, "");
+    const static_completions = try server.completion(static_request);
+    try std.testing.expect(helpers.containsCompletion(static_completions, "submit"));
+    try std.testing.expect(!helpers.containsCompletion(static_completions, "create"));
+    try std.testing.expect(!helpers.containsCompletion(static_completions, "func"));
+
+    const aliased_source =
+        \\use STD.Threading.Task
+        \\use STD.Threading.TaskManager as Tasks
+        \\
+        \\func main() {
+        \\    var handle = Tasks.su
+        \\    print(missing)
+        \\}
+    ;
+    try server.setDocument(uri, aliased_source, 3);
+    const aliased_cursor = (std.mem.indexOf(u8, aliased_source, "Tasks.su") orelse return error.TestUnexpectedResult) + "Tasks.su".len;
+    const aliased_position = helpers.encodedPositionAtByteOffset(aliased_source, aliased_cursor, .utf16).?;
+    const aliased_request = try testRequestParams(allocator, uri, aliased_position, "");
+    const aliased_completions = try server.completion(aliased_request);
+    try std.testing.expect(helpers.containsCompletion(aliased_completions, "submit"));
+    try std.testing.expect(!helpers.containsCompletion(aliased_completions, "func"));
+
+    const qualified_source =
+        \\use STD.Threading
+        \\
+        \\func main() {
+        \\    var handle = Threading.TaskManager.su
+        \\    print(missing)
+        \\}
+    ;
+    try server.setDocument(uri, qualified_source, 4);
+    const qualified_cursor = (std.mem.indexOf(u8, qualified_source, "Threading.TaskManager.su") orelse return error.TestUnexpectedResult) + "Threading.TaskManager.su".len;
+    const qualified_position = helpers.encodedPositionAtByteOffset(qualified_source, qualified_cursor, .utf16).?;
+    const qualified_request = try testRequestParams(allocator, uri, qualified_position, "");
+    const qualified_completions = try server.completion(qualified_request);
+    try std.testing.expect(helpers.containsCompletion(qualified_completions, "submit"));
+    try std.testing.expect(!helpers.containsCompletion(qualified_completions, "func"));
+}
+
+test "self completion reads current struct and class members without a snapshot" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var environ_map = std.process.Environ.Map.init(allocator);
+    var server = Server.init(allocator, std.testing.io, &environ_map);
+    var temporary = std.testing.tmpDir(.{ .iterate = true });
+    defer temporary.cleanup();
+
+    const source =
+        \\struct Record {
+        \\    let name:str
+        \\    static let shared:int = 1
+        \\    func describe() {
+        \\        print(self.na)
+        \\    }
+        \\    static func create() Record {
+        \\        return Record(name: "")
+        \\    }
+        \\}
+        \\class Entity {
+        \\    private var count:int
+        \\    public static var total:int = 0
+        \\    public func update() {
+        \\        print(self.)
+        \\    }
+        \\}
+        \\func main() {
+        \\    print(missing)
+        \\}
+    ;
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = source });
+    const relative_root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const main_path = try SourceGraph.canonicalPath(
+        allocator,
+        std.testing.io,
+        try std.fs.path.join(allocator, &.{ relative_root, "Main.sx" }),
+    );
+    const uri = try helpers.uriFromPath(allocator, main_path);
+    try server.setDocument(uri, source, 1);
+
+    const struct_cursor = (std.mem.indexOf(u8, source, "self.na") orelse return error.TestUnexpectedResult) + "self.na".len;
+    const struct_position = helpers.encodedPositionAtByteOffset(source, struct_cursor, .utf16).?;
+    const struct_request = try testRequestParams(allocator, uri, struct_position, "");
+    const struct_completions = try server.completion(struct_request);
+    try std.testing.expect(helpers.containsCompletion(struct_completions, "name"));
+    try std.testing.expect(!helpers.containsCompletion(struct_completions, "shared"));
+    try std.testing.expect(!helpers.containsCompletion(struct_completions, "func"));
+
+    const class_cursor = (std.mem.indexOf(u8, source, "self.)") orelse return error.TestUnexpectedResult) + "self.".len;
+    const class_position = helpers.encodedPositionAtByteOffset(source, class_cursor, .utf16).?;
+    const class_request = try testRequestParams(allocator, uri, class_position, "");
+    const class_completions = try server.completion(class_request);
+    try std.testing.expect(helpers.containsCompletion(class_completions, "count"));
+    try std.testing.expect(helpers.containsCompletion(class_completions, "update"));
+    try std.testing.expect(!helpers.containsCompletion(class_completions, "total"));
+    try std.testing.expect(!helpers.containsCompletion(class_completions, "func"));
+}
+
+test "member completion includes unspecialized generic structure methods" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var environ_map = std.process.Environ.Map.init(allocator);
+    var server = Server.init(allocator, std.testing.io, &environ_map);
+    var temporary = std.testing.tmpDir(.{ .iterate = true });
+    defer temporary.cleanup();
+
+    const valid_source =
+        \\struct Catalog {
+        \\    func entry<T>(value:T) T { return value }
+        \\}
+        \\func main() {
+        \\    var catalog = Catalog()
+        \\}
+    ;
+    const incomplete_source =
+        \\struct Catalog {
+        \\    func entry<T>(value:T) T { return value }
+        \\}
+        \\func main() {
+        \\    var catalog = Catalog()
+        \\    print(catalog.)
+        \\}
+    ;
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = valid_source });
+    const relative_root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const main_path = try SourceGraph.canonicalPath(
+        allocator,
+        std.testing.io,
+        try std.fs.path.join(allocator, &.{ relative_root, "Main.sx" }),
+    );
+    const uri = try helpers.uriFromPath(allocator, main_path);
+    const snapshot = switch (try Frontend.analyze(
+        allocator,
+        std.testing.io,
+        &environ_map,
+        main_path,
+        .editor,
+        &.{},
+    )) {
+        .success => |value| value,
+        .failure => return error.TestUnexpectedResult,
+    };
+    try server.workspace_roots.append(allocator, try SourceGraph.canonicalPath(allocator, std.testing.io, relative_root));
+    try server.setDocument(uri, incomplete_source, 2);
+    try server.projects.append(allocator, .{
+        .input_path = main_path,
+        .last_success = snapshot,
+        .last_versions = try allocator.dupe(VersionStamp, &.{.{ .path = main_path, .version = 1 }}),
+    });
+
+    const cursor = (std.mem.indexOf(u8, incomplete_source, "catalog.") orelse return error.TestUnexpectedResult) + "catalog.".len;
+    const position = helpers.encodedPositionAtByteOffset(incomplete_source, cursor, .utf16).?;
+    const request = try testRequestParams(allocator, uri, position, "");
+    const completions = try server.completion(request);
+    try std.testing.expect(helpers.containsCompletion(completions, "entry"));
+    for (completions) |completion| {
+        if (!std.mem.eql(u8, completion.label, "entry")) continue;
+        try std.testing.expect(std.mem.indexOf(u8, completion.detail, "entry<T>") != null);
+        try std.testing.expect(completion.insertText == null or std.mem.eql(u8, completion.insertText.?, "entry"));
+        break;
+    } else return error.TestUnexpectedResult;
+}
+
+test "completion recovers lambda parameters and their members from the current buffer" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var environ_map = std.process.Environ.Map.init(allocator);
+    var server = Server.init(allocator, std.testing.io, &environ_map);
+    var temporary = std.testing.tmpDir(.{ .iterate = true });
+    defer temporary.cleanup();
+
+    const declarations =
+        \\struct MyTask {
+        \\    let name:str
+        \\    var result:int
+        \\    func execute() {}
+        \\}
+    ;
+    const valid_source = declarations ++ "\nfunc main() {}\n";
+    const incomplete_source = declarations ++ "\n" ++
+        \\func main() {
+        \\    missing(func(task:MyTask) {
+        \\        print(ta)
+        \\        print(task.)
+        \\    })
+        \\}
+    ;
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = valid_source });
+    const relative_root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const main_path = try SourceGraph.canonicalPath(
+        allocator,
+        std.testing.io,
+        try std.fs.path.join(allocator, &.{ relative_root, "Main.sx" }),
+    );
+    const uri = try helpers.uriFromPath(allocator, main_path);
+    const snapshot = switch (try Frontend.analyze(
+        allocator,
+        std.testing.io,
+        &environ_map,
+        main_path,
+        .editor,
+        &.{},
+    )) {
+        .success => |value| value,
+        .failure => return error.TestUnexpectedResult,
+    };
+    try server.workspace_roots.append(allocator, try SourceGraph.canonicalPath(allocator, std.testing.io, relative_root));
+    try server.setDocument(uri, incomplete_source, 2);
+    try server.projects.append(allocator, .{
+        .input_path = main_path,
+        .last_success = snapshot,
+        .last_versions = try allocator.dupe(VersionStamp, &.{.{ .path = main_path, .version = 1 }}),
+    });
+
+    const parameter_cursor = (std.mem.indexOf(u8, incomplete_source, "print(ta)") orelse return error.TestUnexpectedResult) + "print(ta".len;
+    const parameter_position = helpers.encodedPositionAtByteOffset(incomplete_source, parameter_cursor, .utf16).?;
+    const parameter_request = try testRequestParams(allocator, uri, parameter_position, "");
+    const parameter_completions = try server.completion(parameter_request);
+    try std.testing.expect(helpers.containsCompletion(parameter_completions, "task"));
+    for (parameter_completions) |completion| {
+        if (!std.mem.eql(u8, completion.label, "task")) continue;
+        try std.testing.expectEqualStrings("task:MyTask", completion.detail);
+        break;
+    } else return error.TestUnexpectedResult;
+
+    const member_cursor = (std.mem.indexOf(u8, incomplete_source, "task.") orelse return error.TestUnexpectedResult) + "task.".len;
+    const member_position = helpers.encodedPositionAtByteOffset(incomplete_source, member_cursor, .utf16).?;
+    const member_request = try testRequestParams(allocator, uri, member_position, "");
+    const member_completions = try server.completion(member_request);
+    try std.testing.expect(helpers.containsCompletion(member_completions, "name"));
+    try std.testing.expect(helpers.containsCompletion(member_completions, "result"));
+    try std.testing.expect(helpers.containsCompletion(member_completions, "execute"));
+    try std.testing.expect(!helpers.containsCompletion(member_completions, "func"));
+}
+
+test "member completion keeps public operations on an opaque internal result" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var environ_map = std.process.Environ.Map.init(allocator);
+    var server = Server.init(allocator, std.testing.io, &environ_map);
+    var temporary = std.testing.tmpDir(.{ .iterate = true });
+    defer temporary.cleanup();
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Library.sx",
+        .data =
+        \\internal class Handle<T> {
+        \\    public func complete() T { panic("unused") }
+        \\    internal func secret() {}
+        \\}
+        \\public class Manager {
+        \\    public func submit<T>(value:T) Handle<T> { return Handle<T>() }
+        \\}
+        ,
+    });
+    const valid_source = "use Library.Manager\n\nfunc main() {\n    var handle = Manager().submit(1)\n    print(handle.complete())\n}\n";
+    const incomplete_source = "use Library.Manager\n\nfunc main() {\n    var handle = Manager().submit(1)\n    handle.\n}\n";
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = valid_source });
+    const relative_root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const main_path = try SourceGraph.canonicalPath(
+        allocator,
+        std.testing.io,
+        try std.fs.path.join(allocator, &.{ relative_root, "Main.sx" }),
+    );
+    const uri = try helpers.uriFromPath(allocator, main_path);
+    const snapshot = switch (try Frontend.analyze(
+        allocator,
+        std.testing.io,
+        &environ_map,
+        main_path,
+        .editor,
+        &.{},
+    )) {
+        .success => |value| value,
+        .failure => return error.TestUnexpectedResult,
+    };
+    try server.workspace_roots.append(allocator, try SourceGraph.canonicalPath(allocator, std.testing.io, relative_root));
+    try server.setDocument(uri, incomplete_source, 2);
+    try server.projects.append(allocator, .{
+        .input_path = main_path,
+        .last_success = snapshot,
+        .last_versions = try allocator.dupe(VersionStamp, &.{.{ .path = main_path, .version = 1 }}),
+    });
+
+    const cursor = (std.mem.indexOf(u8, incomplete_source, "handle.") orelse return error.TestUnexpectedResult) + "handle.".len;
+    const position = helpers.encodedPositionAtByteOffset(incomplete_source, cursor, .utf16).?;
+    const request = try testRequestParams(allocator, uri, position, "");
+    const completions = try server.completion(request);
+    try std.testing.expect(helpers.containsCompletion(completions, "complete"));
+    try std.testing.expect(!helpers.containsCompletion(completions, "secret"));
+    try std.testing.expect(!helpers.containsCompletion(completions, "Handle"));
+}
+
 test "member completion resolves a variable on a line added after the last snapshot" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -1273,7 +1627,7 @@ test "module completion separates file declarations from child namespaces and ex
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = "func main() {}\n" });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Library.sx",
-        .data = "public struct Extra {}\npublic func root_value() int { return 1 }\n",
+        .data = "public struct Extra {}\ninternal class Hidden {}\npublic func root_value() int { return 1 }\ninternal func hidden_value() int { return 0 }\n",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Library/Child.sx",
@@ -1303,6 +1657,8 @@ test "module completion separates file declarations from child namespaces and ex
     try std.testing.expect(helpers.containsCompletion(root_items, "Library.Compact"));
     try std.testing.expect(helpers.containsCompletion(root_items, "Library.Extra"));
     try std.testing.expect(helpers.containsCompletion(root_items, "Library.root_value"));
+    try std.testing.expect(!helpers.containsCompletion(root_items, "Library.Hidden"));
+    try std.testing.expect(!helpers.containsCompletion(root_items, "Library.hidden_value"));
     try std.testing.expect(!helpers.containsCompletion(root_items, "Library.child_value"));
 
     const compact_items = try helpers.moduleExportCompletionItems(

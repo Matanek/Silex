@@ -159,14 +159,39 @@ The source type is resolved in the file declaring the alias and is not
 reinterpreted in the consumer. Type aliases cannot currently declare their own
 type parameters.
 
-Declarations are private by default. `public` exposes an enum, protocol, structure,
-class, or function, while `public use` re-exports an existing declaration or type alias
-under the current module name. Every variant of a public enum follows the
-visibility of its enum. Modules cannot currently be re-exported with `public use`.
+Declarations are private by default. `public` exposes an enum, protocol,
+structure, class, or function, while `public use` re-exports an existing
+declaration or type alias under the current module name. Every variant of a
+public enum follows the visibility of its enum. Modules cannot currently be
+re-exported with `public use`.
 
-For a class, declaration and member visibility are independent: `public class`
-exposes the type outside its module, while only its `public` members are accessible
-outside the class. See [Classes](Classes.md).
+`internal` gives a declaration an exact file boundary. It is accepted on every
+top-level enum, protocol, structure, class, function, native function, and
+native resource:
+
+```sx
+internal class Handle {}
+internal func prepare() {}
+internal native resource NativeHandle { drop destroy_handle }
+```
+
+Such a declaration is usable by all declarations in the same `.sx` file, but
+cannot be selected by `use`, qualified from another file, or proposed by
+external module completion. Unlike an unmarked module-private declaration,
+`internal` does not grant access to a sibling file through a direct private
+dependency.
+
+A public function or method may return an internal type. Another file can keep
+that result with `var` and call its effectively public members, but cannot name,
+annotate, import, or construct the concrete type. The return is therefore an
+opaque inferred value. An internal type in a public parameter, constructor
+input, public field, enum payload, or public protocol signature is rejected,
+because the caller or implementer would need to construct or name it.
+
+For a class, declaration and member visibility are independent, but effective
+visibility is capped by the class. A `public` constructor inside an
+`internal class` remains confined to that file and does not need a redundant
+`internal init`. See [Classes](Classes.md).
 
 A public structure that declares `drop` exposes its type and methods but keeps
 its fields and named aggregate initializer private to its declaring file. A

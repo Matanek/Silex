@@ -135,6 +135,12 @@ pub const Helpers = struct {
     pub const moduleDirectoryPath = Completion.moduleDirectoryPath;
     pub const localModuleCompletionItems = Completion.localModuleCompletionItems;
     pub const useCompletionItems = Completion.useCompletionItems;
+    pub const visibleUseCompletionItems = Completion.visibleUseCompletionItems;
+    pub const visibleUseTarget = Completion.visibleUseTarget;
+    pub const importedTypeStaticCompletionItems = Completion.importedTypeStaticCompletionItems;
+    pub const currentLambdaParameterCompletionItems = Completion.currentLambdaParameterCompletionItems;
+    pub const currentLambdaParameterType = Completion.currentLambdaParameterType;
+    pub const currentSelfCompletionItems = Completion.currentSelfCompletionItems;
     pub const collectRootModules = Completion.collectRootModules;
     pub const filePathFromUri = Completion.filePathFromUri;
     pub const documentProjectRoot = Completion.documentProjectRoot;
@@ -1086,7 +1092,8 @@ pub const Server = struct {
             return self.allocator.alloc(CompletionItem, 0);
         var namespace_items: []const CompletionItem = &.{};
         var namespace_qualified = false;
-        if (self.qualifiedCompletionPrefix(document.text, cursor)) |context| {
+        const qualified_context = self.qualifiedCompletionPrefix(document.text, cursor);
+        if (qualified_context) |context| {
             const module_path = try self.usedModulePath(self.allocator, document.text, context.qualifier) orelse context.qualifier;
             namespace_qualified = try self.completionNamespaceExists(self.allocator, self.io, uri, module_path);
             const exports = try self.moduleExportCompletionItems(
@@ -1099,36 +1106,69 @@ pub const Server = struct {
             );
             namespace_items = try self.unqualifiedModuleCompletionItems(self.allocator, exports);
         }
+        const imported_type_items = if (qualified_context) |context|
+            try self.importedTypeStaticCompletionItems(
+                self.allocator,
+                self.io,
+                uri,
+                document.text,
+                context.qualifier,
+                context.prefix,
+            )
+        else
+            null;
+        const self_items = if (qualified_context) |context|
+            if (std.mem.eql(u8, context.qualifier, "self"))
+                try self.currentSelfCompletionItems(
+                    self.allocator,
+                    document.text,
+                    cursor,
+                    context.prefix,
+                )
+            else
+                null
+        else
+            null;
 
-        const project = self.projectForDocument(document) orelse return if (namespace_qualified)
+        const base_items = if (namespace_qualified)
+            &.{}
+        else
+            try self.baseCompletionItems(uri, document.text);
+        const lambda_items = try self.currentLambdaParameterCompletionItems(
+            self.allocator,
+            document.text,
+            cursor,
+            if (qualified_context) |context| context.prefix else "",
+        );
+        var local_base_items: std.ArrayList(CompletionItem) = .empty;
+        try local_base_items.appendSlice(self.allocator, base_items);
+        if (!namespace_qualified) for (lambda_items) |item| {
+            if (!self.containsCompletion(local_base_items.items, item.label)) try local_base_items.append(self.allocator, item);
+        };
+        const fallback_items = self_items orelse imported_type_items orelse if (namespace_qualified)
             namespace_items
         else
-            self.allocator.dupe(CompletionItem, &language_completions);
+            local_base_items.items;
+
+        const project = self.projectForDocument(document) orelse return fallback_items;
         var recovered_snapshot: ?Frontend.Snapshot = null;
         const snapshot = if (project.current) |*current|
             current
         else if (project.last_success) |*previous| fallback: {
-            if (!self.fallbackAllowed(project, document.path)) return if (namespace_qualified)
-                namespace_items
-            else
-                self.allocator.dupe(CompletionItem, &language_completions);
+            if (!self.fallbackAllowed(project, document.path)) return fallback_items;
             break :fallback previous;
         } else recovery: {
             recovered_snapshot = try self.completionRecoverySnapshot(project.input_path, document, cursor);
             if (recovered_snapshot) |*recovered| break :recovery recovered;
-            return if (namespace_qualified)
-                namespace_items
-            else
-                self.allocator.dupe(CompletionItem, &language_completions);
+            return fallback_items;
         };
-        const file = self.snapshotFile(snapshot, document.path) orelse return if (namespace_qualified)
-            namespace_items
-        else
-            self.allocator.dupe(CompletionItem, &language_completions);
+        const file = self.snapshotFile(snapshot, document.path) orelse return fallback_items;
 
         if (try self.initializerFieldCompletionItems(snapshot, file, document.text, cursor)) |fields| {
             return fields;
         }
+
+        if (self_items) |items| return items;
 
         if (try self.completionOwner(snapshot, file, document.text, cursor)) |owner| {
             var members: std.ArrayList(CompletionItem) = .empty;
@@ -1139,12 +1179,39 @@ pub const Server = struct {
                 if (self.containsCompletion(members.items, symbol.name)) continue;
                 try members.append(self.allocator, self.completionItemForSymbol(symbol));
             }
+            if (!owner.static) {
+                const owner_context = self.completionInsideOwnerCallable(snapshot, file, document.text, cursor, owner.key);
+                var owner_source_name: ?[]const u8 = null;
+                for (snapshot.program.structures) |structure| {
+                    if (!std.mem.eql(u8, structure.generated_name, owner.key)) continue;
+                    owner_source_name = structure.source_name;
+                    break;
+                }
+                for (snapshot.ast.structures) |structure| {
+                    if (owner_source_name == null or !std.mem.eql(u8, structure.name, owner_source_name.?)) continue;
+                    for (structure.methods) |method| {
+                        if (method.type_parameters.len == 0 or method.is_static or
+                            (method.member_visibility != .public_access and !owner_context) or
+                            self.containsCompletion(members.items, method.name))
+                        {
+                            continue;
+                        }
+                        try members.append(self.allocator, .{
+                            .label = method.name,
+                            .kind = 3,
+                            .detail = try SymbolIndex.functionDetail(self.allocator, method),
+                        });
+                    }
+                    break;
+                }
+            }
             return members.toOwnedSlice(self.allocator);
         }
+        if (imported_type_items) |items| return items;
         if (namespace_qualified) return namespace_items;
 
         var items: std.ArrayList(CompletionItem) = .empty;
-        try items.appendSlice(self.allocator, &language_completions);
+        try items.appendSlice(self.allocator, local_base_items.items);
         const cursor_position = self.sourcePositionAtByteOffset(document.text, file, cursor);
         for (snapshot.index.symbols) |symbol| {
             if (symbol.owner.len != 0) continue;
@@ -1155,6 +1222,16 @@ pub const Server = struct {
             if (local and (symbol.definition.file != file or self.positionAfter(symbol.definition, cursor_position))) continue;
             if (!local and !self.symbolVisibleFromFile(snapshot, file, symbol)) continue;
             if (!self.containsCompletion(items.items, symbol.name)) try items.append(self.allocator, self.completionItemForSymbol(symbol));
+        }
+        return items.toOwnedSlice(self.allocator);
+    }
+
+    pub fn baseCompletionItems(self: *Server, uri: []const u8, source: []const u8) ![]const CompletionItem {
+        var items: std.ArrayList(CompletionItem) = .empty;
+        try items.appendSlice(self.allocator, &language_completions);
+        const used = try self.visibleUseCompletionItems(self.allocator, self.io, uri, source);
+        for (used) |item| {
+            if (!self.containsCompletion(items.items, item.label)) try items.append(self.allocator, item);
         }
         return items.toOwnedSlice(self.allocator);
     }
@@ -1242,14 +1319,20 @@ pub const Server = struct {
         while (start > 0 and self.isIdentifierContinue(source[start - 1])) start -= 1;
         if (start == end) return null;
         const position = self.sourcePositionAtByteOffset(source, file, start);
-        const receiver = if (snapshot.index.occurrenceAt(file, position.line, position.column)) |occurrence|
-            snapshot.index.symbol(occurrence.symbol)
-        else
-            self.fallbackCompletionReceiver(snapshot, file, source, start, end) orelse return null;
-        if (receiver.kind == .type or receiver.kind == .enumeration) return .{ .key = receiver.key, .static = true };
-        const type_name = self.detailTypeName(receiver.detail) orelse return null;
+        var type_name: ?[]const u8 = null;
+        if (snapshot.index.occurrenceAt(file, position.line, position.column)) |occurrence| {
+            const receiver = snapshot.index.symbol(occurrence.symbol);
+            if (receiver.kind == .type or receiver.kind == .enumeration) return .{ .key = receiver.key, .static = true };
+            type_name = self.detailTypeName(receiver.detail);
+        } else if (self.fallbackCompletionReceiver(snapshot, file, source, start, end)) |receiver| {
+            if (receiver.kind == .type or receiver.kind == .enumeration) return .{ .key = receiver.key, .static = true };
+            type_name = self.detailTypeName(receiver.detail);
+        } else {
+            type_name = try self.currentLambdaParameterType(self.allocator, source, cursor, source[start..end]);
+        }
+        const resolved_type_name = type_name orelse return null;
         for (snapshot.index.symbols) |symbol| {
-            if ((symbol.kind == .type or symbol.kind == .enumeration) and std.mem.eql(u8, symbol.name, type_name)) {
+            if ((symbol.kind == .type or symbol.kind == .enumeration) and std.mem.eql(u8, symbol.name, resolved_type_name)) {
                 return .{ .key = symbol.key, .static = false };
             }
         }
@@ -1417,6 +1500,12 @@ pub const Server = struct {
     pub const moduleDirectoryPath = Completion.moduleDirectoryPath;
     pub const localModuleCompletionItems = Completion.localModuleCompletionItems;
     pub const useCompletionItems = Completion.useCompletionItems;
+    pub const visibleUseCompletionItems = Completion.visibleUseCompletionItems;
+    pub const visibleUseTarget = Completion.visibleUseTarget;
+    pub const importedTypeStaticCompletionItems = Completion.importedTypeStaticCompletionItems;
+    pub const currentLambdaParameterCompletionItems = Completion.currentLambdaParameterCompletionItems;
+    pub const currentLambdaParameterType = Completion.currentLambdaParameterType;
+    pub const currentSelfCompletionItems = Completion.currentSelfCompletionItems;
     pub const collectRootModules = Completion.collectRootModules;
     pub const filePathFromUri = Completion.filePathFromUri;
     pub const documentProjectRoot = Completion.documentProjectRoot;

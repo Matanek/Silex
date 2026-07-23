@@ -43,41 +43,73 @@ pub const Parser = struct {
                 if (self.current.tag == .keyword_use) {
                     try uses.append(self.allocator, try self.parseUse(true));
                 } else if (self.current.tag == .keyword_enum) {
-                    try enums.append(self.allocator, try self.parseEnum(true));
+                    try enums.append(self.allocator, try self.parseEnum(true, false));
                 } else if (self.current.tag == .keyword_protocol) {
-                    try protocols.append(self.allocator, try self.parseProtocol(true));
+                    try protocols.append(self.allocator, try self.parseProtocol(true, false));
                 } else if (self.current.tag == .keyword_struct or self.current.tag == .keyword_class) {
-                    try structures.append(self.allocator, try self.parseStructure(true));
+                    try structures.append(self.allocator, try self.parseStructure(true, false, false));
+                } else if (self.current.tag == .keyword_static) {
+                    try self.advance();
+                    if (self.current.tag != .keyword_class) return self.fail("expected 'class' after 'public static'");
+                    try structures.append(self.allocator, try self.parseStructure(true, false, true));
                 } else if (self.current.tag == .keyword_func) {
-                    try functions.append(self.allocator, try self.parseFunction(true));
+                    try functions.append(self.allocator, try self.parseFunction(true, false));
                 } else if (self.current.tag == .identifier and std.mem.eql(u8, self.current.lexeme, "native")) {
                     try self.advance();
                     if (self.current.tag == .identifier and std.mem.eql(u8, self.current.lexeme, "resource")) {
-                        const resource = try self.parseNativeResource(true);
+                        const resource = try self.parseNativeResource(true, false);
                         try structures.append(self.allocator, resource);
                         try functions.append(self.allocator, try self.nativeResourceDropFunction(resource));
                     } else {
-                        try functions.append(self.allocator, try self.parseNativeFunctionAfterNative(true));
+                        try functions.append(self.allocator, try self.parseNativeFunctionAfterNative(true, false));
                     }
                 } else return self.fail("expected 'enum', 'protocol', 'struct', 'class', 'func', 'native func', 'native resource', or 'use' after 'public'");
+            } else if (self.current.tag == .keyword_internal) {
+                try self.advance();
+                if (self.current.tag == .keyword_enum) {
+                    try enums.append(self.allocator, try self.parseEnum(false, true));
+                } else if (self.current.tag == .keyword_protocol) {
+                    try protocols.append(self.allocator, try self.parseProtocol(false, true));
+                } else if (self.current.tag == .keyword_struct or self.current.tag == .keyword_class) {
+                    try structures.append(self.allocator, try self.parseStructure(false, true, false));
+                } else if (self.current.tag == .keyword_static) {
+                    try self.advance();
+                    if (self.current.tag != .keyword_class) return self.fail("expected 'class' after 'internal static'");
+                    try structures.append(self.allocator, try self.parseStructure(false, true, true));
+                } else if (self.current.tag == .keyword_func) {
+                    try functions.append(self.allocator, try self.parseFunction(false, true));
+                } else if (self.current.tag == .identifier and std.mem.eql(u8, self.current.lexeme, "native")) {
+                    try self.advance();
+                    if (self.current.tag == .identifier and std.mem.eql(u8, self.current.lexeme, "resource")) {
+                        const resource = try self.parseNativeResource(false, true);
+                        try structures.append(self.allocator, resource);
+                        try functions.append(self.allocator, try self.nativeResourceDropFunction(resource));
+                    } else {
+                        try functions.append(self.allocator, try self.parseNativeFunctionAfterNative(false, true));
+                    }
+                } else return self.fail("expected 'enum', 'protocol', 'struct', 'class', 'func', 'native func', or 'native resource' after 'internal'");
             } else if (self.current.tag == .keyword_enum) {
-                try enums.append(self.allocator, try self.parseEnum(false));
+                try enums.append(self.allocator, try self.parseEnum(false, false));
             } else if (self.current.tag == .keyword_protocol) {
-                try protocols.append(self.allocator, try self.parseProtocol(false));
+                try protocols.append(self.allocator, try self.parseProtocol(false, false));
             } else if (self.current.tag == .keyword_extend) {
                 try extensions.append(self.allocator, try self.parseExtension());
             } else if (self.current.tag == .keyword_struct or self.current.tag == .keyword_class) {
-                try structures.append(self.allocator, try self.parseStructure(false));
+                try structures.append(self.allocator, try self.parseStructure(false, false, false));
+            } else if (self.current.tag == .keyword_static) {
+                try self.advance();
+                if (self.current.tag != .keyword_class) return self.fail("expected 'class' after 'static'");
+                try structures.append(self.allocator, try self.parseStructure(false, false, true));
             } else if (self.current.tag == .keyword_func) {
-                try functions.append(self.allocator, try self.parseFunction(false));
+                try functions.append(self.allocator, try self.parseFunction(false, false));
             } else if (self.current.tag == .identifier and std.mem.eql(u8, self.current.lexeme, "native")) {
                 try self.advance();
                 if (self.current.tag == .identifier and std.mem.eql(u8, self.current.lexeme, "resource")) {
-                    const resource = try self.parseNativeResource(false);
+                    const resource = try self.parseNativeResource(false, false);
                     try structures.append(self.allocator, resource);
                     try functions.append(self.allocator, try self.nativeResourceDropFunction(resource));
                 } else {
-                    try functions.append(self.allocator, try self.parseNativeFunctionAfterNative(false));
+                    try functions.append(self.allocator, try self.parseNativeFunctionAfterNative(false, false));
                 }
             } else if (self.current.tag == .keyword_elif) {
                 return self.fail("'elif' must directly continue an if chain");
@@ -122,7 +154,8 @@ pub const Parser = struct {
             if (self.current.tag == .keyword_private) return self.fail("an extension method cannot use 'private'");
             if (self.current.tag == .keyword_override) return self.fail("an extension method cannot use 'override'");
             const is_public = self.current.tag == .keyword_public;
-            if (is_public) try self.advance();
+            const is_internal = self.current.tag == .keyword_internal;
+            if (is_public or is_internal) try self.advance();
             const is_static = self.current.tag == .keyword_static;
             if (is_static) try self.advance();
             if (self.current.tag == .keyword_init) return self.fail("an extension cannot declare a constructor");
@@ -133,11 +166,8 @@ pub const Parser = struct {
             if (self.current.tag != .keyword_func) {
                 return self.fail("an extension can declare only methods");
             }
-            var method = try self.parseFunction(is_public);
-            if (is_static and method.type_parameters.len != 0) {
-                return self.fail("generic static extension methods are not supported");
-            }
-            method.member_visibility = if (is_public) .public_access else null;
+            var method = try self.parseFunction(is_public, is_internal);
+            method.member_visibility = if (is_public) .public_access else if (is_internal) .internal_access else null;
             method.is_static = is_static;
             try methods.append(self.allocator, method);
         }
@@ -151,7 +181,7 @@ pub const Parser = struct {
         };
     }
 
-    pub fn parseProtocol(self: *Parser, is_public: bool) ParseError!Ast.Protocol {
+    pub fn parseProtocol(self: *Parser, is_public: bool, is_internal: bool) ParseError!Ast.Protocol {
         const position = self.current.position;
         try self.expect(.keyword_protocol, "expected 'protocol'");
         if (self.current.tag != .identifier) return self.fail("expected protocol name");
@@ -192,6 +222,7 @@ pub const Parser = struct {
         try self.expect(.right_brace, "expected '}' after protocol requirements");
         return .{
             .is_public = is_public,
+            .is_internal = is_internal,
             .position = position,
             .name = name,
             .name_position = name_position,
@@ -199,7 +230,7 @@ pub const Parser = struct {
         };
     }
 
-    pub fn parseEnum(self: *Parser, is_public: bool) ParseError!Ast.Enum {
+    pub fn parseEnum(self: *Parser, is_public: bool, is_internal: bool) ParseError!Ast.Enum {
         const position = self.current.position;
         try self.expect(.keyword_enum, "expected 'enum'");
         if (self.current.tag != .identifier) return self.fail("expected enum name");
@@ -264,6 +295,7 @@ pub const Parser = struct {
         if (variants.items.len == 0) return self.failAt(name_position, "an enum requires at least one variant");
         return .{
             .is_public = is_public,
+            .is_internal = is_internal,
             .position = position,
             .name = name,
             .name_position = name_position,
@@ -336,7 +368,7 @@ pub const Parser = struct {
         return result;
     }
 
-    pub fn parseStructure(self: *Parser, is_public: bool) ParseError!Ast.Structure {
+    pub fn parseStructure(self: *Parser, is_public: bool, is_internal: bool, is_static_class: bool) ParseError!Ast.Structure {
         const position = self.current.position;
         const is_class = self.current.tag == .keyword_class;
         try self.advance();
@@ -345,13 +377,14 @@ pub const Parser = struct {
         const name_position = self.current.position;
         if (std.mem.eql(u8, name, "Result")) return self.fail("type name 'Result' is reserved");
         try self.advance();
-        const type_parameters = if (self.current.tag == .less) parameters: {
-            if (is_class) return self.fail("generic classes are not supported");
-            break :parameters try self.parseTypeParameters("structure");
-        } else &.{};
+        const type_parameters = if (self.current.tag == .less)
+            try self.parseTypeParameters(if (is_class) "class" else "structure")
+        else
+            &.{};
         var base: ?Ast.BaseClass = null;
         var conformances: std.ArrayList(Ast.ProtocolReference) = .empty;
         if (self.current.tag == .colon) {
+            if (is_static_class) return self.fail("a static class cannot inherit or conform to protocols");
             try self.advance();
             var first = true;
             while (true) {
@@ -376,18 +409,27 @@ pub const Parser = struct {
             const is_override = self.current.tag == .keyword_override;
             if (is_override) {
                 if (!is_class) return self.fail("only class methods can use 'override'");
+                if (is_static_class) return self.fail("a static class cannot use 'override'");
                 try self.advance();
             }
-            var visibility: Ast.MemberVisibility = if (is_class) .private_access else .public_access;
+            var visibility: Ast.MemberVisibility = if (is_class)
+                if (is_internal) .internal_access else .private_access
+            else
+                .public_access;
             const has_visibility = self.current.tag == .keyword_private or
+                self.current.tag == .keyword_internal or
                 self.current.tag == .keyword_protected or
                 self.current.tag == .keyword_public;
             if (has_visibility) {
                 if (!is_class and self.current.tag == .keyword_protected) {
                     return self.fail("a struct member cannot use 'protected' because structs do not support inheritance");
                 }
+                if (is_static_class and self.current.tag == .keyword_protected) {
+                    return self.fail("a static class member cannot use 'protected'");
+                }
                 visibility = switch (self.current.tag) {
                     .keyword_private => .private_access,
+                    .keyword_internal => .internal_access,
                     .keyword_protected => .subclass,
                     .keyword_public => .public_access,
                     else => unreachable,
@@ -408,8 +450,12 @@ pub const Parser = struct {
                 }
             }
             if (self.current.tag == .keyword_func) {
-                var method = try self.parseFunction(false);
-                if (method.type_parameters.len != 0) return self.fail("generic methods are not supported");
+                var method = try self.parseFunction(false, false);
+                if (method.type_parameters.len != 0) {
+                    if (is_override) return self.failAt(method.name_position, "generic methods cannot use 'override'");
+                    if (type_parameters.len != 0) return self.failAt(method.name_position, "generic methods in generic structures are not supported");
+                }
+                if (is_static_class and !is_static) return self.failAt(method.name_position, "a static class can declare only static methods");
                 method.member_visibility = visibility;
                 method.is_override = is_override;
                 method.is_static = is_static;
@@ -417,6 +463,7 @@ pub const Parser = struct {
                 continue;
             }
             if (self.current.tag == .keyword_drop) {
+                if (is_static_class) return self.fail("a static class cannot declare 'drop'");
                 if (is_override) return self.fail("'override' cannot apply to 'drop'");
                 if (has_visibility) return self.fail("'drop' does not accept a visibility modifier");
                 if (drop != null) return self.fail(if (is_class)
@@ -434,6 +481,7 @@ pub const Parser = struct {
             }
             if (is_override) return self.fail("'override' must declare a class method");
             if (self.current.tag == .keyword_init) {
+                if (is_static_class) return self.fail("a static class cannot declare a constructor");
                 const constructor_position = self.current.position;
                 try self.advance();
                 const parameters = try self.parseParameters();
@@ -466,6 +514,7 @@ pub const Parser = struct {
                 return self.fail("expected field declaration starting with 'let' or 'var'");
             }
             const field_mutability: Ast.Mutability = if (self.current.tag == .keyword_let) .immutable else .mutable;
+            if (is_static_class and !is_static) return self.fail("a static class can declare only static fields");
             try self.advance();
             if (self.current.tag != .identifier) return self.fail("expected field name after 'let' or 'var'");
             const field_name = self.current.lexeme;
@@ -492,7 +541,9 @@ pub const Parser = struct {
         try self.expect(.right_brace, "expected '}'");
         return .{
             .is_public = is_public,
+            .is_internal = is_internal,
             .is_class = is_class,
+            .is_static_class = is_static_class,
             .position = position,
             .name = name,
             .name_position = name_position,
@@ -506,7 +557,7 @@ pub const Parser = struct {
         };
     }
 
-    pub fn parseFunction(self: *Parser, is_public: bool) ParseError!Ast.Function {
+    pub fn parseFunction(self: *Parser, is_public: bool, is_internal: bool) ParseError!Ast.Function {
         const position = self.current.position;
         try self.expect(.keyword_func, "expected 'func'");
         if (self.current.tag != .identifier) return self.fail("expected function name");
@@ -524,6 +575,7 @@ pub const Parser = struct {
             try self.parseReturnType();
         return .{
             .is_public = is_public,
+            .is_internal = is_internal,
             .position = position,
             .name = name,
             .name_position = name_position,
@@ -534,38 +586,41 @@ pub const Parser = struct {
         };
     }
 
-    pub fn parseNativeFunction(self: *Parser, is_public: bool) ParseError!Ast.Function {
+    pub fn parseNativeFunction(self: *Parser, is_public: bool, is_internal: bool) ParseError!Ast.Function {
         if (self.current.tag != .identifier or !std.mem.eql(u8, self.current.lexeme, "native")) {
             return self.fail("expected 'native'");
         }
         try self.advance();
-        return self.parseNativeFunctionAfterNative(is_public);
+        return self.parseNativeFunctionAfterNative(is_public, is_internal);
     }
 
-    pub fn parseNativeFunctionAfterNative(self: *Parser, is_public: bool) ParseError!Ast.Function {
+    pub fn parseNativeFunctionAfterNative(self: *Parser, is_public: bool, is_internal: bool) ParseError!Ast.Function {
         const position = self.previous.position;
         try self.expect(.keyword_func, "expected 'func' after 'native'");
         if (self.current.tag != .identifier) return self.fail("expected function name");
         const name = self.current.lexeme;
         const name_position = self.current.position;
         try self.advance();
-        if (self.current.tag == .less) return self.fail("native functions cannot be generic");
+        const type_parameters = if (self.current.tag == .less) try self.parseTypeParameters("native function") else &.{};
         const parameters = try self.parseParameters();
         const return_type = try self.parseReturnType();
         try self.expectStatementTerminator();
         return .{
             .is_public = is_public,
+            .is_internal = is_internal,
             .is_native = true,
+            .is_native_generic = type_parameters.len != 0,
             .position = position,
             .name = name,
             .name_position = name_position,
+            .type_parameters = type_parameters,
             .return_type = return_type,
             .parameters = parameters,
             .statements = &.{},
         };
     }
 
-    pub fn parseNativeResource(self: *Parser, is_public: bool) ParseError!Ast.Structure {
+    pub fn parseNativeResource(self: *Parser, is_public: bool, is_internal: bool) ParseError!Ast.Structure {
         const position = self.previous.position;
         if (self.current.tag != .identifier or !std.mem.eql(u8, self.current.lexeme, "resource")) {
             return self.fail("expected 'resource' after 'native'");
@@ -588,6 +643,7 @@ pub const Parser = struct {
         try self.advance();
         return .{
             .is_public = is_public,
+            .is_internal = is_internal,
             .is_native_resource = true,
             .native_drop_name = drop_name,
             .position = position,
@@ -601,6 +657,7 @@ pub const Parser = struct {
     pub fn nativeResourceDropFunction(self: *Parser, resource: Ast.Structure) Allocator.Error!Ast.Function {
         return .{
             .is_public = resource.is_public,
+            .is_internal = resource.is_internal,
             .is_native = true,
             .is_native_resource_drop = true,
             .position = resource.position,
@@ -839,11 +896,15 @@ pub const Parser = struct {
             try self.expect(.right_parenthesis, "expected ')' after grouped type");
             break :grouped grouped_type;
         } else if (self.current.tag == .keyword_func)
-            try self.parseFunctionType(false)
+            try self.parseFunctionType(false, false)
         else if (self.current.tag == .keyword_deferred) deferred: {
             try self.advance();
             if (self.current.tag != .keyword_func) return self.fail("expected 'func' after 'deferred'");
-            break :deferred try self.parseFunctionType(true);
+            break :deferred try self.parseFunctionType(true, false);
+        } else if (self.current.tag == .keyword_isolated) isolated: {
+            try self.advance();
+            if (self.current.tag != .keyword_func) return self.fail("expected 'func' after 'isolated'");
+            break :isolated try self.parseFunctionType(false, true);
         } else if (self.current.tag == .identifier) named: {
             const name = try self.parseQualifiedName(message);
             if (self.current.tag == .less) {
@@ -905,7 +966,7 @@ pub const Parser = struct {
         return result;
     }
 
-    pub fn parseFunctionType(self: *Parser, deferred: bool) ParseError!Ast.TypeName {
+    pub fn parseFunctionType(self: *Parser, deferred: bool, isolated: bool) ParseError!Ast.TypeName {
         try self.expect(.keyword_func, "expected 'func'");
         try self.expect(.left_parenthesis, "expected '(' after 'func'");
         var parameters: std.ArrayList(Ast.TypeName) = .empty;
@@ -931,6 +992,7 @@ pub const Parser = struct {
         }
         return .{ .function = .{
             .deferred = deferred,
+            .isolated = isolated,
             .parameters = try parameters.toOwnedSlice(self.allocator),
             .parameter_modes = try parameter_modes.toOwnedSlice(self.allocator),
             .return_type = return_type,
@@ -939,7 +1001,7 @@ pub const Parser = struct {
 
     pub fn isTypeStart(self: *const Parser) bool {
         return switch (self.current.tag) {
-            .left_parenthesis, .keyword_func, .keyword_deferred, .keyword_int, .keyword_int8, .keyword_int16, .keyword_int32, .keyword_int64, .keyword_uint, .keyword_uint8, .keyword_uint16, .keyword_uint32, .keyword_uint64, .keyword_float, .keyword_float32, .keyword_float64, .keyword_bool, .keyword_str, .identifier => true,
+            .left_parenthesis, .keyword_func, .keyword_deferred, .keyword_isolated, .keyword_int, .keyword_int8, .keyword_int16, .keyword_int32, .keyword_int64, .keyword_uint, .keyword_uint8, .keyword_uint16, .keyword_uint32, .keyword_uint64, .keyword_float, .keyword_float32, .keyword_float64, .keyword_bool, .keyword_str, .identifier => true,
             else => false,
         };
     }
@@ -1200,8 +1262,8 @@ pub const Parser = struct {
         return Expressions.parseSuperMethodCall(self);
     }
 
-    pub fn parseLambda(self: *Parser, deferred: bool) ParseError!*Ast.Expression {
-        return Expressions.parseLambda(self, deferred);
+    pub fn parseLambda(self: *Parser, deferred: bool, isolated: bool) ParseError!*Ast.Expression {
+        return Expressions.parseLambda(self, deferred, isolated);
     }
 
     pub fn parseSequenceLiteral(self: *Parser) ParseError!*Ast.Expression {

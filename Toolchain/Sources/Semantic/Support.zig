@@ -325,6 +325,7 @@ pub fn typeFromReturn(
         .function => |function| function_return: {
             const value = try typeFromFunction(self, function, position);
             if (value.function.deferred) return self.fail(position, "a Silex function cannot return 'deferred func'");
+            if (value.function.isolated) return self.fail(position, "a Silex function cannot return 'isolated func'");
             break :function_return value;
         },
         .optional => |contained| typeFromAnnotation(self, .{ .optional = contained }, position),
@@ -363,6 +364,7 @@ pub fn typeFromFunction(
     }
     return .{ .function = .{
         .deferred = function.deferred,
+        .isolated = function.isolated,
         .parameters = try parameters.toOwnedSlice(self.allocator),
         .parameter_modes = try self.allocator.dupe(Ast.ParameterMode, function.parameter_modes),
         .return_type = return_type,
@@ -666,6 +668,7 @@ pub fn typeEqual(left: Type, right: Type) bool {
         .function => |left_function| switch (right) {
             .function => |right_function| function_type: {
                 if (left_function.deferred != right_function.deferred) break :function_type false;
+                if (left_function.isolated != right_function.isolated) break :function_type false;
                 if (left_function.parameters.len != right_function.parameters.len) break :function_type false;
                 if (!typeEqual(left_function.return_type.*, right_function.return_type.*)) break :function_type false;
                 for (left_function.parameters, left_function.parameter_modes, right_function.parameters, right_function.parameter_modes) |left_parameter, left_mode, right_parameter, right_mode| {
@@ -743,6 +746,13 @@ pub fn containsPosition(positions: []const Source.Position, candidate: Source.Po
 
 pub fn overloadScore(source: Type, target: Type) ?u8 {
     if (typeEqual(source, target)) return 0;
+    if (source == .function and target == .function and
+        !source.function.isolated and target.function.isolated)
+    {
+        var ordinary_target = target.function;
+        ordinary_target.isolated = false;
+        if (typeEqual(source, Type{ .function = ordinary_target })) return 1;
+    }
     if (target == .optional) {
         if (source == .null) return 3;
         if (source == .optional) {
@@ -929,7 +939,7 @@ pub fn typeName(value: Type) []const u8 {
         .fixed_array => "array",
         .view => "view",
         .reference => |reference| if (reference.mutable) "reference&" else "reference@",
-        .function => |function| if (function.deferred) "deferred func" else "func",
+        .function => |function| if (function.deferred) "deferred func" else if (function.isolated) "isolated func" else "func",
         .optional => "optional",
         .null => "null",
         .structure => |structure_type| structure_type.source_name,
@@ -952,7 +962,7 @@ pub fn allocatedSignatureTypeName(allocator: Allocator, value: Type) Allocator.E
     return switch (value) {
         .function => |function| function_name: {
             var output: std.ArrayList(u8) = .empty;
-            try output.appendSlice(allocator, if (function.deferred) "deferred func(" else "func(");
+            try output.appendSlice(allocator, if (function.deferred) "deferred func(" else if (function.isolated) "isolated func(" else "func(");
             for (function.parameters, function.parameter_modes, 0..) |parameter, mode, index| {
                 if (index != 0) try output.appendSlice(allocator, ", ");
                 if (mode == .borrow) try output.append(allocator, '@');

@@ -237,7 +237,7 @@ pub fn methodCallExpressionWithObject(
                     continue;
                 }
                 const candidate = MethodCandidate{ .symbol = method_symbol, .structure_index = index, .index = method_index };
-                if (method_symbol.extension_visible_files != null or self.memberVisibleFromCurrentContext(index, method_symbol.visibility)) {
+                if (method_symbol.extension_visible_files != null or self.memberVisibleFromCurrentContext(index, method_symbol.visibility, call.name_position.file)) {
                     if (!methodCandidatesContainSlot(candidates.items, method_symbol.generated_name)) try candidates.append(self.allocator, candidate);
                 } else {
                     inaccessible = candidate;
@@ -296,11 +296,29 @@ pub fn methodCallExpressionWithObject(
             if (mutable) state.mutable_borrow = true else state.immutable_borrows += 1;
         }
     }
+    var resource_dependencies: std.ArrayList(*BindingState) = .empty;
+    if (try self.isNonCopyableType(method_symbol.return_type)) {
+        if (method_symbol.return_dependency_self) {
+            const dependency = if (object.borrow) |borrow| borrow.root else object.owner_state;
+            if (dependency) |state| try resource_dependencies.append(self.allocator, state);
+        }
+        for (arguments.items, 0..) |argument, index| {
+            if (!containsIndex(method_symbol.return_dependency_parameters, index)) continue;
+            const dependency = if (argument.borrow) |borrow| borrow.root else argument.owner_state;
+            const state = dependency orelse continue;
+            var found = false;
+            for (resource_dependencies.items) |existing| {
+                if (existing == state) found = true;
+            }
+            if (!found) try resource_dependencies.append(self.allocator, state);
+        }
+    }
     return self.newExpression(.{
         .type = method_symbol.return_type,
         .position = call.name_position,
         .borrow = returned_borrow,
         .owns_borrow = returned_borrow != null,
+        .resource_dependencies = try resource_dependencies.toOwnedSlice(self.allocator),
         .value = .{ .method_call = .{
             .object = object,
             .source_name = method_symbol.source_name,
@@ -423,8 +441,23 @@ pub fn staticFieldAccessExpression(
     const structure_index = self.findStructureIndexByGeneratedName(owner_type.structure.generated_name).?;
     const structure = &self.structures.items[structure_index];
     if (self.findStaticField(structure_index, access.name)) |field| {
-        if (!self.memberVisibleFromCurrentContext(structure_index, field.visibility)) {
+        if (!self.memberVisibleFromCurrentContext(structure_index, field.visibility, access.name_position.file)) {
             return self.failMemberAccess("static field", structure, field.source_name, field.visibility, access.name_position);
+        }
+        var lambda_context = self.current_lambda;
+        while (lambda_context) |lambda| : (lambda_context = lambda.parent) {
+            if (!lambda.isolated) continue;
+            if (field.mutability == .mutable) {
+                return self.fail(access.name_position, "an 'isolated func' cannot access a 'static var'");
+            }
+            var field_path: std.ArrayList([]const u8) = .empty;
+            defer field_path.deinit(self.allocator);
+            var visiting = std.StringHashMap(void).init(self.allocator);
+            defer visiting.deinit();
+            if (try self.nonIndependentType(field.type, &field_path, &visiting) != null) {
+                return self.fail(access.name_position, "an 'isolated func' can only access an independent 'static let'");
+            }
+            break;
         }
         return self.newExpression(.{
             .type = field.type,
@@ -467,7 +500,7 @@ pub fn staticMethodCallExpression(
             continue;
         }
         const candidate = MethodCandidate{ .symbol = method_symbol, .structure_index = structure_index, .index = method_index };
-        if (method_symbol.extension_visible_files != null or self.memberVisibleFromCurrentContext(structure_index, method_symbol.visibility)) {
+        if (method_symbol.extension_visible_files != null or self.memberVisibleFromCurrentContext(structure_index, method_symbol.visibility, call.name_position.file)) {
             try candidates.append(self.allocator, candidate);
         } else {
             inaccessible = candidate;
@@ -767,7 +800,7 @@ pub fn superMethodCallExpression(
             if (method_symbol.is_static) continue;
             if (!std.mem.eql(u8, method_symbol.source_name, call.name)) continue;
             const candidate = MethodCandidate{ .symbol = method_symbol, .structure_index = index, .index = method_index };
-            if (self.memberVisibleFrom(structure_index, index, method_symbol.visibility)) {
+            if (self.memberVisibleFrom(structure_index, index, method_symbol.visibility, call.name_position.file)) {
                 if (!methodCandidatesContainSlot(candidates.items, method_symbol.generated_name)) try candidates.append(self.allocator, candidate);
             } else {
                 inaccessible = candidate;

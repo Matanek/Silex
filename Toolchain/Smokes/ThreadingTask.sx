@@ -1,0 +1,29 @@
+use STD.Threading
+
+struct Sum:Threading.Task {
+    let values:int[]
+    var total:int
+
+    func execute() {
+        var index = 0
+        while index < self.values.count() {
+            self.total += self.values[index]
+            index++
+        }
+    }
+}
+
+func admit<T:Threading.Task>(task:T) T {
+    let copy:T = task
+    return copy
+}
+
+func main() {
+    var source:int[] = [1, 2, 3]
+    var task = admit<Sum>(Sum(values:source, total:0))
+    source[0] = 10
+    task.execute()
+
+    assert(task.total == 6, "task owns an independent list copy")
+    print("threading task")
+}

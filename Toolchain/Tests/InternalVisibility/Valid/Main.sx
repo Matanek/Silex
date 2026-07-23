@@ -1,0 +1,7 @@
+use InternalVisibility.Library.Manager
+
+func main() {
+    var manager = Manager()
+    var handle = manager.submit()
+    handle.complete()
+}

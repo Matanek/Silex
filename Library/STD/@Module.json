@@ -28,6 +28,7 @@
         "@Native/TCP.cpp",
         "@Native/UDP.cpp",
         "@Native/Text.cpp",
+        "@Native/Threading.cpp",
         "@Native/Time.cpp"
       ]
     },

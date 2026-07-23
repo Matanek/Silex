@@ -1,0 +1,14 @@
+use STD.Threading
+
+struct Unsafe:Threading.Task {
+    static var count:int
+
+    func execute() {
+        Unsafe.count++
+    }
+}
+
+func main() {
+    var handle = Threading.TaskManager.submit<Unsafe>(Unsafe())
+    handle.complete()
+}

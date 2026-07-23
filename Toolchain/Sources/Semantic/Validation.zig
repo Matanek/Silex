@@ -234,6 +234,14 @@ pub fn methodSymbol(self: anytype, id: MethodId) *const MethodSymbol {
 }
 
 pub fn validateMethodCalls(self: anytype, program: Program) AnalyzeError!void {
+    var isolated_visiting = std.StringHashMap(void).init(self.allocator);
+    defer isolated_visiting.deinit();
+    self.isolated_validation_program = &program;
+    self.isolated_validation_visiting = &isolated_visiting;
+    defer {
+        self.isolated_validation_program = null;
+        self.isolated_validation_visiting = null;
+    }
     for (program.structures) |structure| {
         for (structure.constructors) |constructor_value| try self.validateStatements(constructor_value.statements);
         if (structure.drop) |drop| try self.validateStatements(drop.statements);
@@ -294,6 +302,7 @@ pub fn validateCondition(self: anytype, condition_value: Statement.Condition) An
 }
 
 pub fn validateExpression(self: anytype, expression_value: *const Expression) AnalyzeError!void {
+    if (self.isolated_validation_depth != 0) try self.validateIsolatedExpression(expression_value);
     switch (expression_value.value) {
         .integer => |value| if (!integerLiteralFits(value, expression_value.type)) {
             const message = try std.fmt.allocPrint(self.allocator, "integer literal is outside the range of '{s}'", .{typeName(expression_value.type)});
@@ -321,7 +330,16 @@ pub fn validateExpression(self: anytype, expression_value: *const Expression) An
             if (call.owner) |owner| try self.validateExpression(owner);
             for (call.arguments) |argument| try self.validateExpression(argument);
         },
-        .lambda => |lambda| try self.validateStatements(lambda.statements),
+        .lambda => |lambda| {
+            if (self.isolated_validation_depth != 0) {
+                return self.fail(expression_value.position, "an 'isolated func' cannot create another function value");
+            }
+            if (lambda.isolated) self.isolated_validation_depth += 1;
+            defer if (lambda.isolated) {
+                self.isolated_validation_depth -= 1;
+            };
+            try self.validateStatements(lambda.statements);
+        },
         .method_call => |call| {
             try self.validateExpression(call.object);
             for (call.arguments) |argument| try self.validateExpression(argument);
@@ -440,6 +458,90 @@ pub fn validateExpression(self: anytype, expression_value: *const Expression) An
     }
 }
 
+pub fn validateIsolatedExpression(self: anytype, expression_value: *const Expression) AnalyzeError!void {
+    if (expression_value.type != .void and expression_value.type != .null) {
+        var field_path: std.ArrayList([]const u8) = .empty;
+        defer field_path.deinit(self.allocator);
+        var visiting = std.StringHashMap(void).init(self.allocator);
+        defer visiting.deinit();
+        if (try self.nonIndependentType(expression_value.type, &field_path, &visiting) != null or
+            try self.isNonCopyableType(expression_value.type))
+        {
+            return self.fail(expression_value.position, "an 'isolated func' can only manipulate independent values");
+        }
+    }
+
+    switch (expression_value.value) {
+        .call => |call| {
+            if (call.is_native) return;
+            const program = self.isolated_validation_program.?;
+            for (program.functions) |function_value| {
+                if (!std.mem.eql(u8, function_value.generated_name, call.generated_name)) continue;
+                try self.validateIsolatedCallable(function_value.generated_name, function_value.statements);
+                break;
+            }
+        },
+        .method_call => |call| {
+            const program = self.isolated_validation_program.?;
+            const method_value = program.structures[call.method_id.structure_index].methods[call.method_id.method_index];
+            try self.validateIsolatedCallable(method_value.generated_name, method_value.statements);
+        },
+        .static_method_call => |call| try self.validateIsolatedMethodByName(call.generated_name),
+        .super_method_call => |call| try self.validateIsolatedMethodByName(call.generated_name),
+        .static_field_access => |access| {
+            const program = self.isolated_validation_program.?;
+            for (program.structures) |structure| {
+                if (!std.mem.eql(u8, structure.generated_name, access.owner_generated_name)) continue;
+                for (structure.static_fields) |field| {
+                    if (!std.mem.eql(u8, field.generated_name, access.generated_name)) continue;
+                    if (field.mutability == .mutable) {
+                        return self.fail(expression_value.position, "an 'isolated func' cannot access a 'static var'");
+                    }
+                    return;
+                }
+            }
+        },
+        .protocol_method_call, .protocol_conversion => return self.fail(
+            expression_value.position,
+            "an 'isolated func' cannot use a dynamic protocol value",
+        ),
+        .value_call => |call| {
+            if (call.callee.type != .function or !call.callee.type.function.isolated) {
+                return self.fail(expression_value.position, "an 'isolated func' cannot call a non-isolated function value");
+            }
+        },
+        .bound_function, .function_reference, .adapt_function => return self.fail(
+            expression_value.position,
+            "an 'isolated func' cannot create a function value",
+        ),
+        .lambda => return self.fail(expression_value.position, "an 'isolated func' cannot create another function value"),
+        else => {},
+    }
+}
+
+pub fn validateIsolatedCallable(
+    self: anytype,
+    generated_name: []const u8,
+    statements_value: []const Statement,
+) AnalyzeError!void {
+    const visiting = self.isolated_validation_visiting.?;
+    if (visiting.contains(generated_name)) return;
+    try visiting.put(generated_name, {});
+    defer _ = visiting.remove(generated_name);
+    try self.validateStatements(statements_value);
+}
+
+pub fn validateIsolatedMethodByName(self: anytype, generated_name: []const u8) AnalyzeError!void {
+    const program = self.isolated_validation_program.?;
+    for (program.structures) |structure| {
+        for (structure.methods) |method_value| {
+            if (!std.mem.eql(u8, method_value.generated_name, generated_name)) continue;
+            try self.validateIsolatedCallable(method_value.generated_name, method_value.statements);
+            return;
+        }
+    }
+}
+
 pub fn unaryExpression(
     self: anytype,
     unary: Ast.Expression.Unary,
@@ -495,26 +597,34 @@ pub fn moveExpression(
         const message = try std.fmt.allocPrint(self.allocator, "unknown variable '{s}'", .{name});
         return self.fail(move_value.operand.position, message);
     };
-    if (!try self.isNonCopyableType(symbol.type) and !symbol.control_binding) {
-        const message = try std.fmt.allocPrint(
-            self.allocator,
-            "'move' requires a noncopyable value, found '{s}'",
-            .{typeName(symbol.type)},
-        );
-        return self.fail(move_value.operator_position, message);
-    }
+    const noncopyable = try self.isNonCopyableType(symbol.type);
     if (symbol.state.borrowed_parameter) {
         return self.fail(move_value.operator_position, "a read-reference parameter cannot be consumed with 'move'");
     }
+    if (symbol.type == .reference or symbol.type == .view) {
+        return self.fail(move_value.operator_position, "a borrowed value cannot be consumed with 'move'");
+    }
+    var lambda_context = self.current_lambda;
+    while (lambda_context) |lambda| : (lambda_context = lambda.parent) {
+        if (symbol.scope_depth < lambda.local_depth and !noncopyable) {
+            const message = try std.fmt.allocPrint(
+                self.allocator,
+                "captured value '{s}' cannot be consumed with 'move'",
+                .{name},
+            );
+            return self.fail(move_value.operator_position, message);
+        }
+    }
     const operand = try self.variableExpression(move_value.operand.position, name, scope);
     if (symbol.state.immutable_borrows != 0 or symbol.state.mutable_borrow or symbol.state.transient_mutable_borrows != 0) {
-        const message = try std.fmt.allocPrint(self.allocator, "cannot move borrowed noncopyable value '{s}'", .{name});
+        const message = try std.fmt.allocPrint(self.allocator, "cannot move borrowed value '{s}'", .{name});
         return self.fail(move_value.operator_position, message);
     }
-    if (try self.isNonCopyableType(symbol.type)) {
-        symbol.state.owner_available = false;
-        symbol.state.consumed_at = move_value.operator_position;
+    if (symbol.state.resource_dependents != 0) {
+        return self.fail(move_value.operator_position, "cannot move a native resource while acquired resources still depend on it");
     }
+    symbol.state.owner_available = false;
+    symbol.state.consumed_at = move_value.operator_position;
     const resource_dependencies = symbol.state.resource_dependencies;
     symbol.state.resource_dependencies = &.{};
     const deferred_resource_paths = symbol.state.deferred_resource_paths;

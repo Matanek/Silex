@@ -433,6 +433,13 @@ pub fn assignment(
 
     if (ast.target.value == .identifier) {
         const symbol = findSymbol(scope, ast.target.value.identifier).?;
+        if (ast.value != null and ast.value.?.value == .move_expression and
+            ast.value.?.value.move_expression.operand.value == .identifier and
+            std.mem.eql(u8, ast.value.?.value.move_expression.operand.value.identifier, symbol.source_name))
+        {
+            const message = try std.fmt.allocPrint(self.allocator, "cannot move value '{s}' into itself", .{symbol.source_name});
+            return self.fail(ast.value.?.value.move_expression.operator_position, message);
+        }
         if (try self.isNonCopyableType(symbol.type)) return self.uniqueOwnerAssignment(ast, symbol, scope);
     }
 
@@ -444,6 +451,24 @@ pub fn assignment(
         symbol.state.narrowed_valid = false;
         break :narrowed_assignment try self.newExpression(.{
             .type = symbol.original_type.?,
+            .position = ast.target.position,
+            .value = .{ .variable = .{ .generated_name = symbol.generated_name, .capture_box = &symbol.state.capture_box } },
+        });
+    } else if (ast.target.value == .identifier and findSymbol(scope, ast.target.value.identifier) != null and
+        !findSymbol(scope, ast.target.value.identifier).?.state.owner_available)
+    consumed_assignment: {
+        const symbol = findSymbol(scope, ast.target.value.identifier).?;
+        if (ast.operator != .assign) {
+            const consumed_at = symbol.state.consumed_at.?;
+            const message = try std.fmt.allocPrint(
+                self.allocator,
+                "value '{s}' was consumed by 'move' at {d}:{d}",
+                .{ symbol.source_name, consumed_at.line, consumed_at.column },
+            );
+            return self.fail(ast.position, message);
+        }
+        break :consumed_assignment try self.newExpression(.{
+            .type = symbol.type,
             .position = ast.target.position,
             .value = .{ .variable = .{ .generated_name = symbol.generated_name, .capture_box = &symbol.state.capture_box } },
         });
@@ -486,7 +511,13 @@ pub fn assignment(
         }
     }
 
-    return self.checkedAssignment(ast, target, value, scope);
+    const result = try self.checkedAssignment(ast, target, value, scope);
+    if (ast.operator == .assign and ast.target.value == .identifier) {
+        const symbol = findSymbol(scope, ast.target.value.identifier).?;
+        symbol.state.owner_available = true;
+        symbol.state.consumed_at = null;
+    }
+    return result;
 }
 
 pub fn uniqueOwnerAssignment(
@@ -642,7 +673,6 @@ pub fn snapshotOwnerStates(self: anytype, scope: *const Scope) Allocator.Error![
     var current: ?*const Scope = scope;
     while (current) |visible_scope| : (current = visible_scope.parent) {
         for (visible_scope.symbols.items) |symbol| {
-            if (!try self.isNonCopyableType(symbol.type)) continue;
             try snapshots.append(self.allocator, .{
                 .name = symbol.source_name,
                 .state = symbol.state,
@@ -716,19 +746,19 @@ pub fn requireSameOwnerStates(
         const message = if (before.available != after.available)
             try std.fmt.allocPrint(
                 self.allocator,
-                "unique resource '{s}' must have the same availability on every path returning to the loop header",
+                "value '{s}' must have the same availability on every path returning to the loop header",
                 .{before.name},
             )
         else if (before.lifetime_depth != after.lifetime_depth)
             try std.fmt.allocPrint(
                 self.allocator,
-                "unique resource '{s}' must keep the same capture lifetime on every path returning to the loop header",
+                "value '{s}' must keep the same capture lifetime on every path returning to the loop header",
                 .{before.name},
             )
         else
             try std.fmt.allocPrint(
                 self.allocator,
-                "unique resource '{s}' must keep the same deferred callback provenance on every path returning to the loop header",
+                "value '{s}' must keep the same deferred callback provenance on every path returning to the loop header",
                 .{before.name},
             );
         return self.fail(position, message);

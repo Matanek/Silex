@@ -1,0 +1,9 @@
+internal class Handle {
+    public init() {}
+}
+
+public class Manager {
+    public func submit() Handle {
+        return Handle()
+    }
+}

@@ -87,6 +87,25 @@ pub fn generateNativeCallbackTrampoline(
         try output.appendSlice(allocator, try std.fmt.allocPrint(allocator, "{d}.get()", .{index}));
         return;
     }
+    if (callback.isolated) {
+        try output.appendSlice(allocator, " {auto& silexNativeCallback = *static_cast<SilexFunction<");
+        try self.appendCppType(allocator, output, callback.return_type.*);
+        try output.append(allocator, '(');
+        for (callback.parameters, 0..) |parameter, parameter_index| {
+            if (parameter_index != 0) try output.appendSlice(allocator, ", ");
+            try self.appendCppType(allocator, output, parameter);
+        }
+        try output.appendSlice(allocator, ")>*>(silexNativeContext);");
+        if (callback.return_type.* != .void) try output.appendSlice(allocator, "return ");
+        try output.appendSlice(allocator, "silexNativeCallback(");
+        for (callback.parameters, 0..) |_, parameter_index| {
+            if (parameter_index != 0) try output.appendSlice(allocator, ", ");
+            try output.appendSlice(allocator, try std.fmt.allocPrint(allocator, "silexNativeArgument{d}", .{parameter_index}));
+        }
+        try output.appendSlice(allocator, ");}, silexNativeIsolated");
+        try output.appendSlice(allocator, try std.fmt.allocPrint(allocator, "{d}.get()", .{index}));
+        return;
+    }
     try output.appendSlice(allocator, " {auto& silexNativeCallback = *static_cast<SilexFunction<");
     try self.appendCppType(allocator, output, callback.return_type.*);
     try output.append(allocator, '(');
@@ -619,6 +638,9 @@ pub fn generateNativeFunctionCall(
     call: Semantic.Expression.Call,
     return_type: Semantic.Type,
 ) GenerateError!void {
+    if (call.is_native_generic) {
+        return self.generateNativeGenericFunctionCall(allocator, output, call, return_type);
+    }
     if (self.nativeReturnedView(return_type)) |_| {
         const module_name = call.native_module_name.?;
         const function_name = call.native_function_name.?;
@@ -702,6 +724,7 @@ pub fn generateNativeFunctionCall(
     if (returned_structure != null and returned_structure.?.is_native_resource) {
         const resource = returned_structure.?;
         const deferred_index = self.nativeDeferredCallbackIndex(call.arguments);
+        const isolated_index = self.nativeIsolatedCallbackIndex(call.arguments);
         try output.appendSlice(allocator, "callNativeFunction(");
         try self.appendCppByteStringLiteral(allocator, output, module_name);
         try output.appendSlice(allocator, ", ");
@@ -720,6 +743,10 @@ pub fn generateNativeFunctionCall(
             try output.appendSlice(allocator, "silexNativeDeferred");
             try output.appendSlice(allocator, try std.fmt.allocPrint(allocator, "{d}->cancel();silexNativeDeferred{d}.reset();", .{ index, index }));
         }
+        if (isolated_index) |index| {
+            try output.appendSlice(allocator, "silexNativeIsolated");
+            try output.appendSlice(allocator, try std.fmt.allocPrint(allocator, "{d}.reset();", .{index}));
+        }
         try output.appendSlice(allocator, "nativeFunctionRuntimeError(");
         try self.appendCppByteStringLiteral(allocator, output, module_name);
         try output.appendSlice(allocator, ", ");
@@ -729,6 +756,10 @@ pub fn generateNativeFunctionCall(
         try output.appendSlice(allocator, "(SilexNativeReturnTag{}, silexNativeHandle");
         if (deferred_index) |index| {
             try output.appendSlice(allocator, ", std::move(silexNativeDeferred");
+            try output.appendSlice(allocator, try std.fmt.allocPrint(allocator, "{d})", .{index}));
+        }
+        if (isolated_index) |index| {
+            try output.appendSlice(allocator, ", SilexIsolatedCallbackTag{}, std::move(silexNativeIsolated");
             try output.appendSlice(allocator, try std.fmt.allocPrint(allocator, "{d})", .{index}));
         }
         try output.appendSlice(allocator, ");})");
@@ -847,6 +878,92 @@ pub fn generateNativeFunctionCall(
         try output.appendSlice(allocator, ");");
     }
     try output.appendSlice(allocator, " })");
+}
+
+pub fn generateNativeGenericFunctionCall(
+    self: anytype,
+    allocator: Allocator,
+    output: *std.ArrayList(u8),
+    call: Semantic.Expression.Call,
+    return_type: Semantic.Type,
+) GenerateError!void {
+    const module_name = call.native_module_name.?;
+    const function_name = call.native_function_name.?;
+    try output.appendSlice(allocator, "callNativeFunction(");
+    try self.appendCppByteStringLiteral(allocator, output, module_name);
+    try output.appendSlice(allocator, ", ");
+    try self.appendCppByteStringLiteral(allocator, output, function_name);
+    try output.appendSlice(allocator, ", [&]() {");
+
+    for (call.arguments, 0..) |argument, index| {
+        if (argument.type != .function) continue;
+        try output.appendSlice(allocator, "auto silexNativeErasedCallback");
+        try output.appendSlice(allocator, try std.fmt.allocPrint(allocator, "{d}", .{index}));
+        if (argument.type.function.isolated) {
+            try output.appendSlice(allocator, " = std::make_shared<");
+            try self.appendCppType(allocator, output, argument.type);
+            try output.appendSlice(allocator, ">(");
+            try self.generateExpression(allocator, output, argument);
+            try output.appendSlice(allocator, ");");
+        } else {
+            try output.appendSlice(allocator, " = ");
+            try self.generateExpression(allocator, output, argument);
+            try output.append(allocator, ';');
+        }
+    }
+
+    if (return_type != .void) try output.appendSlice(allocator, "auto* silexNativeHandle = ");
+    try output.appendSlice(allocator, call.generated_name);
+    try output.append(allocator, '(');
+    for (call.arguments, 0..) |argument, index| {
+        if (index != 0) try output.appendSlice(allocator, ", ");
+        if (argument.type != .function) {
+            try self.generateNativeArgument(allocator, output, call, index);
+            continue;
+        }
+        const callback = argument.type.function;
+        if (callback.isolated) {
+            const result = callback.return_type.*;
+            try output.appendSlice(allocator, "+[](void* silexNativeContext) -> void* {auto& silexNativeCallback = *static_cast<");
+            try self.appendCppType(allocator, output, argument.type);
+            try output.appendSlice(allocator, "*>(silexNativeContext);return new ");
+            try self.appendCppType(allocator, output, result);
+            try output.appendSlice(allocator, "(silexNativeCallback());}, silexNativeErasedCallback");
+            try output.appendSlice(allocator, try std.fmt.allocPrint(allocator, "{d}", .{index}));
+            try output.appendSlice(allocator, ".get(), +[](void* silexNativeValue) {delete static_cast<");
+            try self.appendCppType(allocator, output, result);
+            try output.appendSlice(allocator, "*>(silexNativeValue);}");
+        } else {
+            const value_type = callback.parameters[0];
+            try output.appendSlice(allocator, "+[](void* silexNativeContext, void* silexNativeValue) {auto& silexNativeCallback = *static_cast<");
+            try self.appendCppType(allocator, output, argument.type);
+            try output.appendSlice(allocator, "*>(silexNativeContext);silexNativeCallback(std::move(*static_cast<");
+            try self.appendCppType(allocator, output, value_type);
+            try output.appendSlice(allocator, "*>(silexNativeValue)));}, &silexNativeErasedCallback");
+            try output.appendSlice(allocator, try std.fmt.allocPrint(allocator, "{d}", .{index}));
+        }
+    }
+    try output.appendSlice(allocator, ");");
+
+    if (return_type != .void) {
+        const resource = call.native_return_structure.?;
+        try output.appendSlice(allocator, "if (silexNativeHandle == nullptr) {nativeFunctionRuntimeError(");
+        try self.appendCppByteStringLiteral(allocator, output, module_name);
+        try output.appendSlice(allocator, ", ");
+        try self.appendCppByteStringLiteral(allocator, output, function_name);
+        try output.appendSlice(allocator, ", \"returned a null native resource\");}return ");
+        try output.appendSlice(allocator, resource.generated_name);
+        try output.appendSlice(allocator, "(SilexNativeReturnTag{}, silexNativeHandle, SilexIsolatedCallbackTag{}, std::move(");
+        for (call.arguments, 0..) |argument, index| {
+            if (argument.type == .function and argument.type.function.isolated) {
+                try output.appendSlice(allocator, "silexNativeErasedCallback");
+                try output.appendSlice(allocator, try std.fmt.allocPrint(allocator, "{d}", .{index}));
+                break;
+            }
+        }
+        try output.appendSlice(allocator, "));");
+    }
+    try output.appendSlice(allocator, "})");
 }
 
 pub fn generateNativeByteBufferFunctionCall(

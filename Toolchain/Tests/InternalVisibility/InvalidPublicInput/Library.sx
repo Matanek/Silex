@@ -1,0 +1,7 @@
+internal class Handle {
+    public init() {}
+}
+
+public class Manager {
+    public func consume(handle:Handle) {}
+}

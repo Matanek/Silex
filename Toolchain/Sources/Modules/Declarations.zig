@@ -35,6 +35,7 @@ pub fn transformExtension(self: anytype, extension: Ast.Extension, declaring_mod
         declaring_module_index,
         extension.position.file,
         true,
+        false,
     );
     for (extension.conformances) |conformance| {
         const protocol = try self.resolveName(extension.position.file, conformance.name, .protocol, conformance.position);
@@ -60,6 +61,7 @@ pub fn transformExtension(self: anytype, extension: Ast.Extension, declaring_mod
             declaring_module_index,
             extension.position.file,
             transformed.is_public,
+            transformed.is_internal,
         );
         transformed.extension_module_name = self.project.modules[declaring_module_index].name;
         try methods.append(self.allocator, transformed);
@@ -76,10 +78,14 @@ pub fn extensionVisibleFiles(
     declaring_module_index: usize,
     declaring_file_index: usize,
     is_public: bool,
+    is_internal: bool,
 ) ![]const usize {
     var result: std.ArrayList(usize) = .empty;
     for (self.file_infos) |file| {
-        var visible = file.module_index == declaring_module_index;
+        var visible = if (is_internal)
+            file.file_index == declaring_file_index
+        else
+            file.module_index == declaring_module_index;
         if (!visible and is_public) {
             for (self.files[file.file_index].activated_files) |activated_file| {
                 if (activated_file == declaring_file_index) {
@@ -97,13 +103,13 @@ pub fn collectDeclarations(self: anytype) !void {
     for (self.files) |file| {
         const module_name = self.project.modules[file.module_index].name;
         for (file.program.enums) |enum_value| {
-            try self.addDeclaration(file.module_index, module_name, enum_value.name, .structure, enum_value.is_public, enum_value.name_position);
+            try self.addDeclaration(file.module_index, module_name, enum_value.name, .structure, enum_value.is_public, enum_value.is_internal, enum_value.name_position);
         }
         for (file.program.protocols) |protocol| {
-            try self.addDeclaration(file.module_index, module_name, protocol.name, .protocol, protocol.is_public, protocol.name_position);
+            try self.addDeclaration(file.module_index, module_name, protocol.name, .protocol, protocol.is_public, protocol.is_internal, protocol.name_position);
         }
         for (file.program.structures) |structure| {
-            try self.addDeclaration(file.module_index, module_name, structure.name, .structure, structure.is_public, structure.name_position);
+            try self.addDeclaration(file.module_index, module_name, structure.name, .structure, structure.is_public, structure.is_internal, structure.name_position);
         }
         for (file.program.functions) |function| {
             const canonical = if (self.project.single_file or
@@ -113,7 +119,7 @@ pub fn collectDeclarations(self: anytype) !void {
                 module_name
             else
                 try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ module_name, function.name });
-            try self.addDeclarationWithCanonical(file.module_index, function.name, canonical, .function, function.is_public, function.name_position);
+            try self.addDeclarationWithCanonical(file.module_index, function.name, canonical, .function, function.is_public, function.is_internal, function.name_position);
         }
         for (file.program.uses) |use_value| switch (use_value.target) {
             .declaration => {},
@@ -131,6 +137,7 @@ pub fn collectDeclarations(self: anytype) !void {
                     .canonical_name = canonical,
                     .kind = .type_alias,
                     .is_public = use_value.is_public,
+                    .is_internal = false,
                     .position = use_value.position,
                     .aliased_type = aliased_type,
                 });
@@ -149,6 +156,7 @@ pub fn addDeclaration(
     source_name: []const u8,
     kind: Kind,
     is_public: bool,
+    is_internal: bool,
     position: Source.Position,
 ) !void {
     const canonical = if (self.project.single_file)
@@ -157,7 +165,7 @@ pub fn addDeclaration(
         module_name
     else
         try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ module_name, source_name });
-    try self.addDeclarationWithCanonical(module_index, source_name, canonical, kind, is_public, position);
+    try self.addDeclarationWithCanonical(module_index, source_name, canonical, kind, is_public, is_internal, position);
 }
 
 pub fn addDeclarationWithCanonical(
@@ -167,6 +175,7 @@ pub fn addDeclarationWithCanonical(
     canonical_name: []const u8,
     kind: Kind,
     is_public: bool,
+    is_internal: bool,
     position: Source.Position,
 ) !void {
     if ((kind == .structure or kind == .protocol or kind == .type_alias) and std.mem.eql(u8, source_name, "Result")) {
@@ -191,6 +200,7 @@ pub fn addDeclarationWithCanonical(
         .canonical_name = canonical_name,
         .kind = kind,
         .is_public = is_public,
+        .is_internal = is_internal,
         .position = position,
     });
 }

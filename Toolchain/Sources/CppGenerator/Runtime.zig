@@ -25,6 +25,9 @@ pub fn appendRuntime(_: anytype, allocator: Allocator, output: *std.ArrayList(u8
         \\    return location.file < k_silexSourcePathCount ? k_silexSourcePaths[location.file] : "<unknown>";
         \\}
         \\
+        \\inline std::mutex silexDiagnosticMutex;
+        \\inline std::recursive_mutex silexOutputMutex;
+        \\
         \\template <typename T> void printIntegerValue(T value) {
         \\    if constexpr (sizeof(T) == 1) {
         \\        std::cerr << static_cast<int>(value);
@@ -49,6 +52,7 @@ pub fn appendRuntime(_: anytype, allocator: Allocator, output: *std.ArrayList(u8
         \\    const char* failure,
         \\    Source value
         \\) {
+        \\    std::scoped_lock lock(silexDiagnosticMutex);
         \\    std::cerr << silexSourcePath(location) << ':' << location.line << ':' << location.column
         \\              << ": runtime error: cannot convert '" << sourceType << "' to '" << targetType
         \\              << "': value ";
@@ -72,6 +76,7 @@ pub fn appendRuntime(_: anytype, allocator: Allocator, output: *std.ArrayList(u8
         \\    SilexSourceLocation location,
         \\    const std::string& message
         \\) {
+        \\    std::scoped_lock lock(silexDiagnosticMutex);
         \\    std::cerr << silexSourcePath(location) << ':' << location.line << ':' << location.column
         \\              << ": runtime error: assertion failed: " << message << '\n';
         \\    std::exit(1);
@@ -81,6 +86,7 @@ pub fn appendRuntime(_: anytype, allocator: Allocator, output: *std.ArrayList(u8
         \\    SilexSourceLocation location,
         \\    const std::string& message
         \\) {
+        \\    std::scoped_lock lock(silexDiagnosticMutex);
         \\    std::cerr << silexSourcePath(location) << ':' << location.line << ':' << location.column
         \\              << ": runtime error: " << message << '\n';
         \\    std::exit(1);
@@ -341,19 +347,23 @@ pub fn appendRuntime(_: anytype, allocator: Allocator, output: *std.ArrayList(u8
         \\    virtual ~SilexDeferredCallbackState() = default;
         \\};
         \\
+        \\struct SilexIsolatedCallbackTag {};
+        \\
         \\struct SilexNativeResourceState {
         \\    void* handle;
         \\    void (*drop)(void*);
         \\    std::shared_ptr<SilexDeferredCallbackState> deferred;
+        \\    std::shared_ptr<void> retained;
         \\    std::vector<std::shared_ptr<SilexNativeResourceState>> priorAcquisitions;
-        \\    SilexNativeResourceState(void* value, void (*destroy)(void*), std::shared_ptr<SilexDeferredCallbackState> callback, std::vector<std::shared_ptr<SilexNativeResourceState>> prior)
-        \\        : handle(value), drop(destroy), deferred(std::move(callback)), priorAcquisitions(std::move(prior)) {}
+        \\    SilexNativeResourceState(void* value, void (*destroy)(void*), std::shared_ptr<SilexDeferredCallbackState> callback, std::shared_ptr<void> retainedValue, std::vector<std::shared_ptr<SilexNativeResourceState>> prior)
+        \\        : handle(value), drop(destroy), deferred(std::move(callback)), retained(std::move(retainedValue)), priorAcquisitions(std::move(prior)) {}
         \\    ~SilexNativeResourceState() {
         \\        if (handle != nullptr) {
         \\            if (deferred) deferred->cancel();
         \\            drop(handle);
         \\        }
         \\        deferred.reset();
+        \\        retained.reset();
         \\    }
         \\    void cancelDeferred() { if (deferred) deferred->cancel(); }
         \\    std::int64_t dispatchDeferred() {
@@ -365,7 +375,7 @@ pub fn appendRuntime(_: anytype, allocator: Allocator, output: *std.ArrayList(u8
         \\
         \\inline thread_local std::vector<std::weak_ptr<SilexNativeResourceState>> silexNativeAcquisitions;
         \\
-        \\std::shared_ptr<SilexNativeResourceState> silexAdoptNativeResource(void* handle, void (*drop)(void*), std::shared_ptr<SilexDeferredCallbackState> deferred = {}) {
+        \\std::shared_ptr<SilexNativeResourceState> silexAdoptNativeResource(void* handle, void (*drop)(void*), std::shared_ptr<SilexDeferredCallbackState> deferred = {}, std::shared_ptr<void> retained = {}) {
         \\    std::vector<std::shared_ptr<SilexNativeResourceState>> prior;
         \\    auto output = silexNativeAcquisitions.begin();
         \\    for (auto current = silexNativeAcquisitions.begin(); current != silexNativeAcquisitions.end(); ++current) {
@@ -375,7 +385,7 @@ pub fn appendRuntime(_: anytype, allocator: Allocator, output: *std.ArrayList(u8
         \\        }
         \\    }
         \\    silexNativeAcquisitions.erase(output, silexNativeAcquisitions.end());
-        \\    auto state = std::make_shared<SilexNativeResourceState>(handle, drop, std::move(deferred), std::move(prior));
+        \\    auto state = std::make_shared<SilexNativeResourceState>(handle, drop, std::move(deferred), std::move(retained), std::move(prior));
         \\    silexNativeAcquisitions.push_back(state);
         \\    return state;
         \\}

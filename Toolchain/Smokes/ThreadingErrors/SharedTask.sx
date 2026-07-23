@@ -1,0 +1,10 @@
+use STD.Threading
+
+class Shared:Threading.Task {
+    public func execute() {}
+}
+
+func main() {
+    var handle = Threading.TaskManager.submit<Shared>(Shared())
+    handle.complete()
+}

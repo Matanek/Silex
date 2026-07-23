@@ -19,7 +19,9 @@ For a declaration in module `Math`, the generated header declares the C symbol
 `public func`; module resolution and editor completion do not expose the native
 implementation details.
 
-A private native function is intended to sit behind Silex code. Its name follows
+A private native function is intended to sit behind Silex code. An explicit
+`internal native func` additionally prevents sibling files from calling it and
+is appropriate for file-local C++ plumbing. Its name follows
 the ordinary function naming rules; Silex imposes no `native_` prefix:
 
 ```sx
@@ -39,10 +41,47 @@ arguments, translates errors, combines several native calls, or deliberately
 exposes different Silex types. A direct `public native func` is preferable when
 the generated ABI already expresses the complete public contract.
 
-Both forms are top-level, have no Silex body, cannot be generic or overloaded,
-and require an explicit return type, including `void`. They also require a
+Both forms are top-level, have no Silex body, cannot be overloaded, and require
+an explicit return type, including `void`. Ordinary public and private native
+functions are not generic. One file-local erased-callback form described below
+is reserved for `internal native func`. Native declarations also require a
 named module whose own `@Module.json` or an ancestor manifest has a `native`
 section. A standalone main source cannot declare one.
+
+### Internal erased callbacks
+
+An `internal native func` may be generic only to transport a concrete Silex
+value opaquely between generated callbacks. Exactly these two shapes are
+admitted, with optional borrowed native-resource parameters before the callback:
+
+```sx
+internal native func produce<T>(callback:isolated func() T) NativeHandle
+internal native func consume<T>(handle:@NativeHandle, callback:func(T)) void
+```
+
+The producer trampoline creates the concrete `T` and returns it as `void*`; it
+also supplies a generated destructor. The consumer receives that opaque pointer
+and moves its concrete `T` into the synchronous callback. The native runtime
+stores, synchronizes and eventually destroys only the pointer; it never knows
+the layout or fields of `T`.
+
+The generated C signatures are equivalent to:
+
+```c
+SilexNative_Module_NativeHandle* silexNative_Module_produce(
+    void* (*produce)(void*),
+    void* context,
+    void (*destroy)(void*)
+);
+void silexNative_Module_consume(
+    const SilexNative_Module_NativeHandle* handle,
+    void (*consume)(void*, void*),
+    void* context
+);
+```
+
+No generic value, C++ template, Silex collection layout or public native API
+crosses the C ABI. Other generic native signatures are rejected.
 
 ## Opaque native resources
 
@@ -54,7 +93,8 @@ public native resource Buffer {
 }
 ```
 
-The declaration may be private by omitting `public`. It is top-level,
+The declaration may be private by omitting `public`, or exactly file-local with
+`internal native resource`. It is top-level,
 non-generic, has no fields, initializer, inheritance or extension form, and is
 available only in a named module backed by native sources. Silex cannot inspect
 the pointer, convert it to an integer, or construct a `Buffer`; only a non-null
@@ -158,6 +198,7 @@ following table is exhaustive for the current language:
 | `uint8[]` | yes | yes | borrowed byte view for input; owned byte buffer for output |
 | `uint8[N]` | yes | no | borrowed byte view and length |
 | scalar callback | yes | no | function pointer plus opaque context |
+| `isolated func(...) R` | yes | no | retained function pointer plus owned opaque context; ordinary native callbacks remain scalar |
 | `T?` | no | yes | presence flag plus the transport of `T` |
 | `Result<T,E>` | no | yes | generated tagged output transport |
 
@@ -172,7 +213,10 @@ The following types are not native signature types: arbitrary lists and fixed
 arrays, nested structures, enums, classes, protocols, references other than
 admitted opaque resources and numeric contiguous views, pointers, optional parameters,
 `Result` parameters, nested optionals or
-Results, generic structures, structures with `drop`, and deferred callbacks.
+Results, generic structures, structures with `drop`, deferred callbacks, and
+isolated callbacks outside their dedicated registration contracts. The two
+internal erased-callback shapes above are the sole exception for an arbitrary
+generic value.
 The compiler rejects these declarations before compiling the native sources.
 
 ## Scalars and generated declarations
@@ -267,6 +311,70 @@ pass it to another API. Silex keeps the callback and captures alive for that
 synchronous interval. Unique resources cannot be captures. Strings,
 structures, collections, references, optionals, Results, and nested callbacks
 are excluded from callback signatures.
+
+## Isolated callbacks
+
+`isolated func(...) R` is a function value whose captures, by-value parameters
+and return are recursively independent. Unlike an ordinary capturing lambda,
+it owns copies of captured `let` values. It may therefore be bound with `let`,
+copied, passed through Silex, stored and called directly. An ordinary `func`
+literal becomes isolated contextually when an `isolated func` parameter is
+expected.
+
+```sx
+public native resource Operation {
+    drop discard_operation
+}
+
+public native func start_operation(callback:isolated func()) Operation
+
+let input:int[] = [1, 2, 3]
+let operation = start_operation(isolated func() {
+    var total = 0
+    for value in input {
+        total += value
+    }
+    assert(total == 6, "isolated callback")
+})
+```
+
+The isolated value owns copies of every captured binding. A capture must be a `let`
+whose concrete type is recursively independent; lists such as `int[]` retain
+their ordinary value-copy semantics. Mutable bindings, classes, function or
+dynamic protocol values, references, views, and unique resources are rejected.
+
+An ordinary isolated native registration has exactly one isolated callback and
+returns one `native resource` directly. Its callback may use independent
+by-value parameters and a scalar return accepted by the ordinary callback ABI.
+The zero-parameter `void` form has this C shape:
+
+```c
+SilexNative_Module_Operation* silexNative_Module_start_operation(
+    void (*callback)(void*),
+    void* callback_context
+);
+```
+
+Native code may retain both values and invoke the callback exactly once on one
+worker thread. Unlike a deferred callback, the trampoline immediately executes
+the Silex body on that worker and has no event queue or owner-thread dispatch.
+The returned resource owns the context. Its native destructor must make the
+worker quiescent before returning; the generated bridge then destroys the
+captures exactly once. There is no detach or cancellation contract.
+
+The callback and every Silex function or concrete method it calls are checked
+transitively. They may manipulate independent locals, read independent
+`static let` fields, and use ordinary scalar, string, enum, structure, and
+collection operations. They cannot access `static var`, classes, unique
+resources, dynamic protocols, ordinary function values, deferred callbacks,
+or other Silex shared state. They may call another isolated function value and
+may call native functions directly or transitively. A native module author is
+responsible for the thread-safety and thread-affinity requirements of those
+implementations; the compiler cannot derive them from a native signature.
+`print` is admitted: the complete emission of
+each call is atomic, although calls made by concurrent workers have no defined
+order. `panic` and `assert` remain fatal; their diagnostics are serialized when
+reached from workers.
 
 ## Deferred callbacks
 

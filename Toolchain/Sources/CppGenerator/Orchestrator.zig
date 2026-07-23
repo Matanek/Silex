@@ -95,8 +95,15 @@ pub fn generateWithSources(
         if (!structure.is_native_resource) continue;
         try self.generateNativeTransportIfNew(allocator, &output, &emitted_native_transports, structure.native_module_name.?, structure, false);
     }
-    for (program.functions) |function| {
+    for (program.functions, 0..) |function, function_index| {
         if (!function.is_native) continue;
+        if (function.is_native_generic) {
+            var duplicate = false;
+            for (program.functions[0..function_index]) |previous| {
+                if (previous.is_native_generic and std.mem.eql(u8, previous.generated_name, function.generated_name)) duplicate = true;
+            }
+            if (duplicate) continue;
+        }
         try self.generateNativeFunctionSignature(allocator, &output, program, function, true);
         try output.appendSlice(allocator, ";\n");
     }
@@ -247,7 +254,15 @@ pub fn generateWithSources(
             try output.appendSlice(allocator, structure.native_drop_symbol.?);
             try output.appendSlice(allocator, "(static_cast<::");
             try output.appendSlice(allocator, try NativeInterface.transportName(allocator, structure.native_module_name.?, structure.source_name));
-            try output.appendSlice(allocator, "*>(value)); }, std::move(deferred))) {}\n    auto* silexBorrowNativeHandle() const { return static_cast<::");
+            try output.appendSlice(allocator, "*>(value)); }, std::move(deferred))) {}\n\n    ");
+            try output.appendSlice(allocator, structure.generated_name);
+            try output.appendSlice(allocator, "(SilexNativeReturnTag, ::");
+            try output.appendSlice(allocator, try NativeInterface.transportName(allocator, structure.native_module_name.?, structure.source_name));
+            try output.appendSlice(allocator, "* handle, SilexIsolatedCallbackTag, std::shared_ptr<void> retained) : silexNativeState(silexAdoptNativeResource(handle, +[](void* value) { ");
+            try output.appendSlice(allocator, structure.native_drop_symbol.?);
+            try output.appendSlice(allocator, "(static_cast<::");
+            try output.appendSlice(allocator, try NativeInterface.transportName(allocator, structure.native_module_name.?, structure.source_name));
+            try output.appendSlice(allocator, "*>(value)); }, {}, std::move(retained))) {}\n    auto* silexBorrowNativeHandle() const { return static_cast<::");
             try output.appendSlice(allocator, try NativeInterface.transportName(allocator, structure.native_module_name.?, structure.source_name));
             try output.appendSlice(allocator, "*>(silexNativeState->handle); }\n    auto silexReleaseNativeHandle() { if (silexNativeState.use_count() != 1) throw std::runtime_error(\"native resource still has later acquisitions\"); silexOwnsResource = false; auto state = std::move(silexNativeState); auto* handle = static_cast<::");
             try output.appendSlice(allocator, try NativeInterface.transportName(allocator, structure.native_module_name.?, structure.source_name));

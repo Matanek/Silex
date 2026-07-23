@@ -41,6 +41,7 @@ pub const Type = union(enum) {
 
 pub const FunctionType = struct {
     deferred: bool = false,
+    isolated: bool = false,
     parameters: []const Type,
     parameter_modes: []const Ast.ParameterMode,
     return_type: *const Type,
@@ -51,6 +52,7 @@ pub const StructureType = struct {
     source_name: []const u8,
     generated_name: []const u8,
     is_class: bool,
+    is_static_class: bool = false,
     is_owner: bool = false,
 };
 
@@ -177,6 +179,7 @@ pub const Expression = struct {
         generated_name: []const u8,
         arguments: []const *Expression,
         is_native: bool,
+        is_native_generic: bool = false,
         native_module_name: ?[]const u8,
         native_function_name: ?[]const u8,
         native_return_structure: ?NativeStructureTransport = null,
@@ -200,6 +203,7 @@ pub const Expression = struct {
         };
 
         parameters: []const Parameter,
+        isolated: bool = false,
         return_type: Type,
         statements: []const Statement,
         captures: []const Capture,
@@ -518,6 +522,7 @@ pub const Structure = struct {
     source_name: []const u8,
     generated_name: []const u8,
     is_class: bool,
+    is_static_class: bool,
     is_owner: bool = false,
     is_native_resource: bool = false,
     native_module_name: ?[]const u8 = null,
@@ -602,6 +607,7 @@ pub const Function = struct {
     statements: []const Statement,
     is_main: bool,
     is_native: bool,
+    is_native_generic: bool,
     is_native_resource_drop: bool,
     native_module_name: ?[]const u8,
     native_function_name: ?[]const u8,
@@ -681,6 +687,7 @@ pub const LoopFlow = struct {
 
 pub const LambdaContext = struct {
     local_depth: usize,
+    isolated: bool = false,
     captures: std.ArrayList(Expression.Lambda.Capture) = .empty,
     captures_self: bool = false,
     owner_self: bool = false,
@@ -711,6 +718,7 @@ pub const FunctionSymbol = struct {
     position: Source.Position,
     is_main: bool,
     is_native: bool,
+    is_native_generic: bool,
     is_native_resource_drop: bool,
     native_module_name: ?[]const u8,
     native_function_name: ?[]const u8,
@@ -724,6 +732,7 @@ pub const StructureSymbol = struct {
     source_name: []const u8,
     generated_name: []const u8,
     is_class: bool,
+    is_static_class: bool,
     is_owner: bool,
     is_native_resource: bool,
     native_module_name: ?[]const u8,
@@ -809,6 +818,8 @@ pub const MethodSymbol = struct {
     is_static: bool,
     extension_visible_files: ?[]const usize,
     extension_module_name: ?[]const u8,
+    return_dependency_self: bool = false,
+    return_dependency_parameters: []const usize = &.{},
     return_borrow_parameter: ?usize = null,
     direct_mutation: bool = false,
     direct_mutable_codegen: bool = false,
@@ -843,8 +854,9 @@ pub fn fileSetsOverlap(left: []const usize, right: []const usize) bool {
 pub fn visibilityRank(visibility: Ast.MemberVisibility) u2 {
     return switch (visibility) {
         .private_access => 0,
-        .subclass => 1,
-        .public_access => 2,
+        .internal_access => 1,
+        .subclass => 2,
+        .public_access => 3,
     };
 }
 

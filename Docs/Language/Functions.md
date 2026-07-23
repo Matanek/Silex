@@ -18,10 +18,17 @@ canonical. A non-void return type is never inferred. The compiler collects
 signatures before checking bodies, so functions may be called before their
 definition and may be recursive.
 
+A top-level function may be marked `internal` to make it callable only from
+its source file. A public function may return an internal type as an opaque
+value inferred with `var`; it cannot accept an internal input type, because an
+external caller could neither name nor construct that argument. The same rule
+applies to methods.
+
 ## Generic functions
 
-A function may declare type parameters after its name. Calls provide every
-type argument explicitly:
+A function may declare type parameters after its name. A call may omit its
+type arguments when every one of them can be inferred from the static types of
+the ordinary arguments:
 
 ```sx
 func identity<T>(value:T) T {
@@ -32,8 +39,9 @@ func choose<Key, Value>(key:Key, value:Value) Value {
     return value
 }
 
-let answer = identity<int>(42)
-let name = choose<int, str>(1, "Ada")
+let answer = identity(42)
+let name = choose(1, "Ada")
+let explicit = identity<int>(7)
 ```
 
 Type parameters are available throughout the signature and body. They may be
@@ -46,11 +54,21 @@ func boxed<T>(value:T) Box<T> {
 }
 ```
 
-Silex does not infer type arguments. Calling `identity(42)` is therefore
-invalid unless a concrete overload named `identity` also exists. An explicit
-call such as `identity<int>(42)` considers only visible generic overloads with
-one type parameter, specializes their complete signatures and bodies, and then
-applies ordinary overload resolution.
+Inference matches each parameter type with the static type of its argument. A
+type parameter may occur directly or inside a collection, optional, reference,
+fixed array, function type, or generic structure specialization. Every
+occurrence of the same type parameter must infer the same concrete type, and
+all declared type parameters must be inferred. If this is impossible or
+ambiguous, the call must write the complete `<...>` list explicitly. Silex does
+not infer from the expected return type alone, and it does not support partial
+type-argument lists or default type arguments.
+
+When a call without `<...>` also has a compatible concrete overload, concrete
+overloads are considered first. An inferred generic overload is used only when
+no compatible concrete overload resolves the call. An explicit call such as
+`identity<int>(42)` considers only visible generic overloads with one type
+parameter, specializes their complete signatures and bodies, and then applies
+ordinary overload resolution.
 
 Repeating the same arguments reuses one concrete specialization. Recursion is
 valid when it calls the same specialization; recursively producing ever-new
@@ -60,10 +78,15 @@ module, `use`, alias, and re-export rules.
 One protocol can constrain each parameter with `T : Protocol`. The constraint
 permits the protocol's required methods in the generic body and rejects a
 concrete argument that did not declare conformance. See
-[Protocols](Protocols.md). Type-argument inference is not currently provided.
-`main`, `native func`, methods declared directly in a structure or class, and
-classes remain non-generic. An instance method declared in `extend` may have
-its own explicit parameters; see [Type extensions](Extensions.md#generic-extension-methods).
+[Protocols](Protocols.md). Constraints are checked after inferred arguments are
+known, exactly as for explicit arguments. `main`, constructors, protocol
+requirements, and overrides remain non-generic. Ordinary native functions are
+also non-generic; the internal erased-callback transport is specified in
+[Native interoperability](Native-Interop.md#internal-erased-callbacks). An
+instance or static method declared directly in a non-generic `struct` or
+`class` may have its own type parameters, as may either kind of method declared
+in `extend`; see
+[Type extensions](Extensions.md#generic-extension-methods).
 
 ## Overloads
 
@@ -127,7 +150,8 @@ func require_positive(value:int) int {
 `native func` declares a private, top-level function implemented by a named
 module's native runtime rather than by a Silex body. Its name follows the
 ordinary function naming rules; `native_` is only an optional library
-convention. `public native func` instead exposes the native implementation
+convention. `internal native func` confines the primitive to its exact source
+file. `public native func` instead exposes the native implementation
 directly as an ordinary public module function:
 
 ```sx
@@ -257,8 +281,8 @@ There is no `std::function` in the ABI.
 The ordinary Silex capture rules still apply: a unique resource cannot become a
 callback capture. Strings, structures, references, optionals, `Result`, byte
 buffers, collections, callbacks with an owner, and all non-scalar callback
-parameters or results remain excluded. Deferred callbacks, subscriptions,
-event loops, and interaction with `async` are not part of this ABI.
+parameters or results remain excluded. Deferred and isolated callbacks use
+their dedicated native registration contracts instead of this synchronous ABI.
 
 A native function may return `T?` when `T` is one of the transferable return
 types above: a scalar boolean or number, `str`, or an admitted flat structure.
@@ -337,10 +361,13 @@ All arguments, return values, and return paths are checked statically. A
 non-void function must return a compatible value on every path. A void function
 may use `return` without a value. A unique-resource parameter owns its value;
 a named owner argument or return uses `move`, while a freshly produced
-temporary transfers implicitly. A `name:@T` parameter instead observes the
+temporary transfers implicitly. A named copyable argument or return may also
+use `move` to consume its source and avoid an unnecessary value copy. A
+`name:@T` parameter instead observes the
 caller's ordinary argument without taking ownership; the signature alone
 selects read-reference binding. See
-[Values and mutation](Values-and-References.md#read-references) and
+[Explicit transfers](Values-and-References.md#explicit-transfers),
+[read references](Values-and-References.md#read-references), and
 [unique resource structures](Structures.md#unique-resource-structures).
 
 Methods are functions declared inside a structure or class. An instance method
@@ -394,3 +421,10 @@ lexical check: captures do not allocate shared cells or extend a scope.
 Function values and values that contain them are not printable or comparable.
 They cannot be bound with `let`, have no intrinsic default, and remain
 forbidden in `native func` parameters and returns.
+
+`isolated func(...) R` is the independent function-value variant. It owns
+copies of captured `let` values, may be bound with `let`, stored and called,
+and accepts only recursively independent captures and values. A `func` literal
+is converted contextually when an isolated parameter is expected. Its native
+retention and erased generic transport are specified in
+[Native interoperability](Native-Interop.md#isolated-callbacks).

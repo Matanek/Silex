@@ -11,17 +11,24 @@ pub const Binding = struct {
     value: Ast.TypeName,
 };
 
+pub const InferredLocal = struct {
+    name: []const u8,
+    type: Ast.TypeName,
+};
+
 pub const State = enum { visiting, done };
 
 pub const StructureSpecialization = struct {
     template_name: []const u8,
     name: []const u8,
+    arguments: []const Ast.TypeName,
     state: State,
 };
 
 pub const EnumSpecialization = struct {
     template_name: []const u8,
     name: []const u8,
+    arguments: []const Ast.TypeName,
     state: State,
 };
 

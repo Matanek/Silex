@@ -38,6 +38,7 @@ pub const Symbol = struct {
     owner: []const u8 = "",
     is_static: bool = false,
     is_public: bool = false,
+    is_internal: bool = false,
     visibility: ?Ast.MemberVisibility = null,
     alias_target_kind: ?Kind = null,
     rename_group: usize,
@@ -194,6 +195,7 @@ const Builder = struct {
                 try typeHeader(self.allocator, ast_enum),
             );
             self.symbols.items[enum_id].is_public = ast_enum.is_public;
+            self.symbols.items[enum_id].is_internal = ast_enum.is_internal;
             for (ast_enum.variants, 0..) |variant, variant_index| {
                 const key = try std.fmt.allocPrint(self.allocator, "{s}#variant#{d}", .{ enumeration.generated_name, variant_index });
                 const variant_id = try self.addSymbol(
@@ -204,6 +206,7 @@ const Builder = struct {
                     try variantDetail(self.allocator, ast_enum, variant),
                 );
                 self.symbols.items[variant_id].is_public = ast_enum.is_public;
+                self.symbols.items[variant_id].is_internal = ast_enum.is_internal;
             }
         }
         for (ast.protocols, program.protocols) |ast_protocol, protocol| {
@@ -212,9 +215,10 @@ const Builder = struct {
                 protocol.generated_name,
                 .protocol,
                 ast_protocol.name_position,
-                try std.fmt.allocPrint(self.allocator, "{s}protocol {s}", .{ if (ast_protocol.is_public) "public " else "", sourceSpelling(ast_protocol.name) }),
+                try std.fmt.allocPrint(self.allocator, "{s}protocol {s}", .{ declarationVisibilityPrefix(ast_protocol.is_public, ast_protocol.is_internal), sourceSpelling(ast_protocol.name) }),
             );
             self.symbols.items[protocol_id].is_public = ast_protocol.is_public;
+            self.symbols.items[protocol_id].is_internal = ast_protocol.is_internal;
             for (ast_protocol.requirements, protocol.requirements) |requirement, semantic_requirement| {
                 const requirement_id = try self.addSymbol(
                     requirement.name,
@@ -224,6 +228,7 @@ const Builder = struct {
                     try functionDetail(self.allocator, requirement),
                 );
                 self.symbols.items[requirement_id].is_public = ast_protocol.is_public;
+                self.symbols.items[requirement_id].is_internal = ast_protocol.is_internal;
             }
         }
         for (ast.structures, program.structures) |ast_structure, structure| {
@@ -235,6 +240,7 @@ const Builder = struct {
                 try structureHeader(self.allocator, ast_structure),
             );
             self.symbols.items[structure_id].is_public = ast_structure.is_public;
+            self.symbols.items[structure_id].is_internal = ast_structure.is_internal;
             for (ast_structure.fields) |ast_field| {
                 const fields = if (ast_field.is_static) structure.static_fields else structure.fields;
                 for (fields) |field| {
@@ -289,6 +295,7 @@ const Builder = struct {
                 try functionDetail(self.allocator, function),
             );
             self.symbols.items[function_id].is_public = function.is_public;
+            self.symbols.items[function_id].is_internal = function.is_internal;
             try self.addParameters(function.parameters, semantic_function.parameters);
         }
         try self.addUseSymbols();
@@ -835,6 +842,7 @@ fn appendAstType(allocator: Allocator, output: *std.ArrayList(u8), value: Ast.Ty
         },
         .function => |function| {
             if (function.deferred) try output.appendSlice(allocator, "deferred ");
+            if (function.isolated) try output.appendSlice(allocator, "isolated ");
             try output.appendSlice(allocator, "func(");
             for (function.parameters, 0..) |parameter, index| {
                 if (index != 0) try output.appendSlice(allocator, ", ");
@@ -888,9 +896,9 @@ fn appendReturnType(allocator: Allocator, output: *std.ArrayList(u8), value: Ast
     try appendAstType(allocator, output, name);
 }
 
-fn functionDetail(allocator: Allocator, function: Ast.Function) ![]const u8 {
+pub fn functionDetail(allocator: Allocator, function: Ast.Function) ![]const u8 {
     var output: std.ArrayList(u8) = .empty;
-    if (function.is_public) try output.appendSlice(allocator, "public ");
+    try output.appendSlice(allocator, declarationVisibilityPrefix(function.is_public, function.is_internal));
     if (function.is_native) try output.appendSlice(allocator, "native ");
     if (function.is_static) try output.appendSlice(allocator, "static ");
     if (function.is_override) try output.appendSlice(allocator, "override ");
@@ -919,15 +927,20 @@ fn functionDetail(allocator: Allocator, function: Ast.Function) ![]const u8 {
 }
 
 fn structureHeader(allocator: Allocator, value: Ast.Structure) ![]const u8 {
-    return std.fmt.allocPrint(allocator, "{s}{s} {s}", .{
-        if (value.is_public) "public " else "",
+    return std.fmt.allocPrint(allocator, "{s}{s}{s} {s}", .{
+        declarationVisibilityPrefix(value.is_public, value.is_internal),
+        if (value.is_static_class) "static " else "",
         if (value.is_class) "class" else "struct",
         sourceSpelling(value.name),
     });
 }
 
 fn typeHeader(allocator: Allocator, value: Ast.Enum) ![]const u8 {
-    return std.fmt.allocPrint(allocator, "{s}enum {s}", .{ if (value.is_public) "public " else "", sourceSpelling(value.name) });
+    return std.fmt.allocPrint(allocator, "{s}enum {s}", .{ declarationVisibilityPrefix(value.is_public, value.is_internal), sourceSpelling(value.name) });
+}
+
+fn declarationVisibilityPrefix(is_public: bool, is_internal: bool) []const u8 {
+    return if (is_public) "public " else if (is_internal) "internal " else "";
 }
 
 fn variantDetail(allocator: Allocator, owner: Ast.Enum, variant: Ast.EnumVariant) ![]const u8 {
@@ -999,6 +1012,7 @@ fn appendSemanticType(allocator: Allocator, output: *std.ArrayList(u8), value: S
         },
         .function => |function| {
             if (function.deferred) try output.appendSlice(allocator, "deferred ");
+            if (function.isolated) try output.appendSlice(allocator, "isolated ");
             try output.appendSlice(allocator, "func(");
             for (function.parameters, 0..) |parameter, index| {
                 if (index != 0) try output.appendSlice(allocator, ", ");

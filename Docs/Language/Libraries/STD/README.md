@@ -54,6 +54,8 @@ func main() {
   and contiguous views.
 - [Text](Text.md) — strict UTF conversions, scalar access, normalization,
   casing, and grapheme segmentation.
+- [Threading](Threading.md) — independent task values and explicit asynchronous
+  execution.
 - [Time](Time/README.md) — monotonic elapsed-time and logical-loop utilities.
   - [Stopwatch](Time/Stopwatch.md) measures bounded real durations.
   - [Clock](Time/Clock.md) drives scaled and pausable logical time.

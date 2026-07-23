@@ -232,6 +232,7 @@ pub fn function(self: anytype, ast: Ast.Function, symbol: FunctionSymbol) Analyz
         .statements = function_statements,
         .is_main = symbol.is_main,
         .is_native = symbol.is_native,
+        .is_native_generic = symbol.is_native_generic,
         .is_native_resource_drop = symbol.is_native_resource_drop,
         .native_module_name = symbol.native_module_name,
         .native_function_name = symbol.native_function_name,
@@ -296,6 +297,29 @@ pub fn method(
         null;
     defer self.current_return_borrow_root = null;
     const method_statements = try self.statements(ast.statements, &scope);
+    if (try self.isNonCopyableType(symbol.return_type)) {
+        var returned_dependencies: std.ArrayList(*BindingState) = .empty;
+        try collectReturnedResourceDependencies(self.allocator, method_statements, &returned_dependencies);
+        var depends_on_self = false;
+        var parameter_dependencies: std.ArrayList(usize) = .empty;
+        for (returned_dependencies.items) |dependency| {
+            if (dependency == &self.current_self_state) {
+                depends_on_self = true;
+                continue;
+            }
+            var parameter_index: ?usize = null;
+            for (scope.symbols.items[0..ast.parameters.len], 0..) |parameter_symbol, index| {
+                if (dependency == parameter_symbol.state) parameter_index = index;
+            }
+            if (parameter_index) |index| {
+                if (!containsIndex(parameter_dependencies.items, index)) try parameter_dependencies.append(self.allocator, index);
+            } else {
+                return self.fail(ast.name_position, "cannot return a native resource that depends on a local resource");
+            }
+        }
+        self.structures.items[structure_index].methods[method_index].return_dependency_self = depends_on_self;
+        self.structures.items[structure_index].methods[method_index].return_dependency_parameters = try parameter_dependencies.toOwnedSlice(self.allocator);
+    }
     self.releaseScopeBorrows(&scope);
     if (!typeEqual(symbol.return_type, .void) and !blockAlwaysReturns(method_statements)) {
         const message = try std.fmt.allocPrint(self.allocator, "method '{s}' must return '{s}' on every path", .{ ast.name, typeName(symbol.return_type) });
@@ -435,7 +459,7 @@ pub fn constructorBaseInitialization(
     var candidates: std.ArrayList(ConstructorCandidate) = .empty;
     var inaccessible: ?ConstructorSymbol = null;
     for (base.constructors, 0..) |constructor_symbol, index| {
-        if (self.memberVisibleFrom(structure_index, base_index, constructor_symbol.visibility)) {
+        if (self.memberVisibleFrom(structure_index, base_index, constructor_symbol.visibility, position.file)) {
             try candidates.append(self.allocator, .{ .symbol = constructor_symbol, .index = index });
         } else {
             inaccessible = constructor_symbol;
@@ -445,6 +469,7 @@ pub fn constructorBaseInitialization(
         const constructor_symbol = inaccessible.?;
         const message = switch (constructor_symbol.visibility) {
             .private_access => try std.fmt.allocPrint(self.allocator, "constructor of base class '{s}' is private", .{base.source_name}),
+            .internal_access => try std.fmt.allocPrint(self.allocator, "constructor of base class '{s}' is internal to its source file", .{base.source_name}),
             .subclass => unreachable,
             .public_access => unreachable,
         };

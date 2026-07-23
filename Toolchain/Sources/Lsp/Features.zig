@@ -389,6 +389,7 @@ pub fn signatureCalleeAt(self: anytype, source: []const u8, cursor: usize) ?Sign
 
 pub fn symbolVisibleFromFile(_: anytype, snapshot: *const Frontend.Snapshot, file: usize, symbol: SymbolIndex.Symbol) bool {
     if (symbol.definition.file == file) return true;
+    if (symbol.is_internal or symbol.visibility == .internal_access) return false;
     if (file >= snapshot.files.len or symbol.definition.file >= snapshot.files.len) return false;
     const source_module = snapshot.files[file].module_index;
     const symbol_module = snapshot.files[symbol.definition.file].module_index;

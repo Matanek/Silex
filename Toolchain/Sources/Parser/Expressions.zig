@@ -277,11 +277,16 @@ pub fn parsePrimary(self: anytype) ParseError!*Ast.Expression {
             return self.parsePostfix(try self.newExpression(.{ .position = token.position, .value = .{ .string = token.lexeme } }));
         },
         .left_bracket => return self.parsePostfix(try self.parseSequenceLiteral()),
-        .keyword_func => return self.parsePostfix(try self.parseLambda(false)),
+        .keyword_func => return self.parsePostfix(try self.parseLambda(false, false)),
         .keyword_deferred => {
             try self.advance();
             if (self.current.tag != .keyword_func) return self.fail("expected 'func' after 'deferred'");
-            return self.parsePostfix(try self.parseLambda(true));
+            return self.parsePostfix(try self.parseLambda(true, false));
+        },
+        .keyword_isolated => {
+            try self.advance();
+            if (self.current.tag != .keyword_func) return self.fail("expected 'func' after 'isolated'");
+            return self.parsePostfix(try self.parseLambda(false, true));
         },
         .keyword_super => return self.parseSuperMethodCall(),
         .keyword_match => return self.parsePostfix(try self.parseMatchExpression()),
@@ -398,7 +403,7 @@ pub fn parseSuperMethodCall(self: anytype) ParseError!*Ast.Expression {
     }));
 }
 
-pub fn parseLambda(self: anytype, deferred: bool) ParseError!*Ast.Expression {
+pub fn parseLambda(self: anytype, deferred: bool, isolated: bool) ParseError!*Ast.Expression {
     const position = self.current.position;
     try self.expect(.keyword_func, "expected 'func'");
     const parameters = try self.parseParameters();
@@ -411,6 +416,7 @@ pub fn parseLambda(self: anytype, deferred: bool) ParseError!*Ast.Expression {
         .value = .{ .lambda = .{
             .position = position,
             .deferred = deferred,
+            .isolated = isolated,
             .parameters = parameters,
             .return_type = return_type,
             .statements = try self.parseBlock(),
@@ -574,6 +580,10 @@ pub fn parseStaticMember(self: anytype, owner: Ast.TypeName, owner_position: Sou
     const name = self.current.lexeme;
     const name_position = self.current.position;
     try self.advance();
+    const type_arguments = if (self.current.tag == .less)
+        try self.parseTypeArguments(null)
+    else
+        &.{};
     if (self.current.tag == .left_parenthesis) {
         const invocation = try self.parseInvocationArguments();
         return self.newExpression(.{
@@ -583,6 +593,7 @@ pub fn parseStaticMember(self: anytype, owner: Ast.TypeName, owner_position: Sou
                 .owner_position = owner_position,
                 .name = name,
                 .name_position = name_position,
+                .type_arguments = type_arguments,
                 .arguments = switch (invocation) {
                     .positional => |values| values,
                     .named => &.{},
@@ -594,6 +605,7 @@ pub fn parseStaticMember(self: anytype, owner: Ast.TypeName, owner_position: Sou
             } },
         });
     }
+    if (type_arguments.len != 0) return self.fail("type arguments must be followed by an invocation");
     return self.newExpression(.{
         .position = owner_position,
         .value = .{ .static_field_access = .{

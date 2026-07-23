@@ -32,6 +32,10 @@ struct Team {
     var player:Player
 }
 
+struct VoxelChunk {
+    var voxels:int[]
+}
+
 func main() {
     let players:Player[] = [Player(name:"Ada"), Player(name:"Bob")]
     players[0].rename("Eve")
@@ -77,4 +81,11 @@ func main() {
             assert(player.get_name() == "Nested", "neutral iteration accepts nested shared collections")
         }
     }
+
+    var original = VoxelChunk(voxels:[1, 2, 3])
+    var completed = VoxelChunk(voxels:[4, 5, 6])
+    original = move completed
+    assert(original.voxels[0] == 4, "copyable structure storage transfers explicitly")
+    completed = VoxelChunk(voxels:[7])
+    assert(completed.voxels[0] == 7, "moved copyable var can be reinitialized")
 }

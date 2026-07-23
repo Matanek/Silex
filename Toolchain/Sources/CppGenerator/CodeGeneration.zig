@@ -249,6 +249,10 @@ pub fn generateStatement(
         .print => |argument| {
             try self.generateTryPreludes(allocator, output, argument, indentation);
             try self.indent(allocator, output, indentation);
+            try output.appendSlice(allocator, "{\n");
+            try self.indent(allocator, output, indentation + 1);
+            try output.appendSlice(allocator, "std::scoped_lock silexOutputLock(silexOutputMutex);\n");
+            try self.indent(allocator, output, indentation + 1);
             try output.appendSlice(allocator, "std::cout << ");
             if (argument.type == .bool) try output.append(allocator, '(');
             if (argument.type == .int8 or argument.type == .uint8) try output.appendSlice(allocator, "static_cast<int>(");
@@ -256,6 +260,8 @@ pub fn generateStatement(
             if (argument.type == .int8 or argument.type == .uint8) try output.append(allocator, ')');
             if (argument.type == .bool) try output.appendSlice(allocator, " ? \"true\" : \"false\")");
             try output.appendSlice(allocator, " << '\\n';\n");
+            try self.indent(allocator, output, indentation);
+            try output.appendSlice(allocator, "}\n");
         },
         .assertion => |assertion| {
             try self.generateTryPreludes(allocator, output, assertion.condition, indentation);

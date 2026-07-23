@@ -79,6 +79,7 @@ pub const TypeName = union(enum) {
 
     pub const FunctionType = struct {
         deferred: bool = false,
+        isolated: bool = false,
         parameters: []const TypeName,
         parameter_modes: []const ParameterMode,
         return_type: ?*TypeName,
@@ -126,6 +127,7 @@ pub const IterationBinding = enum {
 
 pub const MemberVisibility = enum {
     private_access,
+    internal_access,
     subclass,
     public_access,
 };
@@ -215,6 +217,7 @@ pub const Expression = struct {
     pub const Lambda = struct {
         position: Source.Position,
         deferred: bool = false,
+        isolated: bool = false,
         parameters: []const Parameter,
         return_type: ReturnType,
         statements: []const Statement,
@@ -235,6 +238,7 @@ pub const Expression = struct {
         owner_position: Source.Position,
         name: []const u8,
         name_position: Source.Position,
+        type_arguments: []const TypeName = &.{},
         arguments: []const *Expression,
         named_fields: ?[]const FieldInitializer = null,
     };
@@ -483,6 +487,7 @@ pub const Extension = struct {
 
 pub const Protocol = struct {
     is_public: bool = false,
+    is_internal: bool = false,
     position: Source.Position,
     name: []const u8,
     name_position: Source.Position,
@@ -491,6 +496,7 @@ pub const Protocol = struct {
 
 pub const Enum = struct {
     is_public: bool = false,
+    is_internal: bool = false,
     position: Source.Position,
     name: []const u8,
     name_position: Source.Position,
@@ -526,7 +532,9 @@ pub const Use = struct {
 
 pub const Structure = struct {
     is_public: bool = false,
+    is_internal: bool = false,
     is_class: bool = false,
+    is_static_class: bool = false,
     is_native_resource: bool = false,
     native_drop_name: ?[]const u8 = null,
     position: Source.Position,
@@ -594,7 +602,9 @@ pub const Parameter = struct {
 
 pub const Function = struct {
     is_public: bool = false,
+    is_internal: bool = false,
     is_native: bool = false,
+    is_native_generic: bool = false,
     is_native_resource_drop: bool = false,
     member_visibility: ?MemberVisibility = null,
     is_override: bool = false,

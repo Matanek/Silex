@@ -1,0 +1,120 @@
+public protocol Task {
+    func execute()
+}
+
+internal native resource NativeTaskManager {
+    drop native_destroy_manager
+}
+
+internal native resource NativeTask {
+    drop native_destroy_task
+}
+
+internal native func native_logical_processor_count() int
+internal native func native_create_manager(worker_count:int) NativeTaskManager
+internal native func native_submit(
+    manager:@NativeTaskManager,
+    callback:isolated func()
+) NativeTask
+internal native func native_complete(task:@NativeTask) void
+internal native func native_submit_result<T>(
+    manager:@NativeTaskManager,
+    callback:isolated func() T
+) NativeTask
+internal native func native_complete_result<T>(
+    task:@NativeTask,
+    callback:func(T)
+) void
+
+internal class TaskPool {
+    let native:NativeTaskManager
+
+    init() {
+        let processors = native_logical_processor_count()
+        var workers = processors - 1
+        if workers < 1 {
+            workers = 1
+        }
+        let native = native_create_manager(workers)
+        self.native = move native
+    }
+}
+
+public static class TaskManager {
+    static var shared:TaskPool?
+
+    static func pool() TaskPool {
+        if var current = TaskManager.shared {
+            return current
+        }
+        var created = TaskPool()
+        TaskManager.shared = created
+        return created
+    }
+
+    public static func submit<T:Task>(task:T) TaskHandle<T> {
+        var pool = TaskManager.pool()
+        let checked:T = task
+        return TaskHandle<T>(
+            native_submit_result<T>(
+                pool.native,
+                isolated func() T {
+                    var running:T = checked
+                    running.execute()
+                    return move running
+                }
+            )
+        )
+    }
+
+    public static func submit<T:Task>(task:T, callback:isolated func(T)) TaskWaitHandle {
+        var pool = TaskManager.pool()
+        let checked:T = task
+        let completed:isolated func(T) = callback
+        return TaskWaitHandle(
+            native_submit(
+                pool.native,
+                isolated func() {
+                    var running:T = checked
+                    running.execute()
+                    completed(move running)
+                }
+            )
+        )
+    }
+}
+
+internal class TaskWaitHandle {
+    let native:NativeTask
+
+    init(native:NativeTask) {
+        self.native = move native
+    }
+
+    public func complete() {
+        native_complete(self.native)
+    }
+}
+
+internal class TaskHandle<T> {
+    let native:NativeTask
+
+    init(native:NativeTask) {
+        self.native = move native
+    }
+
+    public func complete() T {
+        var completed:T?
+        native_complete_result<T>(self.native, func(value:T) {
+            completed = move value
+        })
+        if var value = move completed {
+            return move value
+        }
+        panic("completed task did not return its value")
+    }
+
+    public func complete(callback:func(T)) {
+        native_complete_result<T>(self.native, callback)
+    }
+}

@@ -35,9 +35,10 @@ They do not enter class virtual dispatch and are not inherited. Extending
 
 ## Generic extension methods
 
-An instance method in `extend` may declare its own type parameters and nominal
-constraints. Every argument remains explicit at the call site, and the
-signature and body are specialized before ordinary overload selection:
+A method in `extend` may declare its own type parameters and nominal
+constraints. Its arguments may be inferred from the static types of the
+ordinary arguments, or written explicitly. The signature and body are
+specialized before ordinary overload selection:
 
 ```sx
 extend Randomizer {
@@ -46,7 +47,21 @@ extend Randomizer {
     }
 }
 
-let selected:@int = randomizer.choose<int>(values)
+let selected:@int = randomizer.choose(values)
+let explicit:@int = randomizer.choose<int>(values)
+```
+
+The same rule applies to static extension methods:
+
+```sx
+extend Randomizer {
+    public static func from<T>(seed:T) Randomizer {
+        return Randomizer.create(seed as int)
+    }
+}
+
+let inferred = Randomizer.from(42)
+let explicit = Randomizer.from<int>(42)
 ```
 
 Type parameters are available everywhere a generic free function permits
@@ -56,11 +71,11 @@ method, declaring module, and concrete arguments reuses one specialization.
 Constraints, recursion, overload ambiguity, and arity diagnostics follow the
 rules in [Functions](Functions.md#generic-functions).
 
-Calling the method without `<...>` performs no inference and considers only
-non-generic methods of that name. When exactly one borrowed parameter exists,
-an unqualified borrowed return originates from it; with none it originates
-from `self`. Ambiguous methods qualify the root as `@self:T` or
-`@parameter:T`. The returned alias keeps that caller root borrowed.
+The inference and concrete-overload priority rules are the same as for generic
+free functions. When exactly one borrowed parameter exists, an unqualified
+borrowed return originates from it; with none it originates from `self`.
+Ambiguous methods qualify the root as `@self:T` or `@parameter:T`. The returned
+alias keeps that caller root borrowed.
 
 ## Protocol conformances
 
@@ -101,7 +116,9 @@ unambiguous.
 
 ## Visibility and uses
 
-An unmarked method takes the target's default member visibility. A structure
+An unmarked method takes the target's default member visibility. An
+`internal` extension method is active only in the file that declares the
+extension. A structure
 extension method is therefore public and becomes active in a source file that
 selects its declaring file namespace through an explicit dependency closure. A class extension method
 remains private to that module unless it uses `public`. The explicit marker
@@ -121,9 +138,9 @@ activates those supplied by its transitive `use` closure. Neighboring files
 outside that closure remain inactive. Each consuming source file therefore
 names the namespace or declaration that establishes the required dependency.
 
-An extension has the access rights of an outside caller. Its body can use only
-the target's `public` members, never private or `protected` members, even when the
-extension is declared in the module that owns the type.
+An extension normally has the access rights of an outside caller. When it is
+declared in the same file as its target, it may also use that target's
+`internal` members. It never gains access to `private` or `protected` members.
 
 ## Coherence and limits
 
@@ -136,8 +153,9 @@ source or dependency order. Different signatures remain ordinary overloads.
 Extensions add behavior only. They cannot declare fields, constructors,
 `drop`, `override`, or `protected` members. Names after `:` must be protocols and can
 never add a base class. Extensions cannot target an enum, protocol, scalar,
-collection, generic type, or one specialization of a generic type. Generic
-methods remain unavailable directly in a structure or class, as static
-extension methods, as protocol requirements, and as protocol-conformance
-witnesses. Generic constructors, generic native methods, type-argument
-inference, and generic extension targets are also unavailable.
+collection, generic type, one specialization of a generic type, or a static
+class. Generic methods remain unavailable as protocol requirements and
+protocol-conformance witnesses. A non-generic structure or class may declare
+generic instance or static methods directly. Generic constructors, generic
+native methods, partial type-argument lists, inference from an expected return
+type alone, and generic extension targets are also unavailable.

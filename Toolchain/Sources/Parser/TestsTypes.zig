@@ -84,6 +84,25 @@ test "parse public and private native functions" {
     try std.testing.expectEqualStrings("native_seed", program.functions[1].name);
 }
 
+test "parse generic classes and internal generic native functions" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(),
+        \\internal native resource NativeHandle { drop destroy_handle }
+        \\internal native func produce<T>(callback:isolated func() T) NativeHandle
+        \\internal class Handle<T> {
+        \\    let native:NativeHandle
+        \\    public func value(input:T) T { return input }
+        \\}
+    );
+    const program = try parser.parse();
+
+    try std.testing.expect(program.functions[1].is_native_generic);
+    try std.testing.expectEqual(@as(usize, 1), program.functions[1].type_parameters.len);
+    try std.testing.expect(program.structures[1].is_class);
+    try std.testing.expectEqual(@as(usize, 1), program.structures[1].type_parameters.len);
+}
+
 test "parse public and private opaque native resources" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -339,12 +358,34 @@ test "reject generic main function" {
     try std.testing.expectEqualStrings("'main' cannot be generic", parser.diagnostic.?.message);
 }
 
-test "keep generic methods limited to instance extensions" {
+test "accept generic instance and static methods in non-generic structures and classes" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     var direct = Parser.init(arena.allocator(), "struct Box { func keep<T>(value:T) T { return value } } func main() {}");
-    try std.testing.expectError(error.InvalidSource, direct.parse());
-    try std.testing.expectEqualStrings("generic methods are not supported", direct.diagnostic.?.message);
+    const program = try direct.parse();
+    try std.testing.expectEqual(@as(usize, 1), program.structures[0].methods[0].type_parameters.len);
+    try std.testing.expectEqualStrings("T", program.structures[0].methods[0].type_parameters[0].name);
+
+    var static = Parser.init(arena.allocator(), "struct Box { static func keep<T>(value:T) T { return value } } func main() { let value = Box.keep<int>(1) }");
+    const static_program = try static.parse();
+    try std.testing.expect(static_program.structures[0].methods[0].is_static);
+    try std.testing.expectEqual(@as(usize, 1), static_program.structures[0].methods[0].type_parameters.len);
+    const static_call = static_program.functions[0].statements[0].variable_declaration.initializer.?.value.method_call;
+    try std.testing.expectEqual(@as(usize, 1), static_call.type_arguments.len);
+
+    var class = Parser.init(arena.allocator(), "class Box { public func keep<T>(value:T) T { return value } } func main() {}");
+    const class_program = try class.parse();
+    try std.testing.expect(class_program.structures[0].is_class);
+    try std.testing.expectEqual(@as(usize, 1), class_program.structures[0].methods[0].type_parameters.len);
+    try std.testing.expectEqualStrings("T", class_program.structures[0].methods[0].type_parameters[0].name);
+
+    var override = Parser.init(arena.allocator(), "class Box { override public func keep<T>(value:T) T { return value } } func main() {}");
+    try std.testing.expectError(error.InvalidSource, override.parse());
+    try std.testing.expectEqualStrings("generic methods cannot use 'override'", override.diagnostic.?.message);
+
+    var generic_structure = Parser.init(arena.allocator(), "struct Box<Value> { func keep<T>(value:T) T { return value } } func main() {}");
+    try std.testing.expectError(error.InvalidSource, generic_structure.parse());
+    try std.testing.expectEqualStrings("generic methods in generic structures are not supported", generic_structure.diagnostic.?.message);
 
     var protocol = Parser.init(arena.allocator(), "protocol Box { func keep<T>(value:T) T } func main() {}");
     try std.testing.expectError(error.InvalidSource, protocol.parse());
@@ -477,6 +518,20 @@ test "parse deferred function type and literal" {
     const declaration = program.functions[0].statements[0].variable_declaration;
     try std.testing.expect(declaration.annotation.?.function.deferred);
     try std.testing.expect(declaration.initializer.?.value.lambda.deferred);
+}
+
+test "parse isolated function type and literal" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(),
+        \\native func start(callback:isolated func()) int
+        \\func main() {
+        \\    start(isolated func() {})
+        \\}
+    );
+    const program = try parser.parse();
+    try std.testing.expect(program.functions[0].parameters[0].type.function.isolated);
+    try std.testing.expect(program.functions[1].statements[0].expression_statement.value.call.arguments[0].value.lambda.isolated);
 }
 
 test "reserve Result and reject void as its error type" {
@@ -647,9 +702,10 @@ test "parse type extensions and reject stateful members" {
     try std.testing.expectEqual(@as(usize, 2), generic_program.extensions[0].methods[1].type_parameters.len);
     try std.testing.expectEqualStrings("Comparable", generic_program.extensions[0].methods[1].type_parameters[1].constraint.?.name);
 
-    var generic_static = Parser.init(arena.allocator(), "extend Randomizer { static func create<T>() Randomizer {} } func main() {}");
-    try std.testing.expectError(error.InvalidSource, generic_static.parse());
-    try std.testing.expectEqualStrings("generic static extension methods are not supported", generic_static.diagnostic.?.message);
+    var generic_static = Parser.init(arena.allocator(), "extend Randomizer { static func create<T>(value:T) Randomizer {} } func main() {}");
+    const generic_static_program = try generic_static.parse();
+    try std.testing.expect(generic_static_program.extensions[0].methods[0].is_static);
+    try std.testing.expectEqual(@as(usize, 1), generic_static_program.extensions[0].methods[0].type_parameters.len);
 
     var field = Parser.init(arena.allocator(), "extend Randomizer { var state:int } func main() {}");
     try std.testing.expectError(error.InvalidSource, field.parse());

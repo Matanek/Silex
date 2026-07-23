@@ -1,0 +1,6 @@
+use NativeIsolatedCallbacks as Native
+
+func main() {
+    Native.verify()
+    print("native isolated callbacks ok")
+}

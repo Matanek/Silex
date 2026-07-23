@@ -178,6 +178,9 @@ pub const Analyzer = struct {
     current_loop_flow: ?*LoopFlow = null,
     function_scope_depth: usize = 0,
     current_lambda: ?*LambdaContext = null,
+    isolated_validation_depth: usize = 0,
+    isolated_validation_program: ?*const Program = null,
+    isolated_validation_visiting: ?*std.StringHashMap(void) = null,
     inferring_deferred_return_summaries: bool = false,
     deferred_return_summary_changed: bool = false,
     diagnostic: ?Source.Diagnostic = null,
@@ -284,6 +287,7 @@ pub const Analyzer = struct {
                 .source_name = symbol.source_name,
                 .generated_name = symbol.generated_name,
                 .is_class = symbol.is_class,
+                .is_static_class = symbol.is_static_class,
                 .is_owner = symbol.is_owner,
                 .is_native_resource = symbol.is_native_resource,
                 .native_module_name = symbol.native_module_name,
@@ -293,7 +297,7 @@ pub const Analyzer = struct {
                 .equality_comparable = self.isEqualityComparable(.{ .structure = self.structureType(structure_index) }),
                 .protocol_conformances = try self.protocolConformances(structure_index),
                 .base = if (symbol.base_index) |base_index| self.structureType(base_index) else null,
-                .implicit_constructor_available = symbol.constructors.len == 0 and implicit_base.available,
+                .implicit_constructor_available = !symbol.is_static_class and symbol.constructors.len == 0 and implicit_base.available,
                 .implicit_base_initializer = implicit_base.initializer,
                 .fields = try fields.toOwnedSlice(self.allocator),
                 .static_fields = try static_fields.toOwnedSlice(self.allocator),
@@ -483,6 +487,9 @@ pub const Analyzer = struct {
     pub const validateStatements = Validation.validateStatements;
     pub const validateCondition = Validation.validateCondition;
     pub const validateExpression = Validation.validateExpression;
+    pub const validateIsolatedExpression = Validation.validateIsolatedExpression;
+    pub const validateIsolatedCallable = Validation.validateIsolatedCallable;
+    pub const validateIsolatedMethodByName = Validation.validateIsolatedMethodByName;
     pub const unaryExpression = Validation.unaryExpression;
     pub const moveExpression = Validation.moveExpression;
     pub const resultShape = Validation.resultShape;

@@ -1,0 +1,17 @@
+use STD.Threading
+
+struct Report:Threading.Task {
+    func execute() {
+        print("retained manager")
+    }
+}
+
+func main() {
+    if true {
+        var handle = Threading.TaskManager.submit(Report())
+        handle.complete()
+    }
+    var next = Threading.TaskManager.submit(Report())
+    next.complete()
+    print("after global manager")
+}

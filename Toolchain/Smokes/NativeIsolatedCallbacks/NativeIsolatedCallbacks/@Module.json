@@ -1,0 +1,16 @@
+{
+  "native": {
+    "sources": {
+      "cpp": [
+        "Module.cpp"
+      ]
+    },
+    "targets": {
+      "linux": {
+        "system_libraries": [
+          "pthread"
+        ]
+      }
+    }
+  }
+}

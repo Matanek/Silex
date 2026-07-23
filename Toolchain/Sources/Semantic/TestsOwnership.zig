@@ -347,6 +347,75 @@ test "unique resources transfer explicitly through locals parameters assignments
     );
 }
 
+test "copyable values can transfer explicitly and become unavailable" {
+    try expectSemanticSuccess(
+        \\struct Payload { var values:int[] }
+        \\class Box { public let value:int }
+        \\func consume(value:Payload) {}
+        \\func forward(value:Payload) Payload { return move value }
+        \\func main() {
+        \\    let number = 1
+        \\    let moved_number = move number
+        \\    print(moved_number)
+        \\    var payload = Payload(values:[1, 2, 3])
+        \\    let forwarded = forward(move payload)
+        \\    payload = Payload(values:[4, 5, 6])
+        \\    consume(move payload)
+        \\    payload = Payload(values:[7])
+        \\    let completed = move payload
+        \\    print(completed.values[0])
+        \\    var box = Box(value:8)
+        \\    var moved_box = move box
+        \\    box = Box(value:9)
+        \\    print(moved_box.value + box.value + forwarded.values[0])
+        \\}
+    );
+}
+
+test "copyable moves reject partial borrowed captured and consumed sources" {
+    const declaration =
+        \\struct Payload { var values:int[] }
+        \\func consume(value:Payload) {}
+    ;
+
+    try expectResolvedSemanticErrorContains(
+        declaration ++ "func main() { let value = Payload(values:[1]); consume(move value); print(value.values[0]) }",
+        "value 'value' was consumed by 'move' at",
+    );
+    try expectResolvedSemanticError(
+        declaration ++ "func main() { let value = Payload(values:[1]); let moved = move value; value = Payload(values:[2]) }",
+        "cannot assign to immutable variable 'value'",
+    );
+    try expectResolvedSemanticError(
+        declaration ++ "func main() { var value = Payload(values:[1]); value = move value }",
+        "cannot move value 'value' into itself",
+    );
+    try expectResolvedSemanticError(
+        declaration ++ "func main() { let value = Payload(values:[1]); let moved = move value.values }",
+        "'move' requires a complete local binding or parameter",
+    );
+    try expectResolvedSemanticError(
+        declaration ++ "func inspect(value:@Payload) { let moved = move value } func main() {}",
+        "a read-reference parameter cannot be consumed with 'move'",
+    );
+    try expectResolvedSemanticError(
+        declaration ++ "func main() { var values = [1]; let view = @values[0:1]; let moved = move view }",
+        "a borrowed value cannot be consumed with 'move'",
+    );
+    try expectResolvedSemanticError(
+        declaration ++ "func main() { var values = [1]; let view = @values[0:1]; let moved = move values }",
+        "cannot move borrowed value 'values'",
+    );
+    try expectResolvedSemanticError(
+        declaration ++ "func main() { var value = Payload(values:[1]); var callback = func() { let moved = move value } }",
+        "captured value 'value' cannot be consumed with 'move'",
+    );
+    try expectResolvedSemanticError(
+        declaration ++ "func main() { let value = Payload(values:[1]); while true { consume(move value) } }",
+        "value 'value' must have the same availability on every path returning to the loop header",
+    );
+}
+
 test "unique resource availability follows branches matches and loop exits" {
     try expectSemanticSuccess(
         \\struct Resource {
@@ -394,10 +463,7 @@ test "unique resource moves reject invalid sources and consumed uses" {
         \\func consume(resource:Resource) {}
     ;
 
-    try expectResolvedSemanticError(
-        declaration ++ "func main() { let value = 1; let invalid = move value }",
-        "'move' requires a noncopyable value, found 'int'",
-    );
+    try expectSemanticSuccess(declaration ++ "func main() { let value = 1; let transferred = move value; print(transferred) }");
     try expectResolvedSemanticError(
         declaration ++ "func main() { let resource = Resource.open(1); let invalid = move resource.handle }",
         "'move' requires a complete local binding or parameter",
@@ -408,11 +474,11 @@ test "unique resource moves reject invalid sources and consumed uses" {
     );
     try expectResolvedSemanticErrorContains(
         declaration ++ "func main() { let resource = Resource.open(1); consume(move resource); print(resource.handle) }",
-        "noncopyable value 'resource' was consumed by 'move' at",
+        "value 'resource' was consumed by 'move' at",
     );
     try expectResolvedSemanticErrorContains(
         declaration ++ "func main() { let resource = Resource.open(1); consume(move resource); consume(move resource) }",
-        "noncopyable value 'resource' was consumed by 'move' at",
+        "value 'resource' was consumed by 'move' at",
     );
     try expectResolvedSemanticError(
         declaration ++ "func main() { let resource = Resource.open(1); let other = move resource; resource = move other }",
@@ -420,11 +486,11 @@ test "unique resource moves reject invalid sources and consumed uses" {
     );
     try expectResolvedSemanticError(
         declaration ++ "func main() { var resource = Resource.open(1); resource = move resource }",
-        "cannot move unique resource 'resource' into itself",
+        "cannot move value 'resource' into itself",
     );
     try expectResolvedSemanticError(
         declaration ++ "func main() { var resource = Resource.open(1); while true { consume(move resource) } }",
-        "unique resource 'resource' must have the same availability on every path returning to the loop header",
+        "value 'resource' must have the same availability on every path returning to the loop header",
     );
 }
 

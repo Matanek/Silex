@@ -23,6 +23,7 @@ const fileSetContains = Support.fileSetContains;
 const positionsEqual = Support.positionsEqual;
 const typeNameToReturnType = Support.typeNameToReturnType;
 const appendTypeName = Support.appendTypeName;
+const methodOwnerMatches = Support.methodOwnerMatches;
 pub fn findTemplate(self: anytype, name: []const u8) ?*const Ast.Structure {
     for (self.program.structures) |*structure| {
         if (structure.type_parameters.len != 0 and std.mem.eql(u8, structure.name, name)) return structure;
@@ -156,6 +157,9 @@ pub fn instantiateFunction(
         self.active_extension_visibility_file = previous_visibility_file;
     }
 
+    const previous_self_type = self.inference_self_type;
+    self.inference_self_type = null;
+    defer self.inference_self_type = previous_self_type;
     var concrete = try self.rewriteFunction(template, bindings);
     concrete.name = name;
     concrete.type_parameters = &.{};
@@ -165,21 +169,45 @@ pub fn instantiateFunction(
 
 pub fn instantiateMethods(
     self: anytype,
+    object: *const Ast.Expression,
     template_name: []const u8,
     arguments: []const Ast.TypeName,
     visibility_file: usize,
     position: Source.Position,
 ) SpecializeError![]const u8 {
     const name = try self.genericTypeName(template_name, arguments);
+    const owner_type = try self.inferExpressionType(object);
+    const owner_name = if (owner_type) |value| switch (value) {
+        .structure => |structure_name| structure_name,
+        else => null,
+    } else null;
     var generic_count: usize = 0;
     var matching_arity: usize = 0;
     var expected_arity: ?usize = null;
     var arities_match = true;
     var instantiated = false;
     var constrained_candidate: ?*const Ast.Function = null;
+    for (self.program.structures) |structure| {
+        if (!methodOwnerMatches(self, owner_name, structure.name, true)) continue;
+        for (structure.methods) |*method| {
+            if (method.is_static or method.type_parameters.len == 0 or
+                !std.mem.eql(u8, method.name, template_name)) continue;
+            generic_count += 1;
+            if (expected_arity) |expected| {
+                if (expected != method.type_parameters.len) arities_match = false;
+            } else expected_arity = method.type_parameters.len;
+            if (method.type_parameters.len != arguments.len) continue;
+            matching_arity += 1;
+            constrained_candidate = method;
+            if (!self.typeArgumentsSatisfyConstraints(method.type_parameters, arguments, visibility_file)) continue;
+            try self.instantiateMethod(structure.name, method.*, arguments, name, position);
+            instantiated = true;
+        }
+    }
     for (self.program.extensions) |extension| {
+        if (!methodOwnerMatches(self, owner_name, extension.target, false)) continue;
         for (extension.methods) |*method| {
-            if (method.type_parameters.len == 0 or
+            if (method.is_static or method.type_parameters.len == 0 or
                 !std.mem.eql(u8, method.name, template_name)) continue;
             if (method.extension_visible_files) |visible_files| {
                 if (!fileSetContains(visible_files, visibility_file)) continue;
@@ -201,12 +229,12 @@ pub fn instantiateMethods(
             const count = expected_arity.?;
             const message = try std.fmt.allocPrint(
                 self.allocator,
-                "generic extension method '{s}' expects {d} type argument{s}, found {d}",
+                "generic method '{s}' expects {d} type argument{s}, found {d}",
                 .{ template_name, count, if (count == 1) "" else "s", arguments.len },
             );
             return self.fail(position, message);
         }
-        const message = try std.fmt.allocPrint(self.allocator, "no generic extension method '{s}' accepts {d} type arguments", .{ template_name, arguments.len });
+        const message = try std.fmt.allocPrint(self.allocator, "no generic method '{s}' accepts {d} type arguments", .{ template_name, arguments.len });
         return self.fail(position, message);
     }
     if (!instantiated and constrained_candidate != null) {
@@ -215,15 +243,94 @@ pub fn instantiateMethods(
     return name;
 }
 
-pub fn genericExtensionMethodRequiresArguments(self: anytype, name: []const u8, visibility_file: usize) bool {
+pub fn instantiateStaticMethods(
+    self: anytype,
+    owner: Ast.TypeName,
+    template_name: []const u8,
+    arguments: []const Ast.TypeName,
+    visibility_file: usize,
+    position: Source.Position,
+) SpecializeError![]const u8 {
+    const owner_name = switch (owner) {
+        .structure => |name| name,
+        else => return self.fail(position, "a generic static method must be selected through a concrete struct or class type"),
+    };
+    const name = try self.genericTypeName(template_name, arguments);
+    var generic_count: usize = 0;
+    var matching_arity: usize = 0;
+    var expected_arity: ?usize = null;
+    var arities_match = true;
+    var instantiated = false;
+    var constrained_candidate: ?*const Ast.Function = null;
+    for (self.program.structures) |structure| {
+        if (!std.mem.eql(u8, owner_name, structure.name)) continue;
+        for (structure.methods) |*method| {
+            if (!method.is_static or method.type_parameters.len == 0 or
+                !std.mem.eql(u8, method.name, template_name)) continue;
+            generic_count += 1;
+            if (expected_arity) |expected| {
+                if (expected != method.type_parameters.len) arities_match = false;
+            } else expected_arity = method.type_parameters.len;
+            if (method.type_parameters.len != arguments.len) continue;
+            matching_arity += 1;
+            constrained_candidate = method;
+            if (!self.typeArgumentsSatisfyConstraints(method.type_parameters, arguments, visibility_file)) continue;
+            try self.instantiateMethod(structure.name, method.*, arguments, name, position);
+            instantiated = true;
+        }
+    }
+    for (self.program.extensions) |extension| {
+        if (!std.mem.eql(u8, owner_name, extension.target)) continue;
+        for (extension.methods) |*method| {
+            if (!method.is_static or method.type_parameters.len == 0 or
+                !std.mem.eql(u8, method.name, template_name)) continue;
+            if (method.extension_visible_files) |visible_files| {
+                if (!fileSetContains(visible_files, visibility_file)) continue;
+            }
+            generic_count += 1;
+            if (expected_arity) |expected| {
+                if (expected != method.type_parameters.len) arities_match = false;
+            } else expected_arity = method.type_parameters.len;
+            if (method.type_parameters.len != arguments.len) continue;
+            matching_arity += 1;
+            constrained_candidate = method;
+            if (!self.typeArgumentsSatisfyConstraints(method.type_parameters, arguments, visibility_file)) continue;
+            try self.instantiateMethod(extension.target, method.*, arguments, name, position);
+            instantiated = true;
+        }
+    }
+    if (generic_count != 0 and matching_arity == 0) {
+        if (arities_match) {
+            const count = expected_arity.?;
+            const message = try std.fmt.allocPrint(
+                self.allocator,
+                "generic static method '{s}' expects {d} type argument{s}, found {d}",
+                .{ template_name, count, if (count == 1) "" else "s", arguments.len },
+            );
+            return self.fail(position, message);
+        }
+        const message = try std.fmt.allocPrint(self.allocator, "no generic static method '{s}' accepts {d} type arguments", .{ template_name, arguments.len });
+        return self.fail(position, message);
+    }
+    if (!instantiated and constrained_candidate != null) {
+        try self.validateTypeArgumentConstraints(constrained_candidate.?.type_parameters, arguments, position);
+    }
+    return name;
+}
+
+pub fn genericMethodRequiresArguments(self: anytype, name: []const u8, visibility_file: usize) bool {
     var generic_visible = false;
     for (self.program.structures) |structure| {
         for (structure.methods) |method| {
-            if (method.type_parameters.len == 0 and std.mem.eql(u8, method.name, name)) return false;
+            if (method.is_static) continue;
+            if (!std.mem.eql(u8, method.name, name)) continue;
+            if (method.type_parameters.len == 0) return false;
+            generic_visible = true;
         }
     }
     for (self.program.extensions) |extension| {
         for (extension.methods) |method| {
+            if (method.is_static) continue;
             if (!std.mem.eql(u8, method.name, name)) continue;
             if (method.extension_visible_files) |visible_files| {
                 if (!fileSetContains(visible_files, visibility_file)) continue;
@@ -249,7 +356,7 @@ pub fn instantiateMethod(
         if (specialization.state == .visiting) {
             const message = try std.fmt.allocPrint(
                 self.allocator,
-                "generic extension method '{s}' recursively expands with different type arguments",
+                "generic method '{s}' recursively expands with different type arguments",
                 .{template.name},
             );
             return self.fail(position, message);
@@ -281,6 +388,9 @@ pub fn instantiateMethod(
         self.active_extension_visibility_file = previous_visibility_file;
     }
 
+    const previous_self_type = self.inference_self_type;
+    self.inference_self_type = if (template.is_static) null else .{ .structure = target_name };
+    defer self.inference_self_type = previous_self_type;
     var concrete = try self.rewriteFunction(template, bindings);
     concrete.name = name;
     concrete.type_parameters = &.{};

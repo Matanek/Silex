@@ -83,6 +83,9 @@ pub fn rewriteStructure(
     var methods: std.ArrayList(Ast.Function) = .empty;
     for (structure.methods) |method| {
         if (method.type_parameters.len != 0) continue;
+        const previous_self_type = self.inference_self_type;
+        self.inference_self_type = .{ .structure = structure.name };
+        defer self.inference_self_type = previous_self_type;
         try methods.append(self.allocator, try self.rewriteFunction(method, bindings));
     }
 
@@ -103,11 +106,14 @@ pub fn rewriteFunction(
     function: Ast.Function,
     bindings: []const Binding,
 ) SpecializeError!Ast.Function {
+    const inference_frame = self.beginInferenceCallable();
+    defer self.endInferenceCallable(inference_frame);
     var parameters: std.ArrayList(Ast.Parameter) = .empty;
     for (function.parameters) |parameter| {
         var copy = parameter;
         copy.type = try self.rewriteType(parameter.type, bindings, parameter.position);
         try parameters.append(self.allocator, copy);
+        try self.addInferredLocal(parameter.name, copy.type);
     }
     var result = function;
     result.type_parameters = &.{};
@@ -183,6 +189,7 @@ pub fn rewriteType(
             }
             break :function_type .{ .function = .{
                 .deferred = function.deferred,
+                .isolated = function.isolated,
                 .parameters = try parameters.toOwnedSlice(self.allocator),
                 .parameter_modes = try self.allocator.dupe(Ast.ParameterMode, function.parameter_modes),
                 .return_type = if (function.return_type) |return_type| try self.rewriteTypePointer(return_type.*, bindings, position) else null,
@@ -281,6 +288,7 @@ pub fn instantiate(
     try self.structure_specializations.append(self.allocator, .{
         .template_name = template_name,
         .name = name,
+        .arguments = try self.allocator.dupe(Ast.TypeName, arguments),
         .state = .visiting,
     });
     var bindings = try self.allocator.alloc(Binding, arguments.len);
@@ -357,6 +365,7 @@ pub fn instantiateEnum(
     try self.enum_specializations.append(self.allocator, .{
         .template_name = template_name,
         .name = name,
+        .arguments = try self.allocator.dupe(Ast.TypeName, arguments),
         .state = .visiting,
     });
     const bindings = try self.allocator.alloc(Binding, arguments.len);
@@ -377,6 +386,8 @@ pub fn rewriteStatements(
     statements: []const Ast.Statement,
     bindings: []const Binding,
 ) SpecializeError![]const Ast.Statement {
+    const local_count = self.inferred_locals.items.len;
+    defer self.inferred_locals.shrinkRetainingCapacity(local_count);
     var result: std.ArrayList(Ast.Statement) = .empty;
     for (statements) |statement| try result.append(self.allocator, try self.rewriteStatement(statement, bindings));
     return result.toOwnedSlice(self.allocator);
@@ -402,6 +413,11 @@ pub fn rewriteStatement(
             var copy = value;
             if (value.annotation) |annotation| copy.annotation = try self.rewriteType(annotation, bindings, value.name_position);
             if (value.initializer) |initializer| copy.initializer = try self.rewriteExpression(initializer, bindings);
+            const inferred_type = copy.annotation orelse if (copy.initializer) |initializer|
+                try self.inferExpressionType(initializer)
+            else
+                null;
+            if (inferred_type) |type_value| try self.addInferredLocal(value.name, type_value);
             break :declaration .{ .variable_declaration = copy };
         },
         .assignment => |value| .{ .assignment = .{
@@ -481,22 +497,22 @@ pub fn rewriteExpression(
         .sequence_literal => |values| .{ .sequence_literal = try self.rewriteExpressions(values, bindings) },
         .call => |call| function_call: {
             const type_arguments = try self.rewriteTypes(call.type_arguments, bindings, call.name_position);
+            const arguments = try self.rewriteExpressions(call.arguments, bindings);
             const name = if (type_arguments.len != 0)
                 try self.instantiateFunctions(call.name, type_arguments, call.visible_declarations, call.name_position)
             else no_type_arguments: {
-                if (self.hasVisibleGenericFunction(call.name, call.visible_declarations) and
-                    !self.hasVisibleConcreteFunction(call.name, call.visible_declarations))
-                {
-                    const message = try std.fmt.allocPrint(self.allocator, "generic function '{s}' requires explicit type arguments", .{call.name});
-                    return self.fail(call.name_position, message);
-                }
-                break :no_type_arguments call.name;
+                break :no_type_arguments try self.inferFunctionCall(
+                    call.name,
+                    arguments,
+                    call.visible_declarations,
+                    call.name_position,
+                ) orelse call.name;
             };
             break :function_call .{ .call = .{
                 .name = name,
                 .name_position = call.name_position,
                 .type_arguments = &.{},
-                .arguments = try self.rewriteExpressions(call.arguments, bindings),
+                .arguments = arguments,
                 .named_fields = if (call.named_fields) |fields| try self.rewriteFieldInitializers(fields, bindings) else null,
                 .visible_declarations = call.visible_declarations,
             } };
@@ -516,6 +532,7 @@ pub fn rewriteExpression(
             break :lambda_expression .{ .lambda = .{
                 .position = lambda.position,
                 .deferred = lambda.deferred,
+                .isolated = lambda.isolated,
                 .parameters = try parameters.toOwnedSlice(self.allocator),
                 .return_type = try self.rewriteReturnType(lambda.return_type, bindings, lambda.position),
                 .statements = try self.rewriteStatements(lambda.statements, bindings),
@@ -523,37 +540,51 @@ pub fn rewriteExpression(
         },
         .method_call => |call| method_call: {
             const type_arguments = try self.rewriteTypes(call.type_arguments, bindings, call.name_position);
+            const object = try self.rewriteExpression(call.object, bindings);
+            const arguments = try self.rewriteExpressions(call.arguments, bindings);
             const visibility_file = if (self.activeConstraintRequires(call.name))
                 self.active_extension_visibility_file
             else
                 call.extension_visibility_file;
             const name = if (type_arguments.len != 0)
-                try self.instantiateMethods(call.name, type_arguments, visibility_file orelse call.name_position.file, call.name_position)
+                try self.instantiateMethods(object, call.name, type_arguments, visibility_file orelse call.name_position.file, call.name_position)
             else no_type_arguments: {
-                if (self.genericExtensionMethodRequiresArguments(call.name, visibility_file orelse call.name_position.file)) {
-                    const message = try std.fmt.allocPrint(self.allocator, "generic extension method '{s}' requires explicit type arguments", .{call.name});
-                    return self.fail(call.name_position, message);
-                }
-                break :no_type_arguments call.name;
+                break :no_type_arguments try self.inferMethodCall(
+                    object,
+                    call.name,
+                    arguments,
+                    visibility_file orelse call.name_position.file,
+                    call.name_position,
+                ) orelse call.name;
             };
             break :method_call .{ .method_call = .{
-                .object = try self.rewriteExpression(call.object, bindings),
+                .object = object,
                 .name = name,
                 .name_position = call.name_position,
                 .extension_visibility_file = visibility_file,
                 .type_arguments = type_arguments,
-                .arguments = try self.rewriteExpressions(call.arguments, bindings),
+                .arguments = arguments,
                 .named_fields = if (call.named_fields) |fields| try self.rewriteFieldInitializers(fields, bindings) else null,
             } };
         },
-        .static_method_call => |call| .{ .static_method_call = .{
-            .owner = try self.rewriteType(call.owner, bindings, call.owner_position),
-            .owner_position = call.owner_position,
-            .name = call.name,
-            .name_position = call.name_position,
-            .arguments = try self.rewriteExpressions(call.arguments, bindings),
-            .named_fields = if (call.named_fields) |fields| try self.rewriteFieldInitializers(fields, bindings) else null,
-        } },
+        .static_method_call => |call| static_method_call: {
+            const owner = try self.rewriteType(call.owner, bindings, call.owner_position);
+            const type_arguments = try self.rewriteTypes(call.type_arguments, bindings, call.name_position);
+            const arguments = try self.rewriteExpressions(call.arguments, bindings);
+            const name = if (type_arguments.len != 0)
+                try self.instantiateStaticMethods(owner, call.name, type_arguments, call.name_position.file, call.name_position)
+            else
+                try self.inferStaticMethodCall(owner, call.name, arguments, call.name_position.file, call.name_position) orelse call.name;
+            break :static_method_call .{ .static_method_call = .{
+                .owner = owner,
+                .owner_position = call.owner_position,
+                .name = name,
+                .name_position = call.name_position,
+                .type_arguments = &.{},
+                .arguments = arguments,
+                .named_fields = if (call.named_fields) |fields| try self.rewriteFieldInitializers(fields, bindings) else null,
+            } };
+        },
         .static_field_access => |access| .{ .static_field_access = .{
             .owner = try self.rewriteType(access.owner, bindings, access.owner_position),
             .owner_position = access.owner_position,

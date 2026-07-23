@@ -1,0 +1,7 @@
+static class Tasks {
+    public static func run() {}
+}
+
+func main() {
+    var tasks = Tasks()
+}

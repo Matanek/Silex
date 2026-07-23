@@ -1,0 +1,6 @@
+use InternalVisibility.Library.Manager
+
+func main() {
+    var handle = Manager().submit()
+    handle.secret()
+}

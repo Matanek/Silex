@@ -1,0 +1,52 @@
+use STD.Threading
+use STD.Math
+
+struct Verify:Threading.Task {
+    let values:int[]
+    var total:int
+
+    func execute() {
+        print("task worker")
+        assert(Math.cos(0.0) == 1.0, "isolated task calls native math")
+        var total = 0
+        for value in self.values {
+            total += value
+        }
+        self.total = total
+    }
+}
+
+func main() {
+    var automatic = Threading.TaskManager.submit(
+        Verify(values:[1, 2, 3], total:0),
+        func(task:Verify) {
+            assert(task.total == 6, "submit callback receives the completed task")
+        }
+    )
+    automatic.complete()
+
+    var explicit_callback = Threading.TaskManager.submit<Verify>(
+        Verify(values:[2, 3], total:0),
+        func(task:Verify) {
+            assert(task.total == 5, "explicit submit callback receives the completed task")
+        }
+    )
+
+    var original = Verify(values:[4, 5, 6], total:0)
+    var handled = Threading.TaskManager.submit(original)
+    handled.complete(func(completed:Verify) {
+        original = move completed
+    })
+    assert(original.total == 15, "complete callback moves the completed task on the caller")
+
+    var completed = Threading.TaskManager.submit(
+        Verify(values:[7, 8, 9], total:0)
+    ).complete()
+    assert(completed.total == 24, "complete returns the completed task")
+
+    var explicit = Threading.TaskManager.submit<Verify>(
+        Verify(values:[10, 11], total:0)
+    ).complete()
+    assert(explicit.total == 21, "explicit task argument remains accepted")
+    print("threading task manager")
+}
