@@ -847,6 +847,7 @@ pub fn classInitializerExpression(
         .lifetime_depth = lifetime_depth,
         .value = .{ .class_initializer = .{
             .generated_name = structure.generated_name,
+            .constructor_index = resolved.index,
             .arguments = try arguments.toOwnedSlice(self.allocator),
         } },
     });

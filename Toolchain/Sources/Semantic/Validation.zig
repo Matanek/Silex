@@ -331,9 +331,6 @@ pub fn validateExpression(self: anytype, expression_value: *const Expression) An
             for (call.arguments) |argument| try self.validateExpression(argument);
         },
         .lambda => |lambda| {
-            if (self.isolated_validation_depth != 0) {
-                return self.fail(expression_value.position, "an 'isolated func' cannot create another function value");
-            }
             if (lambda.isolated) self.isolated_validation_depth += 1;
             defer if (lambda.isolated) {
                 self.isolated_validation_depth -= 1;
@@ -459,18 +456,6 @@ pub fn validateExpression(self: anytype, expression_value: *const Expression) An
 }
 
 pub fn validateIsolatedExpression(self: anytype, expression_value: *const Expression) AnalyzeError!void {
-    if (expression_value.type != .void and expression_value.type != .null) {
-        var field_path: std.ArrayList([]const u8) = .empty;
-        defer field_path.deinit(self.allocator);
-        var visiting = std.StringHashMap(void).init(self.allocator);
-        defer visiting.deinit();
-        if (try self.nonIndependentType(expression_value.type, &field_path, &visiting) != null or
-            try self.isNonCopyableType(expression_value.type))
-        {
-            return self.fail(expression_value.position, "an 'isolated func' can only manipulate independent values");
-        }
-    }
-
     switch (expression_value.value) {
         .call => |call| {
             if (call.is_native) return;
@@ -488,6 +473,14 @@ pub fn validateIsolatedExpression(self: anytype, expression_value: *const Expres
         },
         .static_method_call => |call| try self.validateIsolatedMethodByName(call.generated_name),
         .super_method_call => |call| try self.validateIsolatedMethodByName(call.generated_name),
+        .class_initializer => |initializer| try self.validateIsolatedStructureLifecycle(
+            initializer.generated_name,
+            initializer.constructor_index,
+        ),
+        .structure_initializer => |initializer| try self.validateIsolatedStructureLifecycle(
+            initializer.generated_name,
+            null,
+        ),
         .static_field_access => |access| {
             const program = self.isolated_validation_program.?;
             for (program.structures) |structure| {
@@ -497,25 +490,31 @@ pub fn validateIsolatedExpression(self: anytype, expression_value: *const Expres
                     if (field.mutability == .mutable) {
                         return self.fail(expression_value.position, "an 'isolated func' cannot access a 'static var'");
                     }
+                    var field_path: std.ArrayList([]const u8) = .empty;
+                    defer field_path.deinit(self.allocator);
+                    var visiting = std.StringHashMap(void).init(self.allocator);
+                    defer visiting.deinit();
+                    if (try self.nonIndependentType(field.type, &field_path, &visiting) != null or
+                        try self.isNonCopyableType(field.type))
+                    {
+                        return self.fail(expression_value.position, "an 'isolated func' can only access an independent 'static let'");
+                    }
                     return;
                 }
             }
         },
-        .protocol_method_call, .protocol_conversion => return self.fail(
-            expression_value.position,
-            "an 'isolated func' cannot use a dynamic protocol value",
-        ),
-        .value_call => |call| {
-            if (call.callee.type != .function or !call.callee.type.function.isolated) {
-                return self.fail(expression_value.position, "an 'isolated func' cannot call a non-isolated function value");
-            }
-        },
-        .bound_function, .function_reference, .adapt_function => return self.fail(
-            expression_value.position,
-            "an 'isolated func' cannot create a function value",
-        ),
-        .lambda => return self.fail(expression_value.position, "an 'isolated func' cannot create another function value"),
+        .protocol_method_call => |call| try self.validateIsolatedProtocolMethodByName(call.generated_name),
+        .function_reference => |generated_name| try self.validateIsolatedFunctionByName(generated_name),
         else => {},
+    }
+}
+
+pub fn validateIsolatedFunctionByName(self: anytype, generated_name: []const u8) AnalyzeError!void {
+    const program = self.isolated_validation_program.?;
+    for (program.functions) |function_value| {
+        if (!std.mem.eql(u8, function_value.generated_name, generated_name)) continue;
+        try self.validateIsolatedCallable(function_value.generated_name, function_value.statements);
+        return;
     }
 }
 
@@ -539,6 +538,51 @@ pub fn validateIsolatedMethodByName(self: anytype, generated_name: []const u8) A
             try self.validateIsolatedCallable(method_value.generated_name, method_value.statements);
             return;
         }
+    }
+}
+
+pub fn validateIsolatedProtocolMethodByName(self: anytype, generated_name: []const u8) AnalyzeError!void {
+    const program = self.isolated_validation_program.?;
+    for (program.protocols, 0..) |protocol, protocol_index| {
+        for (protocol.requirements, 0..) |requirement, requirement_index| {
+            if (!std.mem.eql(u8, requirement.generated_name, generated_name)) continue;
+            for (program.structures) |structure| {
+                for (structure.protocol_conformances) |conformance| {
+                    if (conformance.protocol_index != protocol_index) continue;
+                    try self.validateIsolatedMethodByName(conformance.method_generated_names[requirement_index]);
+                }
+            }
+            return;
+        }
+    }
+}
+
+pub fn validateIsolatedStructureLifecycle(
+    self: anytype,
+    generated_name: []const u8,
+    constructor_index: ?usize,
+) AnalyzeError!void {
+    const visiting = self.isolated_validation_visiting.?;
+    if (visiting.contains(generated_name)) return;
+    try visiting.put(generated_name, {});
+    defer _ = visiting.remove(generated_name);
+
+    const program = self.isolated_validation_program.?;
+    for (program.structures) |structure| {
+        if (!std.mem.eql(u8, structure.generated_name, generated_name)) continue;
+        const base_initializer = if (constructor_index) |index|
+            structure.constructors[index].base_initializer
+        else
+            structure.implicit_base_initializer;
+        if (base_initializer) |base| {
+            for (base.arguments) |argument| try self.validateExpression(argument);
+            try self.validateIsolatedStructureLifecycle(base.generated_name, base.constructor_index);
+        }
+        if (constructor_index) |index| {
+            try self.validateStatements(structure.constructors[index].statements);
+        }
+        if (structure.drop) |drop_value| try self.validateStatements(drop_value.statements);
+        return;
     }
 }
 

@@ -494,7 +494,11 @@ pub fn constructorBaseInitialization(
         try arguments.append(self.allocator, value);
         try self.retainTransientBorrow(&transient_borrows, value);
     }
-    return .{ .generated_name = base.generated_name, .arguments = try arguments.toOwnedSlice(self.allocator) };
+    return .{
+        .generated_name = base.generated_name,
+        .constructor_index = resolved.index,
+        .arguments = try arguments.toOwnedSlice(self.allocator),
+    };
 }
 
 pub fn validateConstructorInitialization(

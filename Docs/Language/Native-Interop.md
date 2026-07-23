@@ -363,14 +363,19 @@ worker quiescent before returning; the generated bridge then destroys the
 captures exactly once. There is no detach or cancellation contract.
 
 The callback and every Silex function or concrete method it calls are checked
-transitively. They may manipulate independent locals, read independent
-`static let` fields, and use ordinary scalar, string, enum, structure, and
-collection operations. They cannot access `static var`, classes, unique
-resources, dynamic protocols, ordinary function values, deferred callbacks,
-or other Silex shared state. They may call another isolated function value and
-may call native functions directly or transitively. A native module author is
-responsible for the thread-safety and thread-affinity requirements of those
-implementations; the compiler cannot derive them from a native signature.
+transitively for access to Silex shared state. Values created inside the
+callback remain confined to its worker and follow the ordinary language rules:
+they may be classes, dynamic protocols, function values, collections or unique
+resources, and may be mutable. Constructors, methods, callbacks and destructors
+called through those values are checked by the same transitive traversal.
+
+The independence requirement applies at the thread boundary. Captures entering
+the callback remain recursively independent, and an accessed `static let` must
+also contain an independent value. `static var` is rejected because it denotes
+shared mutable Silex storage. Native functions may be called directly or
+transitively; their module author is responsible for native thread-safety and
+thread-affinity requirements, which the compiler cannot derive from a native
+signature.
 `print` is admitted: the complete emission of
 each call is atomic, although calls made by concurrent workers have no defined
 order. `panic` and `assert` remain fatal; their diagnostics are serialized when

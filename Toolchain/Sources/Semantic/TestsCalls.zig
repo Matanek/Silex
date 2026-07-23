@@ -666,11 +666,13 @@ test "isolated callbacks reject mutable captures and accept stored values" {
     );
 }
 
-test "isolated callbacks allow native calls and reject shared values" {
+test "isolated callbacks allow native calls and worker-local values" {
     const registration =
         \\public native resource Operation { drop discard_operation }
+        \\native resource LocalResource { drop destroy_local_resource }
         \\native func start_operation(callback:isolated func()) Operation
         \\native func native_operation() void
+        \\native func create_local_resource() LocalResource
     ;
     try expectDeferredNativeSuccess(
         registration ++ "\nfunc main() { let operation = start_operation(isolated func() { native_operation() }) }",
@@ -678,9 +680,69 @@ test "isolated callbacks allow native calls and reject shared values" {
     try expectDeferredNativeSuccess(
         registration ++ "\nfunc native_helper() { native_operation() } func main() { let operation = start_operation(isolated func() { native_helper() }) }",
     );
+    try expectDeferredNativeSuccess(
+        registration ++
+            "\n" ++
+            \\protocol Source { func next() int }
+            \\class LocalRandomizer : Source {
+            \\    var state:int
+            \\    public init(seed:int) { self.state = seed }
+            \\    public func next() int { self.state += 1; return self.state }
+            \\}
+            \\func main() {
+            \\    let operation = start_operation(isolated func() {
+            \\        var concrete = LocalRandomizer(1)
+            \\        var source:Source = concrete
+            \\        var callback = func() int { return source.next() }
+            \\        let value = callback()
+            \\        var resource = create_local_resource()
+            \\        assert(value == 2, "worker-local values")
+            \\    })
+            \\}
+        ,
+    );
+}
+
+test "isolated callbacks reject only values that cross a shared boundary" {
+    const registration =
+        \\public native resource Operation { drop discard_operation }
+        \\native func start_operation(callback:isolated func()) Operation
+    ;
     try expectDeferredNativeError(
-        registration ++ "\nclass Shared {} func main() { let operation = start_operation(isolated func() { var shared = Shared() }) }",
-        "an 'isolated func' can only manipulate independent values",
+        registration ++ "\nclass Shared { func touch() {} } func main() { var shared = Shared(); let operation = start_operation(isolated func() { shared.touch() }) }",
+        "mutable value 'shared' cannot be captured by an 'isolated func'; bind an independent snapshot with 'let'",
+    );
+    try expectDeferredNativeError(
+        registration ++ "\nclass State { public static var count:int } func main() { let operation = start_operation(isolated func() { print(State.count) }) }",
+        "an 'isolated func' cannot access a 'static var'",
+    );
+}
+
+test "isolated validation follows worker-local callables and lifecycles" {
+    const registration =
+        \\public native resource Operation { drop discard_operation }
+        \\native func start_operation(callback:isolated func()) Operation
+        \\class State { public static var count:int }
+    ;
+    try expectDeferredNativeError(
+        registration ++ "\nclass Local { public init() { State.count++ } } func main() { let operation = start_operation(isolated func() { var local = Local() }) }",
+        "an 'isolated func' cannot access a 'static var'",
+    );
+    try expectDeferredNativeError(
+        registration ++ "\nclass Local { drop { State.count++ } } func main() { let operation = start_operation(isolated func() { var local = Local() }) }",
+        "an 'isolated func' cannot access a 'static var'",
+    );
+    try expectDeferredNativeError(
+        registration ++ "\nprotocol Touch { func touch() } class Local : Touch { public func touch() { State.count++ } } func main() { let operation = start_operation(isolated func() { var concrete = Local(); var value:Touch = concrete; value.touch() }) }",
+        "an 'isolated func' cannot access a 'static var'",
+    );
+    try expectDeferredNativeError(
+        registration ++ "\nfunc touch() { State.count++ } func main() { let operation = start_operation(isolated func() { var callback:func() = touch; callback() }) }",
+        "an 'isolated func' cannot access a 'static var'",
+    );
+    try expectDeferredNativeError(
+        registration ++ "\nfunc main() { let operation = start_operation(isolated func() { var callback = func() { State.count++ }; callback() }) }",
+        "an 'isolated func' cannot access a 'static var'",
     );
 }
 

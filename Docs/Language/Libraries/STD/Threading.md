@@ -83,12 +83,21 @@ handle typé se consomme une fois, soit par `complete()`, soit par
 `complete(func(T))`; le callback de soumission possède un handle d'attente
 distinct, dont `complete()` peut être répété.
 
-La copie initiale et le corps de `execute()` suivent les règles d'indépendance
-de Silex. Les structures et collections récursivement indépendantes sont
-admises ; les classes, protocoles dynamiques, références et ressources uniques
-ne le sont pas. Une exception native levée sur le worker est mémorisée puis
-relevée par un appel explicite à `complete`; la destruction du handle attend et
-libère toujours les données restantes sans lancer depuis un destructeur.
+La copie initiale suit les règles d'indépendance de Silex : seules des données
+récursivement indépendantes franchissent la frontière entre le thread appelant
+et le worker. Une référence de classe, un protocole dynamique, un emprunt ou une
+ressource unique ne peut donc pas être enfoui dans la tâche soumise.
+
+Le corps de `execute()` n'est pas limité à ces types transportables. Il peut
+créer, muter et détruire localement des classes, protocoles, callbacks,
+collections et ressources selon les règles ordinaires du langage. Par exemple,
+un `Randomizer.create()` construit dans `execute()` est confiné au worker et ne
+partage pas son état avec le thread appelant. L'accès à `static var` reste
+refusé, et un `static let` doit être récursivement indépendant.
+
+Une exception native levée sur le worker est mémorisée puis relevée par un appel
+explicite à `complete`; la destruction du handle attend et libère toujours les
+données restantes sans lancer depuis un destructeur.
 
 La composition publique — protocole, pool statique, surcharge de `submit`,
 handles et callbacks — est écrite dans `STD/Threading.sx`. Le C++ se limite à la

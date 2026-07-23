@@ -338,6 +338,7 @@ pub const Expression = struct {
 
     pub const ClassInitializer = struct {
         generated_name: []const u8,
+        constructor_index: usize,
         arguments: []const *Expression,
     };
 
@@ -543,6 +544,7 @@ pub const Structure = struct {
 
 pub const BaseInitializer = struct {
     generated_name: []const u8,
+    constructor_index: ?usize = null,
     arguments: []const *Expression,
 };
 
