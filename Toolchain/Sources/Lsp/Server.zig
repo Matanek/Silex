@@ -153,6 +153,7 @@ pub const Helpers = struct {
     pub const utf8SequenceLength = Completion.utf8SequenceLength;
     pub const isIdentifierContinue = Completion.isIdentifierContinue;
     pub const containsCompletion = Completion.containsCompletion;
+    pub const containsEquivalentCompletion = Completion.containsEquivalentCompletion;
     pub const expectSemanticTokenAt = Completion.expectSemanticTokenAt;
 };
 pub const Server = struct {
@@ -1154,12 +1155,13 @@ pub const Server = struct {
         var recovered_snapshot: ?Frontend.Snapshot = null;
         const snapshot = if (project.current) |*current|
             current
-        else if (project.last_success) |*previous| fallback: {
-            if (!self.fallbackAllowed(project, document.path)) return fallback_items;
-            break :fallback previous;
-        } else recovery: {
+        else recovery: {
             recovered_snapshot = try self.completionRecoverySnapshot(project.input_path, document, cursor);
             if (recovered_snapshot) |*recovered| break :recovery recovered;
+            if (project.last_success) |*previous| {
+                if (!self.fallbackAllowed(project, document.path)) return fallback_items;
+                break :recovery previous;
+            }
             return fallback_items;
         };
         const file = self.snapshotFile(snapshot, document.path) orelse return fallback_items;
@@ -1176,8 +1178,9 @@ pub const Server = struct {
             for (snapshot.index.symbols) |symbol| {
                 if (!std.mem.eql(u8, symbol.owner, owner.key) or symbol.is_static != owner.static) continue;
                 if (!self.symbolVisibleFromFile(snapshot, file, symbol)) continue;
-                if (self.containsCompletion(members.items, symbol.name)) continue;
-                try members.append(self.allocator, self.completionItemForSymbol(symbol));
+                const candidate = self.completionItemForSymbol(symbol);
+                if (self.containsEquivalentCompletion(members.items, candidate)) continue;
+                try members.append(self.allocator, candidate);
             }
             if (!owner.static) {
                 const owner_context = self.completionInsideOwnerCallable(snapshot, file, document.text, cursor, owner.key);
@@ -1191,16 +1194,17 @@ pub const Server = struct {
                     if (owner_source_name == null or !std.mem.eql(u8, structure.name, owner_source_name.?)) continue;
                     for (structure.methods) |method| {
                         if (method.type_parameters.len == 0 or method.is_static or
-                            (method.member_visibility != .public_access and !owner_context) or
-                            self.containsCompletion(members.items, method.name))
+                            (method.member_visibility != .public_access and !owner_context))
                         {
                             continue;
                         }
-                        try members.append(self.allocator, .{
+                        const candidate: CompletionItem = .{
                             .label = method.name,
                             .kind = 3,
                             .detail = try SymbolIndex.functionDetail(self.allocator, method),
-                        });
+                        };
+                        if (self.containsEquivalentCompletion(members.items, candidate)) continue;
+                        try members.append(self.allocator, candidate);
                     }
                     break;
                 }
@@ -1221,7 +1225,8 @@ pub const Server = struct {
             };
             if (local and (symbol.definition.file != file or self.positionAfter(symbol.definition, cursor_position))) continue;
             if (!local and !self.symbolVisibleFromFile(snapshot, file, symbol)) continue;
-            if (!self.containsCompletion(items.items, symbol.name)) try items.append(self.allocator, self.completionItemForSymbol(symbol));
+            const candidate = self.completionItemForSymbol(symbol);
+            if (!self.containsEquivalentCompletion(items.items, candidate)) try items.append(self.allocator, candidate);
         }
         return items.toOwnedSlice(self.allocator);
     }
@@ -1518,6 +1523,7 @@ pub const Server = struct {
     pub const utf8SequenceLength = Completion.utf8SequenceLength;
     pub const isIdentifierContinue = Completion.isIdentifierContinue;
     pub const containsCompletion = Completion.containsCompletion;
+    pub const containsEquivalentCompletion = Completion.containsEquivalentCompletion;
     pub const expectSemanticTokenAt = Completion.expectSemanticTokenAt;
     const RenameSpan = Features.RenameSpan;
     const SignatureCallee = Features.SignatureCallee;

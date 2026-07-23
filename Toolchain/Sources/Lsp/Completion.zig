@@ -189,7 +189,7 @@ pub fn moduleExportCompletionItems(
                     context.qualifier,
                     function.name,
                     3,
-                    "Silex public function",
+                    try SymbolIndex.functionDetail(allocator, function),
                 );
             }
         }
@@ -376,15 +376,16 @@ pub fn appendModuleExportCompletion(
     detail: []const u8,
 ) !void {
     const label = try std.fmt.allocPrint(allocator, "{s}.{s}", .{ qualifier, name });
-    if (self.containsCompletion(items.items, label)) return;
     const insertion = try allocator.dupe(u8, name);
-    try items.append(allocator, .{
+    const candidate: CompletionItem = .{
         .label = label,
         .kind = kind,
         .detail = detail,
         .insertText = insertion,
         .filterText = insertion,
-    });
+    };
+    if (self.containsEquivalentCompletion(items.items, candidate)) return;
+    try items.append(allocator, candidate);
 }
 
 pub fn unqualifiedModuleCompletionItems(
@@ -395,11 +396,11 @@ pub fn unqualifiedModuleCompletionItems(
     var items: std.ArrayList(CompletionItem) = .empty;
     for (qualified) |candidate| {
         const name = candidate.insertText orelse self.lastPathSegment(candidate.label);
-        if (self.containsCompletion(items.items, name)) continue;
         var item = candidate;
         item.label = name;
         item.insertText = name;
         item.filterText = name;
+        if (self.containsEquivalentCompletion(items.items, item)) continue;
         try items.append(allocator, item);
     }
     return items.toOwnedSlice(allocator);
@@ -567,11 +568,41 @@ pub fn importedTypeStaticCompletionItems(
     const target = self.visibleUseTarget(source, visible_name) orelse
         try self.usedModulePath(allocator, source, visible_name) orelse return null;
     const separator = std.mem.lastIndexOfScalar(u8, target, '.') orelse return null;
-    const module_path = target[0..separator];
     const type_name = target[separator + 1 ..];
     if (type_name.len == 0) return null;
     const source_path = try self.filePathFromUri(allocator, uri) orelse return null;
     const project_root = std.fs.path.dirname(source_path) orelse return null;
+
+    if (try staticCompletionItemsFromModule(
+        self,
+        allocator,
+        io,
+        project_root,
+        target,
+        type_name,
+        prefix,
+    )) |items| return items;
+
+    return staticCompletionItemsFromModule(
+        self,
+        allocator,
+        io,
+        project_root,
+        target[0..separator],
+        type_name,
+        prefix,
+    );
+}
+
+fn staticCompletionItemsFromModule(
+    self: anytype,
+    allocator: Allocator,
+    io: Io,
+    project_root: []const u8,
+    module_path: []const u8,
+    type_name: []const u8,
+    prefix: []const u8,
+) !?[]const CompletionItem {
     const module_root = try self.moduleCompletionRoot(allocator, io, project_root, module_path) orelse return null;
     const module_sources = try self.namespaceSourcePaths(allocator, io, module_root, module_path);
 
@@ -601,15 +632,14 @@ pub fn importedTypeStaticCompletionItems(
             }
             for (structure.methods) |method| {
                 if (!method.is_static or method.member_visibility != .public_access or
-                    !std.mem.startsWith(u8, method.name, prefix) or self.containsCompletion(items.items, method.name))
-                {
-                    continue;
-                }
-                try items.append(allocator, .{
+                    !std.mem.startsWith(u8, method.name, prefix)) continue;
+                const candidate: CompletionItem = .{
                     .label = method.name,
                     .kind = 3,
                     .detail = try SymbolIndex.functionDetail(allocator, method),
-                });
+                };
+                if (self.containsEquivalentCompletion(items.items, candidate)) continue;
+                try items.append(allocator, candidate);
             }
             return try items.toOwnedSlice(allocator);
         }
@@ -804,6 +834,7 @@ pub fn currentLambdaParameterType(
 const SelfCompletionScope = struct {
     opening: usize,
     depth: usize,
+    name: []const u8,
 };
 
 fn enclosingSelfCompletionScope(source: []const u8, cursor: usize) ?SelfCompletionScope {
@@ -811,6 +842,7 @@ fn enclosingSelfCompletionScope(source: []const u8, cursor: usize) ?SelfCompleti
     var depth: usize = 0;
     var expects_structure_name = false;
     var pending_structure = false;
+    var pending_structure_name: ?[]const u8 = null;
     var active_scope: ?SelfCompletionScope = null;
 
     while (true) {
@@ -820,18 +852,21 @@ fn enclosingSelfCompletionScope(source: []const u8, cursor: usize) ?SelfCompleti
             .keyword_struct, .keyword_class => {
                 expects_structure_name = true;
                 pending_structure = false;
+                pending_structure_name = null;
             },
             .identifier => {
                 if (expects_structure_name) {
                     expects_structure_name = false;
                     pending_structure = true;
+                    pending_structure_name = token.lexeme;
                 }
             },
             .left_brace => {
                 depth += 1;
                 if (pending_structure) {
-                    active_scope = .{ .opening = token.start, .depth = depth };
+                    active_scope = .{ .opening = token.start, .depth = depth, .name = pending_structure_name.? };
                     pending_structure = false;
+                    pending_structure_name = null;
                 }
             },
             .right_brace => {
@@ -856,6 +891,35 @@ pub fn currentSelfCompletionItems(
     prefix: []const u8,
 ) !?[]const CompletionItem {
     const scope = enclosingSelfCompletionScope(source, cursor) orelse return null;
+    const repaired = try self.blankLineAt(allocator, source, cursor);
+    var parser = ParserModule.Parser.init(allocator, repaired);
+    if (parser.parse() catch null) |program| {
+        for (program.structures) |structure| {
+            if (!std.mem.eql(u8, structure.name, scope.name)) continue;
+            var parsed_items: std.ArrayList(CompletionItem) = .empty;
+            for (structure.fields) |field| {
+                if (field.is_static or !std.mem.startsWith(u8, field.name, prefix) or
+                    self.containsCompletion(parsed_items.items, field.name)) continue;
+                try parsed_items.append(allocator, .{
+                    .label = field.name,
+                    .kind = 5,
+                    .detail = "Silex instance field",
+                });
+            }
+            for (structure.methods) |method| {
+                if (method.is_static or !std.mem.startsWith(u8, method.name, prefix)) continue;
+                const candidate: CompletionItem = .{
+                    .label = method.name,
+                    .kind = 3,
+                    .detail = try SymbolIndex.functionDetail(allocator, method),
+                };
+                if (self.containsEquivalentCompletion(parsed_items.items, candidate)) continue;
+                try parsed_items.append(allocator, candidate);
+            }
+            return try parsed_items.toOwnedSlice(allocator);
+        }
+    }
+
     var items: std.ArrayList(CompletionItem) = .empty;
     var lexer = LexerModule.Lexer.init(source);
     var depth: usize = 0;
@@ -1085,6 +1149,16 @@ pub fn isIdentifierContinue(_: anytype, character: u8) bool {
 
 pub fn containsCompletion(_: anytype, items: []const CompletionItem, label: []const u8) bool {
     for (items) |item| if (std.mem.eql(u8, item.label, label)) return true;
+    return false;
+}
+
+pub fn containsEquivalentCompletion(_: anytype, items: []const CompletionItem, candidate: CompletionItem) bool {
+    const callable = candidate.kind == 3 or candidate.kind == 4;
+    for (items) |item| {
+        if (!std.mem.eql(u8, item.label, candidate.label)) continue;
+        if (!callable or (item.kind != 3 and item.kind != 4)) return true;
+        if (std.mem.eql(u8, item.detail, candidate.detail)) return true;
+    }
     return false;
 }
 

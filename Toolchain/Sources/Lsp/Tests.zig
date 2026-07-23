@@ -60,6 +60,22 @@ const SignatureCallee = @import("Features.zig").SignatureCallee;
 const NamedArgumentContext = @import("Features.zig").NamedArgumentContext;
 const VisibleModule = @import("Features.zig").VisibleModule;
 const language_completions = @import("Completion.zig").language_completions;
+
+fn completionCount(items: []const CompletionItem, label: []const u8) usize {
+    var count: usize = 0;
+    for (items) |item| if (std.mem.eql(u8, item.label, label)) {
+        count += 1;
+    };
+    return count;
+}
+
+fn containsCompletionDetail(items: []const CompletionItem, label: []const u8, detail: []const u8) bool {
+    for (items) |item| {
+        if (std.mem.eql(u8, item.label, label) and std.mem.eql(u8, item.detail, detail)) return true;
+    }
+    return false;
+}
+
 test "syntax diagnostics use zero-based LSP positions" {
     const diagnostic = helpers.syntaxDiagnostic(std.testing.allocator, "func main() void {\n    let value =\n}").?;
     try std.testing.expectEqual(@as(usize, 2), diagnostic.range.start.line);
@@ -921,6 +937,13 @@ test "qualified completion lists local namespace children while the source is in
         .data = "public struct Vec3 {}\n",
     });
     try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Math.sx",
+        .data =
+        \\public func convert(value:int) int { return value }
+        \\public func convert(value:float) float { return value }
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Hidden/Secret.sx",
         .data = "struct Secret {}\n",
     });
@@ -941,6 +964,9 @@ test "qualified completion lists local namespace children while the source is in
     const request = try testRequestParams(allocator, uri, position, "");
     const completions = try server.completion(request);
     try std.testing.expect(helpers.containsCompletion(completions, "Vec3"));
+    try std.testing.expectEqual(@as(usize, 2), completionCount(completions, "convert"));
+    try std.testing.expect(containsCompletionDetail(completions, "convert", "public func convert(value:int):int"));
+    try std.testing.expect(containsCompletionDetail(completions, "convert", "public func convert(value:float):float"));
     try std.testing.expect(!helpers.containsCompletion(completions, "Secret"));
     try std.testing.expect(!helpers.containsCompletion(completions, "func"));
     for (completions) |completion| {
@@ -970,10 +996,12 @@ test "unqualified completion keeps type uses from the current invalid buffer" {
     const incomplete_source =
         \\use STD.Threading.Task
         \\use STD.Threading.TaskManager
+        \\use STD.Randomizer
         \\
         \\func main() {
         \\    var selected = Ta
         \\    var handle = TaskManager.su
+        \\    var random = Randomizer.
         \\    print(missing)
         \\}
     ;
@@ -1020,6 +1048,16 @@ test "unqualified completion keeps type uses from the current invalid buffer" {
     try std.testing.expect(!helpers.containsCompletion(static_completions, "create"));
     try std.testing.expect(!helpers.containsCompletion(static_completions, "func"));
 
+    const compact_type_cursor = (std.mem.indexOf(u8, incomplete_source, "Randomizer.") orelse return error.TestUnexpectedResult) + "Randomizer.".len;
+    const compact_type_position = helpers.encodedPositionAtByteOffset(incomplete_source, compact_type_cursor, .utf16).?;
+    const compact_type_request = try testRequestParams(allocator, uri, compact_type_position, "");
+    const compact_type_completions = try server.completion(compact_type_request);
+    try std.testing.expectEqual(@as(usize, 2), completionCount(compact_type_completions, "create"));
+    try std.testing.expect(containsCompletionDetail(compact_type_completions, "create", "static func create():Randomizer"));
+    try std.testing.expect(containsCompletionDetail(compact_type_completions, "create", "static func create(seed:int):Randomizer"));
+    try std.testing.expect(!helpers.containsCompletion(compact_type_completions, "get_int"));
+    try std.testing.expect(!helpers.containsCompletion(compact_type_completions, "func"));
+
     const aliased_source =
         \\use STD.Threading.Task
         \\use STD.Threading.TaskManager as Tasks
@@ -1052,6 +1090,35 @@ test "unqualified completion keeps type uses from the current invalid buffer" {
     const qualified_completions = try server.completion(qualified_request);
     try std.testing.expect(helpers.containsCompletion(qualified_completions, "submit"));
     try std.testing.expect(!helpers.containsCompletion(qualified_completions, "func"));
+
+    const inferred_instance_source =
+        \\use STD.Threading.Task
+        \\use STD.Randomizer
+        \\
+        \\struct MyTask:Task {
+        \\    var result:float
+        \\    func execute() {
+        \\        var r = Randomizer.create()
+        \\        self.result = r.
+        \\    }
+        \\}
+        \\
+        \\func main() {}
+    ;
+    try server.setDocument(uri, inferred_instance_source, 5);
+    const inferred_instance_cursor = (std.mem.indexOf(u8, inferred_instance_source, "self.result = r.") orelse return error.TestUnexpectedResult) + "self.result = r.".len;
+    const inferred_instance_position = helpers.encodedPositionAtByteOffset(inferred_instance_source, inferred_instance_cursor, .utf16).?;
+    const inferred_instance_request = try testRequestParams(allocator, uri, inferred_instance_position, "");
+    const inferred_instance_completions = try server.completion(inferred_instance_request);
+    try std.testing.expectEqual(@as(usize, 2), completionCount(inferred_instance_completions, "get_int"));
+    try std.testing.expect(containsCompletionDetail(inferred_instance_completions, "get_int", "func get_int():int"));
+    try std.testing.expect(containsCompletionDetail(inferred_instance_completions, "get_int", "func get_int(minimum:int, maximum:int):int"));
+    try std.testing.expectEqual(@as(usize, 2), completionCount(inferred_instance_completions, "get_float"));
+    try std.testing.expect(containsCompletionDetail(inferred_instance_completions, "get_float", "func get_float():float"));
+    try std.testing.expect(containsCompletionDetail(inferred_instance_completions, "get_float", "func get_float(minimum:float, maximum:float):float"));
+    try std.testing.expect(helpers.containsCompletion(inferred_instance_completions, "get_bool"));
+    try std.testing.expect(!helpers.containsCompletion(inferred_instance_completions, "create"));
+    try std.testing.expect(!helpers.containsCompletion(inferred_instance_completions, "func"));
 }
 
 test "self completion reads current struct and class members without a snapshot" {
@@ -1079,6 +1146,9 @@ test "self completion reads current struct and class members without a snapshot"
         \\    public static var total:int = 0
         \\    public func update() {
         \\        print(self.)
+        \\    }
+        \\    public func update(value:int) {
+        \\        self.count = value
         \\    }
         \\}
         \\func main() {
@@ -1108,7 +1178,9 @@ test "self completion reads current struct and class members without a snapshot"
     const class_request = try testRequestParams(allocator, uri, class_position, "");
     const class_completions = try server.completion(class_request);
     try std.testing.expect(helpers.containsCompletion(class_completions, "count"));
-    try std.testing.expect(helpers.containsCompletion(class_completions, "update"));
+    try std.testing.expectEqual(@as(usize, 2), completionCount(class_completions, "update"));
+    try std.testing.expect(containsCompletionDetail(class_completions, "update", "func update()"));
+    try std.testing.expect(containsCompletionDetail(class_completions, "update", "func update(value:int)"));
     try std.testing.expect(!helpers.containsCompletion(class_completions, "total"));
     try std.testing.expect(!helpers.containsCompletion(class_completions, "func"));
 }
@@ -1323,10 +1395,11 @@ test "member completion resolves a variable on a line added after the last snaps
     try temporary.dir.createDir(std.testing.io, "Math", .default_dir);
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Math/Vec3.sx",
-        .data = "public struct Vec3 {\n    var x:float\n    var y:float\n    var z:float\n\n    public func sum() float {\n        return self.x + self.y + self.z\n    }\n}\n",
+        .data = "public struct Vec3 {\n    var x:float\n    var y:float\n    var z:float\n\n    public func sum() float {\n        return self.x + self.y + self.z\n    }\n\n    public func sum(scale:float) float {\n        return (self.x + self.y + self.z) * scale\n    }\n}\n",
     });
-    const valid_source = "use Math\n\nfunc main() {\n    var v = Math.Vec3()\n}\n";
-    const incomplete_source = "use Math\n\nfunc main() {\n    var v = Math.Vec3()\n\n    print(v.)\n}\n";
+    const valid_source = "use Math\n\nfunc choose(value:int) int { return value }\nfunc choose(value:float) float { return value }\n\nfunc main() {\n    var v = Math.Vec3()\n}\n";
+    const incomplete_source = "use Math\n\nfunc choose(value:int) int { return value }\nfunc choose(value:float) float { return value }\n\nfunc main() {\n    var v = Math.Vec3()\n    var selected = cho\n\n    print(v.)\n}\n";
+    const cold_source = "use Math\n\nfunc choose(value:int) int { return value }\nfunc choose(value:float) float { return value }\n\nfunc main() {\n    var v = Math.Vec3()\n\n    print(v.)\n}\n";
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = valid_source });
     const relative_root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
     const main_path = try SourceGraph.canonicalPath(
@@ -1361,16 +1434,27 @@ test "member completion resolves a variable on a line added after the last snaps
     try std.testing.expect(helpers.containsCompletion(completions, "x"));
     try std.testing.expect(helpers.containsCompletion(completions, "y"));
     try std.testing.expect(helpers.containsCompletion(completions, "z"));
-    try std.testing.expect(helpers.containsCompletion(completions, "sum"));
+    try std.testing.expectEqual(@as(usize, 2), completionCount(completions, "sum"));
+    try std.testing.expect(containsCompletionDetail(completions, "sum", "func sum():float"));
+    try std.testing.expect(containsCompletionDetail(completions, "sum", "func sum(scale:float):float"));
     try std.testing.expect(!helpers.containsCompletion(completions, "func"));
 
+    const global_cursor = (std.mem.indexOf(u8, incomplete_source, "cho\n") orelse return error.TestUnexpectedResult) + "cho".len;
+    const global_position = helpers.encodedPositionAtByteOffset(incomplete_source, global_cursor, .utf16).?;
+    const global_request = try testRequestParams(allocator, uri, global_position, "");
+    const global_completions = try server.completion(global_request);
+    try std.testing.expectEqual(@as(usize, 2), completionCount(global_completions, "choose"));
+    try std.testing.expect(containsCompletionDetail(global_completions, "choose", "func choose(value:int):int"));
+    try std.testing.expect(containsCompletionDetail(global_completions, "choose", "func choose(value:float):float"));
+
+    try server.setDocument(uri, cold_source, 3);
     const failed_outcome = try Frontend.analyze(
         allocator,
         std.testing.io,
         &environ_map,
         main_path,
         .editor,
-        &.{.{ .path = main_path, .text = incomplete_source }},
+        &.{.{ .path = main_path, .text = cold_source }},
     );
     server.projects.items[0].last_success = null;
     server.projects.items[0].last_versions = &.{};
@@ -1378,11 +1462,14 @@ test "member completion resolves a variable on a line added after the last snaps
         .success => return error.TestUnexpectedResult,
         .failure => |failure| failure,
     };
-    const cold_completions = try server.completion(request);
+    const cold_cursor = (std.mem.indexOf(u8, cold_source, "v.") orelse return error.TestUnexpectedResult) + "v.".len;
+    const cold_position = helpers.encodedPositionAtByteOffset(cold_source, cold_cursor, .utf16).?;
+    const cold_request = try testRequestParams(allocator, uri, cold_position, "");
+    const cold_completions = try server.completion(cold_request);
     try std.testing.expect(helpers.containsCompletion(cold_completions, "x"));
     try std.testing.expect(helpers.containsCompletion(cold_completions, "y"));
     try std.testing.expect(helpers.containsCompletion(cold_completions, "z"));
-    try std.testing.expect(helpers.containsCompletion(cold_completions, "sum"));
+    try std.testing.expectEqual(@as(usize, 2), completionCount(cold_completions, "sum"));
     try std.testing.expect(!helpers.containsCompletion(cold_completions, "func"));
 }
 

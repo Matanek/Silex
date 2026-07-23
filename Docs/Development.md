@@ -121,11 +121,13 @@ help and rename:
   inside a named structure or implicit-class initializer, completion proposes
   the visible fields that have not already been supplied and inserts the
   canonical `field:` prefix rather than global language words;
-  when an incomplete member access is added on a new line, the receiver is
-  conservatively reattached to the unique variable, parameter or binding with
-  the same name in the same callable from the last valid snapshot; after a cold
-  restart on that incomplete source, the server builds the same bounded
-  recovery snapshot by blanking only the current line in memory;
+  when a completion request makes the current line incomplete, the server first
+  builds a bounded recovery snapshot by blanking only that line in memory. The
+  receiver is therefore resolved from the current imports, declarations and
+  inferred return types, including a variable added since the last valid
+  snapshot. Only when another error prevents that recovery does completion
+  conservatively reattach the receiver to the unique variable, parameter or
+  binding with the same name in the same callable from the last valid snapshot;
 - signature help uses the visible function, method, constructor or protocol
   requirement signatures and computes the active argument through nested
   calls;
