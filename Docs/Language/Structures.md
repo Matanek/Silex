@@ -170,8 +170,8 @@ Silex checks every concrete specialization with its ordinary type rules. One
 protocol can constrain a type parameter, for example
 `struct Box<T : Serializable>`. Only explicitly conforming arguments can create
 that specialization. Unconstrained parameters retain their existing behavior.
-Generic class declarations are not currently part of the language. Instance
-methods declared in a non-generic structure or class may have their own type
+Generic classes follow the same explicit-specialization rule. Instance methods
+declared in a non-generic structure or class may have their own type
 parameters, under the rules described in [Functions](Functions.md). Constraints
 are described in [Protocols](Protocols.md).
 
@@ -232,6 +232,10 @@ concurrency model, atomic access, or implicit synchronization for this storage.
 Structure static fields are public by default and accept explicit `public`,
 `internal`, or `private`. Class visibility and inheritance rules are described in
 [Classes](Classes.md).
+
+Structures, classes, and static classes may also be declared inside a
+structure. Their qualification, visibility, family access, and generic-owner
+rules are specified in [Nested types](NestedTypes.md).
 
 ## Methods
 

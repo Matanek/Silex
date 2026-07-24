@@ -141,6 +141,7 @@ pub const Helpers = struct {
     pub const currentLambdaParameterCompletionItems = Completion.currentLambdaParameterCompletionItems;
     pub const currentLambdaParameterType = Completion.currentLambdaParameterType;
     pub const currentSelfCompletionItems = Completion.currentSelfCompletionItems;
+    pub const currentGenericTypeCompletionItems = Completion.currentGenericTypeCompletionItems;
     pub const collectRootModules = Completion.collectRootModules;
     pub const filePathFromUri = Completion.filePathFromUri;
     pub const documentProjectRoot = Completion.documentProjectRoot;
@@ -1130,6 +1131,13 @@ pub const Server = struct {
                 null
         else
             null;
+        const generic_type_items = try self.currentGenericTypeCompletionItems(
+            self.allocator,
+            self.io,
+            uri,
+            document.text,
+            cursor,
+        );
 
         const base_items = if (namespace_qualified)
             &.{}
@@ -1146,7 +1154,7 @@ pub const Server = struct {
         if (!namespace_qualified) for (lambda_items) |item| {
             if (!self.containsCompletion(local_base_items.items, item.label)) try local_base_items.append(self.allocator, item);
         };
-        const fallback_items = self_items orelse imported_type_items orelse if (namespace_qualified)
+        const fallback_items = self_items orelse generic_type_items orelse imported_type_items orelse if (namespace_qualified)
             namespace_items
         else
             local_base_items.items;
@@ -1171,6 +1179,7 @@ pub const Server = struct {
         }
 
         if (self_items) |items| return items;
+        if (qualified_context == null) if (generic_type_items) |items| return items;
 
         if (try self.completionOwner(snapshot, file, document.text, cursor)) |owner| {
             var members: std.ArrayList(CompletionItem) = .empty;
@@ -1178,6 +1187,8 @@ pub const Server = struct {
             for (snapshot.index.symbols) |symbol| {
                 if (!std.mem.eql(u8, symbol.owner, owner.key) or symbol.is_static != owner.static) continue;
                 if (!self.symbolVisibleFromFile(snapshot, file, symbol)) continue;
+                if (symbol.owner.len != 0 and
+                    !self.memberCompletionVisible(snapshot, file, document.text, cursor, symbol)) continue;
                 const candidate = self.completionItemForSymbol(symbol);
                 if (self.containsEquivalentCompletion(members.items, candidate)) continue;
                 try members.append(self.allocator, candidate);
@@ -1211,6 +1222,7 @@ pub const Server = struct {
             }
             return members.toOwnedSlice(self.allocator);
         }
+        if (generic_type_items) |items| return items;
         if (imported_type_items) |items| return items;
         if (namespace_qualified) return namespace_items;
 
@@ -1315,6 +1327,9 @@ pub const Server = struct {
         source: []const u8,
         cursor: usize,
     ) !?CompletionOwner {
+        if (try Completion.genericTypeCompletionContext(self.allocator, source, cursor)) |context| {
+            if (self.completionTypeOwnerByPath(snapshot, file, source, cursor, context.path)) |owner| return owner;
+        }
         var dot = @min(cursor, source.len);
         while (dot > 0 and (std.ascii.isWhitespace(source[dot - 1]) or self.isIdentifierContinue(source[dot - 1]))) dot -= 1;
         if (dot == 0 or source[dot - 1] != '.') return null;
@@ -1323,6 +1338,11 @@ pub const Server = struct {
         var start = end;
         while (start > 0 and self.isIdentifierContinue(source[start - 1])) start -= 1;
         if (start == end) return null;
+        var chain_start = start;
+        while (chain_start > 0 and (self.isIdentifierContinue(source[chain_start - 1]) or source[chain_start - 1] == '.')) chain_start -= 1;
+        if (std.mem.indexOfScalar(u8, source[chain_start..end], '.') != null) {
+            if (self.completionTypeOwnerByPath(snapshot, file, source, cursor, source[chain_start..end])) |owner| return owner;
+        }
         const position = self.sourcePositionAtByteOffset(source, file, start);
         var type_name: ?[]const u8 = null;
         if (snapshot.index.occurrenceAt(file, position.line, position.column)) |occurrence| {
@@ -1342,6 +1362,147 @@ pub const Server = struct {
             }
         }
         return null;
+    }
+
+    fn completionTypeOwnerByPath(
+        self: *Server,
+        snapshot: *const Frontend.Snapshot,
+        file: usize,
+        source: []const u8,
+        cursor: usize,
+        path: []const u8,
+    ) ?CompletionOwner {
+        var segments = std.mem.splitScalar(u8, path, '.');
+        const root_name = segments.next() orelse return null;
+        var current: ?SymbolIndex.Symbol = null;
+        for (snapshot.index.symbols) |symbol| {
+            if (symbol.kind != .type or symbol.owner.len != 0 or !std.mem.eql(u8, symbol.name, root_name) or
+                !self.symbolVisibleFromFile(snapshot, file, symbol)) continue;
+            if (current != null) return null;
+            current = symbol;
+        }
+        while (segments.next()) |segment| {
+            const owner = current orelse return null;
+            var nested: ?SymbolIndex.Symbol = null;
+            for (snapshot.index.symbols) |symbol| {
+                if (symbol.kind != .type or !std.mem.eql(u8, symbol.owner, owner.key) or
+                    !std.mem.eql(u8, symbol.name, segment) or
+                    !self.memberCompletionVisible(snapshot, file, source, cursor, symbol)) continue;
+                if (nested != null) return null;
+                nested = symbol;
+            }
+            current = nested;
+        }
+        const result = current orelse return null;
+        return .{ .key = result.key, .static = true };
+    }
+
+    fn memberCompletionVisible(
+        self: *Server,
+        snapshot: *const Frontend.Snapshot,
+        file: usize,
+        source: []const u8,
+        cursor: usize,
+        symbol: SymbolIndex.Symbol,
+    ) bool {
+        const visibility = symbol.visibility orelse return self.symbolVisibleFromFile(snapshot, file, symbol);
+        return switch (visibility) {
+            .public_access => self.symbolVisibleFromFile(snapshot, file, symbol),
+            .internal_access => symbol.definition.file == file,
+            .private_access, .subclass => {
+                const current_root = self.enclosingTypeRootKey(snapshot, file, source, cursor) orelse return false;
+                const target_root = self.rootTypeKey(snapshot, symbol.owner) orelse return false;
+                if (std.mem.eql(u8, current_root, target_root)) return true;
+                return visibility == .subclass and self.typeKeyDescendsFrom(snapshot, current_root, target_root);
+            },
+        };
+    }
+
+    fn rootTypeKey(_: *Server, snapshot: *const Frontend.Snapshot, key: []const u8) ?[]const u8 {
+        var current = key;
+        while (true) {
+            var found: ?SymbolIndex.Symbol = null;
+            for (snapshot.index.symbols) |symbol| {
+                if (symbol.kind == .type and std.mem.eql(u8, symbol.key, current)) {
+                    found = symbol;
+                    break;
+                }
+            }
+            const symbol = found orelse return null;
+            if (symbol.owner.len == 0) return symbol.key;
+            current = symbol.owner;
+        }
+    }
+
+    fn enclosingTypeRootKey(
+        self: *Server,
+        snapshot: *const Frontend.Snapshot,
+        file: usize,
+        source: []const u8,
+        cursor: usize,
+    ) ?[]const u8 {
+        var lexer = LexerModule.Lexer.init(source);
+        var depth: usize = 0;
+        var expects_name = false;
+        var pending_name: ?[]const u8 = null;
+        var type_depths: std.ArrayList(usize) = .empty;
+        var type_names: std.ArrayList([]const u8) = .empty;
+        while (true) {
+            const token = lexer.next() catch return null;
+            if (token.tag == .end or token.start >= cursor) break;
+            switch (token.tag) {
+                .keyword_class, .keyword_struct => expects_name = true,
+                .identifier => if (expects_name) {
+                    pending_name = token.lexeme;
+                    expects_name = false;
+                },
+                .left_brace => {
+                    depth += 1;
+                    if (pending_name) |name| {
+                        type_depths.append(self.allocator, depth) catch return null;
+                        type_names.append(self.allocator, name) catch return null;
+                        pending_name = null;
+                    }
+                },
+                .right_brace => {
+                    if (type_depths.items.len != 0 and type_depths.items[type_depths.items.len - 1] == depth) {
+                        _ = type_depths.pop();
+                        _ = type_names.pop();
+                    }
+                    depth -|= 1;
+                },
+                else => {},
+            }
+        }
+        if (type_names.items.len == 0) return null;
+        const root_name = type_names.items[0];
+        var match: ?[]const u8 = null;
+        for (snapshot.index.symbols) |symbol| {
+            if (symbol.kind != .type or symbol.owner.len != 0 or symbol.definition.file != file or
+                !std.mem.eql(u8, symbol.name, root_name)) continue;
+            if (match != null) return null;
+            match = symbol.key;
+        }
+        return match;
+    }
+
+    fn typeKeyDescendsFrom(
+        _: *Server,
+        snapshot: *const Frontend.Snapshot,
+        candidate_key: []const u8,
+        ancestor_key: []const u8,
+    ) bool {
+        var current = candidate_key;
+        while (true) {
+            var base: ?[]const u8 = null;
+            for (snapshot.program.structures) |structure| {
+                if (!std.mem.eql(u8, structure.generated_name, current)) continue;
+                base = if (structure.base) |value| value.generated_name else null;
+                break;
+            }
+            current = base orelse return false;
+            if (std.mem.eql(u8, current, ancestor_key)) return true;
+        }
     }
 
     pub fn signatureHelp(self: *Server, params: std.json.Value) !SignatureHelpResult {
@@ -1511,6 +1672,7 @@ pub const Server = struct {
     pub const currentLambdaParameterCompletionItems = Completion.currentLambdaParameterCompletionItems;
     pub const currentLambdaParameterType = Completion.currentLambdaParameterType;
     pub const currentSelfCompletionItems = Completion.currentSelfCompletionItems;
+    pub const currentGenericTypeCompletionItems = Completion.currentGenericTypeCompletionItems;
     pub const collectRootModules = Completion.collectRootModules;
     pub const filePathFromUri = Completion.filePathFromUri;
     pub const documentProjectRoot = Completion.documentProjectRoot;

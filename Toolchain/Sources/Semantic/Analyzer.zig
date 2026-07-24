@@ -458,6 +458,7 @@ pub const Analyzer = struct {
     pub const implicitBaseInitialization = Resolution.implicitBaseInitialization;
     pub const memberVisibleFromCurrentContext = Resolution.memberVisibleFromCurrentContext;
     pub const memberVisibleFrom = Resolution.memberVisibleFrom;
+    pub const sameNestingFamily = Resolution.sameNestingFamily;
     pub const isDescendantOf = Resolution.isDescendantOf;
     pub const requireFieldAccess = Resolution.requireFieldAccess;
     pub const uniqueOwnerStorageVisible = Resolution.uniqueOwnerStorageVisible;

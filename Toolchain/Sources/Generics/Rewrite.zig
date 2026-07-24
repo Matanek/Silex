@@ -91,6 +91,18 @@ pub fn rewriteStructure(
 
     var result = structure;
     result.type_parameters = &.{};
+    if (structure.base) |base| {
+        if (base.type_arguments.len != 0) {
+            const rewritten = try self.rewriteType(.{ .generic_structure = .{
+                .name = base.name,
+                .arguments = base.type_arguments,
+            } }, bindings, base.position);
+            result.base = .{
+                .name = rewritten.structure,
+                .position = base.position,
+            };
+        }
+    }
     result.fields = try fields.toOwnedSlice(self.allocator);
     result.constructors = try constructors.toOwnedSlice(self.allocator);
     if (structure.drop) |drop| result.drop = .{
@@ -311,6 +323,16 @@ pub fn instantiate(
 
     var concrete = try self.rewriteStructure(template.*, bindings);
     concrete.name = name;
+    if (template.owner_name) |owner_template_name| {
+        concrete.owner_name = if (self.findTemplate(owner_template_name)) |owner_template|
+            try self.instantiate(
+                owner_template_name,
+                arguments[0..owner_template.type_parameters.len],
+                position,
+            )
+        else
+            owner_template_name;
+    }
     concrete.type_parameters = &.{};
     try self.structures.append(self.allocator, concrete);
     self.structure_specializations.items[specialization_index].state = .done;

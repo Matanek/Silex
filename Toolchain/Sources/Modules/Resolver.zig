@@ -41,6 +41,7 @@ pub const Resolver = struct {
     file_infos: []FileInfo = &.{},
     local_scopes: std.ArrayList(std.ArrayList([]const u8)) = .empty,
     current_type_parameters: []const Ast.TypeParameter = &.{},
+    current_structure_declaration: ?*const Declaration = null,
     alias_stack: std.ArrayList(*const Declaration) = .empty,
     diagnostic: ?Source.Diagnostic = null,
 
@@ -72,9 +73,7 @@ pub const Resolver = struct {
                 for (file.program.protocols) |protocol| {
                     try protocols.append(self.allocator, try self.transformProtocol(protocol));
                 }
-                for (file.program.structures) |structure| {
-                    try structures.append(self.allocator, try self.transformStructure(structure));
-                }
+                for (file.program.structures) |structure| try self.transformStructureTree(structure, &.{}, &structures);
                 for (file.program.functions) |function| {
                     try functions.append(self.allocator, try self.transformFunction(function));
                 }
@@ -122,6 +121,7 @@ pub const Resolver = struct {
     pub const transformExtension = Declarations.transformExtension;
     pub const extensionVisibleFiles = Declarations.extensionVisibleFiles;
     pub const collectDeclarations = Declarations.collectDeclarations;
+    pub const collectStructureDeclaration = Declarations.collectStructureDeclaration;
     pub const addDeclaration = Declarations.addDeclaration;
     pub const addDeclarationWithCanonical = Declarations.addDeclarationWithCanonical;
     pub const collectModuleBindings = Declarations.collectModuleBindings;
@@ -139,6 +139,7 @@ pub const Resolver = struct {
     pub const validateNamespaceCollisions = Declarations.validateNamespaceCollisions;
     pub const validatePrincipalMemberCollision = Declarations.validatePrincipalMemberCollision;
     pub const transformStructure = Transform.transformStructure;
+    pub const transformStructureTree = Transform.transformStructureTree;
     pub const transformProtocol = Transform.transformProtocol;
     pub const transformEnum = Transform.transformEnum;
     pub const transformFunction = Transform.transformFunction;
@@ -168,6 +169,10 @@ pub const Resolver = struct {
     pub const validatePublicInputs = Visibility.validatePublicInputs;
     pub const validateCallableInputs = Visibility.validateCallableInputs;
     pub const failInternalInput = Visibility.failInternalInput;
+    pub const hiddenInputTypeDeclaration = Visibility.hiddenInputTypeDeclaration;
+    pub const hiddenInputReturnDeclaration = Visibility.hiddenInputReturnDeclaration;
+    pub const hiddenInputNamedDeclaration = Visibility.hiddenInputNamedDeclaration;
+    pub const declarationExternallyVisible = Visibility.declarationExternallyVisible;
     pub const internalTypeDeclaration = Visibility.internalTypeDeclaration;
     pub const internalReturnDeclaration = Visibility.internalReturnDeclaration;
     pub const internalNamedDeclaration = Visibility.internalNamedDeclaration;
@@ -176,6 +181,7 @@ pub const Resolver = struct {
     pub const staticOwnerType = Resolution.staticOwnerType;
     pub const looksQualified = Resolution.looksQualified;
     pub const visibleDeclarationKind = Resolution.visibleDeclarationKind;
+    pub const inaccessibleNestedType = Resolution.inaccessibleNestedType;
     pub const visibleFunctionDeclarations = Resolution.visibleFunctionDeclarations;
     pub const resolveName = Resolution.resolveName;
     pub const resolveQualified = Resolution.resolveQualified;
@@ -191,6 +197,10 @@ pub const Resolver = struct {
     pub const declarationsNamedVisibleFrom = Resolution.declarationsNamedVisibleFrom;
     pub const findDirect = Resolution.findDirect;
     pub const findDirectVisibleFrom = Resolution.findDirectVisibleFrom;
+    pub const findLexicalDeclaration = Resolution.findLexicalDeclaration;
+    pub const findUsedNestedDeclaration = Resolution.findUsedNestedDeclaration;
+    pub const declarationVisibleFrom = Resolution.declarationVisibleFrom;
+    pub const declarationDescendsFrom = Resolution.declarationDescendsFrom;
     pub const findDirectByPosition = Resolution.findDirectByPosition;
     pub const declarationIsClass = Resolution.declarationIsClass;
     pub const declarationIsStaticClass = Resolution.declarationIsStaticClass;

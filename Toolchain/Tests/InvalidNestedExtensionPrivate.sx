@@ -1,0 +1,13 @@
+class Factory {
+    public class Token {
+        private var value:int
+    }
+}
+
+extend Factory.Token {
+    public func reveal() int {
+        return self.value
+    }
+}
+
+func main() {}

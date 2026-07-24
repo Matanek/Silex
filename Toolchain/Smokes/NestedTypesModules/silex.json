@@ -1,0 +1,7 @@
+{
+  "target": "NestedTypesModules.App.Main",
+  "modules": [
+    { "name": "NestedTypesModules", "sources": ["Library.sx"] },
+    { "name": "NestedTypesModules.App", "sources": ["Main.sx"] }
+  ]
+}

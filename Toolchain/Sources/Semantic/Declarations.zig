@@ -539,6 +539,7 @@ pub fn collectStructureNames(self: anytype, ast_structures: []const Ast.Structur
             .native_drop_symbol = if (drop_qualified_name) |name| try nativeSymbol(self.allocator, name) else null,
             .is_generic = ast_structure.type_parameters.len != 0 or
                 std.mem.indexOfScalar(u8, ast_structure.name, '<') != null,
+            .owner_index = if (ast_structure.owner_name) |owner_name| self.findStructureIndex(owner_name) else null,
             .module_files = ast_structure.module_files,
             .base_index = null,
             .protocol_conformances = &.{},

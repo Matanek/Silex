@@ -1,0 +1,11 @@
+use NestedTypesModules.Library.Container
+use NestedTypesModules.Library.Container.Value as Value
+use NestedTypesModules.Library.Box
+
+func main() {
+    var qualified = Container.Value(3)
+    var aliased = Value(4)
+    var marker = Box<int>.Entry<str>.Marker()
+    assert(qualified.get() + aliased.get() == 7, "public nested type across modules")
+    print("nested type modules")
+}

@@ -1,0 +1,7 @@
+class Factory {
+    class Token {}
+}
+
+func main() {
+    var token = Factory.Token()
+}

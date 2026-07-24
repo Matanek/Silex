@@ -1,0 +1,6 @@
+class Factory {
+    static var Token:int
+    class Token {}
+}
+
+func main() {}

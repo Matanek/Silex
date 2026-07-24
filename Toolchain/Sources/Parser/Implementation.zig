@@ -389,10 +389,19 @@ pub const Parser = struct {
             var first = true;
             while (true) {
                 const relation_position = self.current.position;
-                const relation_name = try self.parseQualifiedName("expected base class or protocol name after ':'");
                 if (is_class and first) {
-                    base = .{ .name = relation_name, .position = relation_position };
+                    const relation_type = try self.parseTypeNameAfter("expected base class or protocol name after ':'");
+                    base = switch (relation_type) {
+                        .structure => |relation_name| .{ .name = relation_name, .position = relation_position },
+                        .generic_structure => |generic| .{
+                            .name = generic.name,
+                            .position = relation_position,
+                            .type_arguments = generic.arguments,
+                        },
+                        else => return self.failAt(relation_position, "a base class must be a named type"),
+                    };
                 } else {
+                    const relation_name = try self.parseQualifiedName("expected base class or protocol name after ':'");
                     try conformances.append(self.allocator, .{ .name = relation_name, .position = relation_position });
                 }
                 first = false;
@@ -402,6 +411,7 @@ pub const Parser = struct {
         }
         try self.expect(.left_brace, "expected '{'");
         var fields: std.ArrayList(Ast.StructureField) = .empty;
+        var structures: std.ArrayList(Ast.Structure) = .empty;
         var constructors: std.ArrayList(Ast.Constructor) = .empty;
         var drop: ?Ast.Drop = null;
         var methods: std.ArrayList(Ast.Function) = .empty;
@@ -445,9 +455,25 @@ pub const Parser = struct {
                     "a static method cannot use 'override'"
                 else
                     "a static field cannot use 'override'");
-                if (self.current.tag != .keyword_func and self.current.tag != .keyword_let and self.current.tag != .keyword_var) {
-                    return self.fail("expected 'func', 'let', or 'var' after 'static'");
+                if (self.current.tag != .keyword_func and self.current.tag != .keyword_let and self.current.tag != .keyword_var and
+                    self.current.tag != .keyword_class)
+                {
+                    return self.fail("expected 'class', 'func', 'let', or 'var' after 'static'");
                 }
+            }
+            if (self.current.tag == .keyword_struct or self.current.tag == .keyword_class) {
+                if (is_override) return self.fail("'override' cannot apply to a nested type");
+                if (visibility == .subclass and self.current.tag == .keyword_struct) {
+                    return self.fail("a nested struct cannot use 'protected' because structs do not support inheritance");
+                }
+                if (visibility == .subclass and is_static) {
+                    return self.fail("a nested static class cannot use 'protected'");
+                }
+                var nested = try self.parseStructure(false, false, is_static);
+                nested.member_visibility = visibility;
+                nested.owner_name = name;
+                try structures.append(self.allocator, nested);
+                continue;
             }
             if (self.current.tag == .keyword_func) {
                 var method = try self.parseFunction(false, false);
@@ -550,6 +576,7 @@ pub const Parser = struct {
             .type_parameters = type_parameters,
             .base = base,
             .conformances = try conformances.toOwnedSlice(self.allocator),
+            .structures = try structures.toOwnedSlice(self.allocator),
             .fields = try fields.toOwnedSlice(self.allocator),
             .constructors = try constructors.toOwnedSlice(self.allocator),
             .drop = drop,
@@ -906,13 +933,25 @@ pub const Parser = struct {
             if (self.current.tag != .keyword_func) return self.fail("expected 'func' after 'isolated'");
             break :isolated try self.parseFunctionType(false, true);
         } else if (self.current.tag == .identifier) named: {
-            const name = try self.parseQualifiedName(message);
-            if (self.current.tag == .less) {
-                break :named .{ .generic_structure = .{
-                    .name = name,
-                    .arguments = try self.parseTypeArguments(name),
-                } };
+            var name: []const u8 = "";
+            var arguments: std.ArrayList(Ast.TypeName) = .empty;
+            while (true) {
+                if (self.current.tag != .identifier) return self.fail(message);
+                name = if (name.len == 0)
+                    self.current.lexeme
+                else
+                    try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ name, self.current.lexeme });
+                try self.advance();
+                if (self.current.tag == .less) {
+                    try arguments.appendSlice(self.allocator, try self.parseTypeArguments(name));
+                }
+                if (self.current.tag != .dot) break;
+                try self.advance();
             }
+            if (arguments.items.len != 0) break :named .{ .generic_structure = .{
+                .name = name,
+                .arguments = try arguments.toOwnedSlice(self.allocator),
+            } };
             break :named .{ .structure = name };
         } else switch (self.current.tag) {
             .keyword_int => .int,

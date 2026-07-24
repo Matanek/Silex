@@ -1,0 +1,125 @@
+class Box<T> {
+    private static var count:int = 1
+
+    public class Entry<U> {
+        public struct Marker {
+            let value:T
+        }
+
+        let left:T
+        let right:U
+
+        public init(left:T, right:U) {
+            self.left = left
+            self.right = right
+        }
+
+        public func first() T {
+            return self.left
+        }
+
+        public func outer_count() int {
+            return Box<T>.count
+        }
+    }
+}
+
+protocol Labelled {
+    func label() str
+}
+
+class Family {
+    internal struct Local {
+        let value:int
+    }
+
+    public class Parent {
+        public func inherited() int {
+            return 3
+        }
+    }
+
+    public struct Item:Labelled {
+        let value:int
+
+        public func label() str {
+            return "item"
+        }
+    }
+
+    public static class Numbers {
+        public static func one() int {
+            return 1
+        }
+    }
+}
+
+class Descendant:Family.Parent {}
+
+class GenericFamily<T> {
+    public class Parent<U> {
+        public func marker() T {
+            return 8
+        }
+    }
+}
+
+class GenericDescendant:GenericFamily<int>.Parent<str> {}
+
+extend Family.Item {
+    public func doubled() int {
+        return self.value * 2
+    }
+}
+
+use Family.Item as Item
+
+func label_of<T:Labelled>(value:T) str {
+    return value.label()
+}
+
+class Base {
+    protected class Token {
+        public init() {}
+    }
+}
+
+class Child:Base {
+    public static func make() Base.Token {
+        return Base.Token()
+    }
+}
+
+public class Factory {
+    private class Output {
+        public func value() int {
+            return 7
+        }
+    }
+
+    public static func make() Output {
+        return Output()
+    }
+}
+
+func main() {
+    var entry:Box<int>.Entry<str> = Box<int>.Entry<str>(1, "one")
+    var marker = Box<int>.Entry<str>.Marker(value:2)
+    assert(entry.first() == 1, "outer generic argument")
+    assert(entry.outer_count() == 1, "nesting family access")
+    assert(marker.value == 2, "deep generic nesting")
+    var local = Family.Local(value:4)
+    assert(local.value == 4, "internal nested type in its source file")
+    var child = Descendant()
+    assert(child.inherited() == 3, "nested base class")
+    var generic_child = GenericDescendant()
+    assert(generic_child.marker() == 8, "generic nested base class")
+    var item:Item = Item(value:5)
+    assert(item.doubled() == 10, "nested extension target")
+    assert(label_of(item) == "item", "nested protocol conformance and constraint")
+    assert(Family.Numbers.one() == 1, "nested static class")
+    var token = Child.make()
+    var result = Factory.make()
+    assert(result.value() == 7, "opaque nested return")
+    print("nested types")
+}

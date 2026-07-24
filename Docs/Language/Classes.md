@@ -8,6 +8,11 @@ one storage instance, and those fields are destroyed exactly once when that
 instance dies. The class's own `drop` runs before its fields, which then follow
 reverse declaration order.
 
+A class may contain nested structures, classes, and static classes. A nested
+class is private by default and all types in the same nesting family share
+private access. See [Nested types](NestedTypes.md) for qualification,
+visibility, generic owners, and opaque inferred results.
+
 ```sx
 class Player {
     var health:int = 100

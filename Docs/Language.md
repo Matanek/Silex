@@ -18,6 +18,7 @@ files use the `.sx` extension; `silex` is the compiler command.
 - [Control flow](Language/Control-Flow.md)
 - [Structures](Language/Structures.md)
 - [Classes](Language/Classes.md)
+- [Nested types](Language/NestedTypes.md)
 - [Protocols](Language/Protocols.md)
 - [Type extensions](Language/Extensions.md)
 - [Modules](Language/Modules.md)

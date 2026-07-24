@@ -241,6 +241,15 @@ const Builder = struct {
             );
             self.symbols.items[structure_id].is_public = ast_structure.is_public;
             self.symbols.items[structure_id].is_internal = ast_structure.is_internal;
+            if (ast_structure.owner_name) |owner_name| {
+                for (program.structures) |candidate| {
+                    if (!std.mem.eql(u8, candidate.source_name, owner_name)) continue;
+                    self.symbols.items[structure_id].owner = candidate.generated_name;
+                    self.symbols.items[structure_id].is_static = true;
+                    self.symbols.items[structure_id].visibility = ast_structure.member_visibility;
+                    break;
+                }
+            }
             for (ast_structure.fields) |ast_field| {
                 const fields = if (ast_field.is_static) structure.static_fields else structure.fields;
                 for (fields) |field| {
@@ -324,16 +333,24 @@ const Builder = struct {
     }
 
     fn declarationKind(self: *const Builder, current_module: usize, path: []const u8) ?Kind {
-        const target_module, const name = if (self.moduleIndexNamed(path)) |module_index|
-            .{ module_index, sourceSpelling(path) }
-        else if (std.mem.lastIndexOfScalar(u8, path, '.')) |separator|
-            .{ self.moduleIndexNamed(path[0..separator]) orelse return null, path[separator + 1 ..] }
-        else
-            .{ current_module, path };
+        var target_module = current_module;
+        var name = path;
+        var module_name_length: usize = 0;
+        if (self.moduleIndexNamed(path)) |module_index| {
+            target_module = module_index;
+            name = sourceSpelling(path);
+            module_name_length = path.len;
+        } else for (self.project.modules, 0..) |module, module_index| {
+            if (module.name.len <= module_name_length or path.len <= module.name.len or
+                !std.mem.startsWith(u8, path, module.name) or path[module.name.len] != '.') continue;
+            target_module = module_index;
+            module_name_length = module.name.len;
+            name = path[module.name.len + 1 ..];
+        }
         var result: ?Kind = null;
         for (self.files) |file| {
             if (file.module_index != target_module) continue;
-            for (file.program.structures) |value| if (std.mem.eql(u8, sourceSpelling(value.name), name))
+            if (astStructureAtPath(file.program.structures, name) != null)
                 trySetDeclarationKind(&result, .type) catch return null;
             for (file.program.enums) |value| if (std.mem.eql(u8, sourceSpelling(value.name), name))
                 trySetDeclarationKind(&result, .enumeration) catch return null;
@@ -734,6 +751,17 @@ pub fn build(
 fn structureIndex(structures: []const Semantic.Structure, generated_name: []const u8) ?usize {
     for (structures, 0..) |structure, index| {
         if (std.mem.eql(u8, structure.generated_name, generated_name)) return index;
+    }
+    return null;
+}
+
+fn astStructureAtPath(structures: []const Ast.Structure, path: []const u8) ?*const Ast.Structure {
+    const separator = std.mem.indexOfScalar(u8, path, '.');
+    const name = if (separator) |index| path[0..index] else path;
+    for (structures) |*structure| {
+        if (!std.mem.eql(u8, structure.name, name)) continue;
+        if (separator) |index| return astStructureAtPath(structure.structures, path[index + 1 ..]);
+        return structure;
     }
     return null;
 }

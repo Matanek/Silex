@@ -26,21 +26,21 @@ internal native func native_complete_result<T>(
     callback:func(T)
 ) void
 
-internal class TaskPool {
-    let native:NativeTaskManager
-
-    init() {
-        let processors = native_logical_processor_count()
-        var workers = processors - 1
-        if workers < 1 {
-            workers = 1
-        }
-        let native = native_create_manager(workers)
-        self.native = move native
-    }
-}
-
 public static class TaskManager {
+    private class TaskPool {
+        let native:NativeTaskManager
+
+        init() {
+            let processors = native_logical_processor_count()
+            var workers = processors - 1
+            if workers < 1 {
+                workers = 1
+            }
+            let native = native_create_manager(workers)
+            self.native = move native
+        }
+    }
+
     static var shared:TaskPool?
 
     static func pool() TaskPool {

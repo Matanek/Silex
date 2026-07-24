@@ -9,7 +9,7 @@ pub fn validatePublicInputs(self: anytype, program: Ast.Program) !void {
     for (program.enums) |enumeration| {
         if (!enumeration.is_public) continue;
         for (enumeration.variants) |variant| for (variant.associated_types) |associated_type| {
-            if (self.internalTypeDeclaration(associated_type)) |declaration| {
+            if (self.hiddenInputTypeDeclaration(associated_type)) |declaration| {
                 return self.failInternalInput("public enum", enumeration.name, declaration, variant.position);
             }
         };
@@ -18,7 +18,7 @@ pub fn validatePublicInputs(self: anytype, program: Ast.Program) !void {
         if (!protocol.is_public) continue;
         for (protocol.requirements) |requirement| {
             try self.validateCallableInputs("public protocol method", requirement.name, requirement.parameters);
-            if (self.internalReturnDeclaration(requirement.return_type)) |declaration| {
+            if (self.hiddenInputReturnDeclaration(requirement.return_type)) |declaration| {
                 return self.failInternalInput("public protocol method", requirement.name, declaration, requirement.position);
             }
         }
@@ -27,7 +27,7 @@ pub fn validatePublicInputs(self: anytype, program: Ast.Program) !void {
         if (!structure.is_public) continue;
         for (structure.fields) |field| {
             if (field.visibility != .public_access) continue;
-            if (self.internalTypeDeclaration(field.type)) |declaration| {
+            if (self.hiddenInputTypeDeclaration(field.type)) |declaration| {
                 return self.failInternalInput("public field", field.name, declaration, field.position);
             }
         }
@@ -53,7 +53,7 @@ pub fn validateCallableInputs(
     parameters: []const Ast.Parameter,
 ) !void {
     for (parameters) |parameter| {
-        if (self.internalTypeDeclaration(parameter.type)) |declaration| {
+        if (self.hiddenInputTypeDeclaration(parameter.type)) |declaration| {
             return self.failInternalInput(callable_kind, callable_name, declaration, parameter.position);
         }
     }
@@ -66,12 +66,80 @@ pub fn failInternalInput(
     declaration: *const Declaration,
     position: Source.Position,
 ) (Source.Error || Allocator.Error) {
-    const message = try std.fmt.allocPrint(
-        self.allocator,
-        "{s} '{s}' cannot expose internal input type '{s}'",
-        .{ callable_kind, callable_name, declaration.source_name },
-    );
+    const message = if (declaration.is_internal)
+        try std.fmt.allocPrint(
+            self.allocator,
+            "{s} '{s}' cannot expose internal input type '{s}'",
+            .{ callable_kind, callable_name, declaration.source_name },
+        )
+    else
+        try std.fmt.allocPrint(
+            self.allocator,
+            "{s} '{s}' cannot expose non-public input type '{s}'",
+            .{ callable_kind, callable_name, declaration.source_name },
+        );
     return self.fail(position, message);
+}
+
+pub fn hiddenInputTypeDeclaration(self: anytype, value: Ast.TypeName) ?*const Declaration {
+    return switch (value) {
+        .structure => |name| self.hiddenInputNamedDeclaration(name),
+        .generic_structure => |generic| hidden: {
+            if (self.hiddenInputNamedDeclaration(generic.name)) |declaration| break :hidden declaration;
+            for (generic.arguments) |argument| {
+                if (self.hiddenInputTypeDeclaration(argument)) |declaration| break :hidden declaration;
+            }
+            break :hidden null;
+        },
+        .list, .view, .optional => |contained| self.hiddenInputTypeDeclaration(contained.*),
+        .fixed_array => |array| self.hiddenInputTypeDeclaration(array.element.*),
+        .reference => |reference| self.hiddenInputTypeDeclaration(reference.target.*),
+        .function => |function| hidden: {
+            for (function.parameters) |parameter| {
+                if (self.hiddenInputTypeDeclaration(parameter)) |declaration| break :hidden declaration;
+            }
+            if (function.return_type) |return_type| {
+                if (self.hiddenInputTypeDeclaration(return_type.*)) |declaration| break :hidden declaration;
+            }
+            break :hidden null;
+        },
+        else => null,
+    };
+}
+
+pub fn hiddenInputReturnDeclaration(self: anytype, value: Ast.ReturnType) ?*const Declaration {
+    return switch (value) {
+        .structure => |name| self.hiddenInputNamedDeclaration(name),
+        .generic_structure => |generic| self.hiddenInputTypeDeclaration(.{ .generic_structure = generic }),
+        .list => |contained| self.hiddenInputTypeDeclaration(.{ .list = contained }),
+        .view => |contained| self.hiddenInputTypeDeclaration(.{ .view = contained }),
+        .optional => |contained| self.hiddenInputTypeDeclaration(.{ .optional = contained }),
+        .fixed_array => |array| self.hiddenInputTypeDeclaration(.{ .fixed_array = array }),
+        .reference => |reference| self.hiddenInputTypeDeclaration(.{ .reference = reference }),
+        .function => |function| self.hiddenInputTypeDeclaration(.{ .function = function }),
+        else => null,
+    };
+}
+
+pub fn hiddenInputNamedDeclaration(self: anytype, name: []const u8) ?*const Declaration {
+    if (self.findDeclarationByCanonicalName(name, .structure)) |declaration| {
+        if (!self.declarationExternallyVisible(declaration)) return declaration;
+    }
+    if (self.findDeclarationByCanonicalName(name, .protocol)) |declaration| {
+        if (!declaration.is_public or declaration.is_internal) return declaration;
+    }
+    return null;
+}
+
+pub fn declarationExternallyVisible(self: anytype, declaration: *const Declaration) bool {
+    if (declaration.is_internal) return false;
+    if (declaration.member_visibility) |visibility| {
+        if (visibility != .public_access) return false;
+        const owner_name = declaration.owner_source_name orelse return false;
+        const owner = self.findDirect(declaration.module_index, owner_name, .structure) orelse return false;
+        return self.declarationExternallyVisible(owner);
+    }
+    return declaration.is_public;
 }
 
 pub fn internalTypeDeclaration(self: anytype, value: Ast.TypeName) ?*const Declaration {

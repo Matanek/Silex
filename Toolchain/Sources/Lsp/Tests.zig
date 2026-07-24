@@ -1185,6 +1185,381 @@ test "self completion reads current struct and class members without a snapshot"
     try std.testing.expect(!helpers.containsCompletion(class_completions, "func"));
 }
 
+test "nested type completion separates visible type members from instance members" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var environ_map = std.process.Environ.Map.init(allocator);
+    var server = Server.init(allocator, std.testing.io, &environ_map);
+    var temporary = std.testing.tmpDir(.{ .iterate = true });
+    defer temporary.cleanup();
+
+    const source =
+        \\public class Foo {
+        \\    private class Hidden {}
+        \\    protected class Protected {}
+        \\    internal struct Local {}
+        \\    public class Bar {
+        \\        public let amount:int
+        \\        public static func create() Bar { return Bar() }
+        \\        public func value() int { return 1 }
+        \\        public func inspect() { print(self.am) }
+        \\    }
+        \\    public static func build() Foo { return Foo() }
+        \\    public init() {}
+        \\}
+        \\public class Box<T> {
+        \\    private class Hidden {}
+        \\    public class Entry<U> {
+        \\        public struct Marker {}
+        \\    }
+        \\}
+        \\func main() {
+        \\    var nested = Foo.B
+        \\    var factory = Foo.Bar.cr
+        \\    var value = Foo()
+        \\    print(value.v)
+        \\    var generic = Box<int>.E
+        \\    var deep = Box<int>.Entry<str>.M
+        \\}
+    ;
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = source });
+    const relative_root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const main_path = try SourceGraph.canonicalPath(
+        allocator,
+        std.testing.io,
+        try std.fs.path.join(allocator, &.{ relative_root, "Main.sx" }),
+    );
+    const uri = try helpers.uriFromPath(allocator, main_path);
+    try server.setDocument(uri, source, 1);
+
+    const foo_cursor = (std.mem.indexOf(u8, source, "Foo.B") orelse return error.TestUnexpectedResult) + "Foo.B".len;
+    const foo_request = try testRequestParams(
+        allocator,
+        uri,
+        helpers.encodedPositionAtByteOffset(source, foo_cursor, .utf16).?,
+        "",
+    );
+    const foo_items = try server.completion(foo_request);
+    try std.testing.expect(helpers.containsCompletion(foo_items, "Bar"));
+    try std.testing.expect(helpers.containsCompletion(foo_items, "Local"));
+    try std.testing.expect(helpers.containsCompletion(foo_items, "build"));
+    try std.testing.expect(!helpers.containsCompletion(foo_items, "Hidden"));
+    try std.testing.expect(!helpers.containsCompletion(foo_items, "Protected"));
+
+    const bar_cursor = (std.mem.indexOf(u8, source, "Foo.Bar.cr") orelse return error.TestUnexpectedResult) + "Foo.Bar.cr".len;
+    const bar_request = try testRequestParams(
+        allocator,
+        uri,
+        helpers.encodedPositionAtByteOffset(source, bar_cursor, .utf16).?,
+        "",
+    );
+    const bar_items = try server.completion(bar_request);
+    try std.testing.expect(helpers.containsCompletion(bar_items, "create"));
+    try std.testing.expect(!helpers.containsCompletion(bar_items, "value"));
+
+    const instance_cursor = (std.mem.indexOf(u8, source, "value.v") orelse return error.TestUnexpectedResult) + "value.v".len;
+    const instance_request = try testRequestParams(
+        allocator,
+        uri,
+        helpers.encodedPositionAtByteOffset(source, instance_cursor, .utf16).?,
+        "",
+    );
+    const instance_items = try server.completion(instance_request);
+    try std.testing.expect(!helpers.containsCompletion(instance_items, "Bar"));
+    try std.testing.expect(!helpers.containsCompletion(instance_items, "build"));
+
+    const self_cursor = (std.mem.indexOf(u8, source, "self.am") orelse return error.TestUnexpectedResult) + "self.am".len;
+    const self_request = try testRequestParams(
+        allocator,
+        uri,
+        helpers.encodedPositionAtByteOffset(source, self_cursor, .utf16).?,
+        "",
+    );
+    const self_items = try server.completion(self_request);
+    try std.testing.expect(helpers.containsCompletion(self_items, "amount"));
+
+    const generic_cursor = (std.mem.indexOf(u8, source, "Box<int>.E") orelse return error.TestUnexpectedResult) + "Box<int>.E".len;
+    const generic_request = try testRequestParams(
+        allocator,
+        uri,
+        helpers.encodedPositionAtByteOffset(source, generic_cursor, .utf16).?,
+        "",
+    );
+    const generic_items = try server.completion(generic_request);
+    try std.testing.expect(helpers.containsCompletion(generic_items, "Entry"));
+    try std.testing.expect(!helpers.containsCompletion(generic_items, "Hidden"));
+
+    const deep_cursor = (std.mem.indexOf(u8, source, "Box<int>.Entry<str>.M") orelse return error.TestUnexpectedResult) +
+        "Box<int>.Entry<str>.M".len;
+    const deep_request = try testRequestParams(
+        allocator,
+        uri,
+        helpers.encodedPositionAtByteOffset(source, deep_cursor, .utf16).?,
+        "",
+    );
+    const deep_items = try server.completion(deep_request);
+    try std.testing.expect(helpers.containsCompletion(deep_items, "Marker"));
+}
+
+test "nested type semantic requests share one symbol identity" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var environ_map = std.process.Environ.Map.init(allocator);
+    var server = Server.init(allocator, std.testing.io, &environ_map);
+    var temporary = std.testing.tmpDir(.{ .iterate = true });
+    defer temporary.cleanup();
+
+    const source =
+        \\public class Foo {
+        \\    public class Bar {
+        \\        public func value() int { return 1 }
+        \\    }
+        \\}
+        \\func main() {
+        \\    var bar = Foo.Bar()
+        \\    print(bar.value())
+        \\}
+    ;
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = source });
+    const relative_root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const main_path = try SourceGraph.canonicalPath(
+        allocator,
+        std.testing.io,
+        try std.fs.path.join(allocator, &.{ relative_root, "Main.sx" }),
+    );
+    const uri = try helpers.uriFromPath(allocator, main_path);
+    const snapshot = switch (try Frontend.analyze(
+        allocator,
+        std.testing.io,
+        &environ_map,
+        main_path,
+        .editor,
+        &.{},
+    )) {
+        .success => |value| value,
+        .failure => return error.TestUnexpectedResult,
+    };
+    try server.workspace_roots.append(
+        allocator,
+        try SourceGraph.canonicalPath(allocator, std.testing.io, relative_root),
+    );
+    try server.setDocument(uri, source, 1);
+    try server.projects.append(allocator, .{
+        .input_path = main_path,
+        .current = snapshot,
+        .last_success = snapshot,
+        .last_versions = try allocator.dupe(VersionStamp, &.{.{ .path = main_path, .version = 1 }}),
+    });
+
+    const call_offset = (std.mem.indexOf(u8, source, "Foo.Bar()") orelse return error.TestUnexpectedResult) + "Foo.".len;
+    const request = try testRequestParams(
+        allocator,
+        uri,
+        helpers.encodedPositionAtByteOffset(source, call_offset, .utf16).?,
+        "",
+    );
+    const definition = (try server.definition(request)).?;
+    try std.testing.expectEqualStrings(uri, definition.uri);
+    try std.testing.expectEqual(@as(usize, 1), definition.range.start.line);
+
+    const hover_value = (try server.hover(request)).?;
+    try std.testing.expect(std.mem.indexOf(u8, hover_value.contents.value, "class Bar") != null);
+
+    const rename_request = try testRequestParams(
+        allocator,
+        uri,
+        helpers.encodedPositionAtByteOffset(source, call_offset, .utf16).?,
+        ",\"newName\":\"Baz\"",
+    );
+    const edit = try server.rename(rename_request);
+    try std.testing.expectEqual(@as(usize, 1), edit.documentChanges.len);
+    try std.testing.expectEqual(@as(usize, 2), edit.documentChanges[0].edits.len);
+
+    const semantic_params = try testRequestParams(allocator, uri, .{ .line = 0, .character = 0 }, "");
+    const tokens = try server.semanticTokens(semantic_params);
+    const definition_offset = std.mem.indexOf(u8, source, "class Bar") orelse return error.TestUnexpectedResult;
+    try helpers.expectSemanticTokenAt(
+        source,
+        tokens.data,
+        definition_offset + "class ".len,
+        "Bar".len,
+        .type,
+    );
+    try helpers.expectSemanticTokenAt(source, tokens.data, call_offset, "Bar".len, .function);
+}
+
+test "opaque nested result completion exposes only public instance members" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var environ_map = std.process.Environ.Map.init(allocator);
+    var server = Server.init(allocator, std.testing.io, &environ_map);
+    var temporary = std.testing.tmpDir(.{ .iterate = true });
+    defer temporary.cleanup();
+
+    const disk_source =
+        \\public class Factory {
+        \\    private class Output {
+        \\        public func value() int { return 1 }
+        \\        private func hidden() {}
+        \\    }
+        \\    public static func make() Output { return Output() }
+        \\}
+        \\func main() {
+        \\    var output = Factory.make()
+        \\    print(output.value())
+        \\}
+    ;
+    const edited_source =
+        \\public class Factory {
+        \\    private class Output {
+        \\        public func value() int { return 1 }
+        \\        private func hidden() {}
+        \\    }
+        \\    public static func make() Output { return Output() }
+        \\}
+        \\func main() {
+        \\    var output = Factory.make()
+        \\    print(output.v)
+        \\}
+    ;
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = disk_source });
+    const relative_root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const main_path = try SourceGraph.canonicalPath(
+        allocator,
+        std.testing.io,
+        try std.fs.path.join(allocator, &.{ relative_root, "Main.sx" }),
+    );
+    const uri = try helpers.uriFromPath(allocator, main_path);
+    const snapshot = switch (try Frontend.analyze(
+        allocator,
+        std.testing.io,
+        &environ_map,
+        main_path,
+        .editor,
+        &.{},
+    )) {
+        .success => |value| value,
+        .failure => return error.TestUnexpectedResult,
+    };
+    try server.workspace_roots.append(
+        allocator,
+        try SourceGraph.canonicalPath(allocator, std.testing.io, relative_root),
+    );
+    try server.setDocument(uri, edited_source, 2);
+    try server.projects.append(allocator, .{
+        .input_path = main_path,
+        .current = snapshot,
+        .last_success = snapshot,
+        .last_versions = try allocator.dupe(VersionStamp, &.{.{ .path = main_path, .version = 2 }}),
+    });
+
+    const cursor = (std.mem.indexOf(u8, edited_source, "output.v") orelse return error.TestUnexpectedResult) + "output.v".len;
+    const request = try testRequestParams(
+        allocator,
+        uri,
+        helpers.encodedPositionAtByteOffset(edited_source, cursor, .utf16).?,
+        "",
+    );
+    const items = try server.completion(request);
+    try std.testing.expect(helpers.containsCompletion(items, "value"));
+    try std.testing.expect(!helpers.containsCompletion(items, "hidden"));
+}
+
+test "imported owner completion exposes public nested types" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var environ_map = std.process.Environ.Map.init(allocator);
+    var server = Server.init(allocator, std.testing.io, &environ_map);
+
+    const project_path = try SourceGraph.canonicalPath(
+        allocator,
+        std.testing.io,
+        "Smokes/NestedTypesModules/silex.json",
+    );
+    const main_path = try SourceGraph.canonicalPath(
+        allocator,
+        std.testing.io,
+        "Smokes/NestedTypesModules/Main.sx",
+    );
+    const workspace_path = try SourceGraph.canonicalPath(
+        allocator,
+        std.testing.io,
+        "Smokes/NestedTypesModules",
+    );
+    const uri = try helpers.uriFromPath(allocator, main_path);
+    const source =
+        \\use NestedTypesModules.Library.Container
+        \\use NestedTypesModules.Library.Container.Value as Value
+        \\use NestedTypesModules.Library.Box
+        \\
+        \\func main() {
+        \\    var incomplete = Container.V
+        \\    var generic = Box<int>.E
+        \\    var deep = Box<int>.Entry<str>.M
+        \\    var qualified = Container.Value(3)
+        \\    var aliased = Value(4)
+        \\    var marker = Box<int>.Entry<str>.Marker()
+        \\    assert(qualified.get() + aliased.get() == 7, "public nested type across modules")
+        \\    print("nested type modules")
+        \\}
+    ;
+    const snapshot = switch (try Frontend.analyze(
+        allocator,
+        std.testing.io,
+        &environ_map,
+        project_path,
+        .editor,
+        &.{},
+    )) {
+        .success => |value| value,
+        .failure => return error.TestUnexpectedResult,
+    };
+    try server.workspace_roots.append(allocator, workspace_path);
+    try server.setDocument(uri, source, 2);
+    try server.projects.append(allocator, .{
+        .input_path = project_path,
+        .current = snapshot,
+        .last_success = snapshot,
+        .last_versions = try allocator.dupe(VersionStamp, &.{.{ .path = main_path, .version = 2 }}),
+    });
+
+    const cursor = (std.mem.indexOf(u8, source, "incomplete = Container.V") orelse return error.TestUnexpectedResult) +
+        "incomplete = Container.V".len;
+    const request = try testRequestParams(
+        allocator,
+        uri,
+        helpers.encodedPositionAtByteOffset(source, cursor, .utf16).?,
+        "",
+    );
+    const items = try server.completion(request);
+    try std.testing.expect(helpers.containsCompletion(items, "Value"));
+
+    const generic_cursor = (std.mem.indexOf(u8, source, "Box<int>.E") orelse return error.TestUnexpectedResult) + "Box<int>.E".len;
+    const generic_request = try testRequestParams(
+        allocator,
+        uri,
+        helpers.encodedPositionAtByteOffset(source, generic_cursor, .utf16).?,
+        "",
+    );
+    const generic_items = try server.completion(generic_request);
+    try std.testing.expect(helpers.containsCompletion(generic_items, "Entry"));
+
+    const deep_cursor = (std.mem.indexOf(u8, source, "Box<int>.Entry<str>.M") orelse return error.TestUnexpectedResult) +
+        "Box<int>.Entry<str>.M".len;
+    const deep_request = try testRequestParams(
+        allocator,
+        uri,
+        helpers.encodedPositionAtByteOffset(source, deep_cursor, .utf16).?,
+        "",
+    );
+    const deep_items = try server.completion(deep_request);
+    try std.testing.expect(helpers.containsCompletion(deep_items, "Marker"));
+}
+
 test "member completion includes unspecialized generic structure methods" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

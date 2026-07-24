@@ -128,6 +128,11 @@ help and rename:
   snapshot. Only when another error prevents that recovery does completion
   conservatively reattach the receiver to the unique variable, parameter or
   binding with the same name in the same callable from the last valid snapshot;
+- type-member completion lists visible nested types together with static fields
+  and every overload of static methods. Instance completion never lists nested
+  types. Nested private and protected declarations follow the same lexical
+  family and descendant checks as compilation, including while the edited line
+  is temporarily incomplete;
 - signature help uses the visible function, method, constructor or protocol
   requirement signatures and computes the active argument through nested
   calls;

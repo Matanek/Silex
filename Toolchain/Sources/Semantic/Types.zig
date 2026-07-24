@@ -741,6 +741,7 @@ pub const StructureSymbol = struct {
     native_drop_name: ?[]const u8,
     native_drop_symbol: ?[]const u8,
     is_generic: bool,
+    owner_index: ?usize,
     module_files: []const usize,
     base_index: ?usize,
     protocol_conformances: []const ProtocolConformanceSymbol,

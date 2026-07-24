@@ -202,6 +202,22 @@ pub fn expectSemanticSuccess(source: []const u8) !void {
     };
 }
 
+pub fn expectSpecializedSemanticSuccess(source: []const u8) !void {
+    const Parser = @import("../Parser.zig").Parser;
+    const Generics = @import("../Generics.zig");
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var parser = Parser.init(allocator, source);
+    const resolved = try resolveSingleTestProgram(allocator, try parser.parse());
+    var specializer = Generics.Specializer.init(allocator, resolved);
+    var analyzer = Analyzer.init(allocator);
+    _ = analyzer.analyze(try specializer.specialize()) catch |failure| {
+        if (analyzer.diagnostic) |diagnostic| std.debug.print("unexpected semantic error: {s}\n", .{diagnostic.message});
+        return failure;
+    };
+}
+
 pub fn analyzeDeferredNativeTest(allocator: Allocator, source: []const u8) !Program {
     const Parser = @import("../Parser.zig").Parser;
     var parser = Parser.init(allocator, source);

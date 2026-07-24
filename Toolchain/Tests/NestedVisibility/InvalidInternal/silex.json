@@ -1,0 +1,7 @@
+{
+  "target": "NestedVisibility.App.Main",
+  "modules": [
+    { "name": "NestedVisibility", "sources": ["Library.sx"] },
+    { "name": "NestedVisibility.App", "sources": ["Main.sx"] }
+  ]
+}

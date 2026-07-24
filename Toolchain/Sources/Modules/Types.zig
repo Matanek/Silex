@@ -24,6 +24,9 @@ pub const Declaration = struct {
     kind: Kind,
     is_public: bool,
     is_internal: bool,
+    member_visibility: ?Ast.MemberVisibility = null,
+    owner_source_name: ?[]const u8 = null,
+    owner_canonical_name: ?[]const u8 = null,
     position: Source.Position,
     aliased_type: ?Ast.TypeName = null,
 };

@@ -421,6 +421,50 @@ test "parse static classes and reject instance state" {
     try std.testing.expectEqualStrings("a static class can declare only static methods", instance_method.diagnostic.?.message);
 }
 
+test "parse nested types with visibility and arbitrary depth" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(),
+        \\public class Foo {
+        \\    class Bar {}
+        \\    internal struct Too {}
+        \\    public static class Yoo {
+        \\        private struct Deep {}
+        \\    }
+        \\    protected class Omg {}
+        \\}
+    );
+    const program = try parser.parse();
+    const foo = program.structures[0];
+    try std.testing.expectEqual(@as(usize, 4), foo.structures.len);
+    try std.testing.expectEqual(Ast.MemberVisibility.private_access, foo.structures[0].member_visibility.?);
+    try std.testing.expectEqual(Ast.MemberVisibility.internal_access, foo.structures[1].member_visibility.?);
+    try std.testing.expectEqual(Ast.MemberVisibility.public_access, foo.structures[2].member_visibility.?);
+    try std.testing.expect(foo.structures[2].is_static_class);
+    try std.testing.expectEqualStrings("Foo", foo.structures[2].owner_name.?);
+    try std.testing.expectEqual(Ast.MemberVisibility.private_access, foo.structures[2].structures[0].member_visibility.?);
+    try std.testing.expectEqualStrings("Yoo", foo.structures[2].structures[0].owner_name.?);
+    try std.testing.expectEqual(Ast.MemberVisibility.subclass, foo.structures[3].member_visibility.?);
+
+    var struct_owner = Parser.init(arena.allocator(), "struct Foo { struct PublicByDefault {} }");
+    const struct_program = try struct_owner.parse();
+    try std.testing.expectEqual(
+        Ast.MemberVisibility.public_access,
+        struct_program.structures[0].structures[0].member_visibility.?,
+    );
+
+    var protected_struct = Parser.init(arena.allocator(), "class Foo { protected struct Hidden {} }");
+    try std.testing.expectError(error.InvalidSource, protected_struct.parse());
+    try std.testing.expectEqualStrings(
+        "a nested struct cannot use 'protected' because structs do not support inheritance",
+        protected_struct.diagnostic.?.message,
+    );
+
+    var protected_static = Parser.init(arena.allocator(), "class Foo { protected static class Hidden {} }");
+    try std.testing.expectError(error.InvalidSource, protected_static.parse());
+    try std.testing.expectEqualStrings("a nested static class cannot use 'protected'", protected_static.diagnostic.?.message);
+}
+
 test "parse internal types functions and members" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

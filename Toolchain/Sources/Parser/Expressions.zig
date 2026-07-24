@@ -584,6 +584,21 @@ pub fn parseStaticMember(self: anytype, owner: Ast.TypeName, owner_position: Sou
         try self.parseTypeArguments(null)
     else
         &.{};
+    if (type_arguments.len != 0 and self.current.tag == .dot) {
+        const owner_name = switch (owner) {
+            .structure => |value| value,
+            .generic_structure => |generic| generic.name,
+            else => return self.fail("a generic type qualifier must be a named type"),
+        };
+        const qualified_name = try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ owner_name, name });
+        var arguments: std.ArrayList(Ast.TypeName) = .empty;
+        if (owner == .generic_structure) try arguments.appendSlice(self.allocator, owner.generic_structure.arguments);
+        try arguments.appendSlice(self.allocator, type_arguments);
+        return self.parseStaticMember(.{ .generic_structure = .{
+            .name = qualified_name,
+            .arguments = try arguments.toOwnedSlice(self.allocator),
+        } }, owner_position);
+    }
     if (self.current.tag == .left_parenthesis) {
         const invocation = try self.parseInvocationArguments();
         return self.newExpression(.{

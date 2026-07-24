@@ -307,6 +307,47 @@ test "parse generic structure declarations types and invocations" {
     try std.testing.expect(program.functions[0].statements[2].print.argument.value == .binary);
 }
 
+test "parse nested generic type paths and constructors" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(),
+        \\class Box<T> { public class Entry<U> { public struct Marker {} } }
+        \\func main() {
+        \\    var entry:Box<int>.Entry<str> = Box<int>.Entry<str>()
+        \\    var marker = Box<int>.Entry<str>.Marker()
+        \\}
+    );
+    const program = try parser.parse();
+    const annotation = program.functions[0].statements[0].variable_declaration.annotation.?.generic_structure;
+    try std.testing.expectEqualStrings("Box.Entry", annotation.name);
+    try std.testing.expectEqual(@as(usize, 2), annotation.arguments.len);
+    try std.testing.expectEqual(Ast.TypeName.int, annotation.arguments[0]);
+    try std.testing.expectEqual(Ast.TypeName.str, annotation.arguments[1]);
+    const initializer = program.functions[0].statements[0].variable_declaration.initializer.?.value.static_method_call;
+    try std.testing.expectEqualStrings("Box", initializer.owner.generic_structure.name);
+    try std.testing.expectEqualStrings("Entry", initializer.name);
+    try std.testing.expectEqual(@as(usize, 1), initializer.type_arguments.len);
+    const marker = program.functions[0].statements[1].variable_declaration.initializer.?.value.static_method_call;
+    try std.testing.expectEqualStrings("Box.Entry", marker.owner.generic_structure.name);
+    try std.testing.expectEqual(@as(usize, 2), marker.owner.generic_structure.arguments.len);
+    try std.testing.expectEqualStrings("Marker", marker.name);
+}
+
+test "parse a generic nested base class" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(
+        arena.allocator(),
+        "class Child:Family<int>.Parent<str> {} func main() {}",
+    );
+    const program = try parser.parse();
+    const base = program.structures[0].base.?;
+    try std.testing.expectEqualStrings("Family.Parent", base.name);
+    try std.testing.expectEqual(@as(usize, 2), base.type_arguments.len);
+    try std.testing.expectEqual(Ast.TypeName.int, base.type_arguments[0]);
+    try std.testing.expectEqual(Ast.TypeName.str, base.type_arguments[1]);
+}
+
 test "parse self-qualified borrowed method returns" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

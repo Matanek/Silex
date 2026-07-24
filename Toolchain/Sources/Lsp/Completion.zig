@@ -615,9 +615,25 @@ fn staticCompletionItemsFromModule(
         ) catch continue;
         var parser = ParserModule.Parser.init(allocator, module_source);
         const program = parser.parse() catch continue;
-        for (program.structures) |structure| {
-            if (!structure.is_public or !std.mem.eql(u8, structure.name, type_name)) continue;
+        var path: std.ArrayList([]const u8) = .empty;
+        var path_iterator = std.mem.splitScalar(u8, type_name, '.');
+        while (path_iterator.next()) |segment| try path.append(allocator, segment);
+        if (findPublicParsedStructure(program.structures, path.items, 0)) |structure| {
             var items: std.ArrayList(CompletionItem) = .empty;
+            for (structure.structures) |nested| {
+                if (nested.member_visibility != .public_access or
+                    !std.mem.startsWith(u8, nested.name, prefix) or self.containsCompletion(items.items, nested.name)) continue;
+                try items.append(allocator, .{
+                    .label = nested.name,
+                    .kind = 7,
+                    .detail = if (nested.is_static_class)
+                        "Silex public nested static class"
+                    else if (nested.is_class)
+                        "Silex public nested class"
+                    else
+                        "Silex public nested struct",
+                });
+            }
             for (structure.fields) |field| {
                 if (!field.is_static or field.visibility != .public_access or
                     !std.mem.startsWith(u8, field.name, prefix) or self.containsCompletion(items.items, field.name))
@@ -835,19 +851,20 @@ const SelfCompletionScope = struct {
     opening: usize,
     depth: usize,
     name: []const u8,
+    path: []const []const u8,
 };
 
-fn enclosingSelfCompletionScope(source: []const u8, cursor: usize) ?SelfCompletionScope {
+fn enclosingSelfCompletionScope(allocator: Allocator, source: []const u8, cursor: usize) !?SelfCompletionScope {
     var lexer = LexerModule.Lexer.init(source);
     var depth: usize = 0;
     var expects_structure_name = false;
     var pending_structure = false;
     var pending_structure_name: ?[]const u8 = null;
-    var active_scope: ?SelfCompletionScope = null;
+    var active_scopes: std.ArrayList(SelfCompletionScope) = .empty;
 
     while (true) {
-        const token = lexer.next() catch return active_scope;
-        if (token.start >= @min(cursor, source.len)) return active_scope;
+        const token = lexer.next() catch return if (active_scopes.items.len == 0) null else active_scopes.items[active_scopes.items.len - 1];
+        if (token.start >= @min(cursor, source.len)) return if (active_scopes.items.len == 0) null else active_scopes.items[active_scopes.items.len - 1];
         switch (token.tag) {
             .keyword_struct, .keyword_class => {
                 expects_structure_name = true;
@@ -864,18 +881,26 @@ fn enclosingSelfCompletionScope(source: []const u8, cursor: usize) ?SelfCompleti
             .left_brace => {
                 depth += 1;
                 if (pending_structure) {
-                    active_scope = .{ .opening = token.start, .depth = depth, .name = pending_structure_name.? };
+                    var path: std.ArrayList([]const u8) = .empty;
+                    if (active_scopes.items.len != 0) try path.appendSlice(allocator, active_scopes.items[active_scopes.items.len - 1].path);
+                    try path.append(allocator, pending_structure_name.?);
+                    try active_scopes.append(allocator, .{
+                        .opening = token.start,
+                        .depth = depth,
+                        .name = pending_structure_name.?,
+                        .path = try path.toOwnedSlice(allocator),
+                    });
                     pending_structure = false;
                     pending_structure_name = null;
                 }
             },
             .right_brace => {
-                if (active_scope) |scope| {
-                    if (scope.depth == depth) active_scope = null;
+                if (active_scopes.items.len != 0 and active_scopes.items[active_scopes.items.len - 1].depth == depth) {
+                    _ = active_scopes.pop();
                 }
                 depth -|= 1;
             },
-            .end => return active_scope,
+            .end => return if (active_scopes.items.len == 0) null else active_scopes.items[active_scopes.items.len - 1],
             else => {},
         }
     }
@@ -890,12 +915,11 @@ pub fn currentSelfCompletionItems(
     cursor: usize,
     prefix: []const u8,
 ) !?[]const CompletionItem {
-    const scope = enclosingSelfCompletionScope(source, cursor) orelse return null;
+    const scope = try enclosingSelfCompletionScope(allocator, source, cursor) orelse return null;
     const repaired = try self.blankLineAt(allocator, source, cursor);
     var parser = ParserModule.Parser.init(allocator, repaired);
     if (parser.parse() catch null) |program| {
-        for (program.structures) |structure| {
-            if (!std.mem.eql(u8, structure.name, scope.name)) continue;
+        if (findParsedStructure(program.structures, scope.path, 0)) |structure| {
             var parsed_items: std.ArrayList(CompletionItem) = .empty;
             for (structure.fields) |field| {
                 if (field.is_static or !std.mem.startsWith(u8, field.name, prefix) or
@@ -976,6 +1000,190 @@ pub fn currentSelfCompletionItems(
         }
     }
     return try items.toOwnedSlice(allocator);
+}
+
+fn findParsedStructure(
+    structures: []const Ast.Structure,
+    path: []const []const u8,
+    index: usize,
+) ?*const Ast.Structure {
+    if (index >= path.len) return null;
+    for (structures) |*structure| {
+        if (!std.mem.eql(u8, structure.name, path[index])) continue;
+        if (index + 1 == path.len) return structure;
+        return findParsedStructure(structure.structures, path, index + 1);
+    }
+    return null;
+}
+
+const GenericTypeCompletionContext = struct {
+    path: []const u8,
+    prefix: []const u8,
+};
+
+pub fn genericTypeCompletionContext(
+    allocator: Allocator,
+    source: []const u8,
+    cursor: usize,
+) !?GenericTypeCompletionContext {
+    var prefix_start = @min(cursor, source.len);
+    while (prefix_start > 0 and std.ascii.isAlphanumeric(source[prefix_start - 1]) or
+        prefix_start > 0 and source[prefix_start - 1] == '_')
+    {
+        prefix_start -= 1;
+    }
+    if (prefix_start == 0 or source[prefix_start - 1] != '.') return null;
+    var end = prefix_start - 1;
+    while (end > 0 and std.ascii.isWhitespace(source[end - 1])) end -= 1;
+    var start = end;
+    var depth: usize = 0;
+    while (start > 0) {
+        const character = source[start - 1];
+        if (character == '>') {
+            depth += 1;
+            start -= 1;
+            continue;
+        }
+        if (character == '<') {
+            if (depth == 0) break;
+            depth -= 1;
+            start -= 1;
+            continue;
+        }
+        if (depth != 0 or std.ascii.isAlphanumeric(character) or character == '_' or character == '.') {
+            start -= 1;
+            continue;
+        }
+        break;
+    }
+    if (depth != 0 or start == end) return null;
+
+    var path: std.ArrayList(u8) = .empty;
+    depth = 0;
+    for (source[start..end]) |character| {
+        if (character == '<') {
+            depth += 1;
+        } else if (character == '>') {
+            depth -|= 1;
+        } else if (depth == 0 and (std.ascii.isAlphanumeric(character) or character == '_' or character == '.')) {
+            try path.append(allocator, character);
+        }
+    }
+    if (path.items.len == 0) return null;
+    return .{
+        .path = try path.toOwnedSlice(allocator),
+        .prefix = source[prefix_start..@min(cursor, source.len)],
+    };
+}
+
+pub fn currentGenericTypeCompletionItems(
+    self: anytype,
+    allocator: Allocator,
+    io: Io,
+    uri: []const u8,
+    source: []const u8,
+    cursor: usize,
+) !?[]const CompletionItem {
+    const context = try genericTypeCompletionContext(allocator, source, cursor) orelse return null;
+    const repaired = try self.blankLineAt(allocator, source, cursor);
+    var parser = ParserModule.Parser.init(allocator, repaired);
+    const program = parser.parse() catch return null;
+    var segments: std.ArrayList([]const u8) = .empty;
+    var iterator = std.mem.splitScalar(u8, context.path, '.');
+    while (iterator.next()) |segment| try segments.append(allocator, segment);
+    if (findParsedStructure(program.structures, segments.items, 0)) |structure| {
+        const scope = try enclosingSelfCompletionScope(allocator, source, cursor);
+        const same_family = scope != null and scope.?.path.len != 0 and segments.items.len != 0 and
+            std.mem.eql(u8, scope.?.path[0], segments.items[0]);
+
+        var items: std.ArrayList(CompletionItem) = .empty;
+        for (structure.structures) |nested| {
+            const visibility = nested.member_visibility orelse continue;
+            if ((visibility == .private_access or visibility == .subclass) and !same_family) continue;
+            try items.append(allocator, .{
+                .label = nested.name,
+                .kind = 7,
+                .detail = if (nested.is_static_class)
+                    "Silex nested static class"
+                else if (nested.is_class)
+                    "Silex nested class"
+                else
+                    "Silex nested struct",
+            });
+        }
+        for (structure.fields) |field| {
+            if (!field.is_static) continue;
+            if ((field.visibility == .private_access or field.visibility == .subclass) and !same_family) continue;
+            try items.append(allocator, .{
+                .label = field.name,
+                .kind = 5,
+                .detail = "Silex static field",
+            });
+        }
+        for (structure.methods) |method| {
+            if (!method.is_static) continue;
+            const visibility = method.member_visibility orelse continue;
+            if ((visibility == .private_access or visibility == .subclass) and !same_family) continue;
+            const candidate: CompletionItem = .{
+                .label = method.name,
+                .kind = 3,
+                .detail = try SymbolIndex.functionDetail(allocator, method),
+            };
+            if (!self.containsEquivalentCompletion(items.items, candidate)) try items.append(allocator, candidate);
+        }
+        return try items.toOwnedSlice(allocator);
+    }
+
+    const root_name = segments.items[0];
+    const target = self.visibleUseTarget(source, root_name) orelse return null;
+    const separator = std.mem.lastIndexOfScalar(u8, target, '.') orelse return null;
+    var resolved_path: std.ArrayList(u8) = .empty;
+    try resolved_path.appendSlice(allocator, target[separator + 1 ..]);
+    for (segments.items[1..]) |segment| {
+        try resolved_path.append(allocator, '.');
+        try resolved_path.appendSlice(allocator, segment);
+    }
+    const source_path = try self.filePathFromUri(allocator, uri) orelse return null;
+    const project_root = std.fs.path.dirname(source_path) orelse return null;
+    if (try staticCompletionItemsFromModule(
+        self,
+        allocator,
+        io,
+        project_root,
+        target,
+        resolved_path.items,
+        context.prefix,
+    )) |items| {
+        if (items.len != 0) return items;
+    }
+    const fallback = try staticCompletionItemsFromModule(
+        self,
+        allocator,
+        io,
+        project_root,
+        target[0..separator],
+        resolved_path.items,
+        context.prefix,
+    );
+    if (fallback) |items| if (items.len != 0) return items;
+    return null;
+}
+
+fn findPublicParsedStructure(
+    structures: []const Ast.Structure,
+    path: []const []const u8,
+    index: usize,
+) ?*const Ast.Structure {
+    if (index >= path.len) return null;
+    for (structures) |*structure| {
+        if (!std.mem.eql(u8, structure.name, path[index])) continue;
+        if (index == 0) {
+            if (!structure.is_public) return null;
+        } else if (structure.member_visibility != .public_access) return null;
+        if (index + 1 == path.len) return structure;
+        return findPublicParsedStructure(structure.structures, path, index + 1);
+    }
+    return null;
 }
 
 pub fn collectRootModules(

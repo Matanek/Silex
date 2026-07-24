@@ -29,9 +29,15 @@ const declarationPositions = Support.declarationPositions;
 const typeNameToReturnType = Support.typeNameToReturnType;
 pub fn transformStructure(self: anytype, structure: Ast.Structure) !Ast.Structure {
     const previous_type_parameters = self.current_type_parameters;
-    self.current_type_parameters = structure.type_parameters;
+    var combined_type_parameters: std.ArrayList(Ast.TypeParameter) = .empty;
+    try combined_type_parameters.appendSlice(self.allocator, previous_type_parameters);
+    try combined_type_parameters.appendSlice(self.allocator, structure.type_parameters);
+    self.current_type_parameters = try combined_type_parameters.toOwnedSlice(self.allocator);
     defer self.current_type_parameters = previous_type_parameters;
     const declaration = self.findDirectByPosition(structure.name_position, .structure).?;
+    const previous_structure_declaration = self.current_structure_declaration;
+    self.current_structure_declaration = declaration;
+    defer self.current_structure_declaration = previous_structure_declaration;
     var fields: std.ArrayList(Ast.StructureField) = .empty;
     for (structure.fields) |field| {
         var copy = field;
@@ -70,6 +76,9 @@ pub fn transformStructure(self: anytype, structure: Ast.Structure) !Ast.Structur
     }
     var result = structure;
     result.name = declaration.canonical_name;
+    result.is_public = self.declarationExternallyVisible(declaration);
+    result.is_internal = declaration.is_internal;
+    result.owner_name = declaration.owner_canonical_name;
     result.module_name = self.project.modules[declaration.module_index].name;
     var module_files: std.ArrayList(usize) = .empty;
     for (self.file_infos) |file| {
@@ -78,11 +87,14 @@ pub fn transformStructure(self: anytype, structure: Ast.Structure) !Ast.Structur
         }
     }
     result.module_files = try module_files.toOwnedSlice(self.allocator);
-    result.type_parameters = try self.transformTypeParameters(structure.type_parameters);
+    result.type_parameters = try self.transformTypeParameters(self.current_type_parameters);
     var conformances: std.ArrayList(Ast.ProtocolReference) = .empty;
     if (structure.base) |base| {
         const kind = try self.visibleDeclarationKind(structure.position.file, base.name);
         if (kind == .protocol) {
+            if (base.type_arguments.len != 0) {
+                return self.fail(base.position, "generic protocols are not supported");
+            }
             const protocol = try self.resolveName(structure.position.file, base.name, .protocol, base.position);
             result.base = null;
             try conformances.append(self.allocator, .{ .name = protocol.canonical_name, .position = base.position });
@@ -90,6 +102,7 @@ pub fn transformStructure(self: anytype, structure: Ast.Structure) !Ast.Structur
             result.base = .{
                 .name = (try self.resolveName(structure.position.file, base.name, .structure, base.position)).canonical_name,
                 .position = base.position,
+                .type_arguments = try self.transformTypeArguments(base.type_arguments, base.position),
             };
         }
     }
@@ -98,6 +111,7 @@ pub fn transformStructure(self: anytype, structure: Ast.Structure) !Ast.Structur
         try conformances.append(self.allocator, .{ .name = protocol.canonical_name, .position = conformance.position });
     }
     result.conformances = try conformances.toOwnedSlice(self.allocator);
+    result.structures = &.{};
     result.fields = try fields.toOwnedSlice(self.allocator);
     result.constructors = try constructors.toOwnedSlice(self.allocator);
     if (structure.drop) |drop| {
@@ -110,6 +124,25 @@ pub fn transformStructure(self: anytype, structure: Ast.Structure) !Ast.Structur
     }
     result.methods = try methods.toOwnedSlice(self.allocator);
     return result;
+}
+
+pub fn transformStructureTree(
+    self: anytype,
+    structure: Ast.Structure,
+    outer_type_parameters: []const Ast.TypeParameter,
+    result: *std.ArrayList(Ast.Structure),
+) !void {
+    const previous_type_parameters = self.current_type_parameters;
+    self.current_type_parameters = outer_type_parameters;
+    const transformed = try self.transformStructure(structure);
+    self.current_type_parameters = previous_type_parameters;
+    try result.append(self.allocator, transformed);
+
+    var combined_type_parameters: std.ArrayList(Ast.TypeParameter) = .empty;
+    try combined_type_parameters.appendSlice(self.allocator, outer_type_parameters);
+    try combined_type_parameters.appendSlice(self.allocator, structure.type_parameters);
+    const nested_outer = try combined_type_parameters.toOwnedSlice(self.allocator);
+    for (structure.structures) |nested| try self.transformStructureTree(nested, nested_outer, result);
 }
 
 pub fn transformProtocol(self: anytype, protocol: Ast.Protocol) !Ast.Protocol {
@@ -663,10 +696,7 @@ pub fn transformExpression(self: anytype, expression: *const Ast.Expression) any
             const type_arguments = try self.transformTypeArguments(call.type_arguments, call.name_position);
             if (try self.expressionPath(call.object)) |prefix| {
                 const path = try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ prefix, call.name });
-                const qualified_kind = if (self.looksQualified(expression.position.file, path))
-                    try self.visibleDeclarationKind(expression.position.file, path)
-                else
-                    null;
+                const qualified_kind = try self.visibleDeclarationKind(expression.position.file, path);
                 if (qualified_kind == .function) {
                     if (call.named_fields != null) {
                         const message = try std.fmt.allocPrint(
@@ -689,7 +719,50 @@ pub fn transformExpression(self: anytype, expression: *const Ast.Expression) any
                         .visible_declarations = try declarationPositions(self.allocator, declarations),
                     } };
                 }
+                if (qualified_kind == .structure) {
+                    const declaration = try self.resolveName(expression.position.file, path, .structure, call.name_position);
+                    if (self.declarationIsStaticClass(declaration)) {
+                        const message = try std.fmt.allocPrint(self.allocator, "static class '{s}' cannot be constructed", .{path});
+                        return self.fail(call.name_position, message);
+                    }
+                    if (call.named_fields) |fields| {
+                        break :method .{ .structure_initializer = .{
+                            .name = declaration.canonical_name,
+                            .name_position = call.name_position,
+                            .type_arguments = type_arguments,
+                            .fields = try self.transformFieldInitializers(fields),
+                        } };
+                    }
+                    if (self.declarationIsClass(declaration) or self.declarationHasConstructors(declaration)) {
+                        break :method .{ .class_initializer = .{
+                            .name = declaration.canonical_name,
+                            .name_position = call.name_position,
+                            .type_arguments = type_arguments,
+                            .arguments = try self.transformExpressions(call.arguments),
+                        } };
+                    }
+                    if (call.arguments.len != 0) {
+                        const message = try std.fmt.allocPrint(self.allocator, "struct '{s}' requires named fields such as 'field:value'", .{path});
+                        return self.fail(call.name_position, message);
+                    }
+                    break :method .{ .structure_initializer = .{
+                        .name = declaration.canonical_name,
+                        .name_position = call.name_position,
+                        .type_arguments = type_arguments,
+                        .fields = &.{},
+                    } };
+                }
                 if (qualified_kind == null) {
+                    if (try self.inaccessibleNestedType(expression.position.file, path)) |declaration| {
+                        const visibility = declaration.member_visibility.?;
+                        const message = switch (visibility) {
+                            .private_access => try std.fmt.allocPrint(self.allocator, "nested type '{s}' is private", .{path}),
+                            .internal_access => try std.fmt.allocPrint(self.allocator, "nested type '{s}' is internal to its source file", .{path}),
+                            .subclass => try std.fmt.allocPrint(self.allocator, "nested type '{s}' is accessible only from its owning class and descendants", .{path}),
+                            .public_access => unreachable,
+                        };
+                        return self.fail(call.name_position, message);
+                    }
                     if (try self.staticOwnerType(
                         expression.position.file,
                         prefix,
@@ -773,15 +846,75 @@ pub fn transformExpression(self: anytype, expression: *const Ast.Expression) any
                 .arguments = try self.transformExpressions(call.arguments),
             } };
         },
-        .static_method_call => |call| .{ .static_method_call = .{
-            .owner = try self.transformType(call.owner, call.owner_position),
-            .owner_position = call.owner_position,
-            .name = call.name,
-            .name_position = call.name_position,
-            .type_arguments = try self.transformTypeArguments(call.type_arguments, call.name_position),
-            .arguments = try self.transformExpressions(call.arguments),
-            .named_fields = if (call.named_fields) |fields| try self.transformFieldInitializers(fields) else null,
-        } },
+        .static_method_call => |call| static_call: {
+            const owner_name = switch (call.owner) {
+                .structure => |name| name,
+                .generic_structure => |generic| generic.name,
+                else => null,
+            };
+            if (owner_name) |name| {
+                const nested_name = try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ name, call.name });
+                if ((try self.visibleDeclarationKind(expression.position.file, nested_name)) == .structure) {
+                    const declaration = try self.resolveName(expression.position.file, nested_name, .structure, call.name_position);
+                    if (self.declarationIsStaticClass(declaration)) {
+                        const message = try std.fmt.allocPrint(self.allocator, "static class '{s}' cannot be constructed", .{nested_name});
+                        return self.fail(call.name_position, message);
+                    }
+                    var type_arguments: std.ArrayList(Ast.TypeName) = .empty;
+                    if (call.owner == .generic_structure) try type_arguments.appendSlice(
+                        self.allocator,
+                        try self.transformTypeArguments(call.owner.generic_structure.arguments, call.owner_position),
+                    );
+                    try type_arguments.appendSlice(
+                        self.allocator,
+                        try self.transformTypeArguments(call.type_arguments, call.name_position),
+                    );
+                    if (call.named_fields) |fields| break :static_call .{ .structure_initializer = .{
+                        .name = declaration.canonical_name,
+                        .name_position = call.name_position,
+                        .type_arguments = try type_arguments.toOwnedSlice(self.allocator),
+                        .fields = try self.transformFieldInitializers(fields),
+                    } };
+                    if (self.declarationIsClass(declaration) or self.declarationHasConstructors(declaration)) {
+                        break :static_call .{ .class_initializer = .{
+                            .name = declaration.canonical_name,
+                            .name_position = call.name_position,
+                            .type_arguments = try type_arguments.toOwnedSlice(self.allocator),
+                            .arguments = try self.transformExpressions(call.arguments),
+                        } };
+                    }
+                    if (call.arguments.len != 0) {
+                        const message = try std.fmt.allocPrint(self.allocator, "struct '{s}' requires named fields such as 'field:value'", .{nested_name});
+                        return self.fail(call.name_position, message);
+                    }
+                    break :static_call .{ .structure_initializer = .{
+                        .name = declaration.canonical_name,
+                        .name_position = call.name_position,
+                        .type_arguments = try type_arguments.toOwnedSlice(self.allocator),
+                        .fields = &.{},
+                    } };
+                }
+                if (try self.inaccessibleNestedType(expression.position.file, nested_name)) |declaration| {
+                    const visibility = declaration.member_visibility.?;
+                    const message = switch (visibility) {
+                        .private_access => try std.fmt.allocPrint(self.allocator, "nested type '{s}' is private", .{nested_name}),
+                        .internal_access => try std.fmt.allocPrint(self.allocator, "nested type '{s}' is internal to its source file", .{nested_name}),
+                        .subclass => try std.fmt.allocPrint(self.allocator, "nested type '{s}' is accessible only from its owning class and descendants", .{nested_name}),
+                        .public_access => unreachable,
+                    };
+                    return self.fail(call.name_position, message);
+                }
+            }
+            break :static_call .{ .static_method_call = .{
+                .owner = try self.transformType(call.owner, call.owner_position),
+                .owner_position = call.owner_position,
+                .name = call.name,
+                .name_position = call.name_position,
+                .type_arguments = try self.transformTypeArguments(call.type_arguments, call.name_position),
+                .arguments = try self.transformExpressions(call.arguments),
+                .named_fields = if (call.named_fields) |fields| try self.transformFieldInitializers(fields) else null,
+            } };
+        },
         .static_field_access => |access| .{ .static_field_access = .{
             .owner = try self.transformType(access.owner, access.owner_position),
             .owner_position = access.owner_position,

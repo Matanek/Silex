@@ -1,0 +1,19 @@
+public class Container {
+    public class Value {
+        let number:int
+
+        public init(number:int) {
+            self.number = number
+        }
+
+        public func get() int {
+            return self.number
+        }
+    }
+}
+
+public class Box<T> {
+    public class Entry<U> {
+        public struct Marker {}
+    }
+}

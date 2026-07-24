@@ -452,14 +452,14 @@ pub const Loader = struct {
                 package_index,
             );
             const remainder = canonical_path[candidate.len + 1 ..];
-            if (std.mem.indexOfScalar(u8, remainder, '.') != null) continue;
+            const declaration_name = firstSegment(remainder);
             const internal_access = modules.items[module_index].package_index ==
                 modules.items[current_module_index].package_index and
                 sameModuleParent(modules.items[module_index].name, modules.items[current_module_index].name);
             return self.resolveDeclaration(
                 modules,
                 module_index,
-                remainder,
+                declaration_name,
                 position,
                 module_index == current_module_index or internal_access,
                 module_index == current_module_index,
@@ -472,6 +472,16 @@ pub const Loader = struct {
         {
             try self.transitiveVisibilityError(position, package_index, package_name);
             unreachable;
+        }
+        if (std.mem.indexOfScalar(u8, canonical_path, '.') != null) {
+            return self.resolveDeclaration(
+                modules,
+                current_module_index,
+                firstSegment(canonical_path),
+                position,
+                true,
+                true,
+            );
         }
         return self.fail(position, try std.fmt.allocPrint(
             self.allocator,

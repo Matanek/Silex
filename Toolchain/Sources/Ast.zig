@@ -536,6 +536,8 @@ pub const Structure = struct {
     is_class: bool = false,
     is_static_class: bool = false,
     is_native_resource: bool = false,
+    member_visibility: ?MemberVisibility = null,
+    owner_name: ?[]const u8 = null,
     native_drop_name: ?[]const u8 = null,
     position: Source.Position,
     name: []const u8,
@@ -545,6 +547,7 @@ pub const Structure = struct {
     type_parameters: []const TypeParameter = &.{},
     base: ?BaseClass = null,
     conformances: []const ProtocolReference = &.{},
+    structures: []const Structure = &.{},
     fields: []const StructureField,
     constructors: []const Constructor = &.{},
     drop: ?Drop = null,
@@ -567,6 +570,7 @@ pub const ProtocolReference = struct {
 pub const BaseClass = struct {
     name: []const u8,
     position: Source.Position,
+    type_arguments: []const TypeName = &.{},
 };
 
 pub const Constructor = struct {

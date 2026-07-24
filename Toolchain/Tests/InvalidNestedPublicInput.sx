@@ -1,0 +1,7 @@
+public class Factory {
+    private class Token {}
+
+    public static func consume(token:Token) {}
+}
+
+func main() {}

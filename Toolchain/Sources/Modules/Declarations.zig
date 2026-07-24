@@ -108,9 +108,13 @@ pub fn collectDeclarations(self: anytype) !void {
         for (file.program.protocols) |protocol| {
             try self.addDeclaration(file.module_index, module_name, protocol.name, .protocol, protocol.is_public, protocol.is_internal, protocol.name_position);
         }
-        for (file.program.structures) |structure| {
-            try self.addDeclaration(file.module_index, module_name, structure.name, .structure, structure.is_public, structure.is_internal, structure.name_position);
-        }
+        for (file.program.structures) |structure| try self.collectStructureDeclaration(
+            file.module_index,
+            module_name,
+            structure,
+            null,
+            null,
+        );
         for (file.program.functions) |function| {
             const canonical = if (self.project.single_file or
                 (file.module_index == self.project.target_module and std.mem.eql(u8, function.name, "main")))
@@ -145,8 +149,75 @@ pub fn collectDeclarations(self: anytype) !void {
         };
     }
     for (self.declarations.items) |*declaration| {
-        if (declaration.is_public) try self.addExport(declaration.module_index, declaration.source_name, declaration, declaration.position);
+        if (declaration.is_public and declaration.owner_source_name == null) {
+            try self.addExport(declaration.module_index, declaration.source_name, declaration, declaration.position);
+        }
     }
+}
+
+pub fn collectStructureDeclaration(
+    self: anytype,
+    module_index: usize,
+    module_name: []const u8,
+    structure: Ast.Structure,
+    owner_source_name: ?[]const u8,
+    owner_canonical_name: ?[]const u8,
+) !void {
+    for (structure.structures) |nested| {
+        for (structure.fields) |field| {
+            if (field.is_static and std.mem.eql(u8, field.name, nested.name)) {
+                return self.fail(nested.name_position, try std.fmt.allocPrint(
+                    self.allocator,
+                    "nested type '{s}' conflicts with static field '{s}'",
+                    .{ nested.name, field.name },
+                ));
+            }
+        }
+        for (structure.methods) |method| {
+            if (method.is_static and std.mem.eql(u8, method.name, nested.name)) {
+                return self.fail(nested.name_position, try std.fmt.allocPrint(
+                    self.allocator,
+                    "nested type '{s}' conflicts with static method '{s}'",
+                    .{ nested.name, method.name },
+                ));
+            }
+        }
+    }
+    const source_name = if (owner_source_name) |owner|
+        try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ owner, structure.name })
+    else
+        structure.name;
+    const canonical_name = if (self.project.single_file)
+        source_name
+    else if (std.mem.eql(u8, source_name, lastSegment(module_name)))
+        module_name
+    else
+        try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ module_name, source_name });
+    try self.addDeclarationWithCanonical(
+        module_index,
+        source_name,
+        canonical_name,
+        .structure,
+        if (structure.member_visibility) |visibility| visibility == .public_access else structure.is_public,
+        if (structure.member_visibility) |visibility| visibility == .internal_access else structure.is_internal,
+        structure.name_position,
+    );
+    for (self.declarations.items) |*declaration| {
+        if (declaration.kind != .structure or declaration.position.file != structure.name_position.file or
+            declaration.position.line != structure.name_position.line or
+            declaration.position.column != structure.name_position.column) continue;
+        declaration.member_visibility = structure.member_visibility;
+        declaration.owner_source_name = owner_source_name;
+        declaration.owner_canonical_name = owner_canonical_name;
+        break;
+    }
+    for (structure.structures) |nested| try self.collectStructureDeclaration(
+        module_index,
+        module_name,
+        nested,
+        source_name,
+        canonical_name,
+    );
 }
 
 pub fn addDeclaration(

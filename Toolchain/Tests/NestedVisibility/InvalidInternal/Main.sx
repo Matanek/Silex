@@ -1,0 +1,5 @@
+use NestedVisibility.Library.Factory
+
+func main() {
+    var token = Factory.Token()
+}

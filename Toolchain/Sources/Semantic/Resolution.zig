@@ -541,10 +541,18 @@ pub fn memberVisibleFrom(
 ) bool {
     return switch (visibility) {
         .public_access => true,
-        .private_access => current_index == declaring_index,
+        .private_access => self.sameNestingFamily(current_index, declaring_index),
         .internal_access => self.structures.items[declaring_index].position.file == access_file,
-        .subclass => current_index == declaring_index or self.isDescendantOf(current_index, declaring_index),
+        .subclass => self.sameNestingFamily(current_index, declaring_index) or self.isDescendantOf(current_index, declaring_index),
     };
+}
+
+pub fn sameNestingFamily(self: anytype, left_index: usize, right_index: usize) bool {
+    var left = left_index;
+    while (self.structures.items[left].owner_index) |owner| left = owner;
+    var right = right_index;
+    while (self.structures.items[right].owner_index) |owner| right = owner;
+    return left == right;
 }
 
 pub fn isDescendantOf(self: anytype, candidate_index: usize, ancestor_index: usize) bool {

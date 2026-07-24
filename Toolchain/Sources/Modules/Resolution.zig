@@ -50,6 +50,14 @@ pub fn resolveUses(
         const message = try std.fmt.allocPrint(self.allocator, "unknown declaration '{s}'", .{path});
         return self.fail(position, message);
     }
+    const local_declarations = try self.declarationsNamedVisibleFrom(
+        file.module_index,
+        path,
+        null,
+        false,
+        file.file_index,
+    );
+    if (local_declarations.len != 0) return local_declarations;
     const target = try self.qualifiedUseTarget(file, path) orelse {
         const message = try std.fmt.allocPrint(self.allocator, "unknown declaration '{s}'", .{path});
         return self.fail(position, message);
@@ -60,7 +68,7 @@ pub fn resolveUses(
         target.module_index,
         target.public_name,
         null,
-        !is_current and !internal_access,
+        !is_current and !internal_access and std.mem.indexOfScalar(u8, target.public_name, '.') == null,
         file.file_index,
     );
     if (declarations.len != 0) return declarations;
@@ -120,14 +128,53 @@ pub fn looksQualified(self: anytype, file_index: usize, path: []const u8) bool {
 pub fn visibleDeclarationKind(self: anytype, file_index: usize, name: []const u8) !?Kind {
     const file = &self.file_infos[file_index];
     if (std.mem.indexOfScalar(u8, name, '.') == null) {
+        if (self.findLexicalDeclaration(file.module_index, name, null, file.file_index)) |declaration| return declaration.kind;
         if (self.findDirectVisibleFrom(file.module_index, name, null, file.file_index)) |declaration| return declaration.kind;
         for (file.uses.items) |binding| {
             if (std.mem.eql(u8, binding.local_name, name)) return binding.declaration.kind;
         }
         return null;
     }
+    if (self.findDirectVisibleFrom(file.module_index, name, null, file.file_index)) |declaration| return declaration.kind;
+    if (self.findUsedNestedDeclaration(file, name, null)) |declaration| return declaration.kind;
     const target = try self.qualifiedExpressionTarget(file, name) orelse return null;
     if (self.findDirectVisibleFrom(target.module_index, target.public_name, null, file.file_index)) |declaration| return declaration.kind;
+    return null;
+}
+
+pub fn inaccessibleNestedType(
+    self: anytype,
+    file_index: usize,
+    path: []const u8,
+) !?*const Declaration {
+    const file = &self.file_infos[file_index];
+    if (self.findDirect(file.module_index, path, .structure)) |declaration| {
+        if (declaration.owner_source_name != null and !self.declarationVisibleFrom(declaration, file_index)) {
+            return declaration;
+        }
+    }
+    if (std.mem.indexOfScalar(u8, path, '.')) |separator| {
+        const head = path[0..separator];
+        for (file.uses.items) |binding| {
+            if (!std.mem.eql(u8, binding.local_name, head)) continue;
+            const source_name = try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{
+                binding.declaration.source_name,
+                path[separator + 1 ..],
+            });
+            if (self.findDirect(binding.declaration.module_index, source_name, .structure)) |declaration| {
+                if (declaration.owner_source_name != null and !self.declarationVisibleFrom(declaration, file_index)) {
+                    return declaration;
+                }
+            }
+        }
+    }
+    if (try self.qualifiedExpressionTarget(file, path)) |target| {
+        if (self.findDirect(target.module_index, target.public_name, .structure)) |declaration| {
+            if (declaration.owner_source_name != null and !self.declarationVisibleFrom(declaration, file_index)) {
+                return declaration;
+            }
+        }
+    }
     return null;
 }
 
@@ -170,6 +217,7 @@ pub fn visibleFunctionDeclarations(
 pub fn resolveName(self: anytype, file_index: usize, name: []const u8, kind: Kind, position: Source.Position) !*const Declaration {
     const file = &self.file_infos[file_index];
     if (std.mem.indexOfScalar(u8, name, '.') != null) return self.resolveQualified(file, name, kind, position);
+    if (self.findLexicalDeclaration(file.module_index, name, kind, file.file_index)) |declaration| return declaration;
     if (self.findDirectVisibleFrom(file.module_index, name, kind, file.file_index)) |declaration| return declaration;
     for (file.uses.items) |binding| {
         if (std.mem.eql(u8, binding.local_name, name) and binding.declaration.kind == kind) return binding.declaration;
@@ -206,19 +254,25 @@ pub fn resolveQualified(
     kind: ?Kind,
     position: Source.Position,
 ) !*const Declaration {
+    if (self.findDirectVisibleFrom(file.module_index, path, kind, file.file_index)) |declaration| return declaration;
+    if (self.findUsedNestedDeclaration(file, path, kind)) |declaration| return declaration;
     if (try self.qualifiedExpressionTarget(file, path)) |target| {
-        if (std.mem.indexOfScalar(u8, target.public_name, '.') != null) {
-            return self.fail(
-                position,
-                try std.fmt.allocPrint(self.allocator, "unknown qualified path '{s}'", .{path}),
-            );
+        if (std.mem.indexOfScalar(u8, target.public_name, '.')) |separator| {
+            const root_name = target.public_name[0..separator];
+            if (self.findDirect(target.module_index, root_name, null) == null and
+                self.findExport(target.module_index, root_name, null) == null)
+            {
+                return self.fail(
+                    position,
+                    try std.fmt.allocPrint(self.allocator, "unknown qualified path '{s}'", .{path}),
+                );
+            }
         }
         const internal_access = self.internalAccess(file, target.module_index);
-        if (target.module_index == file.module_index or internal_access) {
-            if (self.findDirectVisibleFrom(target.module_index, target.public_name, kind, file.file_index)) |declaration| return declaration;
-        } else if (self.findExport(target.module_index, target.public_name, kind)) |export_value| {
+        if (self.findDirectVisibleFrom(target.module_index, target.public_name, kind, file.file_index)) |declaration| return declaration;
+        if (target.module_index != file.module_index and !internal_access) if (self.findExport(target.module_index, target.public_name, kind)) |export_value| {
             return export_value.declaration;
-        }
+        };
         if (self.findDirect(target.module_index, target.public_name, kind)) |declaration| {
             if (declaration.is_internal and declaration.position.file != file.file_index) {
                 const message = try std.fmt.allocPrint(self.allocator, "declaration '{s}' is internal to its source file", .{target.public_name});
@@ -394,7 +448,7 @@ pub fn declarationsNamedVisibleFrom(
     const declarations = try self.declarationsNamed(module_index, name, kind, public_only);
     var result: std.ArrayList(*const Declaration) = .empty;
     for (declarations) |declaration| {
-        if (declaration.is_internal and declaration.position.file != file_index) continue;
+        if (!self.declarationVisibleFrom(declaration, file_index)) continue;
         try result.append(self.allocator, declaration);
     }
     return result.toOwnedSlice(self.allocator);
@@ -420,10 +474,104 @@ pub fn findDirectVisibleFrom(
         if (kind == null and declaration.kind == .type_alias) continue;
         if (declaration.module_index != module_index or (kind != null and declaration.kind != kind.?) or
             !std.mem.eql(u8, declaration.source_name, name)) continue;
-        if (declaration.is_internal and declaration.position.file != file_index) continue;
+        if (!self.declarationVisibleFrom(declaration, file_index)) continue;
         return declaration;
     }
     return null;
+}
+
+pub fn findLexicalDeclaration(
+    self: anytype,
+    module_index: usize,
+    name: []const u8,
+    kind: ?Kind,
+    file_index: usize,
+) ?*const Declaration {
+    var owner = if (self.current_structure_declaration) |declaration| declaration.source_name else return null;
+    while (true) {
+        const candidate = std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ owner, name }) catch return null;
+        if (self.findDirectVisibleFrom(module_index, candidate, kind, file_index)) |declaration| return declaration;
+        const separator = std.mem.lastIndexOfScalar(u8, owner, '.') orelse break;
+        owner = owner[0..separator];
+    }
+    return null;
+}
+
+pub fn findUsedNestedDeclaration(
+    self: anytype,
+    file: *const FileInfo,
+    path: []const u8,
+    kind: ?Kind,
+) ?*const Declaration {
+    const separator = std.mem.indexOfScalar(u8, path, '.') orelse return null;
+    const head = path[0..separator];
+    for (file.uses.items) |binding| {
+        if (!std.mem.eql(u8, binding.local_name, head)) continue;
+        const source_name = std.fmt.allocPrint(self.allocator, "{s}.{s}", .{
+            binding.declaration.source_name,
+            path[separator + 1 ..],
+        }) catch return null;
+        if (self.findDirectVisibleFrom(binding.declaration.module_index, source_name, kind, file.file_index)) |declaration| {
+            return declaration;
+        }
+    }
+    return null;
+}
+
+pub fn declarationVisibleFrom(self: anytype, declaration: *const Declaration, file_index: usize) bool {
+    const visibility = declaration.member_visibility orelse {
+        if (declaration.is_internal) return declaration.position.file == file_index;
+        const file = &self.file_infos[file_index];
+        if (file.module_index == declaration.module_index or self.internalAccess(file, declaration.module_index)) return true;
+        return declaration.is_public;
+    };
+    const owner_name = declaration.owner_source_name orelse return true;
+    const owner = self.findDirect(declaration.module_index, owner_name, .structure) orelse return false;
+    if (!self.declarationVisibleFrom(owner, file_index)) return false;
+    return switch (visibility) {
+        .public_access => true,
+        .internal_access => declaration.position.file == file_index,
+        .private_access => if (self.current_structure_declaration) |current|
+            sameNestingFamily(current.source_name, declaration.source_name)
+        else
+            false,
+        .subclass => if (self.current_structure_declaration) |current|
+            sameNestingFamily(current.source_name, declaration.source_name) or
+                self.declarationDescendsFrom(current, owner)
+        else
+            false,
+    };
+}
+
+pub fn declarationDescendsFrom(
+    self: anytype,
+    candidate: *const Declaration,
+    ancestor: *const Declaration,
+) bool {
+    const candidate_structure = for (self.files) |file| {
+        if (findAstStructure(file.program.structures, candidate.position)) |structure| break structure;
+    } else return false;
+    const base = candidate_structure.base orelse return false;
+    var base_declaration: ?*const Declaration = null;
+    for (self.declarations.items) |*declaration| {
+        if (declaration.kind != .structure or declaration.module_index != candidate.module_index) continue;
+        if (std.mem.eql(u8, declaration.source_name, base.name) or
+            std.mem.eql(u8, declaration.canonical_name, base.name) or
+            std.mem.endsWith(u8, declaration.canonical_name, base.name))
+        {
+            base_declaration = declaration;
+            break;
+        }
+    }
+    const resolved_base = base_declaration orelse return false;
+    if (resolved_base == ancestor) return true;
+    return self.declarationDescendsFrom(resolved_base, ancestor);
+}
+
+fn sameNestingFamily(left: []const u8, right: []const u8) bool {
+    const left_end = std.mem.indexOfScalar(u8, left, '.') orelse left.len;
+    const right_end = std.mem.indexOfScalar(u8, right, '.') orelse right.len;
+    return std.mem.eql(u8, left[0..left_end], right[0..right_end]);
 }
 
 pub fn findDirectByPosition(self: anytype, position: Source.Position, kind: Kind) ?*const Declaration {
@@ -437,14 +585,7 @@ pub fn findDirectByPosition(self: anytype, position: Source.Position, kind: Kind
 pub fn declarationIsClass(self: anytype, declaration: *const Declaration) bool {
     if (declaration.kind != .structure) return false;
     for (self.files) |file| {
-        for (file.program.structures) |structure| {
-            if (structure.name_position.file == declaration.position.file and
-                structure.name_position.line == declaration.position.line and
-                structure.name_position.column == declaration.position.column)
-            {
-                return structure.is_class;
-            }
-        }
+        if (findAstStructure(file.program.structures, declaration.position)) |structure| return structure.is_class;
     }
     return false;
 }
@@ -452,14 +593,7 @@ pub fn declarationIsClass(self: anytype, declaration: *const Declaration) bool {
 pub fn declarationIsStaticClass(self: anytype, declaration: *const Declaration) bool {
     if (declaration.kind != .structure) return false;
     for (self.files) |file| {
-        for (file.program.structures) |structure| {
-            if (structure.name_position.file == declaration.position.file and
-                structure.name_position.line == declaration.position.line and
-                structure.name_position.column == declaration.position.column)
-            {
-                return structure.is_static_class;
-            }
-        }
+        if (findAstStructure(file.program.structures, declaration.position)) |structure| return structure.is_static_class;
     }
     return false;
 }
@@ -467,16 +601,18 @@ pub fn declarationIsStaticClass(self: anytype, declaration: *const Declaration) 
 pub fn declarationHasConstructors(self: anytype, declaration: *const Declaration) bool {
     if (declaration.kind != .structure) return false;
     for (self.files) |file| {
-        for (file.program.structures) |structure| {
-            if (structure.name_position.file == declaration.position.file and
-                structure.name_position.line == declaration.position.line and
-                structure.name_position.column == declaration.position.column)
-            {
-                return structure.constructors.len != 0;
-            }
-        }
+        if (findAstStructure(file.program.structures, declaration.position)) |structure| return structure.constructors.len != 0;
     }
     return false;
+}
+
+fn findAstStructure(structures: []const Ast.Structure, position: Source.Position) ?*const Ast.Structure {
+    for (structures) |*structure| {
+        if (structure.name_position.file == position.file and structure.name_position.line == position.line and
+            structure.name_position.column == position.column) return structure;
+        if (findAstStructure(structure.structures, position)) |nested| return nested;
+    }
+    return null;
 }
 
 pub fn declarationIsEnum(self: anytype, declaration: *const Declaration) bool {

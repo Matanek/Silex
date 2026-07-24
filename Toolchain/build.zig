@@ -896,6 +896,55 @@ pub fn build(b: *std.Build) void {
         "Tests/InternalVisibility/InvalidPublicInput/Library.sx:6:25: error: public method 'consume' cannot expose internal input type 'Handle'\n",
     );
 
+    const invalid_nested_public_input_command = b.addRunArtifact(executable);
+    invalid_nested_public_input_command.addArgs(&.{ "compile", "Tests/InvalidNestedPublicInput.sx" });
+    invalid_nested_public_input_command.expectExitCode(1);
+    invalid_nested_public_input_command.expectStdErrEqual(
+        "Tests/InvalidNestedPublicInput.sx:4:32: error: public method 'consume' cannot expose non-public input type 'Factory.Token'\n",
+    );
+
+    const invalid_nested_collision_command = b.addRunArtifact(executable);
+    invalid_nested_collision_command.addArgs(&.{ "compile", "Tests/InvalidNestedCollision.sx" });
+    invalid_nested_collision_command.expectExitCode(1);
+    invalid_nested_collision_command.expectStdErrEqual(
+        "Tests/InvalidNestedCollision.sx:3:11: error: nested type 'Token' conflicts with static field 'Token'\n",
+    );
+
+    const invalid_nested_method_collision_command = b.addRunArtifact(executable);
+    invalid_nested_method_collision_command.addArgs(&.{ "compile", "Tests/InvalidNestedMethodCollision.sx" });
+    invalid_nested_method_collision_command.expectExitCode(1);
+    invalid_nested_method_collision_command.expectStdErrEqual(
+        "Tests/InvalidNestedMethodCollision.sx:3:11: error: nested type 'Token' conflicts with static method 'Token'\n",
+    );
+
+    const invalid_nested_extension_private_command = b.addRunArtifact(executable);
+    invalid_nested_extension_private_command.addArgs(&.{ "compile", "Tests/InvalidNestedExtensionPrivate.sx" });
+    invalid_nested_extension_private_command.expectExitCode(1);
+    invalid_nested_extension_private_command.expectStdErrEqual(
+        "Tests/InvalidNestedExtensionPrivate.sx:9:21: error: field 'value' is private in class 'Factory.Token'\n",
+    );
+
+    const invalid_private_nested_type_command = b.addRunArtifact(executable);
+    invalid_private_nested_type_command.addArgs(&.{ "compile", "Tests/InvalidPrivateNestedType.sx" });
+    invalid_private_nested_type_command.expectExitCode(1);
+    invalid_private_nested_type_command.expectStdErrEqual(
+        "Tests/InvalidPrivateNestedType.sx:6:25: error: nested type 'Factory.Token' is private\n",
+    );
+
+    const invalid_protected_nested_type_command = b.addRunArtifact(executable);
+    invalid_protected_nested_type_command.addArgs(&.{ "compile", "Tests/InvalidProtectedNestedType.sx" });
+    invalid_protected_nested_type_command.expectExitCode(1);
+    invalid_protected_nested_type_command.expectStdErrEqual(
+        "Tests/InvalidProtectedNestedType.sx:6:25: error: nested type 'Factory.Token' is accessible only from its owning class and descendants\n",
+    );
+
+    const invalid_internal_nested_type_command = b.addRunArtifact(executable);
+    invalid_internal_nested_type_command.addArgs(&.{ "compile", "Tests/NestedVisibility/InvalidInternal/silex.json" });
+    invalid_internal_nested_type_command.expectExitCode(1);
+    invalid_internal_nested_type_command.expectStdErrEqual(
+        "Tests/NestedVisibility/InvalidInternal/Main.sx:4:25: error: nested type 'Factory.Token' is internal to its source file\n",
+    );
+
     const generic_extension_private_command = b.addRunArtifact(executable);
     generic_extension_private_command.addArgs(&.{ "compile", "Tests/GenericExtensionPrivate/silex.json" });
     generic_extension_private_command.expectExitCode(1);
@@ -2489,6 +2538,13 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&invalid_internal_import_command.step);
     test_step.dependOn(&invalid_internal_member_command.step);
     test_step.dependOn(&invalid_internal_public_input_command.step);
+    test_step.dependOn(&invalid_nested_public_input_command.step);
+    test_step.dependOn(&invalid_nested_collision_command.step);
+    test_step.dependOn(&invalid_nested_method_collision_command.step);
+    test_step.dependOn(&invalid_nested_extension_private_command.step);
+    test_step.dependOn(&invalid_private_nested_type_command.step);
+    test_step.dependOn(&invalid_protected_nested_type_command.step);
+    test_step.dependOn(&invalid_internal_nested_type_command.step);
     test_step.dependOn(&generic_extension_private_command.step);
     test_step.dependOn(&extension_conflict_command.step);
     test_step.dependOn(&extension_conformance_visibility_command.step);
@@ -2839,8 +2895,18 @@ pub fn build(b: *std.Build) void {
     generic_structures_command.addArgs(&.{ "run", "Smokes/GenericStructures.sx" });
     generic_structures_command.expectStdOutEqual(hostText(b, "10\n30\nAda\ntrue\n7\nright\ntrue\n0\n3\nGrace\n8\n4\n9\n"));
 
+    const nested_types_command = b.addRunArtifact(executable);
+    nested_types_command.step.dependOn(&generic_structures_command.step);
+    nested_types_command.addArgs(&.{ "run", "Smokes/NestedTypes.sx" });
+    nested_types_command.expectStdOutEqual(hostText(b, "nested types\n"));
+
+    const nested_type_modules_command = b.addRunArtifact(executable);
+    nested_type_modules_command.step.dependOn(&nested_types_command.step);
+    nested_type_modules_command.addArgs(&.{ "run", "Smokes/NestedTypesModules/silex.json" });
+    nested_type_modules_command.expectStdOutEqual(hostText(b, "nested type modules\n"));
+
     const generic_enums_command = b.addRunArtifact(executable);
-    generic_enums_command.step.dependOn(&generic_structures_command.step);
+    generic_enums_command.step.dependOn(&nested_type_modules_command.step);
     generic_enums_command.addArgs(&.{ "run", "Smokes/GenericEnums/silex.json" });
     generic_enums_command.expectStdOutEqual(hostText(b, "success\ninvalid\ndistinct\n2\ntrue\nconverted\nsuccess\n"));
 

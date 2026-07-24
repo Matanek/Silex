@@ -6,6 +6,7 @@ const expectSemanticError = TestSupport.expectSemanticError;
 const expectResolvedSemanticError = TestSupport.expectResolvedSemanticError;
 const expectResolvedSemanticErrorContains = TestSupport.expectResolvedSemanticErrorContains;
 const expectSemanticSuccess = TestSupport.expectSemanticSuccess;
+const expectSpecializedSemanticSuccess = TestSupport.expectSpecializedSemanticSuccess;
 const analyzeDeferredNativeTest = TestSupport.analyzeDeferredNativeTest;
 const resolveDeferredNativeTestProgram = TestSupport.resolveDeferredNativeTestProgram;
 const expectDeferredNativeError = TestSupport.expectDeferredNativeError;
@@ -1016,5 +1017,44 @@ test "noncopyable values compose through fields enums optionals collections clas
     try expectResolvedSemanticError(
         declaration ++ "struct Holder { var resource:Resource } func main() { let first = Holder(resource:Resource.open(1)); let second = Holder(resource:Resource.open(2)); print(first == second) }",
         "type 'Holder' does not support equality",
+    );
+}
+
+test "nested types preserve lexical access generics protected access and opaque returns" {
+    try expectSpecializedSemanticSuccess(
+        \\public class Box<T> {
+        \\    private static var count:int = 1
+        \\    public class Entry<U> {
+        \\        let left:T
+        \\        let right:U
+        \\        public init(left:T, right:U) { self.left = left; self.right = right }
+        \\        public func outer_count() int { return Box<T>.count }
+        \\        public func first() T { return self.left }
+        \\    }
+        \\}
+        \\func main() {
+        \\    var entry:Box<int>.Entry<str> = Box<int>.Entry<str>(1, "ok")
+        \\    assert(entry.first() == 1, "outer generic argument")
+        \\    assert(entry.outer_count() == 1, "nesting family private access")
+        \\}
+    );
+    try expectSemanticSuccess(
+        \\class Base {
+        \\    protected class Token { public init() {} }
+        \\}
+        \\class Child : Base {
+        \\    public static func make() Base.Token { return Base.Token() }
+        \\}
+        \\func main() { var token = Child.make() }
+    );
+    try expectSemanticSuccess(
+        \\public class Factory {
+        \\    private class Token { public func value() int { return 7 } }
+        \\    public static func make() Token { return Token() }
+        \\}
+        \\func main() {
+        \\    var token = Factory.make()
+        \\    assert(token.value() == 7, "opaque nested return")
+        \\}
     );
 }
