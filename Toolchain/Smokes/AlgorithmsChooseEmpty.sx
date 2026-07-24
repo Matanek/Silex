@@ -7,7 +7,7 @@ func is_negative(value:@int) bool {
 
 func main() {
     let values:int[] = []
-    var randomizer = Randomizer.create(1)
+    var randomizer = Randomizer(1)
     let view = @values[0:values.count()]
     let selected:@int = Algorithms.choose<int>(randomizer, view)
     assert(is_negative(selected), "unreachable empty choice")

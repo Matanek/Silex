@@ -45,7 +45,7 @@ Standard error never receives display-control bytes implicitly.
 
 ## Interactive sessions
 
-`Session.create()` requires both standard input and standard output to be
+`Session()` requires both standard input and standard output to be
 interactive. It captures their POSIX `termios` or Windows Console modes and
 activates immediate, non-echoed input. Only one session may be open in a
 process. In this mode, `Ctrl+C` is returned as a key event rather than sent as
@@ -54,7 +54,7 @@ an interruption signal.
 ```sx
 use STD.Console
 
-var session = Console.Session.create()
+var session = Console.Session()
 session.enter_alternate_screen()
 
 var running = true

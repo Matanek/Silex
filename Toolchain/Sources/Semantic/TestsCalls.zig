@@ -6,6 +6,7 @@ const expectSemanticError = TestSupport.expectSemanticError;
 const expectResolvedSemanticError = TestSupport.expectResolvedSemanticError;
 const expectResolvedSemanticErrorContains = TestSupport.expectResolvedSemanticErrorContains;
 const expectSemanticSuccess = TestSupport.expectSemanticSuccess;
+const expectSpecializedSemanticSuccess = TestSupport.expectSpecializedSemanticSuccess;
 const analyzeDeferredNativeTest = TestSupport.analyzeDeferredNativeTest;
 const resolveDeferredNativeTestProgram = TestSupport.resolveDeferredNativeTestProgram;
 const expectDeferredNativeError = TestSupport.expectDeferredNativeError;
@@ -124,6 +125,64 @@ const appendSignature = Support.appendSignature;
 const functionSignatures = Support.functionSignatures;
 const methodSignatures = Support.methodSignatures;
 const constructorSignatures = Support.constructorSignatures;
+
+test "resolve omitted default arguments for functions methods and constructors" {
+    try expectSemanticSuccess(
+        \\struct Box {
+        \\    var value:int
+        \\    init(value:int = 41) { self.value = value }
+        \\    func plus(value:int = 1) int { return self.value + value }
+        \\}
+        \\class Parent {
+        \\    private var value:int
+        \\    public init(value:int = 42) { self.value = value }
+        \\}
+        \\class Child : Parent {}
+        \\func greet(value:int = 40) int { return value + 2 }
+        \\func main() {
+        \\    let box = Box()
+        \\    var child = Child()
+        \\    assert(box.plus() == 42, "method")
+        \\    assert(greet() == 42, "function")
+        \\}
+    );
+}
+
+test "reject collisions between effective callable signatures" {
+    try expectSemanticError(
+        "struct Foo { init() {} init(name:str = \"Foo\") {} } func main() {}",
+        "constructor 'init()' is already exposed by the declaration at 1:14",
+    );
+    try expectSemanticError(
+        \\struct Vector3 {
+        \\    var x:float
+        \\    var y:float
+        \\    var z:float
+        \\    init() {}
+        \\    init(value:float) { self.x = value; self.y = value; self.z = value }
+        \\    init(x:float, y:float = 0.0, z:float = 0.0) { self.x = x; self.y = y; self.z = z }
+        \\}
+        \\func main() {}
+    ,
+        "constructor 'init(float)' is already exposed by the declaration at 6:5",
+    );
+    try expectSemanticError(
+        "func collide(value:int) {} func collide(value:int, extra:int = 0) {} func main() {}",
+        "function 'collide(int)' is already exposed by the declaration at 1:6",
+    );
+}
+
+test "resolve generic defaults lazily after specialization" {
+    try expectSpecializedSemanticSuccess(
+        \\func increment(value:int) int { return value + 1 }
+        \\func apply<T>(value:T, transform:func(T) T = increment) T { return transform(value) }
+        \\func main() {
+        \\    assert(apply(1) == 2, "inferred default")
+        \\    assert(apply<int>(2) == 3, "explicit specialization default")
+        \\    assert(apply<str>("Silex", func(value:str) str { return value }) == "Silex", "explicit")
+        \\}
+    );
+}
 const isNativeScalarReturnType = Support.isNativeScalarReturnType;
 const isNativeStructureFieldType = Support.isNativeStructureFieldType;
 const isNativeScalarParameterType = Support.isNativeScalarParameterType;
@@ -369,6 +428,33 @@ test "reject returning a capturing lambda" {
     );
 }
 
+test "constructors preserve stored callback lifetimes" {
+    const holder =
+        \\struct Holder {
+        \\    var callback:func()
+        \\    init(callback:func()) { self.callback = callback }
+        \\}
+    ;
+    const Parser = @import("../Parser.zig").Parser;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var parser = Parser.init(allocator, holder ++
+        \\func main() {
+        \\    var count = 0
+        \\    var value = Holder(func() { count += 1 })
+        \\    value.callback()
+        \\}
+    );
+    var analyzer = Analyzer.init(allocator);
+    _ = try analyzer.analyze(try resolveSingleTestProgram(allocator, try parser.parse()));
+
+    try expectResolvedSemanticError(
+        holder ++ "func invalid() Holder { var count = 0; return Holder(func() { count += 1 }) } func main() {}",
+        "capturing function value cannot be returned from its lexical scope",
+    );
+}
+
 test "reject storing a callback beyond a captured block" {
     const Parser = @import("../Parser.zig").Parser;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
@@ -512,15 +598,15 @@ test "read references preserve owners and accept ordinary arguments" {
 
     try expectResolvedSemanticError(
         "func inspect(value:int) {} func inspect(value:@int) {} func main() {}",
-        "function 'inspect' with this callable shape is already declared",
+        "function 'inspect(@int)' is already exposed by the declaration at 1:6",
     );
     try expectResolvedSemanticError(
         "class Box { init(value:int) {} init(value:@int) {} } func main() {}",
-        "constructor 'init' with this callable shape is already declared in this class",
+        "constructor 'init(@int)' is already exposed by the declaration at 1:13",
     );
     try expectResolvedSemanticError(
         "struct Box { func inspect(value:int) {} func inspect(value:@int) {} } func main() {}",
-        "method 'inspect' with this callable shape is already declared in struct 'Box'",
+        "method 'inspect(@int)' is already exposed by the declaration at 1:19",
     );
     try expectResolvedSemanticError(
         "protocol Reader { func inspect(value:int); func inspect(value:@int) } func main() {}",
@@ -714,6 +800,37 @@ test "isolated callbacks reject only values that cross a shared boundary" {
     );
     try expectDeferredNativeError(
         registration ++ "\nclass State { public static var count:int } func main() { let operation = start_operation(isolated func() { print(State.count) }) }",
+        "an 'isolated func' cannot access a 'static var'",
+    );
+}
+
+test "mutex protects mutable static storage on isolated call paths" {
+    const registration =
+        \\public native resource Operation { drop discard_operation }
+        \\native func start_operation(callback:isolated func()) Operation
+        \\class State { public static var count:int }
+        \\func increment() { State.count++ }
+    ;
+    try expectDeferredNativeSuccess(
+        registration ++
+            \\func main() {
+            \\    let operation = start_operation(isolated func() {
+            \\        mutex {
+            \\            increment()
+            \\            mutex { State.count++ }
+            \\        }
+            \\    })
+            \\}
+        ,
+    );
+    try expectDeferredNativeError(
+        registration ++
+            \\func main() {
+            \\    mutex {
+            \\        let operation = start_operation(isolated func() { State.count++ })
+            \\    }
+            \\}
+        ,
         "an 'isolated func' cannot access a 'static var'",
     );
 }

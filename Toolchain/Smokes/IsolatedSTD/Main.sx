@@ -1,6 +1,6 @@
 use STD.Randomizer as Randomizer
 
 func main() {
-    var randomizer = Randomizer.create()
+    var randomizer = Randomizer()
     print(randomizer.get_int() > 0)
 }

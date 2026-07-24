@@ -218,7 +218,7 @@ pub fn inferExpressionType(self: anytype, expression: *const Ast.Expression) All
         },
         .call => |call| call_type: {
             for (self.functions.items) |function| {
-                if (std.mem.eql(u8, function.name, call.name) and function.parameters.len == call.arguments.len) {
+                if (std.mem.eql(u8, function.name, call.name) and parametersAcceptArity(function.parameters, call.arguments.len)) {
                     break :call_type returnTypeName(function.return_type);
                 }
             }
@@ -232,7 +232,7 @@ pub fn inferExpressionType(self: anytype, expression: *const Ast.Expression) All
             };
             const structure = availableStructure(self, owner_name) orelse break :method_type null;
             for (structure.methods) |method| {
-                if (method.is_static and std.mem.eql(u8, method.name, call.name) and method.parameters.len == call.arguments.len) {
+                if (method.is_static and std.mem.eql(u8, method.name, call.name) and parametersAcceptArity(method.parameters, call.arguments.len)) {
                     break :method_type returnTypeName(method.return_type);
                 }
             }
@@ -243,7 +243,7 @@ pub fn inferExpressionType(self: anytype, expression: *const Ast.Expression) All
             const owner_name = structureName(object_type) orelse break :method_type null;
             if (availableStructure(self, owner_name)) |structure| {
                 for (structure.methods) |method| {
-                    if (!method.is_static and std.mem.eql(u8, method.name, call.name) and method.parameters.len == call.arguments.len) {
+                    if (!method.is_static and std.mem.eql(u8, method.name, call.name) and parametersAcceptArity(method.parameters, call.arguments.len)) {
                         break :method_type returnTypeName(method.return_type);
                     }
                 }
@@ -436,16 +436,27 @@ fn inferArguments(
     template: *const Ast.Function,
     expressions: []const *Ast.Expression,
 ) Allocator.Error!?[]const Ast.TypeName {
-    if (template.parameters.len != expressions.len) return null;
+    if (!parametersAcceptArity(template.parameters, expressions.len)) return null;
     const inferred = try self.allocator.alloc(?Ast.TypeName, template.type_parameters.len);
     @memset(inferred, null);
-    for (template.parameters, expressions) |parameter, expression| {
+    for (template.parameters[0..expressions.len], expressions) |parameter, expression| {
         const actual = try argumentType(self, expression, parameter.mode) orelse return null;
         if (!bindType(self, parameter.type, actual, template.type_parameters, inferred)) return null;
     }
     var arguments = try self.allocator.alloc(Ast.TypeName, inferred.len);
     for (inferred, 0..) |argument, index| arguments[index] = argument orelse return null;
     return arguments;
+}
+
+fn requiredParameterCount(parameters: []const Ast.Parameter) usize {
+    for (parameters, 0..) |parameter, index| {
+        if (parameter.default_value != null) return index;
+    }
+    return parameters.len;
+}
+
+fn parametersAcceptArity(parameters: []const Ast.Parameter, argument_count: usize) bool {
+    return argument_count >= requiredParameterCount(parameters) and argument_count <= parameters.len;
 }
 
 fn concreteFunctionCompatible(
@@ -456,9 +467,9 @@ fn concreteFunctionCompatible(
 ) Allocator.Error!bool {
     for (self.program.functions) |function| {
         if (function.type_parameters.len != 0 or !std.mem.eql(u8, function.name, name) or
-            !functionIsVisible(function, visible_declarations) or function.parameters.len != expressions.len) continue;
+            !functionIsVisible(function, visible_declarations) or !parametersAcceptArity(function.parameters, expressions.len)) continue;
         var compatible = true;
-        for (function.parameters, expressions) |parameter, expression| {
+        for (function.parameters[0..expressions.len], expressions) |parameter, expression| {
             const actual = try argumentType(self, expression, parameter.mode) orelse return true;
             if (!typesCompatible(parameter.type, actual)) compatible = false;
         }
@@ -521,9 +532,9 @@ fn concreteMethodCompatible(
         if (!methodOwnerMatches(self, owner_name, structure.name, true)) continue;
         for (structure.methods) |method| {
             if (method.type_parameters.len != 0 or method.is_static or !std.mem.eql(u8, method.name, name) or
-                method.parameters.len != expressions.len) continue;
+                !parametersAcceptArity(method.parameters, expressions.len)) continue;
             var compatible = true;
-            for (method.parameters, expressions) |parameter, expression| {
+            for (method.parameters[0..expressions.len], expressions) |parameter, expression| {
                 const actual = try argumentType(self, expression, parameter.mode) orelse return true;
                 if (!typesCompatible(parameter.type, actual)) compatible = false;
             }
@@ -533,12 +544,12 @@ fn concreteMethodCompatible(
     for (self.program.extensions) |extension| {
         if (!methodOwnerMatches(self, owner_name, extension.target, false)) continue;
         for (extension.methods) |method| {
-            if (method.type_parameters.len != 0 or method.is_static or !std.mem.eql(u8, method.name, name) or method.parameters.len != expressions.len) continue;
+            if (method.type_parameters.len != 0 or method.is_static or !std.mem.eql(u8, method.name, name) or !parametersAcceptArity(method.parameters, expressions.len)) continue;
             if (method.extension_visible_files) |visible_files| {
                 if (!fileSetContains(visible_files, visibility_file)) continue;
             }
             var compatible = true;
-            for (method.parameters, expressions) |parameter, expression| {
+            for (method.parameters[0..expressions.len], expressions) |parameter, expression| {
                 const actual = try argumentType(self, expression, parameter.mode) orelse return true;
                 if (!typesCompatible(parameter.type, actual)) compatible = false;
             }
@@ -621,9 +632,9 @@ fn concreteStaticMethodCompatible(
         if (!std.mem.eql(u8, owner_name, structure.name)) continue;
         for (structure.methods) |method| {
             if (method.type_parameters.len != 0 or !method.is_static or !std.mem.eql(u8, method.name, name) or
-                method.parameters.len != expressions.len) continue;
+                !parametersAcceptArity(method.parameters, expressions.len)) continue;
             var compatible = true;
-            for (method.parameters, expressions) |parameter, expression| {
+            for (method.parameters[0..expressions.len], expressions) |parameter, expression| {
                 const actual = try argumentType(self, expression, parameter.mode) orelse return true;
                 if (!typesCompatible(parameter.type, actual)) compatible = false;
             }
@@ -634,12 +645,12 @@ fn concreteStaticMethodCompatible(
         if (!std.mem.eql(u8, owner_name, extension.target)) continue;
         for (extension.methods) |method| {
             if (method.type_parameters.len != 0 or !method.is_static or !std.mem.eql(u8, method.name, name) or
-                method.parameters.len != expressions.len) continue;
+                !parametersAcceptArity(method.parameters, expressions.len)) continue;
             if (method.extension_visible_files) |visible_files| {
                 if (!fileSetContains(visible_files, visibility_file)) continue;
             }
             var compatible = true;
-            for (method.parameters, expressions) |parameter, expression| {
+            for (method.parameters[0..expressions.len], expressions) |parameter, expression| {
                 const actual = try argumentType(self, expression, parameter.mode) orelse return true;
                 if (!typesCompatible(parameter.type, actual)) compatible = false;
             }

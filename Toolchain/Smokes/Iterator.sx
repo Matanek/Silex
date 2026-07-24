@@ -78,7 +78,7 @@ func main() {
     }
     assert(tracker.dropped ==[1], "returned element is no longer retained")
 
-    var queue = Queue<int>.create()
+    var queue = Queue<int>()
     queue.enqueue(1)
     queue.enqueue(2)
     queue.enqueue(3)
@@ -89,7 +89,7 @@ func main() {
     assert_sequence(queue_iterator, [2, 3, 4])
     assert(queue.count() == 4, "queue snapshot does not mutate source")
 
-    var stack = Stack<int>.create()
+    var stack = Stack<int>()
     stack.push(1)
     stack.push(2)
     stack.push(3)
@@ -97,7 +97,7 @@ func main() {
     stack.pop()
     assert_sequence(stack_iterator, [3, 2, 1])
 
-    var dictionary = Dictionary<int, int>.create(Hashing.hash_int, Hashing.equal_int)
+    var dictionary = Dictionary<int, int>(Hashing.hash_int, Hashing.equal_int)
     dictionary.insert(1, 10)
     dictionary.insert(2, 20)
     var dictionary_iterator = dictionary.iterator()
@@ -108,7 +108,7 @@ func main() {
     }
     assert(dictionary_total == 33, "dictionary entry snapshot")
 
-    var set = Set<int>.create(Hashing.hash_int, Hashing.equal_int)
+    var set = Set<int>(Hashing.hash_int, Hashing.equal_int)
     set.insert(5)
     set.insert(6)
     var set_iterator = set.iterator()

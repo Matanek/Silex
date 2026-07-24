@@ -1335,6 +1335,7 @@ pub const Server = struct {
         if (dot == 0 or source[dot - 1] != '.') return null;
         var end = dot - 1;
         while (end > 0 and std.ascii.isWhitespace(source[end - 1])) end -= 1;
+        if (self.completionExpressionOwnerBefore(snapshot, file, source, cursor, end, 0)) |owner| return owner;
         var start = end;
         while (start > 0 and self.isIdentifierContinue(source[start - 1])) start -= 1;
         if (start == end) return null;
@@ -1359,6 +1360,233 @@ pub const Server = struct {
         for (snapshot.index.symbols) |symbol| {
             if ((symbol.kind == .type or symbol.kind == .enumeration) and std.mem.eql(u8, symbol.name, resolved_type_name)) {
                 return .{ .key = symbol.key, .static = false };
+            }
+        }
+        return null;
+    }
+
+    fn completionExpressionOwnerBefore(
+        self: *Server,
+        snapshot: *const Frontend.Snapshot,
+        file: usize,
+        source: []const u8,
+        cursor: usize,
+        raw_end: usize,
+        depth: usize,
+    ) ?CompletionOwner {
+        if (depth >= 32) return null;
+        const end = skipCompletionHorizontalWhitespaceBackward(source, raw_end);
+        if (end == 0) return null;
+
+        if (source[end - 1] == ')') {
+            const opening = matchingCompletionDelimiterBackward(source, end - 1, '(', ')') orelse return null;
+            return self.completionCallResultOwnerBefore(snapshot, file, source, cursor, opening, depth + 1);
+        }
+
+        if (!self.isIdentifierContinue(source[end - 1])) return null;
+        var start = end - 1;
+        while (start > 0 and self.isIdentifierContinue(source[start - 1])) start -= 1;
+        const name = source[start..end];
+        const before = skipCompletionHorizontalWhitespaceBackward(source, start);
+        if (before > 0 and source[before - 1] == '.') {
+            const receiver = self.completionExpressionOwnerBefore(
+                snapshot,
+                file,
+                source,
+                cursor,
+                before - 1,
+                depth + 1,
+            ) orelse return self.completionNamedTypeOwner(snapshot, file, name);
+            return self.completionMemberResultOwner(snapshot, file, source, cursor, receiver, name, false);
+        }
+        return self.completionAtomOwner(snapshot, file, source, cursor, start, end);
+    }
+
+    fn completionCallResultOwnerBefore(
+        self: *Server,
+        snapshot: *const Frontend.Snapshot,
+        file: usize,
+        source: []const u8,
+        cursor: usize,
+        opening: usize,
+        depth: usize,
+    ) ?CompletionOwner {
+        var callable_end = skipCompletionHorizontalWhitespaceBackward(source, opening);
+        if (callable_end == 0) return null;
+        if (source[callable_end - 1] == '>') {
+            callable_end = matchingCompletionDelimiterBackward(source, callable_end - 1, '<', '>') orelse return null;
+            callable_end = skipCompletionHorizontalWhitespaceBackward(source, callable_end);
+        }
+        if (callable_end == 0 or !self.isIdentifierContinue(source[callable_end - 1])) return null;
+        var name_start = callable_end - 1;
+        while (name_start > 0 and self.isIdentifierContinue(source[name_start - 1])) name_start -= 1;
+        const name = source[name_start..callable_end];
+        const before = skipCompletionHorizontalWhitespaceBackward(source, name_start);
+        if (before > 0 and source[before - 1] == '.') {
+            const receiver = self.completionExpressionOwnerBefore(
+                snapshot,
+                file,
+                source,
+                cursor,
+                before - 1,
+                depth + 1,
+            ) orelse return null;
+            if (self.completionNestedTypeOwner(snapshot, file, source, cursor, receiver, name)) |nested| {
+                return .{ .key = nested.key, .static = false };
+            }
+            return self.completionMemberResultOwner(snapshot, file, source, cursor, receiver, name, true);
+        }
+
+        const atom = self.completionAtomOwner(snapshot, file, source, cursor, name_start, callable_end);
+        if (atom) |owner| if (owner.static) return .{ .key = owner.key, .static = false };
+
+        var result: ?CompletionOwner = null;
+        for (snapshot.index.symbols) |symbol| {
+            if (symbol.kind != .function or symbol.owner.len != 0 or !std.mem.eql(u8, symbol.name, name) or
+                !self.symbolVisibleFromFile(snapshot, file, symbol)) continue;
+            const owner = self.completionOwnerFromDetail(snapshot, file, symbol.detail) orelse continue;
+            if (result != null and !std.mem.eql(u8, result.?.key, owner.key)) return null;
+            result = owner;
+        }
+        return result;
+    }
+
+    fn completionMemberResultOwner(
+        self: *Server,
+        snapshot: *const Frontend.Snapshot,
+        file: usize,
+        source: []const u8,
+        cursor: usize,
+        receiver: CompletionOwner,
+        name: []const u8,
+        callable: bool,
+    ) ?CompletionOwner {
+        var result: ?CompletionOwner = null;
+        for (snapshot.index.symbols) |symbol| {
+            const expected_kind = if (callable) symbol.kind == .method else symbol.kind == .field;
+            if (!expected_kind or !std.mem.eql(u8, symbol.owner, receiver.key) or symbol.is_static != receiver.static or
+                !std.mem.eql(u8, symbol.name, name) or
+                !self.memberCompletionVisible(snapshot, file, source, cursor, symbol)) continue;
+            const owner = self.completionOwnerFromDetail(snapshot, file, symbol.detail) orelse continue;
+            if (result != null and !std.mem.eql(u8, result.?.key, owner.key)) return null;
+            result = owner;
+        }
+        return result;
+    }
+
+    fn completionNestedTypeOwner(
+        self: *Server,
+        snapshot: *const Frontend.Snapshot,
+        file: usize,
+        source: []const u8,
+        cursor: usize,
+        receiver: CompletionOwner,
+        name: []const u8,
+    ) ?CompletionOwner {
+        if (!receiver.static) return null;
+        var result: ?CompletionOwner = null;
+        for (snapshot.index.symbols) |symbol| {
+            if (symbol.kind != .type or !std.mem.eql(u8, symbol.owner, receiver.key) or
+                !std.mem.eql(u8, symbol.name, name) or
+                !self.memberCompletionVisible(snapshot, file, source, cursor, symbol)) continue;
+            if (result != null) return null;
+            result = .{ .key = symbol.key, .static = true };
+        }
+        return result;
+    }
+
+    fn completionAtomOwner(
+        self: *Server,
+        snapshot: *const Frontend.Snapshot,
+        file: usize,
+        source: []const u8,
+        cursor: usize,
+        start: usize,
+        end: usize,
+    ) ?CompletionOwner {
+        const name = source[start..end];
+        if (std.mem.eql(u8, name, "self")) {
+            const key = self.enclosingTypeRootKey(snapshot, file, source, cursor) orelse return null;
+            return .{ .key = key, .static = false };
+        }
+        const position = self.sourcePositionAtByteOffset(source, file, start);
+        var symbol: ?SymbolIndex.Symbol = null;
+        if (snapshot.index.occurrenceAt(file, position.line, position.column)) |occurrence| {
+            symbol = snapshot.index.symbol(occurrence.symbol);
+        } else {
+            symbol = self.fallbackCompletionReceiver(snapshot, file, source, start, end);
+        }
+        if (symbol) |resolved| {
+            if (resolved.kind == .type or resolved.kind == .enumeration) return .{ .key = resolved.key, .static = true };
+            if (resolved.kind == .alias and resolved.alias_target_kind == .type) {
+                if (self.visibleUseTarget(source, name)) |target| {
+                    if (self.completionNamedTypeOwner(snapshot, file, self.lastPathSegment(target))) |owner| return owner;
+                }
+            }
+            if (self.completionOwnerFromDetail(snapshot, file, resolved.detail)) |owner| return owner;
+        }
+
+        return self.completionNamedTypeOwner(snapshot, file, name);
+    }
+
+    fn completionNamedTypeOwner(
+        self: *Server,
+        snapshot: *const Frontend.Snapshot,
+        file: usize,
+        name: []const u8,
+    ) ?CompletionOwner {
+        var result: ?CompletionOwner = null;
+        for (snapshot.index.symbols) |candidate| {
+            if ((candidate.kind != .type and candidate.kind != .enumeration) or
+                !std.mem.eql(u8, candidate.name, name) or
+                !self.symbolVisibleFromFile(snapshot, file, candidate)) continue;
+            if (result != null) return null;
+            result = .{ .key = candidate.key, .static = true };
+        }
+        return result;
+    }
+
+    fn completionOwnerFromDetail(
+        self: *Server,
+        snapshot: *const Frontend.Snapshot,
+        file: usize,
+        detail: []const u8,
+    ) ?CompletionOwner {
+        const type_name = self.detailTypeName(detail) orelse return null;
+        const source_name = self.lastPathSegment(type_name);
+        var result: ?CompletionOwner = null;
+        for (snapshot.index.symbols) |symbol| {
+            if ((symbol.kind != .type and symbol.kind != .enumeration and symbol.kind != .protocol) or
+                !std.mem.eql(u8, symbol.name, source_name) or
+                !self.symbolVisibleFromFile(snapshot, file, symbol)) continue;
+            if (result != null and !std.mem.eql(u8, result.?.key, symbol.key)) return null;
+            result = .{ .key = symbol.key, .static = false };
+        }
+        return result;
+    }
+
+    fn skipCompletionHorizontalWhitespaceBackward(source: []const u8, raw_end: usize) usize {
+        var end = @min(raw_end, source.len);
+        while (end > 0 and (source[end - 1] == ' ' or source[end - 1] == '\t')) end -= 1;
+        return end;
+    }
+
+    fn matchingCompletionDelimiterBackward(
+        source: []const u8,
+        closing: usize,
+        opening_character: u8,
+        closing_character: u8,
+    ) ?usize {
+        var depth: usize = 1;
+        var index = closing;
+        while (index > 0) {
+            index -= 1;
+            const character = source[index];
+            if (character == closing_character) {
+                depth += 1;
+            } else if (character == opening_character) {
+                depth -= 1;
+                if (depth == 0) return index;
             }
         }
         return null;

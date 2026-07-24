@@ -5,15 +5,19 @@ public struct Queue<T> {
     private var back:T[]
     private var reserved_capacity:int
 
-    public static func create() Queue<T> {
-        return Queue<T>(front:[], back:[], reserved_capacity:0)
+    public init() {
+        self.front = []
+        self.back = []
+        self.reserved_capacity = 0
     }
 
-    public static func create(minimum_capacity:int) Queue<T> {
+    public init(minimum_capacity:int) {
         if minimum_capacity < 0 {
-            panic("Queue.create requires a non-negative minimum capacity")
+            panic("Queue requires a non-negative minimum capacity")
         }
-        return Queue<T>(front:[], back:[], reserved_capacity:minimum_capacity)
+        self.front = []
+        self.back = []
+        self.reserved_capacity = minimum_capacity
     }
 
     public func count() int {
@@ -61,7 +65,7 @@ public struct Queue<T> {
         return value
     }
 
-    public func peek() &T {
+    public func peek() & T {
         if self.front.is_empty() {
             panic("Queue.peek requires a value")
         }

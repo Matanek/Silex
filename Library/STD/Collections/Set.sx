@@ -1,27 +1,37 @@
 use STD.Collections.Dictionary as Dictionary
+use STD.Collections.Hashing
 use STD.Iteration.Iterator as Iterator
 
 public struct Set<T> {
     private var entries:Dictionary<T, bool>
 
-    public static func create(
-        hash:func(@T) uint,
-        equal:func(@T, @T) bool,
-    ) Set<T> {
-        var entries = Dictionary<T, bool>.create(hash, equal)
-        return Set<T>(entries:entries)
+    public init(
+        hash:func(@T) uint = Hashing.hash,
+        equal:func(@T, @T) bool = Hashing.equal,
+    ) {
+        self.entries = Dictionary<T, bool>(hash, equal)
     }
 
-    public static func create(
+    public init(
+        minimum_capacity:int,
+        hash:func(@T) uint = Hashing.hash,
+        equal:func(@T, @T) bool = Hashing.equal,
+    ) {
+        if minimum_capacity < 0 {
+            panic("Set requires a non-negative minimum capacity")
+        }
+        self.entries = Dictionary<T, bool>(minimum_capacity, hash, equal)
+    }
+
+    public init(
         hash:func(@T) uint,
         equal:func(@T, @T) bool,
         minimum_capacity:int,
-    ) Set<T> {
+    ) {
         if minimum_capacity < 0 {
-            panic("Set.create requires a non-negative minimum capacity")
+            panic("Set requires a non-negative minimum capacity")
         }
-        var entries = Dictionary<T, bool>.create(hash, equal, minimum_capacity)
-        return Set<T>(entries:entries)
+        self.entries = Dictionary<T, bool>(hash, equal, minimum_capacity)
     }
 
     public func count() int {

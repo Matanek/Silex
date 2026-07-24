@@ -301,6 +301,7 @@ pub const Expression = struct {
     pub const StructureInitializer = struct {
         generated_name: []const u8,
         fields: []const *Expression,
+        default_constructed: bool = false,
     };
 
     pub const EnumInitializer = struct {
@@ -385,6 +386,7 @@ pub const Statement = union(enum) {
     assignment: Assignment,
     if_statement: If,
     while_statement: While,
+    mutex_statement: []const Statement,
     for_statement: For,
     break_statement,
     continue_statement,
@@ -717,6 +719,7 @@ pub const FunctionSymbol = struct {
     parameter_types: []const Type,
     parameter_modes: []const Ast.ParameterMode,
     parameter_stored: []const bool,
+    parameter_defaults: []const ?*Ast.Expression,
     position: Source.Position,
     is_main: bool,
     is_native: bool,
@@ -794,6 +797,7 @@ pub const ConstructorSymbol = struct {
     parameter_types: []const Type,
     parameter_modes: []const Ast.ParameterMode,
     parameter_stored: []const bool,
+    parameter_defaults: []const ?*Ast.Expression,
     position: Source.Position,
     visibility: Ast.MemberVisibility,
 };
@@ -815,6 +819,7 @@ pub const MethodSymbol = struct {
     parameter_types: []const Type,
     parameter_modes: []const Ast.ParameterMode,
     parameter_stored: []const bool,
+    parameter_defaults: []const ?*Ast.Expression,
     position: Source.Position,
     visibility: Ast.MemberVisibility,
     is_override: bool,

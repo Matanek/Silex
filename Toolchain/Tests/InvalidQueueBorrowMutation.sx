@@ -5,7 +5,7 @@ func equals(value:@int, expected:int) bool {
 }
 
 func main() {
-    var queue = Queue<int>.create()
+    var queue = Queue<int>()
     queue.enqueue(1)
     let head:@int = queue.peek()
     queue.enqueue(2)

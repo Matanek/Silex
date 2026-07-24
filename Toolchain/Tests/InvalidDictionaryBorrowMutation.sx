@@ -7,7 +7,7 @@ func equals(value:@int, expected:int) bool {
 }
 
 func main() {
-    var values = Dictionary<int, int>.create(hash_int, equal_int)
+    var values = Dictionary<int, int>(hash_int, equal_int)
     values.insert(1, 10)
     let borrowed = values.at(1)
     values.insert(2, 20)

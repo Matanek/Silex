@@ -1,4 +1,5 @@
 use STD.Iteration.Iterator as Iterator
+use STD.Collections.Hashing
 
 struct Search {
     let index:int
@@ -20,32 +21,53 @@ public struct Dictionary<Key, Value> {
     private var values:Value[]
     private var next:int[]
 
-    public static func create(
-        hash:func(@Key) uint,
-        equal:func(@Key, @Key) bool,
-    ) Dictionary<Key, Value> {
-        return Dictionary<Key, Value>(
-            hash:hash,
-            equal:equal,
-            buckets:[],
-            hashes:[],
-            keys:[],
-            values:[],
-            next:[]
-        )
+    public init(
+        hash:func(@Key) uint = Hashing.hash,
+        equal:func(@Key, @Key) bool = Hashing.equal,
+    ) {
+        self.hash = hash
+        self.equal = equal
+        self.buckets = []
+        self.hashes = []
+        self.keys = []
+        self.values = []
+        self.next = []
     }
 
-    public static func create(
+    public init(
+        minimum_capacity:int,
+        hash:func(@Key) uint = Hashing.hash,
+        equal:func(@Key, @Key) bool = Hashing.equal,
+    ) {
+        if minimum_capacity < 0 {
+            panic("Dictionary requires a non-negative minimum capacity")
+        }
+        self.hash = hash
+        self.equal = equal
+        self.buckets = []
+        self.hashes = []
+        self.keys = []
+        self.values = []
+        self.next = []
+        self.reserve(minimum_capacity)
+    }
+
+    public init(
         hash:func(@Key) uint,
         equal:func(@Key, @Key) bool,
         minimum_capacity:int,
-    ) Dictionary<Key, Value> {
+    ) {
         if minimum_capacity < 0 {
-            panic("Dictionary.create requires a non-negative minimum capacity")
+            panic("Dictionary requires a non-negative minimum capacity")
         }
-        var result = Dictionary<Key, Value>.create(hash, equal)
-        result.reserve(minimum_capacity)
-        return result
+        self.hash = hash
+        self.equal = equal
+        self.buckets = []
+        self.hashes = []
+        self.keys = []
+        self.values = []
+        self.next = []
+        self.reserve(minimum_capacity)
     }
 
     public func count() int {
@@ -64,7 +86,7 @@ public struct Dictionary<Key, Value> {
         return self.search(key).index >= 0
     }
 
-    public func at(key:@Key) &self:Value {
+    public func at(key:@Key) & self:Value {
         let index = self.search(key).index
         if index < 0 {
             panic("Dictionary.at requires an existing key")

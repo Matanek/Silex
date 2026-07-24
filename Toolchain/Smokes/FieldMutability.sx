@@ -3,6 +3,33 @@ struct Settings {
     var count:int
 }
 
+struct Counter {
+    var value:int
+
+    func bump() {
+        self.value += 1
+    }
+}
+
+class CounterHolder {
+    static var self_instance:CounterHolder?
+
+    public var counter:Counter
+
+    private init() {
+        self.counter = Counter(value:0)
+    }
+
+    public static func instance() CounterHolder {
+        if var current = CounterHolder.self_instance {
+            return current
+        }
+        var created = CounterHolder()
+        CounterHolder.self_instance = created
+        return created
+    }
+}
+
 class Generation {
     protected let value:int
 
@@ -43,6 +70,8 @@ func main() {
     user.name = "Grace"
     var label = Label(text:"ready")
 
+    CounterHolder.instance().counter.bump()
+
     assert(settings.limit == 10, "let struct field is initialized")
     assert(settings.count == 2, "var struct field is mutable")
     assert(frozen.count == 3, "let structure remains readable")
@@ -52,4 +81,5 @@ func main() {
     assert(user.get_value() == 1, "base constructor owns inherited let initialization")
     assert(label.text == "ready", "named initializer sets let class field")
     assert(!label.ready, "named initializer uses intrinsic let field value")
+    assert(CounterHolder.instance().counter.value == 1, "class identity keeps a nested var field mutable")
 }

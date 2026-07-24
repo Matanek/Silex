@@ -1,0 +1,6 @@
+use STD.Collections.Set
+
+func main() {
+    var values = Set<int>(-1)
+    print(values.count())
+}

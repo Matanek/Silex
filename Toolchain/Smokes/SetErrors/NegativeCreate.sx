@@ -1,7 +1,0 @@
-use STD.Collections.Set as Set
-use STD.Collections.Hashing
-
-func main() {
-    var values = Set<int>.create(Hashing.hash_int, Hashing.equal_int, -1)
-    print(values.count())
-}

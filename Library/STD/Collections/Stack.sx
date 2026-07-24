@@ -4,15 +4,17 @@ public struct Stack<T> {
     private var storage:T[]
     private var reserved_capacity:int
 
-    public static func create() Stack<T> {
-        return Stack<T>(storage:[], reserved_capacity:0)
+    public init() {
+        self.storage = []
+        self.reserved_capacity = 0
     }
 
-    public static func create(minimum_capacity:int) Stack<T> {
+    public init(minimum_capacity:int) {
         if minimum_capacity < 0 {
-            panic("Stack.create requires a non-negative minimum capacity")
+            panic("Stack requires a non-negative minimum capacity")
         }
-        return Stack<T>(storage:[], reserved_capacity:minimum_capacity)
+        self.storage = []
+        self.reserved_capacity = minimum_capacity
     }
 
     public func count() int {
@@ -53,7 +55,7 @@ public struct Stack<T> {
         return self.storage.take_last()
     }
 
-    public func peek() &T {
+    public func peek() & T {
         if self.storage.is_empty() {
             panic("Stack.peek requires a value")
         }

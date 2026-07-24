@@ -1,5 +1,5 @@
 const std = @import("std");
-const silex_version = "0.30.0";
+const silex_version = "0.31.0";
 
 pub fn build(b: *std.Build) void {
     // A Silex run can itself launch several native compiler processes. Keep the
@@ -383,7 +383,7 @@ pub fn build(b: *std.Build) void {
     });
     lsp_protocol_command.expectStdOutEqual(
         "Content-Length: 574\r\n\r\n" ++
-            "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"capabilities\":{\"positionEncoding\":\"utf-8\",\"textDocumentSync\":1,\"documentFormattingProvider\":true,\"completionProvider\":{\"triggerCharacters\":[\".\"]},\"signatureHelpProvider\":{\"triggerCharacters\":[\"(\",\",\"]},\"definitionProvider\":true,\"referencesProvider\":true,\"renameProvider\":{\"prepareProvider\":true},\"hoverProvider\":true,\"semanticTokensProvider\":{\"legend\":{\"tokenTypes\":[\"namespace\",\"type\",\"enumMember\",\"function\",\"method\",\"property\",\"parameter\",\"variable\"],\"tokenModifiers\":[]},\"full\":true}},\"serverInfo\":{\"name\":\"Silex\",\"version\":\"0.30.0\"}}}" ++
+            "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"capabilities\":{\"positionEncoding\":\"utf-8\",\"textDocumentSync\":1,\"documentFormattingProvider\":true,\"completionProvider\":{\"triggerCharacters\":[\".\"]},\"signatureHelpProvider\":{\"triggerCharacters\":[\"(\",\",\"]},\"definitionProvider\":true,\"referencesProvider\":true,\"renameProvider\":{\"prepareProvider\":true},\"hoverProvider\":true,\"semanticTokensProvider\":{\"legend\":{\"tokenTypes\":[\"namespace\",\"type\",\"enumMember\",\"function\",\"method\",\"property\",\"parameter\",\"variable\"],\"tokenModifiers\":[]},\"full\":true}},\"serverInfo\":{\"name\":\"Silex\",\"version\":\"0.31.0\"}}}" ++
             "Content-Length: 136\r\n\r\n" ++
             "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/publishDiagnostics\",\"params\":{\"uri\":\"file:///private/tmp/FormattingMemory.sx\",\"diagnostics\":[]}}" ++
             "Content-Length: 157\r\n\r\n" ++
@@ -956,7 +956,7 @@ pub fn build(b: *std.Build) void {
     extension_conflict_command.addArgs(&.{ "compile", "Tests/ExtensionConflict/silex.json" });
     extension_conflict_command.expectExitCode(1);
     extension_conflict_command.expectStdErrEqual(
-        "Tests/ExtensionConflict/Second.sx:5:17: error: extension method 'read<int>' from module 'ExtensionConflict.Second' conflicts with module 'ExtensionConflict.First' on type 'ExtensionConflict.Core.Value'\n",
+        "Tests/ExtensionConflict/Second.sx:5:17: error: extension method 'read<int>(int)' from module 'ExtensionConflict.Second' conflicts with module 'ExtensionConflict.First' on type 'ExtensionConflict.Core.Value'\n",
     );
 
     const extension_conformance_visibility_command = b.addRunArtifact(executable);
@@ -1146,14 +1146,14 @@ pub fn build(b: *std.Build) void {
     duplicate_overload_alias_command.addArgs(&.{ "compile", "Tests/DuplicateOverloadAlias.sx" });
     duplicate_overload_alias_command.expectExitCode(1);
     duplicate_overload_alias_command.expectStdErrEqual(
-        "Tests/DuplicateOverloadAlias.sx:5:6: error: function 'measure' with this callable shape is already declared\n",
+        "Tests/DuplicateOverloadAlias.sx:5:6: error: function 'measure(int)' is already exposed by the declaration at 1:6\n",
     );
 
     const duplicate_overload_return_command = b.addRunArtifact(executable);
     duplicate_overload_return_command.addArgs(&.{ "compile", "Tests/DuplicateOverloadReturn.sx" });
     duplicate_overload_return_command.expectExitCode(1);
     duplicate_overload_return_command.expectStdErrEqual(
-        "Tests/DuplicateOverloadReturn.sx:5:6: error: function 'measure' with this callable shape is already declared\n",
+        "Tests/DuplicateOverloadReturn.sx:5:6: error: function 'measure(int)' is already exposed by the declaration at 1:6\n",
     );
 
     const ambiguous_overload_command = b.addRunArtifact(executable);
@@ -2380,12 +2380,29 @@ pub fn build(b: *std.Build) void {
         "Tests/InvalidDictionaryBorrowMutation.sx:13:12: error: cannot mutate borrowed variable 'values'\n",
     );
 
+    const invalid_dictionary_default_strategy_command = b.addRunArtifact(executable);
+    invalid_dictionary_default_strategy_command.addArgs(&.{ "compile", "Tests/InvalidDictionaryDefaultStrategy.sx" });
+    invalid_dictionary_default_strategy_command.expectExitCode(1);
+    invalid_dictionary_default_strategy_command.expectStdErrEqual(b.fmt(
+        "{s}:25:32: error: no function 'STD.Collections.Hashing.hash' matches the expected function type\n",
+        .{dictionary_source},
+    ));
+
     const invalid_set_noncopyable_command = b.addRunArtifact(executable);
     invalid_set_noncopyable_command.addArgs(&.{ "compile", "Tests/InvalidSetNonCopyable.sx" });
     invalid_set_noncopyable_command.expectExitCode(1);
     invalid_set_noncopyable_command.expectStdErrEqual(b.fmt(
         "{s}:10:28: error: noncopyable value 'optional' must be passed with 'move'\n",
         .{iterator_source},
+    ));
+
+    const set_library_source = b.getInstallPath(.prefix, "lib/silex/STD/Collections/Set.sx");
+    const invalid_set_default_strategy_command = b.addRunArtifact(executable);
+    invalid_set_default_strategy_command.addArgs(&.{ "compile", "Tests/InvalidSetDefaultStrategy.sx" });
+    invalid_set_default_strategy_command.expectExitCode(1);
+    invalid_set_default_strategy_command.expectStdErrEqual(b.fmt(
+        "{s}:9:30: error: no function 'STD.Collections.Hashing.hash' matches the expected function type\n",
+        .{set_library_source},
     ));
 
     const invalid_set_storage_command = b.addRunArtifact(executable);
@@ -2436,7 +2453,9 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&invalid_dictionary_noncopyable_command.step);
     test_step.dependOn(&invalid_dictionary_storage_command.step);
     test_step.dependOn(&invalid_dictionary_borrow_mutation_command.step);
+    test_step.dependOn(&invalid_dictionary_default_strategy_command.step);
     test_step.dependOn(&invalid_set_noncopyable_command.step);
+    test_step.dependOn(&invalid_set_default_strategy_command.step);
     test_step.dependOn(&invalid_set_storage_command.step);
     test_step.dependOn(&invalid_iterator_noncopyable_command.step);
     test_step.dependOn(&invalid_iterator_storage_command.step);
@@ -2802,13 +2821,18 @@ pub fn build(b: *std.Build) void {
         "task worker\ntask worker\ntask worker\ntask worker\ntask worker\nthreading task manager\n",
     ));
 
+    const threading_mutex_command = b.addRunArtifact(executable);
+    threading_mutex_command.step.dependOn(&threading_task_manager_command.step);
+    threading_mutex_command.addArgs(&.{ "run", "Smokes/ThreadingMutex.sx" });
+    threading_mutex_command.expectStdOutEqual(hostText(b, "threading mutex\n"));
+
     const threading_source = b.getInstallPath(.prefix, "lib/silex/STD/Threading.sx");
     const shared_threading_task_command = b.addRunArtifact(executable);
-    shared_threading_task_command.step.dependOn(&threading_task_manager_command.step);
+    shared_threading_task_command.step.dependOn(&threading_mutex_command.step);
     shared_threading_task_command.addArgs(&.{ "compile", "Smokes/ThreadingErrors/SharedTask.sx" });
     shared_threading_task_command.expectExitCode(1);
     shared_threading_task_command.expectStdErrEqual(b.fmt(
-        "{s}:57:13: error: type 'SharedTask.Shared' is not an independent value and cannot be bound with 'let'; use 'var'\n",
+        "{s}:59:13: error: type 'SharedTask.Shared' is not an independent value and cannot be bound with 'let'; use 'var'\n",
         .{threading_source},
     ));
 
@@ -3303,11 +3327,11 @@ pub fn build(b: *std.Build) void {
         source: []const u8,
         message: []const u8,
     }{
-        .{ .source = "Smokes/RandomErrors/IntOrder.sx", .message = "42:13: runtime error: get_int(minimum, maximum) requires minimum < maximum" },
-        .{ .source = "Smokes/RandomErrors/IntWidth.sx", .message = "47:17: runtime error: get_int(minimum, maximum) requires an interval width that fits in int" },
-        .{ .source = "Smokes/RandomErrors/FloatOrder.sx", .message = "71:13: runtime error: get_float(minimum, maximum) requires minimum < maximum" },
-        .{ .source = "Smokes/RandomErrors/FloatFinite.sx", .message = "68:13: runtime error: get_float(minimum, maximum) requires finite bounds" },
-        .{ .source = "Smokes/RandomErrors/FloatResolution.sx", .message = "78:13: runtime error: get_float(minimum, maximum) requires a representable value below maximum" },
+        .{ .source = "Smokes/RandomErrors/IntOrder.sx", .message = "38:13: runtime error: get_int(minimum, maximum) requires minimum < maximum" },
+        .{ .source = "Smokes/RandomErrors/IntWidth.sx", .message = "43:17: runtime error: get_int(minimum, maximum) requires an interval width that fits in int" },
+        .{ .source = "Smokes/RandomErrors/FloatOrder.sx", .message = "67:13: runtime error: get_float(minimum, maximum) requires minimum < maximum" },
+        .{ .source = "Smokes/RandomErrors/FloatFinite.sx", .message = "64:13: runtime error: get_float(minimum, maximum) requires finite bounds" },
+        .{ .source = "Smokes/RandomErrors/FloatResolution.sx", .message = "74:13: runtime error: get_float(minimum, maximum) requires a representable value below maximum" },
     };
     var previous_random_error_step: *std.Build.Step = &qualified_parent_alias_command.step;
     for (random_error_cases) |case| {
@@ -3585,7 +3609,7 @@ pub fn build(b: *std.Build) void {
     console_session_noninteractive_command.expectExitCode(1);
     console_session_noninteractive_command.expectStdErrEqual(
         "runtime error: native function 'STD.Console.Session.native_session_create' failed: " ++
-            "Console.Session.create failed: standard input and output must be interactive\n",
+            "Console.Session.init failed: standard input and output must be interactive\n",
     );
 
     const portable_distributed_native_target_command = b.addRunArtifact(executable);
@@ -3888,7 +3912,12 @@ pub fn build(b: *std.Build) void {
     io_smoke_command.expectStdOutEqual(hostText(b, "io streams ok\n"));
 
     const queue_smoke_command = b.addRunArtifact(executable);
-    queue_smoke_command.step.dependOn(&io_smoke_command.step);
+    const default_parameters_smoke_command = b.addRunArtifact(executable);
+    default_parameters_smoke_command.step.dependOn(&io_smoke_command.step);
+    default_parameters_smoke_command.addArgs(&.{ "run", "Smokes/DefaultParameters.sx" });
+    default_parameters_smoke_command.expectStdOutEqual(hostText(b, ""));
+
+    queue_smoke_command.step.dependOn(&default_parameters_smoke_command.step);
     queue_smoke_command.addArgs(&.{ "run", "Smokes/Queue.sx" });
     queue_smoke_command.expectStdOutEqual(hostText(b, ""));
 
@@ -4007,21 +4036,21 @@ pub fn build(b: *std.Build) void {
     network_udp_smoke_command.addArgs(&.{ "run", "Smokes/NetworkUDP.sx" });
     network_udp_smoke_command.expectStdOutEqual(hostText(b, ""));
 
-    const queue_negative_create_command = b.addRunArtifact(executable);
-    queue_negative_create_command.step.dependOn(&network_udp_smoke_command.step);
-    queue_negative_create_command.addArgs(&.{ "run", "Smokes/QueueErrors/NegativeCreate.sx" });
-    queue_negative_create_command.expectExitCode(1);
-    queue_negative_create_command.expectStdErrEqual(hostText(b, b.fmt(
-        "{s}:14:13: runtime error: Queue.create requires a non-negative minimum capacity\n",
+    const queue_negative_constructor_command = b.addRunArtifact(executable);
+    queue_negative_constructor_command.step.dependOn(&network_udp_smoke_command.step);
+    queue_negative_constructor_command.addArgs(&.{ "run", "Smokes/QueueErrors/NegativeConstructor.sx" });
+    queue_negative_constructor_command.expectExitCode(1);
+    queue_negative_constructor_command.expectStdErrEqual(hostText(b, b.fmt(
+        "{s}:16:13: runtime error: Queue requires a non-negative minimum capacity\n",
         .{queue_source},
     )));
 
     const queue_negative_reserve_command = b.addRunArtifact(executable);
-    queue_negative_reserve_command.step.dependOn(&queue_negative_create_command.step);
+    queue_negative_reserve_command.step.dependOn(&queue_negative_constructor_command.step);
     queue_negative_reserve_command.addArgs(&.{ "run", "Smokes/QueueErrors/NegativeReserve.sx" });
     queue_negative_reserve_command.expectExitCode(1);
     queue_negative_reserve_command.expectStdErrEqual(hostText(b, b.fmt(
-        "{s}:73:13: runtime error: Queue.reserve requires a non-negative minimum capacity\n",
+        "{s}:77:13: runtime error: Queue.reserve requires a non-negative minimum capacity\n",
         .{queue_source},
     )));
 
@@ -4030,25 +4059,25 @@ pub fn build(b: *std.Build) void {
     queue_peek_empty_command.addArgs(&.{ "run", "Smokes/QueueErrors/PeekEmpty.sx" });
     queue_peek_empty_command.expectExitCode(1);
     queue_peek_empty_command.expectStdErrEqual(hostText(b, b.fmt(
-        "{s}:66:13: runtime error: Queue.peek requires a value\n",
+        "{s}:70:13: runtime error: Queue.peek requires a value\n",
         .{queue_source},
     )));
 
-    const stack_negative_create_command = b.addRunArtifact(executable);
-    stack_negative_create_command.step.dependOn(&queue_peek_empty_command.step);
-    stack_negative_create_command.addArgs(&.{ "run", "Smokes/StackErrors/NegativeCreate.sx" });
-    stack_negative_create_command.expectExitCode(1);
-    stack_negative_create_command.expectStdErrEqual(hostText(b, b.fmt(
-        "{s}:13:13: runtime error: Stack.create requires a non-negative minimum capacity\n",
+    const stack_negative_constructor_command = b.addRunArtifact(executable);
+    stack_negative_constructor_command.step.dependOn(&queue_peek_empty_command.step);
+    stack_negative_constructor_command.addArgs(&.{ "run", "Smokes/StackErrors/NegativeConstructor.sx" });
+    stack_negative_constructor_command.expectExitCode(1);
+    stack_negative_constructor_command.expectStdErrEqual(hostText(b, b.fmt(
+        "{s}:14:13: runtime error: Stack requires a non-negative minimum capacity\n",
         .{stack_source},
     )));
 
     const stack_negative_reserve_command = b.addRunArtifact(executable);
-    stack_negative_reserve_command.step.dependOn(&stack_negative_create_command.step);
+    stack_negative_reserve_command.step.dependOn(&stack_negative_constructor_command.step);
     stack_negative_reserve_command.addArgs(&.{ "run", "Smokes/StackErrors/NegativeReserve.sx" });
     stack_negative_reserve_command.expectExitCode(1);
     stack_negative_reserve_command.expectStdErrEqual(hostText(b, b.fmt(
-        "{s}:65:13: runtime error: Stack.reserve requires a non-negative minimum capacity\n",
+        "{s}:67:13: runtime error: Stack.reserve requires a non-negative minimum capacity\n",
         .{stack_source},
     )));
 
@@ -4057,25 +4086,25 @@ pub fn build(b: *std.Build) void {
     stack_peek_empty_command.addArgs(&.{ "run", "Smokes/StackErrors/PeekEmpty.sx" });
     stack_peek_empty_command.expectExitCode(1);
     stack_peek_empty_command.expectStdErrEqual(hostText(b, b.fmt(
-        "{s}:58:13: runtime error: Stack.peek requires a value\n",
+        "{s}:60:13: runtime error: Stack.peek requires a value\n",
         .{stack_source},
     )));
 
-    const dictionary_negative_create_command = b.addRunArtifact(executable);
-    dictionary_negative_create_command.step.dependOn(&stack_peek_empty_command.step);
-    dictionary_negative_create_command.addArgs(&.{ "run", "Smokes/DictionaryErrors/NegativeCreate.sx" });
-    dictionary_negative_create_command.expectExitCode(1);
-    dictionary_negative_create_command.expectStdErrEqual(hostText(b, b.fmt(
-        "{s}:44:13: runtime error: Dictionary.create requires a non-negative minimum capacity\n",
+    const dictionary_negative_constructor_command = b.addRunArtifact(executable);
+    dictionary_negative_constructor_command.step.dependOn(&stack_peek_empty_command.step);
+    dictionary_negative_constructor_command.addArgs(&.{ "run", "Smokes/DictionaryErrors/NegativeConstructor.sx" });
+    dictionary_negative_constructor_command.expectExitCode(1);
+    dictionary_negative_constructor_command.expectStdErrEqual(hostText(b, b.fmt(
+        "{s}:43:13: runtime error: Dictionary requires a non-negative minimum capacity\n",
         .{dictionary_source},
     )));
 
     const dictionary_negative_reserve_command = b.addRunArtifact(executable);
-    dictionary_negative_reserve_command.step.dependOn(&dictionary_negative_create_command.step);
+    dictionary_negative_reserve_command.step.dependOn(&dictionary_negative_constructor_command.step);
     dictionary_negative_reserve_command.addArgs(&.{ "run", "Smokes/DictionaryErrors/NegativeReserve.sx" });
     dictionary_negative_reserve_command.expectExitCode(1);
     dictionary_negative_reserve_command.expectStdErrEqual(hostText(b, b.fmt(
-        "{s}:129:13: runtime error: Dictionary.reserve requires a non-negative minimum capacity\n",
+        "{s}:151:13: runtime error: Dictionary.reserve requires a non-negative minimum capacity\n",
         .{dictionary_source},
     )));
 
@@ -4084,26 +4113,26 @@ pub fn build(b: *std.Build) void {
     dictionary_at_absent_command.addArgs(&.{ "run", "Smokes/DictionaryErrors/AtAbsent.sx" });
     dictionary_at_absent_command.expectExitCode(1);
     dictionary_at_absent_command.expectStdErrEqual(hostText(b, b.fmt(
-        "{s}:70:13: runtime error: Dictionary.at requires an existing key\n",
+        "{s}:92:13: runtime error: Dictionary.at requires an existing key\n",
         .{dictionary_source},
     )));
 
     const set_source = b.getInstallPath(.prefix, "lib/silex/STD/Collections/Set.sx");
-    const set_negative_create_command = b.addRunArtifact(executable);
-    set_negative_create_command.step.dependOn(&dictionary_at_absent_command.step);
-    set_negative_create_command.addArgs(&.{ "run", "Smokes/SetErrors/NegativeCreate.sx" });
-    set_negative_create_command.expectExitCode(1);
-    set_negative_create_command.expectStdErrEqual(hostText(b, b.fmt(
-        "{s}:21:13: runtime error: Set.create requires a non-negative minimum capacity\n",
+    const set_negative_constructor_command = b.addRunArtifact(executable);
+    set_negative_constructor_command.step.dependOn(&dictionary_at_absent_command.step);
+    set_negative_constructor_command.addArgs(&.{ "run", "Smokes/SetErrors/NegativeConstructor.sx" });
+    set_negative_constructor_command.expectExitCode(1);
+    set_negative_constructor_command.expectStdErrEqual(hostText(b, b.fmt(
+        "{s}:21:13: runtime error: Set requires a non-negative minimum capacity\n",
         .{set_source},
     )));
 
     const set_negative_reserve_command = b.addRunArtifact(executable);
-    set_negative_reserve_command.step.dependOn(&set_negative_create_command.step);
+    set_negative_reserve_command.step.dependOn(&set_negative_constructor_command.step);
     set_negative_reserve_command.addArgs(&.{ "run", "Smokes/SetErrors/NegativeReserve.sx" });
     set_negative_reserve_command.expectExitCode(1);
     set_negative_reserve_command.expectStdErrEqual(hostText(b, b.fmt(
-        "{s}:63:13: runtime error: Set.reserve requires a non-negative minimum capacity\n",
+        "{s}:73:13: runtime error: Set.reserve requires a non-negative minimum capacity\n",
         .{set_source},
     )));
 

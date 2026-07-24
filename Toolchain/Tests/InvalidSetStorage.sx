@@ -3,6 +3,6 @@ use STD.Collections.Hashing.hash_int as hash_int
 use STD.Collections.Hashing.equal_int as equal_int
 
 func main() {
-    var values = Set<int>.create(hash_int, equal_int)
+    var values = Set<int>(hash_int, equal_int)
     print(values.entries)
 }

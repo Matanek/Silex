@@ -14,6 +14,6 @@ func equal_resource(left:@Resource, right:@Resource) bool {
 }
 
 func main() {
-    var values = Set<Resource>.create(hash_resource, equal_resource)
+    var values = Set<Resource>(hash_resource, equal_resource)
     values.insert(Resource(handle:1))
 }

@@ -101,6 +101,7 @@ const rawEnumValuesEqual = Support.rawEnumValuesEqual;
 const rawEnumInteger = Support.rawEnumInteger;
 const sameSignature = Support.sameSignature;
 const sameCallableShape = Support.sameCallableShape;
+const effectiveCallableShapeCollision = Support.effectiveCallableShapeCollision;
 const containsPosition = Support.containsPosition;
 const overloadScore = Support.overloadScore;
 const literalOverloadScore = Support.literalOverloadScore;
@@ -379,11 +380,13 @@ pub fn collectStructures(self: anytype, ast_structures: []const Ast.Structure) A
             var parameter_types: std.ArrayList(Type) = .empty;
             var parameter_modes: std.ArrayList(Ast.ParameterMode) = .empty;
             var parameter_stored_values: std.ArrayList(bool) = .empty;
+            var parameter_defaults: std.ArrayList(?*Ast.Expression) = .empty;
             for (ast_constructor.parameters) |parameter| {
                 const parameter_type = try typeFromAnnotation(self, parameter.type, parameter.position);
                 try self.validateParameterMode(parameter_type, parameter.mode, parameter.position, false);
                 try parameter_types.append(self.allocator, parameter_type);
                 try parameter_modes.append(self.allocator, parameter.mode);
+                try parameter_defaults.append(self.allocator, parameter.default_value);
                 var stored = parameterStored(ast_constructor.statements, parameter.name);
                 if (ast_constructor.super_arguments) |arguments| {
                     for (arguments) |argument| stored = stored or astExpressionUsesIdentifier(argument, parameter.name);
@@ -391,18 +394,27 @@ pub fn collectStructures(self: anytype, ast_structures: []const Ast.Structure) A
                 try parameter_stored_values.append(self.allocator, stored);
             }
             for (constructors.items) |existing| {
-                if (sameCallableShape(existing.parameter_types, parameter_types.items)) return self.fail(
-                    ast_constructor.position,
-                    if (ast_structure.is_class)
-                        "constructor 'init' with this callable shape is already declared in this class"
-                    else
-                        "constructor 'init' with this callable shape is already declared in this struct",
-                );
+                if (effectiveCallableShapeCollision(
+                    existing.parameter_types,
+                    existing.parameter_defaults,
+                    parameter_types.items,
+                    parameter_defaults.items,
+                )) |arity| {
+                    var signature: std.ArrayList(u8) = .empty;
+                    try appendSignature(self.allocator, &signature, "init", parameter_types.items[0..arity], parameter_modes.items[0..arity]);
+                    const message = try std.fmt.allocPrint(
+                        self.allocator,
+                        "constructor '{s}' is already exposed by the declaration at {d}:{d}",
+                        .{ signature.items, existing.position.line, existing.position.column },
+                    );
+                    return self.fail(ast_constructor.position, message);
+                }
             }
             try constructors.append(self.allocator, .{
                 .parameter_types = try parameter_types.toOwnedSlice(self.allocator),
                 .parameter_modes = try parameter_modes.toOwnedSlice(self.allocator),
                 .parameter_stored = try parameter_stored_values.toOwnedSlice(self.allocator),
+                .parameter_defaults = try parameter_defaults.toOwnedSlice(self.allocator),
                 .position = ast_constructor.position,
                 .visibility = ast_constructor.visibility,
             });
@@ -414,32 +426,45 @@ pub fn collectStructures(self: anytype, ast_structures: []const Ast.Structure) A
             var parameter_types: std.ArrayList(Type) = .empty;
             var parameter_modes: std.ArrayList(Ast.ParameterMode) = .empty;
             var parameter_stored_values: std.ArrayList(bool) = .empty;
+            var parameter_defaults: std.ArrayList(?*Ast.Expression) = .empty;
             for (ast_method.parameters) |parameter| {
                 const parameter_type = try typeFromAnnotation(self, parameter.type, parameter.position);
                 try self.validateParameterMode(parameter_type, parameter.mode, parameter.position, false);
                 try parameter_types.append(self.allocator, parameter_type);
                 try parameter_modes.append(self.allocator, parameter.mode);
+                try parameter_defaults.append(self.allocator, parameter.default_value);
                 try parameter_stored_values.append(self.allocator, parameterStored(ast_method.statements, parameter.name));
             }
             for (methods.items) |existing| {
                 if (existing.is_static == ast_method.is_static and
-                    std.mem.eql(u8, existing.source_name, ast_method.name) and
-                    sameCallableShape(existing.parameter_types, parameter_types.items))
-                duplicate: {
+                    std.mem.eql(u8, existing.source_name, ast_method.name))
+                {
+                    const arity = effectiveCallableShapeCollision(
+                        existing.parameter_types,
+                        existing.parameter_defaults,
+                        parameter_types.items,
+                        parameter_defaults.items,
+                    ) orelse continue;
                     const existing_extension = existing.extension_visible_files;
                     const current_extension = ast_method.extension_visible_files;
                     if (existing_extension != null and current_extension != null and
-                        !fileSetsOverlap(existing_extension.?, current_extension.?)) break :duplicate;
+                        !fileSetsOverlap(existing_extension.?, current_extension.?)) continue;
+                    var signature: std.ArrayList(u8) = .empty;
+                    try appendSignature(self.allocator, &signature, ast_method.name, parameter_types.items[0..arity], parameter_modes.items[0..arity]);
                     const message = if (existing_extension != null and current_extension != null)
                         try std.fmt.allocPrint(
                             self.allocator,
                             "extension method '{s}' from module '{s}' conflicts with module '{s}' on type '{s}'",
-                            .{ ast_method.name, ast_method.extension_module_name.?, existing.extension_module_name.?, ast_structure.name },
+                            .{ signature.items, ast_method.extension_module_name.?, existing.extension_module_name.?, ast_structure.name },
                         )
                     else if (existing_extension != null or current_extension != null)
-                        try std.fmt.allocPrint(self.allocator, "extension method '{s}' conflicts with an existing callable shape on type '{s}'", .{ ast_method.name, ast_structure.name })
+                        try std.fmt.allocPrint(self.allocator, "extension method '{s}' conflicts with a signature exposed on type '{s}'", .{ signature.items, ast_structure.name })
                     else
-                        try std.fmt.allocPrint(self.allocator, "method '{s}' with this callable shape is already declared in {s} '{s}'", .{ ast_method.name, if (ast_structure.is_class) "class" else "struct", ast_structure.name });
+                        try std.fmt.allocPrint(
+                            self.allocator,
+                            "method '{s}' is already exposed by the declaration at {d}:{d}",
+                            .{ signature.items, existing.position.line, existing.position.column },
+                        );
                     return self.fail(ast_method.name_position, message);
                 }
             }
@@ -481,6 +506,7 @@ pub fn collectStructures(self: anytype, ast_structures: []const Ast.Structure) A
                 .parameter_types = try parameter_types.toOwnedSlice(self.allocator),
                 .parameter_modes = try parameter_modes.toOwnedSlice(self.allocator),
                 .parameter_stored = try parameter_stored_values.toOwnedSlice(self.allocator),
+                .parameter_defaults = try parameter_defaults.toOwnedSlice(self.allocator),
                 .position = ast_method.name_position,
                 .visibility = ast_method.member_visibility.?,
                 .is_override = ast_method.is_override,
@@ -850,18 +876,30 @@ pub fn collectFunctions(self: anytype, ast_functions: []const Ast.Function) Anal
         var parameter_types: std.ArrayList(Type) = .empty;
         var parameter_modes: std.ArrayList(Ast.ParameterMode) = .empty;
         var parameter_stored_values: std.ArrayList(bool) = .empty;
+        var parameter_defaults: std.ArrayList(?*Ast.Expression) = .empty;
         for (ast_function.parameters) |parameter| {
             const parameter_type = try typeFromAnnotation(self, parameter.type, parameter.position);
             try self.validateParameterMode(parameter_type, parameter.mode, parameter.position, ast_function.is_native);
             try parameter_types.append(self.allocator, parameter_type);
             try parameter_modes.append(self.allocator, parameter.mode);
+            try parameter_defaults.append(self.allocator, parameter.default_value);
             try parameter_stored_values.append(self.allocator, parameterStored(ast_function.statements, parameter.name));
         }
         for (self.functions.items) |existing| {
-            if (std.mem.eql(u8, existing.source_name, ast_function.name) and
-                sameCallableShape(existing.parameter_types, parameter_types.items))
-            {
-                const message = try std.fmt.allocPrint(self.allocator, "function '{s}' with this callable shape is already declared", .{ast_function.name});
+            if (std.mem.eql(u8, existing.source_name, ast_function.name)) {
+                const arity = effectiveCallableShapeCollision(
+                    existing.parameter_types,
+                    existing.parameter_defaults,
+                    parameter_types.items,
+                    parameter_defaults.items,
+                ) orelse continue;
+                var signature: std.ArrayList(u8) = .empty;
+                try appendSignature(self.allocator, &signature, ast_function.name, parameter_types.items[0..arity], parameter_modes.items[0..arity]);
+                const message = try std.fmt.allocPrint(
+                    self.allocator,
+                    "function '{s}' is already exposed by the declaration at {d}:{d}",
+                    .{ signature.items, existing.position.line, existing.position.column },
+                );
                 return self.fail(ast_function.name_position, message);
             }
         }
@@ -1002,6 +1040,7 @@ pub fn collectFunctions(self: anytype, ast_functions: []const Ast.Function) Anal
             .parameter_types = try parameter_types.toOwnedSlice(self.allocator),
             .parameter_modes = try parameter_modes.toOwnedSlice(self.allocator),
             .parameter_stored = try parameter_stored_values.toOwnedSlice(self.allocator),
+            .parameter_defaults = try parameter_defaults.toOwnedSlice(self.allocator),
             .position = ast_function.name_position,
             .is_main = is_main,
             .is_native = ast_function.is_native,

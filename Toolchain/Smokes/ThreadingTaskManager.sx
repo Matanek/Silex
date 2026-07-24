@@ -9,7 +9,7 @@ struct Verify:Threading.Task {
     func execute() {
         print("task worker")
         assert(Math.cos(0.0) == 1.0, "isolated task calls native math")
-        var randomizer = Randomizer.create()
+        var randomizer = Randomizer()
         var next = func() int {
             return randomizer.get_int()
         }

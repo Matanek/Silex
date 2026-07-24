@@ -6,6 +6,6 @@ struct Resource {
 }
 
 func main() {
-    var queue = Queue<Resource>.create()
+    var queue = Queue<Resource>()
     queue.enqueue(Resource(handle:1))
 }

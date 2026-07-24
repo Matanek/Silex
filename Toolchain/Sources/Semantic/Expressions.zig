@@ -495,6 +495,7 @@ pub fn defaultExpression(self: anytype, type_value: Type, position: Source.Posit
                 .value = .{ .structure_initializer = .{
                     .generated_name = structure.generated_name,
                     .fields = try fields.toOwnedSlice(self.allocator),
+                    .default_constructed = structure.constructors.len != 0,
                 } },
             });
         },
@@ -832,11 +833,15 @@ pub fn callExpression(self: anytype, call: Ast.Expression.Call, scope: *const Sc
     var lifetime_depth: usize = 0;
     var transient_borrows: std.ArrayList(Borrow) = .empty;
     defer for (transient_borrows.items) |borrow| releaseBorrow(borrow);
-    for (call.arguments, function_symbol.parameter_types, function_symbol.parameter_modes, function_symbol.parameter_stored, 0..) |argument, expected_type, mode, is_stored, index| {
+    const default_scope = Scope{ .parent = null, .depth = 0 };
+    for (function_symbol.parameter_types, function_symbol.parameter_modes, function_symbol.parameter_stored, 0..) |expected_type, mode, is_stored, index| {
+        const explicit = index < call.arguments.len;
+        const argument = if (explicit) call.arguments[index] else function_symbol.parameter_defaults[index].?;
+        const argument_scope = if (explicit) scope else &default_scope;
         var value = if (function_symbol.is_native_resource_drop)
-            try self.nativeResourceDropArgument(argument, scope, expected_type)
+            try self.nativeResourceDropArgument(argument, argument_scope, expected_type)
         else
-            try self.argumentForMode(argument, scope, expected_type, mode);
+            try self.argumentForMode(argument, argument_scope, expected_type, mode);
         value = try self.coerce(value, expected_type);
         if (!typeEqual(value.type, expected_type)) {
             const message = try std.fmt.allocPrint(self.allocator, "argument {d} of '{s}' expects '{s}', found '{s}'", .{ index + 1, call.name, typeName(expected_type), typeName(value.type) });
@@ -1092,15 +1097,18 @@ pub fn lambdaExpression(
     const previous_return_type = self.current_return_type;
     const previous_loop_depth = self.loop_depth;
     const previous_loop_flow = self.current_loop_flow;
+    const previous_mutex_depth = self.mutex_depth;
     self.current_lambda = &context;
     self.current_return_type = return_type;
     self.loop_depth = 0;
     self.current_loop_flow = null;
+    self.mutex_depth = 0;
     defer {
         self.current_lambda = previous_lambda;
         self.current_return_type = previous_return_type;
         self.loop_depth = previous_loop_depth;
         self.current_loop_flow = previous_loop_flow;
+        self.mutex_depth = previous_mutex_depth;
     }
     const body = try self.statements(lambda.statements, &scope);
     self.releaseScopeBorrows(&scope);

@@ -4,17 +4,17 @@ use STD.Math
 use STD.Randomizer as Randomizer
 
 func main() {
-    var negative:Randomizer = STD.Randomizer.create(-1)
-    var zero = Randomizer.create(0)
-    var one = Randomizer.create(1)
-    var left = Randomizer.create(42)
-    var right = Randomizer.create(42)
-    var ranges = Randomizer.create(-1)
-    var rejected = Randomizer.create(0)
-    var random = Randomizer.create()
-    var shared = Randomizer.create(42)
+    var negative:Randomizer = STD.Randomizer(-1)
+    var zero = Randomizer(0)
+    var one = Randomizer(1)
+    var left = Randomizer(42)
+    var right = Randomizer(42)
+    var ranges = Randomizer(-1)
+    var rejected = Randomizer(0)
+    var random = Randomizer()
+    var shared = Randomizer(42)
     var shared_reference = shared
-    var shared_expected = Randomizer.create(42)
+    var shared_expected = Randomizer(42)
 
     print(negative.get_int())
     print(negative.get_int())

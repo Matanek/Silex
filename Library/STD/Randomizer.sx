@@ -3,16 +3,12 @@ native func native_seed() int
 public class Randomizer {
     var state:int
 
-    init(seed:int) {
+    public init() {
+        self.state = native_seed()
+    }
+
+    public init(seed:int) {
         self.state = seed
-    }
-
-    public static func create() Randomizer {
-        return Randomizer(native_seed())
-    }
-
-    public static func create(seed:int) Randomizer {
-        return Randomizer(seed)
     }
 
     public func get_int() int {

@@ -36,7 +36,7 @@ func verify_captured_callbacks() {
             equality_calls++
             return left == right
         }
-        var measured = Dictionary<int, int>.create(hash, equal, 256)
+        var measured = Dictionary<int, int>(hash, equal, 256)
         var index = 0
         while index < 256 {
             measured.insert(index, index)
@@ -56,7 +56,7 @@ func verify_captured_callbacks() {
 }
 
 func main() {
-    var values = Dictionary<int, str>.create(Hashing.hash_int, Hashing.equal_int, 2)
+    var values = Dictionary<int, str>(2)
     assert(values.is_empty() && values.capacity() >= 2, "empty dictionary")
     assert(values.insert(1, "one") == null, "insert absent key")
     assert(values.insert(2, "two") == null, "insert second key")
@@ -74,7 +74,7 @@ func main() {
     assert(required(values.remove(1)) == "one", "remove returns value")
     assert(values.remove(1) == null, "remove absent key")
 
-    var collisions = Dictionary<int, int>.create(collide, equal_int)
+    var collisions = Dictionary<int, int>(collide, equal_int)
     var index = 0
     while index < 100 {
         collisions.insert(index, index * 10)
@@ -102,7 +102,7 @@ func main() {
     assert(left.count() == 1 && left.contains_key(2), "dictionary copy remains independent")
     assert(right.count() == 1 && right.contains_key(3), "dictionary copy diverges")
 
-    var strings = Dictionary<str, int>.create(Hashing.hash_str, Hashing.equal_str)
+    var strings = Dictionary<str, int>()
     strings.insert("é", 1)
     strings.insert("hello", 2)
     assert(strings.contains_key("é") && strings.contains_key("hello"), "UTF-8 string hashing")

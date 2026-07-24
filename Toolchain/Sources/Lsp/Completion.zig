@@ -1417,6 +1417,7 @@ pub const language_completions = [_]CompletionItem{
     .{ .label = "elif", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "else", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "while", .kind = 14, .detail = "Silex keyword" },
+    .{ .label = "mutex", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "match", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "return", .kind = 14, .detail = "Silex keyword" },
     .{ .label = "try", .kind = 14, .detail = "Silex keyword" },

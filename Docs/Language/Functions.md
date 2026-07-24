@@ -24,6 +24,51 @@ value inferred with `var`; it cannot accept an internal input type, because an
 external caller could neither name nor construct that argument. The same rule
 applies to methods.
 
+## Default parameters
+
+A function, method, or constructor may give its trailing parameters a default
+expression. An invocation may then omit any final suffix of those parameters:
+
+```sx
+func greet(message:str = "Hello", repetitions:int = 1) {
+    var index = 0
+    while index < repetitions {
+        print(message)
+        index++
+    }
+}
+
+greet()
+greet("Bonjour")
+greet("Salut", 2)
+```
+
+Every parameter after the first default must also have a default. Calls still
+provide one positional prefix: default parameters do not add named arguments
+and cannot skip a middle argument. Each omitted expression is evaluated anew
+at the call site, after overload and generic specialization selected its
+declaration, and follows the same conversion, borrowing, ownership, and
+transport rules as an explicit argument.
+
+Defaults are not part of a `func(...)` value type or a native ABI. Lambdas,
+protocol requirements, function types, and `native func` parameters cannot
+declare them, and calls through a function value or protocol still provide the
+complete argument list.
+
+Every optional suffix exposes an effective overload signature. A second
+declaration is rejected when one of those signatures is already exposed:
+
+```sx
+struct Vector3 {
+    init(value:float) {}
+    init(x:float, y:float = 0.0, z:float = 0.0) {} // error: init(float)
+}
+```
+
+Parameter names and default expressions do not distinguish signatures. The
+diagnostic is attached to the later declaration, before any ambiguous call is
+written.
+
 ## Generic functions
 
 A function may declare type parameters after its name. A call may omit its
@@ -105,8 +150,8 @@ func measure(value:int) int {
 }
 ```
 
-At a call site, Silex first keeps the signatures compatible with the argument
-count, types and `&` markers. It then prefers an exact type, a same-sign
+At a call site, Silex first keeps the effective signatures compatible with the
+argument count, types and `&` markers. It then prefers an exact type, a same-sign
 integer widening or `float` to `float64`, and finally an integer-to-float
 conversion. If no single signature is strictly better, the call is rejected as
 ambiguous and the remaining signatures are listed. Integer and decimal

@@ -126,7 +126,7 @@ func show(value:@int) {
     print(value)
 }
 
-var randomizer = Randomizer.create(42)
+var randomizer = Randomizer(42)
 let candidates:int[] = [10, 20, 30]
 if true {
     let candidates_view = @candidates[0:candidates.count()]

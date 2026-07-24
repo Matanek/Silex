@@ -37,7 +37,7 @@ func replace(value:&int, replacement:int) {
 }
 
 func main() {
-    var stack = Stack<int>.create()
+    var stack = Stack<int>()
     assert(stack.is_empty() && stack.pop() == null, "empty stack")
     stack.reserve(40)
     assert(stack.capacity() >= 40, "stack reserve")
@@ -65,7 +65,7 @@ func main() {
     }
     assert(required(stack.pop()) == 8, "mutable top borrow")
 
-    var left = Stack<int>.create()
+    var left = Stack<int>()
     left.push(1)
     left.push(2)
     var right = left
@@ -74,7 +74,7 @@ func main() {
     assert(left.count() == 2 && right.count() == 2, "stack copies diverge")
 
     var tracker = Tracker(dropped:[])
-    var tracked = Stack<Tracked>.create()
+    var tracked = Stack<Tracked>()
     tracked.push(Tracked.create(tracker, 1))
     tracked.push(Tracked.create(tracker, 2))
     tracked.push(Tracked.create(tracker, 3))

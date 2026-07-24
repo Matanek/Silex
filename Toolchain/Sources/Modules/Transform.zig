@@ -62,6 +62,7 @@ pub fn transformStructure(self: anytype, structure: Ast.Structure) !Ast.Structur
         for (constructor.parameters) |parameter| {
             var copy = parameter;
             copy.type = try self.transformType(parameter.type, parameter.position);
+            if (parameter.default_value) |default_value| copy.default_value = try self.transformExpression(default_value);
             try parameters.append(self.allocator, copy);
             try self.declareLocal(parameter.name, parameter.position);
         }
@@ -213,6 +214,7 @@ pub fn transformFunctionBody(self: anytype, function: Ast.Function, name: []cons
     for (function.parameters) |parameter| {
         var copy = parameter;
         copy.type = try self.transformType(parameter.type, parameter.position);
+        if (parameter.default_value) |default_value| copy.default_value = try self.transformExpression(default_value);
         try parameters.append(self.allocator, copy);
         try self.declareLocal(parameter.name, parameter.position);
     }
@@ -490,6 +492,10 @@ pub fn transformStatement(self: anytype, statement: Ast.Statement) anyerror!Ast.
             .condition = try self.transformCondition(value.condition),
             .body = try self.transformConditionalBody(value.body, value.condition),
         } },
+        .mutex_statement => |value| .{ .mutex_statement = .{
+            .position = value.position,
+            .body = try self.transformStatements(value.body),
+        } },
         .for_statement => |value| .{ .for_statement = .{
             .position = value.position,
             .name = value.name,
@@ -667,6 +673,7 @@ pub fn transformExpression(self: anytype, expression: *const Ast.Expression) any
             for (lambda.parameters) |parameter| {
                 var copy = parameter;
                 copy.type = try self.transformType(parameter.type, parameter.position);
+                if (parameter.default_value) |default_value| copy.default_value = try self.transformExpression(default_value);
                 try parameters.append(self.allocator, copy);
                 try self.declareLocal(parameter.name, parameter.position);
             }

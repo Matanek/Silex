@@ -53,7 +53,7 @@ int main() {
     bool valid = GetConsoleMode(input, &rawInput) != 0;
     valid = valid && (rawInput & (ENABLE_ECHO_INPUT | ENABLE_LINE_INPUT |
         ENABLE_PROCESSED_INPUT)) == 0;
-    valid = valid && failsWith("Console.Session.create", [] {
+    valid = valid && failsWith("Console.Session.init", [] {
         static_cast<void>(silexNative_STD_Console_Session_native_session_create());
     });
     valid = valid && failsWith("Console.read_line", [] {
@@ -134,7 +134,7 @@ int testNativeContract() {
         dup2(slave, STDOUT_FILENO) < 0 || tcgetattr(slave, &original) != 0) return 21;
     const std::int64_t handle = silexNative_STD_Console_Session_native_session_create();
     bool valid = silexNative_STD_Console_Session_native_session_is_open(handle);
-    const bool secondRejected = failsWith("Console.Session.create", [] {
+    const bool secondRejected = failsWith("Console.Session.init", [] {
         static_cast<void>(silexNative_STD_Console_Session_native_session_create());
     });
     const bool lineRejected = failsWith("Console.read_line", [] {

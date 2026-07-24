@@ -20,7 +20,7 @@ func replace(value:&int, replacement:int) {
 }
 
 func main() {
-    var queue = Queue<int>.create(0)
+    var queue = Queue<int>(0)
     assert(queue.is_empty() && queue.count() == 0 && queue.capacity() == 0, "empty queue")
 
     var index = 0
@@ -54,7 +54,7 @@ func main() {
     }
     assert(required(queue.dequeue()) == 7, "head remains queued")
 
-    var mutable = Queue<int>.create()
+    var mutable = Queue<int>()
     mutable.enqueue(1)
     if true {
         var mutable_head = mutable.peek()
@@ -62,7 +62,7 @@ func main() {
     }
     assert(required(mutable.dequeue()) == 10, "mutable head borrow")
 
-    var boxes = Queue<Box>.create()
+    var boxes = Queue<Box>()
     boxes.enqueue(Box(value:4))
     if true {
         var box = boxes.peek()
@@ -70,7 +70,7 @@ func main() {
     }
     assert(boxes.dequeue()?.value == 5, "generic mutable borrow supports class elements")
 
-    var left = Queue<int>.create()
+    var left = Queue<int>()
     left.enqueue(1)
     left.enqueue(2)
     var right = left
@@ -78,7 +78,7 @@ func main() {
     right.enqueue(3)
     assert(left.count() == 2, "copied queue remains independent")
     assert(right.count() == 2, "copied queue diverges")
-    var cleared = Queue<int>.create()
+    var cleared = Queue<int>()
     cleared.enqueue(1)
     cleared.enqueue(2)
     cleared.clear()

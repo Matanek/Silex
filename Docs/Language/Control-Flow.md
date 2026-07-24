@@ -140,6 +140,27 @@ it does not affect either bound or the next value produced.
 
 `break` exits the nearest loop and `continue` starts its next iteration.
 
+## Critical sections
+
+`mutex {}` opens a lexical scope and executes its body while holding Silex's
+single process-wide critical-section lock:
+
+```sx
+mutex {
+    pending.enqueue(chunk)
+}
+```
+
+The lock is recursive, so a protected block may call a helper that also uses
+`mutex`. It is shared by the main thread and all task workers. The generated
+scope releases it on every exit, including `return`, `break`, `continue`, and
+recoverable error propagation.
+
+`mutex` is a statement, not a constructible type. The language exposes no
+manual `lock` or `unlock` operation. Because every block uses the same lock,
+unrelated critical sections serialize as well; bodies should therefore remain
+short and leave expensive work outside the block.
+
 Exhaustive pattern matching over enums is described in
 [Enums and exhaustive match](Enums-and-Match.md). String iteration is not part
 of the current language.

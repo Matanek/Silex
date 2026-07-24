@@ -58,7 +58,7 @@ use Standard.Randomizer as Randomizer
 use Standard.Time.Stopwatch as Stopwatch
 
 func create_randomizer(seed:int) Randomizer {
-    return Randomizer.create(seed)
+    return Randomizer(seed)
 }
 
 func create_stopwatch() Stopwatch {

@@ -1,0 +1,32 @@
+static class Counter {
+    public static var value:int
+}
+
+func next_value() int {
+    Counter.value++
+    return Counter.value
+}
+
+struct Box {
+    var value:int
+
+    init(value:int = 40) {
+        self.value = value
+    }
+
+    func plus(value:int = 2) int {
+        return self.value + value
+    }
+}
+
+func selected(value:int = next_value()) int {
+    return value
+}
+
+func main() {
+    let box = Box()
+    assert(box.plus() == 42, "constructor and method defaults")
+    assert(selected() == 1, "first default evaluation")
+    assert(selected() == 2, "default expression is evaluated for each call")
+    assert(selected(42) == 42 && Counter.value == 2, "explicit argument bypasses default")
+}

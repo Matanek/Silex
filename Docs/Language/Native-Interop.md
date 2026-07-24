@@ -371,8 +371,10 @@ called through those values are checked by the same transitive traversal.
 
 The independence requirement applies at the thread boundary. Captures entering
 the callback remain recursively independent, and an accessed `static let` must
-also contain an independent value. `static var` is rejected because it denotes
-shared mutable Silex storage. Native functions may be called directly or
+also contain an independent value. A `static var` denotes shared mutable Silex
+storage and is therefore rejected outside a `mutex {}` critical section. A
+protected access, including one reached transitively through a called helper,
+remains under the process-wide lock until the block exits. Native functions may be called directly or
 transitively; their module author is responsible for native thread-safety and
 thread-affinity requirements, which the compiler cannot derive from a native
 signature.

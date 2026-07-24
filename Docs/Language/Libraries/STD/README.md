@@ -9,7 +9,7 @@ project must not list `STD` in its `@Module.json` dependencies.
 use STD.Randomizer as Randomizer
 
 func main() {
-    var random = Randomizer.create()
+    var random = Randomizer()
     print(random.get_int() > 0)
 }
 ```

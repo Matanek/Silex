@@ -37,3 +37,35 @@ public func hash_str(value:@str) uint {
 public func equal_str(left:@str, right:@str) bool {
     return left == right
 }
+
+public func hash(value:@bool) uint {
+    return hash_bool(value)
+}
+
+public func hash(value:@int) uint {
+    return hash_int(value)
+}
+
+public func hash(value:@uint) uint {
+    return hash_uint(value)
+}
+
+public func hash(value:@str) uint {
+    return hash_str(value)
+}
+
+public func equal(left:@bool, right:@bool) bool {
+    return equal_bool(left, right)
+}
+
+public func equal(left:@int, right:@int) bool {
+    return equal_int(left, right)
+}
+
+public func equal(left:@uint, right:@uint) bool {
+    return equal_uint(left, right)
+}
+
+public func equal(left:@str, right:@str) bool {
+    return equal_str(left, right)
+}

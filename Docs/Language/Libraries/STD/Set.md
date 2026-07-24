@@ -4,18 +4,22 @@
 `STD.Collections.Dictionary`.
 
 ```sx
-use STD.Collections.Set as Set
-use STD.Collections.Hashing
+use STD.Collections.Set
 
-var selected = Set<int>.create(Hashing.hash_int, Hashing.equal_int)
+var selected = Set<int>()
 selected.insert(7)
 selected.insert(7)
+
+var reserved = Set<str>(128)
 ```
 
-`Set<T>` requires recursively copyable elements and explicit hash and equality
-callbacks. Equal values must have equal, stable hashes; equality must be an
-equivalence relation. The callbacks in `STD.Collections.Hashing` can be used
-for `bool`, `int`, `uint`, and `str`.
+`Set<T>` requires recursively copyable elements. `bool`, `int`, `uint`, and
+`str` select the overloaded callbacks in `STD.Collections.Hashing`
+automatically. A business type supplies both callbacks explicitly, for example
+`Set<Token>(hash_token, equal_token)` or
+`Set<Token>(hash_token, equal_token, 128)`. Equal values must have equal,
+stable hashes, and equality must be an equivalence relation. Explicit
+callbacks bypass unavailable defaults without requiring another protocol.
 
 `insert` returns `true` only for a new equivalence class. A duplicate keeps the
 first representative rather than replacing it. `remove` reports whether it
@@ -31,4 +35,4 @@ reasonably distributed hash and O(n) in the worst case. Growth is amortized,
 and `reserve(k)` prevents further growth until at least `k` entries fit.
 Capacity is an entry capacity, not a bucket count. No iteration order is
 defined. `iterator()` creates an O(n) owned snapshot in that unspecified
-order. Negative capacities passed to `create` or `reserve` panic.
+order. Negative capacities passed to the constructor or `reserve` panic.

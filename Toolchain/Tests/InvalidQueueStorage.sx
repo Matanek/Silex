@@ -1,6 +1,6 @@
 use STD.Collections.Queue as Queue
 
 func main() {
-    var queue = Queue<int>.create()
+    var queue = Queue<int>()
     queue.front.append(1)
 }

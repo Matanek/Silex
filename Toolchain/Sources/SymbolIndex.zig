@@ -505,6 +505,7 @@ const Builder = struct {
                 try self.recordCondition(value.condition);
                 try self.recordStatements(value.body);
             },
+            .mutex_statement => |body| try self.recordStatements(body),
             .for_statement => |value| {
                 if (self.symbolByKey(value.generated_name) == null) _ = try self.addSymbol(
                     value.source_name,
@@ -948,6 +949,10 @@ pub fn functionDetail(allocator: Allocator, function: Ast.Function) ![]const u8 
         try output.appendSlice(allocator, parameter.name);
         try output.append(allocator, ':');
         try appendAstType(allocator, &output, parameter.type);
+        if (parameter.default_value) |default_value| {
+            try output.appendSlice(allocator, " = ");
+            try appendAstDefaultExpression(allocator, &output, default_value);
+        }
     }
     try output.append(allocator, ')');
     try appendReturnType(allocator, &output, function.return_type);
@@ -980,7 +985,6 @@ fn fieldDetail(allocator: Allocator, ast: Ast.StructureField, semantic_type: Sem
 }
 
 fn constructorDetail(allocator: Allocator, owner: []const u8, ast: Ast.Constructor, semantic: Semantic.Constructor) ![]const u8 {
-    _ = ast;
     var output: std.ArrayList(u8) = .empty;
     try output.appendSlice(allocator, "init ");
     try output.appendSlice(allocator, owner);
@@ -990,9 +994,40 @@ fn constructorDetail(allocator: Allocator, owner: []const u8, ast: Ast.Construct
         try output.appendSlice(allocator, parameter.source_name);
         try output.append(allocator, ':');
         try appendSemanticType(allocator, &output, parameter.type);
+        if (ast.parameters[index].default_value) |default_value| {
+            try output.appendSlice(allocator, " = ");
+            try appendAstDefaultExpression(allocator, &output, default_value);
+        }
     }
     try output.append(allocator, ')');
     return output.toOwnedSlice(allocator);
+}
+
+fn appendAstDefaultExpression(allocator: Allocator, output: *std.ArrayList(u8), expression: *const Ast.Expression) !void {
+    switch (expression.value) {
+        .integer => |value| try output.appendSlice(allocator, value),
+        .floating => |value| try output.appendSlice(allocator, value),
+        .boolean => |value| try output.appendSlice(allocator, if (value) "true" else "false"),
+        .null => try output.appendSlice(allocator, "null"),
+        .string => |value| {
+            try output.append(allocator, '"');
+            try output.appendSlice(allocator, value);
+            try output.append(allocator, '"');
+        },
+        .identifier => |name| try output.appendSlice(allocator, sourceSpelling(name)),
+        .self => try output.appendSlice(allocator, "self"),
+        .static_field_access => |access| {
+            try appendAstType(allocator, output, access.owner);
+            try output.append(allocator, '.');
+            try output.appendSlice(allocator, sourceSpelling(access.name));
+        },
+        .member_access => |access| {
+            try appendAstDefaultExpression(allocator, output, access.object);
+            try output.append(allocator, '.');
+            try output.appendSlice(allocator, sourceSpelling(access.name));
+        },
+        else => try output.appendSlice(allocator, "..."),
+    }
 }
 
 fn bindingDetail(allocator: Allocator, name: []const u8, semantic_type: Semantic.Type, mutability: ?Ast.Mutability) ![]const u8 {

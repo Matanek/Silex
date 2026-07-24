@@ -480,8 +480,11 @@ pub fn constructorBaseInitialization(
     var arguments: std.ArrayList(*Expression) = .empty;
     var transient_borrows: std.ArrayList(Borrow) = .empty;
     defer for (transient_borrows.items) |borrow| releaseBorrow(borrow);
-    for (ast_arguments, resolved.symbol.parameter_types, resolved.symbol.parameter_modes, resolved.symbol.parameter_stored, 0..) |argument, expected_type, mode, is_stored, index| {
-        var value = try self.argumentForMode(argument, scope, expected_type, mode);
+    const default_scope = Scope{ .parent = null, .depth = 0 };
+    for (resolved.symbol.parameter_types, resolved.symbol.parameter_modes, resolved.symbol.parameter_stored, 0..) |expected_type, mode, is_stored, index| {
+        const explicit = index < ast_arguments.len;
+        const argument = if (explicit) ast_arguments[index] else resolved.symbol.parameter_defaults[index].?;
+        var value = try self.argumentForMode(argument, if (explicit) scope else &default_scope, expected_type, mode);
         value = try self.coerce(value, expected_type);
         if (!typeEqual(value.type, expected_type)) {
             const message = try std.fmt.allocPrint(self.allocator, "argument {d} of base constructor '{s}' expects '{s}', found '{s}'", .{ index + 1, base.source_name, typeName(expected_type), typeName(value.type) });
@@ -622,6 +625,9 @@ pub fn validateConstructorStatement(
             try self.validateConstructorCondition(structure, while_value.condition, initialized);
             const body_state = try self.allocator.dupe(FieldInitialization, initialized);
             _ = try self.validateConstructorStatements(structure, while_value.body, body_state);
+        },
+        .mutex_statement => |body| {
+            if (!try self.validateConstructorStatements(structure, body, initialized)) return false;
         },
         .for_statement => |for_value| {
             switch (for_value.source) {

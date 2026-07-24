@@ -92,6 +92,51 @@ test "generate typed variables and control flow" {
     try std.testing.expect(std.mem.indexOf(u8, cpp, "std::scoped_lock silexOutputLock(silexOutputMutex);") != null);
 }
 
+test "generate reentrant critical sections with scoped lifetime" {
+    const Parser = @import("../Parser.zig").Parser;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var parser = Parser.init(allocator,
+        \\func protected() int {
+        \\    mutex { return 1 }
+        \\}
+        \\func main() {
+        \\    mutex {
+        \\        mutex { print(protected()) }
+        \\    }
+        \\}
+    );
+    var analyzer = Semantic.Analyzer.init(allocator);
+    const cpp = try generate(allocator, try analyzer.analyze(try parser.parse()));
+
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "inline std::recursive_mutex silexCriticalSectionMutex;") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "std::scoped_lock silexCriticalSectionLock(silexCriticalSectionMutex);") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "return std::int64_t{1};") != null);
+}
+
+test "generate intrinsic defaults for structures with constructors" {
+    const Parser = @import("../Parser.zig").Parser;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var parser = Parser.init(allocator,
+        \\struct Value {
+        \\    var number:int
+        \\    public init(seed:int) { self.number = seed }
+        \\}
+        \\static class Shared { public static var value:Value }
+        \\func main() { assert(Shared.value.number == 0, "intrinsic default") }
+    );
+    var analyzer = Semantic.Analyzer.init(allocator);
+    const cpp = try generate(allocator, try analyzer.analyze(try parser.parse()));
+
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "() = default;") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, " = SilexStruct0{};") != null);
+}
+
 test "generate negative collection indexes and ordered slices" {
     const Parser = @import("../Parser.zig").Parser;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
@@ -981,6 +1026,30 @@ test "generate value structs and member access" {
     try std.testing.expect(std.mem.indexOf(u8, cpp, "const int result = SilexGenerated::silexMain();") != null);
     try std.testing.expect(std.mem.indexOf(u8, cpp, "int main(int argumentCount, char** argumentValues)") != null);
     try std.testing.expect(std.mem.indexOf(u8, cpp, "silexRuntimeArgumentCountValue = argumentCount;") != null);
+}
+
+test "generate technical default storage for nested custom constructor values" {
+    const Parser = @import("../Parser.zig").Parser;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var parser = Parser.init(allocator,
+        \\struct Inner {
+        \\    var value:int
+        \\    init(value:int) { self.value = value }
+        \\}
+        \\struct Outer {
+        \\    var inner:Inner
+        \\    init(value:int) { self.inner = Inner(value) }
+        \\}
+        \\func main() { var value = Outer(42) }
+    );
+    var analyzer = Semantic.Analyzer.init(allocator);
+    const cpp = try generate(allocator, try analyzer.analyze(try resolveSingleTestProgram(allocator, try parser.parse())));
+
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "SilexStruct0() = default;") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cpp, "SilexStruct1() = default;") != null);
 }
 
 test "generate class references identity access and cycle tracing" {

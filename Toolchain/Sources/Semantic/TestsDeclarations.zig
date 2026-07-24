@@ -302,6 +302,30 @@ test "field mutability controls direct and nested mutation" {
         "struct State { let values:int[]? } func main() { var state = State(values:[]); state.values?.append(1) }",
         "cannot mutate through let field 'values'",
     );
+    try expectSemanticSuccess(
+        \\struct Counter { var value:int; func bump() { self.value += 1 } }
+        \\class Holder {
+        \\    public var counter:Counter
+        \\    init() { self.counter = Counter(value:0) }
+        \\    public static func instance() Holder { return Holder() }
+        \\}
+        \\func main() { Holder.instance().counter.bump() }
+    );
+    try expectResolvedSemanticError(
+        \\struct Counter { var value:int; func bump() { self.value += 1 } }
+        \\class Holder {
+        \\    public let counter:Counter
+        \\    init() { self.counter = Counter(value:0) }
+        \\    public static func instance() Holder { return Holder() }
+        \\}
+        \\func main() { Holder.instance().counter.bump() }
+    , "cannot call mutating method 'bump' through let field 'counter'");
+    try expectResolvedSemanticError(
+        \\struct Counter { var value:int; func bump() { self.value += 1 } }
+        \\struct Holder { var counter:Counter }
+        \\func make_holder() Holder { return Holder(counter:Counter(value:0)) }
+        \\func main() { make_holder().counter.bump() }
+    , "cannot call mutating method 'bump' on a temporary value");
 }
 
 test "static methods use type receivers and separate overload sets" {

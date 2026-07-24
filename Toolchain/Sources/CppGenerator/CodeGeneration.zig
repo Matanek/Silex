@@ -398,6 +398,15 @@ pub fn generateStatement(
             try self.indent(allocator, output, indentation);
             try output.appendSlice(allocator, "}\n");
         },
+        .mutex_statement => |body| {
+            try self.indent(allocator, output, indentation);
+            try output.appendSlice(allocator, "{\n");
+            try self.indent(allocator, output, indentation + 1);
+            try output.appendSlice(allocator, "std::scoped_lock silexCriticalSectionLock(silexCriticalSectionMutex);\n");
+            try self.generateStatements(allocator, output, body, indentation + 1, is_main);
+            try self.indent(allocator, output, indentation);
+            try output.appendSlice(allocator, "}\n");
+        },
         .for_statement => |for_statement| {
             switch (for_statement.source) {
                 .collection => |collection| try self.generateTryPreludes(allocator, output, collection, indentation),
@@ -1025,6 +1034,11 @@ pub fn generateExpression(self: anytype, allocator: Allocator, output: *std.Arra
             try output.append(allocator, ')');
         },
         .structure_initializer => |initializer| {
+            if (initializer.default_constructed) {
+                try output.appendSlice(allocator, initializer.generated_name);
+                try output.appendSlice(allocator, "{}");
+                return;
+            }
             if (self.isClassType(expression.type)) {
                 try output.appendSlice(allocator, "silexMake<");
                 try output.appendSlice(allocator, initializer.generated_name);

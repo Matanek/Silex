@@ -406,7 +406,7 @@ pub fn parseSuperMethodCall(self: anytype) ParseError!*Ast.Expression {
 pub fn parseLambda(self: anytype, deferred: bool, isolated: bool) ParseError!*Ast.Expression {
     const position = self.current.position;
     try self.expect(.keyword_func, "expected 'func'");
-    const parameters = try self.parseParameters();
+    const parameters = try self.parseParameters(false);
     const return_type: Ast.ReturnType = if (self.current.tag == .left_brace)
         .void
     else

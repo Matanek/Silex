@@ -13,7 +13,7 @@ extend Randomizer {
     }
 
     public static func seeded(seed:int) Randomizer {
-        return Randomizer.create(seed)
+        return Randomizer(seed)
     }
 }
 ```
@@ -56,7 +56,7 @@ The same rule applies to static extension methods:
 ```sx
 extend Randomizer {
     public static func from<T>(seed:T) Randomizer {
-        return Randomizer.create(seed as int)
+        return Randomizer(seed as int)
     }
 }
 

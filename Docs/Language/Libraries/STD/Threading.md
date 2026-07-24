@@ -91,9 +91,38 @@ ressource unique ne peut donc pas être enfoui dans la tâche soumise.
 Le corps de `execute()` n'est pas limité à ces types transportables. Il peut
 créer, muter et détruire localement des classes, protocoles, callbacks,
 collections et ressources selon les règles ordinaires du langage. Par exemple,
-un `Randomizer.create()` construit dans `execute()` est confiné au worker et ne
-partage pas son état avec le thread appelant. L'accès à `static var` reste
-refusé, et un `static let` doit être récursivement indépendant.
+un `Randomizer()` construit dans `execute()` est confiné au worker et ne
+partage pas son état avec le thread appelant. Un `static let` consulté depuis
+le worker doit être récursivement indépendant.
+
+Un stockage mutable volontairement partagé, tel qu'une file statique de
+travail, doit être consulté et modifié dans le bloc de langage `mutex {}` :
+
+```sx
+static class ChunkQueues {
+    public static var pending:Queue<Chunk>
+    public static var completed:Queue<Chunk>
+}
+
+mutex {
+    chunk = ChunkQueues.pending.dequeue()
+}
+
+// traitement lourd sans verrou
+
+mutex {
+    ChunkQueues.completed.enqueue(chunk)
+}
+```
+
+Tous les blocs `mutex` du processus partagent un verrou réentrant unique entre
+le thread principal et les workers. Un helper appelé dans le bloc reste sous
+le verrou jusqu'à son retour, et un helper peut ouvrir un autre bloc sans se
+bloquer lui-même. La sortie du bloc libère toujours le verrou, y compris par
+`return`, `break`, `continue` ou propagation d'erreur. L'accès direct à un
+`static var` reste refusé sur un chemin de tâche hors de `mutex`. Le thread
+principal doit employer le même bloc lorsqu'il accède simultanément au même
+stockage.
 
 Une exception native levée sur le worker est mémorisée puis relevée par un appel
 explicite à `complete`; la destruction du handle attend et libère toujours les
@@ -106,6 +135,7 @@ résultat opaque. Il ne connaît ni `Task`, ni le type concret, ni ses champs. L
 toolchain ne reconnaît aucun nom particulier de `STD.Threading`.
 
 Cette API ne fournit encore ni annulation, priorité, dépendances, sondage non
-bloquant, état partagé arbitraire, mutex public, work stealing ou exécution
-parallèle par index. Les défaillances d'infrastructure restent fatales, de sorte
-que l'usage courant n'impose ni `try` ni `trymove`.
+bloquant, verrou nommé, plusieurs domaines de verrouillage, work stealing ou
+exécution parallèle par index. `STD` n'expose aucun type `Mutex`, aucune méthode
+`lock` ou `unlock` et aucun guard. Les défaillances d'infrastructure restent
+fatales, de sorte que l'usage courant n'impose ni `try` ni `trymove`.

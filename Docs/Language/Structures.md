@@ -28,15 +28,16 @@ are rejected.
 If a structure declares at least one private instance field, its complete
 named initializer is private too. Only methods and static methods declared
 directly in that structure may invoke it; neighboring functions, extensions,
-other types, and other modules construct the value through a public factory:
+other types, and other modules construct the value through a public constructor:
 
 ```sx
 public struct Queue {
     private var values:int[]
     private var head:int
 
-    public static func create() Queue {
-        return Queue(values:[], head:0)
+    public init() {
+        self.values = []
+        self.head = 0
     }
 
     public func count() int {

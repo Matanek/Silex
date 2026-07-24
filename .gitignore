@@ -1,6 +1,7 @@
 .DS_Store
 .cache/
 .zig-cache/
+.zig-global-cache/
 zig-out/
 .silex/
 compile_commands.json

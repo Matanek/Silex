@@ -175,6 +175,7 @@ pub fn statement(self: anytype, ast: Ast.Statement, scope: *Scope) AnalyzeError!
         .assignment => |ast_assignment| self.assignment(ast_assignment, scope),
         .if_statement => |if_statement| self.ifStatement(if_statement, scope),
         .while_statement => |while_statement| self.whileStatement(while_statement, scope),
+        .mutex_statement => |mutex_statement| self.mutexStatement(mutex_statement, scope),
         .for_statement => |for_statement| self.forStatement(for_statement, scope),
         .break_statement => |position| loop_control: {
             if (self.loop_depth == 0) return self.fail(position, "'break' is only available inside a loop");
@@ -191,6 +192,19 @@ pub fn statement(self: anytype, ast: Ast.Statement, scope: *Scope) AnalyzeError!
         .return_statement => |return_statement| self.returnStatement(return_statement, scope),
         .expression_statement => |expression_statement| .{ .expression_statement = try self.expression(expression_statement, scope) },
     };
+}
+
+pub fn mutexStatement(
+    self: anytype,
+    ast: Ast.Statement.Mutex,
+    parent_scope: *const Scope,
+) AnalyzeError!Statement {
+    var body_scope = Scope{ .parent = parent_scope, .depth = parent_scope.depth + 1 };
+    self.mutex_depth += 1;
+    defer self.mutex_depth -= 1;
+    const body = try self.statements(ast.body, &body_scope);
+    self.releaseScopeBorrows(&body_scope);
+    return .{ .mutex_statement = body };
 }
 
 pub fn analyzeAssertion(self: anytype, ast: Ast.Statement.Assert, scope: *const Scope) AnalyzeError!Statement {

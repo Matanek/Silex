@@ -638,7 +638,7 @@ void restoreSession() {
 }
 
 std::int64_t createSession() {
-    if (sessionActive.load()) fail("create", "a session is already active");
+    if (sessionActive.load()) fail("init", "a session is already active");
 #if defined(_WIN32)
     const HANDLE input = GetStdHandle(STD_INPUT_HANDLE);
     const HANDLE output = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -647,7 +647,7 @@ std::int64_t createSession() {
     if (input == INVALID_HANDLE_VALUE || output == INVALID_HANDLE_VALUE ||
         GetConsoleMode(input, &inputMode) == 0 ||
         GetConsoleMode(output, &outputMode) == 0) {
-        fail("create", "standard input and output must be interactive");
+        fail("init", "standard input and output must be interactive");
     }
     DWORD rawInput = inputMode;
     rawInput &= ~(ENABLE_ECHO_INPUT | ENABLE_LINE_INPUT | ENABLE_PROCESSED_INPUT |
@@ -658,7 +658,7 @@ std::int64_t createSession() {
         SetConsoleMode(output, rawOutput) == 0) {
         SetConsoleMode(input, inputMode);
         SetConsoleMode(output, outputMode);
-        fail("create", "unable to activate raw console mode");
+        fail("init", "unable to activate raw console mode");
     }
     session.input = input;
     session.output = output;
@@ -668,7 +668,7 @@ std::int64_t createSession() {
     if (isatty(STDIN_FILENO) != 1 || isatty(STDOUT_FILENO) != 1 ||
         tcgetattr(STDIN_FILENO, &session.inputMode) != 0 ||
         tcgetattr(STDOUT_FILENO, &session.outputMode) != 0) {
-        fail("create", "standard input and output must be interactive");
+        fail("init", "standard input and output must be interactive");
     }
     termios raw = session.inputMode;
     raw.c_iflag &= ~(
@@ -684,7 +684,7 @@ std::int64_t createSession() {
     raw.c_cc[VMIN] = 0;
     raw.c_cc[VTIME] = 0;
     if (tcsetattr(STDIN_FILENO, TCSANOW, &raw) != 0) {
-        fail("create", "unable to activate raw terminal mode");
+        fail("init", "unable to activate raw terminal mode");
     }
     session.bytes.clear();
     session.escapeStarted.reset();

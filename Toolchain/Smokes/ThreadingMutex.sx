@@ -1,0 +1,105 @@
+use STD.Threading
+use STD.Collections.Queue as Queue
+
+static class SharedWork {
+    private static var pending:Queue<int>
+    private static var completed:Queue<int>
+    private static var inside:int
+    private static var overlapped:bool
+
+    public static func enter_nested_section() {
+        mutex {
+            if SharedWork.inside != 0 {
+                SharedWork.overlapped = true
+            }
+            SharedWork.inside++
+            var spin = 0
+            while spin < 20000 {
+                spin++
+            }
+            SharedWork.inside--
+        }
+    }
+
+    public static func take() int? {
+        mutex {
+            return SharedWork.pending.dequeue()
+        }
+    }
+
+    public static func finish(value:int) {
+        mutex {
+            SharedWork.completed.enqueue(value)
+        }
+    }
+
+    public static func prepare() {
+        mutex {
+            for value in 1...5 {
+                SharedWork.pending.enqueue(value)
+            }
+        }
+    }
+
+    public static func verify() {
+        mutex {
+            assert(!SharedWork.overlapped, "critical sections never overlap")
+            assert(SharedWork.completed.count() == 4, "workers share protected queues")
+        }
+    }
+}
+
+struct QueueWorker:Threading.Task {
+    func execute() {
+        mutex {
+            SharedWork.enter_nested_section()
+        }
+        if value = SharedWork.take() {
+            SharedWork.finish(value * value)
+        }
+    }
+}
+
+enum MutexError {
+    expected
+}
+
+func fail() Result<int,MutexError> {
+    return Result<int,MutexError>.failure(MutexError.expected())
+}
+
+func leave_with_error() Result<int,MutexError> {
+    mutex {
+        let value = try fail()
+        return Result<int,MutexError>.success(value)
+    }
+}
+
+func leave_with_break() {
+    while true {
+        mutex {
+            break
+        }
+    }
+}
+
+func main() {
+    SharedWork.prepare()
+    leave_with_break()
+    leave_with_error()
+    mutex {
+        assert(true, "recoverable propagation released the lock")
+    }
+
+    var first = Threading.TaskManager.submit(QueueWorker())
+    var second = Threading.TaskManager.submit(QueueWorker())
+    var third = Threading.TaskManager.submit(QueueWorker())
+    var fourth = Threading.TaskManager.submit(QueueWorker())
+    first.complete()
+    second.complete()
+    third.complete()
+    fourth.complete()
+
+    SharedWork.verify()
+    print("threading mutex")
+}

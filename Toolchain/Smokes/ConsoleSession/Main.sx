@@ -2,9 +2,19 @@ use STD.Console as Console
 
 func describe(event:Console.Session.KeyEvent) str {
     var modifiers = "-"
-    if event.shift { modifiers = "S" }
-    if event.control { modifiers += "C" } else { modifiers += "-" }
-    if event.alt { modifiers += "A" } else { modifiers += "-" }
+    if event.shift {
+        modifiers = "S"
+    }
+    if event.control {
+        modifiers += "C"
+    } else {
+        modifiers += "-"
+    }
+    if event.alt {
+        modifiers += "A"
+    } else {
+        modifiers += "-"
+    }
     return modifiers + ":" + match event.key {
         character(text) => "character:" + text
         enter => "enter"
@@ -33,7 +43,7 @@ func function_number(event:Console.Session.KeyEvent) int {
 }
 
 func main() {
-    var session = Console.Session.create()
+    var session = Console.Session()
     print(session.is_open())
     print(session.poll_key(0) == null)
     session.enter_alternate_screen()

@@ -21,8 +21,8 @@ func int_matches(actual:@int, expected:int) bool {
 
 func check_choose() {
     let candidates:int[] = [10, 20, 30, 40]
-    var randomizer = Randomizer.create(42)
-    var expected_randomizer = Randomizer.create(42)
+    var randomizer = Randomizer(42)
+    var expected_randomizer = Randomizer(42)
     let expected_index = expected_randomizer.get_int(0, candidates.count())
     let expected_value = candidates[expected_index]
     if true {
@@ -39,8 +39,8 @@ func check_choose() {
     )
 
     let bounded:int[] = [90, 1, 2, 3, 80]
-    var bounded_randomizer = Randomizer.create(7)
-    var bounded_expected = Randomizer.create(7)
+    var bounded_randomizer = Randomizer(7)
+    var bounded_expected = Randomizer(7)
     let bounded_index = bounded_expected.get_int(0, 3)
     if true {
         let view = @bounded[1:4]
@@ -53,8 +53,8 @@ func check_choose() {
         "protected-view choose performs exactly one draw"
     )
 
-    var method_randomizer = Randomizer.create(73)
-    var method_expected = Randomizer.create(73)
+    var method_randomizer = Randomizer(73)
+    var method_expected = Randomizer(73)
     let method_index = method_expected.get_int(0, candidates.count())
     if true {
         let view = @candidates[0:candidates.count()]
@@ -72,8 +72,8 @@ func check_choose() {
 
 func check_empty_and_single_shuffle() {
     var empty:int[] = []
-    var empty_randomizer = Randomizer.create(11)
-    var empty_expected = Randomizer.create(11)
+    var empty_randomizer = Randomizer(11)
+    var empty_expected = Randomizer(11)
     if true {
         var view = &empty[0:empty.count()]
         Algorithms.shuffle<int>(empty_randomizer, view)
@@ -85,8 +85,8 @@ func check_empty_and_single_shuffle() {
     )
 
     var single:int[1] = [7]
-    var single_randomizer = Randomizer.create(12)
-    var single_expected = Randomizer.create(12)
+    var single_randomizer = Randomizer(12)
+    var single_expected = Randomizer(12)
     if true {
         var view = &single[0:single.count()]
         Algorithms.shuffle<int>(single_randomizer, view)
@@ -104,8 +104,8 @@ func check_fisher_yates() {
     }
     var values:int[] = [90, 1, 2, 3, 4, 80]
     var expected:int[] = values
-    var randomizer = Randomizer.create(91)
-    var expected_randomizer = Randomizer.create(91)
+    var randomizer = Randomizer(91)
+    var expected_randomizer = Randomizer(91)
 
     var end = 3
     while end > 0 {
@@ -133,8 +133,8 @@ func check_fisher_yates() {
 
     var left:int[] = [1, 2, 3, 4, 5, 6]
     var right:int[] = left
-    var left_randomizer = Randomizer.create(1234)
-    var right_randomizer = Randomizer.create(1234)
+    var left_randomizer = Randomizer(1234)
+    var right_randomizer = Randomizer(1234)
     if true {
         var left_view = &left[0:left.count()]
         Algorithms.shuffle<int>(left_randomizer, left_view)
@@ -147,8 +147,8 @@ func check_fisher_yates() {
 
     var method_values:int[] = [1, 2, 3, 4, 5, 6]
     var free_values:int[] = method_values
-    var method_randomizer = Randomizer.create(808)
-    var free_randomizer = Randomizer.create(808)
+    var method_randomizer = Randomizer(808)
+    var free_randomizer = Randomizer(808)
     if true {
         var view = &method_values[0:method_values.count()]
         method_randomizer.shuffle<int>(view)
@@ -174,7 +174,7 @@ func exercise_noncopyable(tracker:Tracker) {
         Token(value:3, tracker:tracker),
         Token(value:2, tracker:tracker),
     ]
-    var randomizer = Randomizer.create(5)
+    var randomizer = Randomizer(5)
     if true {
         let view = @tokens[0:tokens.count()]
         let selected:@Token = randomizer.choose<Token>(view)

@@ -101,6 +101,7 @@ const rawEnumValuesEqual = Support.rawEnumValuesEqual;
 const rawEnumInteger = Support.rawEnumInteger;
 const sameSignature = Support.sameSignature;
 const sameCallableShape = Support.sameCallableShape;
+const requiredParameterCount = Support.requiredParameterCount;
 const containsPosition = Support.containsPosition;
 const overloadScore = Support.overloadScore;
 const literalOverloadScore = Support.literalOverloadScore;
@@ -158,7 +159,7 @@ pub fn resolveFunctionOverload(
     var best_scores: ?[]const u8 = null;
     var ambiguous: std.ArrayList(FunctionSymbol) = .empty;
     for (candidates) |candidate| {
-        const scores = try self.overloadScores(arguments, scope, candidate.parameter_types, candidate.parameter_modes);
+        const scores = try self.overloadScores(arguments, scope, candidate.parameter_types, candidate.parameter_modes, requiredParameterCount(candidate.parameter_defaults));
         if (scores == null) continue;
         if (best == null) {
             best = candidate;
@@ -191,7 +192,7 @@ pub fn resolveMethodOverload(
     var best_scores: ?[]const u8 = null;
     var ambiguous: std.ArrayList(MethodCandidate) = .empty;
     for (candidates) |candidate| {
-        const scores = try self.overloadScores(arguments, scope, candidate.symbol.parameter_types, candidate.symbol.parameter_modes);
+        const scores = try self.overloadScores(arguments, scope, candidate.symbol.parameter_types, candidate.symbol.parameter_modes, requiredParameterCount(candidate.symbol.parameter_defaults));
         if (scores == null) continue;
         if (best == null) {
             best = candidate;
@@ -224,7 +225,7 @@ pub fn resolveConstructorOverload(
     var best_scores: ?[]const u8 = null;
     var ambiguous: std.ArrayList(ConstructorCandidate) = .empty;
     for (candidates) |candidate| {
-        const scores = try self.overloadScores(arguments, scope, candidate.symbol.parameter_types, candidate.symbol.parameter_modes);
+        const scores = try self.overloadScores(arguments, scope, candidate.symbol.parameter_types, candidate.symbol.parameter_modes, requiredParameterCount(candidate.symbol.parameter_defaults));
         if (scores == null) continue;
         if (best == null) {
             best = candidate;
@@ -259,12 +260,13 @@ pub fn overloadScores(
     scope: *const Scope,
     parameter_types: []const Type,
     parameter_modes: []const Ast.ParameterMode,
+    required_parameter_count: usize,
 ) AnalyzeError!?[]const u8 {
-    if (arguments.len != parameter_types.len) return null;
+    if (arguments.len < required_parameter_count or arguments.len > parameter_types.len) return null;
     const owner_states = try self.snapshotOwnerStates(scope);
     defer restoreOwnerStates(owner_states);
     var scores: std.ArrayList(u8) = .empty;
-    for (arguments, parameter_types, parameter_modes) |argument, parameter_type, parameter_mode| {
+    for (arguments, parameter_types[0..arguments.len], parameter_modes[0..arguments.len]) |argument, parameter_type, parameter_mode| {
         if (argument.value == .borrow_expression) {
             return self.fail(argument.position, "reference arguments are selected by the parameter signature; pass the value without '@'");
         }
@@ -486,13 +488,36 @@ pub fn implicitBaseInitialization(self: anytype, structure_index: usize) Analyze
     const base = self.structures.items[base_index];
 
     if (base.constructors.len != 0) {
-        for (base.constructors) |constructor_symbol| {
-            if (constructor_symbol.parameter_types.len == 0 and
+        for (base.constructors, 0..) |constructor_symbol, constructor_index| {
+            if (requiredParameterCount(constructor_symbol.parameter_defaults) == 0 and
                 self.memberVisibleFrom(structure_index, base_index, constructor_symbol.visibility, structure.position.file))
             {
+                const default_scope = Scope{ .parent = null, .depth = 0 };
+                var arguments: std.ArrayList(*Expression) = .empty;
+                var transient_borrows: std.ArrayList(Borrow) = .empty;
+                defer for (transient_borrows.items) |borrow| releaseBorrow(borrow);
+                for (constructor_symbol.parameter_types, constructor_symbol.parameter_modes, constructor_symbol.parameter_stored, 0..) |expected_type, mode, is_stored, index| {
+                    const argument = constructor_symbol.parameter_defaults[index].?;
+                    var value = try self.argumentForMode(argument, &default_scope, expected_type, mode);
+                    value = try self.coerce(value, expected_type);
+                    if (!typeEqual(value.type, expected_type)) {
+                        const message = try std.fmt.allocPrint(self.allocator, "default argument {d} of base constructor '{s}' expects '{s}', found '{s}'", .{ index + 1, base.source_name, typeName(expected_type), typeName(value.type) });
+                        return self.fail(argument.position, message);
+                    }
+                    if (mode == .value) try self.rejectUniqueOwnerArgument(value, argument.position);
+                    if (is_stored and value.lifetime_depth != 0) {
+                        return self.fail(argument.position, "capturing default callback cannot escape through an implicit base constructor");
+                    }
+                    try arguments.append(self.allocator, value);
+                    try self.retainTransientBorrow(&transient_borrows, value);
+                }
                 return .{
                     .available = true,
-                    .initializer = .{ .generated_name = base.generated_name, .arguments = &.{} },
+                    .initializer = .{
+                        .generated_name = base.generated_name,
+                        .constructor_index = constructor_index,
+                        .arguments = try arguments.toOwnedSlice(self.allocator),
+                    },
                 };
             }
         }
@@ -834,20 +859,20 @@ pub fn classInitializerExpression(
     var transient_borrows: std.ArrayList(Borrow) = .empty;
     defer for (transient_borrows.items) |borrow| releaseBorrow(borrow);
     var lifetime_depth: usize = 0;
-    for (initializer.arguments, constructor_symbol.parameter_types, constructor_symbol.parameter_modes, constructor_symbol.parameter_stored, 0..) |argument, expected_type, mode, is_stored, index| {
-        var value = try self.argumentForMode(argument, scope, expected_type, mode);
+    const default_scope = Scope{ .parent = null, .depth = 0 };
+    for (constructor_symbol.parameter_types, constructor_symbol.parameter_modes, constructor_symbol.parameter_stored, 0..) |expected_type, mode, is_stored, index| {
+        const explicit = index < initializer.arguments.len;
+        const argument = if (explicit) initializer.arguments[index] else constructor_symbol.parameter_defaults[index].?;
+        var value = try self.argumentForMode(argument, if (explicit) scope else &default_scope, expected_type, mode);
         value = try self.coerce(value, expected_type);
         if (!typeEqual(value.type, expected_type)) {
             const message = try std.fmt.allocPrint(self.allocator, "argument {d} of constructor '{s}' expects '{s}', found '{s}'", .{ index + 1, structure.source_name, typeName(expected_type), typeName(value.type) });
             return self.fail(argument.position, message);
         }
         if (mode == .value) try self.rejectUniqueOwnerArgument(value, argument.position);
-        if (is_stored and value.lifetime_depth != 0) {
-            return self.fail(argument.position, "capturing callback cannot be passed to a constructor parameter whose value escapes the call");
-        }
         try arguments.append(self.allocator, value);
         try self.retainTransientBorrow(&transient_borrows, value);
-        lifetime_depth = @max(lifetime_depth, value.lifetime_depth);
+        if (is_stored) lifetime_depth = @max(lifetime_depth, value.lifetime_depth);
     }
     return self.newExpression(.{
         .type = .{ .structure = self.structureType(structure_index) },

@@ -35,7 +35,7 @@ func verify_captured_callbacks() {
         var equal = func(left:@int, right:@int) bool {
             return left == right
         }
-        var values = Set<int>.create(hash, equal, 128)
+        var values = Set<int>(hash, equal, 128)
         var index = 0
         while index < 128 {
             values.insert(index)
@@ -59,20 +59,20 @@ func main() {
     }
     assert(!flags.replace(1, true) && flags.take_last(), "bool list mutation")
 
-    var values = Set<int>.create(Hashing.hash_int, Hashing.equal_int, 2)
+    var values = Set<int>(2)
     assert(values.is_empty() && values.capacity() >= 2, "empty set")
     assert(values.insert(1), "first insertion")
     assert(!values.insert(1), "duplicate insertion")
     assert(values.contains(1) && !values.contains(2), "membership")
     assert(values.remove(1) && !values.remove(1), "boolean removal")
 
-    var representatives = Set<Token>.create(hash_token, equal_token)
+    var representatives = Set<Token>(hash_token, equal_token)
     assert(representatives.insert(Token(id:7, spelling:"first")), "new representative")
     assert(!representatives.insert(Token(id:7, spelling:"second")), "equal duplicate")
     let stored = required_token(representatives.take(Token(id:7, spelling:"query")))
     assert(stored.spelling == "first", "take returns first representative")
 
-    var collisions = Set<int>.create(collide, Hashing.equal_int)
+    var collisions = Set<int>(collide, Hashing.equal_int)
     var index = 0
     while index < 100 {
         assert(collisions.insert(index), "colliding insertion")
@@ -91,7 +91,7 @@ func main() {
     assert(left.contains(0) && !left.contains(100), "set copy stays independent")
     assert(!right.contains(0) && right.contains(100), "set copy diverges")
 
-    var strings = Set<str>.create(Hashing.hash_str, Hashing.equal_str)
+    var strings = Set<str>()
     strings.insert("é")
     strings.insert("hello")
     assert(strings.contains("é") && strings.contains("hello"), "standard string callbacks")

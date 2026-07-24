@@ -23,6 +23,6 @@ func main() {
     assert(box.doubled() == 42, "used class extension")
     assert(box.keep<int>(42) == 42, "used public generic class extension")
 
-    var randomizer = Randomizer.create(42)
+    var randomizer = Randomizer(42)
     assert(randomizer.get_uint() > 0, "extended STD.Randomizer")
 }

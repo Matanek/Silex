@@ -9,6 +9,7 @@ pub const TokenTag = enum {
     keyword_elif,
     keyword_else,
     keyword_while,
+    keyword_mutex,
     keyword_for,
     keyword_range,
     keyword_in,
@@ -484,6 +485,7 @@ fn keywordTag(lexeme: []const u8) ?TokenTag {
         .{ "elif", TokenTag.keyword_elif },
         .{ "else", TokenTag.keyword_else },
         .{ "while", TokenTag.keyword_while },
+        .{ "mutex", TokenTag.keyword_mutex },
         .{ "for", TokenTag.keyword_for },
         .{ "range", TokenTag.keyword_range },
         .{ "in", TokenTag.keyword_in },
@@ -644,6 +646,12 @@ test "recognize isolated keyword" {
     var lexer = Lexer.init("isolated func");
     try std.testing.expectEqual(TokenTag.keyword_isolated, (try lexer.next()).tag);
     try std.testing.expectEqual(TokenTag.keyword_func, (try lexer.next()).tag);
+}
+
+test "recognize mutex keyword" {
+    var lexer = Lexer.init("mutex {}");
+    try std.testing.expectEqual(TokenTag.keyword_mutex, (try lexer.next()).tag);
+    try std.testing.expectEqual(TokenTag.left_brace, (try lexer.next()).tag);
 }
 
 test "recognize read reference prefix and released borrow identifier" {

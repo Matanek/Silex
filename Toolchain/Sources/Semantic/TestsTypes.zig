@@ -253,7 +253,7 @@ test "extensions use only public members and do not participate in inheritance" 
         \\struct Value { func read() int { return 1 } }
         \\extend Value { public func read() int { return 2 } }
         \\func main() {}
-    , "extension method 'read' conflicts with an existing callable shape on type 'Value'");
+    , "extension method 'read()' conflicts with a signature exposed on type 'Value'");
 }
 
 test "extension conformances support dynamic values and multiple protocols" {

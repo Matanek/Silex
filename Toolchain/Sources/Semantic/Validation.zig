@@ -277,6 +277,11 @@ pub fn validateStatements(self: anytype, statements_value: []const Statement) An
                 try self.validateCondition(while_value.condition);
                 try self.validateStatements(while_value.body);
             },
+            .mutex_statement => |body| {
+                self.isolated_mutex_depth += 1;
+                defer self.isolated_mutex_depth -= 1;
+                try self.validateStatements(body);
+            },
             .for_statement => |for_value| {
                 switch (for_value.source) {
                     .collection => |collection| try self.validateExpression(collection),
@@ -331,10 +336,13 @@ pub fn validateExpression(self: anytype, expression_value: *const Expression) An
             for (call.arguments) |argument| try self.validateExpression(argument);
         },
         .lambda => |lambda| {
+            const previous_mutex_depth = self.isolated_mutex_depth;
+            self.isolated_mutex_depth = 0;
             if (lambda.isolated) self.isolated_validation_depth += 1;
-            defer if (lambda.isolated) {
-                self.isolated_validation_depth -= 1;
-            };
+            defer {
+                if (lambda.isolated) self.isolated_validation_depth -= 1;
+                self.isolated_mutex_depth = previous_mutex_depth;
+            }
             try self.validateStatements(lambda.statements);
         },
         .method_call => |call| {
@@ -487,9 +495,10 @@ pub fn validateIsolatedExpression(self: anytype, expression_value: *const Expres
                 if (!std.mem.eql(u8, structure.generated_name, access.owner_generated_name)) continue;
                 for (structure.static_fields) |field| {
                     if (!std.mem.eql(u8, field.generated_name, access.generated_name)) continue;
-                    if (field.mutability == .mutable) {
+                    if (field.mutability == .mutable and self.isolated_mutex_depth == 0) {
                         return self.fail(expression_value.position, "an 'isolated func' cannot access a 'static var'");
                     }
+                    if (field.mutability == .mutable) return;
                     var field_path: std.ArrayList([]const u8) = .empty;
                     defer field_path.deinit(self.allocator);
                     var visiting = std.StringHashMap(void).init(self.allocator);

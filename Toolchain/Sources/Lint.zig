@@ -141,7 +141,10 @@ const Analyzer = struct {
     }
 
     fn parameters(self: *Analyzer, values: []const Ast.Parameter) Allocator.Error!void {
-        for (values) |parameter| try self.valueName(parameter.name, parameter.position, "parameter");
+        for (values) |parameter| {
+            try self.valueName(parameter.name, parameter.position, "parameter");
+            if (parameter.default_value) |default_value| try self.expression(default_value);
+        }
     }
 
     fn statements(self: *Analyzer, values: []const Ast.Statement) Allocator.Error!void {
@@ -186,6 +189,7 @@ const Analyzer = struct {
                 try self.condition(while_value.condition);
                 try self.statements(while_value.body);
             },
+            .mutex_statement => |mutex_value| try self.statements(mutex_value.body),
             .for_statement => |for_value| {
                 try self.valueName(for_value.name, for_value.name_position, "binding");
                 switch (for_value.source) {
@@ -328,6 +332,7 @@ fn statementPosition(value: Ast.Statement) Source.Position {
         .assignment => |item| item.position,
         .if_statement => |item| item.position,
         .while_statement => |item| item.position,
+        .mutex_statement => |item| item.position,
         .for_statement => |item| item.position,
         .break_statement => |position| position,
         .continue_statement => |position| position,

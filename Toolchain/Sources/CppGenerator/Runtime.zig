@@ -27,6 +27,7 @@ pub fn appendRuntime(_: anytype, allocator: Allocator, output: *std.ArrayList(u8
         \\
         \\inline std::mutex silexDiagnosticMutex;
         \\inline std::recursive_mutex silexOutputMutex;
+        \\inline std::recursive_mutex silexCriticalSectionMutex;
         \\
         \\template <typename T> void printIntegerValue(T value) {
         \\    if constexpr (sizeof(T) == 1) {

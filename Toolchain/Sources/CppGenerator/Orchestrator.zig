@@ -271,6 +271,15 @@ pub fn generateWithSources(
             try output.appendSlice(allocator, ">{handle, std::move(state)}; }\n    void silexCancelDeferred() { silexNativeState->cancelDeferred(); }\n");
         }
         if (structure.is_owner) try output.appendSlice(allocator, "    bool silexOwnsResource = true;\n");
+        var has_zero_argument_constructor = false;
+        for (structure.constructors) |constructor| {
+            if (constructor.parameters.len == 0) has_zero_argument_constructor = true;
+        }
+        if (!structure.is_class and structure.constructors.len != 0 and !has_zero_argument_constructor) {
+            try output.appendSlice(allocator, "\n    ");
+            try output.appendSlice(allocator, structure.generated_name);
+            try output.appendSlice(allocator, "() = default;\n");
+        }
         if ((structure.is_class and structure.constructors.len == 0 and structure.implicit_constructor_available) or
             (structure.is_noncopyable and !structure.is_native_resource and structure.constructors.len == 0) or
             (is_native_return and !structure.is_class and structure.constructors.len == 0))

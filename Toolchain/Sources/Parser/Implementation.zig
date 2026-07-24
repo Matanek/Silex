@@ -204,7 +204,7 @@ pub const Parser = struct {
             const method_name_position = self.current.position;
             try self.advance();
             if (self.current.tag == .less) return self.fail("generic protocol methods are not supported");
-            const parameters = try self.parseParameters();
+            const parameters = try self.parseParameters(false);
             const return_type: Ast.ReturnType = if (self.current.tag == .semicolon or
                 self.current.tag == .right_brace or
                 self.current.position.line > self.previous.position.line) .void else try self.parseReturnType();
@@ -510,7 +510,7 @@ pub const Parser = struct {
                 if (is_static_class) return self.fail("a static class cannot declare a constructor");
                 const constructor_position = self.current.position;
                 try self.advance();
-                const parameters = try self.parseParameters();
+                const parameters = try self.parseParameters(true);
                 var super_arguments: ?[]const *Ast.Expression = null;
                 var super_position: ?Source.Position = null;
                 if (self.current.tag == .colon) {
@@ -595,7 +595,7 @@ pub const Parser = struct {
         if (type_parameters.len != 0 and std.mem.eql(u8, name, "main")) {
             return self.fail("'main' cannot be generic");
         }
-        const parameters = try self.parseParameters();
+        const parameters = try self.parseParameters(true);
         const return_type: Ast.ReturnType = if (self.current.tag == .left_brace)
             .void
         else
@@ -629,7 +629,7 @@ pub const Parser = struct {
         const name_position = self.current.position;
         try self.advance();
         const type_parameters = if (self.current.tag == .less) try self.parseTypeParameters("native function") else &.{};
-        const parameters = try self.parseParameters();
+        const parameters = try self.parseParameters(false);
         const return_type = try self.parseReturnType();
         try self.expectStatementTerminator();
         return .{
@@ -762,9 +762,10 @@ pub const Parser = struct {
         };
     }
 
-    pub fn parseParameters(self: *Parser) ParseError![]const Ast.Parameter {
+    pub fn parseParameters(self: *Parser, allow_defaults: bool) ParseError![]const Ast.Parameter {
         try self.expect(.left_parenthesis, "expected '('");
         var parameters: std.ArrayList(Ast.Parameter) = .empty;
+        var has_default = false;
         while (self.current.tag != .right_parenthesis) {
             if (self.current.tag != .identifier) return self.fail("expected parameter name");
             const name = self.current.lexeme;
@@ -776,11 +777,22 @@ pub const Parser = struct {
             const is_mutable_reference = self.current.tag == .amp;
             if (is_mutable_reference) try self.advance();
             if (is_read_reference and is_mutable_reference) return self.fail("a parameter cannot combine '@' and '&'");
+            const parameter_type = try self.parseTypeName();
+            const default_value = if (self.current.tag == .equal) default: {
+                if (!allow_defaults) return self.fail("default parameter values are not allowed here");
+                try self.advance();
+                has_default = true;
+                break :default try self.parseExpression(false);
+            } else null;
+            if (has_default and default_value == null) {
+                return self.failAt(position, "a required parameter cannot follow a parameter with a default value");
+            }
             try parameters.append(self.allocator, .{
                 .name = name,
                 .position = position,
-                .type = try self.parseTypeName(),
+                .type = parameter_type,
                 .mode = if (is_read_reference) .borrow else if (is_mutable_reference) .mutable_reference else .value,
+                .default_value = default_value,
             });
             if (self.current.tag != .comma) break;
             try self.advance();
@@ -810,6 +822,7 @@ pub const Parser = struct {
             .keyword_elif => self.fail("'elif' must directly continue an if chain"),
             .keyword_else => self.fail("'else' must directly continue an if chain with '{' or 'if'"),
             .keyword_while => self.parseWhile(),
+            .keyword_mutex => self.parseMutex(),
             .keyword_for => self.parseFor(),
             .keyword_break => self.parseLoopControl(.break_statement),
             .keyword_continue => self.parseLoopControl(.continue_statement),
@@ -1119,6 +1132,15 @@ pub const Parser = struct {
         const condition = try self.parseCondition();
         const body = try self.parseBlock();
         return .{ .while_statement = .{ .position = position, .condition = condition, .body = body } };
+    }
+
+    pub fn parseMutex(self: *Parser) ParseError!Ast.Statement {
+        const position = self.current.position;
+        try self.advance();
+        return .{ .mutex_statement = .{
+            .position = position,
+            .body = try self.parseBlock(),
+        } };
     }
 
     pub fn parseCondition(self: *Parser) ParseError!Ast.Statement.Condition {

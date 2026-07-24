@@ -8,10 +8,10 @@ Select its file namespace and principal class directly:
 ```sx
 use STD.Randomizer as Randomizer
 
-var random = Randomizer.create(42)
+var random = Randomizer(42)
 ```
 
-`create(seed)` builds an independent reproducible instance, while `create()`
+`Randomizer(seed)` builds an independent reproducible instance, while `Randomizer()`
 chooses its initial seed from the host.
 
 ```sx
@@ -42,7 +42,7 @@ instances created with the same seed and sequence of calls return the same
 sequence of values.
 
 The deterministic transition is implemented in Silex. Only the seed used by
-`create()` comes from the private native runtime configured by
+`Randomizer()` comes from the private native runtime configured by
 `STD/@Module.json`.
 
 ## Collections

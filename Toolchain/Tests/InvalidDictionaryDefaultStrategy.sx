@@ -1,0 +1,9 @@
+use STD.Collections.Dictionary
+
+struct Token {
+    let id:int
+}
+
+func main() {
+    var values = Dictionary<Token, int>()
+}

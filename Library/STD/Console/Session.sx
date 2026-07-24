@@ -46,8 +46,8 @@ public struct KeyEvent {
 public struct Session {
     let handle:int
 
-    static func create() Session {
-        return Session(handle:native_session_create())
+    public init() {
+        self.handle = native_session_create()
     }
 
     func read_key() KeyEvent {
@@ -68,7 +68,7 @@ public struct Session {
         if maximum_count <= 0 {
             panic("Console.Session.poll_keys requires a positive maximum count")
         }
-        var events = Queue<KeyEvent>.create(maximum_count)
+        var events = Queue<KeyEvent>(maximum_count)
         if first = self.poll_key(timeout_milliseconds) {
             events.enqueue(first)
         } else {
@@ -107,21 +107,51 @@ public struct Session {
 
 func event_from_native(native_event:NativeKeyEvent) KeyEvent {
     var key = Key.unknown(native_event.text)
-    if native_event.code == 1 { key = Key.character(native_event.text) }
-    elif native_event.code == 2 { key = Key.enter() }
-    elif native_event.code == 3 { key = Key.escape() }
-    elif native_event.code == 4 { key = Key.tab() }
-    elif native_event.code == 5 { key = Key.backspace() }
-    elif native_event.code == 6 { key = Key.delete() }
-    elif native_event.code == 7 { key = Key.arrow_up() }
-    elif native_event.code == 8 { key = Key.arrow_down() }
-    elif native_event.code == 9 { key = Key.arrow_left() }
-    elif native_event.code == 10 { key = Key.arrow_right() }
-    elif native_event.code == 11 { key = Key.home() }
-    elif native_event.code == 12 { key = Key.end() }
-    elif native_event.code == 13 { key = Key.page_up() }
-    elif native_event.code == 14 { key = Key.page_down() }
-    elif native_event.code == 15 { key = Key.function(native_event.number) }
+    if native_event.code == 1 {
+        key = Key.character(native_event.text)
+    }
+    elif native_event.code == 2 {
+        key = Key.enter()
+    }
+    elif native_event.code == 3 {
+        key = Key.escape()
+    }
+    elif native_event.code == 4 {
+        key = Key.tab()
+    }
+    elif native_event.code == 5 {
+        key = Key.backspace()
+    }
+    elif native_event.code == 6 {
+        key = Key.delete()
+    }
+    elif native_event.code == 7 {
+        key = Key.arrow_up()
+    }
+    elif native_event.code == 8 {
+        key = Key.arrow_down()
+    }
+    elif native_event.code == 9 {
+        key = Key.arrow_left()
+    }
+    elif native_event.code == 10 {
+        key = Key.arrow_right()
+    }
+    elif native_event.code == 11 {
+        key = Key.home()
+    }
+    elif native_event.code == 12 {
+        key = Key.end()
+    }
+    elif native_event.code == 13 {
+        key = Key.page_up()
+    }
+    elif native_event.code == 14 {
+        key = Key.page_down()
+    }
+    elif native_event.code == 15 {
+        key = Key.function(native_event.number)
+    }
     return KeyEvent(
         key:key,
         shift:native_event.shift,

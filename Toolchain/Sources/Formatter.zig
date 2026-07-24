@@ -709,6 +709,19 @@ test "internal declarations and members keep canonical spacing" {
     );
 }
 
+test "default parameters keep canonical spacing" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const result = try formatSource(
+        arena.allocator(),
+        "func greet(message : str=\"Hello\", count : int =1){print(message)}",
+    );
+    try std.testing.expectEqualStrings(
+        "func greet(message:str = \"Hello\", count:int = 1) {\n    print(message)\n}\n",
+        result.text,
+    );
+}
+
 test "control parentheses and else if use their canonical forms" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

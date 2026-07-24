@@ -1,0 +1,9 @@
+use STD.Collections.Set
+
+struct Token {
+    let id:int
+}
+
+func main() {
+    var values = Set<Token>()
+}

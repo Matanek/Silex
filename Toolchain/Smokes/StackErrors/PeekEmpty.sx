@@ -5,7 +5,7 @@ func equals(value:@int, expected:int) bool {
 }
 
 func main() {
-    var stack = Stack<int>.create()
+    var stack = Stack<int>()
     let value:@int = stack.peek()
     print(equals(value, 0))
 }

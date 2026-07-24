@@ -1,7 +1,0 @@
-use STD.Collections.Dictionary as Dictionary
-use STD.Collections.Hashing
-
-func main() {
-    var values = Dictionary<int, int>.create(Hashing.hash_int, Hashing.equal_int, -1)
-    print(values.count())
-}

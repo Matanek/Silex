@@ -1,6 +1,6 @@
 use STD
 
 func main() {
-    var random = STD.Randomizer.create(1)
+    var random = STD.Randomizer(1)
     print(random.get_float(1.0, 1.0000001))
 }

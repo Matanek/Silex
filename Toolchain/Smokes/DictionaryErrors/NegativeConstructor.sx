@@ -1,0 +1,6 @@
+use STD.Collections.Dictionary
+
+func main() {
+    var values = Dictionary<int, int>(-1)
+    print(values.count())
+}

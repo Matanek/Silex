@@ -143,6 +143,7 @@ pub fn collectReturnedDeferredResourcePaths(
             if (conditional.else_body) |body| try collectReturnedDeferredResourcePaths(allocator, body, summary);
         },
         .while_statement => |loop| try collectReturnedDeferredResourcePaths(allocator, loop.body, summary),
+        .mutex_statement => |body| try collectReturnedDeferredResourcePaths(allocator, body, summary),
         .for_statement => |loop| try collectReturnedDeferredResourcePaths(allocator, loop.body, summary),
         else => {},
     };
@@ -170,6 +171,7 @@ pub fn collectReturnedResourceDependencies(
             if (conditional.else_body) |body| try collectReturnedResourceDependencies(allocator, body, output);
         },
         .while_statement => |loop| try collectReturnedResourceDependencies(allocator, loop.body, output),
+        .mutex_statement => |body| try collectReturnedResourceDependencies(allocator, body, output),
         .for_statement => |loop| try collectReturnedResourceDependencies(allocator, loop.body, output),
         else => {},
     };
@@ -415,6 +417,7 @@ pub fn blockAlwaysReturns(statements: []const Statement) bool {
                     if (all_branches_return and blockAlwaysReturns(else_body)) return true;
                 }
             },
+            .mutex_statement => |body| if (blockAlwaysReturns(body)) return true,
             .expression_statement => |expression_value| if (expression_value.value == .match_expression) {
                 var all_branches_return = true;
                 for (expression_value.value.match_expression.branches) |branch| switch (branch.body) {
@@ -447,6 +450,7 @@ pub fn astStatementFallsThrough(statement_value: Ast.Statement) bool {
             }
             break :if_falls_through astStatementsFallThrough(else_body);
         },
+        .mutex_statement => |mutex_value| astStatementsFallThrough(mutex_value.body),
         .expression_statement => |expression_value| match_falls_through: {
             if (expression_value.value != .match_expression) break :match_falls_through true;
             for (expression_value.value.match_expression.branches) |branch| switch (branch.body) {
@@ -480,6 +484,7 @@ pub fn parameterStored(statements: []const Ast.Statement, name: []const u8) bool
             if (if_value.else_body) |else_body| if (parameterStored(else_body, name)) return true;
         },
         .while_statement => |while_value| if (parameterStored(while_value.body, name)) return true,
+        .mutex_statement => |mutex_value| if (parameterStored(mutex_value.body, name)) return true,
         .for_statement => |for_value| if (parameterStored(for_value.body, name)) return true,
         .expression_statement => |expression_value| {
             if (astCollectionCallStoresIdentifier(expression_value, name)) return true;
@@ -735,6 +740,29 @@ pub fn sameCallableShape(left_types: []const Type, right_types: []const Type) bo
         if (!typeEqual(left_type, right_type)) return false;
     }
     return true;
+}
+
+pub fn requiredParameterCount(defaults: []const ?*Ast.Expression) usize {
+    for (defaults, 0..) |default_value, index| {
+        if (default_value != null) return index;
+    }
+    return defaults.len;
+}
+
+pub fn effectiveCallableShapeCollision(
+    left_types: []const Type,
+    left_defaults: []const ?*Ast.Expression,
+    right_types: []const Type,
+    right_defaults: []const ?*Ast.Expression,
+) ?usize {
+    const first_arity = @max(requiredParameterCount(left_defaults), requiredParameterCount(right_defaults));
+    const last_arity = @min(left_types.len, right_types.len);
+    if (first_arity > last_arity) return null;
+    var arity = first_arity;
+    while (arity <= last_arity) : (arity += 1) {
+        if (sameCallableShape(left_types[0..arity], right_types[0..arity])) return arity;
+    }
+    return null;
 }
 
 pub fn containsPosition(positions: []const Source.Position, candidate: Source.Position) bool {

@@ -180,8 +180,9 @@ pub fn methodCallExpression(
         .immutable => |value| value.read_iteration or value.collection_shell,
         else => false,
     };
-    if ((object.type == .structure and object.type.structure.is_class and
-        (receiver == .temporary or shared_identity_receiver)) or
+    if ((receiver == .temporary and mutationReachesClassIdentity(object)) or
+        (object.type == .structure and object.type.structure.is_class and
+            (receiver == .temporary or shared_identity_receiver)) or
         (object.type == .protocol and switch (receiver) {
             .immutable => |value| value.read_iteration,
             else => false,
@@ -264,8 +265,11 @@ pub fn methodCallExpressionWithObject(
     var transient_borrows: std.ArrayList(Borrow) = .empty;
     defer for (transient_borrows.items) |borrow| releaseBorrow(borrow);
     const receiver_depth = expressionScopeDepth(call.object, scope);
-    for (call.arguments, method_symbol.parameter_types, method_symbol.parameter_modes, method_symbol.parameter_stored, 0..) |argument, expected_type, mode, is_stored, index| {
-        var value = try self.argumentForMode(argument, scope, expected_type, mode);
+    const default_scope = Scope{ .parent = null, .depth = 0 };
+    for (method_symbol.parameter_types, method_symbol.parameter_modes, method_symbol.parameter_stored, 0..) |expected_type, mode, is_stored, index| {
+        const explicit = index < call.arguments.len;
+        const argument = if (explicit) call.arguments[index] else method_symbol.parameter_defaults[index].?;
+        var value = try self.argumentForMode(argument, if (explicit) scope else &default_scope, expected_type, mode);
         value = try self.coerce(value, expected_type);
         if (!typeEqual(value.type, expected_type)) {
             const message = try std.fmt.allocPrint(self.allocator, "argument {d} of method '{s}' expects '{s}', found '{s}'", .{ index + 1, call.name, typeName(expected_type), typeName(value.type) });
@@ -363,6 +367,7 @@ pub fn protocolMethodCallExpression(
             scope,
             requirement.parameter_types,
             requirement.parameter_modes,
+            requirement.parameter_types.len,
         ) orelse continue;
         if (best == null or overloadBetter(scores, best_scores.?)) {
             best = index;
@@ -448,7 +453,10 @@ pub fn staticFieldAccessExpression(
         while (lambda_context) |lambda| : (lambda_context = lambda.parent) {
             if (!lambda.isolated) continue;
             if (field.mutability == .mutable) {
-                return self.fail(access.name_position, "an 'isolated func' cannot access a 'static var'");
+                if (self.mutex_depth == 0) {
+                    return self.fail(access.name_position, "an 'isolated func' cannot access a 'static var'");
+                }
+                break;
             }
             var field_path: std.ArrayList([]const u8) = .empty;
             defer field_path.deinit(self.allocator);
@@ -522,8 +530,11 @@ pub fn staticMethodCallExpression(
     var arguments: std.ArrayList(*Expression) = .empty;
     var transient_borrows: std.ArrayList(Borrow) = .empty;
     defer for (transient_borrows.items) |borrow| releaseBorrow(borrow);
-    for (call.arguments, method_symbol.parameter_types, method_symbol.parameter_modes, method_symbol.parameter_stored, 0..) |argument, expected_type, mode, is_stored, index| {
-        var value = try self.argumentForMode(argument, scope, expected_type, mode);
+    const default_scope = Scope{ .parent = null, .depth = 0 };
+    for (method_symbol.parameter_types, method_symbol.parameter_modes, method_symbol.parameter_stored, 0..) |expected_type, mode, is_stored, index| {
+        const explicit = index < call.arguments.len;
+        const argument = if (explicit) call.arguments[index] else method_symbol.parameter_defaults[index].?;
+        var value = try self.argumentForMode(argument, if (explicit) scope else &default_scope, expected_type, mode);
         value = try self.coerce(value, expected_type);
         if (!typeEqual(value.type, expected_type)) {
             const message = try std.fmt.allocPrint(self.allocator, "argument {d} of static method '{s}' expects '{s}', found '{s}'", .{ index + 1, call.name, typeName(expected_type), typeName(value.type) });
@@ -821,8 +832,11 @@ pub fn superMethodCallExpression(
     var arguments: std.ArrayList(*Expression) = .empty;
     var transient_borrows: std.ArrayList(Borrow) = .empty;
     defer for (transient_borrows.items) |borrow| releaseBorrow(borrow);
-    for (call.arguments, method_symbol.parameter_types, method_symbol.parameter_modes, method_symbol.parameter_stored, 0..) |argument, expected_type, mode, is_stored, index| {
-        var value = try self.argumentForMode(argument, scope, expected_type, mode);
+    const default_scope = Scope{ .parent = null, .depth = 0 };
+    for (method_symbol.parameter_types, method_symbol.parameter_modes, method_symbol.parameter_stored, 0..) |expected_type, mode, is_stored, index| {
+        const explicit = index < call.arguments.len;
+        const argument = if (explicit) call.arguments[index] else method_symbol.parameter_defaults[index].?;
+        var value = try self.argumentForMode(argument, if (explicit) scope else &default_scope, expected_type, mode);
         value = try self.coerce(value, expected_type);
         if (!typeEqual(value.type, expected_type)) {
             const message = try std.fmt.allocPrint(self.allocator, "argument {d} of method '{s}' expects '{s}', found '{s}'", .{ index + 1, call.name, typeName(expected_type), typeName(value.type) });

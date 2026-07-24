@@ -1,20 +1,22 @@
 # Dictionary
 
 `STD.Collections.Dictionary` provides an encapsulated hash table with value
-semantics. A dictionary is created with hashing and equality callbacks:
+semantics. Standard `bool`, `int`, `uint`, and `str` keys select the common
+hashing and equality overloads automatically:
 
 ```sx
-use STD.Collections.Dictionary as Dictionary
-use STD.Collections.Hashing
+use STD.Collections.Dictionary
 
-var ports = Dictionary<str, int>.create(Hashing.hash_str, Hashing.equal_str)
+var ports = Dictionary<str, int>()
 ports.insert("http", 80)
 ports.insert("https", 443)
+
+var reserved = Dictionary<int, str>(128)
 ```
 
 The file namespace publishes `Dictionary<Key, Value>` as its principal type
 and `STD.Collections.Dictionary.Entry<Key, Value>` as a child declaration, with
-`create`, `count`, `capacity`, `is_empty`, `contains_key`, `at`, `insert`,
+constructors, `count`, `capacity`, `is_empty`, `contains_key`, `at`, `insert`,
 `remove`, `take_entry`, `reserve`, and `clear`. Keys and values must
 be recursively copyable. Copying a dictionary copies its logical state; later
 mutations of either copy are independent. Stored function values keep their
@@ -37,6 +39,17 @@ equivalence relation, equal keys have equal hashes, and a key's hash remains
 stable while stored. Violating this contract can make an entry unreachable.
 It does not permit an out-of-bounds access or duplicate destruction.
 
+A key type without a standard overload supplies both callbacks explicitly.
+The callback-first capacity form remains available for a custom strategy:
+
+```sx
+var tokens = Dictionary<Token, int>(hash_token, equal_token)
+var reserved_tokens = Dictionary<Token, int>(hash_token, equal_token, 128)
+```
+
+The defaults are resolved only when omitted, so these explicit constructions
+do not require `Token` to implement any additional protocol.
+
 With reasonably distributed hashes, lookup, insertion, replacement, and
 removal are O(1) on average and O(n) in the worst case. Growth is amortized;
 `reserve(k)` ensures at least `k` entries fit before the next growth.
@@ -44,7 +57,7 @@ removal are O(1) on average and O(n) in the worst case. Growth is amortized;
 `iterator()` creates an O(n) owned snapshot of `Entry<Key, Value>` values.
 Iteration order is not defined.
 
-Negative capacities passed to `create` or `reserve` panic. The associated
-`STD.Collections.Hashing` namespace publishes deterministic `hash_*` and
-`equal_*` callbacks for `bool`, `int`, `uint`, and `str`. String hashing uses
-the UTF-8 bytes; equality is exactly `==`.
+Negative capacities passed to the constructor or `reserve` panic. The associated
+`STD.Collections.Hashing` publishes overloaded `hash` and `equal` callbacks,
+alongside the explicit `hash_*` and `equal_*` names, for `bool`, `int`, `uint`,
+and `str`. String hashing uses the UTF-8 bytes; equality is exactly `==`.

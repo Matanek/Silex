@@ -35,7 +35,7 @@ func main() {
     assert(Algorithms.map<int, str>(empty, label).is_empty(), "map empty")
     assert(Algorithms.filter<int>(empty, even).is_empty(), "filter empty")
 
-    var queue = Queue<int>.create()
+    var queue = Queue<int>()
     queue.enqueue(1)
     queue.enqueue(2)
     queue.enqueue(3)
@@ -68,7 +68,10 @@ func main() {
         transform_calls++
         return label(value)
     }
-    var mapped = Algorithms.map<int, str>(Algorithms.filter<int>(queue.iterator(), even), measured_label)
+    var mapped = Algorithms.map<int, str>(
+        Algorithms.filter<int>(queue.iterator(), even),
+        measured_label
+    )
     assert(transform_calls == 2, "map calls once per filtered value")
     assert(required_str(mapped.next()) == "two", "map changes type and preserves order")
     assert(required_str(mapped.next()) == "four" && mapped.next() == null, "map result length")

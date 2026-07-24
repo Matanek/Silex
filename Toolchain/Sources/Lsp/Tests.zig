@@ -76,6 +76,11 @@ fn containsCompletionDetail(items: []const CompletionItem, label: []const u8, de
     return false;
 }
 
+test "language completions include mutex critical sections" {
+    try std.testing.expectEqual(@as(usize, 1), completionCount(&language_completions, "mutex"));
+    try std.testing.expect(containsCompletionDetail(&language_completions, "mutex", "Silex keyword"));
+}
+
 test "syntax diagnostics use zero-based LSP positions" {
     const diagnostic = helpers.syntaxDiagnostic(std.testing.allocator, "func main() void {\n    let value =\n}").?;
     try std.testing.expectEqual(@as(usize, 2), diagnostic.range.start.line);
@@ -380,9 +385,9 @@ test "semantic tokens classify principal type and namespace aliases" {
         .type,
     );
 
-    const type_reference = std.mem.indexOf(u8, source, "Randomizer.create") orelse
+    const type_reference = std.mem.indexOf(u8, source, "Randomizer(1)") orelse
         return error.TestUnexpectedResult;
-    try helpers.expectSemanticTokenAt(source, tokens, type_reference, "Randomizer".len, .type);
+    try helpers.expectSemanticTokenAt(source, tokens, type_reference, "Randomizer".len, .function);
     const namespace_reference = std.mem.indexOf(u8, source, "Algorithms.choose") orelse
         return error.TestUnexpectedResult;
     try helpers.expectSemanticTokenAt(source, tokens, namespace_reference, "Algorithms".len, .namespace);
@@ -1052,9 +1057,7 @@ test "unqualified completion keeps type uses from the current invalid buffer" {
     const compact_type_position = helpers.encodedPositionAtByteOffset(incomplete_source, compact_type_cursor, .utf16).?;
     const compact_type_request = try testRequestParams(allocator, uri, compact_type_position, "");
     const compact_type_completions = try server.completion(compact_type_request);
-    try std.testing.expectEqual(@as(usize, 2), completionCount(compact_type_completions, "create"));
-    try std.testing.expect(containsCompletionDetail(compact_type_completions, "create", "static func create():Randomizer"));
-    try std.testing.expect(containsCompletionDetail(compact_type_completions, "create", "static func create(seed:int):Randomizer"));
+    try std.testing.expectEqual(@as(usize, 0), completionCount(compact_type_completions, "create"));
     try std.testing.expect(!helpers.containsCompletion(compact_type_completions, "get_int"));
     try std.testing.expect(!helpers.containsCompletion(compact_type_completions, "func"));
 
@@ -1098,7 +1101,7 @@ test "unqualified completion keeps type uses from the current invalid buffer" {
         \\struct MyTask:Task {
         \\    var result:float
         \\    func execute() {
-        \\        var r = Randomizer.create()
+        \\        var r = Randomizer()
         \\        self.result = r.
         \\    }
         \\}
@@ -1626,6 +1629,97 @@ test "member completion includes unspecialized generic structure methods" {
     } else return error.TestUnexpectedResult;
 }
 
+test "member completion follows static call results and chained generic fields" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var environ_map = std.process.Environ.Map.init(allocator);
+    var server = Server.init(allocator, std.testing.io, &environ_map);
+    var temporary = std.testing.tmpDir(.{ .iterate = true });
+    defer temporary.cleanup();
+
+    const declarations =
+        \\class Bucket<T> {
+        \\    public func enqueue(value:T) {}
+        \\    public func count() int { return 0 }
+        \\}
+        \\class Manager {
+        \\    static var shared:Manager?
+        \\    public var chunks:Bucket<int>
+        \\    private init() { self.chunks = Bucket<int>() }
+        \\    public static func instance() Manager {
+        \\        if var current = Manager.shared { return current }
+        \\        var created = Manager()
+        \\        Manager.shared = created
+        \\        return created
+        \\    }
+        \\}
+    ;
+    const valid_source = declarations ++
+        \\func main() {
+        \\    Manager.instance().chunks.enqueue(1)
+        \\}
+    ;
+    const incomplete_source = declarations ++
+        \\func main() {
+        \\    Manager.instance().
+        \\    Manager.instance().chunks.
+        \\}
+    ;
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = valid_source });
+    const relative_root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const main_path = try SourceGraph.canonicalPath(
+        allocator,
+        std.testing.io,
+        try std.fs.path.join(allocator, &.{ relative_root, "Main.sx" }),
+    );
+    const uri = try helpers.uriFromPath(allocator, main_path);
+    const snapshot = switch (try Frontend.analyze(
+        allocator,
+        std.testing.io,
+        &environ_map,
+        main_path,
+        .editor,
+        &.{},
+    )) {
+        .success => |value| value,
+        .failure => return error.TestUnexpectedResult,
+    };
+    try server.workspace_roots.append(allocator, try SourceGraph.canonicalPath(allocator, std.testing.io, relative_root));
+    try server.setDocument(uri, incomplete_source, 2);
+    try server.projects.append(allocator, .{
+        .input_path = main_path,
+        .last_success = snapshot,
+        .last_versions = try allocator.dupe(VersionStamp, &.{.{ .path = main_path, .version = 1 }}),
+    });
+
+    const instance_cursor = (std.mem.indexOf(u8, incomplete_source, "Manager.instance().") orelse
+        return error.TestUnexpectedResult) + "Manager.instance().".len;
+    const instance_request = try testRequestParams(
+        allocator,
+        uri,
+        helpers.encodedPositionAtByteOffset(incomplete_source, instance_cursor, .utf16).?,
+        "",
+    );
+    const instance_items = try server.completion(instance_request);
+    try std.testing.expect(helpers.containsCompletion(instance_items, "chunks"));
+    try std.testing.expect(!helpers.containsCompletion(instance_items, "instance"));
+    try std.testing.expect(!helpers.containsCompletion(instance_items, "func"));
+
+    const field_cursor = (std.mem.indexOf(u8, incomplete_source, "Manager.instance().chunks.") orelse
+        return error.TestUnexpectedResult) + "Manager.instance().chunks.".len;
+    const field_request = try testRequestParams(
+        allocator,
+        uri,
+        helpers.encodedPositionAtByteOffset(incomplete_source, field_cursor, .utf16).?,
+        "",
+    );
+    const field_items = try server.completion(field_request);
+    try std.testing.expect(helpers.containsCompletion(field_items, "enqueue"));
+    try std.testing.expect(helpers.containsCompletion(field_items, "count"));
+    try std.testing.expect(!helpers.containsCompletion(field_items, "func"));
+}
+
 test "completion recovers lambda parameters and their members from the current buffer" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -1959,7 +2053,7 @@ test "struct constructor completion closes fields and exposes overload signature
         \\public struct Point {
         \\    private let x:int
         \\    private let y:int
-        \\    init(value:int) { self.x = value; self.y = value }
+        \\    init(value:int, label:str = "point") { self.x = value; self.y = value }
         \\    public init(x:int, y:int) { self.x = x; self.y = y }
         \\}
         \\func main() { let point = Point(1, 2); assert(point == point, "point") }
@@ -2006,7 +2100,7 @@ test "struct constructor completion closes fields and exposes overload signature
     const signature_request = try testRequestParams(allocator, uri, signature_position, "");
     const signatures = try server.signatureHelp(signature_request);
     try std.testing.expectEqual(@as(usize, 2), signatures.signatures.len);
-    try std.testing.expectEqualStrings("init Point(value:int)", signatures.signatures[0].label);
+    try std.testing.expectEqualStrings("init Point(value:int, label:str = \"point\")", signatures.signatures[0].label);
     try std.testing.expectEqualStrings("init Point(x:int, y:int)", signatures.signatures[1].label);
 }
 

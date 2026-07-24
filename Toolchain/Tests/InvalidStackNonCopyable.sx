@@ -6,6 +6,6 @@ struct Resource {
 }
 
 func main() {
-    var stack = Stack<Resource>.create()
+    var stack = Stack<Resource>()
     stack.push(Resource(handle:1))
 }

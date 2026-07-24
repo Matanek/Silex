@@ -54,33 +54,42 @@ func main() {
         calls++
         return value % 2 == 0
     }
-    assert(Algorithms.count_where<int>(iterator, counted) == 2 && calls == 4, "count full traversal")
+    assert(
+        Algorithms.count_where<int>(iterator, counted) == 2 && calls == 4,
+        "count full traversal"
+    )
 
     calls = 0
     var equals_four = func(value:@int) bool {
         calls++
         return value == 4
     }
-    assert(required(Algorithms.find<int>(iterator, equals_four)) == 4 && calls == 3, "find first ordered match")
+    assert(
+        required(Algorithms.find<int>(iterator, equals_four)) == 4 && calls == 3,
+        "find first ordered match"
+    )
 
     calls = 0
     var measured_equal = func(left:@int, right:@int) bool {
         calls++
         return left == right
     }
-    assert(Algorithms.contains<int>(iterator, 5, measured_equal) && calls == 4, "contains ordered equality")
+    assert(
+        Algorithms.contains<int>(iterator, 5, measured_equal) && calls == 4,
+        "contains ordered equality"
+    )
 
-    var queue = Queue<int>.create()
+    var queue = Queue<int>()
     queue.enqueue(2)
     queue.enqueue(3)
     assert(Algorithms.any<int>(queue.iterator(), is_even), "search queue snapshot")
 
-    var stack = Stack<int>.create()
+    var stack = Stack<int>()
     stack.push(8)
     stack.push(11)
     assert(!Algorithms.all<int>(stack.iterator(), less_than_ten), "quantify stack snapshot")
 
-    var dictionary = Dictionary<int, int>.create(Hashing.hash_int, Hashing.equal_int)
+    var dictionary = Dictionary<int, int>(Hashing.hash_int, Hashing.equal_int)
     dictionary.insert(1, 10)
     dictionary.insert(2, 20)
     var entries = dictionary.iterator()
@@ -89,6 +98,10 @@ func main() {
         entry_calls++
         return entry.value == 20
     }
-    assert(Algorithms.any<Dictionary.Entry<int, int>>(entries, value_twenty), "search dictionary entries")
+    assert(
+        Algorithms.any<Dictionary.Entry<int,
+        int>>(entries, value_twenty),
+        "search dictionary entries"
+    )
     assert(entry_calls <= 2, "dictionary search short circuits")
 }

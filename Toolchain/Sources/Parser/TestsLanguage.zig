@@ -1,6 +1,70 @@
 const std = @import("std");
 const Ast = @import("../Ast.zig");
 const Parser = @import("Implementation.zig").Parser;
+
+test "parse trailing default parameter values" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(),
+        \\struct Greeting {
+        \\    init(message:str = "Hello") {}
+        \\    func repeat(count:int = 2) {}
+        \\}
+        \\func greet(message:str = "Hello", count:int = 1) {}
+        \\func main() {}
+    );
+    const program = try parser.parse();
+
+    try std.testing.expectEqualStrings("Hello", program.structures[0].constructors[0].parameters[0].default_value.?.value.string);
+    try std.testing.expectEqualStrings("2", program.structures[0].methods[0].parameters[0].default_value.?.value.integer);
+    try std.testing.expectEqualStrings("Hello", program.functions[0].parameters[0].default_value.?.value.string);
+    try std.testing.expectEqualStrings("1", program.functions[0].parameters[1].default_value.?.value.integer);
+}
+
+test "reject required parameters after a default value" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(), "func invalid(first:int = 1, second:int) {} func main() {}");
+
+    try std.testing.expectError(error.InvalidSource, parser.parse());
+    try std.testing.expectEqualStrings(
+        "a required parameter cannot follow a parameter with a default value",
+        parser.diagnostic.?.message,
+    );
+}
+
+test "reject default values outside ordinary callable declarations" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const sources = [_][]const u8{
+        "protocol Invalid { func call(value:int = 1) } func main() {}",
+        "native func invalid(value:int = 1) void; func main() {}",
+        "func main() { let callback = func(value:int = 1) {} }",
+    };
+    for (sources) |source| {
+        var parser = Parser.init(arena.allocator(), source);
+        try std.testing.expectError(error.InvalidSource, parser.parse());
+        try std.testing.expectEqualStrings("default parameter values are not allowed here", parser.diagnostic.?.message);
+    }
+}
+
+test "parse mutex critical sections" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(),
+        \\func main() {
+        \\    mutex {
+        \\        print("protected")
+        \\    }
+        \\}
+    );
+    const program = try parser.parse();
+    const mutex_statement = program.functions[0].statements[0].mutex_statement;
+
+    try std.testing.expectEqual(@as(usize, 1), mutex_statement.body.len);
+    try std.testing.expect(mutex_statement.body[0] == .print);
+}
+
 test "control flow parentheses do not change the compiler AST" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

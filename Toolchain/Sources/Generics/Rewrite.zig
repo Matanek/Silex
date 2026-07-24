@@ -68,6 +68,7 @@ pub fn rewriteStructure(
         for (constructor.parameters) |parameter| {
             var copy = parameter;
             copy.type = try self.rewriteType(parameter.type, bindings, parameter.position);
+            if (parameter.default_value) |default_value| copy.default_value = try self.rewriteExpression(default_value, bindings);
             try parameters.append(self.allocator, copy);
         }
         try constructors.append(self.allocator, .{
@@ -124,6 +125,7 @@ pub fn rewriteFunction(
     for (function.parameters) |parameter| {
         var copy = parameter;
         copy.type = try self.rewriteType(parameter.type, bindings, parameter.position);
+        if (parameter.default_value) |default_value| copy.default_value = try self.rewriteExpression(default_value, bindings);
         try parameters.append(self.allocator, copy);
         try self.addInferredLocal(parameter.name, copy.type);
     }
@@ -467,6 +469,10 @@ pub fn rewriteStatement(
             .condition = try self.rewriteCondition(value.condition, bindings),
             .body = try self.rewriteStatements(value.body, bindings),
         } },
+        .mutex_statement => |value| .{ .mutex_statement = .{
+            .position = value.position,
+            .body = try self.rewriteStatements(value.body, bindings),
+        } },
         .for_statement => |value| .{ .for_statement = .{
             .position = value.position,
             .name = value.name,
@@ -549,6 +555,7 @@ pub fn rewriteExpression(
             for (lambda.parameters) |parameter| {
                 var copy = parameter;
                 copy.type = try self.rewriteType(parameter.type, bindings, parameter.position);
+                if (parameter.default_value) |default_value| copy.default_value = try self.rewriteExpression(default_value, bindings);
                 try parameters.append(self.allocator, copy);
             }
             break :lambda_expression .{ .lambda = .{

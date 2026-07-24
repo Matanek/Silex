@@ -1,6 +1,6 @@
 use STD.Console as Console
 
 func main() {
-    var session = Console.Session.create()
+    var session = Console.Session()
     print(session.is_open())
 }

@@ -1,6 +1,6 @@
 use STD.Collections.Stack as Stack
 
 func main() {
-    var stack = Stack<int>.create(-1)
+    var stack = Stack<int>(-1)
     print(stack.count())
 }

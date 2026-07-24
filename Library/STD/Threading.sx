@@ -44,12 +44,14 @@ public static class TaskManager {
     static var shared:TaskPool?
 
     static func pool() TaskPool {
-        if var current = TaskManager.shared {
-            return current
+        mutex {
+            if var current = TaskManager.shared {
+                return current
+            }
+            var created = TaskPool()
+            TaskManager.shared = created
+            return created
         }
-        var created = TaskPool()
-        TaskManager.shared = created
-        return created
     }
 
     public static func submit<T:Task>(task:T) TaskHandle<T> {
@@ -57,13 +59,13 @@ public static class TaskManager {
         let checked:T = task
         return TaskHandle<T>(
             native_submit_result<T>(
-                pool.native,
-                isolated func() T {
-                    var running:T = checked
-                    running.execute()
-                    return move running
-                }
-            )
+            pool.native,
+            isolated func() T {
+                var running:T = checked
+                running.execute()
+                return move running
+            }
+        )
         )
     }
 
@@ -73,13 +75,13 @@ public static class TaskManager {
         let completed:isolated func(T) = callback
         return TaskWaitHandle(
             native_submit(
-                pool.native,
-                isolated func() {
-                    var running:T = checked
-                    running.execute()
-                    completed(move running)
-                }
-            )
+            pool.native,
+            isolated func() {
+                var running:T = checked
+                running.execute()
+                completed(move running)
+            }
+        )
         )
     }
 }

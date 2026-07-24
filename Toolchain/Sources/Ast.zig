@@ -373,6 +373,7 @@ pub const Statement = union(enum) {
     assignment: Assignment,
     if_statement: If,
     while_statement: While,
+    mutex_statement: Mutex,
     for_statement: For,
     break_statement: Source.Position,
     continue_statement: Source.Position,
@@ -427,6 +428,11 @@ pub const Statement = union(enum) {
     pub const While = struct {
         position: Source.Position,
         condition: Condition,
+        body: []const Statement,
+    };
+
+    pub const Mutex = struct {
+        position: Source.Position,
         body: []const Statement,
     };
 
@@ -602,6 +608,7 @@ pub const Parameter = struct {
     position: Source.Position,
     type: TypeName,
     mode: ParameterMode = .value,
+    default_value: ?*Expression = null,
 };
 
 pub const Function = struct {
