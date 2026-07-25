@@ -27,12 +27,12 @@ pub const Frontend = struct {
             self.diagnostic = parser.diagnostic;
             return err;
         };
-        var analyzer: Semantic.Analyzer = .{};
-        analyzer.validate(ast) catch |err| {
+        var analyzer = Semantic.Analyzer.init(self.allocator);
+        const ir = analyzer.analyze(ast) catch |err| {
             self.diagnostic = analyzer.diagnostic;
             return err;
         };
-        return .{ .ast = ast, .ir = try Ir.lower(self.allocator, ast) };
+        return .{ .ast = ast, .ir = ir };
     }
 };
 
@@ -43,4 +43,13 @@ test "compile the first Silex program through typed IR" {
     const compilation = try frontend.compile("func main() {}");
     try std.testing.expectEqual(@as(usize, 1), compilation.ast.functions.len);
     try std.testing.expectEqual(@as(usize, 1), compilation.ir.functions.len);
+}
+
+test "compile parsed statements to typed IR" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var frontend = Frontend.init(arena.allocator());
+    const compilation = try frontend.compile("func answer() int { return 40 + 2 } func main() { answer() }");
+    try std.testing.expectEqual(@as(usize, 2), compilation.ir.functions.len);
+    try std.testing.expectEqual(@as(Ir.FunctionId, 0), compilation.ir.functions[1].instructions[0].call.function);
 }
