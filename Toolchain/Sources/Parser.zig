@@ -2,6 +2,7 @@ const std = @import("std");
 const Ast = @import("Ast.zig");
 const LexerModule = @import("Lexer.zig");
 const Source = @import("Source.zig");
+const Strings = @import("Strings.zig");
 
 const Allocator = std.mem.Allocator;
 const Token = LexerModule.Token;
@@ -149,9 +150,39 @@ pub const Parser = struct {
         return switch (self.current.tag) {
             .keyword_let => self.parseVariableDeclaration(),
             .keyword_return => self.parseReturn(),
+            .keyword_print => self.parseEffectStatement(.print),
+            .keyword_assert => self.parseAssert(),
+            .keyword_panic => self.parseEffectStatement(.panic),
             .identifier => self.parseCallStatement(),
             else => self.fail("expected statement"),
         };
+    }
+
+    const Effect = enum { print, panic };
+
+    fn parseEffectStatement(self: *Parser, effect: Effect) ParseError!Ast.Statement {
+        const position = self.current.position;
+        try self.advance();
+        try self.expect(.left_parenthesis, "expected '(' after effect name");
+        const value = try self.parseExpression(true);
+        try self.expect(.right_parenthesis, "expected ')' after effect value");
+        try self.expectStatementTerminator();
+        return switch (effect) {
+            .print => .{ .print_statement = .{ .position = position, .value = value } },
+            .panic => .{ .panic_statement = .{ .position = position, .value = value } },
+        };
+    }
+
+    fn parseAssert(self: *Parser) ParseError!Ast.Statement {
+        const position = self.current.position;
+        try self.advance();
+        try self.expect(.left_parenthesis, "expected '(' after 'assert'");
+        const condition = try self.parseExpression(true);
+        try self.expect(.comma, "expected ',' after assert condition");
+        const message = try self.parseExpression(true);
+        try self.expect(.right_parenthesis, "expected ')' after assert message");
+        try self.expectStatementTerminator();
+        return .{ .assert_statement = .{ .position = position, .condition = condition, .message = message } };
     }
 
     fn parseVariableDeclaration(self: *Parser) ParseError!Ast.Statement {
@@ -209,7 +240,32 @@ pub const Parser = struct {
     }
 
     fn parseExpression(self: *Parser, allow_line_breaks: bool) ParseError!*Ast.Expression {
-        return self.parseAdditive(allow_line_breaks);
+        return self.parseEquality(allow_line_breaks);
+    }
+
+    fn parseEquality(self: *Parser, allow_line_breaks: bool) ParseError!*Ast.Expression {
+        var expression = try self.parseComparison(allow_line_breaks);
+        while ((self.current.tag == .equal_equal or self.current.tag == .bang_equal) and
+            self.canContinueExpression(allow_line_breaks))
+        {
+            const operator = self.current;
+            try self.advance();
+            expression = try self.newBinary(expression, try self.parseComparison(allow_line_breaks), operator);
+        }
+        return expression;
+    }
+
+    fn parseComparison(self: *Parser, allow_line_breaks: bool) ParseError!*Ast.Expression {
+        var expression = try self.parseAdditive(allow_line_breaks);
+        while ((self.current.tag == .less or self.current.tag == .less_equal or
+            self.current.tag == .greater or self.current.tag == .greater_equal) and
+            self.canContinueExpression(allow_line_breaks))
+        {
+            const operator = self.current;
+            try self.advance();
+            expression = try self.newBinary(expression, try self.parseAdditive(allow_line_breaks), operator);
+        }
+        return expression;
     }
 
     fn parseAdditive(self: *Parser, allow_line_breaks: bool) ParseError!*Ast.Expression {
@@ -262,6 +318,13 @@ pub const Parser = struct {
                 return self.newExpression(.{
                     .position = token.position,
                     .value = .{ .boolean = token.tag == .keyword_true },
+                });
+            },
+            .string => {
+                try self.advance();
+                return self.newExpression(.{
+                    .position = token.position,
+                    .value = .{ .string = try Strings.decode(self.allocator, token.lexeme) },
                 });
             },
             .identifier => {
@@ -324,6 +387,12 @@ pub const Parser = struct {
             .star => .multiply,
             .slash => .divide,
             .percent => .remainder,
+            .less => .less,
+            .less_equal => .less_equal,
+            .greater => .greater,
+            .greater_equal => .greater_equal,
+            .equal_equal => .equal,
+            .bang_equal => .not_equal,
             else => unreachable,
         };
         return self.newExpression(.{
@@ -460,6 +529,27 @@ test "parse booleans nested calls and call statements" {
     try std.testing.expect(!call.arguments[1].value.boolean);
 }
 
+test "parse strings comparisons and observable statements" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(),
+        \\func main() {
+        \\    print("é\n")
+        \\    assert(1 + 2 * 3 < 8 == true, "valid")
+        \\    panic("stop")
+        \\}
+    );
+    const program = try parser.parse();
+    const statements = program.functions[0].statements;
+    try std.testing.expectEqualSlices(u8, "é\n", statements[0].print_statement.value.value.string);
+    const equality = statements[1].assert_statement.condition.value.binary;
+    try std.testing.expectEqual(Ast.BinaryOperator.equal, equality.operator);
+    try std.testing.expectEqual(Ast.BinaryOperator.less, equality.left.value.binary.operator);
+    try std.testing.expectEqual(Ast.BinaryOperator.add, equality.left.value.binary.left.value.binary.operator);
+    try std.testing.expectEqual(Ast.BinaryOperator.multiply, equality.left.value.binary.left.value.binary.right.value.binary.operator);
+    try std.testing.expectEqualSlices(u8, "stop", statements[2].panic_statement.value.value.string);
+}
+
 test "parse module uses aliases and qualified calls" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -531,4 +621,8 @@ test "report malformed fundamental statements and expressions" {
     try expectParseError("func main() { call(1 2) }", "expected ',' or ')' after argument");
     try expectParseError("func main() { return 1 return }", "expected ';' or line break");
     try expectParseError("func main() { let first = 1 let second = 2 }", "expected ';' or line break");
+    try expectParseError("func main() { print() }", "expected expression");
+    try expectParseError("func main() { assert(true) }", "expected ',' after assert condition");
+    try expectParseError("func main() { assert(true, \"message\" }", "expected ')' after assert message");
+    try expectParseError("func main() { panic(\"message\", \"extra\") }", "expected ')' after effect value");
 }

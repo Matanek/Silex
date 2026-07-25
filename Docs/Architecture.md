@@ -46,7 +46,14 @@ typed Silex IR
   and knows nothing about manifests, package paths, or source visibility.
 - The reference interpreter checks integer arithmetic and is the semantic
   oracle for native backends. Differential tests compare its results and
-  runtime-error categories with execution of the generated ARM64 instructions.
+  exact observable output, exit status, and runtime diagnostics with generated
+  ARM64 executables.
+- `print`, `assert`, and `panic` lower as typed effects. Output channels,
+  platform descriptors, source-location formatting, and the macOS execution
+  boundary remain privileged compiler details and never enter the source API.
+- Native strings use an internal identity over immutable length-delimited byte
+  sequences. They can cross Silex calls without adopting a C ABI, a terminating
+  zero, or a linker-visible symbol.
 - `main` is the only source name with entry-point semantics. Other function
   names are chosen freely by the user.
 - The initial backend targets only `macos-arm64`. It uses an internal
@@ -60,12 +67,13 @@ typed Silex IR
 
 ## Current limits
 
-- Executable values are limited to `int`, `bool`, and `void`.
+- Executable values are limited to `int`, `bool`, `str`, and `void`.
 - Function bodies are linear: no conditions, loops, mutable variables or
   assignment yet.
-- `float`/`float32` and `str` remain available in parsed signatures, but their
-  values and operations are not executable yet.
-- No allocation, heap-managed value, system API, or general runtime yet.
+- `float`/`float32` remains available in parsed signatures, but its values are
+  not executable yet. Strings have no concatenation, equality, indexing, count,
+  or allocation model yet.
+- No allocation, heap-managed value, public system API, or general runtime yet.
 - The native backend has no symbols, debugging information, dynamic imports,
   library model, or ABI stability guarantee yet.
 - Native executable emission and native tests currently require an Apple

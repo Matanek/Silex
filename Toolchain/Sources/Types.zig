@@ -17,8 +17,8 @@ pub const Type = enum {
 
     pub fn hasRuntimeValue(self: Type) bool {
         return switch (self) {
-            .int, .bool => true,
-            .void, .float32, .str => false,
+            .int, .bool, .str => true,
+            .void, .float32 => false,
         };
     }
 };

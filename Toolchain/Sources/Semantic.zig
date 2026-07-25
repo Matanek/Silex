@@ -103,7 +103,7 @@ pub const Analyzer = struct {
         const ends_with_return = if (function.statements.len == 0)
             false
         else switch (function.statements[function.statements.len - 1]) {
-            .return_statement => true,
+            .return_statement, .panic_statement => true,
             else => false,
         };
         if (function.return_type == .void) {
@@ -136,6 +136,9 @@ pub const Analyzer = struct {
                 },
                 else => unreachable,
             },
+            .print_statement => |print_statement| try self.analyzePrint(builder, print_statement),
+            .assert_statement => |assert_statement| try self.analyzeAssert(builder, assert_statement),
+            .panic_statement => |panic_statement| try self.analyzePanic(builder, panic_statement),
         }
     }
 
@@ -152,6 +155,7 @@ pub const Analyzer = struct {
             break :intrinsic switch (annotation) {
                 .int => try self.emitInt(builder, 0),
                 .bool => try self.emitBool(builder, false),
+                .str => try self.emitString(builder, ""),
                 else => {
                     const message = try std.fmt.allocPrint(
                         self.allocator,
@@ -209,6 +213,7 @@ pub const Analyzer = struct {
         return switch (expression.value) {
             .integer => |lexeme| self.emitInt(builder, try self.parseInteger(lexeme, expression.position, false)),
             .boolean => |value| self.emitBool(builder, value),
+            .string => |value| self.emitString(builder, value),
             .identifier => |name| self.analyzeIdentifier(builder, expression.position, name),
             .call => |call| (try self.analyzeCall(builder, call)) orelse {
                 const message = try std.fmt.allocPrint(self.allocator, "function '{s}' returns 'void' and cannot be used as a value", .{call.name});
@@ -266,15 +271,30 @@ pub const Analyzer = struct {
     fn analyzeBinary(self: *Analyzer, builder: *FunctionBuilder, binary: Ast.Expression.Binary) AnalyzeError!TypedValue {
         const left = try self.analyzeExpression(builder, binary.left);
         const right = try self.analyzeExpression(builder, binary.right);
-        if (left.type != .int or right.type != .int) {
-            const message = try std.fmt.allocPrint(
-                self.allocator,
-                "operator '{s}' expects 'int' operands, found '{s}' and '{s}'",
-                .{ binaryOperatorText(binary.operator), left.type.name(), right.type.name() },
-            );
+        const equality = binary.operator == .equal or binary.operator == .not_equal;
+        const ordering = binary.operator == .less or binary.operator == .less_equal or
+            binary.operator == .greater or binary.operator == .greater_equal;
+        const valid = if (equality)
+            left.type == right.type and (left.type == .int or left.type == .bool)
+        else
+            left.type == .int and right.type == .int;
+        if (!valid) {
+            const message = if (!equality)
+                try std.fmt.allocPrint(
+                    self.allocator,
+                    "operator '{s}' expects 'int' operands, found '{s}' and '{s}'",
+                    .{ binaryOperatorText(binary.operator), left.type.name(), right.type.name() },
+                )
+            else
+                try std.fmt.allocPrint(
+                    self.allocator,
+                    "operator '{s}' does not accept '{s}' and '{s}'",
+                    .{ binaryOperatorText(binary.operator), left.type.name(), right.type.name() },
+                );
             return self.fail(binary.operator_position, message);
         }
-        const result = try self.newValue(builder, .int);
+        const result_type: Types.Type = if (equality or ordering) .bool else .int;
+        const result = try self.newValue(builder, result_type);
         try builder.instructions.append(self.allocator, .{ .binary = .{
             .result = result,
             .operator = switch (binary.operator) {
@@ -283,11 +303,17 @@ pub const Analyzer = struct {
                 .multiply => .multiply,
                 .divide => .divide,
                 .remainder => .remainder,
+                .less => .less,
+                .less_equal => .less_equal,
+                .greater => .greater,
+                .greater_equal => .greater_equal,
+                .equal => .equal,
+                .not_equal => .not_equal,
             },
             .left = left.value,
             .right = right.value,
         } });
-        return .{ .type = .int, .value = result };
+        return .{ .type = result_type, .value = result };
     }
 
     fn analyzeCall(self: *Analyzer, builder: *FunctionBuilder, call: Ast.Expression.Call) AnalyzeError!?TypedValue {
@@ -411,6 +437,41 @@ pub const Analyzer = struct {
         return .{ .type = .bool, .value = result };
     }
 
+    fn emitString(self: *Analyzer, builder: *FunctionBuilder, value: []const u8) AnalyzeError!TypedValue {
+        const result = try self.newValue(builder, .str);
+        try builder.instructions.append(self.allocator, .{ .constant_str = .{ .result = result, .value = value } });
+        return .{ .type = .str, .value = result };
+    }
+
+    fn analyzePrint(self: *Analyzer, builder: *FunctionBuilder, statement: Ast.EffectStatement) AnalyzeError!void {
+        const value = try self.analyzeExpression(builder, statement.value);
+        if (value.type != .str and value.type != .int and value.type != .bool) {
+            return self.fail(statement.value.position, "print expects 'str', 'int', or 'bool'");
+        }
+        try builder.instructions.append(self.allocator, .{ .print = value.value });
+    }
+
+    fn analyzeAssert(self: *Analyzer, builder: *FunctionBuilder, statement: Ast.AssertStatement) AnalyzeError!void {
+        const condition = try self.analyzeExpression(builder, statement.condition);
+        const message = try self.analyzeExpression(builder, statement.message);
+        if (condition.type != .bool) return self.fail(statement.condition.position, "assert condition expects 'bool'");
+        if (message.type != .str) return self.fail(statement.message.position, "assert message expects 'str'");
+        try builder.instructions.append(self.allocator, .{ .assert = .{
+            .condition = condition.value,
+            .message = message.value,
+            .position = statement.position,
+        } });
+    }
+
+    fn analyzePanic(self: *Analyzer, builder: *FunctionBuilder, statement: Ast.EffectStatement) AnalyzeError!void {
+        const message = try self.analyzeExpression(builder, statement.value);
+        if (message.type != .str) return self.fail(statement.value.position, "panic message expects 'str'");
+        try builder.instructions.append(self.allocator, .{ .panic = .{
+            .message = message.value,
+            .position = statement.position,
+        } });
+    }
+
     fn newValue(self: *Analyzer, builder: *FunctionBuilder, type_value: Types.Type) Allocator.Error!Ir.ValueId {
         const result = builder.value_types.items.len;
         try builder.value_types.append(self.allocator, type_value);
@@ -487,6 +548,12 @@ fn binaryOperatorText(operator: Ast.BinaryOperator) []const u8 {
         .multiply => "*",
         .divide => "/",
         .remainder => "%",
+        .less => "<",
+        .less_equal => "<=",
+        .greater => ">",
+        .greater_equal => ">=",
+        .equal => "==",
+        .not_equal => "!=",
     };
 }
 
@@ -594,6 +661,39 @@ test "accept the minimum signed integer" {
     try std.testing.expectEqual(std.math.minInt(i64), program.functions[0].instructions[0].constant_int.value);
 }
 
+test "lower strings comparisons and effects to deterministic IR" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var parser = @import("Parser.zig").Parser.init(allocator,
+        \\func main() {
+        \\    let empty:str
+        \\    print("A\0B")
+        \\    assert(2 * 3 >= 6, "math")
+        \\    panic(empty)
+        \\}
+    );
+    var analyzer = Analyzer.init(allocator);
+    const text = try Ir.writeText(allocator, try analyzer.analyze(try parser.parse()));
+    try std.testing.expectEqualStrings(
+        \\func @main() -> void {
+        \\entry:
+        \\    %0:str = const ""
+        \\    %1:str = const "A\0B"
+        \\    print %1
+        \\    %2:int = const 2
+        \\    %3:int = const 3
+        \\    %4:int = mul %2, %3
+        \\    %5:int = const 6
+        \\    %6:bool = ge %4, %5
+        \\    %7:str = const "math"
+        \\    assert %6, %7
+        \\    panic %0
+        \\}
+        \\
+    , text);
+}
+
 test "report declaration and resolution errors" {
     try expectSemanticError(
         "func value(input:int) int { return input } func value(other:int) bool { return true } func main() {}",
@@ -649,4 +749,8 @@ test "report fundamental type and return errors" {
         "return expects 'int', found 'bool'",
     );
     try expectSemanticError("func main() { return 1 }", "a void function cannot return a value");
+    try expectSemanticError("func main() { assert(1, \"message\") }", "assert condition expects 'bool'");
+    try expectSemanticError("func main() { assert(true, 1) }", "assert message expects 'str'");
+    try expectSemanticError("func main() { panic(false) }", "panic message expects 'str'");
+    try expectSemanticError("func main() { print(\"a\" == \"a\") }", "operator '==' does not accept 'str' and 'str'");
 }
