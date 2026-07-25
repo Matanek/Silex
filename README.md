@@ -15,7 +15,7 @@ func calculate() int {
 }
 
 func main() {
-    calculate()
+    print(calculate())
 }
 ```
 
@@ -36,9 +36,9 @@ zig build run -- compile ../Examples/Packages/Main.sx -o ../packages-example
 ../packages-example
 ```
 
-The interpreter and native ARM64 test harness both verify `calculate() == 42`.
-The generated executable runs directly on macOS and exits with status
-`0`. With `--emit-ir`, the interpretation command prints the typed operations,
+The interpreter and generated executable both print `42` followed by a line
+break and exit with status `0`. With `--emit-ir`, the interpretation command
+first prints the typed operations,
 including:
 
 ```text
@@ -68,6 +68,12 @@ programs. The native backend is experimental, currently supports only
 After `zig build`, add `Toolchain/zig-out/bin` to `PATH` during development to
 invoke the public CLI as `silex run <source.sx>` or
 `silex compile <source.sx> -o <executable>`.
+
+The executable subset includes immutable UTF-8 `str` values, `int` arithmetic,
+fundamental comparisons, and the observable statements `print`, `assert`, and
+`panic`. Their behavior is identical through `silex run` and a generated
+macOS ARM64 executable. These are language operations: programs never name a
+writer, descriptor, syscall, linker option, or native library.
 
 Local packages are canonical sibling directories such as `Math/`, containing
 `Package.json` and `Module/`. Installed packages live under

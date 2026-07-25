@@ -13,6 +13,12 @@ pub const BinaryOperator = enum {
     multiply,
     divide,
     remainder,
+    less,
+    less_equal,
+    greater,
+    greater_equal,
+    equal,
+    not_equal,
 };
 
 pub const Expression = struct {
@@ -22,6 +28,7 @@ pub const Expression = struct {
     pub const Value = union(enum) {
         integer: []const u8,
         boolean: bool,
+        string: []const u8,
         identifier: []const u8,
         call: Call,
         unary: Unary,
@@ -62,16 +69,33 @@ pub const ReturnStatement = struct {
     value: ?*Expression,
 };
 
+pub const EffectStatement = struct {
+    position: Source.Position,
+    value: *Expression,
+};
+
+pub const AssertStatement = struct {
+    position: Source.Position,
+    condition: *Expression,
+    message: *Expression,
+};
+
 pub const Statement = union(enum) {
     variable_declaration: VariableDeclaration,
     return_statement: ReturnStatement,
     expression_statement: *Expression,
+    print_statement: EffectStatement,
+    assert_statement: AssertStatement,
+    panic_statement: EffectStatement,
 
     pub fn position(self: Statement) Source.Position {
         return switch (self) {
             .variable_declaration => |declaration| declaration.position,
             .return_statement => |statement| statement.position,
             .expression_statement => |expression| expression.position,
+            .print_statement => |statement| statement.position,
+            .assert_statement => |statement| statement.position,
+            .panic_statement => |statement| statement.position,
         };
     }
 };

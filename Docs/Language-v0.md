@@ -21,10 +21,11 @@ func enabled() bool {
 }
 ```
 
-The executable value types are currently `int` and `bool`. `int` is a signed
-64-bit integer. The parser also preserves `float`, its equivalent spelling
-`float32`, and `str` in signatures, but values of those types are not executable
-yet.
+The executable value types are currently `int`, `bool`, and `str`. `int` is a
+signed 64-bit integer. `str` is an immutable sequence of valid UTF-8 bytes; it
+is not a zero-terminated C string, so an embedded zero byte remains data.
+The parser also preserves `float` and its equivalent spelling `float32` in
+signatures, but floating-point values are not executable yet.
 
 Functions may share a name when their parameter types differ. Calls resolve to
 an exact parameter list; the return type alone never distinguishes an overload.
@@ -98,20 +99,26 @@ explicitly, or initialized from the intrinsic value of an explicit type:
 let inferred = 20
 let explicit:int = 22
 let ready:bool
+let text:str
 ```
 
-The intrinsic value is `0` for `int` and `false` for `bool`. An explicit
-annotation must exactly match the initializer. A local name cannot reuse a
-parameter or another local name visible in the same function.
+The intrinsic value is `0` for `int`, `false` for `bool`, and the empty string
+for `str`. An explicit annotation must exactly match the initializer. A local
+name cannot reuse a parameter or another local name visible in the same
+function.
 
 Integer literals accept decimal, binary, octal, and hexadecimal notation with
-`_` separators. Boolean literals are `true` and `false`.
+`_` separators. Boolean literals are `true` and `false`. String literals
+accept UTF-8 text and the escapes `\\`, `\"`, `\n`, `\r`, `\t`, `\0`, and
+`\u{H...}`. Escapes are decoded once when the source is compiled.
 
 ## Expressions, calls, and returns
 
-The arithmetic operators are unary `-`, multiplicative `*`, `/`, `%`, then
-additive `+`, `-`, in decreasing precedence. Binary operators associate to the
-left and require `int` operands.
+The operators, in decreasing precedence, are unary `-`; multiplicative `*`,
+`/`, `%`; additive `+`, `-`; integer ordering `<`, `<=`, `>`, `>=`; then
+equality `==`, `!=`. Binary operators associate to the left. Arithmetic and
+ordering require `int`; equality accepts two `int` values or two `bool`
+values. String equality is intentionally not part of v0.
 
 Calls use positional arguments and can be nested in another call, initializer,
 arithmetic expression, or return. A direct call can also be a statement; its
@@ -129,7 +136,32 @@ func main() {
 
 `return` carries exactly one value in a non-`void` function and no value in a
 `void` function. With the current linear bodies, a non-`void` function must end
-with a value return. A `void` function receives an implicit return at the end.
+with a value return or `panic`. A `void` function receives an implicit return
+at the end.
+
+## Observable statements
+
+`print(expression)` evaluates its expression once and writes one line to
+standard output. It accepts `str`, `int`, and `bool`; integers use decimal
+notation and booleans use `true` or `false`. String bytes are preserved
+exactly, including embedded zero bytes, before the final line break.
+
+`assert(condition, message)` requires `bool` then `str`. A true condition does
+nothing. A false condition writes this exact diagnostic to standard error and
+terminates with status `1`:
+
+```text
+<source>:<line>:<column>: runtime error: assertion failed: <message>
+```
+
+`panic(message)` accepts `str`, always terminates with status `1`, and writes:
+
+```text
+<source>:<line>:<column>: runtime error: <message>
+```
+
+Both operations are always active. They expose no writer, recovery object,
+native handle, or platform mechanism to source code.
 
 Statements end at a line break, immediately before `}`, or at an explicit `;`.
 Statements on the same line require `;`. An expression continues after an
@@ -150,14 +182,20 @@ parameter       = identifier ":" type ;
 return_type     = type ;
 type            = "void" | "int" | "bool" | "float" | "float32" | "str" ;
 block           = "{" statement* "}" ;
-statement       = let_statement | return_statement | call_expression ;
+statement       = let_statement | return_statement | call_expression
+                | print_statement | assert_statement | panic_statement ;
 let_statement   = "let" identifier (":" type)? ("=" expression)? ;
 return_statement = "return" expression? ;
-expression      = additive ;
+print_statement = "print" "(" expression ")" ;
+assert_statement = "assert" "(" expression "," expression ")" ;
+panic_statement = "panic" "(" expression ")" ;
+expression      = equality ;
+equality        = comparison (("==" | "!=") comparison)* ;
+comparison      = additive (("<" | "<=" | ">" | ">=") additive)* ;
 additive        = multiplicative (("+" | "-") multiplicative)* ;
 multiplicative  = unary (("*" | "/" | "%") unary)* ;
 unary           = "-" unary | primary ;
-primary         = integer | "true" | "false" | identifier
+primary         = integer | string | "true" | "false" | identifier
                 | call_expression | "(" expression ")" ;
 call_expression = qualified_identifier "(" arguments? ")" ;
 arguments       = expression ("," expression)* ;
@@ -174,7 +212,7 @@ statements as described above.
 
 ## Current limits
 
-There are no mutable variables, assignments, comparisons, logical operators,
-conditions, loops, strings or floating-point expressions, collections,
-methods, downloaded packages, package lockfiles, or visible native interop in
-this subset.
+There are no mutable variables, assignments, logical operators, conditions,
+loops, string concatenation or equality, floating-point expressions,
+collections, methods, downloaded packages, package lockfiles, or visible
+native interop in this subset.

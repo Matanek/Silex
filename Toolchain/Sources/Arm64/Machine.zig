@@ -20,6 +20,7 @@ pub const Status = enum(u8) {
     success = 0,
     integer_overflow = 1,
     division_by_zero = 2,
+    runtime_failure = 3,
 };
 
 pub const UnaryOperator = enum {
@@ -32,14 +33,26 @@ pub const BinaryOperator = enum {
     multiply,
     divide,
     remainder,
+    less,
+    less_equal,
+    greater,
+    greater_equal,
+    equal,
+    not_equal,
 };
+
+pub const PrintKind = enum { integer, boolean, string };
 
 pub const Instruction = union(enum) {
     constant_int: ConstantInt,
     constant_bool: ConstantBool,
+    constant_str: ConstantStr,
     unary: Unary,
     binary: Binary,
     call: Call,
+    print: Print,
+    assert: Assert,
+    panic: Panic,
     return_value: Slot,
     return_void,
 
@@ -51,6 +64,11 @@ pub const Instruction = union(enum) {
     pub const ConstantBool = struct {
         result: Slot,
         value: bool,
+    };
+
+    pub const ConstantStr = struct {
+        result: Slot,
+        string: usize,
     };
 
     pub const Unary = struct {
@@ -71,6 +89,22 @@ pub const Instruction = union(enum) {
         function: FunctionId,
         arguments: []const Slot,
     };
+
+    pub const Print = struct {
+        value: Slot,
+        kind: PrintKind,
+    };
+
+    pub const Assert = struct {
+        condition: Slot,
+        message: Slot,
+        header: usize,
+    };
+
+    pub const Panic = struct {
+        message: Slot,
+        header: usize,
+    };
 };
 
 pub const Function = struct {
@@ -84,6 +118,7 @@ pub const Function = struct {
 
 pub const Program = struct {
     functions: []const Function,
+    strings: []const []const u8 = &.{},
 };
 
 pub fn checkedSlot(value: usize) Error!Slot {
@@ -113,6 +148,10 @@ pub fn validate(program: Program) Error!void {
         for (function.instructions) |instruction| switch (instruction) {
             .constant_int => |value| try requireSlot(function, value.result),
             .constant_bool => |value| try requireSlot(function, value.result),
+            .constant_str => |value| {
+                try requireSlot(function, value.result);
+                if (value.string >= program.strings.len) return error.InvalidMachineProgram;
+            },
             .unary => |value| {
                 try requireSlot(function, value.result);
                 try requireSlot(function, value.operand);
@@ -128,6 +167,16 @@ pub fn validate(program: Program) Error!void {
                 if (call.arguments.len != program.functions[call.function].parameter_count) return error.InvalidMachineProgram;
                 if (call.result) |result| try requireSlot(function, result);
                 for (call.arguments) |argument| try requireSlot(function, argument);
+            },
+            .print => |value| try requireSlot(function, value.value),
+            .assert => |value| {
+                try requireSlot(function, value.condition);
+                try requireSlot(function, value.message);
+                if (value.header >= program.strings.len) return error.InvalidMachineProgram;
+            },
+            .panic => |value| {
+                try requireSlot(function, value.message);
+                if (value.header >= program.strings.len) return error.InvalidMachineProgram;
             },
             .return_value => |value| try requireSlot(function, value),
             .return_void => {},

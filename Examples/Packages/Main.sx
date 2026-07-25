@@ -5,5 +5,5 @@ func calculate() int {
 }
 
 func main() {
-    calculate()
+    print(calculate())
 }

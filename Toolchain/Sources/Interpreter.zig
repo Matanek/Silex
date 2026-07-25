@@ -9,23 +9,43 @@ pub const Error = Allocator.Error || error{
     IntegerOverflow,
     DivisionByZero,
     CallStackOverflow,
+    RuntimeTerminated,
 };
 
 pub const Value = union(enum) {
     void,
     integer: i64,
     boolean: bool,
+    string: []const u8,
 
     pub fn typeOf(self: Value) Ir.Type {
         return switch (self) {
             .void => .void,
             .integer => .int,
             .boolean => .bool,
+            .string => .str,
         };
     }
 };
 
+pub const RunResult = struct {
+    exit_code: u8,
+    stdout: []const u8,
+    stderr: []const u8,
+};
+
+const Session = struct {
+    allocator: Allocator,
+    stdout: std.ArrayList(u8) = .empty,
+    stderr: std.ArrayList(u8) = .empty,
+    terminated: bool = false,
+};
+
 pub fn run(allocator: Allocator, program: Ir.Program) Error!u8 {
+    return (try runCapture(allocator, program)).exit_code;
+}
+
+pub fn runCapture(allocator: Allocator, program: Ir.Program) Error!RunResult {
     var main: ?Ir.FunctionId = null;
     for (program.functions, 0..) |function, function_id| {
         if (!std.mem.eql(u8, function.name, "main")) continue;
@@ -35,9 +55,21 @@ pub fn run(allocator: Allocator, program: Ir.Program) Error!u8 {
     const function_id = main orelse return error.InvalidProgram;
     const function = program.functions[function_id];
     if (function.parameter_types.len != 0 or function.return_type != .void) return error.InvalidProgram;
-    const result = try invokeDepth(allocator, program, function_id, &.{}, 0);
+    var session: Session = .{ .allocator = allocator };
+    const result = invokeDepth(allocator, program, function_id, &.{}, 0, &session) catch |err| switch (err) {
+        error.RuntimeTerminated => return .{
+            .exit_code = 1,
+            .stdout = try session.stdout.toOwnedSlice(allocator),
+            .stderr = try session.stderr.toOwnedSlice(allocator),
+        },
+        else => |other| return other,
+    };
     if (result != .void) return error.InvalidProgram;
-    return 0;
+    return .{
+        .exit_code = 0,
+        .stdout = try session.stdout.toOwnedSlice(allocator),
+        .stderr = try session.stderr.toOwnedSlice(allocator),
+    };
 }
 
 pub fn invoke(
@@ -46,7 +78,8 @@ pub fn invoke(
     function: Ir.FunctionId,
     arguments: []const Value,
 ) Error!Value {
-    return invokeDepth(allocator, program, function, arguments, 0);
+    var session: Session = .{ .allocator = allocator };
+    return invokeDepth(allocator, program, function, arguments, 0, &session);
 }
 
 fn invokeDepth(
@@ -55,6 +88,7 @@ fn invokeDepth(
     function_id: Ir.FunctionId,
     arguments: []const Value,
     depth: usize,
+    session: *Session,
 ) Error!Value {
     if (depth >= max_call_depth) return error.CallStackOverflow;
     if (function_id >= program.functions.len) return error.InvalidProgram;
@@ -74,6 +108,7 @@ fn invokeDepth(
     for (function.instructions) |instruction| switch (instruction) {
         .constant_int => |constant| try store(function, values, constant.result, .{ .integer = constant.value }),
         .constant_bool => |constant| try store(function, values, constant.result, .{ .boolean = constant.value }),
+        .constant_str => |constant| try store(function, values, constant.result, .{ .string = constant.value }),
         .unary => |unary| {
             const operand = try load(values, unary.operand);
             const result: Value = switch (unary.operator) {
@@ -82,10 +117,10 @@ fn invokeDepth(
             try store(function, values, unary.result, result);
         },
         .binary => |binary| {
-            const left = try integer(try load(values, binary.left));
-            const right = try integer(try load(values, binary.right));
+            const left = try load(values, binary.left);
+            const right = try load(values, binary.right);
             const result = try calculate(binary.operator, left, right);
-            try store(function, values, binary.result, .{ .integer = result });
+            try store(function, values, binary.result, result);
         },
         .call => |call| {
             if (call.function >= program.functions.len) return error.InvalidProgram;
@@ -94,13 +129,29 @@ fn invokeDepth(
             const call_arguments = try allocator.alloc(Value, call.arguments.len);
             defer allocator.free(call_arguments);
             for (call.arguments, 0..) |argument, index| call_arguments[index] = try load(values, argument);
-            const result = try invokeDepth(allocator, program, call.function, call_arguments, depth + 1);
+            const result = try invokeDepth(allocator, program, call.function, call_arguments, depth + 1, session);
             if (call.result) |result_id| {
                 if (callee.return_type == .void or result == .void) return error.InvalidProgram;
                 try store(function, values, result_id, result);
             } else if (callee.return_type != .void or result != .void) {
                 return error.InvalidProgram;
             }
+        },
+        .print => |value_id| try appendPrinted(session, try load(values, value_id)),
+        .assert => |assertion| {
+            const condition = try boolean(try load(values, assertion.condition));
+            if (!condition) {
+                const message = try string(try load(values, assertion.message));
+                try appendRuntimeError(session, program, assertion.position, "assertion failed: ", message);
+                session.terminated = true;
+                return error.RuntimeTerminated;
+            }
+        },
+        .panic => |panic_value| {
+            const message = try string(try load(values, panic_value.message));
+            try appendRuntimeError(session, program, panic_value.position, "", message);
+            session.terminated = true;
+            return error.RuntimeTerminated;
         },
         .return_value => |value_id| {
             const result = try load(values, value_id);
@@ -137,14 +188,75 @@ fn negate(value: i64) Error!i64 {
     return -value;
 }
 
-fn calculate(operator: Ir.BinaryOperator, left: i64, right: i64) Error!i64 {
+fn calculate(operator: Ir.BinaryOperator, left: Value, right: Value) Error!Value {
     return switch (operator) {
-        .add => checkedAdd(left, right),
-        .subtract => checkedSubtract(left, right),
-        .multiply => checkedMultiply(left, right),
-        .divide => checkedDivide(left, right),
-        .remainder => checkedRemainder(left, right),
+        .add => .{ .integer = try checkedAdd(try integer(left), try integer(right)) },
+        .subtract => .{ .integer = try checkedSubtract(try integer(left), try integer(right)) },
+        .multiply => .{ .integer = try checkedMultiply(try integer(left), try integer(right)) },
+        .divide => .{ .integer = try checkedDivide(try integer(left), try integer(right)) },
+        .remainder => .{ .integer = try checkedRemainder(try integer(left), try integer(right)) },
+        .less => .{ .boolean = try integer(left) < try integer(right) },
+        .less_equal => .{ .boolean = try integer(left) <= try integer(right) },
+        .greater => .{ .boolean = try integer(left) > try integer(right) },
+        .greater_equal => .{ .boolean = try integer(left) >= try integer(right) },
+        .equal => .{ .boolean = try equal(left, right) },
+        .not_equal => .{ .boolean = !try equal(left, right) },
     };
+}
+
+fn boolean(value: Value) Error!bool {
+    return switch (value) {
+        .boolean => |result| result,
+        else => error.InvalidProgram,
+    };
+}
+
+fn string(value: Value) Error![]const u8 {
+    return switch (value) {
+        .string => |result| result,
+        else => error.InvalidProgram,
+    };
+}
+
+fn equal(left: Value, right: Value) Error!bool {
+    if (left.typeOf() != right.typeOf()) return error.InvalidProgram;
+    return switch (left) {
+        .integer => |value| value == right.integer,
+        .boolean => |value| value == right.boolean,
+        else => error.InvalidProgram,
+    };
+}
+
+fn appendPrinted(session: *Session, value: Value) Error!void {
+    switch (value) {
+        .integer => |number| {
+            var buffer: [32]u8 = undefined;
+            const text = std.fmt.bufPrint(&buffer, "{d}", .{number}) catch unreachable;
+            try session.stdout.appendSlice(session.allocator, text);
+        },
+        .boolean => |flag| try session.stdout.appendSlice(session.allocator, if (flag) "true" else "false"),
+        .string => |text| try session.stdout.appendSlice(session.allocator, text),
+        .void => return error.InvalidProgram,
+    }
+    try session.stdout.append(session.allocator, '\n');
+}
+
+fn appendRuntimeError(
+    session: *Session,
+    program: Ir.Program,
+    position: @import("Source.zig").Position,
+    prefix: []const u8,
+    message: []const u8,
+) Error!void {
+    const path = if (position.file < program.files.len) program.files[position.file] else "<source>";
+    const header = try std.fmt.allocPrint(
+        session.allocator,
+        "{s}:{d}:{d}: runtime error: {s}",
+        .{ path, position.line, position.column, prefix },
+    );
+    try session.stderr.appendSlice(session.allocator, header);
+    try session.stderr.appendSlice(session.allocator, message);
+    try session.stderr.append(session.allocator, '\n');
 }
 
 fn checkedAdd(left: i64, right: i64) Error!i64 {
@@ -259,4 +371,98 @@ test "reject inconsistent typed IR" {
         .instructions = &instructions,
     }};
     try std.testing.expectError(error.InvalidProgram, invoke(arena.allocator(), .{ .functions = &functions }, 0, &.{}));
+}
+
+test "execute UTF-8 strings through parameters returns and intrinsic values" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const program = try compile(
+        \\func identity(value:str) str { return value }
+        \\func empty() str { let value:str; return value }
+        \\func main() {
+        \\    print(identity("Silex\n\u{1f525}\0ok"))
+        \\    print(empty())
+        \\}
+    , allocator);
+    const result = try runCapture(allocator, program);
+    try std.testing.expectEqual(@as(u8, 0), result.exit_code);
+    try std.testing.expectEqualSlices(u8, "Silex\n🔥\x00ok\n\n", result.stdout);
+    try std.testing.expectEqualStrings("", result.stderr);
+}
+
+test "print reference values once and in source order" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const program = try compile(
+        \\func square(value:int) int { return value * value }
+        \\func main() {
+        \\    print("answer")
+        \\    print(square(5))
+        \\    print(true)
+        \\    print(false)
+        \\}
+    , allocator);
+    const result = try runCapture(allocator, program);
+    try std.testing.expectEqualStrings("answer\n25\ntrue\nfalse\n", result.stdout);
+}
+
+test "print evaluates a nested effectful call exactly once" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const program = try compile(
+        \\func observed() int {
+        \\    print("inside")
+        \\    return 42
+        \\}
+        \\func main() { print(observed()) }
+    , allocator);
+    const result = try runCapture(allocator, program);
+    try std.testing.expectEqualStrings("inside\n42\n", result.stdout);
+}
+
+test "compare fundamental values with defined precedence" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const program = try compile(
+        \\func main() {
+        \\    print(1 + 2 * 3 < 8 == true)
+        \\    print(4 <= 4)
+        \\    print(5 > 9)
+        \\    print(false != true)
+        \\}
+    , allocator);
+    const result = try runCapture(allocator, program);
+    try std.testing.expectEqualStrings("true\ntrue\nfalse\ntrue\n", result.stdout);
+}
+
+test "assert and panic return structured runtime output" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var assertion = try compile(
+        \\func main() {
+        \\    print("before")
+        \\    assert(false, "planned failure")
+        \\    print("after")
+        \\}
+    , allocator);
+    assertion.files = &.{"Sandbox/Main.sx"};
+    const failed = try runCapture(allocator, assertion);
+    try std.testing.expectEqual(@as(u8, 1), failed.exit_code);
+    try std.testing.expectEqualStrings("before\n", failed.stdout);
+    try std.testing.expectEqualStrings(
+        "Sandbox/Main.sx:3:5: runtime error: assertion failed: planned failure\n",
+        failed.stderr,
+    );
+
+    var panic_program = try compile("func value() int { panic(\"literal panic\") } func main() { value() }", allocator);
+    panic_program.files = &.{"Main.sx"};
+    const panicked = try runCapture(allocator, panic_program);
+    try std.testing.expectEqual(@as(u8, 1), panicked.exit_code);
+    try std.testing.expectEqualStrings("Main.sx:1:20: runtime error: literal panic\n", panicked.stderr);
 }

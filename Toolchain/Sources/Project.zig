@@ -96,10 +96,11 @@ pub const Compiler = struct {
         const interfaces = try self.buildInterfaces();
         const ast = try self.composeAst();
         var analyzer = Semantic.Analyzer.init(self.allocator);
-        const ir = analyzer.analyze(ast) catch |err| {
+        var ir = analyzer.analyze(ast) catch |err| {
             self.diagnostic = analyzer.diagnostic;
             return err;
         };
+        ir.files = self.files;
 
         return .{
             .ast = ast,
@@ -233,6 +234,11 @@ pub const Compiler = struct {
             .return_statement => |value| if (value.value) |expression|
                 try self.activateExpression(module, expression),
             .expression_statement => |expression| try self.activateExpression(module, expression),
+            .print_statement, .panic_statement => |effect| try self.activateExpression(module, effect.value),
+            .assert_statement => |assertion| {
+                try self.activateExpression(module, assertion.condition);
+                try self.activateExpression(module, assertion.message);
+            },
         }
     }
 
@@ -338,6 +344,11 @@ pub const Compiler = struct {
             .return_statement => |value| if (value.value) |expression|
                 try self.rewriteExpression(module, expression),
             .expression_statement => |expression| try self.rewriteExpression(module, expression),
+            .print_statement, .panic_statement => |effect| try self.rewriteExpression(module, effect.value),
+            .assert_statement => |assertion| {
+                try self.rewriteExpression(module, assertion.condition);
+                try self.rewriteExpression(module, assertion.message);
+            },
         }
     }
 

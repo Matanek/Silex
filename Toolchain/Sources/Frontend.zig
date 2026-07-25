@@ -28,10 +28,11 @@ pub const Frontend = struct {
             return err;
         };
         var analyzer = Semantic.Analyzer.init(self.allocator);
-        const ir = analyzer.analyze(ast) catch |err| {
+        var ir = analyzer.analyze(ast) catch |err| {
             self.diagnostic = analyzer.diagnostic;
             return err;
         };
+        ir.files = &.{"<source>"};
         return .{ .ast = ast, .ir = ir };
     }
 };

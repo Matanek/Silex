@@ -784,3 +784,24 @@ test "reject invalid string escape" {
     try std.testing.expectError(error.InvalidSource, lexer.next());
     try std.testing.expectEqualStrings("invalid escape sequence in string literal", lexer.diagnostic.?.message);
 }
+
+test "reject invalid Unicode string escapes" {
+    var surrogate = Lexer.init("\"\\u{D800}\"");
+    try std.testing.expectError(error.InvalidSource, surrogate.next());
+    try std.testing.expectEqualStrings("invalid Unicode scalar in string literal", surrogate.diagnostic.?.message);
+
+    var too_large = Lexer.init("\"\\u{110000}\"");
+    try std.testing.expectError(error.InvalidSource, too_large.next());
+    try std.testing.expectEqualStrings("invalid Unicode scalar in string literal", too_large.diagnostic.?.message);
+
+    var empty = Lexer.init("\"\\u{}\"");
+    try std.testing.expectError(error.InvalidSource, empty.next());
+    try std.testing.expectEqualStrings("invalid Unicode escape in string literal", empty.diagnostic.?.message);
+}
+
+test "reject invalid UTF-8 in a string literal" {
+    const source = [_]u8{ '"', 0xff, '"' };
+    var lexer = Lexer.init(&source);
+    try std.testing.expectError(error.InvalidSource, lexer.next());
+    try std.testing.expectEqualStrings("string literal is not valid UTF-8", lexer.diagnostic.?.message);
+}

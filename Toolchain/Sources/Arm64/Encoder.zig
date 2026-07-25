@@ -37,6 +37,9 @@ const Register = enum(u5) {
     x11 = 11,
     x12 = 12,
     x13 = 13,
+    x14 = 14,
+    x15 = 15,
+    x16 = 16,
     x29 = 29,
     x30 = 30,
     zero_or_sp = 31,
@@ -45,6 +48,11 @@ const Register = enum(u5) {
 const CallFixup = struct {
     at: usize,
     function: Machine.FunctionId,
+};
+
+const DataFixup = struct {
+    at: usize,
+    string: usize,
 };
 
 const FixupWidth = enum { imm19, imm26 };
@@ -65,10 +73,11 @@ pub fn encode(allocator: Allocator, program: Machine.Program, entry: Entry) Erro
     var words: std.ArrayList(u32) = .empty;
     const offsets = try allocator.alloc(u32, program.functions.len);
     var calls: std.ArrayList(CallFixup) = .empty;
+    var data_fixups: std.ArrayList(DataFixup) = .empty;
 
     for (program.functions, 0..) |function, function_id| {
         offsets[function_id] = @intCast(words.items.len * 4);
-        try encodeFunction(allocator, &words, &calls, function);
+        try encodeFunction(allocator, &words, &calls, &data_fixups, program, function);
     }
 
     const entry_offset: ?u32 = switch (entry) {
@@ -111,8 +120,26 @@ pub fn encode(allocator: Allocator, program: Machine.Program, entry: Entry) Erro
         try patch26(words.items, call.at, offsets[call.function] / 4);
     }
 
-    const code = try allocator.alloc(u8, words.items.len * 4);
+    const code_size = words.items.len * 4;
+    const string_offsets = try allocator.alloc(usize, program.strings.len);
+    defer allocator.free(string_offsets);
+    var image_size = code_size;
+    for (program.strings, 0..) |string, index| {
+        string_offsets[index] = image_size;
+        image_size += string.len;
+    }
+    for (data_fixups.items) |fixup| {
+        if (fixup.string >= string_offsets.len) return error.InvalidMachineProgram;
+        try patchAdr(words.items, fixup.at, string_offsets[fixup.string]);
+    }
+
+    const code = try allocator.alloc(u8, image_size);
     for (words.items, 0..) |word, index| std.mem.writeInt(u32, code[index * 4 ..][0..4], word, .little);
+    var data_offset = code_size;
+    for (program.strings) |string| {
+        @memcpy(code[data_offset..][0..string.len], string);
+        data_offset += string.len;
+    }
     return .{ .code = code, .function_offsets = offsets, .entry_offset = entry_offset };
 }
 
@@ -120,6 +147,8 @@ fn encodeFunction(
     allocator: Allocator,
     words: *std.ArrayList(u32),
     calls: *std.ArrayList(CallFixup),
+    data_fixups: *std.ArrayList(DataFixup),
+    program: Machine.Program,
     function: Machine.Function,
 ) Error!void {
     var fixups: FunctionFixups = .{};
@@ -139,6 +168,10 @@ fn encodeFunction(
             try words.append(allocator, moveWideZero32(.x9, @intFromBool(constant.value)));
             try words.append(allocator, storeStack(.x9, constant.result));
         },
+        .constant_str => |constant| {
+            try emitImmediate64(allocator, words, .x9, constant.string);
+            try words.append(allocator, storeStack(.x9, constant.result));
+        },
         .unary => |unary| {
             try words.append(allocator, loadStack(.x9, unary.operand));
             try emitImmediate64(allocator, words, .x10, @bitCast(@as(i64, std.math.minInt(i64))));
@@ -156,6 +189,27 @@ fn encodeFunction(
             try words.append(allocator, branchLink());
             try appendFixup(allocator, words, &fixups.epilogue, compareBranchNonZero(.x8), .imm19);
             if (call.result) |result| try words.append(allocator, storeStack(.x0, result));
+        },
+        .print => |value| switch (value.kind) {
+            .integer => try emitPrintInteger(allocator, words, value.value),
+            .boolean => try emitPrintBoolean(allocator, words, data_fixups, program, value.value),
+            .string => try emitPrintString(allocator, words, data_fixups, program, value.value, 1, true),
+        },
+        .assert => |assertion| {
+            try words.append(allocator, loadStack(.x9, assertion.condition));
+            const passed = words.items.len;
+            try words.append(allocator, compareBranchNonZero(.x9));
+            try emitWriteStatic(allocator, words, data_fixups, program, assertion.header, 2);
+            try emitPrintString(allocator, words, data_fixups, program, assertion.message, 2, true);
+            try words.append(allocator, moveWideZero32(.x8, @intFromEnum(Machine.Status.runtime_failure)));
+            try appendFixup(allocator, words, &fixups.epilogue, branch(), .imm26);
+            try patch19(words.items, passed, words.items.len);
+        },
+        .panic => |panic_value| {
+            try emitWriteStatic(allocator, words, data_fixups, program, panic_value.header, 2);
+            try emitPrintString(allocator, words, data_fixups, program, panic_value.message, 2, true);
+            try words.append(allocator, moveWideZero32(.x8, @intFromEnum(Machine.Status.runtime_failure)));
+            try appendFixup(allocator, words, &fixups.epilogue, branch(), .imm26);
         },
         .return_value => |value| {
             try words.append(allocator, loadStack(.x0, value));
@@ -237,7 +291,160 @@ fn encodeBinary(
             try words.append(allocator, multiplySubtract(.x12, .x11, .x10, .x9));
             try words.append(allocator, storeStack(.x12, binary.result));
         },
+        .less, .less_equal, .greater, .greater_equal, .equal, .not_equal => {
+            try words.append(allocator, compareRegisters(.x9, .x10));
+            try words.append(allocator, moveWideZero32(.x11, 0));
+            const skip_true = words.items.len;
+            try words.append(allocator, conditionalBranch(inverseComparison(binary.operator)));
+            try words.append(allocator, moveWideZero32(.x11, 1));
+            try patch19(words.items, skip_true, words.items.len);
+            try words.append(allocator, storeStack(.x11, binary.result));
+        },
     }
+}
+
+fn inverseComparison(operator: Machine.BinaryOperator) Condition {
+    return switch (operator) {
+        .less => .greater_equal,
+        .less_equal => .greater,
+        .greater => .less_equal,
+        .greater_equal => .less,
+        .equal => .not_equal,
+        .not_equal => .equal,
+        else => unreachable,
+    };
+}
+
+fn emitPrintBoolean(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    data_fixups: *std.ArrayList(DataFixup),
+    program: Machine.Program,
+    slot: Machine.Slot,
+) Error!void {
+    try words.append(allocator, loadStack(.x9, slot));
+    const use_false = words.items.len;
+    try words.append(allocator, compareBranchZero(.x9));
+    try emitWriteStatic(allocator, words, data_fixups, program, 1, 1);
+    const finished = words.items.len;
+    try words.append(allocator, branch());
+    try patch19(words.items, use_false, words.items.len);
+    try emitWriteStatic(allocator, words, data_fixups, program, 2, 1);
+    try patch26(words.items, finished, words.items.len);
+    try emitWriteStatic(allocator, words, data_fixups, program, 0, 1);
+}
+
+fn emitPrintString(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    data_fixups: *std.ArrayList(DataFixup),
+    program: Machine.Program,
+    slot: Machine.Slot,
+    descriptor: u16,
+    newline: bool,
+) Error!void {
+    try words.append(allocator, loadStack(.x9, slot));
+    var targets: std.ArrayList(usize) = .empty;
+    for (program.strings, 0..) |_, string_id| {
+        try emitImmediate64(allocator, words, .x10, string_id);
+        try words.append(allocator, compareRegisters(.x9, .x10));
+        try targets.append(allocator, words.items.len);
+        try words.append(allocator, conditionalBranch(.equal));
+    }
+    const invalid = words.items.len;
+    try words.append(allocator, branch());
+    var endings: std.ArrayList(usize) = .empty;
+    for (program.strings, 0..) |_, string_id| {
+        try patch19(words.items, targets.items[string_id], words.items.len);
+        try emitWriteStatic(allocator, words, data_fixups, program, string_id, descriptor);
+        try endings.append(allocator, words.items.len);
+        try words.append(allocator, branch());
+    }
+    const end = words.items.len;
+    try patch26(words.items, invalid, end);
+    for (endings.items) |ending| try patch26(words.items, ending, end);
+    if (newline) try emitWriteStatic(allocator, words, data_fixups, program, 0, descriptor);
+}
+
+fn emitWriteStatic(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    data_fixups: *std.ArrayList(DataFixup),
+    program: Machine.Program,
+    string_id: usize,
+    descriptor: u16,
+) Error!void {
+    if (string_id >= program.strings.len) return error.InvalidMachineProgram;
+    try words.append(allocator, moveWideZero32(.x0, descriptor));
+    try data_fixups.append(allocator, .{ .at = words.items.len, .string = string_id });
+    try words.append(allocator, addressRelative(.x1));
+    try emitImmediate64(allocator, words, .x2, program.strings[string_id].len);
+    try words.append(allocator, moveWideZero32(.x16, 4));
+    try words.append(allocator, serviceCall());
+}
+
+fn emitPrintInteger(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    slot: Machine.Slot,
+) Error!void {
+    try words.append(allocator, loadStack(.x9, slot));
+    try words.append(allocator, addSubtractImmediate(.zero_or_sp, .zero_or_sp, 32, false));
+    try words.append(allocator, addSubtractImmediate(.x11, .zero_or_sp, 31, true));
+    try words.append(allocator, moveWideZero32(.x10, '\n'));
+    try words.append(allocator, storeByte(.x10, .x11));
+    try words.append(allocator, moveWideZero32(.x12, 1));
+
+    const nonzero = words.items.len;
+    try words.append(allocator, compareBranchNonZero64(.x9));
+    try words.append(allocator, addSubtractImmediate(.x11, .x11, 1, false));
+    try words.append(allocator, moveWideZero32(.x10, '0'));
+    try words.append(allocator, storeByte(.x10, .x11));
+    try words.append(allocator, addSubtractImmediate(.x12, .x12, 1, true));
+    const zero_finished = words.items.len;
+    try words.append(allocator, branch());
+
+    try patch19(words.items, nonzero, words.items.len);
+    try words.append(allocator, moveWideZero32(.x3, 0));
+    try words.append(allocator, compareRegisters(.x9, .zero_or_sp));
+    const already_negative = words.items.len;
+    try words.append(allocator, conditionalBranch(.less));
+    try words.append(allocator, subtractSetFlags(.x9, .zero_or_sp, .x9));
+    const sign_ready = words.items.len;
+    try words.append(allocator, branch());
+    try patch19(words.items, already_negative, words.items.len);
+    try words.append(allocator, moveWideZero32(.x3, 1));
+    try patch26(words.items, sign_ready, words.items.len);
+
+    const digit_loop = words.items.len;
+    try words.append(allocator, moveWideZero32(.x10, 10));
+    try words.append(allocator, signedDivide(.x4, .x9, .x10));
+    try words.append(allocator, multiplySubtract(.x5, .x4, .x10, .x9));
+    try words.append(allocator, moveWideZero32(.x6, '0'));
+    try words.append(allocator, subtractSetFlags(.x6, .x6, .x5));
+    try words.append(allocator, addSubtractImmediate(.x11, .x11, 1, false));
+    try words.append(allocator, storeByte(.x6, .x11));
+    try words.append(allocator, addSubtractImmediate(.x12, .x12, 1, true));
+    try words.append(allocator, moveRegister(.x9, .x4));
+    const repeat = words.items.len;
+    try words.append(allocator, compareBranchNonZero64(.x9));
+    try patch19(words.items, repeat, digit_loop);
+
+    const unsigned = words.items.len;
+    try words.append(allocator, compareBranchZero(.x3));
+    try words.append(allocator, addSubtractImmediate(.x11, .x11, 1, false));
+    try words.append(allocator, moveWideZero32(.x10, '-'));
+    try words.append(allocator, storeByte(.x10, .x11));
+    try words.append(allocator, addSubtractImmediate(.x12, .x12, 1, true));
+    try patch19(words.items, unsigned, words.items.len);
+
+    try patch26(words.items, zero_finished, words.items.len);
+    try words.append(allocator, moveWideZero32(.x0, 1));
+    try words.append(allocator, moveRegister(.x1, .x11));
+    try words.append(allocator, moveRegister(.x2, .x12));
+    try words.append(allocator, moveWideZero32(.x16, 4));
+    try words.append(allocator, serviceCall());
+    try words.append(allocator, addSubtractImmediate(.zero_or_sp, .zero_or_sp, 32, true));
 }
 
 fn emitImmediate64(allocator: Allocator, words: *std.ArrayList(u32), register: Register, value: u64) Allocator.Error!void {
@@ -293,6 +500,14 @@ fn patch26(words: []u32, at: usize, target: usize) Error!void {
     words[at] |= immediate & 0x03ffffff;
 }
 
+fn patchAdr(words: []u32, at: usize, target_byte: usize) Error!void {
+    const instruction_byte = at * 4;
+    const delta = @as(i64, @intCast(target_byte)) - @as(i64, @intCast(instruction_byte));
+    if (delta < -(1 << 20) or delta >= (1 << 20)) return error.BranchOutOfRange;
+    const immediate: u32 = @bitCast(@as(i32, @intCast(delta)));
+    words[at] |= ((immediate & 0x3) << 29) | (((immediate >> 2) & 0x7ffff) << 5);
+}
+
 fn registerBits(register: Register) u32 {
     return @intFromEnum(register);
 }
@@ -344,6 +559,18 @@ fn loadStack(destination: Register, slot: Machine.Slot) u32 {
     return 0xf9400000 | (@as(u32, slot) << 10) | (registerBits(.zero_or_sp) << 5) | registerBits(destination);
 }
 
+fn storeByte(source: Register, base: Register) u32 {
+    return 0x39000000 | (registerBits(base) << 5) | registerBits(source);
+}
+
+fn addressRelative(destination: Register) u32 {
+    return 0x10000000 | registerBits(destination);
+}
+
+fn serviceCall() u32 {
+    return 0xd4001001;
+}
+
 fn addSetFlags(destination: Register, left: Register, right: Register) u32 {
     return 0xab000000 | (registerBits(right) << 16) | (registerBits(left) << 5) | registerBits(destination);
 }
@@ -384,6 +611,10 @@ const Condition = enum(u4) {
     equal = 0,
     not_equal = 1,
     overflow = 6,
+    greater_equal = 10,
+    less = 11,
+    greater = 12,
+    less_equal = 13,
 };
 
 fn conditionalBranch(condition: Condition) u32 {
@@ -396,6 +627,10 @@ fn compareBranchZero(register: Register) u32 {
 
 fn compareBranchNonZero(register: Register) u32 {
     return 0x35000000 | registerBits(register);
+}
+
+fn compareBranchNonZero64(register: Register) u32 {
+    return 0xb5000000 | registerBits(register);
 }
 
 fn branch() u32 {

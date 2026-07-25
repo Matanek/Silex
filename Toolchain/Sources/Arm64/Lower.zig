@@ -6,15 +6,27 @@ const Allocator = std.mem.Allocator;
 
 pub fn lower(allocator: Allocator, program: Ir.Program) Machine.Error!Machine.Program {
     var functions: std.ArrayList(Machine.Function) = .empty;
+    var strings: std.ArrayList([]const u8) = .empty;
+    try strings.append(allocator, "\n");
+    try strings.append(allocator, "true");
+    try strings.append(allocator, "false");
     for (program.functions) |function| {
-        try functions.append(allocator, try lowerFunction(allocator, function));
+        try functions.append(allocator, try lowerFunction(allocator, program, &strings, function));
     }
-    const result: Machine.Program = .{ .functions = try functions.toOwnedSlice(allocator) };
+    const result: Machine.Program = .{
+        .functions = try functions.toOwnedSlice(allocator),
+        .strings = try strings.toOwnedSlice(allocator),
+    };
     try Machine.validate(result);
     return result;
 }
 
-fn lowerFunction(allocator: Allocator, function: Ir.Function) Machine.Error!Machine.Function {
+fn lowerFunction(
+    allocator: Allocator,
+    program: Ir.Program,
+    strings: *std.ArrayList([]const u8),
+    function: Ir.Function,
+) Machine.Error!Machine.Function {
     const parameter_count = try Machine.checkedArgumentCount(function.parameter_types.len);
     const slot_count = try Machine.checkedSlot(function.value_types.len);
     try requireExecutableReturnType(function.return_type);
@@ -23,7 +35,7 @@ fn lowerFunction(allocator: Allocator, function: Ir.Function) Machine.Error!Mach
 
     var instructions: std.ArrayList(Machine.Instruction) = .empty;
     for (function.instructions) |instruction| {
-        try instructions.append(allocator, try lowerInstruction(allocator, instruction));
+        try instructions.append(allocator, try lowerInstruction(allocator, program, strings, function, instruction));
     }
     return .{
         .name = function.name,
@@ -35,7 +47,13 @@ fn lowerFunction(allocator: Allocator, function: Ir.Function) Machine.Error!Mach
     };
 }
 
-fn lowerInstruction(allocator: Allocator, instruction: Ir.Instruction) Machine.Error!Machine.Instruction {
+fn lowerInstruction(
+    allocator: Allocator,
+    program: Ir.Program,
+    strings: *std.ArrayList([]const u8),
+    function: Ir.Function,
+    instruction: Ir.Instruction,
+) Machine.Error!Machine.Instruction {
     return switch (instruction) {
         .constant_int => |constant| .{ .constant_int = .{
             .result = try Machine.checkedSlot(constant.result),
@@ -44,6 +62,10 @@ fn lowerInstruction(allocator: Allocator, instruction: Ir.Instruction) Machine.E
         .constant_bool => |constant| .{ .constant_bool = .{
             .result = try Machine.checkedSlot(constant.result),
             .value = constant.value,
+        } },
+        .constant_str => |constant| .{ .constant_str = .{
+            .result = try Machine.checkedSlot(constant.result),
+            .string = try internString(allocator, strings, constant.value),
         } },
         .unary => |unary| .{ .unary = .{
             .result = try Machine.checkedSlot(unary.result),
@@ -60,6 +82,12 @@ fn lowerInstruction(allocator: Allocator, instruction: Ir.Instruction) Machine.E
                 .multiply => .multiply,
                 .divide => .divide,
                 .remainder => .remainder,
+                .less => .less,
+                .less_equal => .less_equal,
+                .greater => .greater,
+                .greater_equal => .greater_equal,
+                .equal => .equal,
+                .not_equal => .not_equal,
             },
             .left = try Machine.checkedSlot(binary.left),
             .right = try Machine.checkedSlot(binary.right),
@@ -74,6 +102,24 @@ fn lowerInstruction(allocator: Allocator, instruction: Ir.Instruction) Machine.E
                 .arguments = arguments,
             } };
         },
+        .print => |value| .{ .print = .{
+            .value = try Machine.checkedSlot(value),
+            .kind = switch (function.value_types[value]) {
+                .int => .integer,
+                .bool => .boolean,
+                .str => .string,
+                else => return error.UnsupportedType,
+            },
+        } },
+        .assert => |assertion| .{ .assert = .{
+            .condition = try Machine.checkedSlot(assertion.condition),
+            .message = try Machine.checkedSlot(assertion.message),
+            .header = try internString(allocator, strings, try runtimeHeader(allocator, program, assertion.position, true)),
+        } },
+        .panic => |panic_value| .{ .panic = .{
+            .message = try Machine.checkedSlot(panic_value.message),
+            .header = try internString(allocator, strings, try runtimeHeader(allocator, program, panic_value.position, false)),
+        } },
         .return_value => |value| .{ .return_value = try Machine.checkedSlot(value) },
         .return_void => .return_void,
     };
@@ -81,16 +127,50 @@ fn lowerInstruction(allocator: Allocator, instruction: Ir.Instruction) Machine.E
 
 fn requireExecutableReturnType(type_value: Ir.Type) Machine.Error!void {
     switch (type_value) {
-        .void, .int, .bool => {},
-        .float32, .str => return error.UnsupportedType,
+        .void, .int, .bool, .str => {},
+        .float32 => return error.UnsupportedType,
     }
 }
 
 fn requireExecutableValueType(type_value: Ir.Type) Machine.Error!void {
     switch (type_value) {
-        .int, .bool => {},
-        .void, .float32, .str => return error.UnsupportedType,
+        .int, .bool, .str => {},
+        .void, .float32 => return error.UnsupportedType,
     }
+}
+
+fn internString(
+    allocator: Allocator,
+    strings: *std.ArrayList([]const u8),
+    value: []const u8,
+) Allocator.Error!usize {
+    for (strings.items, 0..) |existing, index| {
+        if (std.mem.eql(u8, existing, value)) return index;
+    }
+    const index = strings.items.len;
+    try strings.append(allocator, value);
+    return index;
+}
+
+fn runtimeHeader(
+    allocator: Allocator,
+    program: Ir.Program,
+    position: @import("../Source.zig").Position,
+    assertion: bool,
+) Allocator.Error![]const u8 {
+    const path = if (position.file < program.files.len) program.files[position.file] else "<source>";
+    return if (assertion)
+        std.fmt.allocPrint(
+            allocator,
+            "{s}:{d}:{d}: runtime error: assertion failed: ",
+            .{ path, position.line, position.column },
+        )
+    else
+        std.fmt.allocPrint(
+            allocator,
+            "{s}:{d}:{d}: runtime error: ",
+            .{ path, position.line, position.column },
+        );
 }
 
 fn compile(allocator: Allocator, source: []const u8) !Machine.Program {

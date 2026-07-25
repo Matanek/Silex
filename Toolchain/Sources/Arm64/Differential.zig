@@ -24,6 +24,7 @@ fn compare(
         native_arguments[index] = switch (argument) {
             .integer => |value| value,
             .boolean => |value| @intFromBool(value),
+            .string => return error.UnsupportedType,
             .void => return error.TestUnexpectedResult,
         };
     }
@@ -43,6 +44,7 @@ fn compare(
     switch (reference) {
         .integer => |value| try std.testing.expectEqual(value, native.value),
         .boolean => |value| try std.testing.expectEqual(@as(i64, @intFromBool(value)), native.value),
+        .string => return error.UnsupportedType,
         .void => try std.testing.expectEqual(@as(i64, 0), native.value),
     }
 }

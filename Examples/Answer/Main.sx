@@ -3,5 +3,5 @@ func answer() int {
 }
 
 func main() {
-    answer()
+    print(answer())
 }

@@ -1,5 +1,7 @@
 const std = @import("std");
 const Types = @import("Types.zig");
+const Source = @import("Source.zig");
+const Strings = @import("Strings.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -24,6 +26,12 @@ pub const BinaryOperator = enum {
     multiply,
     divide,
     remainder,
+    less,
+    less_equal,
+    greater,
+    greater_equal,
+    equal,
+    not_equal,
 
     fn name(self: BinaryOperator) []const u8 {
         return switch (self) {
@@ -32,6 +40,12 @@ pub const BinaryOperator = enum {
             .multiply => "mul",
             .divide => "div",
             .remainder => "rem",
+            .less => "lt",
+            .less_equal => "le",
+            .greater => "gt",
+            .greater_equal => "ge",
+            .equal => "eq",
+            .not_equal => "ne",
         };
     }
 };
@@ -39,9 +53,13 @@ pub const BinaryOperator = enum {
 pub const Instruction = union(enum) {
     constant_int: ConstantInt,
     constant_bool: ConstantBool,
+    constant_str: ConstantStr,
     unary: Unary,
     binary: Binary,
     call: Call,
+    print: ValueId,
+    assert: Assert,
+    panic: Panic,
     return_value: ValueId,
     return_void,
 
@@ -53,6 +71,11 @@ pub const Instruction = union(enum) {
     pub const ConstantBool = struct {
         result: ValueId,
         value: bool,
+    };
+
+    pub const ConstantStr = struct {
+        result: ValueId,
+        value: []const u8,
     };
 
     pub const Unary = struct {
@@ -73,6 +96,17 @@ pub const Instruction = union(enum) {
         function: FunctionId,
         arguments: []const ValueId,
     };
+
+    pub const Assert = struct {
+        condition: ValueId,
+        message: ValueId,
+        position: Source.Position,
+    };
+
+    pub const Panic = struct {
+        message: ValueId,
+        position: Source.Position,
+    };
 };
 
 pub const Function = struct {
@@ -85,6 +119,7 @@ pub const Function = struct {
 
 pub const Program = struct {
     functions: []const Function,
+    files: []const []const u8 = &.{"<source>"},
 };
 
 pub fn writeText(allocator: Allocator, program: Program) Error![]u8 {
@@ -130,6 +165,11 @@ fn writeInstruction(
             try appendResult(output, allocator, function, constant.result);
             try output.appendSlice(allocator, if (constant.value) "const true" else "const false");
         },
+        .constant_str => |constant| {
+            try appendResult(output, allocator, function, constant.result);
+            try output.appendSlice(allocator, "const ");
+            try Strings.appendQuoted(output, allocator, constant.value);
+        },
         .unary => |unary| {
             try appendResult(output, allocator, function, unary.result);
             try output.appendSlice(allocator, unary.operator.name());
@@ -155,6 +195,20 @@ fn writeInstruction(
                 try appendValueChecked(output, allocator, function, argument);
             }
             try output.append(allocator, ')');
+        },
+        .print => |value| {
+            try output.appendSlice(allocator, "print ");
+            try appendValueChecked(output, allocator, function, value);
+        },
+        .assert => |assertion| {
+            try output.appendSlice(allocator, "assert ");
+            try appendValueChecked(output, allocator, function, assertion.condition);
+            try output.appendSlice(allocator, ", ");
+            try appendValueChecked(output, allocator, function, assertion.message);
+        },
+        .panic => |panic_value| {
+            try output.appendSlice(allocator, "panic ");
+            try appendValueChecked(output, allocator, function, panic_value.message);
         },
         .return_value => |value| {
             try output.appendSlice(allocator, "return ");

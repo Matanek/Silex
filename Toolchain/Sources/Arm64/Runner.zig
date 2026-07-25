@@ -79,6 +79,7 @@ pub fn invoke(
         0 => .success,
         1 => .integer_overflow,
         2 => .division_by_zero,
+        3 => .runtime_failure,
         else => return error.InvalidNativeStatus,
     };
     return .{ .value = raw.value, .status = status };

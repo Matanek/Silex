@@ -70,10 +70,13 @@ fn runSource(init: std.process.Init, allocator: std.mem.Allocator, args: []const
         const text = try Ir.writeText(allocator, compilation.ir);
         try Io.File.stdout().writeStreamingAll(init.io, text);
     }
-    return Interpreter.run(allocator, compilation.ir) catch |err| {
+    const result = Interpreter.runCapture(allocator, compilation.ir) catch |err| {
         std.debug.print("silex: runtime error: {t}\n", .{err});
         return 1;
     };
+    try Io.File.stdout().writeStreamingAll(init.io, result.stdout);
+    try Io.File.stderr().writeStreamingAll(init.io, result.stderr);
+    return result.exit_code;
 }
 
 fn compileNative(init: std.process.Init, allocator: std.mem.Allocator, args: []const []const u8) !u8 {
@@ -152,6 +155,7 @@ test {
     _ = @import("MacOS/MachO.zig");
     _ = @import("Composition.zig");
     _ = @import("NativeComposition.zig");
+    _ = @import("NativeEffects.zig");
     _ = @import("Modules.zig");
     _ = @import("Packages.zig");
     _ = @import("Lexer.zig");
