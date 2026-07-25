@@ -2,6 +2,7 @@ pub const Position = struct {
     offset: usize,
     line: usize,
     column: usize,
+    file: usize = 0,
 };
 
 pub const Diagnostic = struct {
