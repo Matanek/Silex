@@ -83,6 +83,7 @@ pub const Parser = struct {
         if (self.current.tag != .identifier) return self.fail("expected structure name");
         const name = self.current.lexeme;
         const name_position = self.current.position;
+        if (std.mem.eql(u8, name, "Result")) return self.failAt(name_position, "'Result' is a reserved intrinsic type name");
         _ = try self.internTypeName(name);
         try self.advance();
         const type_parameters = try Generics.parseTypeParameters(self);
@@ -187,6 +188,7 @@ pub const Parser = struct {
         if (self.current.tag != .identifier) return self.fail("expected function name");
         const name = self.current.lexeme;
         const name_position = self.current.position;
+        if (std.mem.eql(u8, name, "Result")) return self.failAt(name_position, "'Result' is a reserved intrinsic type name");
         try self.advance();
         const type_parameters = try Generics.parseTypeParameters(self);
         const enclosing_type_parameters = self.type_parameters;

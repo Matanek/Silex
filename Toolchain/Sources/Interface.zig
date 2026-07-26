@@ -199,7 +199,7 @@ pub fn buildMappedGenerics(
     var functions: std.ArrayList(Function) = .empty;
     var enums: std.ArrayList(Enum) = .empty;
     for (program.enums) |enumeration| {
-        if (!enumeration.is_public) continue;
+        if (!enumeration.is_public or std.mem.eql(u8, enumeration.name, "Result")) continue;
         const variants = try allocator.alloc(EnumVariant, enumeration.variants.len);
         for (enumeration.variants, 0..) |variant, variant_index| {
             const associated_types = try allocator.alloc(Types.Type, variant.associated_types.len);

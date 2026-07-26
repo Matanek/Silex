@@ -1,6 +1,7 @@
 const std = @import("std");
 const Ast = @import("../Ast.zig");
 const Numeric = @import("../Numeric.zig");
+const Result = @import("../Intrinsics/Result.zig");
 const Source = @import("../Source.zig");
 
 const Allocator = std.mem.Allocator;
@@ -90,6 +91,7 @@ pub const Specializer = struct {
             var locals: std.ArrayList(Binding) = .empty;
             for (function.parameters) |parameter| try locals.append(self.allocator, .{ .name = parameter.name, .type = parameter.type });
             function.parameters = try self.rewriteParameters(function.parameters, &.{}, &locals);
+            function.return_type = try self.rewriteType(function.return_type, &.{}, function.name_position);
             function.statements = try self.rewriteStatements(function.statements, &.{}, &locals);
             self.functions.items[function_index] = function;
         }
@@ -160,7 +162,7 @@ pub const Specializer = struct {
             for (variant.associated_types, 0..) |associated_type, type_index| {
                 associated_types[type_index] = try self.rewriteType(associated_type, arguments, variant.position);
             }
-            variants[variant_index].associated_types = associated_types;
+            variants[variant_index].associated_types = if (Result.hasVoidSuccess(enumeration, variant, associated_types)) &.{} else associated_types;
         }
         enumeration.variants = variants;
         self.enums.items[enum_index] = enumeration;
@@ -803,7 +805,9 @@ pub const Specializer = struct {
             );
             return self.fail(position, message);
         }
-        for (arguments) |argument| if (argument == .void) return self.fail(position, "'void' is not a generic type argument");
+        if (std.mem.eql(u8, template.name, Result.name)) {
+            if (!Result.acceptsArguments(template, arguments)) return self.fail(position, "the error type of 'Result' cannot be 'void'");
+        } else for (arguments) |argument| if (argument == .void) return self.fail(position, "'void' is not a generic type argument");
         for (self.enum_specializations.items) |specialization| {
             if (!samePosition(specialization.template_position, template.name_position)) continue;
             if (std.mem.eql(Ast.Type, specialization.arguments, arguments)) return specialization.type;

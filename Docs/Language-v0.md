@@ -353,6 +353,36 @@ reexports preserve identity. `void` arguments, missing or wrong arity,
 arguments on a concrete enum and generic raw enums are rejected. Generic enums
 do not add variant-level parameters, methods, conformance or raw conversion.
 
+## Recoverable result values
+
+`Result<T,E>` is an intrinsic generic enum available without `use`. It is the
+canonical representation of an expected, recoverable failure and has exactly
+two variants: `success(T)` and `failure(E)`.
+
+```sx
+enum ParseError { invalid(str) }
+
+func parse(text:str) Result<int, ParseError> {
+    if text.count() == 0 {
+        return Result<int, ParseError>.failure(ParseError.invalid("empty"))
+    }
+    return Result<int, ParseError>.success(42)
+}
+```
+
+Construction is explicit and ordinary exhaustive `match` handles both
+variants. There is no implicit conversion from `T` or `E`, default success,
+field or intrinsic method. `Result` retains the copy, composition and nominal
+identity rules of a specialized enum.
+
+`Result<void,E>` is the sole generic specialization that accepts `void`. Its
+success is constructed with `success()` and matched with `success` without a
+binding. The error type must always have a value: `Result<T,void>` and
+`Result<void,void>` are invalid. The name `Result` is reserved and cannot be
+introduced by a declaration or a type or module alias. Propagation and error
+transformation are separate language operations described below when they are
+available.
+
 An enum may instead declare `int` or `str` as a raw type. Every variant then
 provides exactly one literal of that type:
 

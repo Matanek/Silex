@@ -9,6 +9,7 @@ pub fn parse(parser: anytype, is_public: bool, is_internal: bool) !Ast.Enum {
     if (parser.current.tag != .identifier) return parser.fail("expected enum name");
     const name = parser.current.lexeme;
     const name_position = parser.current.position;
+    if (std.mem.eql(u8, name, "Result")) return parser.failAt(name_position, "'Result' is a reserved intrinsic type name");
     _ = try parser.internTypeName(name);
     try parser.advance();
     const type_parameters = try Generics.parseTypeParameters(parser);

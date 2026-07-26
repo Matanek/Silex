@@ -37,6 +37,7 @@ pub fn parse(parser: anytype, is_public: bool) !Ast.Use {
         if (parser.current.tag != .identifier) return parser.fail("expected alias after 'as'");
         alias = parser.current.lexeme;
         alias_position = parser.current.position;
+        if (std.mem.eql(u8, alias.?, "Result")) return parser.failAt(alias_position.?, "'Result' is a reserved intrinsic type name");
         try parser.advance();
     }
     if (is_public and alias == null) return parser.failAt(position, "public use requires an explicit alias");
@@ -55,6 +56,7 @@ fn finishTypeAlias(parser: anytype, position: @import("../Source.zig").Position,
     if (parser.current.tag != .identifier) return parser.fail("expected alias after 'as'");
     const alias = parser.current.lexeme;
     const alias_position = parser.current.position;
+    if (std.mem.eql(u8, alias, "Result")) return parser.failAt(alias_position, "'Result' is a reserved intrinsic type name");
     try parser.advance();
     try parser.expectStatementTerminator();
     return .{

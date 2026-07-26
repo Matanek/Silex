@@ -1,6 +1,7 @@
 const std = @import("std");
 const Ast = @import("Ast.zig");
 const GenericSpecializer = @import("Generics/Specializer.zig").Specializer;
+const Result = @import("Intrinsics/Result.zig");
 const Ir = @import("Ir.zig");
 const ParserModule = @import("Parser.zig");
 const Semantic = @import("Semantic/Analyzer.zig");
@@ -28,6 +29,7 @@ pub const Frontend = struct {
             self.diagnostic = parser.diagnostic;
             return err;
         };
+        ast = try Result.install(self.allocator, ast);
         var specializer = GenericSpecializer.init(self.allocator);
         ast = specializer.specialize(ast) catch |err| {
             self.diagnostic = specializer.diagnostic;
@@ -49,6 +51,7 @@ pub const Frontend = struct {
             return err;
         };
         if (ast.uses.len != 0) return;
+        ast = try Result.install(self.allocator, ast);
         var specializer = GenericSpecializer.init(self.allocator);
         ast = specializer.specialize(ast) catch |err| {
             self.diagnostic = specializer.diagnostic;
