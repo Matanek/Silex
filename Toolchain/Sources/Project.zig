@@ -589,7 +589,7 @@ pub const Compiler = struct {
             },
             .conversion => |conversion| try self.activateExpression(module, conversion.operand),
             .string_count => |operand| try self.activateExpression(module, operand),
-            .sequence_literal => |values| for (values) |value| try self.activateExpression(module, value),
+            .sequence_literal => |literal| for (literal.values) |value| try self.activateExpression(module, value),
             .index_access => |access| {
                 try self.activateExpression(module, access.base);
                 try self.activateExpression(module, access.index);
@@ -801,7 +801,10 @@ pub const Compiler = struct {
 
     fn collectionCanonicalName(self: *Compiler, module: usize, collection: Ast.Collection) Error![]const u8 {
         const element = try self.canonicalTypeSpelling(module, collection.element);
-        return std.fmt.allocPrint(self.allocator, "{s}[{d}]", .{ element, collection.length.? });
+        return if (collection.length) |length|
+            std.fmt.allocPrint(self.allocator, "{s}[{d}]", .{ element, length })
+        else
+            std.fmt.allocPrint(self.allocator, "{s}[]", .{element});
     }
 
     fn canonicalTypeSpelling(self: *Compiler, module: usize, type_value: Ast.Type) Error![]const u8 {
@@ -1447,7 +1450,10 @@ pub const Compiler = struct {
                 try self.rewriteExpression(module, conversion.operand, type_map);
             },
             .string_count => |operand| try self.rewriteExpression(module, operand, type_map),
-            .sequence_literal => |values| for (values) |value| try self.rewriteExpression(module, value, type_map),
+            .sequence_literal => |*literal| {
+                if (literal.inferred_type) |type_value| literal.inferred_type = GenericTypes.remap(type_value, type_map, self.generic_type_maps[module]);
+                for (literal.values) |value| try self.rewriteExpression(module, value, type_map);
+            },
             .index_access => |access| {
                 try self.rewriteExpression(module, access.base, type_map);
                 try self.rewriteExpression(module, access.index, type_map);

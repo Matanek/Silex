@@ -49,7 +49,7 @@ test "diagnose fixed array type literal index and mutability errors" {
     );
     try expectCompileError("func main() { let values:int[2] = [1, 2]; print(values[true]) }", "collection index expects 'int', found 'bool'");
     try expectCompileError("func main() { let values:int[2] = [1, 2]; values[0] = 3 }", "cannot assign to immutable variable 'values'");
-    try expectCompileError("func main() { let values = [] }", "array literal requires an expected fixed array type");
+    try expectCompileError("func main() { let values = [] }", "empty or non-fundamental list literal requires an expected collection type");
 }
 
 test "report fixed array bounds without partial execution" {

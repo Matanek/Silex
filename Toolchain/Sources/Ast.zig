@@ -48,7 +48,7 @@ pub const Expression = struct {
         binary: Binary,
         conversion: Conversion,
         string_count: *Expression,
-        sequence_literal: []const *Expression,
+        sequence_literal: SequenceLiteral,
         index_access: IndexAccess,
         match_expression: Match,
     };
@@ -127,6 +127,11 @@ pub const Expression = struct {
         base: *Expression,
         index: *Expression,
         bracket_position: Source.Position,
+    };
+
+    pub const SequenceLiteral = struct {
+        values: []const *Expression,
+        inferred_type: ?Type = null,
     };
 
     pub const StringPart = union(enum) {

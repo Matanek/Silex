@@ -302,6 +302,27 @@ test "native fixed arrays match reference reads writes copies and bounds" {
     }
 }
 
+test "native dynamic lists match reference construction copies and bounds" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const sources = [_][]const u8{
+        "func changed(values:int[]) int[] { var copy = values; copy[0] = 9; return copy } func main() { let values = [1, 2, 3]; let copy = changed(values); print(values.count(), values[-1], copy[0]) }",
+        "func main() { let values = [1, 2]; print(values[-3]) }",
+    };
+    for (sources) |source| {
+        var frontend = Frontend.Frontend.init(allocator);
+        var compilation = try frontend.compile(source);
+        compilation.ir.files = &.{"Main.sx"};
+        const reference = try Interpreter.runCapture(allocator, compilation.ir);
+        const native = try runMachine(allocator, try Lower.lower(allocator, compilation.ir));
+        try std.testing.expectEqual(reference.exit_code, exitCode(native));
+        try std.testing.expectEqualSlices(u8, reference.stdout, native.stdout);
+        try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
+    }
+}
+
 test "native optional transport matches the reference interpreter" {
     if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);

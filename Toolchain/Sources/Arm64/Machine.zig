@@ -64,10 +64,12 @@ pub const Instruction = union(enum) {
     copy: Copy,
     copy_range: CopyRange,
     aggregate_init: AggregateInit,
+    list_init: ListInit,
     enum_init: EnumInit,
     enum_test: EnumTest,
     collection_load: CollectionLoad,
     collection_replace: CollectionReplace,
+    collection_count: CollectionCount,
     aggregate_equal: AggregateEqual,
     convert: Convert,
     format_value: FormatValue,
@@ -139,6 +141,12 @@ pub const Instruction = union(enum) {
         fields: []const Span,
     };
 
+    pub const ListInit = struct {
+        result: Slot,
+        values: []const Span,
+        element_width: u12,
+    };
+
     pub const EnumInit = struct {
         result: Span,
         tag: u64,
@@ -159,6 +167,7 @@ pub const Instruction = union(enum) {
         collection: Span,
         index: Slot,
         count: u32,
+        dynamic: bool = false,
         header: usize,
         tail: usize,
     };
@@ -169,8 +178,14 @@ pub const Instruction = union(enum) {
         index: Slot,
         replacement: Span,
         count: u32,
+        dynamic: bool = false,
         header: usize,
         tail: usize,
+    };
+
+    pub const CollectionCount = struct {
+        result: Slot,
+        collection: Slot,
     };
 
     pub const AggregateEqual = struct {
@@ -338,6 +353,14 @@ pub fn validate(program: Program) Error!void {
                 }
                 if (width != value.result.width or !value.result.aggregate) return error.InvalidMachineProgram;
             },
+            .list_init => |value| {
+                try requireSlot(function, value.result);
+                if (value.element_width == 0) return error.InvalidMachineProgram;
+                for (value.values) |item| {
+                    try requireSpan(function, item);
+                    if (item.width != value.element_width) return error.InvalidMachineProgram;
+                }
+            },
             .enum_init => |value| {
                 try requireSpan(function, value.result);
                 if (!value.result.aggregate or value.result.width == 0) return error.InvalidMachineProgram;
@@ -361,7 +384,8 @@ pub fn validate(program: Program) Error!void {
                 try requireSpan(function, value.result);
                 try requireSpan(function, value.collection);
                 try requireSlot(function, value.index);
-                if (!value.collection.aggregate or value.collection.width != value.result.width * value.count or
+                if ((!value.dynamic and (!value.collection.aggregate or value.collection.width != value.result.width * value.count)) or
+                    (value.dynamic and (value.collection.aggregate or value.collection.width != 1)) or
                     value.header >= program.strings.len or value.tail >= program.strings.len) return error.InvalidMachineProgram;
             },
             .collection_replace => |value| {
@@ -369,9 +393,14 @@ pub fn validate(program: Program) Error!void {
                 try requireSpan(function, value.collection);
                 try requireSlot(function, value.index);
                 try requireSpan(function, value.replacement);
-                if (!value.result.aggregate or value.result.width != value.collection.width or
-                    value.collection.width != value.replacement.width * value.count or
+                if ((!value.dynamic and (!value.result.aggregate or value.result.width != value.collection.width or
+                    value.collection.width != value.replacement.width * value.count)) or
+                    (value.dynamic and (value.result.aggregate or value.result.width != 1 or value.collection.width != 1)) or
                     value.header >= program.strings.len or value.tail >= program.strings.len) return error.InvalidMachineProgram;
+            },
+            .collection_count => |value| {
+                try requireSlot(function, value.result);
+                try requireSlot(function, value.collection);
             },
             .aggregate_equal => |value| {
                 try requireSlot(function, value.result);

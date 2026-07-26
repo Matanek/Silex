@@ -440,10 +440,13 @@ pub const Specializer = struct {
                 break :value .{ .conversion = copy };
             },
             .string_count => |operand| .{ .string_count = try self.rewriteExpression(operand, arguments, locals) },
-            .sequence_literal => |values| value: {
-                const copy = try self.allocator.alloc(*Ast.Expression, values.len);
-                for (values, 0..) |item, index| copy[index] = try self.rewriteExpression(item, arguments, locals);
-                break :value .{ .sequence_literal = copy };
+            .sequence_literal => |literal| value: {
+                const copy = try self.allocator.alloc(*Ast.Expression, literal.values.len);
+                for (literal.values, 0..) |item, index| copy[index] = try self.rewriteExpression(item, arguments, locals);
+                break :value .{ .sequence_literal = .{
+                    .values = copy,
+                    .inferred_type = if (literal.inferred_type) |type_value| try self.rewriteType(type_value, arguments, expression.position) else null,
+                } };
             },
             .index_access => |access| value: {
                 var copy = access;
@@ -1094,7 +1097,7 @@ pub const Specializer = struct {
             },
             .conversion => |conversion| conversion.target,
             .string_count => .int,
-            .sequence_literal => null,
+            .sequence_literal => |literal| literal.inferred_type,
             .index_access => |access| index_type: {
                 const base = self.inferExpressionType(access.base, locals) orelse break :index_type null;
                 const structure = self.structureForType(base) orelse break :index_type null;
@@ -1330,7 +1333,10 @@ fn remapExpressionTypes(expression: *Ast.Expression, map: []const ?Ast.Type) voi
             remapExpressionTypes(conversion.operand, map);
         },
         .string_count => |operand| remapExpressionTypes(operand, map),
-        .sequence_literal => |values| for (values) |value| remapExpressionTypes(value, map),
+        .sequence_literal => |*literal| {
+            if (literal.inferred_type) |type_value| literal.inferred_type = remapConcreteType(type_value, map);
+            for (literal.values) |value| remapExpressionTypes(value, map);
+        },
         .index_access => |access| {
             remapExpressionTypes(access.base, map);
             remapExpressionTypes(access.index, map);
