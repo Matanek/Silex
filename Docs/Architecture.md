@@ -65,6 +65,10 @@ open Silex document
   structured indices; module interfaces expose only the nominal identity and
   variant signatures. Target lowering may choose a tag and payload layout, but
   neither is a source-visible field, conversion, ABI or stable IR format.
+- Exhaustive expression matches lower their once-evaluated subject to explicit
+  variant tests, typed payload extractions and ordinary CFG branches. Every
+  branch copies its exact-typed result into the merge value; the portable IR
+  does not expose a source tag field or apply an implicit convergence cast.
 - Optional values remain typed in portable IR through explicit `optional.null`
   and `optional.some` instructions. A branch-local presence proof emits an
   internal `optional.unwrap` only on the proven control-flow edge. Target

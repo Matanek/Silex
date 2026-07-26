@@ -46,6 +46,7 @@ pub const Expression = struct {
         binary: Binary,
         conversion: Conversion,
         string_count: *Expression,
+        match_expression: Match,
     };
 
     pub const Call = struct {
@@ -69,6 +70,24 @@ pub const Expression = struct {
         name_position: Source.Position,
         name: []const u8,
         safe: bool = false,
+    };
+
+    pub const MatchBinding = struct {
+        position: Source.Position,
+        name: []const u8,
+        mutable: bool = false,
+    };
+
+    pub const MatchBranch = struct {
+        position: Source.Position,
+        variant: []const u8,
+        bindings: []const MatchBinding = &.{},
+        value: *Expression,
+    };
+
+    pub const Match = struct {
+        subject: *Expression,
+        branches: []const MatchBranch,
     };
 
     pub const Unary = struct {

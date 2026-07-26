@@ -130,6 +130,25 @@ fn lowerInstruction(
                 .values = values,
             } };
         },
+        .enum_test => |test_value| .{ .enum_test = .{
+            .result = layout.values[test_value.result].start,
+            .operand = layout.values[test_value.operand],
+            .tag = test_value.variant,
+        } },
+        .enum_payload => |payload| enum_payload: {
+            if (payload.enumeration >= program.enums.len) return error.InvalidMachineProgram;
+            const enumeration = program.enums[payload.enumeration];
+            if (payload.variant >= enumeration.variants.len) return error.InvalidMachineProgram;
+            const variant = enumeration.variants[payload.variant];
+            if (payload.index >= variant.associated_types.len) return error.InvalidMachineProgram;
+            var offset: usize = 1;
+            for (variant.associated_types[0..payload.index]) |associated_type| offset += try leafCount(program, associated_type);
+            var operand = layout.values[payload.operand];
+            operand.start = try Machine.checkedSlot(@as(usize, operand.start) + offset);
+            operand.width = layout.values[payload.result].width;
+            operand.aggregate = layout.values[payload.result].aggregate;
+            break :enum_payload lowerCopy(layout.values[payload.result], operand);
+        },
         .field_load => |load| field: {
             const base_type = function.value_types[load.base];
             const structure_index = base_type.structureIndex() orelse return error.InvalidMachineProgram;

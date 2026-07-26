@@ -25,6 +25,12 @@ pub fn find(self: anytype, name: []const u8) ?usize {
     return null;
 }
 
+pub fn findByType(self: anytype, type_value: Ast.Type) ?usize {
+    const type_index = type_value.structureIndex() orelse return null;
+    for (self.enums, 0..) |enumeration, index| if (enumeration.type_index == type_index) return index;
+    return null;
+}
+
 pub fn analyzeInitializer(self: anytype, builder: anytype, call: Ast.Expression.Call, enum_index: usize) !Model.TypedValue {
     const enumeration = self.program.enums[enum_index];
     if (enumeration.is_internal and call.name_position.file != enumeration.position.file) {

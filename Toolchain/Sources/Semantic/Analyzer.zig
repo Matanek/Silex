@@ -10,6 +10,7 @@ const Model = @import("Model.zig");
 const Methods = @import("Methods.zig");
 const Control = @import("Control.zig");
 const Enums = @import("Enums.zig");
+const Matches = @import("Matches.zig");
 const Support = @import("Support.zig");
 const Types = @import("../Types.zig");
 
@@ -472,6 +473,7 @@ pub const Analyzer = struct {
             .binary => |binary| self.analyzeBinary(builder, binary, expected),
             .conversion => |conversion| self.analyzeConversion(builder, conversion),
             .string_count => |operand| self.analyzeStringCount(builder, operand),
+            .match_expression => |match_value| Matches.analyze(self, builder, match_value),
         };
         if (expected) |target| return self.coerce(builder, value, target, expression.position);
         return value;
@@ -604,7 +606,7 @@ pub const Analyzer = struct {
         else if (shift)
             left.type.isInteger() and !left.type.isSignedInteger() and right.type.isInteger()
         else if (equality)
-            same_numeric or (left.type == right.type and self.isComparable(left.type))
+            same_numeric or (left.type == right.type and Support.isComparable(self, left.type))
         else
             same_numeric and (!left.type.isFloat() or binary.operator != .remainder);
         if (!valid) {
@@ -823,17 +825,6 @@ pub const Analyzer = struct {
             if (index < self.structures.len) return self.structures[index].name;
         }
         return type_value.name();
-    }
-
-    fn isComparable(self: *Analyzer, type_value: Types.Type) bool {
-        if (type_value.optionalChild()) |child| return self.isComparable(child);
-        if (type_value.structureIndex()) |index| {
-            for (self.structures[index].fields) |field| {
-                if (!self.isComparable(field.type)) return false;
-            }
-            return true;
-        }
-        return type_value != .void;
     }
 
     fn analyzeFieldAccess(self: *Analyzer, builder: *FunctionBuilder, access: Ast.Expression.FieldAccess) AnalyzeError!TypedValue {
