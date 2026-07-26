@@ -267,6 +267,12 @@ pub const TypeParameter = struct {
     name: []const u8,
 };
 
+pub const GenericType = struct {
+    position: Source.Position,
+    base: Type,
+    arguments: []const Type,
+};
+
 pub const StructureField = struct {
     is_public: bool = true,
     is_internal: bool = false,
@@ -348,6 +354,7 @@ pub const Function = struct {
 pub const Program = struct {
     uses: []const Use = &.{},
     type_names: []const []const u8 = &.{},
+    generic_types: []const GenericType = &.{},
     structures: []const Structure = &.{},
     enums: []const Enum = &.{},
     functions: []const Function,

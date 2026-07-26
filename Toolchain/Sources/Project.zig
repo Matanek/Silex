@@ -8,6 +8,8 @@ const Packages = @import("Packages.zig");
 const ParserModule = @import("Parser.zig");
 const Reexports = @import("Project/Reexports.zig");
 const TypeAliases = @import("Project/TypeAliases.zig");
+const GenericTypes = @import("Project/GenericTypes.zig");
+const Paths = @import("Project/Paths.zig");
 const Semantic = @import("Semantic/Analyzer.zig");
 const Source = @import("Source.zig");
 
@@ -37,6 +39,7 @@ pub const Compiler = struct {
     files: []const []const u8 = &.{},
     entry_module: usize = 0,
     diagnostic: ?Source.Diagnostic = null,
+    generic_type_maps: []const []const Ast.Type = &.{},
 
     pub fn init(allocator: Allocator, io: Io) Compiler {
         return .{ .allocator = allocator, .io = io };
@@ -52,7 +55,7 @@ pub const Compiler = struct {
             return self.fail(.{ .offset = 0, .line = 1, .column = 1 }, "input must be a .sx source file");
         }
 
-        const root_path = try findProjectRoot(self.allocator, self.io, input_path);
+        const root_path = try Paths.findRoot(self.allocator, self.io, input_path);
         var package_resolver = Packages.Resolver.init(self.allocator, self.io, self.global_packages_root);
         self.packages = package_resolver.resolve(root_path) catch |err| switch (err) {
             error.InvalidPackageGraph => return self.fail(
@@ -203,15 +206,17 @@ pub const Compiler = struct {
     }
 
     fn resolveUse(self: *Compiler, source_module: usize, use: Ast.Use) Error!Binding {
-        if (use.type_target) |type_target| return .{
-            .alias = use.alias.?,
-            .path = "",
-            .module = null,
-            .declaration = null,
-            .type_alias = type_target,
-            .is_public = use.is_public,
-            .position = use.position,
-        };
+        if (use.type_target) |type_target| {
+            return .{
+                .alias = use.alias.?,
+                .path = "",
+                .module = self.genericAliasDependency(source_module, type_target),
+                .declaration = null,
+                .type_alias = type_target,
+                .is_public = use.is_public,
+                .position = use.position,
+            };
+        }
         const owner = self.index.providers[source_module].owner;
         if (self.findAccessibleModule(use.path, owner)) |module| {
             return .{
@@ -273,6 +278,20 @@ pub const Compiler = struct {
 
         const message = try std.fmt.allocPrint(self.allocator, "unknown module or declaration '{s}'", .{use.path});
         return self.fail(use.position, message);
+    }
+
+    fn genericAliasDependency(self: *Compiler, source_module: usize, type_value: Ast.Type) ?usize {
+        const direct = type_value.optionalChild() orelse type_value;
+        const generic_index = direct.genericInstantiationIndex() orelse return null;
+        const program = self.units[source_module].program orelse return null;
+        if (generic_index >= program.generic_types.len) return null;
+        const base_index = program.generic_types[generic_index].base.structureIndex() orelse return null;
+        if (base_index >= program.type_names.len) return null;
+        const target = self.longestModulePrefix(
+            program.type_names[base_index],
+            self.index.providers[source_module].owner,
+        ) orelse return null;
+        return if (target.module == source_module) null else target.module;
     }
 
     const DeclarationKind = Reexports.DeclarationKind;
@@ -823,7 +842,7 @@ pub const Compiler = struct {
                 const target = if (try self.enumTarget(module, name)) |enumeration| enum_target: {
                     try self.requirePublicEnum(module, enumeration, expressionPosition(module));
                     break :enum_target enumeration;
-                } else try self.resolveStructure(module, name, expressionPosition(module));
+                } else if (self.genericAliasBaseTarget(module, index, name)) |generic_target| generic_target else try self.resolveStructure(module, name, expressionPosition(module));
                 const canonical = try structureCanonicalName(
                     self.allocator,
                     self.index.providers[target.module].name,
@@ -834,6 +853,13 @@ pub const Compiler = struct {
             type_maps[module] = map;
             try self.validatePublicTypeExposure(module);
         }
+        const generic_composition = try GenericTypes.compose(self.allocator, self.units, type_maps);
+        self.generic_type_maps = generic_composition.maps;
+        for (type_maps, 0..) |type_map, module| {
+            for (@constCast(type_map)) |*type_value| {
+                type_value.* = GenericTypes.remap(type_value.*, &.{}, self.generic_type_maps[module]);
+            }
+        }
 
         var structures: std.ArrayList(Ast.Structure) = .empty;
         var enums: std.ArrayList(Ast.Enum) = .empty;
@@ -842,6 +868,7 @@ pub const Compiler = struct {
             if (self.units[module].state != .loaded) continue;
             const program = self.units[module].program.?;
             const type_map = type_maps[module];
+            const generic_map = self.generic_type_maps[module];
             for (program.structures) |structure| {
                 var composed_structure = structure;
                 composed_structure.owner = provider.owner;
@@ -849,7 +876,7 @@ pub const Compiler = struct {
                 const fields = try self.allocator.alloc(Ast.StructureField, structure.fields.len);
                 for (structure.fields, 0..) |field, index| {
                     fields[index] = field;
-                    fields[index].type = remapType(field.type, type_map);
+                    fields[index].type = GenericTypes.remap(field.type, type_map, generic_map);
                     if (field.default) |value| try self.rewriteExpression(module, value, type_map);
                 }
                 composed_structure.fields = fields;
@@ -859,7 +886,7 @@ pub const Compiler = struct {
                     const parameters = try self.allocator.alloc(Ast.Parameter, constructor.parameters.len);
                     for (constructor.parameters, 0..) |parameter, parameter_index| {
                         parameters[parameter_index] = parameter;
-                        parameters[parameter_index].type = remapType(parameter.type, type_map);
+                        parameters[parameter_index].type = GenericTypes.remap(parameter.type, type_map, generic_map);
                         if (parameter.default) |value| try self.rewriteExpression(module, value, type_map);
                     }
                     constructors[constructor_index].parameters = parameters;
@@ -873,11 +900,11 @@ pub const Compiler = struct {
                     const parameters = try self.allocator.alloc(Ast.Parameter, method.parameters.len);
                     for (method.parameters, 0..) |parameter, parameter_index| {
                         parameters[parameter_index] = parameter;
-                        parameters[parameter_index].type = remapType(parameter.type, type_map);
+                        parameters[parameter_index].type = GenericTypes.remap(parameter.type, type_map, generic_map);
                         if (parameter.default) |value| try self.rewriteExpression(module, value, type_map);
                     }
                     methods[method_index].parameters = parameters;
-                    methods[method_index].return_type = remapType(method.return_type, type_map);
+                    methods[method_index].return_type = GenericTypes.remap(method.return_type, type_map, generic_map);
                     methods[method_index].statements = try self.rewriteStatements(module, method.statements, type_map);
                 }
                 composed_structure.methods = methods;
@@ -892,7 +919,7 @@ pub const Compiler = struct {
                     variants[variant_index] = variant;
                     const associated_types = try self.allocator.alloc(Ast.Type, variant.associated_types.len);
                     for (variant.associated_types, 0..) |associated_type, type_index| {
-                        associated_types[type_index] = remapType(associated_type, type_map);
+                        associated_types[type_index] = GenericTypes.remap(associated_type, type_map, generic_map);
                     }
                     variants[variant_index].associated_types = associated_types;
                 }
@@ -909,17 +936,18 @@ pub const Compiler = struct {
                 const parameters = try self.allocator.alloc(Ast.Parameter, function.parameters.len);
                 for (function.parameters, 0..) |parameter, index| {
                     parameters[index] = parameter;
-                    parameters[index].type = remapType(parameter.type, type_map);
+                    parameters[index].type = GenericTypes.remap(parameter.type, type_map, generic_map);
                     if (parameter.default) |value| try self.rewriteExpression(module, value, type_map);
                 }
                 composed.parameters = parameters;
-                composed.return_type = remapType(function.return_type, type_map);
+                composed.return_type = GenericTypes.remap(function.return_type, type_map, generic_map);
                 composed.statements = try self.rewriteStatements(module, function.statements, type_map);
                 try functions.append(self.allocator, composed);
             }
         }
         return .{ .program = .{
             .type_names = try type_names.toOwnedSlice(self.allocator),
+            .generic_types = generic_composition.types,
             .structures = try structures.toOwnedSlice(self.allocator),
             .enums = try enums.toOwnedSlice(self.allocator),
             .functions = try functions.toOwnedSlice(self.allocator),
@@ -939,7 +967,14 @@ pub const Compiler = struct {
             interface_by_module[module] = interfaces.items.len;
             try interfaces.append(
                 self.allocator,
-                try Interface.buildMapped(self.allocator, owner, provider.name, self.units[module].program.?, type_maps[module]),
+                try Interface.buildMappedGenerics(
+                    self.allocator,
+                    owner,
+                    provider.name,
+                    self.units[module].program.?,
+                    type_maps[module],
+                    self.generic_type_maps[module],
+                ),
             );
         }
         for (self.units, 0..) |unit, module| {
@@ -957,7 +992,10 @@ pub const Compiler = struct {
                         const previous = interfaces.items[destination_index].type_aliases;
                         const expanded = try self.allocator.alloc(Interface.TypeAlias, previous.len + 1);
                         @memcpy(expanded[0..previous.len], previous);
-                        expanded[previous.len] = .{ .name = binding.alias, .target = fundamental };
+                        expanded[previous.len] = .{
+                            .name = binding.alias,
+                            .target = GenericTypes.remap(fundamental, type_maps[module], self.generic_type_maps[module]),
+                        };
                         interfaces.items[destination_index].type_aliases = expanded;
                         continue;
                     },
@@ -1045,6 +1083,23 @@ pub const Compiler = struct {
             }
         }
         return interfaces.toOwnedSlice(self.allocator);
+    }
+
+    fn genericAliasBaseTarget(self: *Compiler, module: usize, type_index: usize, name: []const u8) ?CallTarget {
+        const program = self.units[module].program orelse return null;
+        var referenced = false;
+        for (program.generic_types) |generic| {
+            if (generic.base.structureIndex() == type_index) {
+                referenced = true;
+                break;
+            }
+        }
+        if (!referenced) return null;
+        const target = self.longestModulePrefix(name, self.index.providers[module].owner) orelse return null;
+        if (self.units[target.module].state != .loaded) return null;
+        if (findStructure(self.units[target.module].program.?, target.declaration) == null) return null;
+        self.requirePublicStructure(module, target, expressionPosition(module)) catch return null;
+        return target;
     }
 
     fn validatePublicTypeExposure(self: *Compiler, module: usize) Error!void {
@@ -1152,7 +1207,7 @@ pub const Compiler = struct {
         for (statements, 0..) |statement, index| rewritten[index] = switch (statement) {
             .variable_declaration => |declaration| variable: {
                 var value = declaration;
-                if (value.annotation) |annotation| value.annotation = remapType(annotation, type_map);
+                if (value.annotation) |annotation| value.annotation = GenericTypes.remap(annotation, type_map, self.generic_type_maps[module]);
                 if (value.initializer) |initializer| try self.rewriteExpression(module, initializer, type_map);
                 break :variable .{ .variable_declaration = value };
             },
@@ -1210,7 +1265,9 @@ pub const Compiler = struct {
             .call => |*call| {
                 call.owner = self.index.providers[module].owner;
                 const type_arguments = try self.allocator.alloc(Ast.Type, call.type_arguments.len);
-                for (call.type_arguments, 0..) |type_argument, index| type_arguments[index] = remapType(type_argument, type_map);
+                for (call.type_arguments, 0..) |type_argument, index| {
+                    type_arguments[index] = GenericTypes.remap(type_argument, type_map, self.generic_type_maps[module]);
+                }
                 call.type_arguments = type_arguments;
                 for (call.arguments) |argument| try self.rewriteExpression(module, argument, type_map);
                 for (call.named_arguments) |argument| try self.rewriteExpression(module, argument.value, type_map);
@@ -1264,7 +1321,7 @@ pub const Compiler = struct {
                 try self.rewriteExpression(module, binary.right, type_map);
             },
             .conversion => |*conversion| {
-                conversion.target = remapType(conversion.target, type_map);
+                conversion.target = GenericTypes.remap(conversion.target, type_map, self.generic_type_maps[module]);
                 try self.rewriteExpression(module, conversion.operand, type_map);
             },
             .string_count => |operand| try self.rewriteExpression(module, operand, type_map),
@@ -1416,29 +1473,7 @@ fn expressionPosition(module: usize) Source.Position {
     return .{ .offset = 0, .line = 1, .column = 1, .file = module };
 }
 
-fn remapType(type_value: Ast.Type, type_map: []const Ast.Type) Ast.Type {
-    if (type_value.optionalChild()) |child| return .optional(remapType(child, type_map));
-    const index = type_value.structureIndex() orelse return type_value;
-    return if (index < type_map.len) type_map[index] else type_value;
-}
-
 fn pathInside(path: []const u8, directory: []const u8) bool {
     if (!std.mem.startsWith(u8, path, directory) or path.len <= directory.len) return false;
     return path[directory.len] == std.fs.path.sep;
-}
-
-fn findProjectRoot(allocator: Allocator, io: Io, input_path: []const u8) Error![]const u8 {
-    var directory = std.fs.path.dirname(input_path) orelse ".";
-    while (true) {
-        const manifest = try std.fs.path.join(allocator, &.{ directory, "Package.json" });
-        if (fileExists(io, manifest)) return directory;
-        const next = std.fs.path.dirname(directory) orelse return std.fs.path.dirname(input_path) orelse ".";
-        if (std.mem.eql(u8, next, directory)) return std.fs.path.dirname(input_path) orelse ".";
-        directory = next;
-    }
-}
-
-fn fileExists(io: Io, path: []const u8) bool {
-    _ = Io.Dir.cwd().statFile(io, path, .{}) catch return false;
-    return true;
 }

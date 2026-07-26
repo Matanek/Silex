@@ -6,6 +6,7 @@ const Strings = @import("Strings.zig");
 const Matches = @import("Parser/Matches.zig");
 const EnumParser = @import("Parser/Enums.zig");
 const Generics = @import("Parser/Generics.zig");
+const Uses = @import("Parser/Uses.zig");
 
 const Allocator = std.mem.Allocator;
 const Token = LexerModule.Token;
@@ -20,6 +21,7 @@ pub const Parser = struct {
     started: bool = false,
     diagnostic: ?Source.Diagnostic = null,
     type_names: std.ArrayList([]const u8) = .empty,
+    generic_types: std.ArrayList(Ast.GenericType) = .empty,
     type_parameters: []const Ast.TypeParameter = &.{},
     match_depth: usize = 0,
 
@@ -39,14 +41,14 @@ pub const Parser = struct {
         var functions: std.ArrayList(Ast.Function) = .empty;
         while (self.current.tag != .end) {
             switch (self.current.tag) {
-                .keyword_use => try uses.append(self.allocator, try self.parseUse(false)),
+                .keyword_use => try uses.append(self.allocator, try Uses.parse(self, false)),
                 .keyword_struct => try structures.append(self.allocator, try self.parseStructure(false, false)),
                 .keyword_enum => try enums.append(self.allocator, try EnumParser.parse(self, false, false)),
                 .keyword_func => try functions.append(self.allocator, try self.parseFunction(false, false)),
                 .keyword_public => {
                     try self.advance();
                     switch (self.current.tag) {
-                        .keyword_use => try uses.append(self.allocator, try self.parseUse(true)),
+                        .keyword_use => try uses.append(self.allocator, try Uses.parse(self, true)),
                         .keyword_struct => try structures.append(self.allocator, try self.parseStructure(true, false)),
                         .keyword_enum => try enums.append(self.allocator, try EnumParser.parse(self, true, false)),
                         .keyword_func => try functions.append(self.allocator, try self.parseFunction(true, false)),
@@ -68,6 +70,7 @@ pub const Parser = struct {
         return .{
             .uses = try uses.toOwnedSlice(self.allocator),
             .type_names = try self.type_names.toOwnedSlice(self.allocator),
+            .generic_types = try self.generic_types.toOwnedSlice(self.allocator),
             .structures = try structures.toOwnedSlice(self.allocator),
             .enums = try enums.toOwnedSlice(self.allocator),
             .functions = try functions.toOwnedSlice(self.allocator),
@@ -82,6 +85,10 @@ pub const Parser = struct {
         const name_position = self.current.position;
         _ = try self.internTypeName(name);
         try self.advance();
+        const type_parameters = try Generics.parseTypeParameters(self);
+        const enclosing_type_parameters = self.type_parameters;
+        self.type_parameters = if (type_parameters.len == 0) enclosing_type_parameters else type_parameters;
+        defer self.type_parameters = enclosing_type_parameters;
         try self.expect(.left_brace, "expected '{' after structure name");
         var fields: std.ArrayList(Ast.StructureField) = .empty;
         var constructors: std.ArrayList(Ast.Constructor) = .empty;
@@ -137,6 +144,7 @@ pub const Parser = struct {
             .position = position,
             .name_position = name_position,
             .name = name,
+            .type_parameters = type_parameters,
             .fields = try fields.toOwnedSlice(self.allocator),
             .constructors = try constructors.toOwnedSlice(self.allocator),
             .methods = try methods.toOwnedSlice(self.allocator),
@@ -172,56 +180,6 @@ pub const Parser = struct {
         };
     }
 
-    fn parseUse(self: *Parser, is_public: bool) ParseError!Ast.Use {
-        const position = self.current.position;
-        try self.expect(.keyword_use, "expected 'use'");
-        if (isTypeToken(self.current.tag) and self.current.tag != .identifier) {
-            const type_target = try self.parseType();
-            try self.expect(.keyword_as, "type alias requires 'as'");
-            if (self.current.tag != .identifier) return self.fail("expected alias after 'as'");
-            const alias = self.current.lexeme;
-            const alias_position = self.current.position;
-            try self.advance();
-            try self.expectStatementTerminator();
-            return .{
-                .position = position,
-                .path = "",
-                .type_target = type_target,
-                .alias = alias,
-                .alias_position = alias_position,
-                .is_public = is_public,
-            };
-        }
-        if (self.current.tag != .identifier) return self.fail("expected module path after 'use'");
-        var path = self.current.lexeme;
-        try self.advance();
-        while (self.current.tag == .dot) {
-            try self.advance();
-            if (self.current.tag != .identifier) return self.fail("expected name after '.' in use path");
-            path = try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ path, self.current.lexeme });
-            try self.advance();
-        }
-
-        var alias: ?[]const u8 = null;
-        var alias_position: ?Source.Position = null;
-        if (self.current.tag == .keyword_as) {
-            try self.advance();
-            if (self.current.tag != .identifier) return self.fail("expected alias after 'as'");
-            alias = self.current.lexeme;
-            alias_position = self.current.position;
-            try self.advance();
-        }
-        if (is_public and alias == null) return self.failAt(position, "public use requires an explicit alias");
-        try self.expectStatementTerminator();
-        return .{
-            .position = position,
-            .path = path,
-            .alias = alias,
-            .alias_position = alias_position,
-            .is_public = is_public,
-        };
-    }
-
     fn parseFunction(self: *Parser, is_public: bool, is_internal: bool) ParseError!Ast.Function {
         const position = self.current.position;
         try self.expect(.keyword_func, "expected 'func'");
@@ -231,7 +189,7 @@ pub const Parser = struct {
         try self.advance();
         const type_parameters = try Generics.parseTypeParameters(self);
         const enclosing_type_parameters = self.type_parameters;
-        self.type_parameters = type_parameters;
+        self.type_parameters = if (type_parameters.len == 0) enclosing_type_parameters else type_parameters;
         defer self.type_parameters = enclosing_type_parameters;
         try self.expect(.left_parenthesis, "expected '(' after function name");
 
@@ -281,6 +239,7 @@ pub const Parser = struct {
     }
 
     pub fn parseType(self: *Parser) ParseError!Ast.Type {
+        const type_position = self.current.position;
         var result: Ast.Type = switch (self.current.tag) {
             .keyword_void => .void,
             .keyword_int => .int,
@@ -319,6 +278,10 @@ pub const Parser = struct {
             else => return self.fail("expected type name"),
         };
         try self.advance();
+        if (self.current.tag == .less) {
+            const arguments = try Generics.parseTypeArguments(self);
+            result = try self.internGenericType(type_position, result, arguments);
+        }
         if (self.current.tag == .question) {
             if (result == .void) return self.fail("'void?' is not a valid type");
             result = .optional(result);
@@ -328,30 +291,6 @@ pub const Parser = struct {
         return result;
     }
 
-    fn isTypeToken(tag: TokenTag) bool {
-        return switch (tag) {
-            .keyword_void,
-            .keyword_int,
-            .keyword_int8,
-            .keyword_int16,
-            .keyword_int32,
-            .keyword_int64,
-            .keyword_uint,
-            .keyword_uint8,
-            .keyword_uint16,
-            .keyword_uint32,
-            .keyword_uint64,
-            .keyword_bool,
-            .keyword_float,
-            .keyword_float32,
-            .keyword_float64,
-            .keyword_str,
-            .identifier,
-            => true,
-            else => false,
-        };
-    }
-
     pub fn internTypeName(self: *Parser, name: []const u8) Allocator.Error!Ast.Type {
         for (self.type_names.items, 0..) |existing, index| {
             if (std.mem.eql(u8, existing, name)) return .structure(index);
@@ -359,6 +298,15 @@ pub const Parser = struct {
         const index = self.type_names.items.len;
         try self.type_names.append(self.allocator, name);
         return .structure(index);
+    }
+
+    pub fn internGenericType(self: *Parser, position: Source.Position, base: Ast.Type, arguments: []const Ast.Type) Allocator.Error!Ast.Type {
+        for (self.generic_types.items, 0..) |existing, index| {
+            if (existing.base == base and std.mem.eql(Ast.Type, existing.arguments, arguments)) return .genericInstantiation(index);
+        }
+        const index = self.generic_types.items.len;
+        try self.generic_types.append(self.allocator, .{ .position = position, .base = base, .arguments = arguments });
+        return .genericInstantiation(index);
     }
 
     pub fn parseBlock(self: *Parser) ParseError![]const Ast.Statement {
