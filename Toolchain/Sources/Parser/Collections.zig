@@ -11,6 +11,15 @@ pub fn internNamedType(self: anytype, name: []const u8) !Ast.Type {
     return .structure(index);
 }
 
+pub fn internGenericType(self: anytype, position: Source.Position, base: Ast.Type, arguments: []const Ast.Type) !Ast.Type {
+    for (self.generic_types.items, 0..) |existing, index| {
+        if (existing.base == base and std.mem.eql(Ast.Type, existing.arguments, arguments)) return .genericInstantiation(index);
+    }
+    const index = self.generic_types.items.len;
+    try self.generic_types.append(self.allocator, .{ .position = position, .base = base, .arguments = arguments });
+    return .genericInstantiation(index);
+}
+
 pub fn parseLiteral(self: anytype, position: Source.Position) !*Ast.Expression {
     try self.advance();
     var values: std.ArrayList(*Ast.Expression) = .empty;
@@ -21,7 +30,39 @@ pub fn parseLiteral(self: anytype, position: Source.Position) !*Ast.Expression {
         if (self.current.tag == .right_bracket) break;
     };
     try self.expect(.right_bracket, "expected ']' after array literal");
-    return self.newExpression(.{ .position = position, .value = .{ .sequence_literal = try values.toOwnedSlice(self.allocator) } });
+    const items = try values.toOwnedSlice(self.allocator);
+    const inferred_type = if (items.len == 0) null else if (syntacticType(items[0])) |element|
+        try internDynamicType(self, position, element)
+    else
+        null;
+    return self.newExpression(.{ .position = position, .value = .{ .sequence_literal = .{ .values = items, .inferred_type = inferred_type } } });
+}
+
+fn syntacticType(expression: *const Ast.Expression) ?Ast.Type {
+    return switch (expression.value) {
+        .integer => .int,
+        .floating => .float64,
+        .boolean => .bool,
+        .string, .interpolated_string => .str,
+        .sequence_literal => |literal| literal.inferred_type,
+        else => null,
+    };
+}
+
+pub fn internDynamicType(self: anytype, position: Source.Position, element: Ast.Type) !Ast.Type {
+    for (self.collection_structures.items) |structure| if (structure.collection) |collection| {
+        if (collection.element == element and collection.length == null) return self.internTypeName(structure.name);
+    };
+    const name = try std.fmt.allocPrint(self.allocator, "{s}[]", .{try typeSpelling(self, element)});
+    const type_value = try self.internTypeName(name);
+    try self.collection_structures.append(self.allocator, .{
+        .position = position,
+        .name_position = position,
+        .name = name,
+        .fields = &.{},
+        .collection = .{ .element = element, .length = null },
+    });
+    return type_value;
 }
 
 pub fn internFixedType(self: anytype, position: Source.Position, element: Ast.Type, length: usize) !Ast.Type {

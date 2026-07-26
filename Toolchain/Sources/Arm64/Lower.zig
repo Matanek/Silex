@@ -124,6 +124,16 @@ fn lowerInstruction(
                 .fields = fields,
             } };
         },
+        .list_init => |initialization| list: {
+            const values = try allocator.alloc(Machine.Span, initialization.values.len);
+            for (initialization.values, 0..) |value, index| values[index] = layout.values[value];
+            const collection = collectionForType(program, function.value_types[initialization.result]) orelse return error.InvalidMachineProgram;
+            break :list .{ .list_init = .{
+                .result = layout.values[initialization.result].start,
+                .values = values,
+                .element_width = @intCast(try leafCount(program, collection.element)),
+            } };
+        },
         .enum_init => |initialization| enumeration: {
             const values = try allocator.alloc(Machine.Span, initialization.values.len);
             for (initialization.values, 0..) |value, index| values[index] = layout.values[value];
@@ -144,29 +154,35 @@ fn lowerInstruction(
         } },
         .collection_load => |access| collection_load: {
             const collection = collectionForType(program, function.value_types[access.collection]) orelse return error.InvalidMachineProgram;
-            const count: u32 = @intCast(collection.length orelse return error.InvalidMachineProgram);
+            const count: u32 = @intCast(collection.length orelse 0);
             break :collection_load .{ .collection_load = .{
                 .result = layout.values[access.result],
                 .collection = layout.values[access.collection],
                 .index = layout.values[access.index].start,
                 .count = count,
+                .dynamic = collection.length == null,
                 .header = try internString(allocator, strings, try collectionRuntimeHeader(allocator, program, access.position)),
-                .tail = try internString(allocator, strings, try std.fmt.allocPrint(allocator, " is out of bounds for count {d}\n", .{count})),
+                .tail = try internString(allocator, strings, if (collection.length == null) " is out of bounds for count " else try std.fmt.allocPrint(allocator, " is out of bounds for count {d}\n", .{count})),
             } };
         },
         .collection_replace => |replacement| collection_replace: {
             const collection = collectionForType(program, function.value_types[replacement.collection]) orelse return error.InvalidMachineProgram;
-            const count: u32 = @intCast(collection.length orelse return error.InvalidMachineProgram);
+            const count: u32 = @intCast(collection.length orelse 0);
             break :collection_replace .{ .collection_replace = .{
                 .result = layout.values[replacement.result],
                 .collection = layout.values[replacement.collection],
                 .index = layout.values[replacement.index].start,
                 .replacement = layout.values[replacement.replacement],
                 .count = count,
+                .dynamic = collection.length == null,
                 .header = try internString(allocator, strings, try collectionRuntimeHeader(allocator, program, replacement.position)),
-                .tail = try internString(allocator, strings, try std.fmt.allocPrint(allocator, " is out of bounds for count {d}\n", .{count})),
+                .tail = try internString(allocator, strings, if (collection.length == null) " is out of bounds for count " else try std.fmt.allocPrint(allocator, " is out of bounds for count {d}\n", .{count})),
             } };
         },
+        .collection_count => |count| .{ .collection_count = .{
+            .result = layout.values[count.result].start,
+            .collection = layout.values[count.collection].start,
+        } },
         .enum_payload => |payload| enum_payload: {
             if (payload.enumeration >= program.enums.len) return error.InvalidMachineProgram;
             const enumeration = program.enums[payload.enumeration];
@@ -236,7 +252,7 @@ fn lowerInstruction(
             .type = function.value_types[unary.result],
         } },
         .binary => |binary| binary_instruction: {
-            if (isAggregate(function.value_types[binary.left])) {
+            if (isAggregate(program, function.value_types[binary.left])) {
                 if (binary.operator != .equal and binary.operator != .not_equal) return error.UnsupportedType;
                 break :binary_instruction .{ .aggregate_equal = .{
                     .result = layout.values[binary.result].start,
@@ -344,7 +360,7 @@ fn buildLayout(allocator: Allocator, program: Ir.Program, function: Ir.Function)
     for (function.local_types, 0..) |type_value, index| {
         locals[index] = try allocateSpan(program, type_value, &next);
     }
-    const return_aggregate = isAggregate(function.return_type);
+    const return_aggregate = isAggregate(program, function.return_type);
     const return_width: u12 = if (function.return_type == .void)
         0
     else
@@ -373,7 +389,7 @@ fn allocateSpan(program: Ir.Program, type_value: Ir.Type, next: *usize) Machine.
     const result: Machine.Span = .{
         .start = try Machine.checkedSlot(next.*),
         .width = @intCast(width),
-        .aggregate = isAggregate(type_value),
+        .aggregate = isAggregate(program, type_value),
     };
     next.* += width;
     if (next.* > Machine.max_slots) return error.FrameTooLarge;
@@ -394,6 +410,7 @@ fn leafCount(program: Ir.Program, type_value: Ir.Type) Machine.Error!usize {
     }
     const structure_index = type_value.structureIndex() orelse return 1;
     if (structure_index >= program.structures.len) return error.InvalidMachineProgram;
+    if (program.structures[structure_index].collection) |collection| if (collection.length == null) return 1;
     var result: usize = 0;
     for (program.structures[structure_index].fields) |field| result += try leafCount(program, field.type);
     return result;
@@ -459,8 +476,10 @@ fn flattenedTypesForList(allocator: Allocator, program: Ir.Program, types: []con
     return result.toOwnedSlice(allocator);
 }
 
-fn isAggregate(type_value: Ir.Type) bool {
-    return type_value.structureIndex() != null or type_value.optionalChild() != null;
+fn isAggregate(program: Ir.Program, type_value: Ir.Type) bool {
+    if (type_value.optionalChild() != null) return true;
+    const index = type_value.structureIndex() orelse return false;
+    return index >= program.structures.len or program.structures[index].collection == null or program.structures[index].collection.?.length != null;
 }
 
 fn internString(

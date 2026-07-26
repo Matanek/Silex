@@ -4,6 +4,7 @@ const Numeric = @import("../Numeric.zig");
 const A64 = @import("Instructions.zig");
 const Fixups = @import("Fixups.zig");
 const StringRuntime = @import("StringRuntime.zig");
+const ListRuntime = @import("ListRuntime.zig");
 const TextRuntime = @import("TextRuntime.zig");
 const FloatRuntime = @import("FloatRuntime.zig");
 const Register = A64.Register;
@@ -294,6 +295,7 @@ fn encodeFunction(
                     destination_offset += field.width;
                 }
             },
+            .list_init => |initialization| try ListRuntime.emitInit(allocator, words, &fixups.epilogue, initialization),
             .enum_init => |initialization| {
                 try emitImmediate64(allocator, words, .x9, initialization.tag);
                 for (0..initialization.result.width) |index| {
@@ -334,8 +336,15 @@ fn encodeFunction(
                 try patch19(words.items, skip_true, words.items.len);
                 try words.append(allocator, storeStack(.x11, test_value.result));
             },
-            .collection_load => |access| try encodeCollectionLoad(allocator, words, data_fixups, &fixups, program, access),
-            .collection_replace => |replacement| try encodeCollectionReplace(allocator, words, data_fixups, &fixups, program, replacement),
+            .collection_load => |access| if (access.dynamic)
+                try ListRuntime.emitLoad(allocator, words, data_fixups, &fixups.epilogue, program, access)
+            else
+                try encodeCollectionLoad(allocator, words, data_fixups, &fixups, program, access),
+            .collection_replace => |replacement| if (replacement.dynamic)
+                try ListRuntime.emitReplace(allocator, words, data_fixups, &fixups.epilogue, program, replacement)
+            else
+                try encodeCollectionReplace(allocator, words, data_fixups, &fixups, program, replacement),
+            .collection_count => |count| try ListRuntime.emitCount(allocator, words, count),
             .aggregate_equal => |comparison| try encodeAggregateEqual(allocator, words, &fixups, comparison),
             .convert => |conversion| try encodeConversion(
                 allocator,

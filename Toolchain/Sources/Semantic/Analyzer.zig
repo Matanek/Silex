@@ -475,7 +475,7 @@ pub const Analyzer = struct {
             .binary => |binary| self.analyzeBinary(builder, binary, expected),
             .conversion => |conversion| self.analyzeConversion(builder, conversion),
             .string_count => |operand| self.analyzeStringCount(builder, operand),
-            .sequence_literal => |values| Collections.analyzeLiteral(self, builder, values, expected, expression.position),
+            .sequence_literal => |literal| Collections.analyzeLiteral(self, builder, literal, expected, expression.position),
             .index_access => |access| Collections.analyzeIndex(self, builder, access),
             .match_expression => |match_value| Matches.analyze(self, builder, match_value),
         };

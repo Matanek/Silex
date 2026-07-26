@@ -71,6 +71,7 @@ pub const Instruction = union(enum) {
     optional_unwrap: OptionalUnwrap,
     copy: Copy,
     structure_init: StructureInit,
+    list_init: ListInit,
     enum_init: EnumInit,
     enum_test: EnumTest,
     enum_payload: EnumPayload,
@@ -78,6 +79,7 @@ pub const Instruction = union(enum) {
     field_load: FieldLoad,
     collection_load: CollectionLoad,
     collection_replace: CollectionReplace,
+    collection_count: CollectionCount,
     local_load: LocalLoad,
     local_store: LocalStore,
     convert: Convert,
@@ -140,6 +142,11 @@ pub const Instruction = union(enum) {
         fields: []const ValueId,
     };
 
+    pub const ListInit = struct {
+        result: ValueId,
+        values: []const ValueId,
+    };
+
     pub const EnumInit = struct {
         result: ValueId,
         enumeration: usize,
@@ -187,6 +194,11 @@ pub const Instruction = union(enum) {
         index: ValueId,
         replacement: ValueId,
         position: Source.Position,
+    };
+
+    pub const CollectionCount = struct {
+        result: ValueId,
+        collection: ValueId,
     };
 
     pub const LocalLoad = struct {
@@ -492,6 +504,15 @@ fn writeInstruction(
             }
             try output.append(allocator, ')');
         },
+        .list_init => |initialization| {
+            try appendResult(output, allocator, program, function, initialization.result);
+            try output.appendSlice(allocator, "list.init [");
+            for (initialization.values, 0..) |value, index| {
+                if (index != 0) try output.appendSlice(allocator, ", ");
+                try appendValueChecked(output, allocator, function, value);
+            }
+            try output.append(allocator, ']');
+        },
         .enum_init => |initialization| {
             if (initialization.enumeration >= program.enums.len) return error.InvalidProgram;
             const enumeration = program.enums[initialization.enumeration];
@@ -587,6 +608,11 @@ fn writeInstruction(
             try appendValueChecked(output, allocator, function, replacement.index);
             try output.appendSlice(allocator, ", ");
             try appendValueChecked(output, allocator, function, replacement.replacement);
+        },
+        .collection_count => |count| {
+            try appendResult(output, allocator, program, function, count.result);
+            try output.appendSlice(allocator, "collection.count ");
+            try appendValueChecked(output, allocator, function, count.collection);
         },
         .local_load => |load| {
             try appendResult(output, allocator, program, function, load.result);

@@ -257,6 +257,7 @@ fn executeInstruction(
                 .fields = fields,
             } });
         },
+        .list_init => |initialization| try executeListInit(allocator, function, values, initialization),
         .enum_init => |initialization| {
             if (initialization.enumeration >= program.enums.len) return error.InvalidProgram;
             const enumeration = program.enums[initialization.enumeration];
@@ -317,6 +318,7 @@ fn executeInstruction(
         },
         .collection_load => |access| try executeCollectionLoad(allocator, program, function, values, access, session),
         .collection_replace => |replacement| try executeCollectionReplace(allocator, program, function, values, replacement, session),
+        .collection_count => |count| try executeCollectionCount(function, values, count),
         .local_load => |local| {
             const value = try cloneValue(allocator, try loadLocal(function, locals, local.local));
             try store(function, values, local.result, value);
@@ -464,6 +466,23 @@ fn normalizedCollectionIndex(index: i64, count: usize) ?usize {
     const normalized = if (index < 0) index + @as(i64, @intCast(count)) else index;
     if (normalized < 0 or normalized >= count) return null;
     return @intCast(normalized);
+}
+
+fn executeListInit(allocator: Allocator, function: Ir.Function, values: []?Value, initialization: Ir.Instruction.ListInit) Error!void {
+    const fields = try allocator.alloc(Value, initialization.values.len);
+    for (initialization.values, 0..) |value, index| fields[index] = try cloneValue(allocator, try load(values, value));
+    try store(function, values, initialization.result, .{ .structure = .{
+        .type = function.value_types[initialization.result],
+        .fields = fields,
+    } });
+}
+
+fn executeCollectionCount(function: Ir.Function, values: []?Value, count: Ir.Instruction.CollectionCount) Error!void {
+    const collection = switch (try load(values, count.collection)) {
+        .structure => |value| value,
+        else => return error.InvalidProgram,
+    };
+    try store(function, values, count.result, .{ .integer = @intCast(collection.fields.len) });
 }
 
 fn executeCollectionLoad(

@@ -176,6 +176,7 @@ test {
     _ = @import("Composition.zig");
     _ = @import("EnumTests.zig");
     _ = @import("FixedArrayTests.zig");
+    _ = @import("DynamicListTests.zig");
     _ = @import("GenericTests.zig");
     _ = @import("MatchTests.zig");
     _ = @import("MapErrorTests.zig");

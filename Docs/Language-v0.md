@@ -756,6 +756,23 @@ values. Assigning through an index therefore changes only the mutable root
 binding being addressed; immutable roots are rejected. Storage layout and
 index normalization are implementation details, not public collection API.
 
+`T[]` is the dynamic-list counterpart. Its length is stored at runtime, while
+assignment, parameters, and returns preserve the same value semantics as fixed
+arrays. A non-empty literal without an expected type infers its element type
+from the first value; `[]` requires an expected `T[]` type.
+
+```sx
+var scores:int[] = []
+let inferred = [10, 20, 30]
+scores = inferred
+scores[-1] = 40
+```
+
+Dynamic lists use the same `count()`, `is_empty()`, positive and negative
+indexing, mutability, evaluation-order, and bounds-diagnostic contracts as
+fixed arrays. Capacity, allocation strategy, and storage addresses are never
+part of the Silex API.
+
 ## Observable statements
 
 `print(expression, ...)` accepts one or more expressions. It evaluates every
@@ -811,7 +828,7 @@ type_parameters = "<" identifier ("," identifier)* ">" ;
 parameters      = parameter ("," parameter)* ;
 parameter       = identifier ":" type ("=" expression)? ;
 return_type     = type ;
-type            = type_atom ("[" integer "]")* "?"? ;
+type            = type_atom ("[" integer? "]")* "?"? ;
 type_atom       = "void" | "int8" | "int16" | "int32" | "int64" | "int"
                 | "uint8" | "uint16" | "uint32" | "uint64" | "uint"
                 | "float" | "float32" | "float64" | "bool" | "str"
@@ -877,8 +894,8 @@ statements as described above.
 
 ## Current limits
 
-There are no dynamic lists, collection operations beyond fixed-array inspection
-and indexing, method extraction, static methods, package lockfiles, or visible
-native interop in this subset. Fundamental and
+There are no collection operations beyond inspection and indexing, method
+extraction, static methods, package lockfiles, or visible native interop in
+this subset. Fundamental and
 structure values, constructors, instance methods, string operations and
 observable effects have matching reference and macOS ARM64 behavior.

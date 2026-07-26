@@ -296,7 +296,12 @@ pub const Parser = struct {
         while (self.current.tag == .left_bracket) {
             const bracket_position = self.current.position;
             try self.advance();
-            if (self.current.tag == .right_bracket) return self.failAt(bracket_position, "fixed array type requires a length");
+            if (self.current.tag == .right_bracket) {
+                try self.advance();
+                if (result == .void) return self.failAt(bracket_position, "list element type cannot be 'void'");
+                result = try Collections.internDynamicType(self, type_position, result);
+                continue;
+            }
             if (self.current.tag != .integer) return self.fail("fixed array length must be an integer literal");
             const length = std.fmt.parseInt(usize, self.current.lexeme, 10) catch return self.failAt(self.current.position, "fixed array length is too large");
             try self.advance();
@@ -318,12 +323,7 @@ pub const Parser = struct {
     }
 
     pub fn internGenericType(self: *Parser, position: Source.Position, base: Ast.Type, arguments: []const Ast.Type) Allocator.Error!Ast.Type {
-        for (self.generic_types.items, 0..) |existing, index| {
-            if (existing.base == base and std.mem.eql(Ast.Type, existing.arguments, arguments)) return .genericInstantiation(index);
-        }
-        const index = self.generic_types.items.len;
-        try self.generic_types.append(self.allocator, .{ .position = position, .base = base, .arguments = arguments });
-        return .genericInstantiation(index);
+        return Collections.internGenericType(self, position, base, arguments);
     }
 
     pub fn parseBlock(self: *Parser) ParseError![]const Ast.Statement {
