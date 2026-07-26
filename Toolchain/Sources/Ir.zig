@@ -74,6 +74,7 @@ pub const Instruction = union(enum) {
     enum_init: EnumInit,
     enum_test: EnumTest,
     enum_payload: EnumPayload,
+    enum_raw: EnumRaw,
     field_load: FieldLoad,
     local_load: LocalLoad,
     local_store: LocalStore,
@@ -157,6 +158,12 @@ pub const Instruction = union(enum) {
         enumeration: usize,
         variant: usize,
         index: usize,
+    };
+
+    pub const EnumRaw = struct {
+        result: ValueId,
+        operand: ValueId,
+        enumeration: usize,
     };
 
     pub const FieldLoad = struct {
@@ -278,11 +285,18 @@ pub const Structure = struct {
 pub const EnumVariant = struct {
     name: []const u8,
     associated_types: []const Type,
+    raw_value: ?EnumRawValue = null,
+};
+
+pub const EnumRawValue = union(enum) {
+    integer: i64,
+    string: []const u8,
 };
 
 pub const Enum = struct {
     name: []const u8,
     type_index: usize,
+    raw_type: ?Type = null,
     variants: []const EnumVariant,
 };
 
@@ -313,16 +327,29 @@ pub fn writeText(allocator: Allocator, program: Program) Error![]u8 {
         if (program.structures.len != 0 or enumeration.type_index != 0) try output.append(allocator, '\n');
         try output.appendSlice(allocator, "enum @");
         try output.appendSlice(allocator, enumeration.name);
+        if (enumeration.raw_type) |raw_type| {
+            try output.append(allocator, ':');
+            try appendType(&output, allocator, program, raw_type);
+        }
         try output.appendSlice(allocator, " {\n");
         for (enumeration.variants) |variant| {
             try output.appendSlice(allocator, "    .");
             try output.appendSlice(allocator, variant.name);
-            try output.append(allocator, '(');
-            for (variant.associated_types, 0..) |type_value, index| {
-                if (index != 0) try output.appendSlice(allocator, ", ");
-                try appendType(&output, allocator, program, type_value);
+            if (variant.raw_value) |raw_value| {
+                try output.appendSlice(allocator, " = ");
+                switch (raw_value) {
+                    .integer => |value| try output.appendSlice(allocator, try std.fmt.allocPrint(allocator, "{d}", .{value})),
+                    .string => |value| try Strings.appendQuoted(&output, allocator, value),
+                }
+            } else {
+                try output.append(allocator, '(');
+                for (variant.associated_types, 0..) |type_value, index| {
+                    if (index != 0) try output.appendSlice(allocator, ", ");
+                    try appendType(&output, allocator, program, type_value);
+                }
+                try output.append(allocator, ')');
             }
-            try output.appendSlice(allocator, ")\n");
+            try output.append(allocator, '\n');
         }
         try output.appendSlice(allocator, "}\n");
     }
@@ -498,6 +525,17 @@ fn writeInstruction(
             try output.appendSlice(allocator, "[");
             try output.appendSlice(allocator, try std.fmt.allocPrint(allocator, "{d}", .{payload.index}));
             try output.append(allocator, ']');
+        },
+        .enum_raw => |raw| {
+            if (raw.enumeration >= program.enums.len) return error.InvalidProgram;
+            const enumeration = program.enums[raw.enumeration];
+            const raw_type = enumeration.raw_type orelse return error.InvalidProgram;
+            if (raw.result >= function.value_types.len or function.value_types[raw.result] != raw_type or
+                raw.operand >= function.value_types.len or
+                function.value_types[raw.operand] != Type.structure(enumeration.type_index)) return error.InvalidProgram;
+            try appendResult(output, allocator, program, function, raw.result);
+            try output.appendSlice(allocator, "enum.raw ");
+            try appendValueChecked(output, allocator, function, raw.operand);
         },
         .field_load => |load| {
             if (load.base >= function.value_types.len) return error.InvalidProgram;

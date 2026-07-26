@@ -884,6 +884,7 @@ pub const Analyzer = struct {
             const message = try std.fmt.allocPrint(self.allocator, "type '{s}' has no fields", .{self.typeName(base.type)});
             return self.fail(access.name_position, message);
         };
+        if (try Enums.analyzeProperty(self, builder, base, access.name, access.name_position)) |value| return value;
         const structure = self.structures[structure_index];
         const declaration = self.findAstStructure(structure.name) orelse {
             const message = try std.fmt.allocPrint(self.allocator, "type '{s}' has no fields", .{self.typeName(base.type)});
@@ -1030,6 +1031,10 @@ pub const Analyzer = struct {
                 }
             }
             return Methods.analyzeCall(self, builder, call);
+        }
+        if (Enums.find(self, call.name) != null) {
+            const message = try std.fmt.allocPrint(self.allocator, "enum '{s}' must be constructed through one of its variants", .{call.name});
+            return self.fail(call.name_position, message);
         }
         if (self.structureIndex(call.name)) |structure_index| {
             return try self.analyzeStructureInitializer(builder, call, structure_index);

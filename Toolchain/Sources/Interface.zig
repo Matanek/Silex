@@ -84,12 +84,14 @@ pub const Structure = struct {
 pub const EnumVariant = struct {
     name: []const u8,
     associated_types: []const Types.Type,
+    raw_value: ?Ast.EnumRawValue = null,
 };
 
 pub const Enum = struct {
     export_name: []const u8,
     id: TypeId,
     variants: []const EnumVariant,
+    raw_type: ?Types.Type = null,
     position: Source.Position,
 };
 
@@ -183,12 +185,13 @@ pub fn buildMapped(
             for (variant.associated_types, 0..) |associated_type, type_index| {
                 associated_types[type_index] = mappedType(associated_type, type_map);
             }
-            variants[variant_index] = .{ .name = variant.name, .associated_types = associated_types };
+            variants[variant_index] = .{ .name = variant.name, .associated_types = associated_types, .raw_value = variant.raw_value };
         }
         try enums.append(allocator, .{
             .export_name = enumeration.name,
             .id = .{ .owner = owner, .module = module_name, .name = enumeration.name },
             .variants = variants,
+            .raw_type = enumeration.raw_type,
             .position = enumeration.position,
         });
     }

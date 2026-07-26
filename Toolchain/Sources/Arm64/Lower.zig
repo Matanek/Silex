@@ -128,6 +128,10 @@ fn lowerInstruction(
                 .result = layout.values[initialization.result],
                 .tag = initialization.variant,
                 .values = values,
+                .raw_value = if (program.enums[initialization.enumeration].variants[initialization.variant].raw_value) |raw_value| switch (raw_value) {
+                    .integer => |value| .{ .integer = @bitCast(value) },
+                    .string => |value| .{ .string = try internString(allocator, strings, value) },
+                } else null,
             } };
         },
         .enum_test => |test_value| .{ .enum_test = .{
@@ -148,6 +152,14 @@ fn lowerInstruction(
             operand.width = layout.values[payload.result].width;
             operand.aggregate = layout.values[payload.result].aggregate;
             break :enum_payload lowerCopy(layout.values[payload.result], operand);
+        },
+        .enum_raw => |raw| enum_raw: {
+            if (raw.enumeration >= program.enums.len or program.enums[raw.enumeration].raw_type == null) return error.InvalidMachineProgram;
+            var operand = layout.values[raw.operand];
+            operand.start = try Machine.checkedSlot(@as(usize, operand.start) + 1);
+            operand.width = 1;
+            operand.aggregate = false;
+            break :enum_raw lowerCopy(layout.values[raw.result], operand);
         },
         .field_load => |load| field: {
             const base_type = function.value_types[load.base];
@@ -343,6 +355,7 @@ fn allocateSpan(program: Ir.Program, type_value: Ir.Type, next: *usize) Machine.
 fn leafCount(program: Ir.Program, type_value: Ir.Type) Machine.Error!usize {
     if (type_value.optionalChild()) |child| return 1 + try leafCount(program, child);
     if (enumByType(program, type_value)) |enumeration| {
+        if (enumeration.raw_type != null) return 2;
         var maximum: usize = 0;
         for (enumeration.variants) |variant| {
             var width: usize = 0;
@@ -385,6 +398,7 @@ fn appendFlattenedTypes(
     }
     if (enumByType(program, type_value)) |enumeration| {
         try result.append(allocator, .uint);
+        if (enumeration.raw_type) |raw_type| return result.append(allocator, raw_type);
         var widest: []const Ir.Type = &.{};
         for (enumeration.variants) |variant| {
             const flat = try flattenedTypesForList(allocator, program, variant.associated_types);

@@ -271,6 +271,19 @@ fn encodeFunction(
                     if (index != 0) try words.append(allocator, moveWideZero32(.x9, 0));
                     try words.append(allocator, storeStack(.x9, @intCast(@as(usize, initialization.result.start) + index)));
                 }
+                if (initialization.raw_value) |raw_value| switch (raw_value) {
+                    .integer => |value| {
+                        try emitImmediate64(allocator, words, .x9, value);
+                        try words.append(allocator, storeStack(.x9, initialization.result.start + 1));
+                    },
+                    .string => |string| try StringRuntime.emitLiteral(
+                        allocator,
+                        words,
+                        data_fixups,
+                        string,
+                        initialization.result.start + 1,
+                    ),
+                };
                 var destination_offset: usize = 1;
                 for (initialization.values) |value| {
                     var destination = initialization.result;

@@ -1,5 +1,6 @@
 const std = @import("std");
 const Compiler = @import("../Project.zig").Compiler;
+const Types = @import("../Types.zig");
 
 test "compile only the explicit local module closure" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
@@ -489,4 +490,33 @@ test "compose public associated enums across modules" {
     compiler = Compiler.init(allocator, std.testing.io);
     try std.testing.expectError(error.InvalidSource, compiler.compile(input));
     try std.testing.expectEqualStrings("enum 'Message' is internal to its source file", compiler.diagnostic.?.message);
+}
+
+test "compose public raw enums across modules" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Codes.sx",
+        .data =
+        \\public enum Code:int { ok = 200; missing = 404 }
+        \\public func raw(value:Code) int { return value.raw_value }
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "use Codes.Code\nuse Codes.raw\nfunc main() { print(raw(Code.missing())) }",
+    });
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(input);
+    const result = try @import("../Interpreter.zig").runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("404\n", result.stdout);
+    for (compilation.interfaces) |interface| {
+        if (!std.mem.eql(u8, interface.name, "Codes")) continue;
+        try std.testing.expectEqual(Types.Type.int, interface.enums[0].raw_type.?);
+    }
 }
