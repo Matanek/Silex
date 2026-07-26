@@ -555,7 +555,10 @@ pub const Compiler = struct {
             },
             .match_expression => |match_value| {
                 try self.activateExpression(module, match_value.subject);
-                for (match_value.branches) |branch| try self.activateExpression(module, branch.value);
+                for (match_value.branches) |branch| {
+                    if (branch.value) |value| try self.activateExpression(module, value);
+                    if (branch.statements) |statements| for (statements) |statement| try self.activateStatement(module, statement);
+                }
             },
             else => {},
         }
@@ -1261,9 +1264,17 @@ pub const Compiler = struct {
                 .text => {},
                 .expression => |value| try self.rewriteExpression(module, value, type_map),
             },
-            .match_expression => |match_value| {
+            .match_expression => |*match_value| {
                 try self.rewriteExpression(module, match_value.subject, type_map);
-                for (match_value.branches) |branch| try self.rewriteExpression(module, branch.value, type_map);
+                const branches = try self.allocator.alloc(Ast.Expression.MatchBranch, match_value.branches.len);
+                for (match_value.branches, 0..) |branch, branch_index| {
+                    branches[branch_index] = branch;
+                    if (branch.value) |value| try self.rewriteExpression(module, value, type_map);
+                    if (branch.statements) |statements| {
+                        branches[branch_index].statements = try self.rewriteStatements(module, statements, type_map);
+                    }
+                }
+                match_value.branches = branches;
             },
             else => {},
         }

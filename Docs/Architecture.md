@@ -71,6 +71,10 @@ open Silex document
   does not expose a source tag field or apply an implicit convergence cast.
   A terminal `else` is simply the final CFG destination after the named tests;
   it creates neither a synthetic variant nor a catch-all payload binding.
+- Imperative matches reuse the same selection CFG and payload extraction, but
+  place ordinary statement blocks at each destination and produce no value.
+  Branch terminators connect directly to the surrounding return or loop
+  context; continuing branches alone join the post-match block.
 - Optional values remain typed in portable IR through explicit `optional.null`
   and `optional.some` instructions. A branch-local presence proof emits an
   internal `optional.unwrap` only on the proven control-flow edge. Target

@@ -83,12 +83,14 @@ pub const Expression = struct {
         variant: []const u8 = "",
         is_else: bool = false,
         bindings: []const MatchBinding = &.{},
-        value: *Expression,
+        value: ?*Expression = null,
+        statements: ?[]const Statement = null,
     };
 
     pub const Match = struct {
         subject: *Expression,
         branches: []const MatchBranch,
+        imperative: bool = false,
     };
 
     pub const Unary = struct {

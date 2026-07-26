@@ -340,6 +340,7 @@ pub const Analyzer = struct {
                     _ = try self.analyzeCall(builder, call);
                     return false;
                 },
+                .match_expression => |match_value| return Matches.analyzeStatement(self, builder, function, match_value),
                 else => unreachable,
             },
             .print_statement => |print_statement| effect: {
