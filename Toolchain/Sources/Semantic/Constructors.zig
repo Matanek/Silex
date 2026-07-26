@@ -250,6 +250,7 @@ fn analyzeStatements(
             .if_statement => |conditional| try analyzeIf(self, builder, function, structure, self_local, conditional, initialized),
             .return_statement => return self.fail(statement.position(), "constructors return 'self' implicitly"),
             .while_statement => return self.fail(statement.position(), "while is not available during constructor initialization yet"),
+            .for_statement => return self.fail(statement.position(), "for is not available during constructor initialization yet"),
             .break_statement, .continue_statement => return self.fail(statement.position(), "loop control is not valid in a constructor"),
             else => ordinary: {
                 try validateStatementReads(self, structure, statement, initialized);

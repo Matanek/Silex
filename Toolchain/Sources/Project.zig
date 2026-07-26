@@ -13,6 +13,7 @@ const TypeAliases = @import("Project/TypeAliases.zig");
 const GenericTypes = @import("Project/GenericTypes.zig");
 const Paths = @import("Project/Paths.zig");
 const Lookup = @import("Project/Lookup.zig");
+const Iterations = @import("Project/Iterations.zig");
 const Semantic = @import("Semantic/Analyzer.zig");
 const Source = @import("Source.zig");
 
@@ -522,7 +523,7 @@ pub const Compiler = struct {
         if (target.module != module) try self.loadModule(target.module, module);
     }
 
-    fn activateStatement(self: *Compiler, module: usize, statement: Ast.Statement) Error!void {
+    pub fn activateStatement(self: *Compiler, module: usize, statement: Ast.Statement) Error!void {
         switch (statement) {
             .variable_declaration => |declaration| if (declaration.initializer) |value|
                 try self.activateExpression(module, value),
@@ -552,11 +553,12 @@ pub const Compiler = struct {
                 try self.activateExpression(module, loop.condition.source());
                 for (loop.statements) |nested| try self.activateStatement(module, nested);
             },
+            .for_statement => |loop| try Iterations.activate(self, module, loop),
             .break_statement, .continue_statement => {},
         }
     }
 
-    fn activateExpression(self: *Compiler, module: usize, expression: *Ast.Expression) Error!void {
+    pub fn activateExpression(self: *Compiler, module: usize, expression: *Ast.Expression) Error!void {
         switch (expression.value) {
             .call => |call| {
                 const qualified_name = if (call.receiver) |receiver|
@@ -1300,7 +1302,7 @@ pub const Compiler = struct {
         return self.fail(position, message);
     }
 
-    fn rewriteStatements(self: *Compiler, module: usize, statements: []const Ast.Statement, type_map: []const Ast.Type) Error![]const Ast.Statement {
+    pub fn rewriteStatements(self: *Compiler, module: usize, statements: []const Ast.Statement, type_map: []const Ast.Type) Error![]const Ast.Statement {
         const rewritten = try self.allocator.alloc(Ast.Statement, statements.len);
         for (statements, 0..) |statement, index| rewritten[index] = switch (statement) {
             .variable_declaration => |declaration| variable: {
@@ -1353,13 +1355,14 @@ pub const Compiler = struct {
                 value.statements = try self.rewriteStatements(module, loop.statements, type_map);
                 break :loop_statement .{ .while_statement = value };
             },
+            .for_statement => |loop| .{ .for_statement = try Iterations.rewrite(self, module, loop, type_map) },
             .break_statement => |position| .{ .break_statement = position },
             .continue_statement => |position| .{ .continue_statement = position },
         };
         return rewritten;
     }
 
-    fn rewriteExpression(self: *Compiler, module: usize, expression: *Ast.Expression, type_map: []const Ast.Type) Error!void {
+    pub fn rewriteExpression(self: *Compiler, module: usize, expression: *Ast.Expression, type_map: []const Ast.Type) Error!void {
         switch (expression.value) {
             .call => |*call| {
                 call.owner = self.index.providers[module].owner;

@@ -179,6 +179,7 @@ test {
     _ = @import("DynamicListTests.zig");
     _ = @import("CollectionMutationTests.zig");
     _ = @import("CollectionSliceTests.zig");
+    _ = @import("ForIterationTests.zig");
     _ = @import("GenericTests.zig");
     _ = @import("MatchTests.zig");
     _ = @import("MapErrorTests.zig");
