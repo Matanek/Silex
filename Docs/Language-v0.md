@@ -333,7 +333,24 @@ widening, optional promotion and other convergence conversions do not invent a
 common result type. The complete `match` may initialize a value, supply an
 argument or be returned. Unknown, repeated and missing variants, wrong binding
 arities, non-enum subjects, nested matches, blocks, guards and wildcards are
-rejected. A default `else` branch is introduced separately.
+rejected.
+
+A match may end with one `else` expression that handles every variant not named
+before it:
+
+```sx
+let vertical = match direction {
+    north => true
+    south => true
+    else => false
+}
+```
+
+`else` is optional, unique, last and cannot bind associated values. It follows
+the same exact result-type rule as named branches and is rejected when all
+variants have already been covered, because it would be unreachable. Adding a
+future enum variant deliberately routes it through an existing `else`; a match
+without `else` instead becomes non-exhaustive and reveals the required update.
 
 ## Structure values
 

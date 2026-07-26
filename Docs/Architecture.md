@@ -69,6 +69,8 @@ open Silex document
   variant tests, typed payload extractions and ordinary CFG branches. Every
   branch copies its exact-typed result into the merge value; the portable IR
   does not expose a source tag field or apply an implicit convergence cast.
+  A terminal `else` is simply the final CFG destination after the named tests;
+  it creates neither a synthetic variant nor a catch-all payload binding.
 - Optional values remain typed in portable IR through explicit `optional.null`
   and `optional.some` instructions. A branch-local presence proof emits an
   internal `optional.unwrap` only on the proven control-flow edge. Target

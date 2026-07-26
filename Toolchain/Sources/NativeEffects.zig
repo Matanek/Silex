@@ -224,10 +224,14 @@ test "native exhaustive enum matches agree with the reference interpreter" {
         \\        pair(number, enabled) => "pair"
         \\    }
         \\}
+        \\func compact(value:Message) str {
+        \\    return match value { empty => "empty"; else => "other" }
+        \\}
         \\func main() {
         \\    print(describe(Message.empty()))
         \\    print(describe(Message.text("hello")))
         \\    print(describe(Message.pair(42, true)))
+        \\    print(compact(Message.text("hello")))
         \\}
     ;
     var frontend = Frontend.Frontend.init(allocator);
