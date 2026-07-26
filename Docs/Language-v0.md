@@ -884,7 +884,9 @@ for (var i in 0...3) { i += 10 }
 The collection source is likewise evaluated once. `continue` advances to the
 next element or range value; `break` leaves the nearest loop. For a mutable
 collection binding, mutations made before either control statement remain
-visible in the source collection.
+visible in the source collection. When an element is non-copyable, `for` and
+`for let` expose a temporary read borrow and `for var` mutates that element in
+place; none of these loop bindings creates a second owner.
 
 ## Fixed arrays
 
@@ -907,14 +909,16 @@ execution with a bounds diagnostic. Indexing evaluates the array and the index
 exactly once, from left to right.
 
 Fixed arrays have value semantics across bindings, parameters, and return
-values. Assigning through an index therefore changes only the mutable root
-binding being addressed; immutable roots are rejected. Storage layout and
-index normalization are implementation details, not public collection API.
+values while their element type is copyable. An array containing a non-copyable
+element owns its elements and is itself non-copyable. Assigning through an index
+therefore changes only the mutable root binding being addressed; immutable roots
+are rejected. Storage layout and index normalization are implementation details,
+not public collection API.
 
 `T[]` is the dynamic-list counterpart. Its length is stored at runtime, while
-assignment, parameters, and returns preserve the same value semantics as fixed
-arrays. A non-empty literal without an expected type infers its element type
-from the first value; `[]` requires an expected `T[]` type.
+assignment, parameters, and returns preserve the same conditional value
+semantics as fixed arrays. A non-empty literal without an expected type infers
+its element type from the first value; `[]` requires an expected `T[]` type.
 
 ```sx
 var scores:int[] = []
@@ -934,6 +938,13 @@ also provide `append(value_or_sequence)`, `prepend(value)`,
 `insert(index, value)`, `take(index)`, `take_first()`, `take_last()`, and
 `clear()`. The three `take` forms return the removed element.
 
+Insertion or replacement of a named non-copyable element requires `move`.
+`take` and `replace` transfer the removed element to their caller; `clear`
+destroys its elements from the last index to the first. A named non-copyable
+collection likewise requires `move` across assignment, argument, or return.
+Direct indexed access may inspect such an element through `@T`, but cannot copy
+it; extraction must use `take` or `replace`.
+
 All receiver, index, and value expressions run exactly once in source order.
 An invalid index terminates before the root `var` is changed. Every operation
 is rejected through a `let`; mutating one copied list never changes another.
@@ -943,7 +954,9 @@ array or a list. Both bounds are mandatory; the start is included and the end
 excluded. Negative bounds are first made relative to `count()`, then each bound
 is clamped to `[0, count()]`. An empty list results whenever the normalized
 start is greater than or equal to the normalized end. Source, start, and end
-are evaluated once from left to right; the result is a copy, never a view.
+are evaluated once from left to right; the result is a copy, never a view. A
+copied slice is rejected when the element type is non-copyable; borrowed slices
+are defined separately as views.
 
 ## Observable statements
 
