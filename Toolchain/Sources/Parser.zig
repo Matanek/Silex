@@ -154,6 +154,7 @@ pub const Parser = struct {
     fn parseConstructor(self: *Parser, is_internal: bool) ParseError!Ast.Constructor {
         const position = self.current.position;
         try self.advance();
+        if (self.current.tag == .less) return self.fail("constructors cannot declare type parameters");
         try self.expect(.left_parenthesis, "expected '(' after 'init'");
         var parameters: std.ArrayList(Ast.Parameter) = .empty;
         var has_default = false;
@@ -189,6 +190,9 @@ pub const Parser = struct {
         try self.advance();
         const type_parameters = try Generics.parseTypeParameters(self);
         const enclosing_type_parameters = self.type_parameters;
+        if (type_parameters.len != 0 and enclosing_type_parameters.len != 0) {
+            return self.failAt(name_position, "generic methods in generic structures are not supported");
+        }
         self.type_parameters = if (type_parameters.len == 0) enclosing_type_parameters else type_parameters;
         defer self.type_parameters = enclosing_type_parameters;
         try self.expect(.left_parenthesis, "expected '(' after function name");
