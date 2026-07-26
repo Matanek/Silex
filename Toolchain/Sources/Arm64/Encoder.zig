@@ -281,6 +281,17 @@ fn encodeFunction(
                     destination_offset += value.width;
                 }
             },
+            .enum_test => |test_value| {
+                try words.append(allocator, loadStack(.x9, test_value.operand.start));
+                try emitImmediate64(allocator, words, .x10, test_value.tag);
+                try words.append(allocator, compareRegisters(.x9, .x10));
+                try words.append(allocator, moveWideZero32(.x11, 0));
+                const skip_true = words.items.len;
+                try words.append(allocator, conditionalBranch(.not_equal));
+                try words.append(allocator, moveWideZero32(.x11, 1));
+                try patch19(words.items, skip_true, words.items.len);
+                try words.append(allocator, storeStack(.x11, test_value.result));
+            },
             .aggregate_equal => |comparison| try encodeAggregateEqual(allocator, words, &fixups, comparison),
             .convert => |conversion| try encodeConversion(
                 allocator,

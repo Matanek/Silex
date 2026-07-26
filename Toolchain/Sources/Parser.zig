@@ -3,6 +3,8 @@ const Ast = @import("Ast.zig");
 const LexerModule = @import("Lexer.zig");
 const Source = @import("Source.zig");
 const Strings = @import("Strings.zig");
+const Matches = @import("Parser/Matches.zig");
+const EnumParser = @import("Parser/Enums.zig");
 
 const Allocator = std.mem.Allocator;
 const Token = LexerModule.Token;
@@ -17,6 +19,7 @@ pub const Parser = struct {
     started: bool = false,
     diagnostic: ?Source.Diagnostic = null,
     type_names: std.ArrayList([]const u8) = .empty,
+    match_depth: usize = 0,
 
     pub fn init(allocator: Allocator, source: []const u8) Parser {
         return .{ .allocator = allocator, .lexer = .init(source) };
@@ -36,14 +39,14 @@ pub const Parser = struct {
             switch (self.current.tag) {
                 .keyword_use => try uses.append(self.allocator, try self.parseUse(false)),
                 .keyword_struct => try structures.append(self.allocator, try self.parseStructure(false, false)),
-                .keyword_enum => try enums.append(self.allocator, try self.parseEnum(false, false)),
+                .keyword_enum => try enums.append(self.allocator, try EnumParser.parse(self, false, false)),
                 .keyword_func => try functions.append(self.allocator, try self.parseFunction(false, false)),
                 .keyword_public => {
                     try self.advance();
                     switch (self.current.tag) {
                         .keyword_use => try uses.append(self.allocator, try self.parseUse(true)),
                         .keyword_struct => try structures.append(self.allocator, try self.parseStructure(true, false)),
-                        .keyword_enum => try enums.append(self.allocator, try self.parseEnum(true, false)),
+                        .keyword_enum => try enums.append(self.allocator, try EnumParser.parse(self, true, false)),
                         .keyword_func => try functions.append(self.allocator, try self.parseFunction(true, false)),
                         else => return self.fail("expected use, enum, struct, or function declaration after 'public'"),
                     }
@@ -52,7 +55,7 @@ pub const Parser = struct {
                     try self.advance();
                     switch (self.current.tag) {
                         .keyword_struct => try structures.append(self.allocator, try self.parseStructure(false, true)),
-                        .keyword_enum => try enums.append(self.allocator, try self.parseEnum(false, true)),
+                        .keyword_enum => try enums.append(self.allocator, try EnumParser.parse(self, false, true)),
                         .keyword_func => try functions.append(self.allocator, try self.parseFunction(false, true)),
                         else => return self.fail("expected enum, struct, or function declaration after 'internal'"),
                     }
@@ -66,55 +69,6 @@ pub const Parser = struct {
             .structures = try structures.toOwnedSlice(self.allocator),
             .enums = try enums.toOwnedSlice(self.allocator),
             .functions = try functions.toOwnedSlice(self.allocator),
-        };
-    }
-
-    fn parseEnum(self: *Parser, is_public: bool, is_internal: bool) ParseError!Ast.Enum {
-        const position = self.current.position;
-        try self.advance();
-        if (self.current.tag != .identifier) return self.fail("expected enum name");
-        const name = self.current.lexeme;
-        const name_position = self.current.position;
-        _ = try self.internTypeName(name);
-        try self.advance();
-        try self.expect(.left_brace, "expected '{' after enum name");
-        var variants: std.ArrayList(Ast.EnumVariant) = .empty;
-        while (self.current.tag != .right_brace and self.current.tag != .end) {
-            if (self.current.tag != .identifier) return self.fail("expected enum variant name");
-            const variant_name = self.current.lexeme;
-            const variant_position = self.current.position;
-            try self.advance();
-            var associated_types: std.ArrayList(Ast.Type) = .empty;
-            if (self.current.tag == .left_parenthesis) {
-                try self.advance();
-                if (self.current.tag == .right_parenthesis) return self.fail("an empty enum variant does not use parentheses");
-                while (true) {
-                    try associated_types.append(self.allocator, try self.parseType());
-                    if (self.current.tag != .comma) break;
-                    try self.advance();
-                    if (self.current.tag == .right_parenthesis) return self.fail("expected associated value type after ','");
-                }
-                try self.expect(.right_parenthesis, "expected ')' after associated value types");
-            }
-            for (variants.items) |variant| if (std.mem.eql(u8, variant.name, variant_name)) {
-                return self.failAt(variant_position, "enum variant is already declared");
-            };
-            try variants.append(self.allocator, .{
-                .position = variant_position,
-                .name = variant_name,
-                .associated_types = try associated_types.toOwnedSlice(self.allocator),
-            });
-            try self.expectStatementTerminator();
-        }
-        try self.expect(.right_brace, "expected '}' after enum variants");
-        if (variants.items.len == 0) return self.failAt(name_position, "an enum requires at least one variant");
-        return .{
-            .is_public = is_public,
-            .is_internal = is_internal,
-            .position = position,
-            .name_position = name_position,
-            .name = name,
-            .variants = try variants.toOwnedSlice(self.allocator),
         };
     }
 
@@ -319,7 +273,7 @@ pub const Parser = struct {
         return .{ .position = position, .name = name, .type = parameter_type, .default = default };
     }
 
-    fn parseType(self: *Parser) ParseError!Ast.Type {
+    pub fn parseType(self: *Parser) ParseError!Ast.Type {
         var result: Ast.Type = switch (self.current.tag) {
             .keyword_void => .void,
             .keyword_int => .int,
@@ -386,7 +340,7 @@ pub const Parser = struct {
         };
     }
 
-    fn internTypeName(self: *Parser, name: []const u8) Allocator.Error!Ast.Type {
+    pub fn internTypeName(self: *Parser, name: []const u8) Allocator.Error!Ast.Type {
         for (self.type_names.items, 0..) |existing, index| {
             if (std.mem.eql(u8, existing, name)) return .structure(index);
         }
@@ -683,7 +637,7 @@ pub const Parser = struct {
         };
     }
 
-    fn parseExpression(self: *Parser, allow_line_breaks: bool) ParseError!*Ast.Expression {
+    pub fn parseExpression(self: *Parser, allow_line_breaks: bool) ParseError!*Ast.Expression {
         return self.parseLogicalOr(allow_line_breaks);
     }
 
@@ -900,6 +854,7 @@ pub const Parser = struct {
                 try self.expect(.right_parenthesis, "expected ')' after expression");
                 return expression;
             },
+            .keyword_match => return Matches.parse(self),
             else => return self.fail("expected expression"),
         }
     }
@@ -1017,13 +972,13 @@ pub const Parser = struct {
         });
     }
 
-    fn newExpression(self: *Parser, expression: Ast.Expression) Allocator.Error!*Ast.Expression {
+    pub fn newExpression(self: *Parser, expression: Ast.Expression) Allocator.Error!*Ast.Expression {
         const result = try self.allocator.create(Ast.Expression);
         result.* = expression;
         return result;
     }
 
-    fn expectStatementTerminator(self: *Parser) ParseError!void {
+    pub fn expectStatementTerminator(self: *Parser) ParseError!void {
         if (self.current.tag == .semicolon and self.current.position.line == self.previous.position.line) {
             try self.advance();
             return;
@@ -1037,12 +992,12 @@ pub const Parser = struct {
         return allow_line_breaks or self.current.position.line == self.previous.position.line;
     }
 
-    fn expect(self: *Parser, tag: TokenTag, message: []const u8) ParseError!void {
+    pub fn expect(self: *Parser, tag: TokenTag, message: []const u8) ParseError!void {
         if (self.current.tag != tag) return self.fail(message);
         try self.advance();
     }
 
-    fn advance(self: *Parser) ParseError!void {
+    pub fn advance(self: *Parser) ParseError!void {
         const next = self.lexer.next() catch |err| {
             self.diagnostic = self.lexer.diagnostic;
             return err;
@@ -1055,11 +1010,11 @@ pub const Parser = struct {
         self.current = next;
     }
 
-    fn fail(self: *Parser, message: []const u8) Source.Error {
+    pub fn fail(self: *Parser, message: []const u8) Source.Error {
         return self.failAt(self.current.position, message);
     }
 
-    fn failAt(self: *Parser, position: Source.Position, message: []const u8) Source.Error {
+    pub fn failAt(self: *Parser, position: Source.Position, message: []const u8) Source.Error {
         self.diagnostic = .{ .position = position, .message = message };
         return error.InvalidSource;
     }

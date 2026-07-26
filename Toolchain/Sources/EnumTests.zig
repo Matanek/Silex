@@ -58,6 +58,10 @@ test "diagnose invalid associated enum construction" {
         "enum 'Choice' has no variant named 'unknown'",
     );
     try expectCompileError(
+        "enum Choice { value } func main() { let equal = Choice.value() == Choice.value() }",
+        "operator '==' does not accept 'Choice' and 'Choice'",
+    );
+    try expectCompileError(
         "enum Choice { value; value } func main() {}",
         "enum variant is already declared",
     );

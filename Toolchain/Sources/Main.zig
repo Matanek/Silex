@@ -175,6 +175,7 @@ test {
     _ = @import("MacOS/MachO.zig");
     _ = @import("Composition.zig");
     _ = @import("EnumTests.zig");
+    _ = @import("MatchTests.zig");
     _ = @import("NativeComposition.zig");
     _ = @import("NativeEffects.zig");
     _ = @import("Modules.zig");

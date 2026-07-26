@@ -311,6 +311,30 @@ public contract. A private enum remains local to its module; `internal enum`
 is restricted to its exact source file. The tag and payload layout remain
 compiler details and are not a source ABI.
 
+An exhaustive `match` evaluates one associated enum subject once and produces
+one value. Every variant appears exactly once, and parentheses bind all its
+associated values in declaration order:
+
+```sx
+func describe(connection:Connection) str {
+    return match connection {
+        waiting => "waiting"
+        connected(name) => name
+        closed(let reason) => reason
+    }
+}
+```
+
+An unmarked binding is an immutable `let`; explicit `let` is equivalent, while
+`var` creates a mutable branch-local copy. Bindings cannot escape their branch,
+and matching neither consumes nor mutates the subject. Each branch contains one
+expression and all branch results must have exactly the same type. Numeric
+widening, optional promotion and other convergence conversions do not invent a
+common result type. The complete `match` may initialize a value, supply an
+argument or be returned. Unknown, repeated and missing variants, wrong binding
+arities, non-enum subjects, nested matches, blocks, guards and wildcards are
+rejected. A default `else` branch is introduced separately.
+
 ## Structure values
 
 `struct` declares a nominal value type in its source module. Every field starts

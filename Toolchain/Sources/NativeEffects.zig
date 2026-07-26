@@ -210,6 +210,34 @@ test "native associated enum transport matches the reference interpreter" {
     try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
 }
 
+test "native exhaustive enum matches agree with the reference interpreter" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const source =
+        \\enum Message { empty; text(str); pair(int, bool) }
+        \\func describe(value:Message) str {
+        \\    return match value {
+        \\        empty => "empty"
+        \\        text(content) => content
+        \\        pair(number, enabled) => "pair"
+        \\    }
+        \\}
+        \\func main() {
+        \\    print(describe(Message.empty()))
+        \\    print(describe(Message.text("hello")))
+        \\    print(describe(Message.pair(42, true)))
+        \\}
+    ;
+    var frontend = Frontend.Frontend.init(allocator);
+    const reference = try Interpreter.runCapture(allocator, (try frontend.compile(source)).ir);
+    const native = try compileAndRun(allocator, source);
+    try std.testing.expectEqual(reference.exit_code, exitCode(native));
+    try std.testing.expectEqualSlices(u8, reference.stdout, native.stdout);
+    try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
+}
+
 test "native branches and short-circuit match the reference output" {
     if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);

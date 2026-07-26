@@ -65,6 +65,7 @@ pub const Instruction = union(enum) {
     copy_range: CopyRange,
     aggregate_init: AggregateInit,
     enum_init: EnumInit,
+    enum_test: EnumTest,
     aggregate_equal: AggregateEqual,
     convert: Convert,
     format_value: FormatValue,
@@ -140,6 +141,12 @@ pub const Instruction = union(enum) {
         result: Span,
         tag: u64,
         values: []const Span,
+    };
+
+    pub const EnumTest = struct {
+        result: Slot,
+        operand: Span,
+        tag: u64,
     };
 
     pub const AggregateEqual = struct {
@@ -315,6 +322,11 @@ pub fn validate(program: Program) Error!void {
                     width += field.width;
                 }
                 if (width > value.result.width) return error.InvalidMachineProgram;
+            },
+            .enum_test => |value| {
+                try requireSlot(function, value.result);
+                try requireSpan(function, value.operand);
+                if (!value.operand.aggregate or value.operand.width == 0) return error.InvalidMachineProgram;
             },
             .aggregate_equal => |value| {
                 try requireSlot(function, value.result);

@@ -553,6 +553,10 @@ pub const Compiler = struct {
                 .text => {},
                 .expression => |value| try self.activateExpression(module, value),
             },
+            .match_expression => |match_value| {
+                try self.activateExpression(module, match_value.subject);
+                for (match_value.branches) |branch| try self.activateExpression(module, branch.value);
+            },
             else => {},
         }
     }
@@ -1256,6 +1260,10 @@ pub const Compiler = struct {
             .interpolated_string => |interpolated| for (interpolated.parts) |part| switch (part) {
                 .text => {},
                 .expression => |value| try self.rewriteExpression(module, value, type_map),
+            },
+            .match_expression => |match_value| {
+                try self.rewriteExpression(module, match_value.subject, type_map);
+                for (match_value.branches) |branch| try self.rewriteExpression(module, branch.value, type_map);
             },
             else => {},
         }

@@ -251,6 +251,23 @@ fn executeInstruction(
             };
             try store(function, values, initialization.result, .{ .enumeration = value });
         },
+        .enum_test => |test_value| {
+            const value = switch (try load(values, test_value.operand)) {
+                .enumeration => |enumeration| enumeration,
+                else => return error.InvalidProgram,
+            };
+            if (value.enumeration != test_value.enumeration) return error.InvalidProgram;
+            try store(function, values, test_value.result, .{ .boolean = value.variant == test_value.variant });
+        },
+        .enum_payload => |payload| {
+            const value = switch (try load(values, payload.operand)) {
+                .enumeration => |enumeration| enumeration,
+                else => return error.InvalidProgram,
+            };
+            if (value.enumeration != payload.enumeration or value.variant != payload.variant or
+                payload.index >= value.values.len) return error.InvalidProgram;
+            try store(function, values, payload.result, try cloneValue(allocator, value.values[payload.index]));
+        },
         .field_load => |field| {
             const aggregate = switch (try load(values, field.base)) {
                 .structure => |value| value,

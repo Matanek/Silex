@@ -114,3 +114,15 @@ pub fn findBindingIndex(bindings: anytype, name: []const u8) ?usize {
     }
     return null;
 }
+
+pub fn isComparable(self: anytype, type_value: Ast.Type) bool {
+    if (type_value.optionalChild()) |child| return isComparable(self, child);
+    if (type_value.structureIndex()) |index| {
+        for (self.enums) |enumeration| if (enumeration.type_index == index) return false;
+        for (self.structures[index].fields) |field| {
+            if (!isComparable(self, field.type)) return false;
+        }
+        return true;
+    }
+    return type_value != .void;
+}

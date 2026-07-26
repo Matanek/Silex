@@ -72,6 +72,8 @@ pub const Instruction = union(enum) {
     copy: Copy,
     structure_init: StructureInit,
     enum_init: EnumInit,
+    enum_test: EnumTest,
+    enum_payload: EnumPayload,
     field_load: FieldLoad,
     local_load: LocalLoad,
     local_store: LocalStore,
@@ -140,6 +142,21 @@ pub const Instruction = union(enum) {
         enumeration: usize,
         variant: usize,
         values: []const ValueId,
+    };
+
+    pub const EnumTest = struct {
+        result: ValueId,
+        operand: ValueId,
+        enumeration: usize,
+        variant: usize,
+    };
+
+    pub const EnumPayload = struct {
+        result: ValueId,
+        operand: ValueId,
+        enumeration: usize,
+        variant: usize,
+        index: usize,
     };
 
     pub const FieldLoad = struct {
@@ -447,6 +464,40 @@ fn writeInstruction(
                 try appendValueChecked(output, allocator, function, value);
             }
             try output.append(allocator, ')');
+        },
+        .enum_test => |test_value| {
+            if (test_value.enumeration >= program.enums.len) return error.InvalidProgram;
+            const enumeration = program.enums[test_value.enumeration];
+            if (test_value.variant >= enumeration.variants.len or test_value.result >= function.value_types.len or
+                function.value_types[test_value.result] != .bool or test_value.operand >= function.value_types.len or
+                function.value_types[test_value.operand] != Type.structure(enumeration.type_index)) return error.InvalidProgram;
+            try appendResult(output, allocator, program, function, test_value.result);
+            try output.appendSlice(allocator, "enum.test ");
+            try appendValueChecked(output, allocator, function, test_value.operand);
+            try output.appendSlice(allocator, ", @");
+            try output.appendSlice(allocator, enumeration.name);
+            try output.appendSlice(allocator, ".");
+            try output.appendSlice(allocator, enumeration.variants[test_value.variant].name);
+        },
+        .enum_payload => |payload| {
+            if (payload.enumeration >= program.enums.len) return error.InvalidProgram;
+            const enumeration = program.enums[payload.enumeration];
+            if (payload.variant >= enumeration.variants.len) return error.InvalidProgram;
+            const variant = enumeration.variants[payload.variant];
+            if (payload.index >= variant.associated_types.len or payload.result >= function.value_types.len or
+                function.value_types[payload.result] != variant.associated_types[payload.index] or
+                payload.operand >= function.value_types.len or
+                function.value_types[payload.operand] != Type.structure(enumeration.type_index)) return error.InvalidProgram;
+            try appendResult(output, allocator, program, function, payload.result);
+            try output.appendSlice(allocator, "enum.payload ");
+            try appendValueChecked(output, allocator, function, payload.operand);
+            try output.appendSlice(allocator, ", @");
+            try output.appendSlice(allocator, enumeration.name);
+            try output.appendSlice(allocator, ".");
+            try output.appendSlice(allocator, variant.name);
+            try output.appendSlice(allocator, "[");
+            try output.appendSlice(allocator, try std.fmt.allocPrint(allocator, "{d}", .{payload.index}));
+            try output.append(allocator, ']');
         },
         .field_load => |load| {
             if (load.base >= function.value_types.len) return error.InvalidProgram;
