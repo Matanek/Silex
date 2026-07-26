@@ -80,7 +80,8 @@ pub const Expression = struct {
 
     pub const MatchBranch = struct {
         position: Source.Position,
-        variant: []const u8,
+        variant: []const u8 = "",
+        is_else: bool = false,
         bindings: []const MatchBinding = &.{},
         value: *Expression,
     };

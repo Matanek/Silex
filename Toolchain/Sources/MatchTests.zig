@@ -82,3 +82,42 @@ test "keep match bindings scoped to their branch" {
         "unknown variable 'number'",
     );
 }
+
+test "route unmatched variants through a terminal else branch" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\enum Direction { north; south; east; west }
+        \\func vertical(value:Direction) bool {
+        \\    return match value { north => true; south => true; else => false }
+        \\}
+        \\func main() {
+        \\    print(vertical(Direction.north()))
+        \\    print(vertical(Direction.east()))
+        \\    print(match Direction.west() { else => "fallback" })
+        \\}
+    );
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("true\nfalse\nfallback\n", result.stdout);
+}
+
+test "diagnose invalid else match branches" {
+    try expectCompileError(
+        "enum Choice { left; right } func main() { let value = match Choice.left() { left => 1; right => 2; else => 3 } }",
+        "else match branch is unreachable because every variant is already covered",
+    );
+    try expectCompileError(
+        "enum Choice { left; right } func main() { let value = match Choice.left() { else => 1; left => 2 } }",
+        "else match branch must be last",
+    );
+    try expectCompileError(
+        "enum Choice { left; right } func main() { let value = match Choice.left() { left => 1; else(name) => 2 } }",
+        "else match branch cannot bind associated values",
+    );
+    try expectCompileError(
+        "enum Choice { left; right } func main() { let value = match Choice.left() { left => 1 as int8; else => 2 } }",
+        "match branch expects exact type 'int8', found 'int'",
+    );
+}
