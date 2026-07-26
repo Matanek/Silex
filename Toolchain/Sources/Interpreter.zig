@@ -27,6 +27,7 @@ pub const Value = union(enum) {
     structure: Structure,
     enumeration: *const Enumeration,
     optional: Optional,
+    reference: *?Value,
 
     pub const Structure = struct {
         type: Ir.Type,
@@ -57,6 +58,7 @@ pub const Value = union(enum) {
             .structure => |value| value.type,
             .enumeration => |value| value.type,
             .optional => |value| value.type,
+            .reference => .address,
         };
     }
 };
@@ -331,6 +333,24 @@ fn executeInstruction(
             local.local,
             try cloneValue(allocator, try load(values, local.operand)),
         ),
+        .local_address => |address| {
+            if (address.local >= locals.len or locals[address.local] == null) return error.InvalidProgram;
+            try store(function, values, address.result, .{ .reference = &locals[address.local] });
+        },
+        .reference_load => |reference| {
+            const pointer = switch (try load(values, reference.reference)) {
+                .reference => |value| value,
+                else => return error.InvalidProgram,
+            };
+            try store(function, values, reference.result, try cloneValue(allocator, pointer.* orelse return error.InvalidProgram));
+        },
+        .reference_store => |reference| {
+            const pointer = switch (try load(values, reference.reference)) {
+                .reference => |value| value,
+                else => return error.InvalidProgram,
+            };
+            pointer.* = try cloneValue(allocator, try load(values, reference.operand));
+        },
         .convert => |conversion| {
             const operand = try load(values, conversion.operand);
             const converted = convert(operand, conversion.target, conversion.checked) catch |err| switch (err) {
@@ -862,6 +882,7 @@ fn equal(left: Value, right: Value) Error!bool {
             if (optional.value) |payload| break :optional_value try equal(payload.*, right.optional.value.?.*);
             break :optional_value true;
         },
+        .reference => error.InvalidProgram,
         .void => error.InvalidProgram,
     };
 }
@@ -889,6 +910,7 @@ fn appendValueText(output: *std.ArrayList(u8), allocator: Allocator, value: Valu
             try appendValueText(output, allocator, payload.*)
         else
             try output.appendSlice(allocator, "null"),
+        .reference => return error.InvalidProgram,
         .structure => return error.InvalidProgram,
         .enumeration => return error.InvalidProgram,
         .void => return error.InvalidProgram,

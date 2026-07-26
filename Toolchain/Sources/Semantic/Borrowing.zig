@@ -12,11 +12,12 @@ pub fn analyzeIdentifier(self: anytype, builder: anytype, position: @import("../
         const message = try std.fmt.allocPrint(self.allocator, "value '{s}' was moved and is unavailable", .{name});
         return self.fail(position, message);
     }
-    const borrowed_root = if (binding.parameter_mode == .read) binding.name else null;
+    const borrowed_root = if (binding.parameter_mode != .value) binding.name else null;
     if (binding.refined_type) |type_value| return .{
         .type = type_value,
         .value = binding.refined_value.?,
         .borrowed_root = borrowed_root,
+        .borrowed_mode = binding.parameter_mode,
     };
     if (!binding.type.hasRuntimeValue()) {
         const message = try std.fmt.allocPrint(self.allocator, "values of type '{s}' are not executable yet", .{binding.type.name()});
@@ -25,18 +26,37 @@ pub fn analyzeIdentifier(self: anytype, builder: anytype, position: @import("../
     if (binding.local) |local| {
         const result = try self.newValue(builder, binding.type);
         try self.emit(builder, .{ .local_load = .{ .result = result, .local = local } });
-        return .{ .type = binding.type, .value = result, .borrowed_root = borrowed_root };
+        return .{ .type = binding.type, .value = result, .borrowed_root = borrowed_root, .borrowed_mode = binding.parameter_mode };
     }
-    return .{ .type = binding.type, .value = binding.value.?, .borrowed_root = borrowed_root };
+    if (binding.reference) |reference| {
+        const result = try self.newValue(builder, binding.type);
+        try self.emit(builder, .{ .reference_load = .{ .result = result, .reference = reference } });
+        return .{ .type = binding.type, .value = result, .borrowed_root = borrowed_root, .borrowed_mode = binding.parameter_mode };
+    }
+    return .{ .type = binding.type, .value = binding.value.?, .borrowed_root = borrowed_root, .borrowed_mode = binding.parameter_mode };
 }
 
 pub fn requireOwned(self: anytype, value: Model.TypedValue, position: @import("../Source.zig").Position, action: []const u8) !void {
     const root = value.borrowed_root orelse return;
-    const message = try std.fmt.allocPrint(self.allocator, "read-reference parameter '{s}' cannot be {s}", .{ root, action });
+    const message = if (value.borrowed_mode == .read)
+        try std.fmt.allocPrint(self.allocator, "read-reference parameter '{s}' cannot be {s}", .{ root, action })
+    else
+        try std.fmt.allocPrint(self.allocator, "mutable-reference parameter '{s}' cannot be {s}", .{ root, action });
     return self.fail(position, message);
 }
 
 pub fn validateReadArguments(self: anytype, parameters: []const Ast.Parameter, arguments: []const *Ast.Expression) !void {
+    for (parameters[0..arguments.len], arguments, 0..) |parameter, argument, index| {
+        if (parameter.mode == .value) continue;
+        const root = rootName(argument) orelse continue;
+        for (parameters[0..arguments.len], arguments, 0..) |other_parameter, other, other_index| {
+            if (index == other_index or other_parameter.mode == .value or parameter.mode == other_parameter.mode) continue;
+            if (sameRoot(other, root)) {
+                const message = try std.fmt.allocPrint(self.allocator, "cannot borrow '{s}' as both '@' and '&' in the same call", .{root});
+                return self.fail(other.position, message);
+            }
+        }
+    }
     for (parameters[0..arguments.len], arguments, 0..) |parameter, argument, index| {
         if (parameter.mode != .read) continue;
         const root = rootName(argument) orelse continue;

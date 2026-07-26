@@ -285,6 +285,12 @@ fn encodeFunction(
                 try words.append(allocator, storeStack(.x9, copy.result));
             },
             .copy_range => |copy| try emitSpanCopy(allocator, words, copy.result, copy.operand),
+            .local_address => |address| {
+                try emitStackAddress(allocator, words, .x9, address.local);
+                try words.append(allocator, storeStack(.x9, address.result));
+            },
+            .reference_load => |load| try emitReferenceCopy(allocator, words, load.result, load.reference, true),
+            .reference_store => |store| try emitReferenceCopy(allocator, words, store.operand, store.reference, false),
             .aggregate_init => |initialization| {
                 var destination_offset: usize = 0;
                 for (initialization.fields) |field| {
@@ -517,6 +523,26 @@ fn emitSpanCopy(
     for (0..result.width) |index| {
         try words.append(allocator, loadStack(.x9, @intCast(@as(usize, operand.start) + index)));
         try words.append(allocator, storeStack(.x9, @intCast(@as(usize, result.start) + index)));
+    }
+}
+
+fn emitReferenceCopy(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    span: Machine.Span,
+    reference: Machine.Slot,
+    load_reference: bool,
+) Allocator.Error!void {
+    try words.append(allocator, loadStack(.x9, reference));
+    for (0..span.width) |index| {
+        const offset = index * Machine.slot_size;
+        if (load_reference) {
+            try emitLoadAtOffset(allocator, words, .x10, .x9, offset);
+            try words.append(allocator, storeStack(.x10, @intCast(@as(usize, span.start) + index)));
+        } else {
+            try words.append(allocator, loadStack(.x10, @intCast(@as(usize, span.start) + index)));
+            try emitStoreAtOffset(allocator, words, .x10, .x9, offset);
+        }
     }
 }
 

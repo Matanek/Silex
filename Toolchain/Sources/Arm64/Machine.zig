@@ -63,6 +63,9 @@ pub const Instruction = union(enum) {
     optional_unwrap: OptionalUnwrap,
     copy: Copy,
     copy_range: CopyRange,
+    local_address: LocalAddress,
+    reference_load: ReferenceLoad,
+    reference_store: ReferenceStore,
     aggregate_init: AggregateInit,
     list_init: ListInit,
     enum_init: EnumInit,
@@ -135,6 +138,21 @@ pub const Instruction = union(enum) {
 
     pub const CopyRange = struct {
         result: Span,
+        operand: Span,
+    };
+
+    pub const LocalAddress = struct {
+        result: Slot,
+        local: Slot,
+    };
+
+    pub const ReferenceLoad = struct {
+        result: Span,
+        reference: Slot,
+    };
+
+    pub const ReferenceStore = struct {
+        reference: Slot,
         operand: Span,
     };
 
@@ -369,6 +387,18 @@ pub fn validate(program: Program) Error!void {
                 try requireSpan(function, value.result);
                 try requireSpan(function, value.operand);
                 if (value.result.width != value.operand.width) return error.InvalidMachineProgram;
+            },
+            .local_address => |value| {
+                try requireSlot(function, value.result);
+                try requireSlot(function, value.local);
+            },
+            .reference_load => |value| {
+                try requireSpan(function, value.result);
+                try requireSlot(function, value.reference);
+            },
+            .reference_store => |value| {
+                try requireSlot(function, value.reference);
+                try requireSpan(function, value.operand);
             },
             .aggregate_init => |value| {
                 try requireSpan(function, value.result);

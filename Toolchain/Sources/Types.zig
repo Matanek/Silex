@@ -12,6 +12,8 @@ pub const Type = enum(u32) {
     float32 = 10,
     float64 = 11,
     str = 12,
+    /// Toolchain-internal address used to lower temporary mutable borrows.
+    address = 13,
     _,
 
     const structure_base = 0x100;
@@ -70,6 +72,7 @@ pub const Type = enum(u32) {
             .float32 => "float",
             .float64 => "float64",
             .str => "str",
+            .address => "internal address",
             _ => if (self.optionalChild() != null)
                 "optional"
             else if (self.genericInstantiationIndex() != null)
@@ -83,7 +86,7 @@ pub const Type = enum(u32) {
 
     pub fn hasRuntimeValue(self: Type) bool {
         return switch (self) {
-            .int8, .int16, .int32, .int, .uint8, .uint16, .uint32, .uint, .float32, .float64, .bool, .str => true,
+            .int8, .int16, .int32, .int, .uint8, .uint16, .uint32, .uint, .float32, .float64, .bool, .str, .address => true,
             .void => false,
             _ => true,
         };

@@ -84,6 +84,9 @@ pub const Instruction = union(enum) {
     collection_slice: CollectionSlice,
     local_load: LocalLoad,
     local_store: LocalStore,
+    local_address: LocalAddress,
+    reference_load: ReferenceLoad,
+    reference_store: ReferenceStore,
     convert: Convert,
     format_value: FormatValue,
     string_concat: StringConcat,
@@ -228,6 +231,21 @@ pub const Instruction = union(enum) {
 
     pub const LocalStore = struct {
         local: LocalId,
+        operand: ValueId,
+    };
+
+    pub const LocalAddress = struct {
+        result: ValueId,
+        local: LocalId,
+    };
+
+    pub const ReferenceLoad = struct {
+        result: ValueId,
+        reference: ValueId,
+    };
+
+    pub const ReferenceStore = struct {
+        reference: ValueId,
         operand: ValueId,
     };
 
@@ -670,6 +688,25 @@ fn writeInstruction(
             try output.appendSlice(allocator, ", ");
             try appendValueChecked(output, allocator, function, store.operand);
             if (function.local_types[store.local] != function.value_types[store.operand]) return error.InvalidProgram;
+        },
+        .local_address => |address| {
+            try appendResult(output, allocator, program, function, address.result);
+            try output.appendSlice(allocator, "address ");
+            try appendLocalChecked(output, allocator, function, address.local);
+            if (function.value_types[address.result] != .address) return error.InvalidProgram;
+        },
+        .reference_load => |load| {
+            try appendResult(output, allocator, program, function, load.result);
+            try output.appendSlice(allocator, "reference.load ");
+            try appendValueChecked(output, allocator, function, load.reference);
+            if (function.value_types[load.reference] != .address) return error.InvalidProgram;
+        },
+        .reference_store => |store| {
+            try output.appendSlice(allocator, "reference.store ");
+            try appendValueChecked(output, allocator, function, store.reference);
+            try output.appendSlice(allocator, ", ");
+            try appendValueChecked(output, allocator, function, store.operand);
+            if (function.value_types[store.reference] != .address) return error.InvalidProgram;
         },
         .convert => |conversion| {
             try appendResult(output, allocator, program, function, conversion.result);

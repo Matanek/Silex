@@ -7,6 +7,7 @@ const Source = @import("../Source.zig");
 const Mutation = @import("Mutation.zig");
 const Moves = @import("Moves.zig");
 const Borrowing = @import("Borrowing.zig");
+const MutableReferences = @import("MutableReferences.zig");
 const Optionals = @import("Optionals.zig");
 const Constructors = @import("Constructors.zig");
 const Collections = @import("Collections.zig");
@@ -115,7 +116,6 @@ pub const Analyzer = struct {
                 return self.fail(function.name_position, message);
             }
         }
-
         for (self.program.structures) |structure| {
             for (structure.constructors, 0..) |constructor, index| {
                 for (constructor.parameters, 0..) |parameter, parameter_index| {
@@ -181,7 +181,6 @@ pub const Analyzer = struct {
                 }
             }
         }
-
         const entry = main orelse {
             if (require_entry) return self.fail(.{ .offset = 0, .line = 1, .column = 1 }, "missing 'main' function");
             return;
@@ -202,6 +201,9 @@ pub const Analyzer = struct {
         var builder: FunctionBuilder = .{};
         try builder.blocks.append(self.allocator, .{});
         for (parameters) |parameter| {
+            if (parameter.mode == .mutable and parameter.default != null) {
+                return self.fail(parameter.position, "a mutable-reference parameter cannot have a default value");
+            }
             if (parameter.default == null) continue;
             _ = try self.analyzeParameterDefault(&builder, parameter);
         }
@@ -230,12 +232,15 @@ pub const Analyzer = struct {
         try builder.blocks.append(self.allocator, .{});
         var parameter_types: std.ArrayList(Types.Type) = .empty;
         for (function.parameters, 0..) |parameter, value| {
-            try parameter_types.append(self.allocator, parameter.type);
-            try builder.value_types.append(self.allocator, parameter.type);
+            const lowered_type: Types.Type = if (parameter.mode == .mutable) .address else parameter.type;
+            try parameter_types.append(self.allocator, lowered_type);
+            try builder.value_types.append(self.allocator, lowered_type);
             try builder.bindings.append(self.allocator, .{
                 .name = parameter.name,
                 .type = parameter.type,
-                .value = value,
+                .value = if (parameter.mode == .mutable) null else value,
+                .reference = if (parameter.mode == .mutable) value else null,
+                .mutable = parameter.mode == .mutable,
                 .parameter = true,
                 .parameter_mode = parameter.mode,
             });
@@ -895,7 +900,7 @@ pub const Analyzer = struct {
             }
             const result = try self.newValue(builder, field.type);
             try self.emit(builder, .{ .field_load = .{ .result = result, .base = base.value, .field = field_index } });
-            return .{ .type = field.type, .value = result, .borrowed_root = base.borrowed_root };
+            return .{ .type = field.type, .value = result, .borrowed_root = base.borrowed_root, .borrowed_mode = base.borrowed_mode };
         }
         const message = try std.fmt.allocPrint(
             self.allocator,
@@ -1184,6 +1189,8 @@ pub const Analyzer = struct {
         const function = self.program.functions[function_id];
         try Borrowing.validateReadArguments(self, function.parameters, call.arguments);
         var argument_ids: std.ArrayList(Ir.ValueId) = .empty;
+        const MutableArgument = struct { source: *const Ast.Expression, prepared: MutableReferences.Prepared };
+        var mutable_arguments: std.ArrayList(MutableArgument) = .empty;
         for (arguments.items, function.parameters[0..arguments.items.len], 0..) |argument, parameter, index| {
             if (argument.type != parameter.type and !Numeric.canWiden(argument.type, parameter.type) and !Optionals.canConvert(argument.type, parameter.type)) {
                 const message = try std.fmt.allocPrint(
@@ -1192,6 +1199,21 @@ pub const Analyzer = struct {
                     .{ index + 1, call.name, self.typeName(parameter.type), self.typeName(argument.type) },
                 );
                 return self.fail(call.arguments[index].position, message);
+            }
+            if (parameter.mode == .mutable) {
+                var reused: ?Ir.ValueId = null;
+                for (mutable_arguments.items) |previous| if (MutableReferences.samePlace(previous.source, call.arguments[index])) {
+                    reused = previous.prepared.reference;
+                    break;
+                };
+                if (reused) |reference| {
+                    try argument_ids.append(self.allocator, reference);
+                } else {
+                    const prepared = try MutableReferences.prepare(self, builder, call.arguments[index], parameter.type);
+                    try mutable_arguments.append(self.allocator, .{ .source = call.arguments[index], .prepared = prepared });
+                    try argument_ids.append(self.allocator, prepared.reference);
+                }
+                continue;
             }
             if (parameter.mode != .read) try Borrowing.requireOwned(self, argument, call.arguments[index].position, "passed by value");
             const converted = try self.coerce(builder, argument, parameter.type, call.name_position);
@@ -1219,6 +1241,7 @@ pub const Analyzer = struct {
             .function = function_id,
             .arguments = try argument_ids.toOwnedSlice(self.allocator),
         } });
+        for (mutable_arguments.items) |argument| try MutableReferences.writeBack(self, builder, argument.prepared);
         return if (result) |value| .{ .type = function.return_type, .value = value } else null;
     }
 

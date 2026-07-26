@@ -52,15 +52,15 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
             const message = try std.fmt.allocPrint(self.allocator, "cannot move value '{s}' into itself", .{target.name});
             return self.fail(value.position, message);
         };
-        const current = if (assignment.operator == .assign) null else try loadLocal(self, builder, binding.local.?, binding.type);
+        const current = if (assignment.operator == .assign) null else try loadBinding(self, builder, binding);
         const replacement = try analyzeReplacement(self, builder, assignment, binding.type, current, target.name, false);
-        try self.emit(builder, .{ .local_store = .{ .local = binding.local.?, .operand = replacement } });
+        try storeBinding(self, builder, binding, replacement);
         builder.bindings.items[binding_index].available = true;
         Optionals.invalidateRefinement(builder, target.name);
         return;
     }
 
-    const root = try loadLocal(self, builder, binding.local.?, binding.type);
+    const root = try loadBinding(self, builder, binding);
     var steps: std.ArrayList(PathStep) = .empty;
     var current_type = binding.type;
     var current_value = root;
@@ -195,7 +195,23 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
             },
         }
     }
-    try self.emit(builder, .{ .local_store = .{ .local = binding.local.?, .operand = replacement } });
+    try storeBinding(self, builder, binding, replacement);
+}
+
+fn loadBinding(self: anytype, builder: anytype, binding: anytype) !Ir.ValueId {
+    if (binding.local) |local| return loadLocal(self, builder, local, binding.type);
+    if (binding.reference) |reference| {
+        const result = try self.newValue(builder, binding.type);
+        try self.emit(builder, .{ .reference_load = .{ .result = result, .reference = reference } });
+        return result;
+    }
+    return error.InvalidSource;
+}
+
+fn storeBinding(self: anytype, builder: anytype, binding: anytype, value: Ir.ValueId) !void {
+    if (binding.local) |local| return self.emit(builder, .{ .local_store = .{ .local = local, .operand = value } });
+    if (binding.reference) |reference| return self.emit(builder, .{ .reference_store = .{ .reference = reference, .operand = value } });
+    return error.InvalidSource;
 }
 
 fn loadLocal(self: anytype, builder: anytype, local: Ir.LocalId, type_value: Ast.Type) !Ir.ValueId {

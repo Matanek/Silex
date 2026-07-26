@@ -8,6 +8,7 @@ pub const Binding = struct {
     type: Types.Type,
     value: ?Ir.ValueId = null,
     local: ?Ir.LocalId = null,
+    reference: ?Ir.ValueId = null,
     mutable: bool = false,
     parameter: bool = false,
     parameter_mode: Ast.Parameter.Mode = .value,
@@ -20,6 +21,7 @@ pub const TypedValue = struct {
     type: Types.Type,
     value: Ir.ValueId,
     borrowed_root: ?[]const u8 = null,
+    borrowed_mode: Ast.Parameter.Mode = .value,
 };
 
 pub const BlockBuilder = struct {

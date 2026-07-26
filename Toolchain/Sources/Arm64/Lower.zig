@@ -246,6 +246,18 @@ fn lowerInstruction(
         },
         .local_load => |load| lowerCopy(layout.values[load.result], layout.locals[load.local]),
         .local_store => |store| lowerCopy(layout.locals[store.local], layout.values[store.operand]),
+        .local_address => |address| .{ .local_address = .{
+            .result = layout.values[address.result].start,
+            .local = layout.locals[address.local].start,
+        } },
+        .reference_load => |load| .{ .reference_load = .{
+            .result = layout.values[load.result],
+            .reference = layout.values[load.reference].start,
+        } },
+        .reference_store => |store| .{ .reference_store = .{
+            .reference = layout.values[store.reference].start,
+            .operand = layout.values[store.operand],
+        } },
         .convert => |conversion| .{ .convert = .{
             .result = layout.values[conversion.result].start,
             .operand = layout.values[conversion.operand].start,

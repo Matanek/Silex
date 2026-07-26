@@ -10,10 +10,17 @@ pub fn parseParameter(self: anytype) !Ast.Parameter {
     if (std.mem.eql(u8, name, "map_error")) return self.failAt(position, "'map_error' is a reserved intrinsic function name");
     try self.advance();
     try self.expect(.colon, "expected ':' after parameter name");
-    const mode: Ast.Parameter.Mode = if (self.current.tag == .at) mode: {
-        try self.advance();
-        break :mode .read;
-    } else .value;
+    const mode: Ast.Parameter.Mode = switch (self.current.tag) {
+        .at => mode: {
+            try self.advance();
+            break :mode .read;
+        },
+        .amp => mode: {
+            try self.advance();
+            break :mode .mutable;
+        },
+        else => .value,
+    };
     const parameter_type = try parseType(self);
     const default = if (self.current.tag == .equal) default: {
         try self.advance();

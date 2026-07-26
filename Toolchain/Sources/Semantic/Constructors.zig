@@ -7,6 +7,7 @@ const Model = @import("Model.zig");
 const Optionals = @import("Optionals.zig");
 const Control = @import("Control.zig");
 const Borrowing = @import("Borrowing.zig");
+const MutableReferences = @import("MutableReferences.zig");
 
 const AnalyzeError = error{ InvalidSource, OutOfMemory };
 
@@ -24,12 +25,15 @@ pub fn analyze(
 
     const parameter_types = try self.allocator.alloc(Ast.Type, constructor.parameters.len);
     for (constructor.parameters, 0..) |parameter, value| {
-        parameter_types[value] = parameter.type;
-        try builder.value_types.append(self.allocator, parameter.type);
+        const lowered_type: Ast.Type = if (parameter.mode == .mutable) .address else parameter.type;
+        parameter_types[value] = lowered_type;
+        try builder.value_types.append(self.allocator, lowered_type);
         try builder.bindings.append(self.allocator, .{
             .name = parameter.name,
             .type = parameter.type,
-            .value = value,
+            .value = if (parameter.mode == .mutable) null else value,
+            .reference = if (parameter.mode == .mutable) value else null,
+            .mutable = parameter.mode == .mutable,
             .parameter = true,
             .parameter_mode = parameter.mode,
         });
@@ -201,7 +205,14 @@ pub fn analyzeCall(
     const constructor = declaration.constructors[constructor_index];
     try Borrowing.validateReadArguments(self, constructor.parameters, call.arguments);
     var argument_ids: std.ArrayList(Ir.ValueId) = .empty;
+    var mutable_arguments: std.ArrayList(MutableReferences.Prepared) = .empty;
     for (arguments.items, constructor.parameters[0..arguments.items.len], 0..) |argument, parameter, index| {
+        if (parameter.mode == .mutable) {
+            const prepared = try MutableReferences.prepare(self, builder, call.arguments[index], parameter.type);
+            try mutable_arguments.append(self.allocator, prepared);
+            try argument_ids.append(self.allocator, prepared.reference);
+            continue;
+        }
         if (parameter.mode != .read) try Borrowing.requireOwned(self, argument, call.arguments[index].position, "passed by value");
         try argument_ids.append(
             self.allocator,
@@ -219,6 +230,7 @@ pub fn analyzeCall(
         .function = constructorFunctionId(self.program, declaration.name, constructor_index),
         .arguments = try argument_ids.toOwnedSlice(self.allocator),
     } });
+    for (mutable_arguments.items) |prepared| try MutableReferences.writeBack(self, builder, prepared);
     return .{ .type = result_type, .value = result };
 }
 
