@@ -235,6 +235,20 @@ fn encodeFunction(
                 try emitImmediate64(allocator, words, .x9, constant.bits);
                 try words.append(allocator, storeStack(.x9, constant.result));
             },
+            .optional_null => |optional| {
+                try words.append(allocator, moveWideZero32(.x9, 0));
+                for (0..optional.result.width) |index| {
+                    try words.append(allocator, storeStack(.x9, @intCast(@as(usize, optional.result.start) + index)));
+                }
+            },
+            .optional_some => |optional| {
+                try words.append(allocator, moveWideZero32(.x9, 1));
+                try words.append(allocator, storeStack(.x9, optional.result.start));
+                var payload = optional.result;
+                payload.start += 1;
+                payload.width -= 1;
+                try emitSpanCopy(allocator, words, payload, optional.operand);
+            },
             .copy => |copy| {
                 try words.append(allocator, loadStack(.x9, copy.operand));
                 try words.append(allocator, storeStack(.x9, copy.result));

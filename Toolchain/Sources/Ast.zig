@@ -36,6 +36,7 @@ pub const Expression = struct {
         integer: []const u8,
         floating: []const u8,
         boolean: bool,
+        null_value,
         string: []const u8,
         interpolated_string: InterpolatedString,
         identifier: []const u8,

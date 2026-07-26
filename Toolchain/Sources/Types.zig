@@ -15,6 +15,7 @@ pub const Type = enum(u32) {
     _,
 
     const structure_base = 0x100;
+    const optional_flag = 0x80000000;
 
     pub fn structure(index: usize) Type {
         return @enumFromInt(structure_base + @as(u32, @intCast(index)));
@@ -22,7 +23,16 @@ pub const Type = enum(u32) {
 
     pub fn structureIndex(self: Type) ?usize {
         const value = @intFromEnum(self);
-        return if (value >= structure_base) value - structure_base else null;
+        return if (value >= structure_base and value < optional_flag) value - structure_base else null;
+    }
+
+    pub fn optional(child: Type) Type {
+        return @enumFromInt(optional_flag | @intFromEnum(child));
+    }
+
+    pub fn optionalChild(self: Type) ?Type {
+        const value = @intFromEnum(self);
+        return if (value & optional_flag != 0) @enumFromInt(value & ~@as(u32, optional_flag)) else null;
     }
 
     pub fn name(self: Type) []const u8 {
@@ -40,7 +50,7 @@ pub const Type = enum(u32) {
             .float32 => "float",
             .float64 => "float64",
             .str => "str",
-            _ => "structure",
+            _ => if (self.optionalChild() != null) "optional" else "structure",
         };
     }
 

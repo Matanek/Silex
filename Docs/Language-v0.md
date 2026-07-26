@@ -30,6 +30,22 @@ The floating types are IEEE-754 `float32` and `float64`; `float` is exactly
 `float32`. `bool` and immutable UTF-8 `str` complete the current value types.
 An embedded zero in a string remains ordinary data.
 
+Appending `?` to any non-`void` value type forms an optional type. Its value is
+either a value of the underlying type or `null`:
+
+```sx
+let count:int?
+let title:str? = "Silex"
+var position:Position? = null
+```
+
+The intrinsic value of `T?` is `null`. A `T` value promotes implicitly to
+`T?`; the reverse conversion is never implicit. A `null` literal therefore
+needs an expected optional type from an annotation, parameter, return or
+field. It cannot by itself infer the type of `let value = null`. `void?` and
+directly nested optionals such as `int??` are invalid. Presence tests and
+extraction are introduced separately from this transport contract.
+
 `use <type> as <name>` introduces a transparent local type alias. The alias is
 accepted everywhere its target type is accepted and does not create a new
 identity, conversion, representation or overload distinction:
@@ -197,9 +213,10 @@ function parameter cannot be assigned. Pointers, references, storage slots,
 and target machine details are not part of this source contract.
 
 The intrinsic value is the correctly typed positive zero for every numeric
-type, `false` for `bool`, and the empty string for `str`. Numeric initializers
-may use the widening rules. A local name cannot reuse a parameter or another
-local name visible in its lexical scope; sibling branches may reuse a name.
+type, `false` for `bool`, the empty string for `str`, and `null` for every
+optional type. Numeric initializers may use the widening rules. A local name
+cannot reuse a parameter or another local name visible in its lexical scope;
+sibling branches may reuse a name.
 
 ## Structure values
 

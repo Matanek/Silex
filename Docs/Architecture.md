@@ -60,6 +60,10 @@ open Silex document
   source code never observes a tuple, address, offset, layout or copy machine
   operation. Calls, returns, local storage and recursive equality preserve
   value semantics in the reference interpreter and native backend.
+- Optional values remain typed in portable IR through explicit `optional.null`
+  and `optional.some` instructions. Target lowering currently represents them
+  as a presence slot followed by the flattened payload, but this layout is an
+  experimental backend detail rather than a source ABI or serialized format.
 - Package manifests locate no source by consumer-provided path. The resolver
   derives canonical local and global locations from package identities, builds
   a single-version dependency graph, and enforces direct visibility.

@@ -195,6 +195,7 @@ fn requiredParameterCount(parameters: []const Ast.Parameter) usize {
 }
 
 fn mappedType(type_value: Types.Type, type_map: []const Types.Type) Types.Type {
+    if (type_value.optionalChild()) |child| return .optional(mappedType(child, type_map));
     const index = type_value.structureIndex() orelse return type_value;
     return if (index < type_map.len) type_map[index] else type_value;
 }

@@ -24,10 +24,16 @@ pub const Value = union(enum) {
     boolean: bool,
     string: []const u8,
     structure: Structure,
+    optional: Optional,
 
     pub const Structure = struct {
         type: Ir.Type,
         fields: []const Value,
+    };
+
+    pub const Optional = struct {
+        type: Ir.Type,
+        value: ?*const Value,
     };
 
     pub fn typeOf(self: Value) Ir.Type {
@@ -40,6 +46,7 @@ pub const Value = union(enum) {
             .boolean => .bool,
             .string => .str,
             .structure => |value| value.type,
+            .optional => |value| value.type,
         };
     }
 };
@@ -176,6 +183,19 @@ fn executeInstruction(
         .constant_str => |constant| try store(function, values, constant.result, .{ .string = constant.value }),
         .constant_float32 => |constant| try store(function, values, constant.result, .{ .float32 = @bitCast(constant.bits) }),
         .constant_float64 => |constant| try store(function, values, constant.result, .{ .float64 = @bitCast(constant.bits) }),
+        .optional_null => |optional| {
+            const type_value = function.value_types[optional.result];
+            if (type_value.optionalChild() == null) return error.InvalidProgram;
+            try store(function, values, optional.result, .{ .optional = .{ .type = type_value, .value = null } });
+        },
+        .optional_some => |optional| {
+            const operand = try load(values, optional.operand);
+            const type_value = function.value_types[optional.result];
+            if (type_value.optionalChild() != operand.typeOf()) return error.InvalidProgram;
+            const payload = try allocator.create(Value);
+            payload.* = try cloneValue(allocator, operand);
+            try store(function, values, optional.result, .{ .optional = .{ .type = type_value, .value = payload } });
+        },
         .copy => |copy| try store(function, values, copy.result, try cloneValue(allocator, try load(values, copy.operand))),
         .structure_init => |initialization| {
             if (initialization.structure >= program.structures.len or
@@ -302,6 +322,14 @@ fn cloneValue(allocator: Allocator, value: Value) Error!Value {
             const fields = try allocator.alloc(Value, aggregate.fields.len);
             for (aggregate.fields, 0..) |field, index| fields[index] = try cloneValue(allocator, field);
             break :cloned .{ .structure = .{ .type = aggregate.type, .fields = fields } };
+        },
+        .optional => |optional| cloned: {
+            const payload = if (optional.value) |present| payload: {
+                const copy = try allocator.create(Value);
+                copy.* = try cloneValue(allocator, present.*);
+                break :payload copy;
+            } else null;
+            break :cloned .{ .optional = .{ .type = optional.type, .value = payload } };
         },
         else => value,
     };
@@ -557,6 +585,11 @@ fn equal(left: Value, right: Value) Error!bool {
             }
             break :structure true;
         },
+        .optional => |optional| optional_value: {
+            if ((optional.value == null) != (right.optional.value == null)) break :optional_value false;
+            if (optional.value) |payload| break :optional_value try equal(payload.*, right.optional.value.?.*);
+            break :optional_value true;
+        },
         .void => error.InvalidProgram,
     };
 }
@@ -580,6 +613,10 @@ fn appendValueText(output: *std.ArrayList(u8), allocator: Allocator, value: Valu
         .float64 => |number| try appendFloat(output, allocator, number),
         .boolean => |flag| try output.appendSlice(allocator, if (flag) "true" else "false"),
         .string => |text| try output.appendSlice(allocator, text),
+        .optional => |optional| if (optional.value) |payload|
+            try appendValueText(output, allocator, payload.*)
+        else
+            try output.appendSlice(allocator, "null"),
         .structure => return error.InvalidProgram,
         .void => return error.InvalidProgram,
     }

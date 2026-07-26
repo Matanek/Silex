@@ -4,6 +4,7 @@ const Ir = @import("../Ir.zig");
 const Numeric = @import("../Numeric.zig");
 const Source = @import("../Source.zig");
 const Mutation = @import("Mutation.zig");
+const Optionals = @import("Optionals.zig");
 const Constructors = @import("Constructors.zig");
 const Model = @import("Model.zig");
 const Methods = @import("Methods.zig");
@@ -300,9 +301,9 @@ pub const Analyzer = struct {
         var value = try self.analyzeExpressionExpected(
             builder,
             expression,
-            if (parameter.type.isNumeric() and Support.acceptsNumericContext(expression)) parameter.type else null,
+            Optionals.expectedContext(parameter.type, expression),
         );
-        if (value.type != parameter.type and Numeric.canWiden(value.type, parameter.type)) {
+        if (value.type != parameter.type and (Numeric.canWiden(value.type, parameter.type) or Optionals.canConvert(value.type, parameter.type))) {
             value = try self.coerce(builder, value, parameter.type, expression.position);
         }
         if (value.type != parameter.type) {
@@ -366,17 +367,14 @@ pub const Analyzer = struct {
             try self.analyzeExpressionExpected(
                 builder,
                 expression,
-                if (declaration.annotation != null and declaration.annotation.?.isNumeric() and Support.acceptsNumericContext(expression))
-                    declaration.annotation
-                else
-                    null,
+                if (declaration.annotation) |annotation| Optionals.expectedContext(annotation, expression) else null,
             )
         else intrinsic: {
             const annotation = declaration.annotation.?;
             break :intrinsic try self.emitIntrinsic(builder, annotation, declaration.name_position);
         };
         const declared_type = declaration.annotation orelse initializer.type;
-        if (initializer.type != declared_type and Numeric.canWiden(initializer.type, declared_type)) {
+        if (initializer.type != declared_type and (Numeric.canWiden(initializer.type, declared_type) or Optionals.canConvert(initializer.type, declared_type))) {
             initializer = try self.coerce(builder, initializer, declared_type, declaration.initializer.?.position);
         }
         if (initializer.type != declared_type) {
@@ -410,9 +408,9 @@ pub const Analyzer = struct {
             var value = try self.analyzeExpressionExpected(
                 builder,
                 expression,
-                if (function.return_type.isNumeric() and Support.acceptsNumericContext(expression)) function.return_type else null,
+                Optionals.expectedContext(function.return_type, expression),
             );
-            if (value.type != function.return_type and Numeric.canWiden(value.type, function.return_type)) {
+            if (value.type != function.return_type and (Numeric.canWiden(value.type, function.return_type) or Optionals.canConvert(value.type, function.return_type))) {
                 value = try self.coerce(builder, value, function.return_type, expression.position);
             }
             if (value.type != function.return_type) {
@@ -458,6 +456,7 @@ pub const Analyzer = struct {
                 break :floating try self.emitFloatingLiteral(builder, lexeme, target, expression.position);
             },
             .boolean => |value| self.emitBool(builder, value),
+            .null_value => Optionals.analyzeNull(self, builder, expected, expression.position),
             .string => |value| self.emitString(builder, value),
             .interpolated_string => |value| self.analyzeInterpolatedString(builder, value),
             .identifier => |name| self.analyzeIdentifier(builder, expression.position, name),
@@ -781,9 +780,9 @@ pub const Analyzer = struct {
                 var value = try self.analyzeExpressionExpected(
                     &builder,
                     default,
-                    if (field.type.isNumeric() and Support.acceptsNumericContext(default)) field.type else null,
+                    Optionals.expectedContext(field.type, default),
                 );
-                if (value.type != field.type and Numeric.canWiden(value.type, field.type)) {
+                if (value.type != field.type and (Numeric.canWiden(value.type, field.type) or Optionals.canConvert(value.type, field.type))) {
                     value = try self.coerce(&builder, value, field.type, default.position);
                 }
                 if (value.type != field.type) {
@@ -819,7 +818,8 @@ pub const Analyzer = struct {
         }
         states[index] = .visiting;
         for (self.structures[index].fields) |field| {
-            if (field.type.structureIndex()) |nested| try self.validateStructureCycle(nested, states);
+            const field_type = field.type.optionalChild() orelse field.type;
+            if (field_type.structureIndex()) |nested| try self.validateStructureCycle(nested, states);
         }
         states[index] = .complete;
     }
@@ -839,6 +839,9 @@ pub const Analyzer = struct {
     }
 
     pub fn typeName(self: *Analyzer, type_value: Types.Type) []const u8 {
+        if (type_value.optionalChild()) |child| {
+            return std.fmt.allocPrint(self.allocator, "{s}?", .{self.typeName(child)}) catch "optional";
+        }
         if (type_value.structureIndex()) |index| {
             if (index < self.structures.len) return self.structures[index].name;
         }
@@ -950,11 +953,11 @@ pub const Analyzer = struct {
                 try self.analyzeExpressionExpected(
                     builder,
                     expression,
-                    if (field.type.isNumeric() and Support.acceptsNumericContext(expression)) field.type else null,
+                    Optionals.expectedContext(field.type, expression),
                 )
             else
                 try self.emitIntrinsic(builder, field.type, call.name_position);
-            if (value.type != field.type and Numeric.canWiden(value.type, field.type)) {
+            if (value.type != field.type and (Numeric.canWiden(value.type, field.type) or Optionals.canConvert(value.type, field.type))) {
                 value = try self.coerce(builder, value, field.type, if (provided) |expression| expression.position else call.name_position);
             }
             if (value.type != field.type) {
@@ -978,6 +981,7 @@ pub const Analyzer = struct {
     }
 
     pub fn emitIntrinsic(self: *Analyzer, builder: *FunctionBuilder, type_value: Types.Type, position: Source.Position) AnalyzeError!TypedValue {
+        if (try Optionals.intrinsic(self, builder, type_value)) |value| return value;
         return switch (type_value) {
             .int8, .int16, .int32, .int, .uint8, .uint16, .uint32, .uint => self.emitInteger(builder, 0, type_value),
             .bool => self.emitBool(builder, false),
@@ -1083,7 +1087,7 @@ pub const Analyzer = struct {
         for (call.arguments, 0..) |argument, index| {
             const expected = if (sole_candidate) |candidate| expected: {
                 const parameter_type = self.program.functions[candidate].parameters[index].type;
-                break :expected if (parameter_type.isNumeric() and Support.acceptsNumericContext(argument)) parameter_type else null;
+                break :expected Optionals.expectedContext(parameter_type, argument);
             } else null;
             try arguments.append(self.allocator, try self.analyzeExpressionExpected(builder, argument, expected));
         }
@@ -1158,7 +1162,7 @@ pub const Analyzer = struct {
         const function = self.program.functions[function_id];
         var argument_ids: std.ArrayList(Ir.ValueId) = .empty;
         for (arguments.items, function.parameters[0..arguments.items.len], 0..) |argument, parameter, index| {
-            if (argument.type != parameter.type and !Numeric.canWiden(argument.type, parameter.type)) {
+            if (argument.type != parameter.type and !Numeric.canWiden(argument.type, parameter.type) and !Optionals.canConvert(argument.type, parameter.type)) {
                 const message = try std.fmt.allocPrint(
                     self.allocator,
                     "argument {d} of '{s}' expects '{s}', found '{s}'",
@@ -1367,6 +1371,7 @@ pub const Analyzer = struct {
         position: Source.Position,
     ) AnalyzeError!TypedValue {
         if (value.type == target) return value;
+        if (try Optionals.promote(self, builder, value, target)) |promoted| return promoted;
         if (!Numeric.canWiden(value.type, target)) {
             const message = try std.fmt.allocPrint(
                 self.allocator,
@@ -1425,7 +1430,7 @@ pub const Analyzer = struct {
 
 fn restrictedFieldDefault(self: *Analyzer, expression: *const Ast.Expression) bool {
     return switch (expression.value) {
-        .integer, .floating, .boolean, .string => true,
+        .integer, .floating, .boolean, .null_value, .string => true,
         .unary => |unary| unary.operator == .negate and switch (unary.operand.value) {
             .integer, .floating => true,
             else => false,
@@ -1442,6 +1447,7 @@ fn restrictedFieldDefault(self: *Analyzer, expression: *const Ast.Expression) bo
 
 fn conversionCost(source: Types.Type, target: Types.Type) ?u8 {
     if (source == target) return 0;
+    if (Optionals.conversionCost(source, target)) |cost| return cost;
     if (!Numeric.canWiden(source, target)) return null;
     return if (source.isInteger() and target.isFloat()) 2 else 1;
 }
