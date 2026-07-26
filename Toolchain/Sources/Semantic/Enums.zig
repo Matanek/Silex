@@ -4,6 +4,7 @@ const Ir = @import("../Ir.zig");
 const Model = @import("Model.zig");
 const Optionals = @import("Optionals.zig");
 const Borrowing = @import("Borrowing.zig");
+const Resources = @import("Resources.zig");
 
 pub fn prepare(self: anytype) ![]const Ir.Enum {
     const result = try self.allocator.alloc(Ir.Enum, self.program.enums.len);
@@ -74,6 +75,7 @@ pub fn analyzeInitializer(self: anytype, builder: anytype, call: Ast.Expression.
             });
             return self.fail(argument.position, message);
         }
+        try Resources.requireTransfer(self, argument, expected, "storing it in an enum");
         try Borrowing.requireOwned(self, value, argument.position, "stored in an enum");
         try values.append(self.allocator, value.value);
     }

@@ -5,6 +5,7 @@ const Enums = @import("Enums.zig");
 const Model = @import("Model.zig");
 const Support = @import("Support.zig");
 const Availability = @import("Availability.zig");
+const Resources = @import("Resources.zig");
 
 const Prepared = struct {
     subject: Model.TypedValue,
@@ -40,7 +41,9 @@ pub fn analyze(self: anytype, builder: anytype, match_value: Ast.Expression.Matc
             result_type = branch_value.type;
             result = try self.newValue(builder, branch_value.type);
         }
+        try Resources.requireTransfer(self, branch.value.?, branch_value.type, "returning it from a match branch");
         try self.emit(builder, .{ .copy = .{ .result = result.?, .operand = branch_value.value } });
+        try Resources.emitActiveDrops(self, builder, binding_count);
         try exit_availabilities.append(self.allocator, try Availability.snapshot(self.allocator, builder.bindings.items, availability_count));
         self.terminate(builder, .{ .jump = prepared.merge_block });
     }
@@ -71,6 +74,7 @@ pub fn analyzeStatement(
         try bindBranch(self, builder, prepared, branch, variant_index);
         const terminated = try self.analyzeStatements(builder, function, branch.statements.?);
         if (!terminated) {
+            try Resources.emitActiveDrops(self, builder, binding_count);
             all_terminated = false;
             try exit_availabilities.append(self.allocator, try Availability.snapshot(self.allocator, builder.bindings.items, availability_count));
             self.terminate(builder, .{ .jump = prepared.merge_block });
@@ -94,6 +98,7 @@ fn prepare(self: anytype, builder: anytype, match_value: Ast.Expression.Match) !
         const message = try std.fmt.allocPrint(self.allocator, "match requires an enum subject, found '{s}'", .{self.typeName(subject.type)});
         return self.fail(match_value.subject.position, message);
     };
+    try Resources.requireTransfer(self, match_value.subject, subject.type, "matching it by value");
     const enumeration = self.program.enums[enum_index];
     var else_index: ?usize = null;
     for (match_value.branches, 0..) |branch, branch_index| if (branch.is_else) {

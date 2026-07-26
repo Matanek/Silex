@@ -160,7 +160,10 @@ pub fn analyze(self: anytype, structure_index: usize, method_index: usize, sourc
         }
         if (mutating and !borrowed_mutable) {
             try emitMutatingReturn(self, &builder, structure_index, flat, self_local.?, method, null);
-        } else self.terminate(&builder, .return_void);
+        } else {
+            try Resources.emitActiveDrops(self, &builder, 0);
+            self.terminate(&builder, .return_void);
+        }
     }
 
     const blocks = try self.allocator.alloc(Ir.Block, builder.blocks.items.len);
@@ -562,6 +565,7 @@ fn analyzeMutatingIf(
         const binding_count = builder.bindings.items.len;
         if (analyzed.binding) |binding| try Control.enterBinding(self, builder, binding);
         const terminated = try analyzeMutatingStatements(self, builder, method, structure_index, flat, self_local, branch.statements);
+        if (!terminated) try Resources.emitActiveDrops(self, builder, binding_count);
         builder.bindings.shrinkRetainingCapacity(binding_count);
         if (!terminated) try exits.append(self.allocator, builder.current_block);
         builder.current_block = next_block;
@@ -569,6 +573,7 @@ fn analyzeMutatingIf(
     if (conditional.else_statements) |statements| {
         const binding_count = builder.bindings.items.len;
         const terminated = try analyzeMutatingStatements(self, builder, method, structure_index, flat, self_local, statements);
+        if (!terminated) try Resources.emitActiveDrops(self, builder, binding_count);
         builder.bindings.shrinkRetainingCapacity(binding_count);
         if (!terminated) try exits.append(self.allocator, builder.current_block);
     } else try exits.append(self.allocator, builder.current_block);
@@ -600,6 +605,7 @@ fn analyzeMutatingWhile(
     const binding_count = builder.bindings.items.len;
     if (analyzed.binding) |binding| try Control.enterBinding(self, builder, binding);
     const terminated = try analyzeMutatingStatements(self, builder, method, structure_index, flat, self_local, loop.statements);
+    if (!terminated) try Resources.emitActiveDrops(self, builder, binding_count);
     builder.bindings.shrinkRetainingCapacity(binding_count);
     builder.loops.items.len -= 1;
     if (!terminated) self.terminate(builder, .{ .jump = condition_block });
@@ -616,6 +622,7 @@ fn emitMutatingReturn(
     method: Ast.Function,
     value: ?Ir.ValueId,
 ) !void {
+    try Resources.emitActiveDrops(self, builder, 0);
     const receiver_type = Ast.Type.structure(structure_index);
     const receiver = try self.newValue(builder, receiver_type);
     try self.emit(builder, .{ .local_load = .{ .result = receiver, .local = self_local } });

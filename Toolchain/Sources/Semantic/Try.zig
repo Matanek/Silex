@@ -3,6 +3,7 @@ const Ast = @import("../Ast.zig");
 const Ir = @import("../Ir.zig");
 const Result = @import("../Intrinsics/Result.zig");
 const Model = @import("Model.zig");
+const Resources = @import("Resources.zig");
 
 pub fn analyzeValue(self: anytype, builder: anytype, unary: Ast.Expression.Unary) !Model.TypedValue {
     return (try analyze(self, builder, unary, true)).?;
@@ -14,6 +15,7 @@ pub fn analyzeStatement(self: anytype, builder: anytype, unary: Ast.Expression.U
 
 fn analyze(self: anytype, builder: anytype, unary: Ast.Expression.Unary, require_value: bool) !?Model.TypedValue {
     const operand = try self.analyzeExpression(builder, unary.operand);
+    try Resources.requireTransfer(self, unary.operand, operand.type, "propagating it with 'try'");
     const source_index = findResult(self.enums, operand.type) orelse {
         const message = try std.fmt.allocPrint(self.allocator, "'try' expects 'Result<T,E>', found '{s}'", .{self.typeName(operand.type)});
         return self.fail(unary.operator_position, message);
@@ -75,6 +77,7 @@ fn analyze(self: anytype, builder: anytype, unary: Ast.Expression.Unary, require
         .variant = destination_failure,
         .values = values,
     } });
+    try Resources.emitActiveDrops(self, builder, 0);
     self.terminate(builder, .{ .return_value = propagated });
 
     builder.current_block = success_block;

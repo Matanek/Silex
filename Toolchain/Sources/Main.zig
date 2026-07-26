@@ -196,6 +196,7 @@ test {
     _ = @import("TryTests.zig");
     _ = @import("Packages.zig");
     _ = @import("ReadReferenceTests.zig");
+    _ = @import("RecursiveResourceTests.zig");
     _ = @import("ResourceTests.zig");
     _ = @import("Lexer.zig");
     _ = @import("Lsp/Completion.zig");

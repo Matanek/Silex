@@ -64,7 +64,7 @@ test "owner structures reject copies comparison and mutable references" {
         \\struct File { let descriptor:int; drop {} }
         \\func main() { let first = File(descriptor:1); let second = File(descriptor:1); print(first == second) }
     ));
-    try std.testing.expectEqualStrings("owner structures cannot be compared", frontend.diagnostic.?.message);
+    try std.testing.expectEqualStrings("noncopyable values cannot be compared", frontend.diagnostic.?.message);
 
     frontend.diagnostic = null;
     try std.testing.expectError(error.InvalidSource, frontend.compile(
