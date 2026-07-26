@@ -31,7 +31,7 @@ pub fn analyzeMutation(self: anytype, builder: anytype, call: Ast.Expression.Cal
         else => return self.fail(receiver_expression.position, "collection mutation requires a var receiver"),
     };
     const binding = Support.findBinding(builder.bindings.items, name) orelse return self.fail(receiver_expression.position, "unknown collection variable");
-    if (!binding.mutable or binding.local == null) return self.fail(receiver_expression.position, "collection mutation requires a var receiver");
+    if (!binding.mutable or (binding.local == null and binding.reference == null)) return self.fail(receiver_expression.position, "collection mutation requires a var receiver");
     const collection = collectionForType(self.structures, binding.type) orelse return self.fail(receiver_expression.position, "collection mutation requires an array or list");
     const source = try self.analyzeExpression(builder, receiver_expression);
 
@@ -43,7 +43,7 @@ pub fn analyzeMutation(self: anytype, builder: anytype, call: Ast.Expression.Cal
         try self.emit(builder, .{ .collection_load = .{ .result = previous, .collection = source.value, .index = index.value, .position = call.name_position } });
         const updated = try self.newValue(builder, binding.type);
         try self.emit(builder, .{ .collection_replace = .{ .result = updated, .collection = source.value, .index = index.value, .replacement = replacement.value, .position = call.name_position } });
-        try self.emit(builder, .{ .local_store = .{ .local = binding.local.?, .operand = updated } });
+        try storeBinding(self, builder, binding, updated);
         return .{ .type = collection.element, .value = previous };
     }
     if (std.mem.eql(u8, call.name, "swap")) {
@@ -58,7 +58,7 @@ pub fn analyzeMutation(self: anytype, builder: anytype, call: Ast.Expression.Cal
         const updated = try self.newValue(builder, binding.type);
         try self.emit(builder, .{ .collection_replace = .{ .result = first, .collection = source.value, .index = left_index.value, .replacement = right, .position = call.name_position } });
         try self.emit(builder, .{ .collection_replace = .{ .result = updated, .collection = first, .index = right_index.value, .replacement = left, .position = call.name_position } });
-        try self.emit(builder, .{ .local_store = .{ .local = binding.local.?, .operand = updated } });
+        try storeBinding(self, builder, binding, updated);
         return .{ .type = binding.type, .value = updated };
     }
     if (collection.length != null and std.mem.eql(u8, call.name, "reverse")) {
@@ -78,7 +78,7 @@ pub fn analyzeMutation(self: anytype, builder: anytype, call: Ast.Expression.Cal
             try self.emit(builder, .{ .collection_replace = .{ .result = next, .collection = first, .index = right_constant, .replacement = left, .position = call.name_position } });
             updated = next;
         }
-        try self.emit(builder, .{ .local_store = .{ .local = binding.local.?, .operand = updated } });
+        try storeBinding(self, builder, binding, updated);
         return .{ .type = binding.type, .value = updated };
     }
     if (collection.length != null) return self.fail(call.name_position, "fixed arrays only support swap, reverse, and replace");
@@ -131,8 +131,13 @@ pub fn analyzeMutation(self: anytype, builder: anytype, call: Ast.Expression.Cal
     }
     const updated = try self.newValue(builder, binding.type);
     try self.emit(builder, .{ .list_edit = .{ .result = updated, .collection = source.value, .kind = kind, .index = index, .argument = argument, .removed = removed, .position = call.name_position } });
-    try self.emit(builder, .{ .local_store = .{ .local = binding.local.?, .operand = updated } });
+    try storeBinding(self, builder, binding, updated);
     return .{ .type = return_type, .value = removed orelse updated };
+}
+
+fn storeBinding(self: anytype, builder: anytype, binding: anytype, value: Ir.ValueId) !void {
+    if (binding.local) |local| return self.emit(builder, .{ .local_store = .{ .local = local, .operand = value } });
+    return self.emit(builder, .{ .reference_store = .{ .reference = binding.reference.?, .operand = value } });
 }
 
 fn requireArity(self: anytype, call: Ast.Expression.Call, expected: usize) !void {
@@ -211,7 +216,7 @@ pub fn analyzeIndex(self: anytype, builder: anytype, access: Ast.Expression.Inde
         .index = index.value,
         .position = access.bracket_position,
     } });
-    return .{ .type = collection.element, .value = result, .borrowed_root = source.borrowed_root };
+    return .{ .type = collection.element, .value = result, .borrowed_root = source.borrowed_root, .borrowed_mode = source.borrowed_mode };
 }
 
 pub fn analyzeSlice(self: anytype, builder: anytype, access: Ast.Expression.SliceAccess, expected: ?Ast.Type) !Model.TypedValue {
@@ -233,7 +238,7 @@ pub fn analyzeSlice(self: anytype, builder: anytype, access: Ast.Expression.Slic
     const target = result_type orelse return self.fail(access.bracket_position, "a fixed-array slice requires an expected dynamic list type");
     const result = try self.newValue(builder, target);
     try self.emit(builder, .{ .collection_slice = .{ .result = result, .collection = source.value, .start = start.value, .end = end.value } });
-    return .{ .type = target, .value = result, .borrowed_root = source.borrowed_root };
+    return .{ .type = target, .value = result, .borrowed_root = source.borrowed_root, .borrowed_mode = source.borrowed_mode };
 }
 
 pub fn analyzeCall(self: anytype, builder: anytype, call: Ast.Expression.Call) !?Model.TypedValue {

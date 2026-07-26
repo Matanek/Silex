@@ -302,8 +302,9 @@ count++
 The arithmetic updates `+=`, `-=`, `*=`, `/=`, `++`, and `--` are statements,
 not expressions. They require a numeric `var`, evaluate their operand once,
 and use the same checked arithmetic as `+`, `-`, `*`, and `/`. A `let` and a
-function parameter cannot be assigned. Pointers, references, storage slots,
-and target machine details are not part of this source contract.
+function parameter cannot be assigned unless it is explicitly declared `&T`.
+Pointers, storage slots, and target machine details are not part of this source
+contract.
 
 The intrinsic value is the correctly typed positive zero for every numeric
 type, `false` for `bool`, the empty string for `str`, and `null` for every
@@ -350,6 +351,28 @@ the same call holds a read reference. The mode is not an overload distinction:
 declarations differing only by `T` and `@T` expose the same effective
 signature. `@T` is a controlled parameter mode, not a pointer or a generally
 storable type.
+
+A parameter written `name:&T` temporarily aliases a mutable place owned by the
+caller. The call syntax stays ordinary, and writes through the parameter are
+visible in the exact `var`, mutable field, or mutable indexed element supplied
+as its argument.
+
+```sx
+func increment(value:&int) {
+    value += 1
+}
+
+var count = 1
+increment(count)
+```
+
+The alias lasts only for the synchronous call and may be forwarded to another
+`&T` parameter. Several mutable-reference parameters may name the same place;
+their writes then follow the execution order of the function body. The same
+root cannot be passed as both `@T` and `&T` in one call. A mutable-reference
+parameter cannot be moved, returned, stored in another binding or aggregate,
+or passed by value. Like `@T`, `&T` is a controlled parameter mode rather than
+a pointer or an overload distinction.
 
 ## Associated enum values
 
@@ -918,7 +941,7 @@ field_default   = fundamental_literal | structure_initializer ;
 function        = visibility? "func" identifier type_parameters? "(" parameters? ")" return_type? block ;
 type_parameters = "<" identifier ("," identifier)* ">" ;
 parameters      = parameter ("," parameter)* ;
-parameter       = identifier ":" "@"? type ("=" expression)? ;
+parameter       = identifier ":" ("@" | "&")? type ("=" expression)? ;
 return_type     = type ;
 type            = type_atom ("[" integer? "]")* "?"? ;
 type_atom       = "void" | "int8" | "int16" | "int32" | "int64" | "int"

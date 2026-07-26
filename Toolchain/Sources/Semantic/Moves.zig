@@ -16,6 +16,9 @@ pub fn analyze(self: anytype, builder: anytype, unary: Ast.Expression.Unary) !Mo
     if (builder.bindings.items[index].parameter_mode == .read) {
         return self.fail(unary.operator_position, "a read-reference parameter cannot be consumed with 'move'");
     }
+    if (builder.bindings.items[index].parameter_mode == .mutable) {
+        return self.fail(unary.operator_position, "a mutable-reference parameter cannot be consumed with 'move'");
+    }
     const value = try self.analyzeExpression(builder, unary.operand);
     builder.bindings.items[index].available = false;
     builder.bindings.items[index].refined_type = null;

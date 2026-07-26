@@ -7,11 +7,13 @@ const Support = @import("Support.zig");
 const Optionals = @import("Optionals.zig");
 const Control = @import("Control.zig");
 const Borrowing = @import("Borrowing.zig");
+const MutableReferences = @import("MutableReferences.zig");
 
 const AnalyzeError = error{ InvalidSource, OutOfMemory };
 
 const Place = struct {
-    local: Ir.LocalId,
+    local: ?Ir.LocalId,
+    reference: ?Ir.ValueId,
     root_type: Ast.Type,
     fields: []const usize,
 };
@@ -112,12 +114,15 @@ pub fn analyze(self: anytype, structure_index: usize, method_index: usize, metho
 
     for (method.parameters, 0..) |parameter, parameter_index| {
         const value = parameter_index + 1;
-        parameter_types[value] = parameter.type;
-        try builder.value_types.append(self.allocator, parameter.type);
+        const lowered_type: Ast.Type = if (parameter.mode == .mutable) .address else parameter.type;
+        parameter_types[value] = lowered_type;
+        try builder.value_types.append(self.allocator, lowered_type);
         try builder.bindings.append(self.allocator, .{
             .name = parameter.name,
             .type = parameter.type,
-            .value = value,
+            .value = if (parameter.mode == .mutable) null else value,
+            .reference = if (parameter.mode == .mutable) value else null,
+            .mutable = parameter.mode == .mutable,
             .parameter = true,
             .parameter_mode = parameter.mode,
         });
@@ -310,8 +315,15 @@ fn analyzeCallWithReceiver(
         null;
 
     var argument_ids: std.ArrayList(Ir.ValueId) = .empty;
+    var mutable_arguments: std.ArrayList(MutableReferences.Prepared) = .empty;
     try argument_ids.append(self.allocator, receiver.value);
     for (arguments.items, method.parameters[0..arguments.items.len], 0..) |argument, parameter, index| {
+        if (parameter.mode == .mutable) {
+            const prepared = try MutableReferences.prepare(self, builder, call.arguments[index], parameter.type);
+            try mutable_arguments.append(self.allocator, prepared);
+            try argument_ids.append(self.allocator, prepared.reference);
+            continue;
+        }
         if (parameter.mode != .read) try Borrowing.requireOwned(self, argument, call.arguments[index].position, "passed by value");
         try argument_ids.append(
             self.allocator,
@@ -330,6 +342,7 @@ fn analyzeCallWithReceiver(
         .function = methodFunctionId(self.program, structure_index, method_index),
         .arguments = try argument_ids.toOwnedSlice(self.allocator),
     } });
+    for (mutable_arguments.items) |prepared| try MutableReferences.writeBack(self, builder, prepared);
 
     if (!mutating) {
         return if (call_result) |value| .{ .type = method.return_type, .value = value } else null;
@@ -363,7 +376,7 @@ fn requireMutablePlace(self: anytype, builder: anytype, expression: *const Ast.E
                 const message = try std.fmt.allocPrint(self.allocator, "unknown variable '{s}'", .{name});
                 return self.fail(current.position, message);
             };
-            if (!binding.mutable or binding.local == null) {
+            if (!binding.mutable or (binding.local == null and binding.reference == null)) {
                 const message = try std.fmt.allocPrint(self.allocator, "mutating method '{s}' requires a var receiver", .{method_name});
                 return self.fail(expression.position, message);
             }
@@ -388,7 +401,7 @@ fn requireMutablePlace(self: anytype, builder: anytype, expression: *const Ast.E
                 field_indices[path_index] = field_index;
                 type_value = structure.fields[field_index].type;
             }
-            return .{ .local = binding.local.?, .root_type = binding.type, .fields = field_indices };
+            return .{ .local = binding.local, .reference = binding.reference, .root_type = binding.type, .fields = field_indices };
         },
         .field_access => |access| {
             try names.append(self.allocator, access.name);
@@ -403,11 +416,11 @@ fn requireMutablePlace(self: anytype, builder: anytype, expression: *const Ast.E
 
 fn writePlace(self: anytype, builder: anytype, place: Place, replacement_value: Ir.ValueId) !void {
     if (place.fields.len == 0) {
-        try self.emit(builder, .{ .local_store = .{ .local = place.local, .operand = replacement_value } });
+        if (place.local) |local| try self.emit(builder, .{ .local_store = .{ .local = local, .operand = replacement_value } }) else try self.emit(builder, .{ .reference_store = .{ .reference = place.reference.?, .operand = replacement_value } });
         return;
     }
     const root = try self.newValue(builder, place.root_type);
-    try self.emit(builder, .{ .local_load = .{ .result = root, .local = place.local } });
+    if (place.local) |local| try self.emit(builder, .{ .local_load = .{ .result = root, .local = local } }) else try self.emit(builder, .{ .reference_load = .{ .result = root, .reference = place.reference.? } });
     const bases = try self.allocator.alloc(Ir.ValueId, place.fields.len);
     const structure_indices = try self.allocator.alloc(usize, place.fields.len);
     var current = root;
@@ -445,7 +458,7 @@ fn writePlace(self: anytype, builder: anytype, place: Place, replacement_value: 
             .fields = fields,
         } });
     }
-    try self.emit(builder, .{ .local_store = .{ .local = place.local, .operand = replacement } });
+    if (place.local) |local| try self.emit(builder, .{ .local_store = .{ .local = local, .operand = replacement } }) else try self.emit(builder, .{ .reference_store = .{ .reference = place.reference.?, .operand = replacement } });
 }
 
 fn analyzeMutatingStatements(
