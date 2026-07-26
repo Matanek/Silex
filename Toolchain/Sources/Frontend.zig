@@ -1,5 +1,6 @@
 const std = @import("std");
 const Ast = @import("Ast.zig");
+const GenericSpecializer = @import("Generics/Specializer.zig").Specializer;
 const Ir = @import("Ir.zig");
 const ParserModule = @import("Parser.zig");
 const Semantic = @import("Semantic/Analyzer.zig");
@@ -23,8 +24,13 @@ pub const Frontend = struct {
 
     pub fn compile(self: *Frontend, source: []const u8) CompileError!Compilation {
         var parser = ParserModule.Parser.init(self.allocator, source);
-        const ast = parser.parse() catch |err| {
+        var ast = parser.parse() catch |err| {
             self.diagnostic = parser.diagnostic;
+            return err;
+        };
+        var specializer = GenericSpecializer.init(self.allocator);
+        ast = specializer.specialize(ast) catch |err| {
+            self.diagnostic = specializer.diagnostic;
             return err;
         };
         var analyzer = Semantic.Analyzer.init(self.allocator);
@@ -38,11 +44,16 @@ pub const Frontend = struct {
 
     pub fn checkDocument(self: *Frontend, source: []const u8) CompileError!void {
         var parser = ParserModule.Parser.init(self.allocator, source);
-        const ast = parser.parse() catch |err| {
+        var ast = parser.parse() catch |err| {
             self.diagnostic = parser.diagnostic;
             return err;
         };
         if (ast.uses.len != 0) return;
+        var specializer = GenericSpecializer.init(self.allocator);
+        ast = specializer.specialize(ast) catch |err| {
+            self.diagnostic = specializer.diagnostic;
+            return err;
+        };
         var analyzer = Semantic.Analyzer.init(self.allocator);
         _ = analyzer.analyzeUnit(ast) catch |err| {
             self.diagnostic = analyzer.diagnostic;

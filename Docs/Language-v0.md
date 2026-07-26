@@ -132,6 +132,28 @@ distinct signatures. The return type alone never distinguishes an overload.
 All signatures are collected before bodies, so a call may target a function
 declared later in the source.
 
+A function may declare unconstrained type parameters after its name. Calls may
+provide every type argument explicitly or let the compiler infer all of them
+from ordinary arguments:
+
+```sx
+func identity<T>(value:T) T {
+    return value
+}
+
+let inferred = identity(42)
+let explicit = identity<str>("Silex")
+```
+
+Inference unifies every occurrence, including optional forms, and never uses
+the expected return type. Partial and default type-argument lists do not exist.
+An unqualified call prefers a compatible concrete overload before generic
+inference; an explicit `<...>` call considers only generic overloads of that
+type arity. Identical arguments share one program-wide specialization, stable
+recursion reuses it, and recursion that continually changes its type arguments
+is rejected. Visibility, reexports, aliases and trailing value defaults retain
+their ordinary meaning after specialization.
+
 ## Default parameters and effective signatures
 
 A function, method, or constructor may give its trailing parameters a default
@@ -604,7 +626,8 @@ structure_field = visibility? ("let" | "var") identifier ":" type ("=" field_def
 constructor     = visibility? "init" "(" parameters? ")" block ;
 method          = visibility? "func" identifier "(" parameters? ")" return_type? block ;
 field_default   = fundamental_literal | structure_initializer ;
-function        = visibility? "func" identifier "(" parameters? ")" return_type? block ;
+function        = visibility? "func" identifier type_parameters? "(" parameters? ")" return_type? block ;
+type_parameters = "<" identifier ("," identifier)* ">" ;
 parameters      = parameter ("," parameter)* ;
 parameter       = identifier ":" type ("=" expression)? ;
 return_type     = type ;
@@ -650,7 +673,8 @@ primary         = integer | floating | string | "true" | "false" | identifier
 string          = '"' string_part* '"' ;
 string_part     = string_text | string_escape | "$$"
                 | "$(" expression ")" ;
-call_expression = postfix ;
+call_expression = postfix type_arguments? "(" arguments? ")" ;
+type_arguments  = "<" type ("," type)* ">" ;
 arguments       = expression ("," expression)* ;
 structure_initializer = identifier "(" field_initializers? ")" ;
 field_initializers = field_initializer ("," field_initializer)* ","? ;

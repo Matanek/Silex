@@ -37,6 +37,7 @@ pub const DeclarationId = struct {
 pub const Function = struct {
     export_name: []const u8,
     id: DeclarationId,
+    type_parameters: []const []const u8 = &.{},
     return_type: Types.Type,
     position: Source.Position,
     required_parameters: usize = 0,
@@ -199,6 +200,8 @@ pub fn buildMapped(
         if (!function.is_public) continue;
         const parameter_types = try allocator.alloc(Types.Type, function.parameters.len);
         for (function.parameters, 0..) |parameter, index| parameter_types[index] = mappedType(parameter.type, type_map);
+        const type_parameters = try allocator.alloc([]const u8, function.type_parameters.len);
+        for (function.type_parameters, 0..) |parameter, index| type_parameters[index] = parameter.name;
         try functions.append(allocator, .{
             .export_name = function.name,
             .id = .{
@@ -207,6 +210,7 @@ pub fn buildMapped(
                 .name = function.name,
                 .parameter_types = parameter_types,
             },
+            .type_parameters = type_parameters,
             .return_type = mappedType(function.return_type, type_map),
             .position = function.position,
             .required_parameters = requiredParameterCount(function.parameters),
