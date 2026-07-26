@@ -2,8 +2,10 @@ const std = @import("std");
 const Ast = @import("Ast.zig");
 const Interface = @import("Interface.zig");
 const GenericSpecializer = @import("Generics/Specializer.zig").Specializer;
+const Result = @import("Intrinsics/Result.zig");
 const Ir = @import("Ir.zig");
 const Modules = @import("Modules.zig");
+const Names = @import("Project/Names.zig");
 const Packages = @import("Packages.zig");
 const ParserModule = @import("Parser.zig");
 const Reexports = @import("Project/Reexports.zig");
@@ -15,6 +17,17 @@ const Source = @import("Source.zig");
 
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
+const canonicalName = Names.canonical;
+const expressionName = Names.expression;
+const expressionPosition = Names.expressionPosition;
+const findEnum = Names.findEnum;
+const findName = Names.find;
+const findStructure = Names.findStructure;
+const lastSegment = Names.lastSegment;
+const parent = Names.parent;
+const pathInside = Names.pathInside;
+const sameParent = Names.sameParent;
+const structureCanonicalName = Names.nominal;
 
 pub const Error = anyerror;
 
@@ -144,10 +157,11 @@ pub const Compiler = struct {
             .limited(1024 * 1024),
         );
         var parser = ParserModule.Parser.initFile(self.allocator, source, provider.file);
-        const program = parser.parse() catch |err| {
+        const parsed = parser.parse() catch |err| {
             self.diagnostic = parser.diagnostic;
             return err;
         };
+        const program = try Result.install(self.allocator, parsed);
         self.units[module].program = program;
 
         var bindings: std.ArrayList(Binding) = .empty;
@@ -794,6 +808,7 @@ pub const Compiler = struct {
             }
             for (self.units[module].program.?.enums) |enumeration| {
                 const name = try structureCanonicalName(self.allocator, provider.name, enumeration.name);
+                if (std.mem.eql(u8, name, Result.name) and findName(type_names.items, name) != null) continue;
                 for (type_names.items) |existing| {
                     if (std.mem.eql(u8, existing, name)) {
                         const message = try std.fmt.allocPrint(self.allocator, "type identity '{s}' is already provided", .{name});
@@ -1146,6 +1161,7 @@ pub const Compiler = struct {
         declaration_name: []const u8,
     ) Error!void {
         if (type_value.optionalChild()) |child| return self.requirePublicOutputType(module, child, position, declaration_kind, declaration_name);
+        if (type_value.genericInstantiationIndex() != null) return self.requirePublicType(module, type_value, position, declaration_kind, declaration_name);
         const index = type_value.structureIndex() orelse return;
         const program = self.units[module].program.?;
         if (index >= program.type_names.len) return;
@@ -1167,6 +1183,14 @@ pub const Compiler = struct {
         declaration_name: []const u8,
     ) Error!void {
         if (type_value.optionalChild()) |child| return self.requirePublicType(module, child, position, declaration_kind, declaration_name);
+        if (type_value.genericInstantiationIndex()) |generic_index| {
+            const program = self.units[module].program.?;
+            if (generic_index >= program.generic_types.len) return;
+            const generic = program.generic_types[generic_index];
+            try self.requirePublicType(module, generic.base, position, declaration_kind, declaration_name);
+            for (generic.arguments) |argument| try self.requirePublicType(module, argument, position, declaration_kind, declaration_name);
+            return;
+        }
         const index = type_value.structureIndex() orelse return;
         const program = self.units[module].program.?;
         if (index >= program.type_names.len) return;
@@ -1433,68 +1457,3 @@ pub const Compiler = struct {
         return error.InvalidSource;
     }
 };
-
-fn canonicalName(allocator: Allocator, module: []const u8, declaration: []const u8) Allocator.Error![]const u8 {
-    return std.fmt.allocPrint(allocator, "{s}.{s}", .{ module, declaration });
-}
-
-fn structureCanonicalName(allocator: Allocator, module: []const u8, declaration: []const u8) Allocator.Error![]const u8 {
-    if (std.mem.eql(u8, lastSegment(module), declaration)) return allocator.dupe(u8, module);
-    return canonicalName(allocator, module, declaration);
-}
-
-fn findName(names: []const []const u8, name: []const u8) ?usize {
-    for (names, 0..) |candidate, index| {
-        if (std.mem.eql(u8, candidate, name)) return index;
-    }
-    return null;
-}
-
-fn findStructure(program: Ast.Program, name: []const u8) ?Ast.Structure {
-    for (program.structures) |structure| {
-        if (std.mem.eql(u8, structure.name, name)) return structure;
-    }
-    return null;
-}
-
-fn findEnum(program: Ast.Program, name: []const u8) ?Ast.Enum {
-    for (program.enums) |enumeration| {
-        if (std.mem.eql(u8, enumeration.name, name)) return enumeration;
-    }
-    return null;
-}
-
-fn expressionName(allocator: Allocator, expression: *const Ast.Expression) Allocator.Error!?[]const u8 {
-    return switch (expression.value) {
-        .identifier => |name| name,
-        .generic_reference => |reference| reference.name,
-        .field_access => |access| if (try expressionName(allocator, access.base)) |prefix|
-            try std.fmt.allocPrint(allocator, "{s}.{s}", .{ prefix, access.name })
-        else
-            null,
-        else => null,
-    };
-}
-
-fn lastSegment(path: []const u8) []const u8 {
-    const separator = std.mem.lastIndexOfScalar(u8, path, '.') orelse return path;
-    return path[separator + 1 ..];
-}
-
-fn sameParent(left: []const u8, right: []const u8) bool {
-    return std.mem.eql(u8, parent(left), parent(right));
-}
-
-fn parent(path: []const u8) []const u8 {
-    const separator = std.mem.lastIndexOfScalar(u8, path, '.') orelse return "";
-    return path[0..separator];
-}
-
-fn expressionPosition(module: usize) Source.Position {
-    return .{ .offset = 0, .line = 1, .column = 1, .file = module };
-}
-
-fn pathInside(path: []const u8, directory: []const u8) bool {
-    if (!std.mem.startsWith(u8, path, directory) or path.len <= directory.len) return false;
-    return path[directory.len] == std.fs.path.sep;
-}
