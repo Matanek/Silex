@@ -313,7 +313,10 @@ pub const Parameter = struct {
     position: Source.Position,
     name: []const u8,
     type: Type,
+    mode: Mode = .value,
     default: ?*Expression = null,
+
+    pub const Mode = enum { value, read, mutable };
 };
 
 pub const TypeParameter = struct {

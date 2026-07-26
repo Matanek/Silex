@@ -42,7 +42,7 @@ pub fn promote(
     if (target.optionalChild() != value.type) return null;
     const result = try self.newValue(builder, target);
     try self.emit(builder, .{ .optional_some = .{ .result = result, .operand = value.value } });
-    return .{ .type = target, .value = result };
+    return .{ .type = target, .value = result, .borrowed_root = value.borrowed_root };
 }
 
 pub fn intrinsic(self: anytype, builder: anytype, type_value: Types.Type) !?Model.TypedValue {
@@ -69,7 +69,7 @@ pub fn unwrap(self: anytype, builder: anytype, source: Model.TypedValue) !Model.
     const child = source.type.optionalChild() orelse return error.InvalidSource;
     const result = try self.newValue(builder, child);
     try self.emit(builder, .{ .optional_unwrap = .{ .result = result, .operand = source.value } });
-    return .{ .type = child, .value = result };
+    return .{ .type = child, .value = result, .borrowed_root = source.borrowed_root };
 }
 
 pub fn conversionCost(source: Types.Type, target: Types.Type) ?u8 {
