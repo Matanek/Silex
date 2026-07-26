@@ -81,6 +81,18 @@ pub const Structure = struct {
     position: Source.Position,
 };
 
+pub const EnumVariant = struct {
+    name: []const u8,
+    associated_types: []const Types.Type,
+};
+
+pub const Enum = struct {
+    export_name: []const u8,
+    id: TypeId,
+    variants: []const EnumVariant,
+    position: Source.Position,
+};
+
 pub const TypeAlias = struct {
     name: []const u8,
     target: Types.Type,
@@ -90,6 +102,7 @@ pub const Module = struct {
     owner: Owner,
     name: []const u8,
     structures: []const Structure,
+    enums: []const Enum = &.{},
     functions: []const Function,
     type_aliases: []const TypeAlias = &.{},
 };
@@ -161,6 +174,24 @@ pub fn buildMapped(
         });
     }
     var functions: std.ArrayList(Function) = .empty;
+    var enums: std.ArrayList(Enum) = .empty;
+    for (program.enums) |enumeration| {
+        if (!enumeration.is_public) continue;
+        const variants = try allocator.alloc(EnumVariant, enumeration.variants.len);
+        for (enumeration.variants, 0..) |variant, variant_index| {
+            const associated_types = try allocator.alloc(Types.Type, variant.associated_types.len);
+            for (variant.associated_types, 0..) |associated_type, type_index| {
+                associated_types[type_index] = mappedType(associated_type, type_map);
+            }
+            variants[variant_index] = .{ .name = variant.name, .associated_types = associated_types };
+        }
+        try enums.append(allocator, .{
+            .export_name = enumeration.name,
+            .id = .{ .owner = owner, .module = module_name, .name = enumeration.name },
+            .variants = variants,
+            .position = enumeration.position,
+        });
+    }
     for (program.functions) |function| {
         if (!function.is_public) continue;
         const parameter_types = try allocator.alloc(Types.Type, function.parameters.len);
@@ -182,6 +213,7 @@ pub fn buildMapped(
         .owner = owner,
         .name = module_name,
         .structures = try structures.toOwnedSlice(allocator),
+        .enums = try enums.toOwnedSlice(allocator),
         .functions = try functions.toOwnedSlice(allocator),
         .type_aliases = &.{},
     };

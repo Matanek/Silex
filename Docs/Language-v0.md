@@ -122,8 +122,8 @@ use Geometry.Vector as Vector
 An alias of a structure can construct the original nominal type. Alias chains
 are reduced to one canonical type and cannot be cyclic. `public use` exposes a
 type alias through the current module; consumers may qualify or rename it.
-Only the fundamental and nominal structure types currently implemented by this
-compiler can be aliased.
+Only the fundamental and nominal structure or enum types currently implemented
+by this compiler can be aliased.
 
 Functions may share a name when their parameter types differ. Resolution
 prefers exact arguments, then same-family widening, then integer-to-float
@@ -280,6 +280,36 @@ type, `false` for `bool`, the empty string for `str`, and `null` for every
 optional type. Numeric initializers may use the widening rules. A local name
 cannot reuse a parameter or another local name visible in its lexical scope;
 sibling branches may reuse a name.
+
+## Associated enum values
+
+`enum` declares a nominal closed set of variants. A variant may carry zero or
+more positional values, whose types belong to the declaration:
+
+```sx
+enum Connection {
+    waiting
+    connected(str)
+    closed(str)
+}
+
+let pending = Connection.waiting()
+let active = Connection.connected("server")
+```
+
+Construction always uses parentheses, including for an empty variant. The
+variant name is scoped by its enum, so unrelated enums may reuse it. Arity and
+argument types are checked at the construction site; named arguments, an
+implicit integer value, raw conversion, fields, methods, equality and printing
+of a complete enum value are not part of this contract.
+
+Associated enums are ordinary copied values. Their nominal type, selected
+variant and associated values survive local storage, structure fields,
+parameters, returns, module composition, the reference interpreter and the
+macOS ARM64 backend. `public enum` exposes the enum and all its variants as one
+public contract. A private enum remains local to its module; `internal enum`
+is restricted to its exact source file. The tag and payload layout remain
+compiler details and are not a source ABI.
 
 ## Structure values
 

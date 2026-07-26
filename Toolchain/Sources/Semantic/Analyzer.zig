@@ -9,6 +9,7 @@ const Constructors = @import("Constructors.zig");
 const Model = @import("Model.zig");
 const Methods = @import("Methods.zig");
 const Control = @import("Control.zig");
+const Enums = @import("Enums.zig");
 const Support = @import("Support.zig");
 const Types = @import("../Types.zig");
 
@@ -27,6 +28,7 @@ pub const Analyzer = struct {
     allocator: Allocator,
     program: Ast.Program = undefined,
     structures: []const Ir.Structure = &.{},
+    enums: []const Ir.Enum = &.{},
     method_mutability: []const bool = &.{},
     default_expansions: std.ArrayList(*const Ast.Expression) = .empty,
     diagnostic: ?Source.Diagnostic = null,
@@ -47,6 +49,7 @@ pub const Analyzer = struct {
         self.program = program;
         self.diagnostic = null;
         self.structures = try self.prepareStructures();
+        self.enums = try Enums.prepare(self);
         self.method_mutability = try Methods.inferMutability(self.allocator, self.program);
         self.structures = try Methods.extendStructures(self.allocator, self.program, self.structures, self.method_mutability);
         try self.validateDeclarations(require_entry);
@@ -72,7 +75,7 @@ pub const Analyzer = struct {
                 );
             }
         }
-        return .{ .structures = self.structures, .functions = try functions.toOwnedSlice(self.allocator) };
+        return .{ .structures = self.structures, .enums = self.enums, .functions = try functions.toOwnedSlice(self.allocator) };
     }
 
     fn validateDeclarations(self: *Analyzer, require_entry: bool) AnalyzeError!void {
@@ -723,7 +726,11 @@ pub const Analyzer = struct {
         const structures = try self.allocator.alloc(Ir.Structure, self.program.type_names.len);
         for (self.program.type_names, 0..) |name, type_index| {
             const declaration = self.findAstStructure(name) orelse {
-                const message = try std.fmt.allocPrint(self.allocator, "unknown structure type '{s}'", .{name});
+                if (Enums.find(self, name) != null) {
+                    structures[type_index] = .{ .name = name, .fields = &.{} };
+                    continue;
+                }
+                const message = try std.fmt.allocPrint(self.allocator, "unknown nominal type '{s}'", .{name});
                 return self.fail(.{ .offset = 0, .line = 1, .column = 1 }, message);
             };
             const fields = try self.allocator.alloc(Ir.StructureField, declaration.fields.len);
@@ -801,7 +808,7 @@ pub const Analyzer = struct {
         return null;
     }
 
-    fn structureIndex(self: *Analyzer, name: []const u8) ?usize {
+    pub fn structureIndex(self: *Analyzer, name: []const u8) ?usize {
         for (self.structures, 0..) |structure, index| {
             if (std.mem.eql(u8, structure.name, name)) return index;
         }
@@ -886,7 +893,10 @@ pub const Analyzer = struct {
             return self.fail(access.name_position, message);
         };
         const structure = self.structures[structure_index];
-        const declaration = self.program.structures[structure_index];
+        const declaration = self.findAstStructure(structure.name) orelse {
+            const message = try std.fmt.allocPrint(self.allocator, "type '{s}' has no fields", .{self.typeName(base.type)});
+            return self.fail(access.name_position, message);
+        };
         if (declaration.is_internal and access.name_position.file != declaration.position.file) {
             const message = try std.fmt.allocPrint(
                 self.allocator,
@@ -1022,7 +1032,11 @@ pub const Analyzer = struct {
 
     fn analyzeCall(self: *Analyzer, builder: *FunctionBuilder, call: Ast.Expression.Call) AnalyzeError!?TypedValue {
         if (call.receiver) |receiver_expression| {
-            _ = receiver_expression;
+            if (receiver_expression.value == .identifier) {
+                if (Enums.find(self, receiver_expression.value.identifier)) |enum_index| {
+                    return try Enums.analyzeInitializer(self, builder, call, enum_index);
+                }
+            }
             return Methods.analyzeCall(self, builder, call);
         }
         if (self.structureIndex(call.name)) |structure_index| {

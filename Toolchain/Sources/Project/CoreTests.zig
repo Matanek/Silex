@@ -434,3 +434,51 @@ test "compose and execute structures inside their declaring module" {
     const result = try @import("../Interpreter.zig").runCapture(allocator, compilation.ir);
     try std.testing.expectEqualStrings("42\n", result.stdout);
 }
+
+test "compose public associated enums across modules" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Api.sx",
+        .data =
+        \\public enum Message { empty; text(str) }
+        \\public func accept(value:Message) int { return 42 }
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data =
+        \\use Api.Message
+        \\use Api.accept
+        \\func main() { print(accept(Message.text("hello"))) }
+        ,
+    });
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(input);
+    const result = try @import("../Interpreter.zig").runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("42\n", result.stdout);
+    var found_interface = false;
+    for (compilation.interfaces) |interface| {
+        if (!std.mem.eql(u8, interface.name, "Api")) continue;
+        found_interface = true;
+        try std.testing.expectEqual(@as(usize, 1), interface.enums.len);
+    }
+    try std.testing.expect(found_interface);
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Api.sx",
+        .data = "internal enum Message { empty }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "use Api.Message\nfunc main() { Message.empty() }",
+    });
+    compiler = Compiler.init(allocator, std.testing.io);
+    try std.testing.expectError(error.InvalidSource, compiler.compile(input));
+    try std.testing.expectEqualStrings("enum 'Message' is internal to its source file", compiler.diagnostic.?.message);
+}

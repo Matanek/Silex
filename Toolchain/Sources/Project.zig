@@ -167,6 +167,17 @@ pub const Compiler = struct {
                     return self.fail(position, message);
                 }
             }
+            for (program.enums) |enumeration| {
+                if (std.mem.eql(u8, enumeration.name, binding.alias)) {
+                    const position = use.alias_position orelse use.position;
+                    const message = try std.fmt.allocPrint(
+                        self.allocator,
+                        "use alias '{s}' collides with a local declaration",
+                        .{binding.alias},
+                    );
+                    return self.fail(position, message);
+                }
+            }
             for (bindings.items) |existing| {
                 if (std.mem.eql(u8, existing.alias, binding.alias)) {
                     const position = use.alias_position orelse use.position;
@@ -305,7 +316,15 @@ pub const Compiler = struct {
                     .structure,
                     try self.allocator.alloc(bool, self.units.len),
                 );
-                if (functions != null and structures != null) {
+                const enumerations = try self.resolveReexport(
+                    binding.module.?,
+                    binding.declaration.?,
+                    .enumeration,
+                    try self.allocator.alloc(bool, self.units.len),
+                );
+                const declaration_count = @as(u2, @intFromBool(functions != null)) +
+                    @as(u2, @intFromBool(structures != null)) + @as(u2, @intFromBool(enumerations != null));
+                if (declaration_count > 1) {
                     const message = try std.fmt.allocPrint(
                         self.allocator,
                         "public use destination '{s}' is ambiguous",
@@ -313,7 +332,7 @@ pub const Compiler = struct {
                     );
                     return self.fail(binding.position, message);
                 }
-                if (functions == null and structures == null) {
+                if (declaration_count == 0) {
                     if (try self.resolveTypeAlias(
                         binding.module.?,
                         binding.declaration.?,
@@ -370,26 +389,41 @@ pub const Compiler = struct {
         position: Source.Position,
         alias: []const u8,
     ) Error!void {
-        const structure_target = switch (target) {
+        const nominal_target = switch (target) {
             .fundamental => return,
             .structure => |structure| structure,
+            .enumeration => |enumeration| enumeration,
         };
-        const structure = findStructure(
-            self.units[structure_target.module].program.?,
-            structure_target.declaration,
-        ).?;
-        if (structure.is_public) return;
-        const message = if (structure.is_internal)
+        const program = self.units[nominal_target.module].program.?;
+        if (findStructure(program, nominal_target.declaration)) |structure| {
+            if (structure.is_public) return;
+            const message = if (structure.is_internal)
+                try std.fmt.allocPrint(
+                    self.allocator,
+                    "public type alias '{s}' exposes internal structure '{s}'",
+                    .{ alias, structure.name },
+                )
+            else
+                try std.fmt.allocPrint(
+                    self.allocator,
+                    "public type alias '{s}' exposes private structure '{s}'",
+                    .{ alias, structure.name },
+                );
+            return self.fail(position, message);
+        }
+        const enumeration = findEnum(program, nominal_target.declaration).?;
+        if (enumeration.is_public) return;
+        const message = if (enumeration.is_internal)
             try std.fmt.allocPrint(
                 self.allocator,
-                "public type alias '{s}' exposes internal structure '{s}'",
-                .{ alias, structure.name },
+                "public type alias '{s}' exposes internal enum '{s}'",
+                .{ alias, enumeration.name },
             )
         else
             try std.fmt.allocPrint(
                 self.allocator,
-                "public type alias '{s}' exposes private structure '{s}'",
-                .{ alias, structure.name },
+                "public type alias '{s}' exposes private enum '{s}'",
+                .{ alias, enumeration.name },
             );
         return self.fail(position, message);
     }
@@ -421,6 +455,19 @@ pub const Compiler = struct {
                 for (method.statements) |statement| try self.activateStatement(module, statement);
             }
         }
+        for (program.enums) |enumeration| {
+            for (enumeration.variants) |variant| {
+                for (variant.associated_types) |associated_type| try self.activateType(module, associated_type);
+            }
+        }
+        for (program.enums) |enumeration| {
+            if (!enumeration.is_public) continue;
+            for (enumeration.variants) |variant| {
+                for (variant.associated_types) |associated_type| {
+                    try self.requirePublicType(module, associated_type, variant.position, "public enum", enumeration.name);
+                }
+            }
+        }
         for (program.functions) |function| {
             for (function.parameters) |parameter| try self.activateType(module, parameter.type);
             try self.activateType(module, function.return_type);
@@ -433,7 +480,7 @@ pub const Compiler = struct {
         const index = type_value.structureIndex() orelse return;
         const program = self.units[module].program.?;
         if (index >= program.type_names.len) return;
-        const target = try self.structureCandidate(module, program.type_names[index]) orelse return;
+        const target = try self.nominalCandidate(module, program.type_names[index]) orelse return;
         if (target.module != module) try self.loadModule(target.module, module);
     }
 
@@ -480,6 +527,13 @@ pub const Compiler = struct {
                 else
                     call.name;
                 if (qualified_name) |name| {
+                    if (call.receiver) |receiver| if (try expressionName(self.allocator, receiver)) |prefix| {
+                        for (self.units[module].bindings) |binding| {
+                            if (std.mem.eql(u8, binding.alias, prefix)) {
+                                if (binding.module) |target_module| try self.loadModule(target_module, module);
+                            }
+                        }
+                    };
                     if (try self.targetForCall(module, name)) |target| {
                         try self.loadModule(target.module, module);
                     } else if (call.receiver) |receiver| try self.activateExpression(module, receiver);
@@ -548,9 +602,36 @@ pub const Compiler = struct {
             return switch (target) {
                 .fundamental => null,
                 .structure => |structure| structure,
+                .enumeration => null,
             };
         }
         return null;
+    }
+
+    fn enumCandidate(self: *Compiler, module: usize, name: []const u8) Error!?CallTarget {
+        if (findEnum(self.units[module].program.?, name) != null) {
+            return .{ .module = module, .declaration = name };
+        }
+        if (std.mem.indexOfScalar(u8, name, '.') != null) return self.targetForCall(module, name);
+        for (self.units[module].bindings) |binding| {
+            if (!std.mem.eql(u8, binding.alias, name)) continue;
+            const target_module = binding.module orelse continue;
+            return .{
+                .module = target_module,
+                .declaration = binding.declaration orelse lastSegment(self.index.providers[target_module].name),
+            };
+        }
+        if (try self.resolveTypeAlias(module, name, expressionPosition(module), false)) |target| {
+            return switch (target) {
+                .fundamental, .structure => null,
+                .enumeration => |enumeration| enumeration,
+            };
+        }
+        return null;
+    }
+
+    fn nominalCandidate(self: *Compiler, module: usize, name: []const u8) Error!?CallTarget {
+        return try self.structureCandidate(module, name) orelse try self.enumCandidate(module, name);
     }
 
     fn structureTarget(self: *Compiler, module: usize, name: []const u8) Error!?CallTarget {
@@ -563,6 +644,37 @@ pub const Compiler = struct {
             .structure,
             try self.allocator.alloc(bool, self.units.len),
         );
+    }
+
+    fn enumTarget(self: *Compiler, module: usize, name: []const u8) Error!?CallTarget {
+        const target = try self.enumCandidate(module, name) orelse return null;
+        if (self.units[target.module].state != .loaded) return null;
+        if (findEnum(self.units[target.module].program.?, target.declaration) != null) return target;
+        return self.resolveReexport(
+            target.module,
+            target.declaration,
+            .enumeration,
+            try self.allocator.alloc(bool, self.units.len),
+        );
+    }
+
+    fn enumReceiverTarget(self: *Compiler, module: usize, name: []const u8) Error!?CallTarget {
+        const separator = std.mem.indexOfScalar(u8, name, '.');
+        if (separator == null) return self.enumTarget(module, name);
+        const head = name[0..separator.?];
+        const tail = name[separator.? + 1 ..];
+        for (self.units[module].bindings) |binding| {
+            if (!std.mem.eql(u8, binding.alias, head) or binding.declaration != null) continue;
+            if (binding.module) |target_module| return self.enumTarget(target_module, tail);
+        }
+        for (self.index.providers, 0..) |provider, target_module| {
+            if (self.units[target_module].state != .loaded) continue;
+            for (self.units[target_module].program.?.enums) |enumeration| {
+                const canonical = try structureCanonicalName(self.allocator, provider.name, enumeration.name);
+                if (std.mem.eql(u8, canonical, name)) return .{ .module = target_module, .declaration = enumeration.name };
+            }
+        }
+        return null;
     }
 
     fn functionTarget(self: *Compiler, target: CallTarget) Error!?CallTarget {
@@ -587,6 +699,15 @@ pub const Compiler = struct {
         return target;
     }
 
+    fn resolveEnum(self: *Compiler, module: usize, name: []const u8, position: Source.Position) Error!CallTarget {
+        const target = try self.enumTarget(module, name) orelse {
+            const message = try std.fmt.allocPrint(self.allocator, "unknown enum type '{s}'", .{name});
+            return self.fail(position, message);
+        };
+        try self.requirePublicEnum(module, target, position);
+        return target;
+    }
+
     fn requirePublicStructure(self: *Compiler, source_module: usize, target: CallTarget, position: Source.Position) Error!void {
         if (source_module == target.module) return;
         const structure = findStructure(self.units[target.module].program.?, target.declaration).?;
@@ -595,6 +716,17 @@ pub const Compiler = struct {
             try std.fmt.allocPrint(self.allocator, "structure '{s}' is internal to its source file", .{target.declaration})
         else
             try std.fmt.allocPrint(self.allocator, "structure '{s}' is private outside its module", .{target.declaration});
+        return self.fail(position, message);
+    }
+
+    fn requirePublicEnum(self: *Compiler, source_module: usize, target: CallTarget, position: Source.Position) Error!void {
+        if (source_module == target.module) return;
+        const enumeration = findEnum(self.units[target.module].program.?, target.declaration).?;
+        if (enumeration.is_public) return;
+        const message = if (enumeration.is_internal)
+            try std.fmt.allocPrint(self.allocator, "enum '{s}' is internal to its source file", .{target.declaration})
+        else
+            try std.fmt.allocPrint(self.allocator, "enum '{s}' is private outside its module", .{target.declaration});
         return self.fail(position, message);
     }
 
@@ -629,6 +761,16 @@ pub const Compiler = struct {
                 }
                 try type_names.append(self.allocator, name);
             }
+            for (self.units[module].program.?.enums) |enumeration| {
+                const name = try structureCanonicalName(self.allocator, provider.name, enumeration.name);
+                for (type_names.items) |existing| {
+                    if (std.mem.eql(u8, existing, name)) {
+                        const message = try std.fmt.allocPrint(self.allocator, "type identity '{s}' is already provided", .{name});
+                        return self.fail(enumeration.name_position, message);
+                    }
+                }
+                try type_names.append(self.allocator, name);
+            }
         }
 
         const type_maps = try self.allocator.alloc([]const Ast.Type, self.units.len);
@@ -652,10 +794,24 @@ pub const Compiler = struct {
                                 findName(type_names.items, canonical) orelse return error.InvalidSource,
                             );
                         },
+                        .enumeration => |target| enum_type: {
+                            try self.requirePublicEnum(module, target, expressionPosition(module));
+                            const canonical = try structureCanonicalName(
+                                self.allocator,
+                                self.index.providers[target.module].name,
+                                target.declaration,
+                            );
+                            break :enum_type .structure(
+                                findName(type_names.items, canonical) orelse return error.InvalidSource,
+                            );
+                        },
                     };
                     continue;
                 }
-                const target = try self.resolveStructure(module, name, expressionPosition(module));
+                const target = if (try self.enumTarget(module, name)) |enumeration| enum_target: {
+                    try self.requirePublicEnum(module, enumeration, expressionPosition(module));
+                    break :enum_target enumeration;
+                } else try self.resolveStructure(module, name, expressionPosition(module));
                 const canonical = try structureCanonicalName(
                     self.allocator,
                     self.index.providers[target.module].name,
@@ -668,6 +824,7 @@ pub const Compiler = struct {
         }
 
         var structures: std.ArrayList(Ast.Structure) = .empty;
+        var enums: std.ArrayList(Ast.Enum) = .empty;
         var functions: std.ArrayList(Ast.Function) = .empty;
         for (self.index.providers, 0..) |provider, module| {
             if (self.units[module].state != .loaded) continue;
@@ -714,6 +871,22 @@ pub const Compiler = struct {
                 composed_structure.methods = methods;
                 try structures.append(self.allocator, composed_structure);
             }
+            for (program.enums) |enumeration| {
+                var composed = enumeration;
+                composed.owner = provider.owner;
+                composed.name = try structureCanonicalName(self.allocator, provider.name, enumeration.name);
+                const variants = try self.allocator.alloc(Ast.EnumVariant, enumeration.variants.len);
+                for (enumeration.variants, 0..) |variant, variant_index| {
+                    variants[variant_index] = variant;
+                    const associated_types = try self.allocator.alloc(Ast.Type, variant.associated_types.len);
+                    for (variant.associated_types, 0..) |associated_type, type_index| {
+                        associated_types[type_index] = remapType(associated_type, type_map);
+                    }
+                    variants[variant_index].associated_types = associated_types;
+                }
+                composed.variants = variants;
+                try enums.append(self.allocator, composed);
+            }
             for (program.functions) |function| {
                 var composed = function;
                 composed.owner = provider.owner;
@@ -736,6 +909,7 @@ pub const Compiler = struct {
         return .{ .program = .{
             .type_names = try type_names.toOwnedSlice(self.allocator),
             .structures = try structures.toOwnedSlice(self.allocator),
+            .enums = try enums.toOwnedSlice(self.allocator),
             .functions = try functions.toOwnedSlice(self.allocator),
         }, .type_maps = type_maps };
     }
@@ -788,6 +962,19 @@ pub const Compiler = struct {
                         }
                         continue;
                     },
+                    .enumeration => |enum_target| {
+                        const source = interfaces.items[interface_by_module[enum_target.module].?];
+                        for (source.enums) |enumeration| {
+                            if (!std.mem.eql(u8, enumeration.id.name, enum_target.declaration)) continue;
+                            const previous = interfaces.items[destination_index].enums;
+                            const expanded = try self.allocator.alloc(Interface.Enum, previous.len + 1);
+                            @memcpy(expanded[0..previous.len], previous);
+                            expanded[previous.len] = enumeration;
+                            expanded[previous.len].export_name = binding.alias;
+                            interfaces.items[destination_index].enums = expanded;
+                        }
+                        continue;
+                    },
                 };
                 const function_target = try self.resolveReexport(
                     binding.module.?,
@@ -823,6 +1010,24 @@ pub const Compiler = struct {
                         expanded[previous.len] = structure;
                         expanded[previous.len].export_name = binding.alias;
                         interfaces.items[destination_index].structures = expanded;
+                    }
+                }
+                const enum_target = try self.resolveReexport(
+                    binding.module.?,
+                    binding.declaration.?,
+                    .enumeration,
+                    try self.allocator.alloc(bool, self.units.len),
+                );
+                if (enum_target) |target| {
+                    const source = interfaces.items[interface_by_module[target.module].?];
+                    for (source.enums) |enumeration| {
+                        if (!std.mem.eql(u8, enumeration.id.name, target.declaration)) continue;
+                        const previous = interfaces.items[destination_index].enums;
+                        const expanded = try self.allocator.alloc(Interface.Enum, previous.len + 1);
+                        @memcpy(expanded[0..previous.len], previous);
+                        expanded[previous.len] = enumeration;
+                        expanded[previous.len].export_name = binding.alias;
+                        interfaces.items[destination_index].enums = expanded;
                     }
                 }
             }
@@ -873,9 +1078,12 @@ pub const Compiler = struct {
         const index = type_value.structureIndex() orelse return;
         const program = self.units[module].program.?;
         if (index >= program.type_names.len) return;
-        const target = try self.structureTarget(module, program.type_names[index]) orelse return;
-        const structure = findStructure(self.units[target.module].program.?, target.declaration).?;
-        if (structure.is_internal) return;
+        const name = program.type_names[index];
+        const target = try self.structureTarget(module, name) orelse try self.enumTarget(module, name) orelse return;
+        const target_program = self.units[target.module].program.?;
+        if (findStructure(target_program, target.declaration)) |structure| {
+            if (structure.is_internal) return;
+        } else if (findEnum(target_program, target.declaration).?.is_internal) return;
         return self.requirePublicType(module, type_value, position, declaration_kind, declaration_name);
     }
 
@@ -891,20 +1099,38 @@ pub const Compiler = struct {
         const index = type_value.structureIndex() orelse return;
         const program = self.units[module].program.?;
         if (index >= program.type_names.len) return;
-        const target = try self.structureTarget(module, program.type_names[index]) orelse return;
-        const structure = findStructure(self.units[target.module].program.?, target.declaration).?;
-        if (structure.is_public) return;
-        const message = if (structure.is_internal)
+        const name = program.type_names[index];
+        const target = try self.structureTarget(module, name) orelse try self.enumTarget(module, name) orelse return;
+        const target_program = self.units[target.module].program.?;
+        if (findStructure(target_program, target.declaration)) |structure| {
+            if (structure.is_public) return;
+            const message = if (structure.is_internal)
+                try std.fmt.allocPrint(
+                    self.allocator,
+                    "{s} '{s}' exposes internal structure '{s}'",
+                    .{ declaration_kind, declaration_name, structure.name },
+                )
+            else
+                try std.fmt.allocPrint(
+                    self.allocator,
+                    "{s} '{s}' exposes private structure '{s}'",
+                    .{ declaration_kind, declaration_name, structure.name },
+                );
+            return self.fail(position, message);
+        }
+        const enumeration = findEnum(target_program, target.declaration).?;
+        if (enumeration.is_public) return;
+        const message = if (enumeration.is_internal)
             try std.fmt.allocPrint(
                 self.allocator,
-                "{s} '{s}' exposes internal structure '{s}'",
-                .{ declaration_kind, declaration_name, structure.name },
+                "{s} '{s}' exposes internal enum '{s}'",
+                .{ declaration_kind, declaration_name, enumeration.name },
             )
         else
             try std.fmt.allocPrint(
                 self.allocator,
-                "{s} '{s}' exposes private structure '{s}'",
-                .{ declaration_kind, declaration_name, structure.name },
+                "{s} '{s}' exposes private enum '{s}'",
+                .{ declaration_kind, declaration_name, enumeration.name },
             );
         return self.fail(position, message);
     }
@@ -975,14 +1201,23 @@ pub const Compiler = struct {
                 for (call.named_arguments) |argument| try self.rewriteExpression(module, argument.value, type_map);
                 if (call.receiver) |receiver| {
                     if (try expressionName(self.allocator, receiver)) |prefix| {
-                        const qualified = try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ prefix, call.name });
-                        if (try self.structureTarget(module, qualified) != null or try self.targetForCall(module, qualified) != null) {
-                            call.name = qualified;
-                            call.receiver = null;
-                        } else if (prefix.len != 0 and std.ascii.isUpper(prefix[0])) {
-                            call.name = qualified;
-                            call.receiver = null;
-                        } else try self.rewriteExpression(module, receiver, type_map);
+                        if (try self.enumReceiverTarget(module, prefix)) |target| {
+                            try self.requirePublicEnum(module, target, call.name_position);
+                            receiver.value = .{ .identifier = try structureCanonicalName(
+                                self.allocator,
+                                self.index.providers[target.module].name,
+                                target.declaration,
+                            ) };
+                        } else {
+                            const qualified = try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ prefix, call.name });
+                            if (try self.structureTarget(module, qualified) != null or try self.targetForCall(module, qualified) != null) {
+                                call.name = qualified;
+                                call.receiver = null;
+                            } else if (prefix.len != 0 and std.ascii.isUpper(prefix[0])) {
+                                call.name = qualified;
+                                call.receiver = null;
+                            } else try self.rewriteExpression(module, receiver, type_map);
+                        }
                     } else try self.rewriteExpression(module, receiver, type_map);
                 }
                 if (try self.structureTarget(module, call.name)) |target| {
@@ -1114,6 +1349,13 @@ fn findName(names: []const []const u8, name: []const u8) ?usize {
 fn findStructure(program: Ast.Program, name: []const u8) ?Ast.Structure {
     for (program.structures) |structure| {
         if (std.mem.eql(u8, structure.name, name)) return structure;
+    }
+    return null;
+}
+
+fn findEnum(program: Ast.Program, name: []const u8) ?Ast.Enum {
+    for (program.enums) |enumeration| {
+        if (std.mem.eql(u8, enumeration.name, name)) return enumeration;
     }
     return null;
 }

@@ -121,6 +121,15 @@ fn lowerInstruction(
                 .fields = fields,
             } };
         },
+        .enum_init => |initialization| enumeration: {
+            const values = try allocator.alloc(Machine.Span, initialization.values.len);
+            for (initialization.values, 0..) |value, index| values[index] = layout.values[value];
+            break :enumeration .{ .enum_init = .{
+                .result = layout.values[initialization.result],
+                .tag = initialization.variant,
+                .values = values,
+            } };
+        },
         .field_load => |load| field: {
             const base_type = function.value_types[load.base];
             const structure_index = base_type.structureIndex() orelse return error.InvalidMachineProgram;
@@ -314,6 +323,15 @@ fn allocateSpan(program: Ir.Program, type_value: Ir.Type, next: *usize) Machine.
 
 fn leafCount(program: Ir.Program, type_value: Ir.Type) Machine.Error!usize {
     if (type_value.optionalChild()) |child| return 1 + try leafCount(program, child);
+    if (enumByType(program, type_value)) |enumeration| {
+        var maximum: usize = 0;
+        for (enumeration.variants) |variant| {
+            var width: usize = 0;
+            for (variant.associated_types) |associated| width += try leafCount(program, associated);
+            maximum = @max(maximum, width);
+        }
+        return 1 + maximum;
+    }
     const structure_index = type_value.structureIndex() orelse return 1;
     if (structure_index >= program.structures.len) return error.InvalidMachineProgram;
     var result: usize = 0;
@@ -346,11 +364,32 @@ fn appendFlattenedTypes(
         try result.append(allocator, .bool);
         return appendFlattenedTypes(allocator, program, child, result);
     }
+    if (enumByType(program, type_value)) |enumeration| {
+        try result.append(allocator, .uint);
+        var widest: []const Ir.Type = &.{};
+        for (enumeration.variants) |variant| {
+            const flat = try flattenedTypesForList(allocator, program, variant.associated_types);
+            if (flat.len > widest.len) widest = flat;
+        }
+        return result.appendSlice(allocator, widest);
+    }
     const structure_index = type_value.structureIndex() orelse return result.append(allocator, type_value);
     if (structure_index >= program.structures.len) return error.InvalidMachineProgram;
     for (program.structures[structure_index].fields) |field| {
         try appendFlattenedTypes(allocator, program, field.type, result);
     }
+}
+
+fn enumByType(program: Ir.Program, type_value: Ir.Type) ?Ir.Enum {
+    const index = type_value.structureIndex() orelse return null;
+    for (program.enums) |enumeration| if (enumeration.type_index == index) return enumeration;
+    return null;
+}
+
+fn flattenedTypesForList(allocator: Allocator, program: Ir.Program, types: []const Ir.Type) Machine.Error![]const Ir.Type {
+    var result: std.ArrayList(Ir.Type) = .empty;
+    for (types) |type_value| try appendFlattenedTypes(allocator, program, type_value, &result);
+    return result.toOwnedSlice(allocator);
 }
 
 fn isAggregate(type_value: Ir.Type) bool {

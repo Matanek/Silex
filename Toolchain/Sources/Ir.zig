@@ -71,6 +71,7 @@ pub const Instruction = union(enum) {
     optional_unwrap: OptionalUnwrap,
     copy: Copy,
     structure_init: StructureInit,
+    enum_init: EnumInit,
     field_load: FieldLoad,
     local_load: LocalLoad,
     local_store: LocalStore,
@@ -132,6 +133,13 @@ pub const Instruction = union(enum) {
         result: ValueId,
         structure: usize,
         fields: []const ValueId,
+    };
+
+    pub const EnumInit = struct {
+        result: ValueId,
+        enumeration: usize,
+        variant: usize,
+        values: []const ValueId,
     };
 
     pub const FieldLoad = struct {
@@ -250,8 +258,20 @@ pub const Structure = struct {
     fields: []const StructureField,
 };
 
+pub const EnumVariant = struct {
+    name: []const u8,
+    associated_types: []const Type,
+};
+
+pub const Enum = struct {
+    name: []const u8,
+    type_index: usize,
+    variants: []const EnumVariant,
+};
+
 pub const Program = struct {
     structures: []const Structure = &.{},
+    enums: []const Enum = &.{},
     functions: []const Function,
     files: []const []const u8 = &.{"<source>"},
 };
@@ -272,8 +292,25 @@ pub fn writeText(allocator: Allocator, program: Program) Error![]u8 {
         }
         try output.appendSlice(allocator, "}\n");
     }
+    for (program.enums) |enumeration| {
+        if (program.structures.len != 0 or enumeration.type_index != 0) try output.append(allocator, '\n');
+        try output.appendSlice(allocator, "enum @");
+        try output.appendSlice(allocator, enumeration.name);
+        try output.appendSlice(allocator, " {\n");
+        for (enumeration.variants) |variant| {
+            try output.appendSlice(allocator, "    .");
+            try output.appendSlice(allocator, variant.name);
+            try output.append(allocator, '(');
+            for (variant.associated_types, 0..) |type_value, index| {
+                if (index != 0) try output.appendSlice(allocator, ", ");
+                try appendType(&output, allocator, program, type_value);
+            }
+            try output.appendSlice(allocator, ")\n");
+        }
+        try output.appendSlice(allocator, "}\n");
+    }
     for (program.functions, 0..) |function, function_index| {
-        if (function_index != 0 or program.structures.len != 0) try output.append(allocator, '\n');
+        if (function_index != 0 or program.structures.len != 0 or program.enums.len != 0) try output.append(allocator, '\n');
         try output.appendSlice(allocator, "func @");
         try output.appendSlice(allocator, function.name);
         try output.append(allocator, '(');
@@ -390,6 +427,24 @@ fn writeInstruction(
                 try output.appendSlice(allocator, program.structures[initialization.structure].fields[index].name);
                 try output.appendSlice(allocator, "=");
                 try appendValueChecked(output, allocator, function, field);
+            }
+            try output.append(allocator, ')');
+        },
+        .enum_init => |initialization| {
+            if (initialization.enumeration >= program.enums.len) return error.InvalidProgram;
+            const enumeration = program.enums[initialization.enumeration];
+            if (initialization.variant >= enumeration.variants.len) return error.InvalidProgram;
+            const variant = enumeration.variants[initialization.variant];
+            if (initialization.values.len != variant.associated_types.len) return error.InvalidProgram;
+            try appendResult(output, allocator, program, function, initialization.result);
+            try output.appendSlice(allocator, "enum.init @");
+            try output.appendSlice(allocator, enumeration.name);
+            try output.appendSlice(allocator, ".");
+            try output.appendSlice(allocator, variant.name);
+            try output.append(allocator, '(');
+            for (initialization.values, 0..) |value, index| {
+                if (index != 0) try output.appendSlice(allocator, ", ");
+                try appendValueChecked(output, allocator, function, value);
             }
             try output.append(allocator, ')');
         },

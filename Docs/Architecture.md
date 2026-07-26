@@ -60,6 +60,11 @@ open Silex document
   source code never observes a tuple, address, offset, layout or copy machine
   operation. Calls, returns, local storage and recursive equality preserve
   value semantics in the reference interpreter and native backend.
+- Associated enums are portable nominal declarations whose variants carry
+  typed positional values. Construction records the enum and variant by
+  structured indices; module interfaces expose only the nominal identity and
+  variant signatures. Target lowering may choose a tag and payload layout, but
+  neither is a source-visible field, conversion, ABI or stable IR format.
 - Optional values remain typed in portable IR through explicit `optional.null`
   and `optional.some` instructions. A branch-local presence proof emits an
   internal `optional.unwrap` only on the proven control-flow edge. Target

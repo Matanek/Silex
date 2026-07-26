@@ -21,7 +21,7 @@ pub const Unit = struct {
     bindings: []const Binding = &.{},
 };
 
-pub const DeclarationKind = enum { function, structure };
+pub const DeclarationKind = enum { function, structure, enumeration };
 
 pub const Target = struct {
     module: usize,
@@ -61,6 +61,11 @@ fn resolveInner(
         },
         .structure => for (program.structures) |structure| {
             if (std.mem.eql(u8, structure.name, name) and structure.is_public) {
+                return .{ .module = module, .declaration = name };
+            }
+        },
+        .enumeration => for (program.enums) |enumeration| {
+            if (std.mem.eql(u8, enumeration.name, name) and enumeration.is_public) {
                 return .{ .module = module, .declaration = name };
             }
         },
