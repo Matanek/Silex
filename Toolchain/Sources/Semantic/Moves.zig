@@ -2,6 +2,7 @@ const std = @import("std");
 const Ast = @import("../Ast.zig");
 const Model = @import("Model.zig");
 const Support = @import("Support.zig");
+const Borrowing = @import("Borrowing.zig");
 
 pub fn analyze(self: anytype, builder: anytype, unary: Ast.Expression.Unary) !Model.TypedValue {
     const name = switch (unary.operand.value) {
@@ -19,6 +20,8 @@ pub fn analyze(self: anytype, builder: anytype, unary: Ast.Expression.Unary) !Mo
     if (builder.bindings.items[index].parameter_mode == .mutable) {
         return self.fail(unary.operator_position, "a mutable-reference parameter cannot be consumed with 'move'");
     }
+    if (builder.bindings.items[index].borrowed_root != null) return self.fail(unary.operator_position, "a borrowed alias cannot be consumed with 'move'");
+    try Borrowing.ensureRootUnborrowed(self, builder, name, unary.operator_position);
     const value = try self.analyzeExpression(builder, unary.operand);
     builder.bindings.items[index].available = false;
     builder.bindings.items[index].refined_type = null;

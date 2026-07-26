@@ -21,6 +21,7 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
         return self.fail(target.name_position, message);
     };
     const binding_index = Support.findBindingIndex(builder.bindings.items, target.name).?;
+    if (binding.borrowed_root == null) try Borrowing.ensureRootUnborrowed(self, builder, target.name, target.name_position);
     const complete_assignment = target.fields.len == 0 and target.indices.len == 0 and assignment.operator == .assign;
     if (!binding.available and !(binding.mutable and complete_assignment)) {
         const message = try std.fmt.allocPrint(self.allocator, "value '{s}' was moved and is unavailable", .{target.name});

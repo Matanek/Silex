@@ -258,6 +258,11 @@ fn lowerInstruction(
             .reference = layout.values[store.reference].start,
             .operand = layout.values[store.operand],
         } },
+        .reference_field => |field| .{ .reference_offset = .{
+            .result = layout.values[field.result].start,
+            .reference = layout.values[field.reference].start,
+            .byte_offset = @intCast((try fieldOffset(program, field.structure, field.field)) * Machine.slot_size),
+        } },
         .convert => |conversion| .{ .convert = .{
             .result = layout.values[conversion.result].start,
             .operand = layout.values[conversion.operand].start,

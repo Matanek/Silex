@@ -26,6 +26,7 @@ pub fn prepare(self: anytype, builder: anytype, expression: *const Ast.Expressio
         return self.fail(expression.position, message);
     };
     const binding = builder.bindings.items[root_index];
+    if (binding.borrowed_root == null) try @import("Borrowing.zig").ensureRootUnborrowed(self, builder, root_name, expression.position);
     if (!binding.available) return self.fail(expression.position, "moved value cannot be borrowed mutably");
     if (!binding.mutable or (binding.local == null and binding.reference == null)) {
         return self.fail(expression.position, "mutable reference requires a var root");
@@ -39,13 +40,38 @@ pub fn prepare(self: anytype, builder: anytype, expression: *const Ast.Expressio
         return self.fail(expression.position, message);
     }
 
-    if (steps.items.len == 0 and binding.reference != null) return .{
-        .root_binding = root_index,
-        .type = current_type,
-        .reference = binding.reference.?,
-        .temporary = null,
-        .steps = try steps.toOwnedSlice(self.allocator),
-    };
+    var stable_reference = binding.reference;
+    if (stable_reference == null and binding.local != null) {
+        stable_reference = try self.newValue(builder, .address);
+        try self.emit(builder, .{ .local_address = .{ .result = stable_reference.?, .local = binding.local.? } });
+    }
+    if (stable_reference != null) {
+        var only_fields = true;
+        var reference = stable_reference.?;
+        for (steps.items) |step| switch (step) {
+            .field => |field| {
+                const next = try self.newValue(builder, .address);
+                try self.emit(builder, .{ .reference_field = .{
+                    .result = next,
+                    .reference = reference,
+                    .structure = field.structure,
+                    .field = field.field,
+                } });
+                reference = next;
+            },
+            .index => {
+                only_fields = false;
+                break;
+            },
+        };
+        if (only_fields) return .{
+            .root_binding = root_index,
+            .type = current_type,
+            .reference = reference,
+            .temporary = null,
+            .steps = try steps.toOwnedSlice(self.allocator),
+        };
+    }
 
     const local = builder.local_types.items.len;
     try builder.local_types.append(self.allocator, current_type);

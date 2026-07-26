@@ -171,6 +171,7 @@ test {
     _ = @import("Arm64/Lower.zig");
     _ = @import("Arm64/Machine.zig");
     _ = @import("Arm64/Runner.zig");
+    _ = @import("BorrowedReturnTests.zig");
     _ = @import("MacOS/CodeSignature.zig");
     _ = @import("MacOS/MachO.zig");
     _ = @import("Composition.zig");

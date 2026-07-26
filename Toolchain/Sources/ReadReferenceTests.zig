@@ -69,16 +69,12 @@ test "reject mutation and move conflicts between call arguments" {
     try std.testing.expect(std.mem.startsWith(u8, frontend.diagnostic.?.message, "cannot move or mutate 'values' while it is passed as '@"));
 }
 
-test "reject moving returning or storing a read-reference parameter" {
+test "reject moving or returning a read-reference parameter by value" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     var frontend = Frontend.Frontend.init(arena.allocator());
     try std.testing.expectError(error.InvalidSource, frontend.compile("func leak(value:@int) int { return value } func main() { print(leak(1)) }"));
     try std.testing.expectEqualStrings("read-reference parameter 'value' cannot be returned", frontend.diagnostic.?.message);
-
-    frontend.diagnostic = null;
-    try std.testing.expectError(error.InvalidSource, frontend.compile("func store(value:@int) { let copy = value } func main() { store(1) }"));
-    try std.testing.expectEqualStrings("read-reference parameter 'value' cannot be stored", frontend.diagnostic.?.message);
 
     frontend.diagnostic = null;
     try std.testing.expectError(error.InvalidSource, frontend.compile("func consume(value:@int) { let copy = move value } func main() { consume(1) }"));
