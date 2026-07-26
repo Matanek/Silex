@@ -261,6 +261,22 @@ pub const WhileStatement = struct {
     statements: []const Statement,
 };
 
+pub const ForStatement = struct {
+    position: Source.Position,
+    name_position: Source.Position,
+    name: []const u8,
+    mode: Mode,
+    source: SourceValue,
+    statements: []const Statement,
+
+    pub const Mode = enum { read, copy, mutable };
+    pub const SourceValue = union(enum) {
+        collection: *Expression,
+        range: Range,
+    };
+    pub const Range = struct { start: *Expression, end: *Expression };
+};
+
 pub const Statement = union(enum) {
     variable_declaration: VariableDeclaration,
     assignment_statement: AssignmentStatement,
@@ -271,6 +287,7 @@ pub const Statement = union(enum) {
     panic_statement: EffectStatement,
     if_statement: IfStatement,
     while_statement: WhileStatement,
+    for_statement: ForStatement,
     break_statement: Source.Position,
     continue_statement: Source.Position,
 
@@ -285,6 +302,7 @@ pub const Statement = union(enum) {
             .panic_statement => |statement| statement.position,
             .if_statement => |statement| statement.position,
             .while_statement => |statement| statement.position,
+            .for_statement => |statement| statement.position,
             .break_statement, .continue_statement => |source_position| source_position,
         };
     }

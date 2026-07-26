@@ -8,6 +8,7 @@ const EnumParser = @import("Parser/Enums.zig");
 const Generics = @import("Parser/Generics.zig");
 const Uses = @import("Parser/Uses.zig");
 const Collections = @import("Parser/Collections.zig");
+const Iterations = @import("Parser/Iterations.zig");
 
 const Allocator = std.mem.Allocator;
 const Token = LexerModule.Token;
@@ -346,6 +347,7 @@ pub const Parser = struct {
             .keyword_panic => self.parseEffectStatement(.panic),
             .keyword_if => self.parseIf(),
             .keyword_while => self.parseWhile(),
+            .keyword_for => Iterations.parseFor(self),
             .keyword_break => self.parseLoopControl(false),
             .keyword_continue => self.parseLoopControl(true),
             .keyword_match => self.parseMatchStatement(),

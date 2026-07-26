@@ -731,6 +731,40 @@ while remaining > 0 {
 }
 ```
 
+`for` traverses a fixed array, a dynamic list, or an exclusive integer range.
+The unmarked binding is an immutable read-only temporary. Explicit `let`
+creates an independent immutable copy, while `var` binds the stored collection
+element and writes mutations back to the source. The latter therefore requires
+a mutable named collection. Every body has its own lexical binding scope.
+
+```sx
+for value in values {
+    print(value)
+}
+
+for var value in values {
+    value += 1
+}
+```
+
+An integer range excludes its end and follows the order of its bounds. Equal
+bounds produce no iteration. `range(start, end)` and `start...end` are
+equivalent; both bounds are evaluated exactly once from left to right. Changing
+a `var` range binding changes only that iteration's local copy, not the next
+value. Parentheses around the complete binding are accepted, although the bare
+form is canonical.
+
+```sx
+for i in 0...3 { print(i) }
+for let i in range(3, 0) { print(i) }
+for (var i in 0...3) { i += 10 }
+```
+
+The collection source is likewise evaluated once. `continue` advances to the
+next element or range value; `break` leaves the nearest loop. For a mutable
+collection binding, mutations made before either control statement remain
+visible in the source collection.
+
 ## Fixed arrays
 
 `T[N]` is a fixed array of exactly `N` values of `T`. The length is part of
@@ -854,11 +888,15 @@ block           = "{" statement* "}" ;
 statement       = binding_statement | assignment_statement | return_statement
                 | call_expression | break_statement | continue_statement
                 | print_statement | assert_statement | panic_statement
-                | if_statement | while_statement ;
+                | if_statement | while_statement | for_statement ;
 if_statement    = "if" expression block
                   (("elif" | "else" "if") expression block)*
                   ("else" block)? ;
 while_statement = "while" expression block ;
+for_statement   = "for" (for_binding | "(" for_binding ")") block ;
+for_binding     = ("let" | "var")? identifier "in" for_source ;
+for_source      = expression ("..." expression)?
+                | "range" "(" expression "," expression ")" ;
 binding_statement = ("let" | "var") identifier (":" type)? ("=" expression)? ;
 assignment_statement = field_path ("=" | "+=" | "-=" | "*=" | "/=") expression
                      | field_path ("++" | "--") ;
@@ -911,8 +949,8 @@ statements as described above.
 
 ## Current limits
 
-There are no collection operations beyond inspection and indexing, method
-extraction, static methods, package lockfiles, or visible native interop in
-this subset. Fundamental and
+There are no custom iterators or string traversal, method extraction, static
+methods, package lockfiles, or visible native interop in this subset.
+Fundamental and
 structure values, constructors, instance methods, string operations and
 observable effects have matching reference and macOS ARM64 behavior.

@@ -5,6 +5,7 @@ const Source = @import("../Source.zig");
 const Model = @import("Model.zig");
 const Optionals = @import("Optionals.zig");
 const Support = @import("Support.zig");
+const Collections = @import("Collections.zig");
 
 pub const ConditionalValue = struct {
     condition: Model.TypedValue,
@@ -102,6 +103,176 @@ pub fn analyzeWhile(self: anytype, builder: anytype, function: Ast.Function, loo
 
     builder.current_block = exit_block;
     return false;
+}
+
+pub fn analyzeFor(self: anytype, builder: anytype, function: Ast.Function, loop: Ast.ForStatement) !bool {
+    if (Support.findBinding(builder.bindings.items, loop.name) != null) {
+        const message = try std.fmt.allocPrint(self.allocator, "variable '{s}' is already declared in this scope", .{loop.name});
+        return self.fail(loop.name_position, message);
+    }
+    return switch (loop.source) {
+        .collection => |source| analyzeCollectionFor(self, builder, function, loop, source),
+        .range => |range| analyzeRangeFor(self, builder, function, loop, range),
+    };
+}
+
+fn analyzeCollectionFor(self: anytype, builder: anytype, function: Ast.Function, loop: Ast.ForStatement, source_expression: *Ast.Expression) !bool {
+    const source = try self.analyzeExpression(builder, source_expression);
+    const collection = Collections.collectionForType(self.structures, source.type) orelse return self.fail(source_expression.position, "for source expects an array or list");
+    const collection_local: Ir.LocalId = if (loop.mode == .mutable) mutable: {
+        const name = switch (source_expression.value) {
+            .identifier => |value| value,
+            else => return self.fail(source_expression.position, "for var requires a var collection binding"),
+        };
+        const binding = Support.findBinding(builder.bindings.items, name) orelse return self.fail(source_expression.position, "unknown collection variable");
+        if (!binding.mutable or binding.local == null) return self.fail(source_expression.position, "for var requires a var collection binding");
+        break :mutable binding.local.?;
+    } else local: {
+        const value = builder.local_types.items.len;
+        try builder.local_types.append(self.allocator, source.type);
+        try self.emit(builder, .{ .local_store = .{ .local = value, .operand = source.value } });
+        break :local value;
+    };
+    const index_local = builder.local_types.items.len;
+    try builder.local_types.append(self.allocator, .int);
+    try self.emit(builder, .{ .local_store = .{ .local = index_local, .operand = try emitInt(self, builder, 0) } });
+
+    const condition_block = try self.newBlock(builder);
+    const body_block = try self.newBlock(builder);
+    const update_block = try self.newBlock(builder);
+    const break_update_block = if (loop.mode == .mutable) try self.newBlock(builder) else 0;
+    const exit_block = try self.newBlock(builder);
+    self.terminate(builder, .{ .jump = condition_block });
+
+    builder.current_block = condition_block;
+    const index = try loadLocalValue(self, builder, index_local, .int);
+    const count = if (collection.length) |length| try emitInt(self, builder, length) else count: {
+        const value = try loadLocalValue(self, builder, collection_local, source.type);
+        const result = try self.newValue(builder, .int);
+        try self.emit(builder, .{ .collection_count = .{ .result = result, .collection = value } });
+        break :count result;
+    };
+    const condition = try emitBinary(self, builder, .less, index, count, .bool);
+    self.terminate(builder, .{ .branch = .{ .condition = condition, .then_block = body_block, .else_block = exit_block } });
+
+    builder.current_block = body_block;
+    const collection_value = try loadLocalValue(self, builder, collection_local, source.type);
+    const element = try self.newValue(builder, collection.element);
+    try self.emit(builder, .{ .collection_load = .{ .result = element, .collection = collection_value, .index = index, .position = loop.position } });
+    const binding_count = builder.bindings.items.len;
+    var element_local: ?Ir.LocalId = null;
+    if (loop.mode == .mutable) {
+        element_local = builder.local_types.items.len;
+        try builder.local_types.append(self.allocator, collection.element);
+        try self.emit(builder, .{ .local_store = .{ .local = element_local.?, .operand = element } });
+        try builder.bindings.append(self.allocator, .{ .name = loop.name, .type = collection.element, .local = element_local, .mutable = true });
+    } else try builder.bindings.append(self.allocator, .{ .name = loop.name, .type = collection.element, .value = element });
+    try builder.loops.append(self.allocator, .{
+        .continue_block = update_block,
+        .break_block = if (loop.mode == .mutable) break_update_block else exit_block,
+    });
+    const terminated = try self.analyzeStatements(builder, function, loop.statements);
+    builder.loops.items.len -= 1;
+    builder.bindings.shrinkRetainingCapacity(binding_count);
+    if (!terminated) self.terminate(builder, .{ .jump = update_block });
+
+    builder.current_block = update_block;
+    if (element_local) |local| try writeCollectionElement(self, builder, collection_local, source.type, index_local, local, collection.element, loop.position);
+    const next = try emitBinary(
+        self,
+        builder,
+        .add,
+        try loadLocalValue(self, builder, index_local, .int),
+        try emitInt(self, builder, 1),
+        .int,
+    );
+    try self.emit(builder, .{ .local_store = .{ .local = index_local, .operand = next } });
+    self.terminate(builder, .{ .jump = condition_block });
+
+    if (element_local) |local| {
+        builder.current_block = break_update_block;
+        try writeCollectionElement(self, builder, collection_local, source.type, index_local, local, collection.element, loop.position);
+        self.terminate(builder, .{ .jump = exit_block });
+    }
+    builder.current_block = exit_block;
+    return false;
+}
+
+fn analyzeRangeFor(self: anytype, builder: anytype, function: Ast.Function, loop: Ast.ForStatement, range: Ast.ForStatement.Range) !bool {
+    const start = try self.analyzeExpression(builder, range.start);
+    const end = try self.analyzeExpression(builder, range.end);
+    if (start.type != .int or end.type != .int) return self.fail(loop.position, "range bounds expect 'int'");
+    const current_local = builder.local_types.items.len;
+    try builder.local_types.append(self.allocator, .int);
+    const end_local = builder.local_types.items.len;
+    try builder.local_types.append(self.allocator, .int);
+    const step_local = builder.local_types.items.len;
+    try builder.local_types.append(self.allocator, .int);
+    try self.emit(builder, .{ .local_store = .{ .local = current_local, .operand = start.value } });
+    try self.emit(builder, .{ .local_store = .{ .local = end_local, .operand = end.value } });
+    try self.emit(builder, .{ .local_store = .{ .local = step_local, .operand = try emitInt(self, builder, std.math.maxInt(u64)) } });
+    const ascending_block = try self.newBlock(builder);
+    const condition_block = try self.newBlock(builder);
+    const body_block = try self.newBlock(builder);
+    const update_block = try self.newBlock(builder);
+    const exit_block = try self.newBlock(builder);
+    const ascending = try emitBinary(self, builder, .less, start.value, end.value, .bool);
+    self.terminate(builder, .{ .branch = .{ .condition = ascending, .then_block = ascending_block, .else_block = condition_block } });
+    builder.current_block = ascending_block;
+    try self.emit(builder, .{ .local_store = .{ .local = step_local, .operand = try emitInt(self, builder, 1) } });
+    self.terminate(builder, .{ .jump = condition_block });
+
+    builder.current_block = condition_block;
+    const current = try loadLocalValue(self, builder, current_local, .int);
+    const limit = try loadLocalValue(self, builder, end_local, .int);
+    const condition = try emitBinary(self, builder, .not_equal, current, limit, .bool);
+    self.terminate(builder, .{ .branch = .{ .condition = condition, .then_block = body_block, .else_block = exit_block } });
+    builder.current_block = body_block;
+    const binding_count = builder.bindings.items.len;
+    if (loop.mode == .mutable) {
+        const local = builder.local_types.items.len;
+        try builder.local_types.append(self.allocator, .int);
+        try self.emit(builder, .{ .local_store = .{ .local = local, .operand = current } });
+        try builder.bindings.append(self.allocator, .{ .name = loop.name, .type = .int, .local = local, .mutable = true });
+    } else try builder.bindings.append(self.allocator, .{ .name = loop.name, .type = .int, .value = current });
+    try builder.loops.append(self.allocator, .{ .continue_block = update_block, .break_block = exit_block });
+    const terminated = try self.analyzeStatements(builder, function, loop.statements);
+    builder.loops.items.len -= 1;
+    builder.bindings.shrinkRetainingCapacity(binding_count);
+    if (!terminated) self.terminate(builder, .{ .jump = update_block });
+    builder.current_block = update_block;
+    const next = try emitBinary(self, builder, .add, try loadLocalValue(self, builder, current_local, .int), try loadLocalValue(self, builder, step_local, .int), .int);
+    try self.emit(builder, .{ .local_store = .{ .local = current_local, .operand = next } });
+    self.terminate(builder, .{ .jump = condition_block });
+    builder.current_block = exit_block;
+    return false;
+}
+
+fn writeCollectionElement(self: anytype, builder: anytype, collection_local: Ir.LocalId, collection_type: Ast.Type, index_local: Ir.LocalId, element_local: Ir.LocalId, element_type: Ast.Type, position: Source.Position) !void {
+    const collection = try loadLocalValue(self, builder, collection_local, collection_type);
+    const index = try loadLocalValue(self, builder, index_local, .int);
+    const element = try loadLocalValue(self, builder, element_local, element_type);
+    const updated = try self.newValue(builder, collection_type);
+    try self.emit(builder, .{ .collection_replace = .{ .result = updated, .collection = collection, .index = index, .replacement = element, .position = position } });
+    try self.emit(builder, .{ .local_store = .{ .local = collection_local, .operand = updated } });
+}
+
+fn emitInt(self: anytype, builder: anytype, bits: u64) !Ir.ValueId {
+    const result = try self.newValue(builder, .int);
+    try self.emit(builder, .{ .constant_int = .{ .result = result, .bits = bits } });
+    return result;
+}
+
+fn loadLocalValue(self: anytype, builder: anytype, local: Ir.LocalId, type_value: Ast.Type) !Ir.ValueId {
+    const result = try self.newValue(builder, type_value);
+    try self.emit(builder, .{ .local_load = .{ .result = result, .local = local } });
+    return result;
+}
+
+fn emitBinary(self: anytype, builder: anytype, operator: Ir.BinaryOperator, left: Ir.ValueId, right: Ir.ValueId, type_value: Ast.Type) !Ir.ValueId {
+    const result = try self.newValue(builder, type_value);
+    try self.emit(builder, .{ .binary = .{ .result = result, .operator = operator, .left = left, .right = right } });
+    return result;
 }
 
 pub fn analyzeCondition(self: anytype, builder: anytype, condition: Ast.Condition, keyword: []const u8) !ConditionalValue {

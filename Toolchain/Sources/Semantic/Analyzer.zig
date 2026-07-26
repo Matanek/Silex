@@ -357,6 +357,7 @@ pub const Analyzer = struct {
             },
             .if_statement => |conditional| Control.analyzeIf(self, builder, function, conditional),
             .while_statement => |loop| Control.analyzeWhile(self, builder, function, loop),
+            .for_statement => |loop| Control.analyzeFor(self, builder, function, loop),
             .break_statement => |position| Control.analyzeLoopControl(self, builder, position, false),
             .continue_statement => |position| Control.analyzeLoopControl(self, builder, position, true),
         };

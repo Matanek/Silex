@@ -82,7 +82,9 @@ pub const Specializer = struct {
         const concrete_enum_count = self.enums.items.len;
         for (0..concrete_enum_count) |enum_index| try self.rewriteEnumAt(enum_index, &.{});
         for (program.structures) |structure| {
-            if (structure.type_parameters.len == 0) try self.structures.append(self.allocator, structure);
+            if (structure.type_parameters.len == 0 and !self.collectionNeedsSpecialization(structure)) {
+                try self.structures.append(self.allocator, structure);
+            }
         }
         const concrete_structure_count = self.structures.items.len;
         for (0..concrete_structure_count) |structure_index| {
@@ -348,6 +350,30 @@ pub const Specializer = struct {
                 copy.statements = try self.rewriteStatements(loop.statements, arguments, locals);
                 locals.shrinkRetainingCapacity(local_count);
                 break :value .{ .while_statement = copy };
+            },
+            .for_statement => |loop| value: {
+                var copy = loop;
+                const element_type: ?Ast.Type = switch (loop.source) {
+                    .collection => |source| element: {
+                        const rewritten_source = try self.rewriteExpression(source, arguments, locals);
+                        copy.source = .{ .collection = rewritten_source };
+                        const source_type = self.inferExpressionType(rewritten_source, locals.items) orelse break :element null;
+                        const structure = self.structureForType(source_type) orelse break :element null;
+                        break :element if (structure.collection) |collection| collection.element else null;
+                    },
+                    .range => |range| range_value: {
+                        copy.source = .{ .range = .{
+                            .start = try self.rewriteExpression(range.start, arguments, locals),
+                            .end = try self.rewriteExpression(range.end, arguments, locals),
+                        } };
+                        break :range_value .int;
+                    },
+                };
+                const local_count = locals.items.len;
+                if (element_type) |type_value| try locals.append(self.allocator, .{ .name = loop.name, .type = type_value });
+                copy.statements = try self.rewriteStatements(loop.statements, arguments, locals);
+                locals.shrinkRetainingCapacity(local_count);
+                break :value .{ .for_statement = copy };
             },
             .break_statement => |position| .{ .break_statement = position },
             .continue_statement => |position| .{ .continue_statement = position },
@@ -804,6 +830,9 @@ pub const Specializer = struct {
             if (self.enumTemplateForType(base) != null or self.enumForType(base) != null) return self.instantiateEnum(base, concrete_arguments, generic.position);
             return self.instantiateStructure(base, concrete_arguments, generic.position);
         }
+        if (self.sourceStructureForType(type_value)) |structure| {
+            if (self.collectionNeedsSpecialization(structure)) return self.instantiateCollection(structure, arguments, position);
+        }
         if (self.structureTemplateForType(type_value)) |template| {
             const message = try std.fmt.allocPrint(
                 self.allocator,
@@ -842,6 +871,37 @@ pub const Specializer = struct {
             return self.fail(call.name_position, message);
         }
         return null;
+    }
+
+    fn instantiateCollection(
+        self: *Specializer,
+        template: Ast.Structure,
+        arguments: []const Ast.Type,
+        position: Source.Position,
+    ) SpecializeError!Ast.Type {
+        const source_collection = template.collection.?;
+        const element = try self.rewriteType(source_collection.element, arguments, position);
+        for (self.structures.items) |structure| if (structure.collection) |collection| {
+            if (collection.element == element and collection.length == source_collection.length) {
+                return self.typeForName(structure.name) orelse error.InvalidSource;
+            }
+        };
+        const name = if (source_collection.length) |length|
+            try std.fmt.allocPrint(self.allocator, "{s}[{d}]", .{ self.typeName(element), length })
+        else
+            try std.fmt.allocPrint(self.allocator, "{s}[]", .{self.typeName(element)});
+        const type_value = self.typeForName(name) orelse new_type: {
+            const value: Ast.Type = .structure(self.type_names.items.len);
+            try self.type_names.append(self.allocator, name);
+            break :new_type value;
+        };
+        var concrete = template;
+        concrete.name = name;
+        concrete.collection = .{ .element = element, .length = source_collection.length };
+        const structure_index = self.structures.items.len;
+        try self.structures.append(self.allocator, concrete);
+        try self.rewriteStructureAt(structure_index, arguments);
+        return type_value;
     }
 
     fn instantiateStructure(
@@ -996,6 +1056,11 @@ pub const Specializer = struct {
             }
             return true;
         }
+        if (self.collectionForSourceType(pattern)) |pattern_collection| {
+            const actual_collection = self.collectionForSourceType(actual) orelse return false;
+            return pattern_collection.length == actual_collection.length and
+                self.unifyType(pattern_collection.element, actual_collection.element, inferred);
+        }
         return compatible(actual, pattern);
     }
 
@@ -1031,6 +1096,11 @@ pub const Specializer = struct {
                 if (!self.matchesPattern(nested_pattern, nested_actual, arguments)) return false;
             }
             return true;
+        }
+        if (self.collectionForSourceType(pattern)) |pattern_collection| {
+            const actual_collection = self.collectionForSourceType(actual) orelse return false;
+            return pattern_collection.length == actual_collection.length and
+                self.matchesPattern(pattern_collection.element, actual_collection.element, arguments);
         }
         return compatible(actual, pattern);
     }
@@ -1142,6 +1212,33 @@ pub const Specializer = struct {
             if (structure.type_parameters.len == 0 and std.mem.eql(u8, structure.name, name)) return structure;
         }
         return null;
+    }
+
+    fn collectionForSourceType(self: *Specializer, type_value: Ast.Type) ?Ast.Collection {
+        if (self.structureForType(type_value)) |structure| return structure.collection;
+        if (self.sourceStructureForType(type_value)) |structure| return structure.collection;
+        return null;
+    }
+
+    fn collectionNeedsSpecialization(self: *Specializer, structure: Ast.Structure) bool {
+        const collection = structure.collection orelse return false;
+        return self.typeNeedsSpecialization(collection.element);
+    }
+
+    fn typeNeedsSpecialization(self: *Specializer, type_value: Ast.Type) bool {
+        if (type_value.optionalChild()) |child| return self.typeNeedsSpecialization(child);
+        if (type_value.genericParameterIndex() != null) return true;
+        if (type_value.genericInstantiationIndex()) |index| {
+            if (index >= self.source.generic_types.len) return true;
+            const generic = self.source.generic_types[index];
+            if (self.typeNeedsSpecialization(generic.base)) return true;
+            for (generic.arguments) |argument| if (self.typeNeedsSpecialization(argument)) return true;
+            return false;
+        }
+        if (self.sourceStructureForType(type_value)) |nested| if (nested.collection != null) {
+            return self.collectionNeedsSpecialization(nested);
+        };
+        return false;
     }
 
     fn structureIndexForType(self: *Specializer, type_value: Ast.Type) ?usize {
@@ -1312,6 +1409,16 @@ fn remapStatementTypes(statements: []const Ast.Statement, map: []const ?Ast.Type
         },
         .while_statement => |loop| {
             remapExpressionTypes(loop.condition.source(), map);
+            remapStatementTypes(loop.statements, map);
+        },
+        .for_statement => |loop| {
+            switch (loop.source) {
+                .collection => |source| remapExpressionTypes(source, map),
+                .range => |range| {
+                    remapExpressionTypes(range.start, map);
+                    remapExpressionTypes(range.end, map);
+                },
+            }
             remapStatementTypes(loop.statements, map);
         },
         .break_statement, .continue_statement => {},

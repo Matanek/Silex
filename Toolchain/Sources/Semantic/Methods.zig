@@ -625,6 +625,7 @@ fn statementsWriteSelf(statements: []const Ast.Statement) bool {
             if (conditional.else_statements) |nested| if (statementsWriteSelf(nested)) return true;
         },
         .while_statement => |loop| if (statementsWriteSelf(loop.statements)) return true,
+        .for_statement => |loop| if (statementsWriteSelf(loop.statements)) return true,
         else => {},
     };
     return false;
@@ -646,6 +647,13 @@ fn statementsCallMutatingSelf(program: Ast.Program, structure_index: usize, stat
             if (conditional.else_statements) |nested| if (statementsCallMutatingSelf(program, structure_index, nested, mutating)) return true;
         },
         .while_statement => |loop| if (expressionCallsMutatingSelf(program, structure_index, loop.condition.source(), mutating) or statementsCallMutatingSelf(program, structure_index, loop.statements, mutating)) return true,
+        .for_statement => |loop| {
+            switch (loop.source) {
+                .collection => |source| if (expressionCallsMutatingSelf(program, structure_index, source, mutating)) return true,
+                .range => |range| if (expressionCallsMutatingSelf(program, structure_index, range.start, mutating) or expressionCallsMutatingSelf(program, structure_index, range.end, mutating)) return true,
+            }
+            if (statementsCallMutatingSelf(program, structure_index, loop.statements, mutating)) return true;
+        },
         else => {},
     };
     return false;
