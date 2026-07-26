@@ -4,6 +4,16 @@ const Machine = @import("Machine.zig");
 
 const Allocator = std.mem.Allocator;
 
+const Layout = struct {
+    values: []const Machine.Span,
+    locals: []const Machine.Span,
+    parameters: []const Machine.Span,
+    return_width: u12,
+    return_aggregate: bool,
+    hidden_return_slot: ?Machine.Slot,
+    slot_count: Machine.Slot,
+};
+
 pub fn lower(allocator: Allocator, program: Ir.Program) Machine.Error!Machine.Program {
     var functions: std.ArrayList(Machine.Function) = .empty;
     var strings: std.ArrayList([]const u8) = .empty;
@@ -28,10 +38,7 @@ fn lowerFunction(
     function: Ir.Function,
 ) Machine.Error!Machine.Function {
     const parameter_count = try Machine.checkedArgumentCount(function.parameter_types.len);
-    const slot_count = try Machine.checkedSlot(function.value_types.len);
-    try requireExecutableReturnType(function.return_type);
-    for (function.parameter_types) |type_value| try requireExecutableValueType(type_value);
-    for (function.value_types) |type_value| try requireExecutableValueType(type_value);
+    const layout = try buildLayout(allocator, program, function);
 
     var instructions: std.ArrayList(Machine.Instruction) = .empty;
     const starts = try allocator.alloc(usize, function.blocks.len);
@@ -42,16 +49,20 @@ fn lowerFunction(
     }
     for (function.blocks) |block| {
         for (block.instructions) |instruction| {
-            try instructions.append(allocator, try lowerInstruction(allocator, program, strings, function, instruction));
+            try instructions.append(allocator, try lowerInstruction(allocator, program, strings, function, layout, instruction));
         }
-        try instructions.append(allocator, try lowerTerminator(allocator, program, strings, block.terminator, starts));
+        try instructions.append(allocator, try lowerTerminator(allocator, program, strings, layout, block.terminator, starts));
     }
     return .{
         .name = function.name,
         .parameter_count = parameter_count,
+        .parameters = layout.parameters,
         .return_type = function.return_type,
-        .slot_count = slot_count,
-        .frame_size = try Machine.frameSize(slot_count),
+        .return_width = layout.return_width,
+        .return_aggregate = layout.return_aggregate,
+        .hidden_return_slot = layout.hidden_return_slot,
+        .slot_count = layout.slot_count,
+        .frame_size = try Machine.frameSize(layout.slot_count),
         .instructions = try instructions.toOwnedSlice(allocator),
     };
 }
@@ -61,37 +72,55 @@ fn lowerInstruction(
     program: Ir.Program,
     strings: *std.ArrayList([]const u8),
     function: Ir.Function,
+    layout: Layout,
     instruction: Ir.Instruction,
 ) Machine.Error!Machine.Instruction {
     return switch (instruction) {
         .constant_int => |constant| .{ .constant_int = .{
-            .result = try Machine.checkedSlot(constant.result),
+            .result = layout.values[constant.result].start,
             .bits = constant.bits,
             .type = function.value_types[constant.result],
         } },
         .constant_bool => |constant| .{ .constant_bool = .{
-            .result = try Machine.checkedSlot(constant.result),
+            .result = layout.values[constant.result].start,
             .value = constant.value,
         } },
         .constant_str => |constant| .{ .constant_str = .{
-            .result = try Machine.checkedSlot(constant.result),
+            .result = layout.values[constant.result].start,
             .string = try internString(allocator, strings, constant.value),
         } },
         .constant_float32 => |constant| .{ .constant_float32 = .{
-            .result = try Machine.checkedSlot(constant.result),
+            .result = layout.values[constant.result].start,
             .bits = constant.bits,
         } },
         .constant_float64 => |constant| .{ .constant_float64 = .{
-            .result = try Machine.checkedSlot(constant.result),
+            .result = layout.values[constant.result].start,
             .bits = constant.bits,
         } },
-        .copy => |copy| .{ .copy = .{
-            .result = try Machine.checkedSlot(copy.result),
-            .operand = try Machine.checkedSlot(copy.operand),
-        } },
+        .copy => |copy| lowerCopy(layout.values[copy.result], layout.values[copy.operand]),
+        .structure_init => |initialization| aggregate: {
+            const fields = try allocator.alloc(Machine.Span, initialization.fields.len);
+            for (initialization.fields, 0..) |field, index| fields[index] = layout.values[field];
+            break :aggregate .{ .aggregate_init = .{
+                .result = layout.values[initialization.result],
+                .fields = fields,
+            } };
+        },
+        .field_load => |load| field: {
+            const base_type = function.value_types[load.base];
+            const structure_index = base_type.structureIndex() orelse return error.InvalidMachineProgram;
+            const offset = try fieldOffset(program, structure_index, load.field);
+            var operand = layout.values[load.base];
+            operand.start = try Machine.checkedSlot(@as(usize, operand.start) + offset);
+            operand.width = layout.values[load.result].width;
+            operand.aggregate = layout.values[load.result].aggregate;
+            break :field lowerCopy(layout.values[load.result], operand);
+        },
+        .local_load => |load| lowerCopy(layout.values[load.result], layout.locals[load.local]),
+        .local_store => |store| lowerCopy(layout.locals[store.local], layout.values[store.operand]),
         .convert => |conversion| .{ .convert = .{
-            .result = try Machine.checkedSlot(conversion.result),
-            .operand = try Machine.checkedSlot(conversion.operand),
+            .result = layout.values[conversion.result].start,
+            .operand = layout.values[conversion.operand].start,
             .source = conversion.source,
             .target = conversion.target,
             .checked = conversion.checked,
@@ -102,68 +131,80 @@ fn lowerInstruction(
             ),
         } },
         .format_value => |format| .{ .format_value = .{
-            .result = try Machine.checkedSlot(format.result),
-            .operand = try Machine.checkedSlot(format.operand),
+            .result = layout.values[format.result].start,
+            .operand = layout.values[format.operand].start,
             .kind = try printKind(function.value_types[format.operand]),
         } },
         .string_concat => |concat| .{ .string_concat = .{
-            .result = try Machine.checkedSlot(concat.result),
-            .left = try Machine.checkedSlot(concat.left),
-            .right = try Machine.checkedSlot(concat.right),
+            .result = layout.values[concat.result].start,
+            .left = layout.values[concat.left].start,
+            .right = layout.values[concat.right].start,
         } },
         .string_count => |count| .{ .string_count = .{
-            .result = try Machine.checkedSlot(count.result),
-            .operand = try Machine.checkedSlot(count.operand),
+            .result = layout.values[count.result].start,
+            .operand = layout.values[count.operand].start,
         } },
         .unary => |unary| .{ .unary = .{
-            .result = try Machine.checkedSlot(unary.result),
+            .result = layout.values[unary.result].start,
             .operator = switch (unary.operator) {
                 .negate => .negate,
             },
-            .operand = try Machine.checkedSlot(unary.operand),
+            .operand = layout.values[unary.operand].start,
             .type = function.value_types[unary.result],
         } },
-        .binary => |binary| .{ .binary = .{
-            .result = try Machine.checkedSlot(binary.result),
-            .operator = switch (binary.operator) {
-                .add => .add,
-                .subtract => .subtract,
-                .multiply => .multiply,
-                .divide => .divide,
-                .remainder => .remainder,
-                .less => .less,
-                .less_equal => .less_equal,
-                .greater => .greater,
-                .greater_equal => .greater_equal,
-                .equal => .equal,
-                .not_equal => .not_equal,
-                .bit_and => .bit_and,
-                .bit_xor => .bit_xor,
-                .shift_left => .shift_left,
-                .shift_right => .shift_right,
-            },
-            .left = try Machine.checkedSlot(binary.left),
-            .right = try Machine.checkedSlot(binary.right),
-            .type = function.value_types[binary.left],
-        } },
+        .binary => |binary| binary_instruction: {
+            if (function.value_types[binary.left].structureIndex() != null) {
+                if (binary.operator != .equal and binary.operator != .not_equal) return error.UnsupportedType;
+                break :binary_instruction .{ .aggregate_equal = .{
+                    .result = layout.values[binary.result].start,
+                    .left = layout.values[binary.left],
+                    .right = layout.values[binary.right],
+                    .leaf_types = try flattenedTypes(allocator, program, function.value_types[binary.left]),
+                    .equal = binary.operator == .equal,
+                } };
+            }
+            break :binary_instruction .{ .binary = .{
+                .result = layout.values[binary.result].start,
+                .operator = switch (binary.operator) {
+                    .add => .add,
+                    .subtract => .subtract,
+                    .multiply => .multiply,
+                    .divide => .divide,
+                    .remainder => .remainder,
+                    .less => .less,
+                    .less_equal => .less_equal,
+                    .greater => .greater,
+                    .greater_equal => .greater_equal,
+                    .equal => .equal,
+                    .not_equal => .not_equal,
+                    .bit_and => .bit_and,
+                    .bit_xor => .bit_xor,
+                    .shift_left => .shift_left,
+                    .shift_right => .shift_right,
+                },
+                .left = layout.values[binary.left].start,
+                .right = layout.values[binary.right].start,
+                .type = function.value_types[binary.left],
+            } };
+        },
         .call => |call| call: {
             _ = try Machine.checkedArgumentCount(call.arguments.len);
-            const arguments = try allocator.alloc(Machine.Slot, call.arguments.len);
-            for (call.arguments, 0..) |argument, index| arguments[index] = try Machine.checkedSlot(argument);
+            const arguments = try allocator.alloc(Machine.Span, call.arguments.len);
+            for (call.arguments, 0..) |argument, index| arguments[index] = layout.values[argument];
             break :call .{ .call = .{
-                .result = if (call.result) |result| try Machine.checkedSlot(result) else null,
+                .result = if (call.result) |result| layout.values[result] else null,
                 .function = call.function,
                 .arguments = arguments,
             } };
         },
         .print => |value| .{ .print = .{
-            .value = try Machine.checkedSlot(value.value),
+            .value = layout.values[value.value].start,
             .kind = try printKind(function.value_types[value.value]),
             .newline = value.newline,
         } },
         .assert => |assertion| .{ .assert = .{
-            .condition = try Machine.checkedSlot(assertion.condition),
-            .message = try Machine.checkedSlot(assertion.message),
+            .condition = layout.values[assertion.condition].start,
+            .message = layout.values[assertion.message].start,
             .header = try internString(allocator, strings, try runtimeHeader(allocator, program, assertion.position, true)),
         } },
     };
@@ -185,35 +226,110 @@ fn lowerTerminator(
     allocator: Allocator,
     program: Ir.Program,
     strings: *std.ArrayList([]const u8),
+    layout: Layout,
     terminator: Ir.Terminator,
     starts: []const usize,
 ) Machine.Error!Machine.Instruction {
     return switch (terminator) {
         .jump => |target| .{ .jump = starts[target] },
         .branch => |branch| .{ .branch = .{
-            .condition = try Machine.checkedSlot(branch.condition),
+            .condition = layout.values[branch.condition].start,
             .then_instruction = starts[branch.then_block],
             .else_instruction = starts[branch.else_block],
         } },
-        .return_value => |value| .{ .return_value = try Machine.checkedSlot(value) },
+        .return_value => |value| .{ .return_value = layout.values[value] },
         .return_void => .return_void,
         .panic => |panic_value| .{ .panic = .{
-            .message = try Machine.checkedSlot(panic_value.message),
+            .message = layout.values[panic_value.message].start,
             .header = try internString(allocator, strings, try runtimeHeader(allocator, program, panic_value.position, false)),
         } },
     };
 }
 
-fn requireExecutableReturnType(type_value: Ir.Type) Machine.Error!void {
-    switch (type_value) {
-        .void, .int8, .int16, .int32, .int, .uint8, .uint16, .uint32, .uint, .float32, .float64, .bool, .str => {},
-    }
+fn lowerCopy(result: Machine.Span, operand: Machine.Span) Machine.Instruction {
+    if (!result.aggregate and result.width == 1) return .{ .copy = .{ .result = result.start, .operand = operand.start } };
+    return .{ .copy_range = .{ .result = result, .operand = operand } };
 }
 
-fn requireExecutableValueType(type_value: Ir.Type) Machine.Error!void {
-    switch (type_value) {
-        .int8, .int16, .int32, .int, .uint8, .uint16, .uint32, .uint, .float32, .float64, .bool, .str => {},
-        .void => return error.UnsupportedType,
+fn buildLayout(allocator: Allocator, program: Ir.Program, function: Ir.Function) Machine.Error!Layout {
+    const values = try allocator.alloc(Machine.Span, function.value_types.len);
+    const locals = try allocator.alloc(Machine.Span, function.local_types.len);
+    var next: usize = 0;
+    for (function.value_types, 0..) |type_value, index| {
+        values[index] = try allocateSpan(program, type_value, &next);
+    }
+    for (function.local_types, 0..) |type_value, index| {
+        locals[index] = try allocateSpan(program, type_value, &next);
+    }
+    const return_aggregate = function.return_type.structureIndex() != null;
+    const return_width: u12 = if (function.return_type == .void)
+        0
+    else
+        @intCast(try leafCount(program, function.return_type));
+    const hidden_return_slot: ?Machine.Slot = if (return_aggregate) hidden: {
+        const slot = try Machine.checkedSlot(next);
+        next += 1;
+        break :hidden slot;
+    } else null;
+    const parameters = try allocator.alloc(Machine.Span, function.parameter_types.len);
+    @memcpy(parameters, values[0..function.parameter_types.len]);
+    return .{
+        .values = values,
+        .locals = locals,
+        .parameters = parameters,
+        .return_width = return_width,
+        .return_aggregate = return_aggregate,
+        .hidden_return_slot = hidden_return_slot,
+        .slot_count = try Machine.checkedSlot(next),
+    };
+}
+
+fn allocateSpan(program: Ir.Program, type_value: Ir.Type, next: *usize) Machine.Error!Machine.Span {
+    if (type_value == .void) return error.UnsupportedType;
+    const width = try leafCount(program, type_value);
+    const result: Machine.Span = .{
+        .start = try Machine.checkedSlot(next.*),
+        .width = @intCast(width),
+        .aggregate = type_value.structureIndex() != null,
+    };
+    next.* += width;
+    if (next.* > Machine.max_slots) return error.FrameTooLarge;
+    return result;
+}
+
+fn leafCount(program: Ir.Program, type_value: Ir.Type) Machine.Error!usize {
+    const structure_index = type_value.structureIndex() orelse return 1;
+    if (structure_index >= program.structures.len) return error.InvalidMachineProgram;
+    var result: usize = 0;
+    for (program.structures[structure_index].fields) |field| result += try leafCount(program, field.type);
+    return result;
+}
+
+fn fieldOffset(program: Ir.Program, structure_index: usize, field_index: usize) Machine.Error!usize {
+    if (structure_index >= program.structures.len or field_index >= program.structures[structure_index].fields.len) {
+        return error.InvalidMachineProgram;
+    }
+    var result: usize = 0;
+    for (program.structures[structure_index].fields[0..field_index]) |field| result += try leafCount(program, field.type);
+    return result;
+}
+
+fn flattenedTypes(allocator: Allocator, program: Ir.Program, type_value: Ir.Type) Machine.Error![]const Ir.Type {
+    var result: std.ArrayList(Ir.Type) = .empty;
+    try appendFlattenedTypes(allocator, program, type_value, &result);
+    return result.toOwnedSlice(allocator);
+}
+
+fn appendFlattenedTypes(
+    allocator: Allocator,
+    program: Ir.Program,
+    type_value: Ir.Type,
+    result: *std.ArrayList(Ir.Type),
+) Machine.Error!void {
+    const structure_index = type_value.structureIndex() orelse return result.append(allocator, type_value);
+    if (structure_index >= program.structures.len) return error.InvalidMachineProgram;
+    for (program.structures[structure_index].fields) |field| {
+        try appendFlattenedTypes(allocator, program, field.type, result);
     }
 }
 
@@ -284,7 +400,7 @@ test "lower answer and nested calls to deterministic machine slots" {
     try std.testing.expectEqual(Machine.BinaryOperator.add, program.functions[0].instructions[0].binary.operator);
     try std.testing.expectEqual(@as(Machine.Slot, 0), program.functions[0].instructions[0].binary.left);
     try std.testing.expectEqual(@as(Machine.FunctionId, 0), program.functions[1].instructions[2].call.function);
-    try std.testing.expectEqual(@as(Machine.Slot, 2), program.functions[1].instructions[2].call.result.?);
+    try std.testing.expectEqual(@as(Machine.Slot, 2), program.functions[1].instructions[2].call.result.?.start);
     try std.testing.expectEqual(@as(Machine.FunctionId, 1), program.functions[2].instructions[0].call.function);
 }
 
@@ -306,4 +422,21 @@ test "reject target limits before encoding" {
         .blocks = &.{.{ .instructions = &.{}, .terminator = .return_void }},
     }};
     _ = try lower(allocator, .{ .functions = &functions });
+}
+
+test "lower abstract mutable locals after value slots" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const program = try compile(arena.allocator(),
+        \\func main() {
+        \\    var value:int = 1
+        \\    value = 42
+        \\    print(value)
+        \\}
+    );
+    const function = program.functions[0];
+    try std.testing.expectEqual(@as(Machine.Slot, 4), function.slot_count);
+    try std.testing.expectEqual(@as(Machine.Slot, 3), function.instructions[1].copy.result);
+    try std.testing.expectEqual(@as(Machine.Slot, 3), function.instructions[3].copy.result);
+    try std.testing.expectEqual(@as(Machine.Slot, 3), function.instructions[4].copy.operand);
 }

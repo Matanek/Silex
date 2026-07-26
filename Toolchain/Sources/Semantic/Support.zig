@@ -1,5 +1,5 @@
 const std = @import("std");
-const Ast = @import("Ast.zig");
+const Ast = @import("../Ast.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -9,6 +9,28 @@ pub fn sameParameterTypes(left: []const Ast.Parameter, right: []const Ast.Parame
         if (left_parameter.type != right_parameter.type) return false;
     }
     return true;
+}
+
+pub fn requiredParameterCount(parameters: []const Ast.Parameter) usize {
+    for (parameters, 0..) |parameter, index| {
+        if (parameter.default != null) return index;
+    }
+    return parameters.len;
+}
+
+pub fn acceptsArity(parameters: []const Ast.Parameter, arity: usize) bool {
+    return arity >= requiredParameterCount(parameters) and arity <= parameters.len;
+}
+
+pub fn effectiveSignatureCollision(left: []const Ast.Parameter, right: []const Ast.Parameter) ?usize {
+    const first_arity = @max(requiredParameterCount(left), requiredParameterCount(right));
+    const last_arity = @min(left.len, right.len);
+    if (first_arity > last_arity) return null;
+    var arity = first_arity;
+    while (arity <= last_arity) : (arity += 1) {
+        if (sameParameterTypes(left[0..arity], right[0..arity])) return arity;
+    }
+    return null;
 }
 
 pub fn findVisibleFunctionByName(program: Ast.Program, call: Ast.Expression.Call) ?Ast.Function {
@@ -68,4 +90,13 @@ pub fn binaryOperatorText(operator: Ast.BinaryOperator) []const u8 {
         .shift_left => "<<",
         .shift_right => ">>",
     };
+}
+
+pub fn findBinding(bindings: anytype, name: []const u8) ?@TypeOf(bindings[0]) {
+    var index = bindings.len;
+    while (index != 0) {
+        index -= 1;
+        if (std.mem.eql(u8, bindings[index].name, name)) return bindings[index];
+    }
+    return null;
 }

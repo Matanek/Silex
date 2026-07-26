@@ -1,0 +1,36 @@
+const std = @import("std");
+const Ir = @import("../Ir.zig");
+const Types = @import("../Types.zig");
+
+pub const Binding = struct {
+    name: []const u8,
+    type: Types.Type,
+    value: ?Ir.ValueId = null,
+    local: ?Ir.LocalId = null,
+    mutable: bool = false,
+    parameter: bool = false,
+};
+
+pub const TypedValue = struct {
+    type: Types.Type,
+    value: Ir.ValueId,
+};
+
+pub const BlockBuilder = struct {
+    instructions: std.ArrayList(Ir.Instruction) = .empty,
+    terminator: ?Ir.Terminator = null,
+};
+
+pub const LoopContext = struct {
+    continue_block: Ir.BlockId,
+    break_block: Ir.BlockId,
+};
+
+pub const FunctionBuilder = struct {
+    value_types: std.ArrayList(Types.Type) = .empty,
+    local_types: std.ArrayList(Types.Type) = .empty,
+    blocks: std.ArrayList(BlockBuilder) = .empty,
+    current_block: Ir.BlockId = 0,
+    bindings: std.ArrayList(Binding) = .empty,
+    loops: std.ArrayList(LoopContext) = .empty,
+};

@@ -16,6 +16,7 @@ pub const Parser = struct {
     previous: Token = undefined,
     started: bool = false,
     diagnostic: ?Source.Diagnostic = null,
+    type_names: std.ArrayList([]const u8) = .empty,
 
     pub fn init(allocator: Allocator, source: []const u8) Parser {
         return .{ .allocator = allocator, .lexer = .init(source) };
@@ -28,24 +29,125 @@ pub const Parser = struct {
     pub fn parse(self: *Parser) ParseError!Ast.Program {
         try self.advance();
         var uses: std.ArrayList(Ast.Use) = .empty;
+        var structures: std.ArrayList(Ast.Structure) = .empty;
         var functions: std.ArrayList(Ast.Function) = .empty;
         while (self.current.tag != .end) {
             switch (self.current.tag) {
                 .keyword_use => try uses.append(self.allocator, try self.parseUse(false)),
+                .keyword_struct => try structures.append(self.allocator, try self.parseStructure(false)),
                 .keyword_func => try functions.append(self.allocator, try self.parseFunction(false)),
                 .keyword_public => {
                     try self.advance();
-                    if (self.current.tag != .keyword_func) {
-                        return self.fail("only function declarations can be public in language v0");
+                    switch (self.current.tag) {
+                        .keyword_struct => try structures.append(self.allocator, try self.parseStructure(true)),
+                        .keyword_func => try functions.append(self.allocator, try self.parseFunction(true)),
+                        else => return self.fail("expected struct or function declaration after 'public'"),
                     }
-                    try functions.append(self.allocator, try self.parseFunction(true));
                 },
-                else => return self.fail("expected use or function declaration"),
+                else => return self.fail("expected use, struct, or function declaration"),
             }
         }
         return .{
             .uses = try uses.toOwnedSlice(self.allocator),
+            .type_names = try self.type_names.toOwnedSlice(self.allocator),
+            .structures = try structures.toOwnedSlice(self.allocator),
             .functions = try functions.toOwnedSlice(self.allocator),
+        };
+    }
+
+    fn parseStructure(self: *Parser, is_public: bool) ParseError!Ast.Structure {
+        const position = self.current.position;
+        try self.advance();
+        if (self.current.tag != .identifier) return self.fail("expected structure name");
+        const name = self.current.lexeme;
+        const name_position = self.current.position;
+        _ = try self.internTypeName(name);
+        try self.advance();
+        try self.expect(.left_brace, "expected '{' after structure name");
+        var fields: std.ArrayList(Ast.StructureField) = .empty;
+        var constructors: std.ArrayList(Ast.Constructor) = .empty;
+        var methods: std.ArrayList(Ast.Function) = .empty;
+        while (self.current.tag != .right_brace and self.current.tag != .end) {
+            if (self.current.tag == .keyword_init) {
+                try constructors.append(self.allocator, try self.parseConstructor());
+                continue;
+            }
+            if (self.current.tag == .keyword_func) {
+                try methods.append(self.allocator, try self.parseFunction(true));
+                continue;
+            }
+            if (self.current.tag == .keyword_public) {
+                try self.advance();
+                if (self.current.tag == .keyword_func) {
+                    try methods.append(self.allocator, try self.parseFunction(true));
+                    continue;
+                }
+            }
+            const mutable = switch (self.current.tag) {
+                .keyword_let => false,
+                .keyword_var => true,
+                else => return self.fail("structure field must start with 'let' or 'var'"),
+            };
+            const field_position = self.current.position;
+            try self.advance();
+            if (self.current.tag != .identifier) return self.fail("expected field name");
+            const field_name = self.current.lexeme;
+            const field_name_position = self.current.position;
+            try self.advance();
+            try self.expect(.colon, "expected ':' after field name");
+            const field_type = try self.parseType();
+            var default: ?*Ast.Expression = null;
+            if (self.current.tag == .equal) {
+                try self.advance();
+                default = try self.parseExpression(false);
+            }
+            try self.expectStatementTerminator();
+            try fields.append(self.allocator, .{
+                .is_public = true,
+                .position = field_position,
+                .name_position = field_name_position,
+                .name = field_name,
+                .mutable = mutable,
+                .type = field_type,
+                .default = default,
+            });
+        }
+        try self.expect(.right_brace, "expected '}' after structure fields");
+        return .{
+            .is_public = is_public,
+            .position = position,
+            .name_position = name_position,
+            .name = name,
+            .fields = try fields.toOwnedSlice(self.allocator),
+            .constructors = try constructors.toOwnedSlice(self.allocator),
+            .methods = try methods.toOwnedSlice(self.allocator),
+        };
+    }
+
+    fn parseConstructor(self: *Parser) ParseError!Ast.Constructor {
+        const position = self.current.position;
+        try self.advance();
+        try self.expect(.left_parenthesis, "expected '(' after 'init'");
+        var parameters: std.ArrayList(Ast.Parameter) = .empty;
+        var has_default = false;
+        if (self.current.tag != .right_parenthesis) {
+            while (true) {
+                const parameter = try self.parseParameter();
+                if (has_default and parameter.default == null) {
+                    return self.failAt(parameter.position, "a required parameter cannot follow a parameter with a default value");
+                }
+                has_default = has_default or parameter.default != null;
+                try parameters.append(self.allocator, parameter);
+                if (self.current.tag != .comma) break;
+                try self.advance();
+                if (self.current.tag == .right_parenthesis) return self.fail("expected parameter after ','");
+            }
+        }
+        try self.expect(.right_parenthesis, "expected ')' after constructor parameters");
+        return .{
+            .position = position,
+            .parameters = try parameters.toOwnedSlice(self.allocator),
+            .statements = try self.parseBlock(),
         };
     }
 
@@ -91,9 +193,15 @@ pub const Parser = struct {
         try self.expect(.left_parenthesis, "expected '(' after function name");
 
         var parameters: std.ArrayList(Ast.Parameter) = .empty;
+        var has_default = false;
         if (self.current.tag != .right_parenthesis) {
             while (true) {
-                try parameters.append(self.allocator, try self.parseParameter());
+                const parameter = try self.parseParameter();
+                if (has_default and parameter.default == null) {
+                    return self.failAt(parameter.position, "a required parameter cannot follow a parameter with a default value");
+                }
+                has_default = has_default or parameter.default != null;
+                try parameters.append(self.allocator, parameter);
                 if (self.current.tag != .comma) break;
                 try self.advance();
                 if (self.current.tag == .right_parenthesis) return self.fail("expected parameter after ','");
@@ -119,7 +227,12 @@ pub const Parser = struct {
         const name = self.current.lexeme;
         try self.advance();
         try self.expect(.colon, "expected ':' after parameter name");
-        return .{ .position = position, .name = name, .type = try self.parseType() };
+        const parameter_type = try self.parseType();
+        const default = if (self.current.tag == .equal) default: {
+            try self.advance();
+            break :default try self.parseExpression(false);
+        } else null;
+        return .{ .position = position, .name = name, .type = parameter_type, .default = default };
     }
 
     fn parseType(self: *Parser) ParseError!Ast.Type {
@@ -139,11 +252,33 @@ pub const Parser = struct {
             .keyword_float, .keyword_float32 => .float32,
             .keyword_float64 => .float64,
             .keyword_str => .str,
-            .identifier => return self.fail("unknown type in language v0"),
+            .identifier => identifier: {
+                var name = self.current.lexeme;
+                while (true) {
+                    var lexer = self.lexer;
+                    const dot = lexer.next() catch break;
+                    if (dot.tag != .dot) break;
+                    const part = lexer.next() catch break;
+                    if (part.tag != .identifier) break;
+                    try self.advance();
+                    try self.advance();
+                    name = try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ name, self.current.lexeme });
+                }
+                break :identifier try self.internTypeName(name);
+            },
             else => return self.fail("expected type name"),
         };
         try self.advance();
         return result;
+    }
+
+    fn internTypeName(self: *Parser, name: []const u8) Allocator.Error!Ast.Type {
+        for (self.type_names.items, 0..) |existing, index| {
+            if (std.mem.eql(u8, existing, name)) return .structure(index);
+        }
+        const index = self.type_names.items.len;
+        try self.type_names.append(self.allocator, name);
+        return .structure(index);
     }
 
     fn parseBlock(self: *Parser) ParseError![]const Ast.Statement {
@@ -158,15 +293,40 @@ pub const Parser = struct {
 
     fn parseStatement(self: *Parser) ParseError!Ast.Statement {
         return switch (self.current.tag) {
-            .keyword_let => self.parseVariableDeclaration(),
+            .keyword_let => self.parseVariableDeclaration(false),
+            .keyword_var => self.parseVariableDeclaration(true),
             .keyword_return => self.parseReturn(),
             .keyword_print => self.parsePrint(),
             .keyword_assert => self.parseAssert(),
             .keyword_panic => self.parseEffectStatement(.panic),
             .keyword_if => self.parseIf(),
-            .identifier => self.parseCallStatement(),
+            .keyword_while => self.parseWhile(),
+            .keyword_break => self.parseLoopControl(false),
+            .keyword_continue => self.parseLoopControl(true),
+            .identifier, .keyword_self => self.parseIdentifierStatement(),
             else => self.fail("expected statement"),
         };
+    }
+
+    fn parseWhile(self: *Parser) ParseError!Ast.Statement {
+        const position = self.current.position;
+        try self.advance();
+        const condition = try self.parseExpression(false);
+        return .{ .while_statement = .{
+            .position = position,
+            .condition = condition,
+            .statements = try self.parseBlock(),
+        } };
+    }
+
+    fn parseLoopControl(self: *Parser, is_continue: bool) ParseError!Ast.Statement {
+        const position = self.current.position;
+        try self.advance();
+        try self.expectStatementTerminator();
+        return if (is_continue)
+            .{ .continue_statement = position }
+        else
+            .{ .break_statement = position };
     }
 
     fn parseIf(self: *Parser) ParseError!Ast.Statement {
@@ -260,7 +420,7 @@ pub const Parser = struct {
         return .{ .assert_statement = .{ .position = position, .condition = condition, .message = message } };
     }
 
-    fn parseVariableDeclaration(self: *Parser) ParseError!Ast.Statement {
+    fn parseVariableDeclaration(self: *Parser, mutable: bool) ParseError!Ast.Statement {
         const position = self.current.position;
         try self.advance();
         if (self.current.tag != .identifier) return self.fail("expected variable name");
@@ -286,6 +446,7 @@ pub const Parser = struct {
             .position = position,
             .name_position = name_position,
             .name = name,
+            .mutable = mutable,
             .annotation = annotation,
             .initializer = initializer,
         } };
@@ -304,14 +465,63 @@ pub const Parser = struct {
         return .{ .return_statement = .{ .position = position, .value = value } };
     }
 
-    fn parseCallStatement(self: *Parser) ParseError!Ast.Statement {
+    fn parseIdentifierStatement(self: *Parser) ParseError!Ast.Statement {
         const expression = try self.parseExpression(false);
+        const assignment_operator: ?Ast.AssignmentOperator = switch (self.current.tag) {
+            .equal => .assign,
+            .plus_equal => .add,
+            .minus_equal => .subtract,
+            .star_equal => .multiply,
+            .slash_equal => .divide,
+            .plus_plus => .increment,
+            .minus_minus => .decrement,
+            else => null,
+        };
+        if (assignment_operator) |operator| {
+            const target = try self.assignmentTarget(expression);
+            const position = self.current.position;
+            try self.advance();
+            const value = switch (operator) {
+                .increment, .decrement => null,
+                else => try self.parseExpression(false),
+            };
+            try self.expectStatementTerminator();
+            return .{ .assignment_statement = .{
+                .position = position,
+                .target = target,
+                .operator = operator,
+                .value = value,
+            } };
+        }
         switch (expression.value) {
             .call => {},
-            else => return self.failAt(expression.position, "only a function call can be used as an expression statement"),
+            else => return self.failAt(expression.position, "expected assignment or function call"),
         }
         try self.expectStatementTerminator();
         return .{ .expression_statement = expression };
+    }
+
+    fn assignmentTarget(self: *Parser, expression: *Ast.Expression) ParseError!Ast.AssignmentTarget {
+        var fields: std.ArrayList(Ast.AssignmentTarget.Field) = .empty;
+        var current = expression;
+        while (true) switch (current.value) {
+            .identifier => |name| {
+                std.mem.reverse(Ast.AssignmentTarget.Field, fields.items);
+                return .{
+                    .name_position = current.position,
+                    .name = name,
+                    .fields = try fields.toOwnedSlice(self.allocator),
+                };
+            },
+            .field_access => |access| {
+                try fields.append(self.allocator, .{
+                    .name_position = access.name_position,
+                    .name = access.name,
+                });
+                current = access.base;
+            },
+            else => return self.failAt(expression.position, "assignment target must be a variable or field path"),
+        };
     }
 
     fn parseExpression(self: *Parser, allow_line_breaks: bool) ParseError!*Ast.Expression {
@@ -436,17 +646,34 @@ pub const Parser = struct {
     fn parseConversion(self: *Parser) ParseError!*Ast.Expression {
         var expression = try self.parsePrimary();
         while (true) {
+            if (self.current.tag == .left_parenthesis) {
+                const name = switch (expression.value) {
+                    .identifier => |value| Token{
+                        .tag = .identifier,
+                        .lexeme = value,
+                        .position = expression.position,
+                        .start = 0,
+                        .end = 0,
+                    },
+                    else => return self.fail("only a named declaration can be called directly"),
+                };
+                expression = try self.parseCallAfterName(name, null);
+                continue;
+            }
             if (self.current.tag == .dot) {
                 try self.advance();
-                if (self.current.tag != .identifier or !std.mem.eql(u8, self.current.lexeme, "count")) {
-                    return self.fail("only count() is available as a value method in this language slice");
-                }
+                if (self.current.tag != .identifier) return self.fail("expected member name after '.'");
+                const member = self.current;
                 try self.advance();
-                try self.expect(.left_parenthesis, "expected '(' after 'count'");
-                try self.expect(.right_parenthesis, "expected ')' after 'count('");
-                expression = try self.newExpression(.{
+                if (self.current.tag == .left_parenthesis) {
+                    expression = try self.parseCallAfterName(member, expression);
+                } else expression = try self.newExpression(.{
                     .position = expression.position,
-                    .value = .{ .string_count = expression },
+                    .value = .{ .field_access = .{
+                        .base = expression,
+                        .name_position = member.position,
+                        .name = member.lexeme,
+                    } },
                 });
                 continue;
             }
@@ -492,24 +719,11 @@ pub const Parser = struct {
                 });
             },
             .string_start => return self.parseInterpolatedString(token),
-            .identifier => {
+            .identifier, .keyword_self => {
                 try self.advance();
-                var name = token.lexeme;
-                while (self.current.tag == .dot) {
-                    try self.advance();
-                    if (self.current.tag != .identifier) return self.fail("expected name after '.'");
-                    name = try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ name, self.current.lexeme });
-                    try self.advance();
-                }
-                if (self.current.tag != .left_parenthesis) {
-                    return self.newExpression(.{ .position = token.position, .value = .{ .identifier = name } });
-                }
-                return self.parseCallAfterName(.{
-                    .tag = .identifier,
-                    .lexeme = name,
+                return self.newExpression(.{
                     .position = token.position,
-                    .start = token.start,
-                    .end = token.end,
+                    .value = .{ .identifier = token.lexeme },
                 });
             },
             .left_parenthesis => {
@@ -549,16 +763,34 @@ pub const Parser = struct {
         });
     }
 
-    fn parseCallAfterName(self: *Parser, name: Token) ParseError!*Ast.Expression {
+    fn parseCallAfterName(self: *Parser, name: Token, receiver: ?*Ast.Expression) ParseError!*Ast.Expression {
         try self.expect(.left_parenthesis, "expected '(' after function name");
         var arguments: std.ArrayList(*Ast.Expression) = .empty;
+        var named_arguments: std.ArrayList(Ast.Expression.NamedArgument) = .empty;
         if (self.current.tag != .right_parenthesis) {
             while (true) {
-                try arguments.append(self.allocator, try self.parseExpression(true));
+                if (try self.startsNamedArgument()) {
+                    if (arguments.items.len != 0) return self.fail("named fields cannot follow positional arguments");
+                    const position = self.current.position;
+                    const field_name = self.current.lexeme;
+                    try self.advance();
+                    try self.expect(.colon, "expected ':' after field name");
+                    try named_arguments.append(self.allocator, .{
+                        .position = position,
+                        .name = field_name,
+                        .value = try self.parseExpression(true),
+                    });
+                } else {
+                    if (named_arguments.items.len != 0) return self.fail("positional arguments cannot follow named fields");
+                    try arguments.append(self.allocator, try self.parseExpression(true));
+                }
                 if (self.current.tag == .right_parenthesis) break;
                 if (self.current.tag != .comma) return self.fail("expected ',' or ')' after argument");
                 try self.advance();
-                if (self.current.tag == .right_parenthesis) return self.fail("expected argument after ','");
+                if (self.current.tag == .right_parenthesis) {
+                    if (named_arguments.items.len == 0) return self.fail("expected argument after ','");
+                    break;
+                }
             }
         }
         try self.expect(.right_parenthesis, "expected ')' after arguments");
@@ -567,9 +799,21 @@ pub const Parser = struct {
             .value = .{ .call = .{
                 .name = name.lexeme,
                 .name_position = name.position,
+                .receiver = receiver,
                 .arguments = try arguments.toOwnedSlice(self.allocator),
+                .named_arguments = try named_arguments.toOwnedSlice(self.allocator),
             } },
         });
+    }
+
+    fn startsNamedArgument(self: *Parser) ParseError!bool {
+        if (self.current.tag != .identifier) return false;
+        var lexer = self.lexer;
+        const next = lexer.next() catch |err| {
+            self.diagnostic = lexer.diagnostic;
+            return err;
+        };
+        return next.tag == .colon;
     }
 
     fn newBinary(self: *Parser, left: *Ast.Expression, right: *Ast.Expression, token: Token) Allocator.Error!*Ast.Expression {
@@ -789,6 +1033,82 @@ test "parse conditional alternatives and logical precedence" {
     try std.testing.expectEqual(Ast.UnaryOperator.logical_not, logical_or.left.value.binary.left.value.unary.operator);
 }
 
+test "parse mutable declarations and simple assignment statements" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(),
+        \\func main() {
+        \\    var value:int = 1
+        \\    value = 2
+        \\}
+    );
+    const statements = (try parser.parse()).functions[0].statements;
+    try std.testing.expect(statements[0].variable_declaration.mutable);
+    try std.testing.expectEqualStrings("value", statements[1].assignment_statement.target.name);
+    try std.testing.expectEqual(Ast.AssignmentOperator.assign, statements[1].assignment_statement.operator);
+    try std.testing.expectEqualStrings("2", statements[1].assignment_statement.value.?.value.integer);
+}
+
+test "parse every arithmetic assignment statement" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(),
+        \\func main() {
+        \\    var value = 1
+        \\    value += 2
+        \\    value -= 3
+        \\    value *= 4
+        \\    value /= 5
+        \\    value++
+        \\    value--
+        \\}
+    );
+    const statements = (try parser.parse()).functions[0].statements;
+    const expected = [_]Ast.AssignmentOperator{ .add, .subtract, .multiply, .divide, .increment, .decrement };
+    for (expected, statements[1..]) |operator, statement| {
+        try std.testing.expectEqual(operator, statement.assignment_statement.operator);
+    }
+    try std.testing.expect(statements[5].assignment_statement.value == null);
+    try std.testing.expect(statements[6].assignment_statement.value == null);
+}
+
+test "parse simple and nested field assignment targets" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(),
+        \\func main() {
+        \\    var entity:int
+        \\    entity.position.x += 2
+        \\}
+    );
+    const assignment = (try parser.parse()).functions[0].statements[1].assignment_statement;
+    try std.testing.expectEqualStrings("entity", assignment.target.name);
+    try std.testing.expectEqual(@as(usize, 2), assignment.target.fields.len);
+    try std.testing.expectEqualStrings("position", assignment.target.fields[0].name);
+    try std.testing.expectEqualStrings("x", assignment.target.fields[1].name);
+    try std.testing.expectEqual(Ast.AssignmentOperator.add, assignment.operator);
+}
+
+test "parse while loops and their control statements" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(),
+        \\func main() {
+        \\    var value = 0
+        \\    while (value < 3) {
+        \\        if value == 1 { continue }
+        \\        break
+        \\    }
+        \\}
+    );
+    const statements = (try parser.parse()).functions[0].statements;
+    const loop = statements[1].while_statement;
+    try std.testing.expectEqual(Ast.BinaryOperator.less, loop.condition.value.binary.operator);
+    try std.testing.expectEqual(@as(usize, 2), loop.statements.len);
+    try std.testing.expect(loop.statements[0].if_statement.branches[0].statements[0] == .continue_statement);
+    try std.testing.expect(loop.statements[1] == .break_statement);
+}
+
 test "parse module uses aliases and qualified calls" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -803,8 +1123,115 @@ test "parse module uses aliases and qualified calls" {
     try std.testing.expect(program.uses[0].alias == null);
     try std.testing.expectEqualStrings("Checked", program.uses[1].alias.?);
     const call = program.functions[0].statements[0].expression_statement.value.call;
-    try std.testing.expectEqualStrings("Operations.add", call.name);
-    try std.testing.expectEqualStrings("Checked.value", call.arguments[0].value.call.name);
+    try std.testing.expectEqualStrings("add", call.name);
+    try std.testing.expectEqualStrings("Operations", call.receiver.?.value.identifier);
+    try std.testing.expectEqualStrings("value", call.arguments[0].value.call.name);
+    try std.testing.expectEqualStrings("Checked", call.arguments[0].value.call.receiver.?.value.identifier);
+}
+
+test "parse structure declarations named aggregates and field paths" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(),
+        \\struct Position {
+        \\    let layer:int = 2
+        \\    var x:int
+        \\}
+        \\struct Entity { var position:Position }
+        \\func main() {
+        \\    let entity = Entity(position:Position(x:1,))
+        \\    print(entity.position.x)
+        \\}
+    );
+    const program = try parser.parse();
+    try std.testing.expectEqual(@as(usize, 2), program.structures.len);
+    try std.testing.expect(!program.structures[0].fields[0].mutable);
+    try std.testing.expect(program.structures[0].fields[0].default.?.value == .integer);
+    try std.testing.expectEqual(@as(usize, 1), program.functions[0].statements[0].variable_declaration.initializer.?.value.call.named_arguments.len);
+    const outer = program.functions[0].statements[1].print_statement.values[0].value.field_access;
+    try std.testing.expectEqualStrings("x", outer.name);
+    try std.testing.expectEqualStrings("position", outer.base.value.field_access.name);
+}
+
+test "parse overloaded constructors and self field initialization" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(),
+        \\struct Position {
+        \\    let x:int
+        \\    let y:int
+        \\    init(x:int, y:int) { self.x = x; self.y = y }
+        \\    init(enabled:bool) { if enabled { self.x = 1 } else { self.x = 0 } self.y = 2 }
+        \\}
+        \\func main() { let point = Position(10, 5) }
+    );
+    const program = try parser.parse();
+    try std.testing.expectEqual(@as(usize, 2), program.structures[0].constructors.len);
+    try std.testing.expectEqual(@as(usize, 2), program.structures[0].constructors[0].parameters.len);
+    const assignment = program.structures[0].constructors[0].statements[0].assignment_statement;
+    try std.testing.expectEqualStrings("self", assignment.target.name);
+    try std.testing.expectEqualStrings("x", assignment.target.fields[0].name);
+    try std.testing.expectEqual(@as(usize, 2), program.functions[0].statements[0].variable_declaration.initializer.?.value.call.arguments.len);
+}
+
+test "parse trailing parameter defaults for functions constructors and methods" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(),
+        \\struct Box {
+        \\    init(value:int = 40) {}
+        \\    func plus(value:int = 2) int { return value }
+        \\}
+        \\func selected(value:int = 1, other:int = 2) int { return value + other }
+        \\func main() {}
+    );
+    const program = try parser.parse();
+    try std.testing.expectEqualStrings("40", program.structures[0].constructors[0].parameters[0].default.?.value.integer);
+    try std.testing.expectEqualStrings("2", program.structures[0].methods[0].parameters[0].default.?.value.integer);
+    try std.testing.expectEqualStrings("1", program.functions[0].parameters[0].default.?.value.integer);
+    try std.testing.expectEqualStrings("2", program.functions[0].parameters[1].default.?.value.integer);
+}
+
+test "reject a required parameter after a default" {
+    try expectParseError(
+        "func invalid(first:int = 1, second:int) {} func main() {}",
+        "a required parameter cannot follow a parameter with a default value",
+    );
+    try expectParseError(
+        "struct Invalid { init(first:int = 1, second:int) {} } func main() {}",
+        "a required parameter cannot follow a parameter with a default value",
+    );
+}
+
+test "parse methods and chained member calls" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(),
+        \\struct Counter {
+        \\    var value:int
+        \\    func increment() { self.value++ }
+        \\    public func current() int { return self.value }
+        \\}
+        \\func make() Counter { return Counter(value:1) }
+        \\func main() {
+        \\    var counter = Counter()
+        \\    counter.increment()
+        \\    print(make().current())
+        \\}
+    );
+    const program = try parser.parse();
+    try std.testing.expectEqual(@as(usize, 2), program.structures[0].methods.len);
+    const mutation = program.functions[1].statements[1].expression_statement.value.call;
+    try std.testing.expectEqualStrings("increment", mutation.name);
+    try std.testing.expectEqualStrings("counter", mutation.receiver.?.value.identifier);
+    const chained = program.functions[1].statements[2].print_statement.values[0].value.call;
+    try std.testing.expectEqualStrings("current", chained.name);
+    try std.testing.expect(chained.receiver.?.value == .call);
+}
+
+test "reject legacy and malformed structure syntax" {
+    try expectParseError("struct Position { x:int } func main() {}", "structure field must start with 'let' or 'var'");
+    try expectParseError("struct Position { var x:int } func main() { let value = Position { x:1 } }", "expected ';' or line break");
 }
 
 test "parse public functions and keep functions private by default" {
@@ -817,6 +1244,25 @@ test "parse public functions and keep functions private by default" {
     const program = try parser.parse();
     try std.testing.expect(program.functions[0].is_public);
     try std.testing.expect(!program.functions[1].is_public);
+}
+
+test "parse public structures explicit public fields and qualified types" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(),
+        \\public struct Vec2 {
+        \\    public var x:int
+        \\    let y:int
+        \\}
+        \\func read(value:Geometry.Point) int { return value.x }
+        \\func main() {}
+    );
+    const program = try parser.parse();
+    try std.testing.expect(program.structures[0].is_public);
+    try std.testing.expect(program.structures[0].fields[0].is_public);
+    try std.testing.expect(program.structures[0].fields[1].is_public);
+    const type_index = program.functions[0].parameters[0].type.structureIndex().?;
+    try std.testing.expectEqualStrings("Geometry.Point", program.type_names[type_index]);
 }
 
 test "continue expressions after operators and inside parentheses" {
@@ -868,4 +1314,8 @@ test "report malformed fundamental statements and expressions" {
     try expectParseError("func main() { assert(true) }", "expected ',' after assert condition");
     try expectParseError("func main() { assert(true, \"message\" }", "expected ')' after assert message");
     try expectParseError("func main() { panic(\"message\", \"extra\") }", "expected ')' after effect value");
+    try expectParseError("func main() { value = }", "expected expression");
+    try expectParseError("func main() { while true break }", "expected '{' before function body");
+    try expectParseError("func main() { break value() }", "expected ';' or line break");
+    try expectParseError("func main() { var value = 1; value++ 2 }", "expected ';' or line break");
 }

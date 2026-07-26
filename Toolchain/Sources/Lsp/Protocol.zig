@@ -81,11 +81,26 @@ pub fn textDocumentUri(params: std.json.Value) ?[]const u8 {
     return stringMember(text_document, "uri");
 }
 
+pub fn workspaceRootUri(params: ?std.json.Value) ?[]const u8 {
+    const value = params orelse return null;
+    return stringMember(value, "rootUri");
+}
+
 pub fn requestPosition(params: std.json.Value) ?Types.Position {
     const position = objectMember(params, "position") orelse return null;
     return .{
         .line = unsignedMember(position, "line") orelse return null,
         .character = unsignedMember(position, "character") orelse return null,
+    };
+}
+
+pub fn completionTriggerKind(params: std.json.Value) Types.CompletionTriggerKind {
+    const context = objectMember(params, "context") orelse return .invoked;
+    const raw = integerMember(context, "triggerKind") orelse return .invoked;
+    return switch (raw) {
+        2 => .trigger_character,
+        3 => .trigger_for_incomplete,
+        else => .invoked,
     };
 }
 
@@ -195,4 +210,13 @@ test "convert Unicode positions according to the negotiated encoding" {
     try std.testing.expectEqual(@as(?usize, 6), byteOffsetAtPosition(source, .{ .line = 0, .character = 3 }, .utf16));
     try std.testing.expectEqual(Types.Position{ .line = 0, .character = 6 }, positionAtByteOffset(source, 6, .utf8).?);
     try std.testing.expectEqual(Types.Position{ .line = 0, .character = 2 }, positionAtByteOffset(source, 6, .utf32).?);
+}
+
+test "read completion trigger kinds without trusting unknown values" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const parsed = try std.json.parseFromSliceLeaky(std.json.Value, arena.allocator(),
+        \\{"context":{"triggerKind":2}}
+    , .{});
+    try std.testing.expectEqual(Types.CompletionTriggerKind.trigger_character, completionTriggerKind(parsed));
 }

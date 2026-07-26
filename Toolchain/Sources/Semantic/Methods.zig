@@ -1,0 +1,619 @@
+const std = @import("std");
+const Ast = @import("../Ast.zig");
+const Ir = @import("../Ir.zig");
+const Model = @import("Model.zig");
+const Numeric = @import("../Numeric.zig");
+const Support = @import("Support.zig");
+
+const AnalyzeError = error{ InvalidSource, OutOfMemory };
+
+const Place = struct {
+    local: Ir.LocalId,
+    root_type: Ast.Type,
+    fields: []const usize,
+};
+
+pub fn inferMutability(allocator: std.mem.Allocator, program: Ast.Program) ![]const bool {
+    const count = methodCount(program);
+    const mutating = try allocator.alloc(bool, count);
+    @memset(mutating, false);
+    var flat: usize = 0;
+    for (program.structures) |structure| {
+        for (structure.methods) |method| {
+            mutating[flat] = statementsWriteSelf(method.statements);
+            flat += 1;
+        }
+    }
+
+    var changed = true;
+    while (changed) {
+        changed = false;
+        flat = 0;
+        for (program.structures, 0..) |structure, structure_index| {
+            for (structure.methods) |method| {
+                if (!mutating[flat] and statementsCallMutatingSelf(program, structure_index, method.statements, mutating)) {
+                    mutating[flat] = true;
+                    changed = true;
+                }
+                flat += 1;
+            }
+        }
+    }
+    return mutating;
+}
+
+pub fn extendStructures(
+    allocator: std.mem.Allocator,
+    program: Ast.Program,
+    base: []const Ir.Structure,
+    mutating: []const bool,
+) ![]const Ir.Structure {
+    var extra: usize = 0;
+    var flat: usize = 0;
+    for (program.structures) |structure| {
+        for (structure.methods) |method| {
+            if (mutating[flat] and method.return_type != .void) extra += 1;
+            flat += 1;
+        }
+    }
+    const structures = try allocator.alloc(Ir.Structure, base.len + extra);
+    @memcpy(structures[0..base.len], base);
+    var next = base.len;
+    flat = 0;
+    for (program.structures, 0..) |structure, structure_index| {
+        for (structure.methods, 0..) |method, method_index| {
+            if (mutating[flat] and method.return_type != .void) {
+                const fields = try allocator.alloc(Ir.StructureField, 2);
+                fields[0] = .{ .name = "self", .type = .structure(structure_index), .mutable = false };
+                fields[1] = .{ .name = "value", .type = method.return_type, .mutable = false };
+                structures[next] = .{
+                    .name = try std.fmt.allocPrint(allocator, "{s}.{s}#result{d}", .{ structure.name, method.name, method_index }),
+                    .fields = fields,
+                };
+                next += 1;
+            }
+            flat += 1;
+        }
+    }
+    return structures;
+}
+
+pub fn analyze(self: anytype, structure_index: usize, method_index: usize, method: Ast.Function) !Ir.Function {
+    const structure = self.program.structures[structure_index];
+    const flat = flatMethodIndex(self.program, structure_index, method_index);
+    const mutating = self.method_mutability[flat];
+    const receiver_type = Ast.Type.structure(structure_index);
+    var builder: Model.FunctionBuilder = .{};
+    try builder.blocks.append(self.allocator, .{});
+
+    const parameter_types = try self.allocator.alloc(Ast.Type, method.parameters.len + 1);
+    parameter_types[0] = receiver_type;
+    try builder.value_types.append(self.allocator, receiver_type);
+    var self_local: ?Ir.LocalId = null;
+    if (mutating) {
+        self_local = builder.local_types.items.len;
+        try builder.local_types.append(self.allocator, receiver_type);
+        try self.emit(&builder, .{ .local_store = .{ .local = self_local.?, .operand = 0 } });
+        try builder.bindings.append(self.allocator, .{
+            .name = "self",
+            .type = receiver_type,
+            .local = self_local,
+            .mutable = true,
+        });
+    } else try builder.bindings.append(self.allocator, .{
+        .name = "self",
+        .type = receiver_type,
+        .value = 0,
+        .parameter = true,
+    });
+
+    for (method.parameters, 0..) |parameter, parameter_index| {
+        const value = parameter_index + 1;
+        parameter_types[value] = parameter.type;
+        try builder.value_types.append(self.allocator, parameter.type);
+        try builder.bindings.append(self.allocator, .{
+            .name = parameter.name,
+            .type = parameter.type,
+            .value = value,
+            .parameter = true,
+        });
+    }
+
+    const terminated = if (mutating)
+        try analyzeMutatingStatements(self, &builder, method, structure_index, flat, self_local.?, method.statements)
+    else
+        try self.analyzeStatements(&builder, method, method.statements);
+    if (!terminated) {
+        if (method.return_type != .void) {
+            const message = try std.fmt.allocPrint(
+                self.allocator,
+                "method '{s}' must return '{s}' on every path",
+                .{ method.name, self.typeName(method.return_type) },
+            );
+            return self.fail(method.name_position, message);
+        }
+        if (mutating) {
+            try emitMutatingReturn(self, &builder, structure_index, flat, self_local.?, method, null);
+        } else self.terminate(&builder, .return_void);
+    }
+
+    const blocks = try self.allocator.alloc(Ir.Block, builder.blocks.items.len);
+    for (builder.blocks.items, 0..) |*block, block_index| blocks[block_index] = .{
+        .instructions = try block.instructions.toOwnedSlice(self.allocator),
+        .terminator = block.terminator orelse return error.InvalidSource,
+    };
+    return .{
+        .name = try std.fmt.allocPrint(self.allocator, "{s}.{s}#{d}", .{ structure.name, method.name, method_index }),
+        .parameter_types = parameter_types,
+        .return_type = methodIrReturnType(self, structure_index, flat, method.return_type),
+        .value_types = try builder.value_types.toOwnedSlice(self.allocator),
+        .local_types = try builder.local_types.toOwnedSlice(self.allocator),
+        .blocks = blocks,
+    };
+}
+
+pub fn analyzeCall(self: anytype, builder: anytype, call: Ast.Expression.Call) !?Model.TypedValue {
+    const receiver_expression = call.receiver.?;
+    const receiver = try self.analyzeExpression(builder, receiver_expression);
+    if (receiver.type == .str and std.mem.eql(u8, call.name, "count") and call.arguments.len == 0 and call.named_arguments.len == 0) {
+        return try self.emitStringCount(builder, receiver.value);
+    }
+    const structure_index = receiver.type.structureIndex() orelse {
+        if (std.mem.eql(u8, call.name, "count")) return self.fail(call.name_position, "count() expects 'str'");
+        const message = try std.fmt.allocPrint(self.allocator, "type '{s}' has no methods", .{self.typeName(receiver.type)});
+        return self.fail(call.name_position, message);
+    };
+    if (structure_index >= self.program.structures.len) return error.InvalidSource;
+    const structure = self.program.structures[structure_index];
+    if (call.named_arguments.len != 0) return self.fail(call.name_position, "methods use positional arguments");
+
+    var arity_count: usize = 0;
+    var sole: ?usize = null;
+    for (structure.methods, 0..) |method, method_index| {
+        if (std.mem.eql(u8, method.name, call.name) and Support.acceptsArity(method.parameters, call.arguments.len)) {
+            arity_count += 1;
+            sole = method_index;
+        }
+    }
+    if (arity_count == 0) {
+        const message = try std.fmt.allocPrint(
+            self.allocator,
+            "structure '{s}' has no method named '{s}' accepting {d} arguments",
+            .{ structure.name, call.name, call.arguments.len },
+        );
+        return self.fail(call.name_position, message);
+    }
+
+    var arguments: std.ArrayList(Model.TypedValue) = .empty;
+    for (call.arguments, 0..) |argument, argument_index| {
+        const expected = if (arity_count == 1) expected: {
+            const parameter_type = structure.methods[sole.?].parameters[argument_index].type;
+            break :expected if (parameter_type.isNumeric() and Support.acceptsNumericContext(argument)) parameter_type else null;
+        } else null;
+        try arguments.append(self.allocator, try self.analyzeExpressionExpected(builder, argument, expected));
+    }
+
+    var selected: ?usize = null;
+    var selected_cost: usize = std.math.maxInt(usize);
+    var ambiguous = false;
+    for (structure.methods, 0..) |method, method_index| {
+        if (!std.mem.eql(u8, method.name, call.name) or !Support.acceptsArity(method.parameters, arguments.items.len)) continue;
+        var cost: usize = 0;
+        var viable = true;
+        for (method.parameters[0..arguments.items.len], arguments.items) |parameter, argument| {
+            if (parameter.type == argument.type) continue;
+            if (!Numeric.canWiden(argument.type, parameter.type)) {
+                viable = false;
+                break;
+            }
+            cost += 1;
+        }
+        if (!viable) continue;
+        if (cost < selected_cost) {
+            selected = method_index;
+            selected_cost = cost;
+            ambiguous = false;
+        } else if (cost == selected_cost) ambiguous = true;
+    }
+    if (ambiguous) {
+        const message = try std.fmt.allocPrint(self.allocator, "call to method '{s}' is ambiguous", .{call.name});
+        return self.fail(call.name_position, message);
+    }
+    const method_index = selected orelse {
+        const message = try std.fmt.allocPrint(self.allocator, "no overload of method '{s}' matches the argument types", .{call.name});
+        return self.fail(call.name_position, message);
+    };
+    const method = structure.methods[method_index];
+    const flat = flatMethodIndex(self.program, structure_index, method_index);
+    const mutating = self.method_mutability[flat];
+    const place = if (mutating)
+        try requireMutablePlace(self, builder, receiver_expression, call.name)
+    else
+        null;
+
+    var argument_ids: std.ArrayList(Ir.ValueId) = .empty;
+    try argument_ids.append(self.allocator, receiver.value);
+    for (arguments.items, method.parameters[0..arguments.items.len], 0..) |argument, parameter, index| {
+        try argument_ids.append(
+            self.allocator,
+            (try self.coerce(builder, argument, parameter.type, call.arguments[index].position)).value,
+        );
+    }
+    for (method.parameters[arguments.items.len..]) |parameter| {
+        const value = try self.analyzeParameterDefault(builder, parameter);
+        try argument_ids.append(self.allocator, value.value);
+    }
+
+    const ir_return_type = methodIrReturnType(self, structure_index, flat, method.return_type);
+    const call_result: ?Ir.ValueId = if (ir_return_type == .void) null else try self.newValue(builder, ir_return_type);
+    try self.emit(builder, .{ .call = .{
+        .result = call_result,
+        .function = methodFunctionId(self.program, structure_index, method_index),
+        .arguments = try argument_ids.toOwnedSlice(self.allocator),
+    } });
+
+    if (!mutating) {
+        return if (call_result) |value| .{ .type = method.return_type, .value = value } else null;
+    }
+    if (method.return_type == .void) {
+        try writePlace(self, builder, place.?, call_result.?);
+        return null;
+    }
+    const updated_receiver = try self.newValue(builder, receiver.type);
+    try self.emit(builder, .{ .field_load = .{ .result = updated_receiver, .base = call_result.?, .field = 0 } });
+    try writePlace(self, builder, place.?, updated_receiver);
+    const value = try self.newValue(builder, method.return_type);
+    try self.emit(builder, .{ .field_load = .{ .result = value, .base = call_result.?, .field = 1 } });
+    return .{ .type = method.return_type, .value = value };
+}
+
+fn requireMutablePlace(self: anytype, builder: anytype, expression: *const Ast.Expression, method_name: []const u8) !Place {
+    var names: std.ArrayList([]const u8) = .empty;
+    var current = expression;
+    while (true) switch (current.value) {
+        .identifier => |name| {
+            const binding = Support.findBinding(builder.bindings.items, name) orelse {
+                const message = try std.fmt.allocPrint(self.allocator, "unknown variable '{s}'", .{name});
+                return self.fail(current.position, message);
+            };
+            if (!binding.mutable or binding.local == null) {
+                const message = try std.fmt.allocPrint(self.allocator, "mutating method '{s}' requires a var receiver", .{method_name});
+                return self.fail(expression.position, message);
+            }
+            std.mem.reverse([]const u8, names.items);
+            const field_indices = try self.allocator.alloc(usize, names.items.len);
+            var type_value = binding.type;
+            for (names.items, 0..) |field_name, path_index| {
+                const structure_index = type_value.structureIndex() orelse return error.InvalidSource;
+                const structure = self.structures[structure_index];
+                var selected: ?usize = null;
+                for (structure.fields, 0..) |field, field_index| {
+                    if (std.mem.eql(u8, field.name, field_name)) {
+                        selected = field_index;
+                        break;
+                    }
+                }
+                const field_index = selected orelse return error.InvalidSource;
+                if (!structure.fields[field_index].mutable) {
+                    const message = try std.fmt.allocPrint(self.allocator, "mutating method '{s}' cannot write through immutable field '{s}'", .{ method_name, field_name });
+                    return self.fail(expression.position, message);
+                }
+                field_indices[path_index] = field_index;
+                type_value = structure.fields[field_index].type;
+            }
+            return .{ .local = binding.local.?, .root_type = binding.type, .fields = field_indices };
+        },
+        .field_access => |access| {
+            try names.append(self.allocator, access.name);
+            current = access.base;
+        },
+        else => {
+            const message = try std.fmt.allocPrint(self.allocator, "mutating method '{s}' requires a var receiver", .{method_name});
+            return self.fail(expression.position, message);
+        },
+    };
+}
+
+fn writePlace(self: anytype, builder: anytype, place: Place, replacement_value: Ir.ValueId) !void {
+    if (place.fields.len == 0) {
+        try self.emit(builder, .{ .local_store = .{ .local = place.local, .operand = replacement_value } });
+        return;
+    }
+    const root = try self.newValue(builder, place.root_type);
+    try self.emit(builder, .{ .local_load = .{ .result = root, .local = place.local } });
+    const bases = try self.allocator.alloc(Ir.ValueId, place.fields.len);
+    const structure_indices = try self.allocator.alloc(usize, place.fields.len);
+    var current = root;
+    var current_type = place.root_type;
+    for (place.fields, 0..) |field_index, path_index| {
+        bases[path_index] = current;
+        structure_indices[path_index] = current_type.structureIndex().?;
+        if (path_index + 1 < place.fields.len) {
+            const field_type = self.structures[structure_indices[path_index]].fields[field_index].type;
+            current = try self.newValue(builder, field_type);
+            try self.emit(builder, .{ .field_load = .{ .result = current, .base = bases[path_index], .field = field_index } });
+            current_type = field_type;
+        }
+    }
+
+    var replacement = replacement_value;
+    var path_index = place.fields.len;
+    while (path_index != 0) {
+        path_index -= 1;
+        const structure_index = structure_indices[path_index];
+        const structure = self.structures[structure_index];
+        const fields = try self.allocator.alloc(Ir.ValueId, structure.fields.len);
+        for (structure.fields, 0..) |field, field_index| {
+            if (field_index == place.fields[path_index]) {
+                fields[field_index] = replacement;
+            } else {
+                fields[field_index] = try self.newValue(builder, field.type);
+                try self.emit(builder, .{ .field_load = .{ .result = fields[field_index], .base = bases[path_index], .field = field_index } });
+            }
+        }
+        replacement = try self.newValue(builder, .structure(structure_index));
+        try self.emit(builder, .{ .structure_init = .{
+            .result = replacement,
+            .structure = structure_index,
+            .fields = fields,
+        } });
+    }
+    try self.emit(builder, .{ .local_store = .{ .local = place.local, .operand = replacement } });
+}
+
+fn analyzeMutatingStatements(
+    self: anytype,
+    builder: anytype,
+    method: Ast.Function,
+    structure_index: usize,
+    flat: usize,
+    self_local: Ir.LocalId,
+    statements: []const Ast.Statement,
+) AnalyzeError!bool {
+    for (statements) |statement| {
+        const terminated = switch (statement) {
+            .return_statement => |return_statement| returned: {
+                var value: ?Model.TypedValue = null;
+                if (return_statement.value) |expression| {
+                    if (method.return_type == .void) return self.fail(return_statement.position, "a void method cannot return a value");
+                    value = try self.analyzeExpressionExpected(
+                        builder,
+                        expression,
+                        if (method.return_type.isNumeric() and Support.acceptsNumericContext(expression)) method.return_type else null,
+                    );
+                    if (value.?.type != method.return_type and Numeric.canWiden(value.?.type, method.return_type)) {
+                        value = try self.coerce(builder, value.?, method.return_type, expression.position);
+                    }
+                    if (value.?.type != method.return_type) {
+                        const message = try std.fmt.allocPrint(self.allocator, "return expects '{s}', found '{s}'", .{ self.typeName(method.return_type), self.typeName(value.?.type) });
+                        return self.fail(expression.position, message);
+                    }
+                } else if (method.return_type != .void) {
+                    const message = try std.fmt.allocPrint(self.allocator, "expected return value of type '{s}'", .{self.typeName(method.return_type)});
+                    return self.fail(return_statement.position, message);
+                }
+                try emitMutatingReturn(self, builder, structure_index, flat, self_local, method, if (value) |typed| typed.value else null);
+                break :returned true;
+            },
+            .if_statement => |conditional| try analyzeMutatingIf(self, builder, method, structure_index, flat, self_local, conditional),
+            .while_statement => |loop| try analyzeMutatingWhile(self, builder, method, structure_index, flat, self_local, loop),
+            else => ordinary: {
+                const one = [_]Ast.Statement{statement};
+                break :ordinary try self.analyzeStatements(builder, method, &one);
+            },
+        };
+        if (terminated) return true;
+    }
+    return false;
+}
+
+fn analyzeMutatingIf(
+    self: anytype,
+    builder: anytype,
+    method: Ast.Function,
+    structure_index: usize,
+    flat: usize,
+    self_local: Ir.LocalId,
+    conditional: Ast.IfStatement,
+) AnalyzeError!bool {
+    var exits: std.ArrayList(Ir.BlockId) = .empty;
+    for (conditional.branches) |branch| {
+        const condition = try self.analyzeExpression(builder, branch.condition);
+        if (condition.type != .bool) return self.fail(branch.condition.position, "if condition expects 'bool'");
+        const body_block = try self.newBlock(builder);
+        const next_block = try self.newBlock(builder);
+        self.terminate(builder, .{ .branch = .{ .condition = condition.value, .then_block = body_block, .else_block = next_block } });
+        builder.current_block = body_block;
+        const binding_count = builder.bindings.items.len;
+        const terminated = try analyzeMutatingStatements(self, builder, method, structure_index, flat, self_local, branch.statements);
+        builder.bindings.shrinkRetainingCapacity(binding_count);
+        if (!terminated) try exits.append(self.allocator, builder.current_block);
+        builder.current_block = next_block;
+    }
+    if (conditional.else_statements) |statements| {
+        const binding_count = builder.bindings.items.len;
+        const terminated = try analyzeMutatingStatements(self, builder, method, structure_index, flat, self_local, statements);
+        builder.bindings.shrinkRetainingCapacity(binding_count);
+        if (!terminated) try exits.append(self.allocator, builder.current_block);
+    } else try exits.append(self.allocator, builder.current_block);
+    if (exits.items.len == 0) return true;
+    const merge = try self.newBlock(builder);
+    for (exits.items) |block| builder.blocks.items[block].terminator = .{ .jump = merge };
+    builder.current_block = merge;
+    return false;
+}
+
+fn analyzeMutatingWhile(
+    self: anytype,
+    builder: anytype,
+    method: Ast.Function,
+    structure_index: usize,
+    flat: usize,
+    self_local: Ir.LocalId,
+    loop: Ast.WhileStatement,
+) AnalyzeError!bool {
+    const condition_block = try self.newBlock(builder);
+    const body_block = try self.newBlock(builder);
+    const exit_block = try self.newBlock(builder);
+    self.terminate(builder, .{ .jump = condition_block });
+    builder.current_block = condition_block;
+    const condition = try self.analyzeExpression(builder, loop.condition);
+    if (condition.type != .bool) return self.fail(loop.condition.position, "while condition expects 'bool'");
+    self.terminate(builder, .{ .branch = .{ .condition = condition.value, .then_block = body_block, .else_block = exit_block } });
+    builder.current_block = body_block;
+    try builder.loops.append(self.allocator, .{ .continue_block = condition_block, .break_block = exit_block });
+    const terminated = try analyzeMutatingStatements(self, builder, method, structure_index, flat, self_local, loop.statements);
+    builder.loops.items.len -= 1;
+    if (!terminated) self.terminate(builder, .{ .jump = condition_block });
+    builder.current_block = exit_block;
+    return false;
+}
+
+fn emitMutatingReturn(
+    self: anytype,
+    builder: anytype,
+    structure_index: usize,
+    flat: usize,
+    self_local: Ir.LocalId,
+    method: Ast.Function,
+    value: ?Ir.ValueId,
+) !void {
+    const receiver_type = Ast.Type.structure(structure_index);
+    const receiver = try self.newValue(builder, receiver_type);
+    try self.emit(builder, .{ .local_load = .{ .result = receiver, .local = self_local } });
+    if (method.return_type == .void) {
+        self.terminate(builder, .{ .return_value = receiver });
+        return;
+    }
+    const result_type = methodResultType(self.program, self.method_mutability, self.program.type_names.len, flat).?;
+    const result = try self.newValue(builder, result_type);
+    try self.emit(builder, .{ .structure_init = .{
+        .result = result,
+        .structure = result_type.structureIndex().?,
+        .fields = try self.allocator.dupe(Ir.ValueId, &.{ receiver, value.? }),
+    } });
+    self.terminate(builder, .{ .return_value = result });
+}
+
+fn methodIrReturnType(self: anytype, structure_index: usize, flat: usize, source_return: Ast.Type) Ast.Type {
+    if (!self.method_mutability[flat]) return source_return;
+    if (source_return == .void) return .structure(structure_index);
+    return methodResultType(self.program, self.method_mutability, self.program.type_names.len, flat).?;
+}
+
+fn methodResultType(program: Ast.Program, mutating: []const bool, base_count: usize, target_flat: usize) ?Ast.Type {
+    var result = base_count;
+    var flat: usize = 0;
+    for (program.structures) |structure| {
+        for (structure.methods) |method| {
+            if (flat == target_flat) return if (mutating[flat] and method.return_type != .void) .structure(result) else null;
+            if (mutating[flat] and method.return_type != .void) result += 1;
+            flat += 1;
+        }
+    }
+    return null;
+}
+
+fn methodFunctionId(program: Ast.Program, structure_index: usize, method_index: usize) Ir.FunctionId {
+    var result = program.functions.len;
+    for (program.structures) |structure| result += structure.constructors.len;
+    return result + flatMethodIndex(program, structure_index, method_index);
+}
+
+fn flatMethodIndex(program: Ast.Program, structure_index: usize, method_index: usize) usize {
+    var result: usize = 0;
+    for (program.structures[0..structure_index]) |structure| result += structure.methods.len;
+    return result + method_index;
+}
+
+fn methodCount(program: Ast.Program) usize {
+    var result: usize = 0;
+    for (program.structures) |structure| result += structure.methods.len;
+    return result;
+}
+
+fn statementsWriteSelf(statements: []const Ast.Statement) bool {
+    for (statements) |statement| switch (statement) {
+        .assignment_statement => |assignment| if (std.mem.eql(u8, assignment.target.name, "self")) return true,
+        .if_statement => |conditional| {
+            for (conditional.branches) |branch| if (statementsWriteSelf(branch.statements)) return true;
+            if (conditional.else_statements) |nested| if (statementsWriteSelf(nested)) return true;
+        },
+        .while_statement => |loop| if (statementsWriteSelf(loop.statements)) return true,
+        else => {},
+    };
+    return false;
+}
+
+fn statementsCallMutatingSelf(program: Ast.Program, structure_index: usize, statements: []const Ast.Statement, mutating: []const bool) bool {
+    for (statements) |statement| switch (statement) {
+        .variable_declaration => |declaration| if (declaration.initializer) |value| if (expressionCallsMutatingSelf(program, structure_index, value, mutating)) return true,
+        .assignment_statement => |assignment| if (assignment.value) |value| if (expressionCallsMutatingSelf(program, structure_index, value, mutating)) return true,
+        .return_statement => |returned| if (returned.value) |value| if (expressionCallsMutatingSelf(program, structure_index, value, mutating)) return true,
+        .expression_statement => |value| if (expressionCallsMutatingSelf(program, structure_index, value, mutating)) return true,
+        .print_statement => |printed| for (printed.values) |value| if (expressionCallsMutatingSelf(program, structure_index, value, mutating)) return true,
+        .assert_statement => |assertion| if (expressionCallsMutatingSelf(program, structure_index, assertion.condition, mutating) or expressionCallsMutatingSelf(program, structure_index, assertion.message, mutating)) return true,
+        .panic_statement => |panic_statement| if (expressionCallsMutatingSelf(program, structure_index, panic_statement.value, mutating)) return true,
+        .if_statement => |conditional| {
+            for (conditional.branches) |branch| {
+                if (expressionCallsMutatingSelf(program, structure_index, branch.condition, mutating) or statementsCallMutatingSelf(program, structure_index, branch.statements, mutating)) return true;
+            }
+            if (conditional.else_statements) |nested| if (statementsCallMutatingSelf(program, structure_index, nested, mutating)) return true;
+        },
+        .while_statement => |loop| if (expressionCallsMutatingSelf(program, structure_index, loop.condition, mutating) or statementsCallMutatingSelf(program, structure_index, loop.statements, mutating)) return true,
+        else => {},
+    };
+    return false;
+}
+
+fn expressionCallsMutatingSelf(program: Ast.Program, structure_index: usize, expression: *const Ast.Expression, mutating: []const bool) bool {
+    return switch (expression.value) {
+        .call => |call| calls: {
+            if (call.receiver) |receiver| {
+                if (receiverStructure(program, structure_index, receiver)) |target| {
+                    if (mutatingMethodInStructure(program, target, call.name, call.arguments.len, mutating)) break :calls true;
+                }
+                if (expressionCallsMutatingSelf(program, structure_index, receiver, mutating)) break :calls true;
+            }
+            for (call.arguments) |argument| if (expressionCallsMutatingSelf(program, structure_index, argument, mutating)) break :calls true;
+            for (call.named_arguments) |argument| if (expressionCallsMutatingSelf(program, structure_index, argument.value, mutating)) break :calls true;
+            break :calls false;
+        },
+        .field_access => |access| expressionCallsMutatingSelf(program, structure_index, access.base, mutating),
+        .unary => |unary| expressionCallsMutatingSelf(program, structure_index, unary.operand, mutating),
+        .binary => |binary| expressionCallsMutatingSelf(program, structure_index, binary.left, mutating) or expressionCallsMutatingSelf(program, structure_index, binary.right, mutating),
+        .conversion => |conversion| expressionCallsMutatingSelf(program, structure_index, conversion.operand, mutating),
+        .string_count => |operand| expressionCallsMutatingSelf(program, structure_index, operand, mutating),
+        .interpolated_string => |interpolated| parts: {
+            for (interpolated.parts) |part| switch (part) {
+                .text => {},
+                .expression => |value| if (expressionCallsMutatingSelf(program, structure_index, value, mutating)) break :parts true,
+            };
+            break :parts false;
+        },
+        else => false,
+    };
+}
+
+fn receiverStructure(program: Ast.Program, root_structure: usize, expression: *const Ast.Expression) ?usize {
+    return switch (expression.value) {
+        .identifier => |name| if (std.mem.eql(u8, name, "self")) root_structure else null,
+        .field_access => |access| if (receiverStructure(program, root_structure, access.base)) |base| field: {
+            if (base >= program.structures.len) break :field null;
+            for (program.structures[base].fields) |field_value| {
+                if (std.mem.eql(u8, field_value.name, access.name)) break :field field_value.type.structureIndex();
+            }
+            break :field null;
+        } else null,
+        else => null,
+    };
+}
+
+fn mutatingMethodInStructure(program: Ast.Program, structure_index: usize, name: []const u8, arity: usize, mutating: []const bool) bool {
+    if (structure_index >= program.structures.len) return false;
+    const offset = flatMethodIndex(program, structure_index, 0);
+    for (program.structures[structure_index].methods, 0..) |method, method_index| {
+        if (mutating[offset + method_index] and std.mem.eql(u8, method.name, name) and Support.acceptsArity(method.parameters, arity)) return true;
+    }
+    return false;
+}
