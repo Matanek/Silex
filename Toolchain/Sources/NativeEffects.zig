@@ -350,6 +350,28 @@ test "native collection mutations match the reference" {
     try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
 }
 
+test "native copied slices match the reference" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const source =
+        \\func main() {
+        \\    let fixed:int[5] = [0, 1, 2, 3, 4]; let middle:int[] = fixed[1:4]
+        \\    let values = [10, 20, 30, 40, 50]; let negative = values[-4:-1]; let clamped = values[-99:99]; let inverse = values[4:2]
+        \\    print(middle.count(), middle[0], middle[-1], " ", negative[0], negative[-1], " ", clamped.count(), clamped[0], clamped[-1], " ", inverse.count())
+        \\}
+    ;
+    var frontend = Frontend.Frontend.init(allocator);
+    var compilation = try frontend.compile(source);
+    compilation.ir.files = &.{"Main.sx"};
+    const reference = try Interpreter.runCapture(allocator, compilation.ir);
+    const native = try runMachine(allocator, try Lower.lower(allocator, compilation.ir));
+    try std.testing.expectEqual(reference.exit_code, exitCode(native));
+    try std.testing.expectEqualSlices(u8, reference.stdout, native.stdout);
+    try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
+}
+
 test "native optional transport matches the reference interpreter" {
     if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);

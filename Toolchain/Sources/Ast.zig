@@ -50,6 +50,7 @@ pub const Expression = struct {
         string_count: *Expression,
         sequence_literal: SequenceLiteral,
         index_access: IndexAccess,
+        slice_access: SliceAccess,
         match_expression: Match,
     };
 
@@ -132,6 +133,13 @@ pub const Expression = struct {
     pub const SequenceLiteral = struct {
         values: []const *Expression,
         inferred_type: ?Type = null,
+    };
+
+    pub const SliceAccess = struct {
+        base: *Expression,
+        start: *Expression,
+        end: *Expression,
+        bracket_position: Source.Position,
     };
 
     pub const StringPart = union(enum) {

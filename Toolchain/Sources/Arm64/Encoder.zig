@@ -346,6 +346,7 @@ fn encodeFunction(
                 try encodeCollectionReplace(allocator, words, data_fixups, &fixups, program, replacement),
             .collection_count => |count| try ListRuntime.emitCount(allocator, words, count),
             .list_edit => |edit| try ListRuntime.emitEdit(allocator, words, data_fixups, &fixups.epilogue, program, edit),
+            .collection_slice => |slice| try ListRuntime.emitSlice(allocator, words, &fixups.epilogue, slice),
             .aggregate_equal => |comparison| try encodeAggregateEqual(allocator, words, &fixups, comparison),
             .convert => |conversion| try encodeConversion(
                 allocator,

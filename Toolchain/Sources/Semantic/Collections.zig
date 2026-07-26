@@ -212,6 +212,28 @@ pub fn analyzeIndex(self: anytype, builder: anytype, access: Ast.Expression.Inde
     return .{ .type = collection.element, .value = result };
 }
 
+pub fn analyzeSlice(self: anytype, builder: anytype, access: Ast.Expression.SliceAccess, expected: ?Ast.Type) !Model.TypedValue {
+    const source = try self.analyzeExpression(builder, access.base);
+    const collection = collectionForType(self.structures, source.type) orelse return self.fail(access.bracket_position, "slicing requires an array or list");
+    const start = try requireIndex(self, builder, access.start);
+    const end = try requireIndex(self, builder, access.end);
+    var result_type: ?Ast.Type = null;
+    if (expected) |type_value| if (collectionForType(self.structures, type_value)) |target| {
+        if (target.length == null and target.element == collection.element) result_type = type_value;
+    };
+    if (result_type == null and collection.length == null) result_type = source.type;
+    if (result_type == null) for (self.structures, 0..) |structure, index| if (structure.collection) |candidate| {
+        if (candidate.length == null and candidate.element == collection.element) {
+            result_type = .structure(index);
+            break;
+        }
+    };
+    const target = result_type orelse return self.fail(access.bracket_position, "a fixed-array slice requires an expected dynamic list type");
+    const result = try self.newValue(builder, target);
+    try self.emit(builder, .{ .collection_slice = .{ .result = result, .collection = source.value, .start = start.value, .end = end.value } });
+    return .{ .type = target, .value = result };
+}
+
 pub fn analyzeCall(self: anytype, builder: anytype, call: Ast.Expression.Call) !?Model.TypedValue {
     const receiver_expression = call.receiver orelse return null;
     const receiver_type = inferReceiverType(builder, receiver_expression) orelse return null;

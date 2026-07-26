@@ -200,6 +200,18 @@ fn lowerInstruction(
                 .tail = try internString(allocator, strings, " is out of bounds for count "),
             } };
         },
+        .collection_slice => |slice| slice_value: {
+            const collection = collectionForType(program, function.value_types[slice.collection]) orelse return error.InvalidMachineProgram;
+            break :slice_value .{ .collection_slice = .{
+                .result = layout.values[slice.result].start,
+                .collection = layout.values[slice.collection],
+                .start = layout.values[slice.start].start,
+                .end = layout.values[slice.end].start,
+                .count = @intCast(collection.length orelse 0),
+                .dynamic = collection.length == null,
+                .element_width = @intCast(try leafCount(program, collection.element)),
+            } };
+        },
         .enum_payload => |payload| enum_payload: {
             if (payload.enumeration >= program.enums.len) return error.InvalidMachineProgram;
             const enumeration = program.enums[payload.enumeration];

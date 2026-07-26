@@ -81,6 +81,7 @@ pub const Instruction = union(enum) {
     collection_replace: CollectionReplace,
     collection_count: CollectionCount,
     list_edit: ListEdit,
+    collection_slice: CollectionSlice,
     local_load: LocalLoad,
     local_store: LocalStore,
     convert: Convert,
@@ -211,6 +212,13 @@ pub const Instruction = union(enum) {
         argument: ?ValueId = null,
         removed: ?ValueId = null,
         position: Source.Position,
+    };
+
+    pub const CollectionSlice = struct {
+        result: ValueId,
+        collection: ValueId,
+        start: ValueId,
+        end: ValueId,
     };
 
     pub const LocalLoad = struct {
@@ -640,6 +648,15 @@ fn writeInstruction(
                 try output.appendSlice(allocator, ", ");
                 try appendValueChecked(output, allocator, function, argument);
             }
+        },
+        .collection_slice => |slice| {
+            try appendResult(output, allocator, program, function, slice.result);
+            try output.appendSlice(allocator, "collection.slice ");
+            try appendValueChecked(output, allocator, function, slice.collection);
+            try output.appendSlice(allocator, ", ");
+            try appendValueChecked(output, allocator, function, slice.start);
+            try output.appendSlice(allocator, ", ");
+            try appendValueChecked(output, allocator, function, slice.end);
         },
         .local_load => |load| {
             try appendResult(output, allocator, program, function, load.result);

@@ -454,6 +454,13 @@ pub const Specializer = struct {
                 copy.index = try self.rewriteExpression(access.index, arguments, locals);
                 break :value .{ .index_access = copy };
             },
+            .slice_access => |access| value: {
+                var copy = access;
+                copy.base = try self.rewriteExpression(access.base, arguments, locals);
+                copy.start = try self.rewriteExpression(access.start, arguments, locals);
+                copy.end = try self.rewriteExpression(access.end, arguments, locals);
+                break :value .{ .slice_access = copy };
+            },
             .interpolated_string => |interpolated| value: {
                 const parts = try self.allocator.alloc(Ast.Expression.StringPart, interpolated.parts.len);
                 for (interpolated.parts, 0..) |part, index| parts[index] = switch (part) {
@@ -1103,6 +1110,7 @@ pub const Specializer = struct {
                 const structure = self.structureForType(base) orelse break :index_type null;
                 break :index_type if (structure.collection) |collection| collection.element else null;
             },
+            .slice_access => |access| self.inferExpressionType(access.base, locals),
             .match_expression => |match_value| match_type: {
                 for (match_value.branches) |branch| if (branch.value) |value| {
                     break :match_type self.inferExpressionType(value, locals);
@@ -1340,6 +1348,11 @@ fn remapExpressionTypes(expression: *Ast.Expression, map: []const ?Ast.Type) voi
         .index_access => |access| {
             remapExpressionTypes(access.base, map);
             remapExpressionTypes(access.index, map);
+        },
+        .slice_access => |access| {
+            remapExpressionTypes(access.base, map);
+            remapExpressionTypes(access.start, map);
+            remapExpressionTypes(access.end, map);
         },
         .interpolated_string => |interpolated| for (interpolated.parts) |part| switch (part) {
             .text => {},

@@ -198,6 +198,81 @@ pub fn emitEdit(
     try Fixups.patch26(words.items, complete, words.items.len);
 }
 
+pub fn emitSlice(allocator: Allocator, words: *std.ArrayList(u32), epilogue: *std.ArrayList(Fixups.Local), value: Machine.Instruction.CollectionSlice) Error!void {
+    if (value.dynamic) {
+        try words.append(allocator, A64.loadStack(.x10, value.collection.start));
+        try words.append(allocator, A64.load64(.x13, .x10, 0));
+        try words.append(allocator, A64.addSubtractImmediate(.x10, .x10, 8, true));
+    } else {
+        try stackAddress(allocator, words, .x10, value.collection.start);
+        try immediate(allocator, words, .x13, value.count);
+    }
+    try words.append(allocator, A64.loadStack(.x9, value.start));
+    try normalizeBound(allocator, words, .x9);
+    try words.append(allocator, A64.loadStack(.x8, value.end));
+    try normalizeBound(allocator, words, .x8);
+    try words.append(allocator, A64.moveWideZero32(.x12, 0));
+    try words.append(allocator, A64.compareRegisters(.x9, .x8));
+    const empty = words.items.len;
+    try words.append(allocator, A64.conditionalBranch(.greater_equal));
+    try words.append(allocator, A64.subtractSetFlags(.x12, .x8, .x9));
+    try Fixups.patch19(words.items, empty, words.items.len);
+    try words.append(allocator, A64.addSubtractImmediate(.zero_or_sp, .zero_or_sp, 32, false));
+    try words.append(allocator, A64.store64(.x10, .zero_or_sp, 0));
+    try words.append(allocator, A64.store64(.x9, .zero_or_sp, 8));
+    try words.append(allocator, A64.store64(.x12, .zero_or_sp, 16));
+    try immediate(allocator, words, .x11, @as(u64, value.element_width) * Machine.slot_size);
+    try words.append(allocator, A64.multiply(.x1, .x12, .x11));
+    try words.append(allocator, A64.addSubtractImmediate(.x1, .x1, 8, true));
+    try allocateWithSize(allocator, words);
+    const mmap_failed = words.items.len;
+    try words.append(allocator, A64.conditionalBranch(.carry_set));
+    try words.append(allocator, A64.moveRegister(.x15, .x0));
+    try words.append(allocator, A64.load64(.x10, .zero_or_sp, 0));
+    try words.append(allocator, A64.load64(.x9, .zero_or_sp, 8));
+    try words.append(allocator, A64.load64(.x13, .zero_or_sp, 16));
+    try words.append(allocator, A64.store64(.x13, .x15, 0));
+    try immediate(allocator, words, .x11, @as(u64, value.element_width) * Machine.slot_size);
+    try words.append(allocator, A64.multiply(.x9, .x9, .x11));
+    try words.append(allocator, A64.addRegisters(.x10, .x10, .x9));
+    try words.append(allocator, A64.addSubtractImmediate(.x14, .x15, 8, true));
+    try copyElements(allocator, words, .x13, value.element_width);
+    try words.append(allocator, A64.addSubtractImmediate(.zero_or_sp, .zero_or_sp, 32, true));
+    try words.append(allocator, A64.storeStack(.x15, value.result));
+    const complete = words.items.len;
+    try words.append(allocator, A64.branch());
+    const failure = words.items.len;
+    try Fixups.patch19(words.items, mmap_failed, failure);
+    try words.append(allocator, A64.addSubtractImmediate(.zero_or_sp, .zero_or_sp, 32, true));
+    try fail(allocator, words, epilogue);
+    try Fixups.patch26(words.items, complete, words.items.len);
+}
+
+fn normalizeBound(allocator: Allocator, words: *std.ArrayList(u32), register: A64.Register) Error!void {
+    try words.append(allocator, A64.compareRegisters(register, .zero_or_sp));
+    const nonnegative = words.items.len;
+    try words.append(allocator, A64.conditionalBranch(.greater_equal));
+    try words.append(allocator, A64.addRegisters(register, register, .x13));
+    try Fixups.patch19(words.items, nonnegative, words.items.len);
+    try words.append(allocator, A64.compareRegisters(register, .zero_or_sp));
+    const not_below = words.items.len;
+    try words.append(allocator, A64.conditionalBranch(.greater_equal));
+    try words.append(allocator, A64.moveWideZero32(register, 0));
+    try Fixups.patch19(words.items, not_below, words.items.len);
+    try words.append(allocator, A64.compareRegisters(register, .x13));
+    const not_above = words.items.len;
+    try words.append(allocator, A64.conditionalBranch(.less_equal));
+    try words.append(allocator, A64.moveRegister(register, .x13));
+    try Fixups.patch19(words.items, not_above, words.items.len);
+}
+
+fn stackAddress(allocator: Allocator, words: *std.ArrayList(u32), destination: A64.Register, slot: Machine.Slot) Error!void {
+    const offset = @as(u64, slot) * Machine.slot_size;
+    if (offset <= std.math.maxInt(u12)) return words.append(allocator, A64.addSubtractImmediate(destination, .zero_or_sp, @intCast(offset), true));
+    try immediate(allocator, words, .x11, offset);
+    try words.append(allocator, A64.addRegisters(destination, .zero_or_sp, .x11));
+}
+
 fn insertionBounds(allocator: Allocator, words: *std.ArrayList(u32), index: Machine.Slot) Error!Bounds {
     try words.append(allocator, A64.loadStack(.x9, index));
     try words.append(allocator, A64.compareRegisters(.x9, .zero_or_sp));
