@@ -521,6 +521,29 @@ receiver and write the returned value state back to that receiver; nonmutating
 calls accept `let`, `var`, and temporary receivers. Receiver and arguments are
 evaluated once in source order, and calls may chain through returned values.
 
+A method of a non-generic structure may declare its own unconstrained type
+parameters. Calls infer the complete argument list from positional arguments,
+or provide it explicitly after the method name:
+
+```sx
+struct Catalog {
+    func identity<T>(value:T) T { return value }
+}
+
+let catalog = Catalog()
+print(catalog.identity(42))
+print(catalog.identity<str>("Silex"))
+```
+
+An applicable concrete method overload takes priority over generic inference.
+Defaults, stable recursive calls, visibility and mutability inference retain
+the ordinary method rules after specialization. Failure to infer every type
+argument, a wrong explicit arity, `void`, ambiguous specialization and
+recursion that continually changes its arguments are rejected. Methods of a
+generic structure may use the structure parameters but cannot declare another
+parameter list in this version. Constructors cannot be generic; static
+methods, protocol requirements and overrides are not part of this subset.
+
 `internal` applies with the same exact file boundary to structures, fields,
 constructors and methods. All declarations in that file may use them. Their
 visibility never increases through a public containing type, an alias or a
@@ -669,7 +692,7 @@ enum            = visibility? "enum" identifier type_parameters? "{" enum_varian
 enum_variant    = identifier ("(" type ("," type)* ")")? ;
 structure_field = visibility? ("let" | "var") identifier ":" type ("=" field_default)? ;
 constructor     = visibility? "init" "(" parameters? ")" block ;
-method          = visibility? "func" identifier "(" parameters? ")" return_type? block ;
+method          = visibility? "func" identifier type_parameters? "(" parameters? ")" return_type? block ;
 field_default   = fundamental_literal | structure_initializer ;
 function        = visibility? "func" identifier type_parameters? "(" parameters? ")" return_type? block ;
 type_parameters = "<" identifier ("," identifier)* ">" ;
@@ -739,7 +762,7 @@ statements as described above.
 
 ## Current limits
 
-There are no collections, method extraction, static methods, generic methods,
-package lockfiles, or visible native interop in this subset. Fundamental and
+There are no collections, method extraction, static methods, package lockfiles,
+or visible native interop in this subset. Fundamental and
 structure values, constructors, instance methods, string operations and
 observable effects have matching reference and macOS ARM64 behavior.

@@ -379,3 +379,112 @@ test "diagnose invalid generic enum uses" {
         "raw enums cannot be generic",
     );
 }
+
+test "specialize inferred explicit overloaded mutating and recursive generic methods" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\struct Catalog {
+        \\    var count:int
+        \\    func identity<T>(value:T) T { return value }
+        \\    func select(value:int) int { return 100 }
+        \\    func select<T>(value:T) T { return value }
+        \\    func store<T>(value:T, amount:int = 1) T {
+        \\        self.count += amount
+        \\        return value
+        \\    }
+        \\    func descend<T>(value:T, count:int) T {
+        \\        if count == 0 { return value }
+        \\        return self.descend(value, count - 1)
+        \\    }
+        \\}
+        \\func main() {
+        \\    var catalog = Catalog()
+        \\    print(catalog.identity(42))
+        \\    print(catalog.identity<str>("Silex"))
+        \\    print(catalog.select(1))
+        \\    print(catalog.select("generic"))
+        \\    print(catalog.store(7))
+        \\    print(catalog.count)
+        \\    print(catalog.descend(8, 2))
+        \\}
+    );
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("42\nSilex\n100\ngeneric\n7\n1\n8\n", result.stdout);
+}
+
+test "compose public generic methods through modules" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data =
+        \\use Api
+        \\func main() {
+        \\    let catalog = Api.Catalog()
+        \\    print(catalog.identity(20))
+        \\    print(catalog.identity<int>(22))
+        \\}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Api.sx",
+        .data = "public struct Catalog { public func identity<T>(value:T) T { return value } }",
+    });
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(input);
+    var found_method = false;
+    for (compilation.interfaces) |interface| {
+        if (!std.mem.eql(u8, interface.name, "Api")) continue;
+        for (interface.structures) |structure| if (std.mem.eql(u8, structure.export_name, "Catalog")) {
+            try std.testing.expectEqual(@as(usize, 1), structure.methods.len);
+            try std.testing.expectEqual(@as(usize, 1), structure.methods[0].type_parameters.len);
+            try std.testing.expectEqualStrings("T", structure.methods[0].type_parameters[0]);
+            found_method = true;
+        };
+    }
+    try std.testing.expect(found_method);
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("20\n22\n", result.stdout);
+}
+
+test "diagnose invalid generic method declarations and calls" {
+    try expectCompileError(
+        "struct Factory { func create<T>() int { return 1 } } func main() { Factory().create() }",
+        "generic method 'create' cannot infer all type arguments; use explicit '<...>'",
+    );
+    try expectCompileError(
+        "struct Catalog { func choose<T, U>(value:T) T { return value } } func main() { Catalog().choose<int>(1) }",
+        "generic method 'choose' has no overload accepting 1 type arguments",
+    );
+    try expectCompileError(
+        "struct Catalog { func plain(value:int) int { return value } } func main() { Catalog().plain<int>(1) }",
+        "method 'plain' does not accept type arguments",
+    );
+    try expectCompileError(
+        "struct Catalog { func expand<T>(value:T) T { return self.expand<T?>(value) } } func main() { Catalog().expand(1) }",
+        "generic method 'expand' recursively expands with different type arguments",
+    );
+    try expectCompileError(
+        "struct Factory { func create<T>() int { return 1 } } func main() { Factory().create<void>() }",
+        "'void' is not a generic type argument",
+    );
+    try expectCompileError(
+        "struct Catalog { func pick<T>(left:T, right:int) T { return left } func pick<T>(left:int, right:T) T { return right } } func main() { Catalog().pick(1, 2) }",
+        "generic call to method 'pick' is ambiguous",
+    );
+    try expectCompileError(
+        "struct Box<T> { func identity<U>(value:U) U { return value } } func main() {}",
+        "generic methods in generic structures are not supported",
+    );
+    try expectCompileError(
+        "struct Box { init<T>() {} } func main() {}",
+        "constructors cannot declare type parameters",
+    );
+}

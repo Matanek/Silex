@@ -68,6 +68,7 @@ pub const Constructor = struct {
 
 pub const Method = struct {
     name: []const u8,
+    type_parameters: []const []const u8 = &.{},
     parameter_types: []const Types.Type,
     return_type: Types.Type,
     required_parameters: usize = 0,
@@ -173,8 +174,11 @@ pub fn buildMappedGenerics(
             for (method.parameters, 0..) |parameter, parameter_index| {
                 parameters[parameter_index] = mappedType(parameter.type, type_map, generic_map);
             }
+            const method_type_parameters = try allocator.alloc([]const u8, method.type_parameters.len);
+            for (method.type_parameters, 0..) |parameter, index| method_type_parameters[index] = parameter.name;
             try methods.append(allocator, .{
                 .name = method.name,
+                .type_parameters = method_type_parameters,
                 .parameter_types = parameters,
                 .return_type = mappedType(method.return_type, type_map, generic_map),
                 .required_parameters = requiredParameterCount(method.parameters),

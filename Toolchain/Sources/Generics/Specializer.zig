@@ -39,6 +39,14 @@ const SpecializedType = struct {
     arguments: []const Ast.Type,
 };
 
+const MethodSpecialization = struct {
+    structure: Ast.Type,
+    template_position: Source.Position,
+    arguments: []const Ast.Type,
+    name: []const u8,
+    visiting: bool = true,
+};
+
 pub const Specializer = struct {
     allocator: Allocator,
     source: Ast.Program = undefined,
@@ -49,6 +57,7 @@ pub const Specializer = struct {
     specializations: std.ArrayList(FunctionSpecialization) = .empty,
     structure_specializations: std.ArrayList(StructureSpecialization) = .empty,
     enum_specializations: std.ArrayList(EnumSpecialization) = .empty,
+    method_specializations: std.ArrayList(MethodSpecialization) = .empty,
     diagnostic: ?Source.Diagnostic = null,
 
     pub fn init(allocator: Allocator) Specializer {
@@ -182,17 +191,22 @@ pub const Specializer = struct {
             constructors[constructor_index].statements = try self.rewriteStatements(constructor.statements, arguments, &locals);
         }
         structure.constructors = constructors;
-        const methods = try self.allocator.alloc(Ast.Function, structure.methods.len);
-        for (structure.methods, 0..) |method, method_index| {
-            methods[method_index] = method;
+        var concrete_methods: std.ArrayList(Ast.Function) = .empty;
+        for (structure.methods) |method| if (method.type_parameters.len == 0) {
+            try concrete_methods.append(self.allocator, method);
+        };
+        structure.methods = try concrete_methods.toOwnedSlice(self.allocator);
+        self.structures.items[structure_index] = structure;
+        const initial_method_count = structure.methods.len;
+        for (0..initial_method_count) |method_index| {
+            var method = self.structures.items[structure_index].methods[method_index];
             var locals: std.ArrayList(Binding) = .empty;
             try locals.append(self.allocator, .{ .name = "self", .type = self_type });
-            methods[method_index].parameters = try self.rewriteParameters(method.parameters, arguments, &locals);
-            methods[method_index].return_type = try self.rewriteType(method.return_type, arguments, method.name_position);
-            methods[method_index].statements = try self.rewriteStatements(method.statements, arguments, &locals);
+            method.parameters = try self.rewriteParameters(method.parameters, arguments, &locals);
+            method.return_type = try self.rewriteType(method.return_type, arguments, method.name_position);
+            method.statements = try self.rewriteStatements(method.statements, arguments, &locals);
+            @constCast(self.structures.items[structure_index].methods)[method_index] = method;
         }
-        structure.methods = methods;
-        self.structures.items[structure_index] = structure;
     }
 
     fn rewriteParameters(
@@ -361,6 +375,12 @@ pub const Specializer = struct {
                         }
                     }
                 };
+                if (copy.receiver != null and copy.named_arguments.len == 0) {
+                    if (try self.specializeMethodCall(copy, locals.items)) |name| {
+                        copy.name = name;
+                        copy.type_arguments = &.{};
+                    }
+                }
                 if (copy.receiver == null) {
                     if (try self.specializeStructureCall(copy)) |specialized| {
                         copy.name = specialized;
@@ -497,6 +517,114 @@ pub const Specializer = struct {
             .{call.name},
         );
         return self.fail(call.name_position, message);
+    }
+
+    fn specializeMethodCall(self: *Specializer, call: Ast.Expression.Call, locals: []const Binding) SpecializeError!?[]const u8 {
+        const receiver_type = self.inferExpressionType(call.receiver.?, locals) orelse return null;
+        const concrete_receiver = receiver_type.optionalChild() orelse receiver_type;
+        const structure = self.structureForType(concrete_receiver) orelse return null;
+        const source_structure = self.sourceStructureForType(concrete_receiver) orelse return null;
+        const actual_types = try self.allocator.alloc(Ast.Type, call.arguments.len);
+        for (call.arguments, 0..) |argument, index| {
+            actual_types[index] = self.inferExpressionType(argument, locals) orelse {
+                if (call.type_arguments.len == 0) return null;
+                return self.fail(call.arguments[index].position, "cannot determine argument type for generic method specialization");
+            };
+        }
+        if (call.type_arguments.len == 0) {
+            for (structure.methods) |method| {
+                if (!std.mem.eql(u8, method.name, call.name) or !methodVisible(call, method)) continue;
+                if (self.argumentsMatch(method.parameters, actual_types, &.{})) return null;
+            }
+        }
+
+        var selected: ?Ast.Function = null;
+        var selected_arguments: []const Ast.Type = &.{};
+        var saw_generic = false;
+        var saw_type_arity = false;
+        for (source_structure.methods) |method| {
+            if (method.type_parameters.len == 0 or !std.mem.eql(u8, method.name, call.name) or !methodVisible(call, method)) continue;
+            saw_generic = true;
+            if (call.type_arguments.len != 0) {
+                if (call.type_arguments.len != method.type_parameters.len) continue;
+                saw_type_arity = true;
+                if (!parametersAcceptArity(method.parameters, actual_types.len) or
+                    !self.argumentsMatch(method.parameters, actual_types, call.type_arguments)) continue;
+                if (selected != null) return self.ambiguousMethod(call.name_position, call.name);
+                selected = method;
+                selected_arguments = call.type_arguments;
+            } else {
+                if (!parametersAcceptArity(method.parameters, actual_types.len)) continue;
+                saw_type_arity = true;
+                const inferred = try self.inferTypeArguments(method, actual_types) orelse continue;
+                if (selected != null) return self.ambiguousMethod(call.name_position, call.name);
+                selected = method;
+                selected_arguments = inferred;
+            }
+        }
+        if (selected) |template| return try self.instantiateMethod(concrete_receiver, template, selected_arguments, call.name_position);
+        if (!saw_generic) {
+            if (call.type_arguments.len == 0) return null;
+            const message = try std.fmt.allocPrint(self.allocator, "method '{s}' does not accept type arguments", .{call.name});
+            return self.fail(call.name_position, message);
+        }
+        if (call.type_arguments.len != 0 and !saw_type_arity) {
+            const message = try std.fmt.allocPrint(
+                self.allocator,
+                "generic method '{s}' has no overload accepting {d} type arguments",
+                .{ call.name, call.type_arguments.len },
+            );
+            return self.fail(call.name_position, message);
+        }
+        const message = try std.fmt.allocPrint(
+            self.allocator,
+            "generic method '{s}' cannot infer all type arguments; use explicit '<...>'",
+            .{call.name},
+        );
+        return self.fail(call.name_position, message);
+    }
+
+    fn instantiateMethod(
+        self: *Specializer,
+        structure_type: Ast.Type,
+        template: Ast.Function,
+        arguments: []const Ast.Type,
+        position: Source.Position,
+    ) SpecializeError![]const u8 {
+        for (arguments) |argument| if (argument == .void) return self.fail(position, "'void' is not a generic type argument");
+        for (self.method_specializations.items) |specialization| {
+            if (specialization.structure != structure_type or !samePosition(specialization.template_position, template.name_position)) continue;
+            if (std.mem.eql(Ast.Type, specialization.arguments, arguments)) return specialization.name;
+            if (specialization.visiting) {
+                const message = try std.fmt.allocPrint(
+                    self.allocator,
+                    "generic method '{s}' recursively expands with different type arguments",
+                    .{template.name},
+                );
+                return self.fail(position, message);
+            }
+        }
+        const name = try self.specializationName(template.name, arguments);
+        const specialization_index = self.method_specializations.items.len;
+        try self.method_specializations.append(self.allocator, .{
+            .structure = structure_type,
+            .template_position = template.name_position,
+            .arguments = try self.allocator.dupe(Ast.Type, arguments),
+            .name = name,
+        });
+        var concrete = template;
+        concrete.name = name;
+        concrete.type_parameters = &.{};
+        var locals: std.ArrayList(Binding) = .empty;
+        try locals.append(self.allocator, .{ .name = "self", .type = structure_type });
+        concrete.parameters = try self.rewriteParameters(template.parameters, arguments, &locals);
+        concrete.return_type = try self.rewriteType(template.return_type, arguments, template.name_position);
+        const structure_index = self.structureIndexForType(structure_type) orelse return error.InvalidSource;
+        const method_index = try self.appendMethod(structure_index, concrete);
+        concrete.statements = try self.rewriteStatements(template.statements, arguments, &locals);
+        @constCast(self.structures.items[structure_index].methods)[method_index] = concrete;
+        self.method_specializations.items[specialization_index].visiting = false;
+        return name;
     }
 
     fn instantiate(
@@ -873,6 +1001,36 @@ pub const Specializer = struct {
         return null;
     }
 
+    fn sourceStructureForType(self: *Specializer, type_value: Ast.Type) ?Ast.Structure {
+        const index = type_value.structureIndex() orelse return null;
+        if (index >= self.type_names.items.len) return null;
+        const name = self.type_names.items[index];
+        for (self.source.structures) |structure| {
+            if (structure.type_parameters.len == 0 and std.mem.eql(u8, structure.name, name)) return structure;
+        }
+        return null;
+    }
+
+    fn structureIndexForType(self: *Specializer, type_value: Ast.Type) ?usize {
+        const index = type_value.structureIndex() orelse return null;
+        if (index >= self.type_names.items.len) return null;
+        const name = self.type_names.items[index];
+        for (self.structures.items, 0..) |structure, structure_index| {
+            if (std.mem.eql(u8, structure.name, name)) return structure_index;
+        }
+        return null;
+    }
+
+    fn appendMethod(self: *Specializer, structure_index: usize, method: Ast.Function) Allocator.Error!usize {
+        const structure = &self.structures.items[structure_index];
+        const method_index = structure.methods.len;
+        const methods = try self.allocator.alloc(Ast.Function, method_index + 1);
+        @memcpy(methods[0..method_index], structure.methods);
+        methods[method_index] = method;
+        structure.methods = methods;
+        return method_index;
+    }
+
     fn structureTemplateForType(self: *Specializer, type_value: Ast.Type) ?Ast.Structure {
         const index = type_value.structureIndex() orelse return null;
         if (index >= self.type_names.items.len) return null;
@@ -948,6 +1106,11 @@ pub const Specializer = struct {
         return self.fail(position, message);
     }
 
+    fn ambiguousMethod(self: *Specializer, position: Source.Position, name: []const u8) Source.Error {
+        const message = std.fmt.allocPrint(self.allocator, "generic call to method '{s}' is ambiguous", .{name}) catch "generic method call is ambiguous";
+        return self.fail(position, message);
+    }
+
     fn fail(self: *Specializer, position: Source.Position, message: []const u8) Source.Error {
         self.diagnostic = .{ .position = position, .message = message };
         return error.InvalidSource;
@@ -972,6 +1135,11 @@ fn parametersAcceptArity(parameters: []const Ast.Parameter, arity: usize) bool {
 fn functionVisible(call: Ast.Expression.Call, function: Ast.Function) bool {
     if (function.is_internal) return call.name_position.file == function.position.file;
     return call.owner == function.owner or function.is_public;
+}
+
+fn methodVisible(call: Ast.Expression.Call, method: Ast.Function) bool {
+    if (method.is_internal) return call.name_position.file == method.position.file;
+    return call.owner == method.owner or method.is_public;
 }
 
 fn samePosition(left: Source.Position, right: Source.Position) bool {
