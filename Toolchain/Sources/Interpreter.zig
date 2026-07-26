@@ -23,6 +23,12 @@ pub const Value = union(enum) {
     float64: f64,
     boolean: bool,
     string: []const u8,
+    structure: Structure,
+
+    pub const Structure = struct {
+        type: Ir.Type,
+        fields: []const Value,
+    };
 
     pub fn typeOf(self: Value) Ir.Type {
         return switch (self) {
@@ -33,6 +39,7 @@ pub const Value = union(enum) {
             .float64 => .float64,
             .boolean => .bool,
             .string => .str,
+            .structure => |value| value.type,
         };
     }
 };
@@ -109,9 +116,12 @@ fn invokeDepth(
     const values = try allocator.alloc(?Value, function.value_types.len);
     defer allocator.free(values);
     @memset(values, null);
+    const locals = try allocator.alloc(?Value, function.local_types.len);
+    defer allocator.free(locals);
+    @memset(locals, null);
     for (arguments, function.parameter_types, 0..) |argument, parameter_type, index| {
         if (argument.typeOf() != parameter_type) return error.InvalidProgram;
-        values[index] = argument;
+        values[index] = try cloneValue(allocator, argument);
     }
 
     var block_id: Ir.BlockId = 0;
@@ -119,7 +129,7 @@ fn invokeDepth(
         if (block_id >= function.blocks.len) return error.InvalidProgram;
         const block = function.blocks[block_id];
         for (block.instructions) |instruction| {
-            if (try executeInstruction(allocator, program, function, values, instruction, depth, session)) |result| return result;
+            if (try executeInstruction(allocator, program, function, values, locals, instruction, depth, session)) |result| return result;
         }
         switch (block.terminator) {
             .jump => |target| block_id = target,
@@ -127,7 +137,7 @@ fn invokeDepth(
             .return_value => |value_id| {
                 const result = try load(values, value_id);
                 if (result.typeOf() != function.return_type or function.return_type == .void) return error.InvalidProgram;
-                return result;
+                return cloneValue(allocator, result);
             },
             .return_void => {
                 if (function.return_type != .void) return error.InvalidProgram;
@@ -148,6 +158,7 @@ fn executeInstruction(
     program: Ir.Program,
     function: Ir.Function,
     values: []?Value,
+    locals: []?Value,
     instruction: Ir.Instruction,
     depth: usize,
     session: *Session,
@@ -165,7 +176,43 @@ fn executeInstruction(
         .constant_str => |constant| try store(function, values, constant.result, .{ .string = constant.value }),
         .constant_float32 => |constant| try store(function, values, constant.result, .{ .float32 = @bitCast(constant.bits) }),
         .constant_float64 => |constant| try store(function, values, constant.result, .{ .float64 = @bitCast(constant.bits) }),
-        .copy => |copy| try store(function, values, copy.result, try load(values, copy.operand)),
+        .copy => |copy| try store(function, values, copy.result, try cloneValue(allocator, try load(values, copy.operand))),
+        .structure_init => |initialization| {
+            if (initialization.structure >= program.structures.len or
+                initialization.fields.len != program.structures[initialization.structure].fields.len)
+            {
+                return error.InvalidProgram;
+            }
+            const fields = try allocator.alloc(Value, initialization.fields.len);
+            for (initialization.fields, 0..) |field, index| {
+                fields[index] = try cloneValue(allocator, try load(values, field));
+                if (fields[index].typeOf() != program.structures[initialization.structure].fields[index].type) {
+                    return error.InvalidProgram;
+                }
+            }
+            try store(function, values, initialization.result, .{ .structure = .{
+                .type = .structure(initialization.structure),
+                .fields = fields,
+            } });
+        },
+        .field_load => |field| {
+            const aggregate = switch (try load(values, field.base)) {
+                .structure => |value| value,
+                else => return error.InvalidProgram,
+            };
+            if (field.field >= aggregate.fields.len) return error.InvalidProgram;
+            try store(function, values, field.result, try cloneValue(allocator, aggregate.fields[field.field]));
+        },
+        .local_load => |local| {
+            const value = try cloneValue(allocator, try loadLocal(function, locals, local.local));
+            try store(function, values, local.result, value);
+        },
+        .local_store => |local| try storeLocal(
+            function,
+            locals,
+            local.local,
+            try cloneValue(allocator, try load(values, local.operand)),
+        ),
         .convert => |conversion| {
             const operand = try load(values, conversion.operand);
             const converted = convert(operand, conversion.target, conversion.checked) catch |err| switch (err) {
@@ -247,6 +294,29 @@ fn store(function: Ir.Function, values: []?Value, id: Ir.ValueId, value: Value) 
 fn load(values: []const ?Value, id: Ir.ValueId) Error!Value {
     if (id >= values.len) return error.InvalidProgram;
     return values[id] orelse error.InvalidProgram;
+}
+
+fn cloneValue(allocator: Allocator, value: Value) Error!Value {
+    return switch (value) {
+        .structure => |aggregate| cloned: {
+            const fields = try allocator.alloc(Value, aggregate.fields.len);
+            for (aggregate.fields, 0..) |field, index| fields[index] = try cloneValue(allocator, field);
+            break :cloned .{ .structure = .{ .type = aggregate.type, .fields = fields } };
+        },
+        else => value,
+    };
+}
+
+fn storeLocal(function: Ir.Function, locals: []?Value, id: Ir.LocalId, value: Value) Error!void {
+    if (id >= locals.len or function.local_types[id] != value.typeOf()) return error.InvalidProgram;
+    locals[id] = value;
+}
+
+fn loadLocal(function: Ir.Function, locals: []const ?Value, id: Ir.LocalId) Error!Value {
+    if (id >= locals.len) return error.InvalidProgram;
+    const value = locals[id] orelse return error.InvalidProgram;
+    if (function.local_types[id] != value.typeOf()) return error.InvalidProgram;
+    return value;
 }
 
 fn integer(value: Value) Error!i64 {
@@ -480,6 +550,13 @@ fn equal(left: Value, right: Value) Error!bool {
         .float64 => |value| value == right.float64,
         .string => |value| std.mem.eql(u8, value, right.string),
         .boolean => |value| value == right.boolean,
+        .structure => |aggregate| structure: {
+            if (aggregate.fields.len != right.structure.fields.len) return error.InvalidProgram;
+            for (aggregate.fields, right.structure.fields) |left_field, right_field| {
+                if (!try equal(left_field, right_field)) break :structure false;
+            }
+            break :structure true;
+        },
         .void => error.InvalidProgram,
     };
 }
@@ -503,6 +580,7 @@ fn appendValueText(output: *std.ArrayList(u8), allocator: Allocator, value: Valu
         .float64 => |number| try appendFloat(output, allocator, number),
         .boolean => |flag| try output.appendSlice(allocator, if (flag) "true" else "false"),
         .string => |text| try output.appendSlice(allocator, text),
+        .structure => return error.InvalidProgram,
         .void => return error.InvalidProgram,
     }
 }
@@ -789,6 +867,259 @@ test "print reference values once and in source order" {
     , allocator);
     const result = try runCapture(allocator, program);
     try std.testing.expectEqualStrings("answer\n25\ntrue\nfalse\n", result.stdout);
+}
+
+test "execute mutable locals and evaluate assignments once" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const program = try compile(
+        \\func observed() int { print("observed"); return 42 }
+        \\func main() {
+        \\    var signed:int8
+        \\    var unsigned:uint64
+        \\    var decimal:float64
+        \\    var enabled:bool
+        \\    var message:str
+        \\    signed = -8
+        \\    unsigned = 18446744073709551615
+        \\    decimal = 2.5
+        \\    enabled = true
+        \\    message = "Value: $(observed())"
+        \\    print(signed, " ", unsigned, " ", decimal, " ", enabled, " ", message)
+        \\}
+    , allocator);
+    const result = try runCapture(allocator, program);
+    try std.testing.expectEqualStrings("observed\n-8 18446744073709551615 2.5 true Value: 42\n", result.stdout);
+}
+
+test "execute structure defaults nested aggregates and chained reads" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const program = try compile(
+        \\struct Position {
+        \\    var x:int
+        \\    let layer:int = 7
+        \\}
+        \\struct Entity {
+        \\    var position:Position = Position(x:5)
+        \\    var name:str
+        \\}
+        \\func main() {
+        \\    let empty = Entity()
+        \\    let configured = Entity(name:"Ada", position:Position(x:42,),)
+        \\    print(empty.position.x, " ", empty.position.layer, " ", empty.name)
+        \\    print(configured.name, " ", configured.position.x, " ", configured.position.layer)
+        \\}
+    , allocator);
+    const result = try runCapture(allocator, program);
+    try std.testing.expectEqualStrings("5 7 \nAda 42 7\n", result.stdout);
+}
+
+test "transport and recursively compare structure values" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const program = try compile(
+        \\struct Point { var x:int; var label:str }
+        \\struct Pair { var first:Point; var second:Point }
+        \\func identity(value:Pair) Pair { return value }
+        \\func nested(value:Pair) Pair { return identity(identity(value)) }
+        \\func main() {
+        \\    var original = Pair(first:Point(x:1, label:"A\0B"), second:Point(x:2, label:"C"))
+        \\    let copied = nested(original)
+        \\    original = Pair()
+        \\    print(copied == Pair(first:Point(x:1, label:"A\0B"), second:Point(x:2, label:"C")))
+        \\    print(original != copied)
+        \\}
+    , allocator);
+    const result = try runCapture(allocator, program);
+    try std.testing.expectEqualStrings("true\ntrue\n", result.stdout);
+}
+
+test "mutate nested fields once while preserving independent copies" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const program = try compile(
+        \\struct Score { var value:int; var label:str }
+        \\struct Player { var score:Score; var reserve:int }
+        \\func observed() int { print("observed"); return 2 }
+        \\func main() {
+        \\    var player = Player(score:Score(value:10, label:"A"), reserve:7)
+        \\    let copy = player
+        \\    player.score.value += observed()
+        \\    player.score.value *= 3
+        \\    player.score.value -= 6
+        \\    player.score.value /= 3
+        \\    player.score.value++
+        \\    player.score.value--
+        \\    player.score.label = "B"
+        \\    print(player.score.value, " ", player.score.label, " ", player.reserve)
+        \\    print(copy.score.value, " ", copy.score.label, " ", copy.reserve)
+        \\}
+    , allocator);
+    const result = try runCapture(allocator, program);
+    try std.testing.expectEqualStrings("observed\n10 B 7\n10 A 7\n", result.stdout);
+}
+
+test "execute overloaded value constructors and implicit self return" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const program = try compile(
+        \\struct Position {
+        \\    let x:int
+        \\    let y:int
+        \\    var label:str = "point"
+        \\    init(x:int, y:int) { self.x = x; self.y = y }
+        \\    init(enabled:bool) {
+        \\        if enabled { self.x = 20 } else { self.x = 0 }
+        \\        self.y = 22
+        \\    }
+        \\}
+        \\func main() {
+        \\    let first = Position(10, 5)
+        \\    let second = Position(true)
+        \\    print(first.x, " ", first.y, " ", first.label)
+        \\    print(second.x + second.y)
+        \\}
+    , allocator);
+    const result = try runCapture(allocator, program);
+    try std.testing.expectEqualStrings("10 5 point\n42\n", result.stdout);
+}
+
+test "execute mutating nonmutating overloaded and chained methods" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const program = try compile(
+        \\struct Counter {
+        \\    var value:int
+        \\    func increment() { self.value++ }
+        \\    func forward() { self.increment() }
+        \\    func add(amount:int) int { self.value += amount; return self.value }
+        \\    func choose(amount:int) { self.value += amount }
+        \\    func choose(enabled:bool) { if enabled { self.increment() } }
+        \\    func current() int { return self.value }
+        \\    func copy() Counter { return self }
+        \\}
+        \\func observed() int { print("observed"); return 2 }
+        \\func make() Counter { print("make"); return Counter(value:40) }
+        \\func main() {
+        \\    var counter = Counter(value:1)
+        \\    counter.forward()
+        \\    let returned = counter.add(observed())
+        \\    counter.choose(true)
+        \\    counter.choose(3)
+        \\    let immutable = counter
+        \\    print(returned, " ", counter.current(), " ", immutable.copy().current())
+        \\    print(make().current())
+        \\}
+    , allocator);
+    const result = try runCapture(allocator, program);
+    try std.testing.expectEqualStrings("observed\n4 8 8\nmake\n40\n", result.stdout);
+}
+
+test "evaluate function constructor and method defaults at each omitted argument" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const program = try compile(
+        \\func observed() int { print("default"); return 2 }
+        \\func selected(value:int = observed()) int { return value }
+        \\struct Box {
+        \\    var value:int
+        \\    init(value:int = 40) { self.value = value }
+        \\    func plus(value:int = 2) int { return self.value + value }
+        \\    func bump(value:int = 1) { self.value += value }
+        \\    func forward() { self.bump() }
+        \\}
+        \\func main() {
+        \\    let box = Box()
+        \\    print(box.plus())
+        \\    print(selected(), " ", selected(), " ", selected(42))
+        \\    var mutable = Box(40)
+        \\    mutable.forward()
+        \\    print(mutable.value)
+        \\}
+    , allocator);
+    const result = try runCapture(allocator, program);
+    try std.testing.expectEqualStrings("42\ndefault\ndefault\n2 2 42\n41\n", result.stdout);
+}
+
+test "execute while with zero iterations nested break and continue" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const program = try compile(
+        \\func main() {
+        \\    var untouched = 7
+        \\    while false { untouched = 0 }
+        \\    var outer = 0
+        \\    var score = 0
+        \\    while outer < 3 {
+        \\        outer = outer + 1
+        \\        var inner = 0
+        \\        while inner < 4 {
+        \\            inner = inner + 1
+        \\            if inner == 2 { continue }
+        \\            if inner == 4 { break }
+        \\            score = score + 1
+        \\        }
+        \\    }
+        \\    print(untouched, " ", outer, " ", score)
+        \\}
+    , allocator);
+    const result = try runCapture(allocator, program);
+    try std.testing.expectEqualStrings("7 3 6\n", result.stdout);
+}
+
+test "execute compound assignments once across numeric families" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const program = try compile(
+        \\func observed() int8 { print("observed"); return 2 }
+        \\func main() {
+        \\    var signed:int8 = 10
+        \\    signed += observed()
+        \\    signed *= 3
+        \\    signed -= 6
+        \\    signed /= 3
+        \\    signed++
+        \\    signed--
+        \\    var unsigned:uint16 = 40
+        \\    unsigned++
+        \\    unsigned -= 1
+        \\    var decimal:float64 = 1.5
+        \\    decimal += 0.5
+        \\    decimal *= 4.0
+        \\    decimal -= 2.0
+        \\    decimal /= 3.0
+        \\    print(signed, " ", unsigned, " ", decimal)
+        \\}
+    , allocator);
+    const result = try runCapture(allocator, program);
+    try std.testing.expectEqualStrings("observed\n10 40 2.0\n", result.stdout);
+}
+
+test "compound assignments preserve checked arithmetic failures" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const overflow = try compile(
+        "func value() int { var result = 9223372036854775807; result++; return result } func main() {}",
+        allocator,
+    );
+    try std.testing.expectError(error.IntegerOverflow, invoke(allocator, overflow, 0, &.{}));
+
+    const division = try compile(
+        "func value() int { var result = 1; result /= 0; return result } func main() {}",
+        allocator,
+    );
+    try std.testing.expectError(error.DivisionByZero, invoke(allocator, division, 0, &.{}));
 }
 
 test "print evaluates a nested effectful call exactly once" {

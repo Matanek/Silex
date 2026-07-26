@@ -1,17 +1,29 @@
-pub const Type = enum {
-    void,
-    int8,
-    int16,
-    int32,
-    int,
-    uint8,
-    uint16,
-    uint32,
-    uint,
-    bool,
-    float32,
-    float64,
-    str,
+pub const Type = enum(u32) {
+    void = 0,
+    int8 = 1,
+    int16 = 2,
+    int32 = 3,
+    int = 4,
+    uint8 = 5,
+    uint16 = 6,
+    uint32 = 7,
+    uint = 8,
+    bool = 9,
+    float32 = 10,
+    float64 = 11,
+    str = 12,
+    _,
+
+    const structure_base = 0x100;
+
+    pub fn structure(index: usize) Type {
+        return @enumFromInt(structure_base + @as(u32, @intCast(index)));
+    }
+
+    pub fn structureIndex(self: Type) ?usize {
+        const value = @intFromEnum(self);
+        return if (value >= structure_base) value - structure_base else null;
+    }
 
     pub fn name(self: Type) []const u8 {
         return switch (self) {
@@ -28,6 +40,7 @@ pub const Type = enum {
             .float32 => "float",
             .float64 => "float64",
             .str => "str",
+            _ => "structure",
         };
     }
 
@@ -35,6 +48,7 @@ pub const Type = enum {
         return switch (self) {
             .int8, .int16, .int32, .int, .uint8, .uint16, .uint32, .uint, .float32, .float64, .bool, .str => true,
             .void => false,
+            _ => true,
         };
     }
 

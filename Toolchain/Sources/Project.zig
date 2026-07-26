@@ -5,7 +5,7 @@ const Ir = @import("Ir.zig");
 const Modules = @import("Modules.zig");
 const Packages = @import("Packages.zig");
 const ParserModule = @import("Parser.zig");
-const Semantic = @import("Semantic.zig");
+const Semantic = @import("Semantic/Analyzer.zig");
 const Source = @import("Source.zig");
 
 const Allocator = std.mem.Allocator;
@@ -93,8 +93,9 @@ pub const Compiler = struct {
         );
         try self.loadModule(self.entry_module, null);
 
-        const interfaces = try self.buildInterfaces();
-        const ast = try self.composeAst();
+        const composition = try self.composeAst();
+        const ast = composition.program;
+        const interfaces = try self.buildInterfaces(composition.type_maps);
         var analyzer = Semantic.Analyzer.init(self.allocator);
         var ir = analyzer.analyze(ast) catch |err| {
             self.diagnostic = analyzer.diagnostic;
@@ -163,6 +164,17 @@ pub const Compiler = struct {
                     return self.fail(position, message);
                 }
             }
+            for (program.structures) |structure| {
+                if (std.mem.eql(u8, structure.name, binding.alias)) {
+                    const position = use.alias_position orelse use.position;
+                    const message = try std.fmt.allocPrint(
+                        self.allocator,
+                        "use alias '{s}' collides with a local declaration",
+                        .{binding.alias},
+                    );
+                    return self.fail(position, message);
+                }
+            }
             for (bindings.items) |existing| {
                 if (std.mem.eql(u8, existing.alias, binding.alias)) {
                     const position = use.alias_position orelse use.position;
@@ -222,14 +234,38 @@ pub const Compiler = struct {
 
     fn activateQualifiedReferences(self: *Compiler, module: usize) Error!void {
         const program = self.units[module].program.?;
+        for (program.structures) |structure| {
+            for (structure.fields) |field| try self.activateType(module, field.type);
+            for (structure.constructors) |constructor| {
+                for (constructor.parameters) |parameter| try self.activateType(module, parameter.type);
+                for (constructor.statements) |statement| try self.activateStatement(module, statement);
+            }
+            for (structure.methods) |method| {
+                for (method.parameters) |parameter| try self.activateType(module, parameter.type);
+                try self.activateType(module, method.return_type);
+                for (method.statements) |statement| try self.activateStatement(module, statement);
+            }
+        }
         for (program.functions) |function| {
+            for (function.parameters) |parameter| try self.activateType(module, parameter.type);
+            try self.activateType(module, function.return_type);
             for (function.statements) |statement| try self.activateStatement(module, statement);
         }
+    }
+
+    fn activateType(self: *Compiler, module: usize, type_value: Ast.Type) Error!void {
+        const index = type_value.structureIndex() orelse return;
+        const program = self.units[module].program.?;
+        if (index >= program.type_names.len) return;
+        const target = try self.structureCandidate(module, program.type_names[index]) orelse return;
+        if (target.module != module) try self.loadModule(target.module, module);
     }
 
     fn activateStatement(self: *Compiler, module: usize, statement: Ast.Statement) Error!void {
         switch (statement) {
             .variable_declaration => |declaration| if (declaration.initializer) |value|
+                try self.activateExpression(module, value),
+            .assignment_statement => |assignment| if (assignment.value) |value|
                 try self.activateExpression(module, value),
             .return_statement => |value| if (value.value) |expression|
                 try self.activateExpression(module, expression),
@@ -249,17 +285,33 @@ pub const Compiler = struct {
                     for (statements) |nested| try self.activateStatement(module, nested);
                 }
             },
+            .while_statement => |loop| {
+                try self.activateExpression(module, loop.condition);
+                for (loop.statements) |nested| try self.activateStatement(module, nested);
+            },
+            .break_statement, .continue_statement => {},
         }
     }
 
     fn activateExpression(self: *Compiler, module: usize, expression: *Ast.Expression) Error!void {
         switch (expression.value) {
             .call => |call| {
-                if (try self.targetForCall(module, call.name)) |target| {
-                    try self.loadModule(target.module, module);
-                }
+                const qualified_name = if (call.receiver) |receiver|
+                    if (try expressionName(self.allocator, receiver)) |prefix|
+                        try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ prefix, call.name })
+                    else
+                        null
+                else
+                    call.name;
+                if (qualified_name) |name| {
+                    if (try self.targetForCall(module, name)) |target| {
+                        try self.loadModule(target.module, module);
+                    } else if (call.receiver) |receiver| try self.activateExpression(module, receiver);
+                } else if (call.receiver) |receiver| try self.activateExpression(module, receiver);
                 for (call.arguments) |argument| try self.activateExpression(module, argument);
+                for (call.named_arguments) |argument| try self.activateExpression(module, argument.value);
             },
+            .field_access => |access| try self.activateExpression(module, access.base),
             .unary => |unary| try self.activateExpression(module, unary.operand),
             .binary => |binary| {
                 try self.activateExpression(module, binary.left);
@@ -306,6 +358,50 @@ pub const Compiler = struct {
         return null;
     }
 
+    fn structureCandidate(self: *Compiler, module: usize, name: []const u8) Error!?CallTarget {
+        if (findStructure(self.units[module].program.?, name) != null) {
+            return .{ .module = module, .declaration = name };
+        }
+        if (std.mem.indexOfScalar(u8, name, '.') != null) return self.targetForCall(module, name);
+        for (self.units[module].bindings) |binding| {
+            if (!std.mem.eql(u8, binding.alias, name)) continue;
+            const target_module = binding.module orelse continue;
+            return .{
+                .module = target_module,
+                .declaration = binding.declaration orelse lastSegment(self.index.providers[target_module].name),
+            };
+        }
+        return null;
+    }
+
+    fn structureTarget(self: *Compiler, module: usize, name: []const u8) Error!?CallTarget {
+        const target = try self.structureCandidate(module, name) orelse return null;
+        if (self.units[target.module].state != .loaded) return null;
+        if (findStructure(self.units[target.module].program.?, target.declaration) == null) return null;
+        return target;
+    }
+
+    fn resolveStructure(self: *Compiler, module: usize, name: []const u8, position: Source.Position) Error!CallTarget {
+        const target = try self.structureTarget(module, name) orelse {
+            const message = try std.fmt.allocPrint(self.allocator, "unknown structure type '{s}'", .{name});
+            return self.fail(position, message);
+        };
+        try self.requirePublicStructure(module, target, position);
+        return target;
+    }
+
+    fn requirePublicStructure(self: *Compiler, source_module: usize, target: CallTarget, position: Source.Position) Error!void {
+        if (source_module == target.module) return;
+        const structure = findStructure(self.units[target.module].program.?, target.declaration).?;
+        if (structure.is_public) return;
+        const message = try std.fmt.allocPrint(
+            self.allocator,
+            "structure '{s}' is private outside its module",
+            .{target.declaration},
+        );
+        return self.fail(position, message);
+    }
+
     fn longestModulePrefix(self: *Compiler, path: []const u8, owner: usize) ?CallTarget {
         var end = path.len;
         while (true) {
@@ -318,11 +414,93 @@ pub const Compiler = struct {
         }
     }
 
-    fn composeAst(self: *Compiler) Error!Ast.Program {
+    const AstComposition = struct {
+        program: Ast.Program,
+        type_maps: []const []const usize,
+    };
+
+    fn composeAst(self: *Compiler) Error!AstComposition {
+        var type_names: std.ArrayList([]const u8) = .empty;
+        for (self.index.providers, 0..) |provider, module| {
+            if (self.units[module].state != .loaded) continue;
+            for (self.units[module].program.?.structures) |structure| {
+                const name = try structureCanonicalName(self.allocator, provider.name, structure.name);
+                for (type_names.items) |existing| {
+                    if (std.mem.eql(u8, existing, name)) {
+                        const message = try std.fmt.allocPrint(self.allocator, "structure identity '{s}' is already provided", .{name});
+                        return self.fail(structure.name_position, message);
+                    }
+                }
+                try type_names.append(self.allocator, name);
+            }
+        }
+
+        const type_maps = try self.allocator.alloc([]const usize, self.units.len);
+        @memset(type_maps, &.{});
+        for (self.index.providers, 0..) |_, module| {
+            if (self.units[module].state != .loaded) continue;
+            const program = self.units[module].program.?;
+            const map = try self.allocator.alloc(usize, program.type_names.len);
+            for (program.type_names, 0..) |name, index| {
+                const target = try self.resolveStructure(module, name, expressionPosition(module));
+                const canonical = try structureCanonicalName(
+                    self.allocator,
+                    self.index.providers[target.module].name,
+                    target.declaration,
+                );
+                map[index] = findName(type_names.items, canonical) orelse return error.InvalidSource;
+            }
+            type_maps[module] = map;
+            try self.validatePublicTypeExposure(module);
+        }
+
+        var structures: std.ArrayList(Ast.Structure) = .empty;
         var functions: std.ArrayList(Ast.Function) = .empty;
         for (self.index.providers, 0..) |provider, module| {
             if (self.units[module].state != .loaded) continue;
             const program = self.units[module].program.?;
+            const type_map = type_maps[module];
+            for (program.structures) |structure| {
+                var composed_structure = structure;
+                composed_structure.owner = provider.owner;
+                composed_structure.name = try structureCanonicalName(self.allocator, provider.name, structure.name);
+                const fields = try self.allocator.alloc(Ast.StructureField, structure.fields.len);
+                for (structure.fields, 0..) |field, index| {
+                    fields[index] = field;
+                    fields[index].type = remapType(field.type, type_map);
+                    if (field.default) |value| try self.rewriteExpression(module, value, type_map);
+                }
+                composed_structure.fields = fields;
+                const constructors = try self.allocator.alloc(Ast.Constructor, structure.constructors.len);
+                for (structure.constructors, 0..) |constructor, constructor_index| {
+                    constructors[constructor_index] = constructor;
+                    const parameters = try self.allocator.alloc(Ast.Parameter, constructor.parameters.len);
+                    for (constructor.parameters, 0..) |parameter, parameter_index| {
+                        parameters[parameter_index] = parameter;
+                        parameters[parameter_index].type = remapType(parameter.type, type_map);
+                        if (parameter.default) |value| try self.rewriteExpression(module, value, type_map);
+                    }
+                    constructors[constructor_index].parameters = parameters;
+                    constructors[constructor_index].statements = try self.rewriteStatements(module, constructor.statements, type_map);
+                }
+                composed_structure.constructors = constructors;
+                const methods = try self.allocator.alloc(Ast.Function, structure.methods.len);
+                for (structure.methods, 0..) |method, method_index| {
+                    methods[method_index] = method;
+                    methods[method_index].owner = provider.owner;
+                    const parameters = try self.allocator.alloc(Ast.Parameter, method.parameters.len);
+                    for (method.parameters, 0..) |parameter, parameter_index| {
+                        parameters[parameter_index] = parameter;
+                        parameters[parameter_index].type = remapType(parameter.type, type_map);
+                        if (parameter.default) |value| try self.rewriteExpression(module, value, type_map);
+                    }
+                    methods[method_index].parameters = parameters;
+                    methods[method_index].return_type = remapType(method.return_type, type_map);
+                    methods[method_index].statements = try self.rewriteStatements(module, method.statements, type_map);
+                }
+                composed_structure.methods = methods;
+                try structures.append(self.allocator, composed_structure);
+            }
             for (program.functions) |function| {
                 var composed = function;
                 composed.owner = provider.owner;
@@ -330,14 +508,26 @@ pub const Compiler = struct {
                     "main"
                 else
                     try canonicalName(self.allocator, provider.name, function.name);
-                for (function.statements) |statement| try self.rewriteStatement(module, statement);
+                const parameters = try self.allocator.alloc(Ast.Parameter, function.parameters.len);
+                for (function.parameters, 0..) |parameter, index| {
+                    parameters[index] = parameter;
+                    parameters[index].type = remapType(parameter.type, type_map);
+                    if (parameter.default) |value| try self.rewriteExpression(module, value, type_map);
+                }
+                composed.parameters = parameters;
+                composed.return_type = remapType(function.return_type, type_map);
+                composed.statements = try self.rewriteStatements(module, function.statements, type_map);
                 try functions.append(self.allocator, composed);
             }
         }
-        return .{ .functions = try functions.toOwnedSlice(self.allocator) };
+        return .{ .program = .{
+            .type_names = try type_names.toOwnedSlice(self.allocator),
+            .structures = try structures.toOwnedSlice(self.allocator),
+            .functions = try functions.toOwnedSlice(self.allocator),
+        }, .type_maps = type_maps };
     }
 
-    fn buildInterfaces(self: *Compiler) Error![]const Interface.Module {
+    fn buildInterfaces(self: *Compiler, type_maps: []const []const usize) Error![]const Interface.Module {
         var interfaces: std.ArrayList(Interface.Module) = .empty;
         for (self.index.providers, 0..) |provider, module| {
             if (self.units[module].state != .loaded) continue;
@@ -347,62 +537,172 @@ pub const Compiler = struct {
                 .project;
             try interfaces.append(
                 self.allocator,
-                try Interface.build(self.allocator, owner, provider.name, self.units[module].program.?),
+                try Interface.buildMapped(self.allocator, owner, provider.name, self.units[module].program.?, type_maps[module]),
             );
         }
         return interfaces.toOwnedSlice(self.allocator);
     }
 
-    fn rewriteStatement(self: *Compiler, module: usize, statement: Ast.Statement) Error!void {
-        switch (statement) {
-            .variable_declaration => |declaration| if (declaration.initializer) |value|
-                try self.rewriteExpression(module, value),
-            .return_statement => |value| if (value.value) |expression|
-                try self.rewriteExpression(module, expression),
-            .expression_statement => |expression| try self.rewriteExpression(module, expression),
-            .print_statement => |print_statement| for (print_statement.values) |value| try self.rewriteExpression(module, value),
-            .panic_statement => |effect| try self.rewriteExpression(module, effect.value),
-            .assert_statement => |assertion| {
-                try self.rewriteExpression(module, assertion.condition);
-                try self.rewriteExpression(module, assertion.message);
-            },
-            .if_statement => |conditional| {
-                for (conditional.branches) |branch| {
-                    try self.rewriteExpression(module, branch.condition);
-                    for (branch.statements) |nested| try self.rewriteStatement(module, nested);
+    fn validatePublicTypeExposure(self: *Compiler, module: usize) Error!void {
+        const program = self.units[module].program.?;
+        for (program.structures) |structure| {
+            if (!structure.is_public) continue;
+            for (structure.fields) |field| {
+                try self.requirePublicType(module, field.type, field.name_position, "public structure", structure.name);
+            }
+            for (structure.constructors) |constructor| {
+                for (constructor.parameters) |parameter| {
+                    try self.requirePublicType(module, parameter.type, parameter.position, "constructor of", structure.name);
                 }
-                if (conditional.else_statements) |statements| {
-                    for (statements) |nested| try self.rewriteStatement(module, nested);
+            }
+            for (structure.methods) |method| {
+                for (method.parameters) |parameter| {
+                    try self.requirePublicType(module, parameter.type, parameter.position, "method of", structure.name);
                 }
-            },
+                try self.requirePublicType(module, method.return_type, method.name_position, "method of", structure.name);
+            }
+        }
+        for (program.functions) |function| {
+            if (!function.is_public) continue;
+            for (function.parameters) |parameter| {
+                try self.requirePublicType(module, parameter.type, parameter.position, "public function", function.name);
+            }
+            try self.requirePublicType(module, function.return_type, function.name_position, "public function", function.name);
         }
     }
 
-    fn rewriteExpression(self: *Compiler, module: usize, expression: *Ast.Expression) Error!void {
+    fn requirePublicType(
+        self: *Compiler,
+        module: usize,
+        type_value: Ast.Type,
+        position: Source.Position,
+        declaration_kind: []const u8,
+        declaration_name: []const u8,
+    ) Error!void {
+        const index = type_value.structureIndex() orelse return;
+        const program = self.units[module].program.?;
+        if (index >= program.type_names.len) return;
+        const target = try self.structureTarget(module, program.type_names[index]) orelse return;
+        const structure = findStructure(self.units[target.module].program.?, target.declaration).?;
+        if (structure.is_public) return;
+        const message = try std.fmt.allocPrint(
+            self.allocator,
+            "{s} '{s}' exposes private structure '{s}'",
+            .{ declaration_kind, declaration_name, structure.name },
+        );
+        return self.fail(position, message);
+    }
+
+    fn rewriteStatements(self: *Compiler, module: usize, statements: []const Ast.Statement, type_map: []const usize) Error![]const Ast.Statement {
+        const rewritten = try self.allocator.alloc(Ast.Statement, statements.len);
+        for (statements, 0..) |statement, index| rewritten[index] = switch (statement) {
+            .variable_declaration => |declaration| variable: {
+                var value = declaration;
+                if (value.annotation) |annotation| value.annotation = remapType(annotation, type_map);
+                if (value.initializer) |initializer| try self.rewriteExpression(module, initializer, type_map);
+                break :variable .{ .variable_declaration = value };
+            },
+            .assignment_statement => |assignment| assignment_statement: {
+                if (assignment.value) |value| try self.rewriteExpression(module, value, type_map);
+                break :assignment_statement .{ .assignment_statement = assignment };
+            },
+            .return_statement => |value| return_statement: {
+                if (value.value) |expression| try self.rewriteExpression(module, expression, type_map);
+                break :return_statement .{ .return_statement = value };
+            },
+            .expression_statement => |expression| expression_statement: {
+                try self.rewriteExpression(module, expression, type_map);
+                break :expression_statement .{ .expression_statement = expression };
+            },
+            .print_statement => |print_statement| print: {
+                for (print_statement.values) |value| try self.rewriteExpression(module, value, type_map);
+                break :print .{ .print_statement = print_statement };
+            },
+            .panic_statement => |effect| panic: {
+                try self.rewriteExpression(module, effect.value, type_map);
+                break :panic .{ .panic_statement = effect };
+            },
+            .assert_statement => |assertion| assertion_statement: {
+                try self.rewriteExpression(module, assertion.condition, type_map);
+                try self.rewriteExpression(module, assertion.message, type_map);
+                break :assertion_statement .{ .assert_statement = assertion };
+            },
+            .if_statement => |conditional| conditional_statement: {
+                const branches = try self.allocator.alloc(Ast.ConditionalBranch, conditional.branches.len);
+                for (conditional.branches, 0..) |branch, branch_index| {
+                    try self.rewriteExpression(module, branch.condition, type_map);
+                    branches[branch_index] = branch;
+                    branches[branch_index].statements = try self.rewriteStatements(module, branch.statements, type_map);
+                }
+                var value = conditional;
+                value.branches = branches;
+                if (conditional.else_statements) |nested| value.else_statements = try self.rewriteStatements(module, nested, type_map);
+                break :conditional_statement .{ .if_statement = value };
+            },
+            .while_statement => |loop| loop_statement: {
+                try self.rewriteExpression(module, loop.condition, type_map);
+                var value = loop;
+                value.statements = try self.rewriteStatements(module, loop.statements, type_map);
+                break :loop_statement .{ .while_statement = value };
+            },
+            .break_statement => |position| .{ .break_statement = position },
+            .continue_statement => |position| .{ .continue_statement = position },
+        };
+        return rewritten;
+    }
+
+    fn rewriteExpression(self: *Compiler, module: usize, expression: *Ast.Expression, type_map: []const usize) Error!void {
         switch (expression.value) {
             .call => |*call| {
                 call.owner = self.index.providers[module].owner;
-                for (call.arguments) |argument| try self.rewriteExpression(module, argument);
-                if (try self.targetForCall(module, call.name)) |target| {
+                for (call.arguments) |argument| try self.rewriteExpression(module, argument, type_map);
+                for (call.named_arguments) |argument| try self.rewriteExpression(module, argument.value, type_map);
+                if (call.receiver) |receiver| {
+                    if (try expressionName(self.allocator, receiver)) |prefix| {
+                        const qualified = try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ prefix, call.name });
+                        if (try self.structureTarget(module, qualified) != null or try self.targetForCall(module, qualified) != null) {
+                            call.name = qualified;
+                            call.receiver = null;
+                        } else if (prefix.len != 0 and std.ascii.isUpper(prefix[0])) {
+                            call.name = qualified;
+                            call.receiver = null;
+                        } else try self.rewriteExpression(module, receiver, type_map);
+                    } else try self.rewriteExpression(module, receiver, type_map);
+                }
+                if (try self.structureTarget(module, call.name)) |target| {
+                    try self.requirePublicStructure(module, target, call.name_position);
+                    call.name = try structureCanonicalName(
+                        self.allocator,
+                        self.index.providers[target.module].name,
+                        target.declaration,
+                    );
+                } else if (try self.targetForCall(module, call.name)) |target| {
                     call.name = try canonicalName(
                         self.allocator,
                         self.index.providers[target.module].name,
                         target.declaration,
                     );
-                } else if (std.mem.indexOfScalar(u8, call.name, '.') == null) {
-                    call.name = try canonicalName(self.allocator, self.index.providers[module].name, call.name);
+                } else if (call.receiver == null and std.mem.indexOfScalar(u8, call.name, '.') == null) {
+                    call.name = if (findStructure(self.units[module].program.?, call.name) != null)
+                        try structureCanonicalName(self.allocator, self.index.providers[module].name, call.name)
+                    else
+                        try canonicalName(self.allocator, self.index.providers[module].name, call.name);
                 }
             },
-            .unary => |unary| try self.rewriteExpression(module, unary.operand),
+            .field_access => |access| try self.rewriteExpression(module, access.base, type_map),
+            .unary => |unary| try self.rewriteExpression(module, unary.operand, type_map),
             .binary => |binary| {
-                try self.rewriteExpression(module, binary.left);
-                try self.rewriteExpression(module, binary.right);
+                try self.rewriteExpression(module, binary.left, type_map);
+                try self.rewriteExpression(module, binary.right, type_map);
             },
-            .conversion => |conversion| try self.rewriteExpression(module, conversion.operand),
-            .string_count => |operand| try self.rewriteExpression(module, operand),
+            .conversion => |*conversion| {
+                conversion.target = remapType(conversion.target, type_map);
+                try self.rewriteExpression(module, conversion.operand, type_map);
+            },
+            .string_count => |operand| try self.rewriteExpression(module, operand, type_map),
             .interpolated_string => |interpolated| for (interpolated.parts) |part| switch (part) {
                 .text => {},
-                .expression => |value| try self.rewriteExpression(module, value),
+                .expression => |value| try self.rewriteExpression(module, value, type_map),
             },
             else => {},
         }
@@ -481,6 +781,36 @@ fn canonicalName(allocator: Allocator, module: []const u8, declaration: []const 
     return std.fmt.allocPrint(allocator, "{s}.{s}", .{ module, declaration });
 }
 
+fn structureCanonicalName(allocator: Allocator, module: []const u8, declaration: []const u8) Allocator.Error![]const u8 {
+    if (std.mem.eql(u8, lastSegment(module), declaration)) return allocator.dupe(u8, module);
+    return canonicalName(allocator, module, declaration);
+}
+
+fn findName(names: []const []const u8, name: []const u8) ?usize {
+    for (names, 0..) |candidate, index| {
+        if (std.mem.eql(u8, candidate, name)) return index;
+    }
+    return null;
+}
+
+fn findStructure(program: Ast.Program, name: []const u8) ?Ast.Structure {
+    for (program.structures) |structure| {
+        if (std.mem.eql(u8, structure.name, name)) return structure;
+    }
+    return null;
+}
+
+fn expressionName(allocator: Allocator, expression: *const Ast.Expression) Allocator.Error!?[]const u8 {
+    return switch (expression.value) {
+        .identifier => |name| name,
+        .field_access => |access| if (try expressionName(allocator, access.base)) |prefix|
+            try std.fmt.allocPrint(allocator, "{s}.{s}", .{ prefix, access.name })
+        else
+            null,
+        else => null,
+    };
+}
+
 fn lastSegment(path: []const u8) []const u8 {
     const separator = std.mem.lastIndexOfScalar(u8, path, '.') orelse return path;
     return path[separator + 1 ..];
@@ -497,6 +827,11 @@ fn parent(path: []const u8) []const u8 {
 
 fn expressionPosition(module: usize) Source.Position {
     return .{ .offset = 0, .line = 1, .column = 1, .file = module };
+}
+
+fn remapType(type_value: Ast.Type, type_map: []const usize) Ast.Type {
+    const index = type_value.structureIndex() orelse return type_value;
+    return if (index < type_map.len) .structure(type_map[index]) else type_value;
 }
 
 fn pathInside(path: []const u8, directory: []const u8) bool {
@@ -724,6 +1059,45 @@ test "collect public overloads before analyzing calls across files" {
     }));
 }
 
+test "compose public parameter defaults in their declaring module" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.createDirPath(std.testing.io, "Math");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data =
+        \\use Math.Operations
+        \\func answer() int { return Operations.value() + Operations.Box().plus() }
+        \\func main() {}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Math/Operations.sx",
+        .data =
+        \\func seed() int { return 20 }
+        \\public func value(input:int = seed()) int { return input }
+        \\public struct Box {
+        \\    var value:int
+        \\    init(value:int = seed()) { self.value = value }
+        \\    func plus(amount:int = 2) int { return self.value + amount }
+        \\}
+        ,
+    });
+
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(input);
+    const answer = try @import("Interpreter.zig").invoke(allocator, compilation.ir, 0, &.{});
+    try std.testing.expectEqual(@as(i64, 42), answer.integer);
+    try std.testing.expectEqual(@as(usize, 0), compilation.interfaces[1].functions[0].required_parameters);
+    try std.testing.expectEqual(@as(usize, 0), compilation.interfaces[1].structures[0].constructors[0].required_parameters);
+    try std.testing.expectEqual(@as(usize, 0), compilation.interfaces[1].structures[0].methods[0].required_parameters);
+}
+
 test "do not propagate private module access through a dependency" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -892,4 +1266,25 @@ test "enforce public package interfaces and direct dependency visibility" {
     compiler = Compiler.init(allocator, std.testing.io);
     try std.testing.expectError(error.InvalidSource, compiler.compile(input));
     try std.testing.expectEqualStrings("unknown module or declaration 'B.Private'", compiler.diagnostic.?.message);
+}
+
+test "compose and execute structures inside their declaring module" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data =
+        \\struct Point { var x:int; var y:int = 2 }
+        \\func main() { let point = Point(x:40); print(point.x + point.y) }
+        ,
+    });
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(input);
+    const result = try @import("Interpreter.zig").runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("42\n", result.stdout);
 }

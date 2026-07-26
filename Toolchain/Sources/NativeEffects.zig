@@ -99,6 +99,67 @@ test "native branches and short-circuit match the reference output" {
     try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
 }
 
+test "native mutable locals match every current reference value family" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const source =
+        \\func main() {
+        \\    var narrow:int8
+        \\    var wide:uint64
+        \\    var decimal:float64
+        \\    var enabled:bool
+        \\    var message:str
+        \\    narrow = -8
+        \\    wide = 18446744073709551615
+        \\    decimal = 2.5
+        \\    enabled = true
+        \\    message = "mutable 🔥"
+        \\    if enabled { narrow = 42 }
+        \\    print(narrow, " ", wide, " ", decimal, " ", enabled, " ", message)
+        \\}
+    ;
+    var frontend = Frontend.Frontend.init(allocator);
+    const reference = try Interpreter.runCapture(allocator, (try frontend.compile(source)).ir);
+    const native = try compileAndRun(allocator, source);
+    try std.testing.expectEqual(reference.exit_code, exitCode(native));
+    try std.testing.expectEqualSlices(u8, reference.stdout, native.stdout);
+    try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
+}
+
+test "native while backedges break and continue match the reference" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const source =
+        \\func main() {
+        \\    var untouched = 7
+        \\    while false { untouched = 0 }
+        \\    var outer = 0
+        \\    var score = 0
+        \\    while outer < 3 {
+        \\        outer = outer + 1
+        \\        var inner = 0
+        \\        while inner < 4 {
+        \\            inner = inner + 1
+        \\            if inner == 2 { continue }
+        \\            if inner == 4 { break }
+        \\            score = score + 1
+        \\        }
+        \\    }
+        \\    print(untouched, " ", outer, " ", score)
+        \\}
+    ;
+    var frontend = Frontend.Frontend.init(allocator);
+    const reference = try Interpreter.runCapture(allocator, (try frontend.compile(source)).ir);
+    const native = try compileAndRun(allocator, source);
+    try std.testing.expectEqual(reference.exit_code, exitCode(native));
+    try std.testing.expectEqualSlices(u8, reference.stdout, native.stdout);
+    try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
+}
+
 test "native integer families preserve signedness widths and decimal output" {
     if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);

@@ -34,6 +34,48 @@ distinct signatures. The return type alone never distinguishes an overload.
 All signatures are collected before bodies, so a call may target a function
 declared later in the source.
 
+## Default parameters and effective signatures
+
+A function, method, or constructor may give its trailing parameters a default
+expression. An invocation may omit any final suffix of those parameters:
+
+```sx
+func greet(message:str = "Hello", repetitions:int = 1) {
+    print(message)
+}
+
+greet()
+greet("Bonjour")
+greet("Salut", 2)
+```
+
+Every parameter after the first default must also have a default. Calls remain
+positional: defaults neither introduce named function arguments nor permit a
+middle argument to be skipped. An omitted default is evaluated anew at the
+call site, in parameter order, after overload selection. Supplying an explicit
+argument bypasses its default completely. The expression is resolved in the
+declaration's module and cannot observe the caller's locals or the callable's
+parameters.
+
+Each declaration exposes one effective signature for every arity between its
+required and total parameter counts. The effective signature at an arity is
+the corresponding prefix of normalized parameter types. Two overloads in the
+same family cannot expose the same effective signature:
+
+```sx
+init() {}
+init(value:float = 0) {} // error: also exposes init()
+
+init(value:float) {}
+init(x:float, y:float = 0) {} // error: also exposes init(float)
+```
+
+This collision is rejected on the later declaration before any ambiguous call
+is written. Parameter names, default expressions and return types do not
+distinguish signatures, and aliases such as `int` and `int64` are identical.
+Conversions between otherwise distinct effective signatures may still produce
+an ambiguity diagnosed at the call site.
+
 The name `main` is special only as the executable entry point. It must be unique,
 have no parameters, and return `void`.
 
@@ -92,7 +134,7 @@ without a manifest may use local sibling packages, but never consults the
 global store implicitly. Package dependencies are direct: a transitive
 dependency is not visible unless it is also declared directly.
 
-## Constants and local names
+## Local bindings and mutation
 
 `let` declares an immutable local value. Its type can be inferred, stated
 explicitly, or initialized from the intrinsic value of an explicit type:
@@ -106,10 +148,95 @@ let ready:bool
 let text:str
 ```
 
+`var` uses the same declaration forms and creates a mutable local binding.
+Assignment preserves its declared or inferred type:
+
+```sx
+var count:int = 1
+count = 2
+count += 3
+count++
+```
+
+The arithmetic updates `+=`, `-=`, `*=`, `/=`, `++`, and `--` are statements,
+not expressions. They require a numeric `var`, evaluate their operand once,
+and use the same checked arithmetic as `+`, `-`, `*`, and `/`. A `let` and a
+function parameter cannot be assigned. Pointers, references, storage slots,
+and target machine details are not part of this source contract.
+
 The intrinsic value is the correctly typed positive zero for every numeric
 type, `false` for `bool`, and the empty string for `str`. Numeric initializers
 may use the widening rules. A local name cannot reuse a parameter or another
 local name visible in its lexical scope; sibling branches may reuse a name.
+
+## Structure values
+
+`struct` declares a nominal value type in its source module. Every field starts
+with `let` or `var` and carries an explicit annotation. A structure without a
+custom constructor uses a parenthesized initializer with named fields:
+
+```sx
+struct Position {
+    var x:int
+    var y:int = 10
+}
+
+struct Entity {
+    let position:Position
+    var name:str
+}
+
+let origin = Entity()
+let player = Entity(name:"Ada", position:Position(x:2, y:3,))
+print(player.position.x)
+```
+
+Fields may be supplied once each, in any order, and the final comma is
+optional. An omitted field uses its explicit default first, then the intrinsic
+value of its type; this rule applies recursively to nested structures. Defaults
+are restricted to fundamental literals and structure aggregates, so they do
+not execute code or depend on file order. Direct or indirect recursive value
+layouts are rejected.
+
+Structure names are nominal: two declarations with identical fields remain
+incompatible. Structures are ordinary values: local assignment, arguments and
+returns copy the complete value without observable shared mutable state.
+`==` and `!=` compare same-typed structures recursively when every contained
+field is comparable. Structures gain neither ordering nor structural
+conversion, and `print` continues to accept their printable fields rather than
+the complete aggregate. The reference interpreter and the macOS ARM64 backend
+preserve the same value semantics for construction, copy, field reads,
+comparison, parameters and returns. A field path is assignable when its root
+is a `var` and every field on the path is also declared `var`; an intervening
+`let` makes the nested value deeply immutable through that path. Field `=`,
+`+=`, `-=`, `*=`, `/=`, `++`, and `--` evaluate the target and operand once,
+retain every unaffected field, and behave identically in both execution paths.
+
+`init` declares a positional constructor inside a structure. `self` is
+implicit; assigning `self.field` initializes that field, and the completed
+value is returned implicitly. Declaring any constructor closes the named
+aggregate initializer completely. Constructors may be overloaded by parameter
+types. Every `let` field without a default must be initialized exactly once on
+each normal path; reading an uninitialized field, initializing it twice, or
+passing an incomplete `self` is rejected. A `var` begins with its explicit
+default or intrinsic value and may then be reassigned. Constructor calls and
+their returned values have matching reference and native behavior.
+
+A function declared inside a structure is an instance method. Its implicit
+`self` receiver can read fields and call other methods. A method is inferred
+mutating when it writes through `self` or reaches another mutating method,
+including through recursive call cycles. Mutating calls require a `var`
+receiver and write the returned value state back to that receiver; nonmutating
+calls accept `let`, `var`, and temporary receivers. Receiver and arguments are
+evaluated once in source order, and calls may chain through returned values.
+Methods are public by default with their public structure; explicit `public`
+is accepted.
+
+`public struct` exposes one nominal identity through `use`, including its
+public-by-default fields, constructors, and methods. Module qualification and
+aliases select that same identity rather than creating new types. A private
+structure cannot be constructed outside its module or leak through a public
+typed contract. No public declaration exposes native layout.
 
 Integer literals accept decimal, binary, octal, and hexadecimal notation with
 `_` separators. They default to `int` but receive an expected integer type
@@ -167,7 +294,7 @@ func main() {
 `void` function. A non-`void` function must return or panic on every reachable
 path. A `void` function receives an implicit return when its end is reachable.
 
-## Conditional control flow
+## Control flow
 
 `if` requires `bool`. `elif` is canonical; `else if` is accepted and may be
 mixed with it. Conditions run from top to bottom and stop after the first true
@@ -180,6 +307,17 @@ if value < 0 {
     print("zero")
 } else {
     print("positive")
+}
+```
+
+`while` checks a `bool` condition before every iteration and opens a lexical
+scope for its body. `break` exits the nearest enclosing loop; `continue`
+rechecks the condition of that loop. Both are rejected outside a loop.
+
+```sx
+var remaining = 3
+while remaining > 0 {
+    remaining--
 }
 ```
 
@@ -222,23 +360,36 @@ normative reference for these semantics.
 ## Grammar
 
 ```ebnf
-program         = (use | function)* EOF ;
+program         = (use | structure | function)* EOF ;
 use             = "use" qualified_identifier ("as" identifier)? ;
+structure       = "public"? "struct" identifier "{" (structure_field | constructor | method)* "}" ;
+structure_field = "public"? ("let" | "var") identifier ":" type ("=" field_default)? ;
+constructor     = "init" "(" parameters? ")" block ;
+method          = "public"? "func" identifier "(" parameters? ")" return_type? block ;
+field_default   = fundamental_literal | structure_initializer ;
 function        = "public"? "func" identifier "(" parameters? ")" return_type? block ;
 parameters      = parameter ("," parameter)* ;
-parameter       = identifier ":" type ;
+parameter       = identifier ":" type ("=" expression)? ;
 return_type     = type ;
 type            = "void" | "int8" | "int16" | "int32" | "int64" | "int"
                 | "uint8" | "uint16" | "uint32" | "uint64" | "uint"
-                | "float" | "float32" | "float64" | "bool" | "str" ;
+                | "float" | "float32" | "float64" | "bool" | "str"
+                | identifier ;
 block           = "{" statement* "}" ;
-statement       = let_statement | return_statement | call_expression
+statement       = binding_statement | assignment_statement | return_statement
+                | call_expression | break_statement | continue_statement
                 | print_statement | assert_statement | panic_statement
-                | if_statement ;
+                | if_statement | while_statement ;
 if_statement    = "if" expression block
                   (("elif" | "else" "if") expression block)*
                   ("else" block)? ;
-let_statement   = "let" identifier (":" type)? ("=" expression)? ;
+while_statement = "while" expression block ;
+binding_statement = ("let" | "var") identifier (":" type)? ("=" expression)? ;
+assignment_statement = field_path ("=" | "+=" | "-=" | "*=" | "/=") expression
+                     | field_path ("++" | "--") ;
+field_path      = identifier ("." identifier)* ;
+break_statement = "break" ;
+continue_statement = "continue" ;
 return_statement = "return" expression? ;
 print_statement = "print" "(" expression ("," expression)* ")" ;
 assert_statement = "assert" "(" expression "," expression ")" ;
@@ -254,29 +405,35 @@ shift           = additive (("<<" | ">>") additive)* ;
 additive        = multiplicative (("+" | "-") multiplicative)* ;
 multiplicative  = unary (("*" | "/" | "%") unary)* ;
 unary           = ("-" | "!") unary | conversion ;
-conversion      = primary ("as" type | "." "count" "(" ")")* ;
+conversion      = postfix ("as" type)* ;
+postfix         = primary (("(" arguments? ")")
+                | ("." identifier ("(" arguments? ")")?))* ;
 primary         = integer | floating | string | "true" | "false" | identifier
-                | call_expression | "(" expression ")" ;
+                | "self" | "(" expression ")" ;
 string          = '"' string_part* '"' ;
 string_part     = string_text | string_escape | "$$"
                 | "$(" expression ")" ;
-call_expression = qualified_identifier "(" arguments? ")" ;
+call_expression = postfix ;
 arguments       = expression ("," expression)* ;
+structure_initializer = identifier "(" field_initializers? ")" ;
+field_initializers = field_initializer ("," field_initializer)* ","? ;
+field_initializer = identifier ":" expression ;
+member_expression = identifier ("." identifier)+ ;
 identifier      = (letter | "_") (letter | digit | "_")* ;
 qualified_identifier = identifier ("." identifier)* ;
 ```
 
-The grammar states the structural forms. Semantic requirements such as a
-`let` having a type or initializer, callable overload resolution, and statement
-termination are enforced separately.
+The grammar states the structural forms. Semantic requirements such as a local
+binding having a type or initializer, trailing parameter defaults, effective
+callable signatures, mutability, loop context, and statement termination are
+enforced separately.
 
 Whitespace and `//` line comments are ignored except that line breaks terminate
 statements as described above.
 
 ## Current limits
 
-There are no mutable variables, assignments, loops, collections, general
-methods, downloaded packages, package lockfiles, or visible native interop in
-this subset. String concatenation, byte equality and Unicode scalar `count()`
-have the same observable semantics in the interpreter and native backend, as
-does floating-point calculation and decimal `print` formatting.
+There are no collections, method extraction, static methods, generic methods,
+package lockfiles, or visible native interop in this subset. Fundamental and
+structure values, constructors, instance methods, string operations and
+observable effects have matching reference and macOS ARM64 behavior.

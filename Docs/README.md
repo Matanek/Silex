@@ -4,5 +4,6 @@
 - [Compiler architecture](Architecture.md) records the current compilation
   path, decisions, and limits.
 
-The executable package example is in `Examples/Packages/`. It demonstrates a
-local `Math` package composed directly from Silex sources, without a link step.
+The executable composition example is in `Examples/Packages/`. It demonstrates
+plain, dotted and nested application modules together with a local `Math`
+package, all composed directly from Silex sources without a link step.

@@ -1,40 +1,33 @@
 const std = @import("std");
-const Ast = @import("Ast.zig");
-const Ir = @import("Ir.zig");
-const Numeric = @import("Numeric.zig");
-const Source = @import("Source.zig");
-const Support = @import("SemanticSupport.zig");
-const Types = @import("Types.zig");
+const Ast = @import("../Ast.zig");
+const Ir = @import("../Ir.zig");
+const Numeric = @import("../Numeric.zig");
+const Source = @import("../Source.zig");
+const Mutation = @import("Mutation.zig");
+const Constructors = @import("Constructors.zig");
+const Model = @import("Model.zig");
+const Methods = @import("Methods.zig");
+const Control = @import("Control.zig");
+const Support = @import("Support.zig");
+const Types = @import("../Types.zig");
 
 const Allocator = std.mem.Allocator;
 const AnalyzeError = Source.Error || Allocator.Error;
 
-const Binding = struct {
-    name: []const u8,
-    type: Types.Type,
-    value: Ir.ValueId,
-};
+pub const Binding = Model.Binding;
+pub const TypedValue = Model.TypedValue;
+pub const BlockBuilder = Model.BlockBuilder;
 
-const TypedValue = struct {
-    type: Types.Type,
-    value: Ir.ValueId,
-};
+const StructureState = enum { unseen, visiting, complete };
 
-const BlockBuilder = struct {
-    instructions: std.ArrayList(Ir.Instruction) = .empty,
-    terminator: ?Ir.Terminator = null,
-};
-
-const FunctionBuilder = struct {
-    value_types: std.ArrayList(Types.Type) = .empty,
-    blocks: std.ArrayList(BlockBuilder) = .empty,
-    current_block: Ir.BlockId = 0,
-    bindings: std.ArrayList(Binding) = .empty,
-};
+pub const FunctionBuilder = Model.FunctionBuilder;
 
 pub const Analyzer = struct {
     allocator: Allocator,
     program: Ast.Program = undefined,
+    structures: []const Ir.Structure = &.{},
+    method_mutability: []const bool = &.{},
+    default_expansions: std.ArrayList(*const Ast.Expression) = .empty,
     diagnostic: ?Source.Diagnostic = null,
 
     pub fn init(allocator: Allocator) Analyzer {
@@ -52,13 +45,33 @@ pub const Analyzer = struct {
     fn analyzeProgram(self: *Analyzer, program: Ast.Program, require_entry: bool) AnalyzeError!Ir.Program {
         self.program = program;
         self.diagnostic = null;
+        self.structures = try self.prepareStructures();
+        self.method_mutability = try Methods.inferMutability(self.allocator, self.program);
+        self.structures = try Methods.extendStructures(self.allocator, self.program, self.structures, self.method_mutability);
         try self.validateDeclarations(require_entry);
+        try self.validateParameterDefaults();
 
         var functions: std.ArrayList(Ir.Function) = .empty;
         for (program.functions, 0..) |function, function_id| {
             try functions.append(self.allocator, try self.analyzeFunction(function_id, function));
         }
-        return .{ .functions = try functions.toOwnedSlice(self.allocator) };
+        for (program.structures, 0..) |structure, structure_index| {
+            for (structure.constructors, 0..) |constructor, constructor_index| {
+                try functions.append(
+                    self.allocator,
+                    try Constructors.analyze(self, structure_index, constructor_index, constructor),
+                );
+            }
+        }
+        for (program.structures, 0..) |structure, structure_index| {
+            for (structure.methods, 0..) |method, method_index| {
+                try functions.append(
+                    self.allocator,
+                    try Methods.analyze(self, structure_index, method_index, method),
+                );
+            }
+        }
+        return .{ .structures = self.structures, .functions = try functions.toOwnedSlice(self.allocator) };
     }
 
     fn validateDeclarations(self: *Analyzer, require_entry: bool) AnalyzeError!void {
@@ -82,13 +95,91 @@ pub const Analyzer = struct {
         for (self.program.functions, 0..) |function, index| {
             for (self.program.functions[0..index]) |previous| {
                 if (!std.mem.eql(u8, function.name, previous.name)) continue;
-                if (!Support.sameParameterTypes(function.parameters, previous.parameters)) continue;
+                const arity = Support.effectiveSignatureCollision(function.parameters, previous.parameters) orelse continue;
+                if (Support.sameParameterTypes(function.parameters, previous.parameters) and
+                    Support.requiredParameterCount(function.parameters) == function.parameters.len and
+                    Support.requiredParameterCount(previous.parameters) == previous.parameters.len)
+                {
+                    const message = try std.fmt.allocPrint(
+                        self.allocator,
+                        "function '{s}' with these parameter types is already declared",
+                        .{function.name},
+                    );
+                    return self.fail(function.name_position, message);
+                }
+                const signature = try self.effectiveSignature(function.name, function.parameters, arity);
                 const message = try std.fmt.allocPrint(
                     self.allocator,
-                    "function '{s}' with these parameter types is already declared",
-                    .{function.name},
+                    "function '{s}' is already exposed by the declaration at {d}:{d}",
+                    .{ signature, previous.name_position.line, previous.name_position.column },
                 );
                 return self.fail(function.name_position, message);
+            }
+        }
+
+        for (self.program.structures) |structure| {
+            for (structure.constructors, 0..) |constructor, index| {
+                for (constructor.parameters, 0..) |parameter, parameter_index| {
+                    for (constructor.parameters[0..parameter_index]) |previous| {
+                        if (std.mem.eql(u8, parameter.name, previous.name)) {
+                            const message = try std.fmt.allocPrint(self.allocator, "parameter '{s}' is already declared", .{parameter.name});
+                            return self.fail(parameter.position, message);
+                        }
+                    }
+                }
+                for (structure.constructors[0..index]) |previous| {
+                    const arity = Support.effectiveSignatureCollision(constructor.parameters, previous.parameters) orelse continue;
+                    if (Support.sameParameterTypes(constructor.parameters, previous.parameters) and
+                        Support.requiredParameterCount(constructor.parameters) == constructor.parameters.len and
+                        Support.requiredParameterCount(previous.parameters) == previous.parameters.len)
+                    {
+                        const message = try std.fmt.allocPrint(
+                            self.allocator,
+                            "constructor for '{s}' with these parameter types is already declared",
+                            .{structure.name},
+                        );
+                        return self.fail(constructor.position, message);
+                    }
+                    const signature = try self.effectiveSignature("init", constructor.parameters, arity);
+                    const message = try std.fmt.allocPrint(
+                        self.allocator,
+                        "constructor '{s}' is already exposed by the declaration at {d}:{d}",
+                        .{ signature, previous.position.line, previous.position.column },
+                    );
+                    return self.fail(constructor.position, message);
+                }
+            }
+            for (structure.methods, 0..) |method, index| {
+                for (method.parameters, 0..) |parameter, parameter_index| {
+                    for (method.parameters[0..parameter_index]) |previous| {
+                        if (std.mem.eql(u8, parameter.name, previous.name)) {
+                            const message = try std.fmt.allocPrint(self.allocator, "parameter '{s}' is already declared", .{parameter.name});
+                            return self.fail(parameter.position, message);
+                        }
+                    }
+                }
+                for (structure.methods[0..index]) |previous| {
+                    if (!std.mem.eql(u8, method.name, previous.name)) continue;
+                    const arity = Support.effectiveSignatureCollision(method.parameters, previous.parameters) orelse continue;
+                    if (Support.sameParameterTypes(method.parameters, previous.parameters) and
+                        Support.requiredParameterCount(method.parameters) == method.parameters.len and
+                        Support.requiredParameterCount(previous.parameters) == previous.parameters.len)
+                    {
+                        const message = try std.fmt.allocPrint(
+                            self.allocator,
+                            "method '{s}' with these parameter types is already declared in '{s}'",
+                            .{ method.name, structure.name },
+                        );
+                        return self.fail(method.name_position, message);
+                    }
+                    const signature = try self.effectiveSignature(method.name, method.parameters, arity);
+                    const message = try std.fmt.allocPrint(
+                        self.allocator,
+                        "method '{s}' is already exposed in '{s}' by the declaration at {d}:{d}",
+                        .{ signature, structure.name, previous.name_position.line, previous.name_position.column },
+                    );
+                    return self.fail(method.name_position, message);
+                }
             }
         }
 
@@ -103,6 +194,40 @@ pub const Analyzer = struct {
         if (entry.return_type != .void) return self.fail(entry.name_position, "'main' must return 'void'");
     }
 
+    fn validateParameterDefaults(self: *Analyzer) AnalyzeError!void {
+        for (self.program.functions) |function| try self.validateDefaults(function.parameters);
+        for (self.program.structures) |structure| {
+            for (structure.constructors) |constructor| try self.validateDefaults(constructor.parameters);
+            for (structure.methods) |method| try self.validateDefaults(method.parameters);
+        }
+    }
+
+    fn validateDefaults(self: *Analyzer, parameters: []const Ast.Parameter) AnalyzeError!void {
+        var builder: FunctionBuilder = .{};
+        try builder.blocks.append(self.allocator, .{});
+        for (parameters) |parameter| {
+            if (parameter.default == null) continue;
+            _ = try self.analyzeParameterDefault(&builder, parameter);
+        }
+    }
+
+    fn effectiveSignature(
+        self: *Analyzer,
+        name: []const u8,
+        parameters: []const Ast.Parameter,
+        arity: usize,
+    ) Allocator.Error![]const u8 {
+        var signature = try std.fmt.allocPrint(self.allocator, "{s}(", .{name});
+        for (parameters[0..arity], 0..) |parameter, index| {
+            signature = try std.fmt.allocPrint(
+                self.allocator,
+                "{s}{s}{s}",
+                .{ signature, if (index == 0) "" else ", ", self.typeName(parameter.type) },
+            );
+        }
+        return std.fmt.allocPrint(self.allocator, "{s})", .{signature});
+    }
+
     fn analyzeFunction(self: *Analyzer, function_id: Ir.FunctionId, function: Ast.Function) AnalyzeError!Ir.Function {
         _ = function_id;
         var builder: FunctionBuilder = .{};
@@ -115,6 +240,7 @@ pub const Analyzer = struct {
                 .name = parameter.name,
                 .type = parameter.type,
                 .value = value,
+                .parameter = true,
             });
         }
 
@@ -125,7 +251,7 @@ pub const Analyzer = struct {
             const message = try std.fmt.allocPrint(
                 self.allocator,
                 "function '{s}' must return '{s}' on every path",
-                .{ function.name, function.return_type.name() },
+                .{ function.name, self.typeName(function.return_type) },
             );
             return self.fail(function.name_position, message);
         }
@@ -143,15 +269,51 @@ pub const Analyzer = struct {
             .parameter_types = try parameter_types.toOwnedSlice(self.allocator),
             .return_type = function.return_type,
             .value_types = try builder.value_types.toOwnedSlice(self.allocator),
+            .local_types = try builder.local_types.toOwnedSlice(self.allocator),
             .blocks = owned_blocks,
         };
     }
 
-    fn analyzeStatements(self: *Analyzer, builder: *FunctionBuilder, function: Ast.Function, statements: []const Ast.Statement) AnalyzeError!bool {
+    pub fn analyzeStatements(self: *Analyzer, builder: *FunctionBuilder, function: Ast.Function, statements: []const Ast.Statement) AnalyzeError!bool {
         for (statements) |statement| {
             if (try self.analyzeStatement(builder, function, statement)) return true;
         }
         return false;
+    }
+
+    pub fn analyzeParameterDefault(
+        self: *Analyzer,
+        builder: *FunctionBuilder,
+        parameter: Ast.Parameter,
+    ) AnalyzeError!TypedValue {
+        const expression = parameter.default orelse return error.InvalidSource;
+        for (self.default_expansions.items) |active| {
+            if (active == expression) {
+                return self.fail(expression.position, "default parameter expansion is recursive");
+            }
+        }
+        try self.default_expansions.append(self.allocator, expression);
+        defer _ = self.default_expansions.pop();
+        const caller_bindings = builder.bindings;
+        builder.bindings = .empty;
+        defer builder.bindings = caller_bindings;
+        var value = try self.analyzeExpressionExpected(
+            builder,
+            expression,
+            if (parameter.type.isNumeric() and Support.acceptsNumericContext(expression)) parameter.type else null,
+        );
+        if (value.type != parameter.type and Numeric.canWiden(value.type, parameter.type)) {
+            value = try self.coerce(builder, value, parameter.type, expression.position);
+        }
+        if (value.type != parameter.type) {
+            const message = try std.fmt.allocPrint(
+                self.allocator,
+                "default for parameter '{s}' expects '{s}', found '{s}'",
+                .{ parameter.name, self.typeName(parameter.type), self.typeName(value.type) },
+            );
+            return self.fail(expression.position, message);
+        }
+        return value;
     }
 
     fn analyzeStatement(self: *Analyzer, builder: *FunctionBuilder, function: Ast.Function, statement: Ast.Statement) AnalyzeError!bool {
@@ -159,6 +321,10 @@ pub const Analyzer = struct {
             .variable_declaration => |declaration| variable: {
                 try self.analyzeVariable(builder, declaration);
                 break :variable false;
+            },
+            .assignment_statement => |assignment| assignment_statement: {
+                try Mutation.analyzeAssignment(self, builder, assignment);
+                break :assignment_statement false;
             },
             .return_statement => |return_statement| return_value: {
                 try self.analyzeReturn(builder, function, return_statement);
@@ -184,11 +350,14 @@ pub const Analyzer = struct {
                 break :fatal true;
             },
             .if_statement => |conditional| self.analyzeIf(builder, function, conditional),
+            .while_statement => |loop| Control.analyzeWhile(self, builder, function, loop),
+            .break_statement => |position| Control.analyzeLoopControl(self, builder, position, false),
+            .continue_statement => |position| Control.analyzeLoopControl(self, builder, position, true),
         };
     }
 
     fn analyzeVariable(self: *Analyzer, builder: *FunctionBuilder, declaration: Ast.VariableDeclaration) AnalyzeError!void {
-        if (findBinding(builder.bindings.items, declaration.name) != null) {
+        if (Support.findBinding(builder.bindings.items, declaration.name) != null) {
             const message = try std.fmt.allocPrint(self.allocator, "variable '{s}' is already declared in this scope", .{declaration.name});
             return self.fail(declaration.name_position, message);
         }
@@ -204,21 +373,7 @@ pub const Analyzer = struct {
             )
         else intrinsic: {
             const annotation = declaration.annotation.?;
-            break :intrinsic switch (annotation) {
-                .int8, .int16, .int32, .int, .uint8, .uint16, .uint32, .uint => try self.emitInteger(builder, 0, annotation),
-                .bool => try self.emitBool(builder, false),
-                .float32 => try self.emitFloat32(builder, 0.0),
-                .float64 => try self.emitFloat64(builder, 0.0),
-                .str => try self.emitString(builder, ""),
-                else => {
-                    const message = try std.fmt.allocPrint(
-                        self.allocator,
-                        "intrinsic values of type '{s}' are not executable yet",
-                        .{annotation.name()},
-                    );
-                    return self.fail(declaration.name_position, message);
-                },
-            };
+            break :intrinsic try self.emitIntrinsic(builder, annotation, declaration.name_position);
         };
         const declared_type = declaration.annotation orelse initializer.type;
         if (initializer.type != declared_type and Numeric.canWiden(initializer.type, declared_type)) {
@@ -228,11 +383,21 @@ pub const Analyzer = struct {
             const message = try std.fmt.allocPrint(
                 self.allocator,
                 "variable '{s}' expects '{s}', found '{s}'",
-                .{ declaration.name, declared_type.name(), initializer.type.name() },
+                .{ declaration.name, self.typeName(declared_type), self.typeName(initializer.type) },
             );
             return self.fail(if (declaration.initializer) |value| value.position else declaration.name_position, message);
         }
-        try builder.bindings.append(self.allocator, .{
+        if (declaration.mutable) {
+            const local = builder.local_types.items.len;
+            try builder.local_types.append(self.allocator, declared_type);
+            try self.emit(builder, .{ .local_store = .{ .local = local, .operand = initializer.value } });
+            try builder.bindings.append(self.allocator, .{
+                .name = declaration.name,
+                .type = declared_type,
+                .local = local,
+                .mutable = true,
+            });
+        } else try builder.bindings.append(self.allocator, .{
             .name = declaration.name,
             .type = declared_type,
             .value = initializer.value,
@@ -254,7 +419,7 @@ pub const Analyzer = struct {
                 const message = try std.fmt.allocPrint(
                     self.allocator,
                     "return expects '{s}', found '{s}'",
-                    .{ function.return_type.name(), value.type.name() },
+                    .{ self.typeName(function.return_type), self.typeName(value.type) },
                 );
                 return self.fail(expression.position, message);
             }
@@ -266,18 +431,18 @@ pub const Analyzer = struct {
             const message = try std.fmt.allocPrint(
                 self.allocator,
                 "expected return value of type '{s}'",
-                .{function.return_type.name()},
+                .{self.typeName(function.return_type)},
             );
             return self.fail(statement.position, message);
         }
         self.terminate(builder, .return_void);
     }
 
-    fn analyzeExpression(self: *Analyzer, builder: *FunctionBuilder, expression: *const Ast.Expression) AnalyzeError!TypedValue {
+    pub fn analyzeExpression(self: *Analyzer, builder: *FunctionBuilder, expression: *const Ast.Expression) AnalyzeError!TypedValue {
         return self.analyzeExpressionExpected(builder, expression, null);
     }
 
-    fn analyzeExpressionExpected(
+    pub fn analyzeExpressionExpected(
         self: *Analyzer,
         builder: *FunctionBuilder,
         expression: *const Ast.Expression,
@@ -296,6 +461,7 @@ pub const Analyzer = struct {
             .string => |value| self.emitString(builder, value),
             .interpolated_string => |value| self.analyzeInterpolatedString(builder, value),
             .identifier => |name| self.analyzeIdentifier(builder, expression.position, name),
+            .field_access => |access| self.analyzeFieldAccess(builder, access),
             .call => |call| (try self.analyzeCall(builder, call)) orelse {
                 const message = try std.fmt.allocPrint(self.allocator, "function '{s}' returns 'void' and cannot be used as a value", .{call.name});
                 return self.fail(call.name_position, message);
@@ -315,7 +481,7 @@ pub const Analyzer = struct {
         position: Source.Position,
         name: []const u8,
     ) AnalyzeError!TypedValue {
-        const binding = findBinding(builder.bindings.items, name) orelse {
+        const binding = Support.findBinding(builder.bindings.items, name) orelse {
             const message = try std.fmt.allocPrint(self.allocator, "unknown variable '{s}'", .{name});
             return self.fail(position, message);
         };
@@ -323,7 +489,12 @@ pub const Analyzer = struct {
             const message = try std.fmt.allocPrint(self.allocator, "values of type '{s}' are not executable yet", .{binding.type.name()});
             return self.fail(position, message);
         }
-        return .{ .type = binding.type, .value = binding.value };
+        if (binding.local) |local| {
+            const result = try self.newValue(builder, binding.type);
+            try self.emit(builder, .{ .local_load = .{ .result = result, .local = local } });
+            return .{ .type = binding.type, .value = result };
+        }
+        return .{ .type = binding.type, .value = binding.value.? };
     }
 
     fn analyzeUnary(
@@ -416,7 +587,7 @@ pub const Analyzer = struct {
         else if (shift)
             left.type.isInteger() and !left.type.isSignedInteger() and right.type.isInteger()
         else if (equality)
-            same_numeric or (left.type == right.type and (left.type == .bool or left.type == .str))
+            same_numeric or (left.type == right.type and self.isComparable(left.type))
         else
             same_numeric and (!left.type.isFloat() or binary.operator != .remainder);
         if (!valid) {
@@ -424,13 +595,13 @@ pub const Analyzer = struct {
                 try std.fmt.allocPrint(
                     self.allocator,
                     "operator '{s}' does not accept '{s}' and '{s}'",
-                    .{ Support.binaryOperatorText(binary.operator), left.type.name(), right.type.name() },
+                    .{ Support.binaryOperatorText(binary.operator), self.typeName(left.type), self.typeName(right.type) },
                 )
             else
                 try std.fmt.allocPrint(
                     self.allocator,
                     "operator '{s}' does not accept '{s}' and '{s}'",
-                    .{ Support.binaryOperatorText(binary.operator), left.type.name(), right.type.name() },
+                    .{ Support.binaryOperatorText(binary.operator), self.typeName(left.type), self.typeName(right.type) },
                 );
             return self.fail(binary.operator_position, message);
         }
@@ -555,12 +726,269 @@ pub const Analyzer = struct {
         return false;
     }
 
+    fn prepareStructures(self: *Analyzer) AnalyzeError![]const Ir.Structure {
+        for (self.program.structures, 0..) |structure, index| {
+            for (self.program.structures[0..index]) |previous| {
+                if (std.mem.eql(u8, structure.name, previous.name)) {
+                    const message = try std.fmt.allocPrint(self.allocator, "structure '{s}' is already declared", .{structure.name});
+                    return self.fail(structure.name_position, message);
+                }
+            }
+            for (self.program.functions) |function| {
+                if (std.mem.eql(u8, structure.name, function.name)) {
+                    const message = try std.fmt.allocPrint(self.allocator, "declaration name '{s}' is already used by a function", .{structure.name});
+                    return self.fail(structure.name_position, message);
+                }
+            }
+            for (structure.fields, 0..) |field, field_index| {
+                if (field.type == .void) return self.fail(field.name_position, "a structure field cannot have type 'void'");
+                for (structure.fields[0..field_index]) |previous| {
+                    if (std.mem.eql(u8, field.name, previous.name)) {
+                        const message = try std.fmt.allocPrint(self.allocator, "field '{s}' is already declared in this structure", .{field.name});
+                        return self.fail(field.name_position, message);
+                    }
+                }
+            }
+        }
+
+        const structures = try self.allocator.alloc(Ir.Structure, self.program.type_names.len);
+        for (self.program.type_names, 0..) |name, type_index| {
+            const declaration = self.findAstStructure(name) orelse {
+                const message = try std.fmt.allocPrint(self.allocator, "unknown structure type '{s}'", .{name});
+                return self.fail(.{ .offset = 0, .line = 1, .column = 1 }, message);
+            };
+            const fields = try self.allocator.alloc(Ir.StructureField, declaration.fields.len);
+            for (declaration.fields, 0..) |field, field_index| fields[field_index] = .{
+                .name = field.name,
+                .type = field.type,
+                .mutable = field.mutable,
+            };
+            structures[type_index] = .{ .name = name, .fields = fields };
+        }
+        self.structures = structures;
+
+        const states = try self.allocator.alloc(StructureState, structures.len);
+        @memset(states, .unseen);
+        for (structures, 0..) |_, index| try self.validateStructureCycle(index, states);
+
+        for (self.program.structures) |structure| {
+            for (structure.fields) |field| if (field.default) |default| {
+                if (!restrictedFieldDefault(self, default)) {
+                    return self.fail(default.position, "field default must be a fundamental literal or structure aggregate");
+                }
+                var builder: FunctionBuilder = .{};
+                try builder.blocks.append(self.allocator, .{});
+                var value = try self.analyzeExpressionExpected(
+                    &builder,
+                    default,
+                    if (field.type.isNumeric() and Support.acceptsNumericContext(default)) field.type else null,
+                );
+                if (value.type != field.type and Numeric.canWiden(value.type, field.type)) {
+                    value = try self.coerce(&builder, value, field.type, default.position);
+                }
+                if (value.type != field.type) {
+                    const message = try std.fmt.allocPrint(
+                        self.allocator,
+                        "default for field '{s}' expects '{s}', found '{s}'",
+                        .{ field.name, self.typeName(field.type), self.typeName(value.type) },
+                    );
+                    return self.fail(default.position, message);
+                }
+            };
+        }
+        return structures;
+    }
+
+    fn validateStructureCycle(
+        self: *Analyzer,
+        index: usize,
+        states: []StructureState,
+    ) AnalyzeError!void {
+        switch (states[index]) {
+            .complete => return,
+            .visiting => {
+                const message = try std.fmt.allocPrint(
+                    self.allocator,
+                    "structure '{s}' has a recursive value representation",
+                    .{self.structures[index].name},
+                );
+                const declaration = self.findAstStructure(self.structures[index].name).?;
+                return self.fail(declaration.name_position, message);
+            },
+            .unseen => {},
+        }
+        states[index] = .visiting;
+        for (self.structures[index].fields) |field| {
+            if (field.type.structureIndex()) |nested| try self.validateStructureCycle(nested, states);
+        }
+        states[index] = .complete;
+    }
+
+    fn findAstStructure(self: *Analyzer, name: []const u8) ?Ast.Structure {
+        for (self.program.structures) |structure| {
+            if (std.mem.eql(u8, structure.name, name)) return structure;
+        }
+        return null;
+    }
+
+    fn structureIndex(self: *Analyzer, name: []const u8) ?usize {
+        for (self.structures, 0..) |structure, index| {
+            if (std.mem.eql(u8, structure.name, name)) return index;
+        }
+        return null;
+    }
+
+    pub fn typeName(self: *Analyzer, type_value: Types.Type) []const u8 {
+        if (type_value.structureIndex()) |index| {
+            if (index < self.structures.len) return self.structures[index].name;
+        }
+        return type_value.name();
+    }
+
+    fn isComparable(self: *Analyzer, type_value: Types.Type) bool {
+        if (type_value.structureIndex()) |index| {
+            for (self.structures[index].fields) |field| {
+                if (!self.isComparable(field.type)) return false;
+            }
+            return true;
+        }
+        return type_value != .void;
+    }
+
+    fn analyzeFieldAccess(self: *Analyzer, builder: *FunctionBuilder, access: Ast.Expression.FieldAccess) AnalyzeError!TypedValue {
+        const base = try self.analyzeExpression(builder, access.base);
+        const structure_index = base.type.structureIndex() orelse {
+            const message = try std.fmt.allocPrint(self.allocator, "type '{s}' has no fields", .{self.typeName(base.type)});
+            return self.fail(access.name_position, message);
+        };
+        const structure = self.structures[structure_index];
+        for (structure.fields, 0..) |field, field_index| {
+            if (!std.mem.eql(u8, field.name, access.name)) continue;
+            const result = try self.newValue(builder, field.type);
+            try self.emit(builder, .{ .field_load = .{ .result = result, .base = base.value, .field = field_index } });
+            return .{ .type = field.type, .value = result };
+        }
+        const message = try std.fmt.allocPrint(
+            self.allocator,
+            "structure '{s}' has no field named '{s}'",
+            .{ structure.name, access.name },
+        );
+        return self.fail(access.name_position, message);
+    }
+
+    fn analyzeStructureInitializer(
+        self: *Analyzer,
+        builder: *FunctionBuilder,
+        call: Ast.Expression.Call,
+        structure_index: usize,
+    ) AnalyzeError!TypedValue {
+        const structure = self.structures[structure_index];
+        const declaration = self.findAstStructure(structure.name).?;
+        if (declaration.constructors.len != 0) {
+            return Constructors.analyzeCall(self, builder, structure_index, declaration, call);
+        }
+        if (call.arguments.len != 0) {
+            const message = try std.fmt.allocPrint(self.allocator, "structure '{s}' uses named fields", .{structure.name});
+            return self.fail(call.name_position, message);
+        }
+        for (call.named_arguments, 0..) |argument, index| {
+            for (call.named_arguments[0..index]) |previous| {
+                if (std.mem.eql(u8, argument.name, previous.name)) {
+                    const message = try std.fmt.allocPrint(self.allocator, "field '{s}' is provided more than once", .{argument.name});
+                    return self.fail(argument.position, message);
+                }
+            }
+            var known = false;
+            for (structure.fields) |field| if (std.mem.eql(u8, field.name, argument.name)) {
+                known = true;
+                break;
+            };
+            if (!known) {
+                const message = try std.fmt.allocPrint(
+                    self.allocator,
+                    "structure '{s}' has no field named '{s}'",
+                    .{ structure.name, argument.name },
+                );
+                return self.fail(argument.position, message);
+            }
+        }
+
+        var field_values: std.ArrayList(Ir.ValueId) = .empty;
+        for (declaration.fields) |field| {
+            var provided: ?*Ast.Expression = null;
+            for (call.named_arguments) |argument| {
+                if (std.mem.eql(u8, field.name, argument.name)) provided = argument.value;
+            }
+            var value = if (provided orelse field.default) |expression|
+                try self.analyzeExpressionExpected(
+                    builder,
+                    expression,
+                    if (field.type.isNumeric() and Support.acceptsNumericContext(expression)) field.type else null,
+                )
+            else
+                try self.emitIntrinsic(builder, field.type, call.name_position);
+            if (value.type != field.type and Numeric.canWiden(value.type, field.type)) {
+                value = try self.coerce(builder, value, field.type, if (provided) |expression| expression.position else call.name_position);
+            }
+            if (value.type != field.type) {
+                const message = try std.fmt.allocPrint(
+                    self.allocator,
+                    "field '{s}' of '{s}' expects '{s}', found '{s}'",
+                    .{ field.name, structure.name, self.typeName(field.type), self.typeName(value.type) },
+                );
+                return self.fail(if (provided) |expression| expression.position else call.name_position, message);
+            }
+            try field_values.append(self.allocator, value.value);
+        }
+        const result_type = Types.Type.structure(structure_index);
+        const result = try self.newValue(builder, result_type);
+        try self.emit(builder, .{ .structure_init = .{
+            .result = result,
+            .structure = structure_index,
+            .fields = try field_values.toOwnedSlice(self.allocator),
+        } });
+        return .{ .type = result_type, .value = result };
+    }
+
+    pub fn emitIntrinsic(self: *Analyzer, builder: *FunctionBuilder, type_value: Types.Type, position: Source.Position) AnalyzeError!TypedValue {
+        return switch (type_value) {
+            .int8, .int16, .int32, .int, .uint8, .uint16, .uint32, .uint => self.emitInteger(builder, 0, type_value),
+            .bool => self.emitBool(builder, false),
+            .float32 => self.emitFloat32(builder, 0.0),
+            .float64 => self.emitFloat64(builder, 0.0),
+            .str => self.emitString(builder, ""),
+            else => if (type_value.structureIndex()) |structure_index|
+                self.analyzeStructureInitializer(builder, .{
+                    .name = self.structures[structure_index].name,
+                    .name_position = position,
+                    .arguments = &.{},
+                }, structure_index)
+            else
+                self.fail(position, "this type has no intrinsic value"),
+        };
+    }
+
     fn analyzeCall(self: *Analyzer, builder: *FunctionBuilder, call: Ast.Expression.Call) AnalyzeError!?TypedValue {
+        if (call.receiver) |receiver_expression| {
+            _ = receiver_expression;
+            return Methods.analyzeCall(self, builder, call);
+        }
+        if (self.structureIndex(call.name)) |structure_index| {
+            return try self.analyzeStructureInitializer(builder, call, structure_index);
+        }
+        if (call.named_arguments.len != 0) {
+            return self.fail(call.name_position, "named fields require a structure initializer");
+        }
         if (std.mem.endsWith(u8, call.name, ".count") and call.arguments.len == 0) {
             const receiver_name = call.name[0 .. call.name.len - ".count".len];
-            if (findBinding(builder.bindings.items, receiver_name)) |binding| {
+            if (Support.findBinding(builder.bindings.items, receiver_name)) |binding| {
                 if (binding.type != .str) return self.fail(call.name_position, "count() expects 'str'");
-                return try self.emitStringCount(builder, binding.value);
+                const value = if (binding.local) |local| load: {
+                    const result = try self.newValue(builder, binding.type);
+                    try self.emit(builder, .{ .local_load = .{ .result = result, .local = local } });
+                    break :load result;
+                } else binding.value.?;
+                return try self.emitStringCount(builder, value);
             }
         }
         var total_named: usize = 0;
@@ -571,7 +999,7 @@ pub const Analyzer = struct {
             total_named += 1;
             if (!Support.functionVisible(call, function)) continue;
             named_count += 1;
-            if (function.parameters.len == call.arguments.len) arity_count += 1;
+            if (Support.acceptsArity(function.parameters, call.arguments.len)) arity_count += 1;
         }
         if (total_named == 0) {
             const message = try std.fmt.allocPrint(self.allocator, "unknown function '{s}'", .{call.name});
@@ -588,11 +1016,19 @@ pub const Analyzer = struct {
         if (arity_count == 0) {
             const message = if (named_count == 1) single: {
                 const function = Support.findVisibleFunctionByName(self.program, call).?;
-                break :single try std.fmt.allocPrint(
-                    self.allocator,
-                    "function '{s}' expects {d} arguments, found {d}",
-                    .{ call.name, function.parameters.len, call.arguments.len },
-                );
+                const required = Support.requiredParameterCount(function.parameters);
+                break :single if (required == function.parameters.len)
+                    try std.fmt.allocPrint(
+                        self.allocator,
+                        "function '{s}' expects {d} arguments, found {d}",
+                        .{ call.name, function.parameters.len, call.arguments.len },
+                    )
+                else
+                    try std.fmt.allocPrint(
+                        self.allocator,
+                        "function '{s}' expects between {d} and {d} arguments, found {d}",
+                        .{ call.name, required, function.parameters.len, call.arguments.len },
+                    );
             } else try std.fmt.allocPrint(
                 self.allocator,
                 "no overload of function '{s}' accepts {d} arguments",
@@ -604,7 +1040,7 @@ pub const Analyzer = struct {
         var sole_candidate: ?Ir.FunctionId = null;
         if (arity_count == 1) {
             for (self.program.functions, 0..) |function, function_id| {
-                if (std.mem.eql(u8, function.name, call.name) and function.parameters.len == call.arguments.len and
+                if (std.mem.eql(u8, function.name, call.name) and Support.acceptsArity(function.parameters, call.arguments.len) and
                     Support.functionVisible(call, function))
                 {
                     sole_candidate = function_id;
@@ -627,10 +1063,10 @@ pub const Analyzer = struct {
         if (sole_candidate == null) {
             var viable: std.ArrayList(Ir.FunctionId) = .empty;
             for (self.program.functions, 0..) |function, function_id| {
-                if (!std.mem.eql(u8, function.name, call.name) or function.parameters.len != arguments.items.len) continue;
+                if (!std.mem.eql(u8, function.name, call.name) or !Support.acceptsArity(function.parameters, arguments.items.len)) continue;
                 if (!Support.functionVisible(call, function)) continue;
                 var matches = true;
-                for (function.parameters, arguments.items) |parameter, argument| {
+                for (function.parameters[0..arguments.items.len], arguments.items) |parameter, argument| {
                     if (conversionCost(argument.type, parameter.type) == null) {
                         matches = false;
                         break;
@@ -645,8 +1081,8 @@ pub const Analyzer = struct {
                 for (viable.items) |other_id| {
                     if (candidate_id == other_id) continue;
                     if (dominates(
-                        self.program.functions[other_id],
-                        self.program.functions[candidate_id],
+                        self.program.functions[other_id].parameters[0..arguments.items.len],
+                        self.program.functions[candidate_id].parameters[0..arguments.items.len],
                         arguments.items,
                     )) {
                         dominated = true;
@@ -669,14 +1105,14 @@ pub const Analyzer = struct {
         const function_id = resolved orelse {
             if (arity_count == 1) {
                 for (self.program.functions) |function| {
-                    if (!std.mem.eql(u8, function.name, call.name) or function.parameters.len != arguments.items.len) continue;
+                    if (!std.mem.eql(u8, function.name, call.name) or !Support.acceptsArity(function.parameters, arguments.items.len)) continue;
                     if (!Support.functionVisible(call, function)) continue;
-                    for (function.parameters, arguments.items, 0..) |parameter, argument, index| {
+                    for (function.parameters[0..arguments.items.len], arguments.items, 0..) |parameter, argument, index| {
                         if (parameter.type == argument.type) continue;
                         const message = try std.fmt.allocPrint(
                             self.allocator,
                             "argument {d} of '{s}' expects '{s}', found '{s}'",
-                            .{ index + 1, call.name, parameter.type.name(), argument.type.name() },
+                            .{ index + 1, call.name, self.typeName(parameter.type), self.typeName(argument.type) },
                         );
                         return self.fail(call.arguments[index].position, message);
                     }
@@ -691,17 +1127,21 @@ pub const Analyzer = struct {
         };
         const function = self.program.functions[function_id];
         var argument_ids: std.ArrayList(Ir.ValueId) = .empty;
-        for (arguments.items, function.parameters, 0..) |argument, parameter, index| {
+        for (arguments.items, function.parameters[0..arguments.items.len], 0..) |argument, parameter, index| {
             if (argument.type != parameter.type and !Numeric.canWiden(argument.type, parameter.type)) {
                 const message = try std.fmt.allocPrint(
                     self.allocator,
                     "argument {d} of '{s}' expects '{s}', found '{s}'",
-                    .{ index + 1, call.name, parameter.type.name(), argument.type.name() },
+                    .{ index + 1, call.name, self.typeName(parameter.type), self.typeName(argument.type) },
                 );
                 return self.fail(call.arguments[index].position, message);
             }
             const converted = try self.coerce(builder, argument, parameter.type, call.name_position);
             try argument_ids.append(self.allocator, converted.value);
+        }
+        for (function.parameters[arguments.items.len..]) |parameter| {
+            const value = try self.analyzeParameterDefault(builder, parameter);
+            try argument_ids.append(self.allocator, value.value);
         }
         const result: ?Ir.ValueId = if (function.return_type == .void)
             null
@@ -710,7 +1150,7 @@ pub const Analyzer = struct {
                 const message = try std.fmt.allocPrint(
                     self.allocator,
                     "values of type '{s}' are not executable yet",
-                    .{function.return_type.name()},
+                    .{self.typeName(function.return_type)},
                 );
                 return self.fail(call.name_position, message);
             }
@@ -856,22 +1296,22 @@ pub const Analyzer = struct {
         return self.emitStringCount(builder, value.value);
     }
 
-    fn emitStringCount(self: *Analyzer, builder: *FunctionBuilder, operand: Ir.ValueId) AnalyzeError!TypedValue {
+    pub fn emitStringCount(self: *Analyzer, builder: *FunctionBuilder, operand: Ir.ValueId) AnalyzeError!TypedValue {
         const result = try self.newValue(builder, .int);
         try self.emit(builder, .{ .string_count = .{ .result = result, .operand = operand } });
         return .{ .type = .int, .value = result };
     }
 
-    fn emit(self: *Analyzer, builder: *FunctionBuilder, instruction: Ir.Instruction) Allocator.Error!void {
+    pub fn emit(self: *Analyzer, builder: *FunctionBuilder, instruction: Ir.Instruction) Allocator.Error!void {
         try builder.blocks.items[builder.current_block].instructions.append(self.allocator, instruction);
     }
 
-    fn terminate(_: *Analyzer, builder: *FunctionBuilder, terminator: Ir.Terminator) void {
+    pub fn terminate(_: *Analyzer, builder: *FunctionBuilder, terminator: Ir.Terminator) void {
         std.debug.assert(builder.blocks.items[builder.current_block].terminator == null);
         builder.blocks.items[builder.current_block].terminator = terminator;
     }
 
-    fn newBlock(self: *Analyzer, builder: *FunctionBuilder) Allocator.Error!Ir.BlockId {
+    pub fn newBlock(self: *Analyzer, builder: *FunctionBuilder) Allocator.Error!Ir.BlockId {
         const block = builder.blocks.items.len;
         try builder.blocks.append(self.allocator, .{});
         return block;
@@ -889,7 +1329,7 @@ pub const Analyzer = struct {
         return self.emitConversion(builder, operand, conversion.target, conversion.operator_position, true);
     }
 
-    fn coerce(
+    pub fn coerce(
         self: *Analyzer,
         builder: *FunctionBuilder,
         value: TypedValue,
@@ -901,7 +1341,7 @@ pub const Analyzer = struct {
             const message = try std.fmt.allocPrint(
                 self.allocator,
                 "cannot implicitly convert '{s}' to '{s}'",
-                .{ value.type.name(), target.name() },
+                .{ self.typeName(value.type), self.typeName(target) },
             );
             return self.fail(position, message);
         }
@@ -929,7 +1369,7 @@ pub const Analyzer = struct {
         return .{ .type = target, .value = result };
     }
 
-    fn newValue(self: *Analyzer, builder: *FunctionBuilder, type_value: Types.Type) Allocator.Error!Ir.ValueId {
+    pub fn newValue(self: *Analyzer, builder: *FunctionBuilder, type_value: Types.Type) Allocator.Error!Ir.ValueId {
         const result = builder.value_types.items.len;
         try builder.value_types.append(self.allocator, type_value);
         return result;
@@ -947,19 +1387,27 @@ pub const Analyzer = struct {
         return std.fmt.parseInt(u64, digits, base) catch self.fail(position, "integer literal is outside the range of 'uint'");
     }
 
-    fn fail(self: *Analyzer, position: Source.Position, message: []const u8) Source.Error {
+    pub fn fail(self: *Analyzer, position: Source.Position, message: []const u8) Source.Error {
         self.diagnostic = .{ .position = position, .message = message };
         return error.InvalidSource;
     }
 };
 
-fn findBinding(bindings: []const Binding, name: []const u8) ?Binding {
-    var index = bindings.len;
-    while (index != 0) {
-        index -= 1;
-        if (std.mem.eql(u8, bindings[index].name, name)) return bindings[index];
-    }
-    return null;
+fn restrictedFieldDefault(self: *Analyzer, expression: *const Ast.Expression) bool {
+    return switch (expression.value) {
+        .integer, .floating, .boolean, .string => true,
+        .unary => |unary| unary.operator == .negate and switch (unary.operand.value) {
+            .integer, .floating => true,
+            else => false,
+        },
+        .call => |call| call.arguments.len == 0 and self.structureIndex(call.name) != null and blk: {
+            for (call.named_arguments) |argument| {
+                if (!restrictedFieldDefault(self, argument.value)) break :blk false;
+            }
+            break :blk true;
+        },
+        else => false,
+    };
 }
 
 fn conversionCost(source: Types.Type, target: Types.Type) ?u8 {
@@ -968,9 +1416,9 @@ fn conversionCost(source: Types.Type, target: Types.Type) ?u8 {
     return if (source.isInteger() and target.isFloat()) 2 else 1;
 }
 
-fn dominates(better: Ast.Function, worse: Ast.Function, arguments: []const TypedValue) bool {
+fn dominates(better: []const Ast.Parameter, worse: []const Ast.Parameter, arguments: []const TypedValue) bool {
     var strictly_better = false;
-    for (better.parameters, worse.parameters, arguments) |better_parameter, worse_parameter, argument| {
+    for (better, worse, arguments) |better_parameter, worse_parameter, argument| {
         const better_cost = conversionCost(argument.type, better_parameter.type) orelse return false;
         const worse_cost = conversionCost(argument.type, worse_parameter.type) orelse return false;
         if (better_cost > worse_cost) return false;

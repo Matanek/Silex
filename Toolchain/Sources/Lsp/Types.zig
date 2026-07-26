@@ -44,10 +44,20 @@ pub const CompletionItem = struct {
     label: []const u8,
     kind: u8,
     detail: []const u8,
+    sortText: ?[]const u8 = null,
+    filterText: ?[]const u8 = null,
+    insertText: ?[]const u8 = null,
 };
 
 pub const CompletionOptions = struct {
     resolveProvider: bool = false,
+    triggerCharacters: []const []const u8 = &.{"."},
+};
+
+pub const CompletionTriggerKind = enum(u8) {
+    invoked = 1,
+    trigger_character = 2,
+    trigger_for_incomplete = 3,
 };
 
 pub const Request = struct {

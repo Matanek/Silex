@@ -20,6 +20,8 @@ const addSubtractImmediate = A64.addSubtractImmediate;
 const storeStack = A64.storeStack;
 const loadStack = A64.loadStack;
 const storeByte = A64.storeByte;
+const store64 = A64.store64;
+const load64 = A64.load64;
 const addressRelative = A64.addressRelative;
 const serviceCall = A64.serviceCall;
 const addSetFlags = A64.addSetFlags;
@@ -52,6 +54,7 @@ const compareBranchNonZero = A64.compareBranchNonZero;
 const compareBranchNonZero64 = A64.compareBranchNonZero64;
 const branch = A64.branch;
 const branchLink = A64.branchLink;
+const addRegisters = A64.addRegisters;
 
 const Allocator = std.mem.Allocator;
 
@@ -195,8 +198,15 @@ fn encodeFunction(
     try words.append(allocator, saveFrame());
     try words.append(allocator, moveFramePointer());
     try emitStackAdjustment(allocator, words, function.frame_size, false);
-    for (0..function.parameter_count) |index| {
-        try words.append(allocator, storeStack(@enumFromInt(index), @intCast(index)));
+    if (function.hidden_return_slot) |slot| try words.append(allocator, storeStack(.x15, slot));
+    for (function.parameters, 0..) |parameter, index| {
+        const incoming: Register = @enumFromInt(index);
+        if (!parameter.aggregate) {
+            try words.append(allocator, storeStack(incoming, parameter.start));
+        } else for (0..parameter.width) |leaf| {
+            try emitLoadAtOffset(allocator, words, .x9, incoming, leaf * Machine.slot_size);
+            try words.append(allocator, storeStack(.x9, @intCast(@as(usize, parameter.start) + leaf)));
+        }
     }
 
     for (function.instructions, 0..) |instruction, instruction_index| {
@@ -229,6 +239,18 @@ fn encodeFunction(
                 try words.append(allocator, loadStack(.x9, copy.operand));
                 try words.append(allocator, storeStack(.x9, copy.result));
             },
+            .copy_range => |copy| try emitSpanCopy(allocator, words, copy.result, copy.operand),
+            .aggregate_init => |initialization| {
+                var destination_offset: usize = 0;
+                for (initialization.fields) |field| {
+                    var destination = initialization.result;
+                    destination.start = @intCast(@as(usize, destination.start) + destination_offset);
+                    destination.width = field.width;
+                    try emitSpanCopy(allocator, words, destination, field);
+                    destination_offset += field.width;
+                }
+            },
+            .aggregate_equal => |comparison| try encodeAggregateEqual(allocator, words, &fixups, comparison),
             .convert => |conversion| try encodeConversion(
                 allocator,
                 words,
@@ -270,12 +292,22 @@ fn encodeFunction(
             .binary => |binary| try encodeBinary(allocator, words, &fixups, binary),
             .call => |call| {
                 for (call.arguments, 0..) |argument, index| {
-                    try words.append(allocator, loadStack(@enumFromInt(index), argument));
+                    const outgoing: Register = @enumFromInt(index);
+                    if (argument.aggregate) {
+                        if (argument.width == 0) {
+                            try words.append(allocator, moveWideZero64(outgoing, 0, 0));
+                        } else try emitStackAddress(allocator, words, outgoing, argument.start);
+                    } else try words.append(allocator, loadStack(outgoing, argument.start));
                 }
+                if (call.result) |result| if (result.aggregate) {
+                    if (result.width == 0) {
+                        try words.append(allocator, moveWideZero64(.x15, 0, 0));
+                    } else try emitStackAddress(allocator, words, .x15, result.start);
+                };
                 try calls.append(allocator, .{ .at = words.items.len, .function = call.function });
                 try words.append(allocator, branchLink());
                 try appendFixup(allocator, words, &fixups.epilogue, compareBranchNonZero(.x8), .imm19);
-                if (call.result) |result| try words.append(allocator, storeStack(.x0, result));
+                if (call.result) |result| if (!result.aggregate) try words.append(allocator, storeStack(.x0, result.start));
             },
             .print => |value| switch (value.kind) {
                 .signed_integer => try emitPrintInteger(allocator, words, value.value, value.newline),
@@ -310,7 +342,15 @@ fn encodeFunction(
                 try appendFixup(allocator, words, &fixups.epilogue, branch(), .imm26);
             },
             .return_value => |value| {
-                try words.append(allocator, loadStack(.x0, value));
+                if (value.aggregate) {
+                    const hidden_slot = function.hidden_return_slot orelse return error.InvalidMachineProgram;
+                    try words.append(allocator, loadStack(.x14, hidden_slot));
+                    for (0..value.width) |leaf| {
+                        try words.append(allocator, loadStack(.x9, @intCast(@as(usize, value.start) + leaf)));
+                        try emitStoreAtOffset(allocator, words, .x9, .x14, leaf * Machine.slot_size);
+                    }
+                    try words.append(allocator, moveWideZero64(.x0, 0, 0));
+                } else try words.append(allocator, loadStack(.x0, value.start));
                 try words.append(allocator, moveWideZero32(.x8, @intFromEnum(Machine.Status.success)));
                 try appendFixup(allocator, words, &fixups.epilogue, branch(), .imm26);
             },
@@ -369,6 +409,89 @@ fn encodeFunction(
     for (fixups.epilogue.items) |fixup| try patchLocal(words.items, fixup, epilogue_label);
     try patch26(words.items, overflow_to_epilogue, epilogue_label);
     try patch26(words.items, division_to_epilogue, epilogue_label);
+}
+
+fn emitSpanCopy(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    result: Machine.Span,
+    operand: Machine.Span,
+) Allocator.Error!void {
+    for (0..result.width) |index| {
+        try words.append(allocator, loadStack(.x9, @intCast(@as(usize, operand.start) + index)));
+        try words.append(allocator, storeStack(.x9, @intCast(@as(usize, result.start) + index)));
+    }
+}
+
+fn emitStackAddress(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    destination: Register,
+    slot: Machine.Slot,
+) Allocator.Error!void {
+    const byte_offset = @as(usize, slot) * Machine.slot_size;
+    if (byte_offset <= std.math.maxInt(u12)) {
+        return words.append(allocator, addSubtractImmediate(destination, .zero_or_sp, @intCast(byte_offset), true));
+    }
+    try emitImmediate64(allocator, words, .x14, byte_offset);
+    try words.append(allocator, addRegisters(destination, .zero_or_sp, .x14));
+}
+
+fn emitLoadAtOffset(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    destination: Register,
+    base: Register,
+    byte_offset: usize,
+) Allocator.Error!void {
+    if (byte_offset <= std.math.maxInt(u12)) return words.append(allocator, load64(destination, base, @intCast(byte_offset)));
+    try emitImmediate64(allocator, words, .x14, byte_offset);
+    try words.append(allocator, addRegisters(.x14, base, .x14));
+    try words.append(allocator, load64(destination, .x14, 0));
+}
+
+fn emitStoreAtOffset(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    source: Register,
+    base: Register,
+    byte_offset: usize,
+) Allocator.Error!void {
+    if (byte_offset <= std.math.maxInt(u12)) return words.append(allocator, store64(source, base, @intCast(byte_offset)));
+    try emitImmediate64(allocator, words, .x13, byte_offset);
+    try words.append(allocator, addRegisters(.x13, base, .x13));
+    try words.append(allocator, store64(source, .x13, 0));
+}
+
+fn encodeAggregateEqual(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    fixups: *FunctionFixups,
+    comparison: Machine.Instruction.AggregateEqual,
+) Error!void {
+    var unequal_branches: std.ArrayList(usize) = .empty;
+    for (comparison.leaf_types, 0..) |type_value, index| {
+        try encodeBinary(allocator, words, fixups, .{
+            .result = comparison.result,
+            .operator = .equal,
+            .left = @intCast(@as(usize, comparison.left.start) + index),
+            .right = @intCast(@as(usize, comparison.right.start) + index),
+            .type = type_value,
+        });
+        try words.append(allocator, loadStack(.x9, comparison.result));
+        try unequal_branches.append(allocator, words.items.len);
+        try words.append(allocator, compareBranchZero(.x9));
+    }
+    try words.append(allocator, moveWideZero32(.x9, @intFromBool(comparison.equal)));
+    try words.append(allocator, storeStack(.x9, comparison.result));
+    const done_branch = words.items.len;
+    try words.append(allocator, branch());
+    const unequal = words.items.len;
+    try words.append(allocator, moveWideZero32(.x9, @intFromBool(!comparison.equal)));
+    try words.append(allocator, storeStack(.x9, comparison.result));
+    const done = words.items.len;
+    for (unequal_branches.items) |at| try patch19(words.items, at, unequal);
+    try patch26(words.items, done_branch, done);
 }
 
 fn encodeBinary(
@@ -973,12 +1096,13 @@ test "encode known AArch64 instruction words" {
 test "resolve calls and append a native test entry" {
     const answer_instructions = [_]Machine.Instruction{
         .{ .constant_int = .{ .result = 0, .bits = 42 } },
-        .{ .return_value = 0 },
+        .{ .return_value = .{ .start = 0, .width = 1 } },
     };
     const functions = [_]Machine.Function{.{
         .name = "answer",
         .parameter_count = 0,
         .return_type = .int,
+        .return_width = 1,
         .slot_count = 1,
         .frame_size = try Machine.frameSize(1),
         .instructions = &answer_instructions,

@@ -44,7 +44,11 @@ fn runLanguageServer(init: std.process.Init, args: []const []const u8) !u8 {
         std.debug.print("silex: 'lsp' does not accept arguments\n", .{});
         return 1;
     }
-    var server = Lsp.Server.init(init.gpa, init.io);
+    var server = Lsp.Server.initWithPackages(
+        init.gpa,
+        init.io,
+        try globalPackagesRoot(init.arena.allocator(), init.environ_map),
+    );
     defer server.deinit();
     try server.run();
     return 0;
@@ -180,10 +184,12 @@ test {
     _ = @import("Lsp/Diagnostics.zig");
     _ = @import("Lsp/Protocol.zig");
     _ = @import("Lsp/Server.zig");
+    _ = @import("Lsp/Workspace.zig");
     _ = @import("Parser.zig");
     _ = @import("Project.zig");
-    _ = @import("Semantic.zig");
-    _ = @import("SemanticTests.zig");
+    _ = @import("ProjectStructureTests.zig");
+    _ = @import("Semantic/Analyzer.zig");
+    _ = @import("Semantic/Tests.zig");
     _ = @import("Ir.zig");
     _ = @import("Interpreter.zig");
     _ = @import("Interface.zig");

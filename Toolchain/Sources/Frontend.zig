@@ -2,7 +2,7 @@ const std = @import("std");
 const Ast = @import("Ast.zig");
 const Ir = @import("Ir.zig");
 const ParserModule = @import("Parser.zig");
-const Semantic = @import("Semantic.zig");
+const Semantic = @import("Semantic/Analyzer.zig");
 const Source = @import("Source.zig");
 
 const Allocator = std.mem.Allocator;

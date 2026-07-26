@@ -29,6 +29,7 @@ fn compare(
             .float64 => |value| @bitCast(@as(u64, @bitCast(value))),
             .boolean => |value| @intFromBool(value),
             .string => return error.UnsupportedType,
+            .structure => return error.UnsupportedType,
             .void => return error.TestUnexpectedResult,
         };
     }
@@ -62,6 +63,7 @@ fn compare(
         ),
         .boolean => |value| try std.testing.expectEqual(@as(i64, @intFromBool(value)), native.value),
         .string => return error.UnsupportedType,
+        .structure => return error.UnsupportedType,
         .void => try std.testing.expectEqual(@as(i64, 0), native.value),
     }
 }
@@ -136,6 +138,34 @@ test "native ARM64 agrees with checked arithmetic failures" {
     try compare(allocator, compilation.ir, machine, "negateOverflow", &.{});
 }
 
+test "native ARM64 agrees on compound updates and their failures" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\func update() int8 {
+        \\    var value:int8 = 10
+        \\    value += 2
+        \\    value *= 3
+        \\    value -= 6
+        \\    value /= 3
+        \\    value++
+        \\    value--
+        \\    return value
+        \\}
+        \\func overflow() int { var value = 9223372036854775807; value++; return value }
+        \\func divideByZero() int { var value = 42; value /= 0; return value }
+        \\func main() {}
+    );
+    const machine = try Lower.lower(allocator, compilation.ir);
+    try compare(allocator, compilation.ir, machine, "update", &.{});
+    try compare(allocator, compilation.ir, machine, "overflow", &.{});
+    try compare(allocator, compilation.ir, machine, "divideByZero", &.{});
+}
+
 test "native ARM64 agrees on narrow and unsigned integer domains" {
     if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
@@ -205,4 +235,173 @@ test "native ARM64 preserves IEEE arithmetic comparisons arguments and returns" 
         .{ .float64 = std.math.nan(f64) },
         .{ .float64 = 1.0 },
     });
+}
+
+test "native ARM64 transports and compares flattened structure values" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\struct Empty {}
+        \\struct Scalars {
+        \\    var i8:int8
+        \\    var i16:int16
+        \\    var i32:int32
+        \\    var i:int
+        \\    var u8:uint8
+        \\    var u16:uint16
+        \\    var u32:uint32
+        \\    var u:uint
+        \\    var f:float
+        \\    var f64:float64
+        \\    var flag:bool
+        \\    var text:str
+        \\}
+        \\struct Nested { var left:Scalars; var right:Scalars }
+        \\func emptyIdentity(value:Empty) Empty { return value }
+        \\func identity(value:Nested) Nested { return value }
+        \\func sample() Scalars {
+        \\    return Scalars(i8:-8, i16:-16, i32:-32, i:-64, u8:8, u16:16, u32:32, u:18446744073709551615, f:1.5, f64:2.5, flag:true, text:"A\0B")
+        \\}
+        \\func emptySame() bool { return emptyIdentity(Empty()) == Empty() }
+        \\func roundTripSame() bool {
+        \\    let value = Nested(left:sample(), right:sample())
+        \\    return identity(value) == value
+        \\}
+        \\func nestedField() int {
+        \\    let value = identity(Nested(left:sample(), right:sample()))
+        \\    return value.right.i
+        \\}
+        \\func copiedDifferent() bool {
+        \\    var value = Nested(left:sample(), right:sample())
+        \\    let copy = value
+        \\    value = Nested()
+        \\    return value != copy
+        \\}
+        \\func main() {}
+    );
+    const machine = try Lower.lower(allocator, compilation.ir);
+    try compare(allocator, compilation.ir, machine, "emptySame", &.{});
+    try compare(allocator, compilation.ir, machine, "roundTripSame", &.{});
+    try compare(allocator, compilation.ir, machine, "nestedField", &.{});
+    try compare(allocator, compilation.ir, machine, "copiedDifferent", &.{});
+}
+
+test "native ARM64 agrees on nested field mutation and value copies" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\struct Score { var value:int; var other:int }
+        \\struct Player { var score:Score; var reserve:int }
+        \\func mutate() int {
+        \\    var player = Player(score:Score(value:10, other:4), reserve:7)
+        \\    player.score.value += 2
+        \\    player.score.value *= 3
+        \\    player.score.value -= 6
+        \\    player.score.value /= 3
+        \\    player.score.value++
+        \\    player.score.value--
+        \\    return player.score.value + player.score.other + player.reserve
+        \\}
+        \\func copyIndependent() bool {
+        \\    var player = Player(score:Score(value:1, other:2), reserve:3)
+        \\    let copy = player
+        \\    player.score.value = 9
+        \\    return copy == Player(score:Score(value:1, other:2), reserve:3)
+        \\}
+        \\func main() {}
+    );
+    const machine = try Lower.lower(allocator, compilation.ir);
+    try compare(allocator, compilation.ir, machine, "mutate", &.{});
+    try compare(allocator, compilation.ir, machine, "copyIndependent", &.{});
+}
+
+test "native ARM64 agrees on value constructors and branched self initialization" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\struct Position {
+        \\    let x:int
+        \\    let y:int
+        \\    init(x:int, positive:bool) {
+        \\        if positive { self.x = x } else { self.x = -x }
+        \\        self.y = 2
+        \\    }
+        \\}
+        \\func positive() int { let value = Position(40, true); return value.x + value.y }
+        \\func negative() int { let value = Position(40, false); return value.x + value.y }
+        \\func main() {}
+    );
+    const machine = try Lower.lower(allocator, compilation.ir);
+    try compare(allocator, compilation.ir, machine, "positive", &.{});
+    try compare(allocator, compilation.ir, machine, "negative", &.{});
+}
+
+test "native ARM64 agrees on method receiver mutation returns and chaining" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\struct Counter {
+        \\    var value:int
+        \\    func increment() { self.value++ }
+        \\    func forward() { self.increment() }
+        \\    func add(amount:int) int { self.value += amount; return self.value }
+        \\    func current() int { return self.value }
+        \\    func copy() Counter { return self }
+        \\}
+        \\func mutate() int {
+        \\    var counter = Counter(value:1)
+        \\    counter.forward()
+        \\    let returned = counter.add(20)
+        \\    return returned + counter.current()
+        \\}
+        \\func chained() int { return Counter(value:42).copy().current() }
+        \\func main() {}
+    );
+    const machine = try Lower.lower(allocator, compilation.ir);
+    try compare(allocator, compilation.ir, machine, "mutate", &.{});
+    try compare(allocator, compilation.ir, machine, "chained", &.{});
+}
+
+test "native ARM64 agrees on omitted function constructor and method arguments" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\func seed() int { return 40 }
+        \\func add(left:int = seed(), right:int = 2) int { return left + right }
+        \\struct Box {
+        \\    var value:int
+        \\    init(value:int = 40) { self.value = value }
+        \\    func plus(value:int = 2) int { return self.value + value }
+        \\}
+        \\func functionDefault() int { return add() }
+        \\func constructorDefault() int { return Box().value }
+        \\func methodDefault() int { return Box().plus() }
+        \\func explicitArguments() int { return add(20, 22) }
+        \\func main() {}
+    );
+    const machine = try Lower.lower(allocator, compilation.ir);
+    try compare(allocator, compilation.ir, machine, "functionDefault", &.{});
+    try compare(allocator, compilation.ir, machine, "constructorDefault", &.{});
+    try compare(allocator, compilation.ir, machine, "methodDefault", &.{});
+    try compare(allocator, compilation.ir, machine, "explicitArguments", &.{});
 }

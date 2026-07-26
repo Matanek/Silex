@@ -8,6 +8,7 @@ const Allocator = std.mem.Allocator;
 pub const Type = Types.Type;
 pub const FunctionId = usize;
 pub const ValueId = usize;
+pub const LocalId = usize;
 pub const BlockId = usize;
 pub const Error = Allocator.Error || error{InvalidProgram};
 
@@ -66,6 +67,10 @@ pub const Instruction = union(enum) {
     constant_float32: ConstantFloat32,
     constant_float64: ConstantFloat64,
     copy: Copy,
+    structure_init: StructureInit,
+    field_load: FieldLoad,
+    local_load: LocalLoad,
+    local_store: LocalStore,
     convert: Convert,
     format_value: FormatValue,
     string_concat: StringConcat,
@@ -103,6 +108,28 @@ pub const Instruction = union(enum) {
 
     pub const Copy = struct {
         result: ValueId,
+        operand: ValueId,
+    };
+
+    pub const StructureInit = struct {
+        result: ValueId,
+        structure: usize,
+        fields: []const ValueId,
+    };
+
+    pub const FieldLoad = struct {
+        result: ValueId,
+        base: ValueId,
+        field: usize,
+    };
+
+    pub const LocalLoad = struct {
+        result: ValueId,
+        local: LocalId,
+    };
+
+    pub const LocalStore = struct {
+        local: LocalId,
         operand: ValueId,
     };
 
@@ -191,18 +218,45 @@ pub const Function = struct {
     parameter_types: []const Type,
     return_type: Type,
     value_types: []const Type,
+    local_types: []const Type = &.{},
     blocks: []const Block,
 };
 
+pub const StructureField = struct {
+    name: []const u8,
+    type: Type,
+    mutable: bool,
+};
+
+pub const Structure = struct {
+    name: []const u8,
+    fields: []const StructureField,
+};
+
 pub const Program = struct {
+    structures: []const Structure = &.{},
     functions: []const Function,
     files: []const []const u8 = &.{"<source>"},
 };
 
 pub fn writeText(allocator: Allocator, program: Program) Error![]u8 {
     var output: std.ArrayList(u8) = .empty;
+    for (program.structures, 0..) |structure, structure_index| {
+        if (structure_index != 0) try output.append(allocator, '\n');
+        try output.appendSlice(allocator, "struct @");
+        try output.appendSlice(allocator, structure.name);
+        try output.appendSlice(allocator, " {\n");
+        for (structure.fields) |field| {
+            try output.appendSlice(allocator, if (field.mutable) "    var ." else "    let .");
+            try output.appendSlice(allocator, field.name);
+            try output.append(allocator, ':');
+            try appendType(&output, allocator, program, field.type);
+            try output.append(allocator, '\n');
+        }
+        try output.appendSlice(allocator, "}\n");
+    }
     for (program.functions, 0..) |function, function_index| {
-        if (function_index != 0) try output.append(allocator, '\n');
+        if (function_index != 0 or program.structures.len != 0) try output.append(allocator, '\n');
         try output.appendSlice(allocator, "func @");
         try output.appendSlice(allocator, function.name);
         try output.append(allocator, '(');
@@ -269,6 +323,62 @@ fn writeInstruction(
             try output.appendSlice(allocator, "copy ");
             try appendValueChecked(output, allocator, function, copy.operand);
         },
+        .structure_init => |initialization| {
+            if (initialization.structure >= program.structures.len or
+                initialization.fields.len != program.structures[initialization.structure].fields.len or
+                initialization.result >= function.value_types.len or
+                function.value_types[initialization.result] != Type.structure(initialization.structure))
+            {
+                return error.InvalidProgram;
+            }
+            try appendResult(output, allocator, function, initialization.result);
+            try output.appendSlice(allocator, "struct.init @");
+            try output.appendSlice(allocator, program.structures[initialization.structure].name);
+            try output.append(allocator, '(');
+            for (initialization.fields, 0..) |field, index| {
+                if (field >= function.value_types.len or
+                    function.value_types[field] != program.structures[initialization.structure].fields[index].type)
+                {
+                    return error.InvalidProgram;
+                }
+                if (index != 0) try output.appendSlice(allocator, ", ");
+                try output.appendSlice(allocator, ".");
+                try output.appendSlice(allocator, program.structures[initialization.structure].fields[index].name);
+                try output.appendSlice(allocator, "=");
+                try appendValueChecked(output, allocator, function, field);
+            }
+            try output.append(allocator, ')');
+        },
+        .field_load => |load| {
+            if (load.base >= function.value_types.len) return error.InvalidProgram;
+            const structure_index = function.value_types[load.base].structureIndex() orelse return error.InvalidProgram;
+            if (structure_index >= program.structures.len or load.field >= program.structures[structure_index].fields.len) {
+                return error.InvalidProgram;
+            }
+            if (load.result >= function.value_types.len or
+                function.value_types[load.result] != program.structures[structure_index].fields[load.field].type)
+            {
+                return error.InvalidProgram;
+            }
+            try appendResult(output, allocator, function, load.result);
+            try output.appendSlice(allocator, "field ");
+            try appendValueChecked(output, allocator, function, load.base);
+            try output.appendSlice(allocator, ", .");
+            try output.appendSlice(allocator, program.structures[structure_index].fields[load.field].name);
+        },
+        .local_load => |load| {
+            try appendResult(output, allocator, function, load.result);
+            try output.appendSlice(allocator, "load ");
+            try appendLocalChecked(output, allocator, function, load.local);
+            if (function.local_types[load.local] != function.value_types[load.result]) return error.InvalidProgram;
+        },
+        .local_store => |store| {
+            try output.appendSlice(allocator, "store ");
+            try appendLocalChecked(output, allocator, function, store.local);
+            try output.appendSlice(allocator, ", ");
+            try appendValueChecked(output, allocator, function, store.operand);
+            if (function.local_types[store.local] != function.value_types[store.operand]) return error.InvalidProgram;
+        },
         .convert => |conversion| {
             try appendResult(output, allocator, function, conversion.result);
             try output.appendSlice(allocator, "convert ");
@@ -333,6 +443,15 @@ fn writeInstruction(
     }
 }
 
+fn appendType(output: *std.ArrayList(u8), allocator: Allocator, program: Program, type_value: Type) Error!void {
+    if (type_value.structureIndex()) |index| {
+        if (index >= program.structures.len) return error.InvalidProgram;
+        try output.append(allocator, '@');
+        return output.appendSlice(allocator, program.structures[index].name);
+    }
+    try output.appendSlice(allocator, type_value.name());
+}
+
 fn writeTerminator(
     output: *std.ArrayList(u8),
     allocator: Allocator,
@@ -385,6 +504,14 @@ fn appendResult(output: *std.ArrayList(u8), allocator: Allocator, function: Func
 fn appendValueChecked(output: *std.ArrayList(u8), allocator: Allocator, function: Function, value: ValueId) Error!void {
     if (value >= function.value_types.len) return error.InvalidProgram;
     try appendValue(output, allocator, value);
+}
+
+fn appendLocalChecked(output: *std.ArrayList(u8), allocator: Allocator, function: Function, local: LocalId) Error!void {
+    if (local >= function.local_types.len) return error.InvalidProgram;
+    try output.append(allocator, '$');
+    var buffer: [32]u8 = undefined;
+    const text = std.fmt.bufPrint(&buffer, "{d}:{s}", .{ local, function.local_types[local].name() }) catch unreachable;
+    try output.appendSlice(allocator, text);
 }
 
 fn appendValue(output: *std.ArrayList(u8), allocator: Allocator, value: ValueId) Allocator.Error!void {

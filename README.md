@@ -3,15 +3,18 @@
 This repository explores a native Silex compiler whose internal model does not
 depend on generated C or C++.
 
-The current bootstrap composes typed Silex modules and source packages into one
-program. A package is consumed by identity, without a library path or linker
-configuration:
+The current bootstrap composes simple typed modules and source packages into
+one program. A module may use a plain, dotted, or nested source path; a package
+is consumed by identity, without a library path or linker configuration:
 
 ```sx
+use Module1
+use Module1.SubModule.Foo as FlatFoo
+use Module2.SubModule.Foo as NestedFoo
 use Math.Operations
 
 func calculate() int {
-    return Operations.add(20, 22)
+    return Operations.add(Module1.value(), FlatFoo.value()) + NestedFoo.value()
 }
 
 func main() {
@@ -44,10 +47,12 @@ including:
 ```text
 func @Main.calculate() -> int {
 entry:
-    %0:int = const 20
-    %1:int = const 22
+    %0:int = call @Module1.value()
+    %1:int = call @Module1.SubModule.Foo.value()
     %2:int = call @Math.Operations.add(%0, %1)
-    return %2
+    %3:int = call @Module2.SubModule.Foo.value()
+    %4:int = add %2, %3
+    return %4
 }
 ```
 
@@ -73,17 +78,36 @@ minimal editor server with `silex lsp`. It synchronizes complete documents,
 publishes diagnostics from the current frontend and completes only the syntax,
 types and declarations implemented by this bootstrap.
 
-The executable subset includes structured conditionals, short-circuit boolean
-logic, immutable UTF-8 `str` values, the historical integer and floating-point
-families, checked numeric conversions, arithmetic, comparisons, and the
-observable statements `print`, `assert`, and `panic`. Integer behavior is
-validated against generated macOS ARM64 executables, including narrow domains
-and the complete unsigned 64-bit range. Floating-point calculation, conversion
-and decimal formatting are native too. Immutable string concatenation, exact
-byte equality, Unicode scalar counting, `$(expression)` interpolation and
-multiargument `print` have matching reference and native behavior. These are
-language operations: programs never name a writer,
-descriptor, allocator, syscall, linker option, or native library.
+The executable subset includes immutable `let` and mutable `var` bindings,
+assignment and checked arithmetic updates, structured conditionals, `while`
+loops with `break` and `continue`, short-circuit boolean logic, immutable UTF-8
+`str` values, the historical integer and floating-point families, checked
+numeric conversions, arithmetic, comparisons, and the observable statements
+`print`, `assert`, and `panic`. Integer behavior is validated against generated
+macOS ARM64 executables, including narrow domains and the complete unsigned
+64-bit range. Floating-point calculation, conversion and decimal formatting
+are native too. Immutable string concatenation, exact byte equality, Unicode
+scalar counting, `$(expression)` interpolation and multiargument `print` have
+matching reference and native behavior. These are language operations:
+programs never name a writer, descriptor, allocator, storage slot, syscall,
+linker option, or native library.
+
+Nominal `struct` declarations, named aggregate initialization, recursive
+intrinsic/default field values, chained field reads, value transport through
+locals and functions, and recursive equality execute identically in the
+reference interpreter and the macOS ARM64 backend. The native representation,
+copy operations and calling convention remain private implementation details;
+field assignments and arithmetic updates rebuild value aggregates without
+introducing observable references or aliases. Public structures retain one
+nominal identity across module and package aliases. Positional `init`
+constructors establish `self` field invariants before returning a value and
+execute through the same reference and native paths. Instance methods use an
+implicit `self`; receiver mutability is inferred transitively, mutating calls
+require `var`, and chained nonmutating calls also accept temporary values.
+Functions, constructors, and methods accept trailing parameter defaults.
+Omitted expressions are evaluated after overload selection, while collisions
+between the effective signatures exposed by optional suffixes are rejected at
+their declarations.
 
 Local packages are canonical sibling directories such as `Math/`, containing
 `Package.json` and `Module/`. Installed packages live under
@@ -91,8 +115,10 @@ Local packages are canonical sibling directories such as `Math/`, containing
 exact (`=1.4.1`) or caret (`^1.4.0`) constraints; they never declare paths,
 native symbols, or linkage options.
 
-The initial LSP analyzes each open document as an autonomous source unit.
-Syntax diagnostics always apply; semantic diagnostics apply to units without
-`use`, while imported graphs await overlay-aware project analysis. The server
-deliberately does not advertise navigation, rename, hover, formatting or
-semantic tokens yet.
+The LSP keeps syntax diagnostics on every open document and semantic
+diagnostics on autonomous units without `use`. Completion is project-aware: it
+indexes simple modules and allowed package dependencies, overlays unsaved open
+documents, restricts `receiver.` to the receiver's members, and exposes module
+paths and accessible API signatures according to the cursor context. The
+server deliberately does not advertise navigation, rename, hover, formatting,
+semantic tokens or project-wide semantic diagnostics yet.

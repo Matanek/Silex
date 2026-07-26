@@ -9,6 +9,11 @@ pub const slot_size = 8;
 
 pub const FunctionId = usize;
 pub const Slot = u12;
+pub const Span = struct {
+    start: Slot,
+    width: u12,
+    aggregate: bool = false,
+};
 pub const Error = Allocator.Error || error{
     InvalidMachineProgram,
     TooManyArguments,
@@ -54,6 +59,9 @@ pub const Instruction = union(enum) {
     constant_float32: ConstantFloat32,
     constant_float64: ConstantFloat64,
     copy: Copy,
+    copy_range: CopyRange,
+    aggregate_init: AggregateInit,
+    aggregate_equal: AggregateEqual,
     convert: Convert,
     format_value: FormatValue,
     string_concat: StringConcat,
@@ -64,7 +72,7 @@ pub const Instruction = union(enum) {
     print: Print,
     assert: Assert,
     panic: Panic,
-    return_value: Slot,
+    return_value: Span,
     return_void,
     jump: usize,
     branch: Branch,
@@ -98,6 +106,24 @@ pub const Instruction = union(enum) {
     pub const Copy = struct {
         result: Slot,
         operand: Slot,
+    };
+
+    pub const CopyRange = struct {
+        result: Span,
+        operand: Span,
+    };
+
+    pub const AggregateInit = struct {
+        result: Span,
+        fields: []const Span,
+    };
+
+    pub const AggregateEqual = struct {
+        result: Slot,
+        left: Span,
+        right: Span,
+        leaf_types: []const Types.Type,
+        equal: bool,
     };
 
     pub const Convert = struct {
@@ -142,9 +168,9 @@ pub const Instruction = union(enum) {
     };
 
     pub const Call = struct {
-        result: ?Slot,
+        result: ?Span,
         function: FunctionId,
-        arguments: []const Slot,
+        arguments: []const Span,
     };
 
     pub const Print = struct {
@@ -174,7 +200,11 @@ pub const Instruction = union(enum) {
 pub const Function = struct {
     name: []const u8,
     parameter_count: u4,
+    parameters: []const Span = &.{},
     return_type: Types.Type,
+    return_width: u12 = 0,
+    return_aggregate: bool = false,
+    hidden_return_slot: ?Slot = null,
     slot_count: u12,
     frame_size: u16,
     instructions: []const Instruction,
@@ -222,6 +252,30 @@ pub fn validate(program: Program) Error!void {
                 try requireSlot(function, value.result);
                 try requireSlot(function, value.operand);
             },
+            .copy_range => |value| {
+                try requireSpan(function, value.result);
+                try requireSpan(function, value.operand);
+                if (value.result.width != value.operand.width) return error.InvalidMachineProgram;
+            },
+            .aggregate_init => |value| {
+                try requireSpan(function, value.result);
+                var width: usize = 0;
+                for (value.fields) |field| {
+                    try requireSpan(function, field);
+                    width += field.width;
+                }
+                if (width != value.result.width or !value.result.aggregate) return error.InvalidMachineProgram;
+            },
+            .aggregate_equal => |value| {
+                try requireSlot(function, value.result);
+                try requireSpan(function, value.left);
+                try requireSpan(function, value.right);
+                if (!value.left.aggregate or !value.right.aggregate or
+                    value.left.width != value.right.width or value.leaf_types.len != value.left.width)
+                {
+                    return error.InvalidMachineProgram;
+                }
+            },
             .convert => |value| {
                 try requireSlot(function, value.result);
                 try requireSlot(function, value.operand);
@@ -253,8 +307,19 @@ pub fn validate(program: Program) Error!void {
                 if (call.function >= program.functions.len) return error.InvalidMachineProgram;
                 if (call.arguments.len > max_register_arguments) return error.TooManyArguments;
                 if (call.arguments.len != program.functions[call.function].parameter_count) return error.InvalidMachineProgram;
-                if (call.result) |result| try requireSlot(function, result);
-                for (call.arguments) |argument| try requireSlot(function, argument);
+                if (call.result) |result| try requireSpan(function, result);
+                for (call.arguments, program.functions[call.function].parameters) |argument, parameter| {
+                    try requireSpan(function, argument);
+                    if (argument.width != parameter.width or argument.aggregate != parameter.aggregate) {
+                        return error.InvalidMachineProgram;
+                    }
+                }
+                const callee = program.functions[call.function];
+                if (call.result) |result| {
+                    if (result.width != callee.return_width or result.aggregate != callee.return_aggregate) {
+                        return error.InvalidMachineProgram;
+                    }
+                } else if (callee.return_type != .void) return error.InvalidMachineProgram;
             },
             .print => |value| try requireSlot(function, value.value),
             .assert => |value| {
@@ -266,7 +331,12 @@ pub fn validate(program: Program) Error!void {
                 try requireSlot(function, value.message);
                 if (value.header >= program.strings.len) return error.InvalidMachineProgram;
             },
-            .return_value => |value| try requireSlot(function, value),
+            .return_value => |value| {
+                try requireSpan(function, value);
+                if (value.width != function.return_width or value.aggregate != function.return_aggregate) {
+                    return error.InvalidMachineProgram;
+                }
+            },
             .return_void => {},
             .jump => |target| if (target >= function.instructions.len) return error.InvalidMachineProgram,
             .branch => |branch_value| {
@@ -275,11 +345,23 @@ pub fn validate(program: Program) Error!void {
                     branch_value.else_instruction >= function.instructions.len) return error.InvalidMachineProgram;
             },
         };
+        if (function.parameters.len != function.parameter_count) return error.InvalidMachineProgram;
+        for (function.parameters) |parameter| try requireSpan(function, parameter);
+        if (function.return_type == .void) {
+            if (function.return_width != 0 or function.return_aggregate or function.hidden_return_slot != null) {
+                return error.InvalidMachineProgram;
+            }
+        } else if (function.return_aggregate != (function.hidden_return_slot != null)) return error.InvalidMachineProgram;
+        if (function.hidden_return_slot) |slot| try requireSlot(function, slot);
     }
 }
 
 fn requireSlot(function: Function, slot: Slot) Error!void {
     if (slot >= function.slot_count) return error.InvalidMachineProgram;
+}
+
+fn requireSpan(function: Function, span: Span) Error!void {
+    if (@as(usize, span.start) + span.width > function.slot_count) return error.InvalidMachineProgram;
 }
 
 test "allocate deterministic aligned stack homes" {
@@ -292,22 +374,25 @@ test "allocate deterministic aligned stack homes" {
 }
 
 test "validate function identities calls and slots" {
-    const arguments = [_]Slot{ 0, 1 };
+    const arguments = [_]Span{ .{ .start = 0, .width = 1 }, .{ .start = 1, .width = 1 } };
+    const parameters = [_]Span{ .{ .start = 0, .width = 1 }, .{ .start = 1, .width = 1 } };
     const add_instructions = [_]Instruction{
         .{ .binary = .{ .result = 2, .operator = .add, .left = 0, .right = 1 } },
-        .{ .return_value = 2 },
+        .{ .return_value = .{ .start = 2, .width = 1 } },
     };
     const main_instructions = [_]Instruction{
         .{ .constant_int = .{ .result = 0, .bits = 40, .type = .int } },
         .{ .constant_int = .{ .result = 1, .bits = 2, .type = .int } },
-        .{ .call = .{ .result = 2, .function = 0, .arguments = &arguments } },
+        .{ .call = .{ .result = .{ .start = 2, .width = 1 }, .function = 0, .arguments = &arguments } },
         .return_void,
     };
     const functions = [_]Function{
         .{
             .name = "add",
             .parameter_count = 2,
+            .parameters = &parameters,
             .return_type = .int,
+            .return_width = 1,
             .slot_count = 3,
             .frame_size = try frameSize(3),
             .instructions = &add_instructions,
