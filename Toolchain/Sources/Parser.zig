@@ -762,22 +762,27 @@ pub const Parser = struct {
                     },
                     else => return self.fail("only a named declaration can be called directly"),
                 };
-                expression = try self.parseCallAfterName(name, null);
+                expression = try self.parseCallAfterName(name, null, false);
                 continue;
             }
-            if (self.current.tag == .dot) {
+            if (self.current.tag == .dot or self.current.tag == .question_dot) {
+                const safe = self.current.tag == .question_dot;
                 try self.advance();
-                if (self.current.tag != .identifier) return self.fail("expected member name after '.'");
+                if (self.current.tag != .identifier) return self.fail(if (safe)
+                    "expected member name after '?.'"
+                else
+                    "expected member name after '.'");
                 const member = self.current;
                 try self.advance();
                 if (self.current.tag == .left_parenthesis) {
-                    expression = try self.parseCallAfterName(member, expression);
+                    expression = try self.parseCallAfterName(member, expression, safe);
                 } else expression = try self.newExpression(.{
                     .position = expression.position,
                     .value = .{ .field_access = .{
                         .base = expression,
                         .name_position = member.position,
                         .name = member.lexeme,
+                        .safe = safe,
                     } },
                 });
                 continue;
@@ -872,7 +877,7 @@ pub const Parser = struct {
         });
     }
 
-    fn parseCallAfterName(self: *Parser, name: Token, receiver: ?*Ast.Expression) ParseError!*Ast.Expression {
+    fn parseCallAfterName(self: *Parser, name: Token, receiver: ?*Ast.Expression, safe: bool) ParseError!*Ast.Expression {
         try self.expect(.left_parenthesis, "expected '(' after function name");
         var arguments: std.ArrayList(*Ast.Expression) = .empty;
         var named_arguments: std.ArrayList(Ast.Expression.NamedArgument) = .empty;
@@ -909,6 +914,7 @@ pub const Parser = struct {
                 .name = name.lexeme,
                 .name_position = name.position,
                 .receiver = receiver,
+                .safe = safe,
                 .arguments = try arguments.toOwnedSlice(self.allocator),
                 .named_arguments = try named_arguments.toOwnedSlice(self.allocator),
             } },

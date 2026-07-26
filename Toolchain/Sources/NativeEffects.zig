@@ -156,6 +156,36 @@ test "native conditional optional bindings match the reference interpreter" {
     try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
 }
 
+test "native safe optional access matches the reference interpreter" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const source =
+        \\struct Position {
+        \\    var x:int
+        \\    func shifted(delta:int) int { return self.x + delta }
+        \\    func translate(delta:int) { self.x += delta }
+        \\}
+        \\func argument() int { print("argument"); return 2 }
+        \\func observed(value:Position?) Position? { print("receiver"); return value }
+        \\func main() {
+        \\    var position:Position? = Position(x:40)
+        \\    let absent:Position?
+        \\    if value = position?.shifted(argument()) { print(value) }
+        \\    observed(absent)?.shifted(argument())
+        \\    position?.translate(2)
+        \\    if updated = position { print(updated.x) }
+        \\}
+    ;
+    var frontend = Frontend.Frontend.init(allocator);
+    const reference = try Interpreter.runCapture(allocator, (try frontend.compile(source)).ir);
+    const native = try compileAndRun(allocator, source);
+    try std.testing.expectEqual(reference.exit_code, exitCode(native));
+    try std.testing.expectEqualSlices(u8, reference.stdout, native.stdout);
+    try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
+}
+
 test "native branches and short-circuit match the reference output" {
     if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);

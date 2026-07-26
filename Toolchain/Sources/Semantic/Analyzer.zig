@@ -831,6 +831,56 @@ pub const Analyzer = struct {
 
     fn analyzeFieldAccess(self: *Analyzer, builder: *FunctionBuilder, access: Ast.Expression.FieldAccess) AnalyzeError!TypedValue {
         const base = try self.analyzeExpression(builder, access.base);
+        if (access.safe) return self.analyzeSafeFieldAccess(builder, access, base);
+        return self.analyzeFieldValue(builder, access, base);
+    }
+
+    fn analyzeSafeFieldAccess(
+        self: *Analyzer,
+        builder: *FunctionBuilder,
+        access: Ast.Expression.FieldAccess,
+        optional_base: TypedValue,
+    ) AnalyzeError!TypedValue {
+        if (optional_base.type.optionalChild() == null) {
+            const message = try std.fmt.allocPrint(
+                self.allocator,
+                "safe access '?.' requires an optional receiver, found '{s}'",
+                .{self.typeName(optional_base.type)},
+            );
+            return self.fail(access.name_position, message);
+        }
+        const presence = try Optionals.emitPresence(self, builder, optional_base);
+        const present_block = try self.newBlock(builder);
+        const absent_block = try self.newBlock(builder);
+        const merge_block = try self.newBlock(builder);
+        self.terminate(builder, .{ .branch = .{
+            .condition = presence.value,
+            .then_block = present_block,
+            .else_block = absent_block,
+        } });
+
+        builder.current_block = present_block;
+        const base = try Optionals.unwrap(self, builder, optional_base);
+        const field = try self.analyzeFieldValue(builder, access, base);
+        const result = if (field.type.optionalChild() != null)
+            field
+        else
+            (try Optionals.promote(self, builder, field, .optional(field.type))).?;
+        self.terminate(builder, .{ .jump = merge_block });
+
+        builder.current_block = absent_block;
+        try self.emit(builder, .{ .optional_null = .{ .result = result.value } });
+        self.terminate(builder, .{ .jump = merge_block });
+        builder.current_block = merge_block;
+        return result;
+    }
+
+    fn analyzeFieldValue(
+        self: *Analyzer,
+        builder: *FunctionBuilder,
+        access: Ast.Expression.FieldAccess,
+        base: TypedValue,
+    ) AnalyzeError!TypedValue {
         const structure_index = base.type.structureIndex() orelse {
             const message = try std.fmt.allocPrint(self.allocator, "type '{s}' has no fields", .{self.typeName(base.type)});
             return self.fail(access.name_position, message);

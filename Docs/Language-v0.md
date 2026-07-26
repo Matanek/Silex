@@ -92,6 +92,23 @@ body, and `break` performs no additional evaluation. The extracted name exists
 only inside its associated body and follows the ordinary collision and
 mutability rules.
 
+Safe member access evaluates an optional receiver once and performs the field
+read or method call only when it is present:
+
+```sx
+let x:int? = profile?.position?.x
+position?.translate(3)
+```
+
+Each nullable step requires its own `?.`. A field or method result `U` becomes
+`U?`, an existing `U?` stays flat, and a `void` method remains `void`. Method
+arguments are evaluated only in the present branch, after the receiver has
+been extracted, while member lookup and overload selection remain those of the
+underlying type. A mutating safe call requires an optional `var` place and
+writes the updated present value back to it; the same call through `let` is
+rejected. Safe assignment, indexing, forced extraction, `??`, and calls through
+optional function values are not part of this contract.
+
 `use <type> as <name>` introduces a transparent local type alias. The alias is
 accepted everywhere its target type is accepted and does not create a new
 identity, conversion, representation or overload distinction:

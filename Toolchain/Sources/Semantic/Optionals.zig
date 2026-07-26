@@ -51,6 +51,26 @@ pub fn intrinsic(self: anytype, builder: anytype, type_value: Types.Type) !?Mode
     return .{ .type = type_value, .value = result };
 }
 
+pub fn emitPresence(self: anytype, builder: anytype, source: Model.TypedValue) !Model.TypedValue {
+    if (source.type.optionalChild() == null) return error.InvalidSource;
+    const absent = (try intrinsic(self, builder, source.type)).?;
+    const result = try self.newValue(builder, .bool);
+    try self.emit(builder, .{ .binary = .{
+        .result = result,
+        .operator = .not_equal,
+        .left = source.value,
+        .right = absent.value,
+    } });
+    return .{ .type = .bool, .value = result };
+}
+
+pub fn unwrap(self: anytype, builder: anytype, source: Model.TypedValue) !Model.TypedValue {
+    const child = source.type.optionalChild() orelse return error.InvalidSource;
+    const result = try self.newValue(builder, child);
+    try self.emit(builder, .{ .optional_unwrap = .{ .result = result, .operand = source.value } });
+    return .{ .type = child, .value = result };
+}
+
 pub fn conversionCost(source: Types.Type, target: Types.Type) ?u8 {
     return if (target.optionalChild() == source) 1 else null;
 }
