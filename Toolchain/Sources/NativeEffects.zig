@@ -97,6 +97,37 @@ test "native optional transport matches the reference interpreter" {
     try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
 }
 
+test "native optional equality and refinement match the reference interpreter" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const source =
+        \\struct Position { let x:int }
+        \\func inspect(position:Position?) {
+        \\    print(position == null)
+        \\    if null != position { print(position.x) }
+        \\}
+        \\func main() {
+        \\    let absent:int?
+        \\    let present:int? = 7
+        \\    let first:Position? = Position(x:42)
+        \\    let second:Position? = Position(x:42)
+        \\    print(absent == null)
+        \\    print(present != null)
+        \\    print(first == second)
+        \\    inspect(Position(x:42))
+        \\    inspect(null)
+        \\}
+    ;
+    var frontend = Frontend.Frontend.init(allocator);
+    const reference = try Interpreter.runCapture(allocator, (try frontend.compile(source)).ir);
+    const native = try compileAndRun(allocator, source);
+    try std.testing.expectEqual(reference.exit_code, exitCode(native));
+    try std.testing.expectEqualSlices(u8, reference.stdout, native.stdout);
+    try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
+}
+
 test "native branches and short-circuit match the reference output" {
     if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);

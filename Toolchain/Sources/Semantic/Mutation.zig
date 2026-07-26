@@ -42,6 +42,7 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
         const current = if (assignment.operator == .assign) null else try loadLocal(self, builder, binding.local.?, binding.type);
         const replacement = try analyzeReplacement(self, builder, assignment, binding.type, current, target.name, false);
         try self.emit(builder, .{ .local_store = .{ .local = binding.local.?, .operand = replacement } });
+        Optionals.invalidateRefinement(builder, target.name);
         return;
     }
 

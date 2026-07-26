@@ -114,3 +114,69 @@ test "reject invalid optional forms and context-free null" {
         "variable 'required' expects 'int', found 'int?'",
     );
 }
+
+test "compare all optional presence states with null on either side" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\func main() {
+        \\    let absent:int?
+        \\    let same_absence:int? = null
+        \\    let first:int? = 7
+        \\    let same:int? = 7
+        \\    let other:int? = 8
+        \\    print(absent == same_absence)
+        \\    print(first == same)
+        \\    print(first == other)
+        \\    print(absent == first)
+        \\    print(absent == null)
+        \\    print(null != first)
+        \\}
+    );
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("true\ntrue\nfalse\nfalse\ntrue\ntrue\n", result.stdout);
+}
+
+test "refine direct local presence in positive and negative branches" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\struct Position { let x:int }
+        \\func inspect(position:Position?) {
+        \\    if position != null { print(position.x) }
+        \\    if null == position { print("missing") }
+        \\    else { print(position.x + 1) }
+        \\}
+        \\func main() {
+        \\    inspect(Position(x:41))
+        \\    inspect(null)
+        \\}
+    );
+    const text = try Ir.writeText(allocator, compilation.ir);
+    try std.testing.expect(std.mem.indexOf(u8, text, "optional.unwrap") != null);
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("41\n42\nmissing\n", result.stdout);
+}
+
+test "invalidate mutable proofs and keep compound or member proofs local" {
+    try expectCompileError(
+        "func main() { var value:int? = 1; if value != null { value = null; print(value + 1) } }",
+        "operator '+' does not accept 'int?' and 'int'",
+    );
+    try expectCompileError(
+        "func main() { let value:int? = 1; if !(value == null) { print(value + 1) } }",
+        "operator '+' does not accept 'int?' and 'int'",
+    );
+    try expectCompileError(
+        "func main() { let value:int? = 1; if value != null && true { print(value + 1) } }",
+        "operator '+' does not accept 'int?' and 'int'",
+    );
+    try expectCompileError(
+        "struct Box { let value:int? } func main() { let box = Box(value:1); if box.value != null { print(box.value + 1) } }",
+        "operator '+' does not accept 'int?' and 'int'",
+    );
+}

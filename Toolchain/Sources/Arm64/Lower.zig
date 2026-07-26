@@ -102,6 +102,16 @@ fn lowerInstruction(
             .result = layout.values[optional.result],
             .operand = layout.values[optional.operand],
         } },
+        .optional_unwrap => |optional| unwrap: {
+            var operand = layout.values[optional.operand];
+            operand.start += 1;
+            operand.width -= 1;
+            operand.aggregate = layout.values[optional.result].aggregate;
+            break :unwrap .{ .optional_unwrap = .{
+                .result = layout.values[optional.result],
+                .operand = operand,
+            } };
+        },
         .copy => |copy| lowerCopy(layout.values[copy.result], layout.values[copy.operand]),
         .structure_init => |initialization| aggregate: {
             const fields = try allocator.alloc(Machine.Span, initialization.fields.len);
@@ -158,7 +168,7 @@ fn lowerInstruction(
             .type = function.value_types[unary.result],
         } },
         .binary => |binary| binary_instruction: {
-            if (function.value_types[binary.left].structureIndex() != null) {
+            if (isAggregate(function.value_types[binary.left])) {
                 if (binary.operator != .equal and binary.operator != .not_equal) return error.UnsupportedType;
                 break :binary_instruction .{ .aggregate_equal = .{
                     .result = layout.values[binary.result].start,

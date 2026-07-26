@@ -196,6 +196,13 @@ fn executeInstruction(
             payload.* = try cloneValue(allocator, operand);
             try store(function, values, optional.result, .{ .optional = .{ .type = type_value, .value = payload } });
         },
+        .optional_unwrap => |optional| {
+            const value = switch (try load(values, optional.operand)) {
+                .optional => |value| value.value orelse return error.InvalidProgram,
+                else => return error.InvalidProgram,
+            };
+            try store(function, values, optional.result, try cloneValue(allocator, value.*));
+        },
         .copy => |copy| try store(function, values, copy.result, try cloneValue(allocator, try load(values, copy.operand))),
         .structure_init => |initialization| {
             if (initialization.structure >= program.structures.len or
