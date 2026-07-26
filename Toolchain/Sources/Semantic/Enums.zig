@@ -12,8 +12,17 @@ pub fn prepare(self: anytype) ![]const Ir.Enum {
         for (enumeration.variants, 0..) |variant, variant_index| variants[variant_index] = .{
             .name = variant.name,
             .associated_types = variant.associated_types,
+            .raw_value = if (variant.raw_value) |raw_value| switch (raw_value) {
+                .integer => |value| .{ .integer = value },
+                .string => |value| .{ .string = value },
+            } else null,
         };
-        result[enum_index] = .{ .name = enumeration.name, .type_index = type_index, .variants = variants };
+        result[enum_index] = .{
+            .name = enumeration.name,
+            .type_index = type_index,
+            .raw_type = enumeration.raw_type,
+            .variants = variants,
+        };
     }
     return result;
 }
@@ -75,6 +84,19 @@ pub fn analyzeInitializer(self: anytype, builder: anytype, call: Ast.Expression.
         .values = try values.toOwnedSlice(self.allocator),
     } });
     return .{ .type = result_type, .value = result };
+}
+
+pub fn analyzeProperty(self: anytype, builder: anytype, base: Model.TypedValue, name: []const u8, position: @import("../Source.zig").Position) !?Model.TypedValue {
+    const enum_index = findByType(self, base.type) orelse return null;
+    if (!std.mem.eql(u8, name, "raw_value")) {
+        const message = try std.fmt.allocPrint(self.allocator, "enum '{s}' has no property named '{s}'", .{ self.enums[enum_index].name, name });
+        return self.fail(position, message);
+    }
+    const enumeration = self.enums[enum_index];
+    const raw_type = enumeration.raw_type orelse return self.fail(position, "associated enum has no 'raw_value' property");
+    const result = try self.newValue(builder, raw_type);
+    try self.emit(builder, .{ .enum_raw = .{ .result = result, .operand = base.value, .enumeration = enum_index } });
+    return .{ .type = raw_type, .value = result };
 }
 
 pub fn typeIndex(program: Ast.Program, name: []const u8) ?usize {

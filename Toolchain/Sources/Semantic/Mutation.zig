@@ -4,6 +4,7 @@ const Ir = @import("../Ir.zig");
 const Numeric = @import("../Numeric.zig");
 const Support = @import("Support.zig");
 const Optionals = @import("Optionals.zig");
+const Enums = @import("Enums.zig");
 
 const PathStep = struct {
     base: Ir.ValueId,
@@ -55,6 +56,13 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
             const message = try std.fmt.allocPrint(self.allocator, "type '{s}' has no fields", .{self.typeName(current_type)});
             return self.fail(target_field.name_position, message);
         };
+        if (Enums.findByType(self, current_type) != null) {
+            if (std.mem.eql(u8, target_field.name, "raw_value")) {
+                return self.fail(target_field.name_position, "enum property 'raw_value' is read-only");
+            }
+            const message = try std.fmt.allocPrint(self.allocator, "type '{s}' has no assignable fields", .{self.typeName(current_type)});
+            return self.fail(target_field.name_position, message);
+        }
         const structure = self.structures[structure_index];
         const source_structure = self.program.structures[structure_index];
         if (source_structure.is_internal and target_field.name_position.file != source_structure.position.file) {

@@ -296,6 +296,12 @@ pub const EnumVariant = struct {
     position: Source.Position,
     name: []const u8,
     associated_types: []const Type = &.{},
+    raw_value: ?EnumRawValue = null,
+};
+
+pub const EnumRawValue = union(enum) {
+    integer: i64,
+    string: []const u8,
 };
 
 pub const Enum = struct {
@@ -305,6 +311,7 @@ pub const Enum = struct {
     position: Source.Position,
     name_position: Source.Position,
     name: []const u8,
+    raw_type: ?Type = null,
     variants: []const EnumVariant,
 };
 

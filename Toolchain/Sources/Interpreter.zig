@@ -268,6 +268,19 @@ fn executeInstruction(
                 payload.index >= value.values.len) return error.InvalidProgram;
             try store(function, values, payload.result, try cloneValue(allocator, value.values[payload.index]));
         },
+        .enum_raw => |raw| {
+            if (raw.enumeration >= program.enums.len) return error.InvalidProgram;
+            const value = switch (try load(values, raw.operand)) {
+                .enumeration => |enumeration| enumeration,
+                else => return error.InvalidProgram,
+            };
+            if (value.enumeration != raw.enumeration) return error.InvalidProgram;
+            const raw_value = program.enums[raw.enumeration].variants[value.variant].raw_value orelse return error.InvalidProgram;
+            try store(function, values, raw.result, switch (raw_value) {
+                .integer => |raw_integer| .{ .integer = raw_integer },
+                .string => |raw_string| .{ .string = raw_string },
+            });
+        },
         .field_load => |field| {
             const aggregate = switch (try load(values, field.base)) {
                 .structure => |value| value,

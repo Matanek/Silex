@@ -65,6 +65,10 @@ open Silex document
   structured indices; module interfaces expose only the nominal identity and
   variant signatures. Target lowering may choose a tag and payload layout, but
   neither is a source-visible field, conversion, ABI or stable IR format.
+- Raw enums keep each validated `int` or `str` literal in the nominal variant
+  declaration. The typed `enum.raw` operation is the sole observation path;
+  target lowering may cache that scalar beside its private tag, but exposes no
+  layout, mutable field or enum/raw conversion to source code.
 - Exhaustive expression matches lower their once-evaluated subject to explicit
   variant tests, typed payload extractions and ordinary CFG branches. Every
   branch copies its exact-typed result into the merge value; the portable IR

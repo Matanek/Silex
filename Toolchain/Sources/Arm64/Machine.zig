@@ -141,7 +141,10 @@ pub const Instruction = union(enum) {
         result: Span,
         tag: u64,
         values: []const Span,
+        raw_value: ?EnumRawValue = null,
     };
+
+    pub const EnumRawValue = union(enum) { integer: u64, string: usize };
 
     pub const EnumTest = struct {
         result: Slot,
@@ -320,6 +323,10 @@ pub fn validate(program: Program) Error!void {
                 for (value.values) |field| {
                     try requireSpan(function, field);
                     width += field.width;
+                }
+                if (value.raw_value) |raw_value| {
+                    width += 1;
+                    if (raw_value == .string and raw_value.string >= program.strings.len) return error.InvalidMachineProgram;
                 }
                 if (width > value.result.width) return error.InvalidMachineProgram;
             },

@@ -311,6 +311,32 @@ public contract. A private enum remains local to its module; `internal enum`
 is restricted to its exact source file. The tag and payload layout remain
 compiler details and are not a source ABI.
 
+An enum may instead declare `int` or `str` as a raw type. Every variant then
+provides exactly one literal of that type:
+
+```sx
+enum Direction:int {
+    north = 1
+    south = -2
+}
+
+enum DirectionName:str {
+    north = "north"
+    south = "south"
+}
+
+let code:int = Direction.north().raw_value
+```
+
+Raw values are mandatory and unique; strings are compared after escape
+decoding. Integer literals may be negative, but calculations, calls,
+conversions, omitted or auto-incremented values are rejected. A raw enum variant
+cannot carry associated values. `.raw_value` is an intrinsic read-only property
+with the declared raw type: it cannot be assigned, and no implicit or explicit
+conversion exists in either direction between an enum and its raw type. Raw
+enums otherwise retain the same nominal construction, copying, visibility,
+module composition and matching behavior. They do not gain equality.
+
 An exhaustive `match` evaluates one associated enum subject once and produces
 one value. Every variant appears exactly once, and parentheses bind all its
 associated values in declaration order:
