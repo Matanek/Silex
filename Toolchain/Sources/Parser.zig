@@ -266,7 +266,7 @@ pub const Parser = struct {
     }
 
     fn parseType(self: *Parser) ParseError!Ast.Type {
-        const result: Ast.Type = switch (self.current.tag) {
+        var result: Ast.Type = switch (self.current.tag) {
             .keyword_void => .void,
             .keyword_int => .int,
             .keyword_int8 => .int8,
@@ -299,6 +299,12 @@ pub const Parser = struct {
             else => return self.fail("expected type name"),
         };
         try self.advance();
+        if (self.current.tag == .question) {
+            if (result == .void) return self.fail("'void?' is not a valid type");
+            result = .optional(result);
+            try self.advance();
+            if (self.current.tag == .question) return self.fail("nested optional types are not supported");
+        }
         return result;
     }
 
@@ -764,6 +770,10 @@ pub const Parser = struct {
                     .position = token.position,
                     .value = .{ .boolean = token.tag == .keyword_true },
                 });
+            },
+            .keyword_null => {
+                try self.advance();
+                return self.newExpression(.{ .position = token.position, .value = .null_value });
             },
             .string => {
                 try self.advance();

@@ -30,6 +30,7 @@ fn compare(
             .boolean => |value| @intFromBool(value),
             .string => return error.UnsupportedType,
             .structure => return error.UnsupportedType,
+            .optional => return error.UnsupportedType,
             .void => return error.TestUnexpectedResult,
         };
     }
@@ -64,6 +65,7 @@ fn compare(
         .boolean => |value| try std.testing.expectEqual(@as(i64, @intFromBool(value)), native.value),
         .string => return error.UnsupportedType,
         .structure => return error.UnsupportedType,
+        .optional => return error.UnsupportedType,
         .void => try std.testing.expectEqual(@as(i64, 0), native.value),
     }
 }

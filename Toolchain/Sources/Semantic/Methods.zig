@@ -4,6 +4,7 @@ const Ir = @import("../Ir.zig");
 const Model = @import("Model.zig");
 const Numeric = @import("../Numeric.zig");
 const Support = @import("Support.zig");
+const Optionals = @import("Optionals.zig");
 
 const AnalyzeError = error{ InvalidSource, OutOfMemory };
 
@@ -210,7 +211,7 @@ pub fn analyzeCall(self: anytype, builder: anytype, call: Ast.Expression.Call) !
     for (call.arguments, 0..) |argument, argument_index| {
         const expected = if (arity_count == 1) expected: {
             const parameter_type = structure.methods[sole.?].parameters[argument_index].type;
-            break :expected if (parameter_type.isNumeric() and Support.acceptsNumericContext(argument)) parameter_type else null;
+            break :expected Optionals.expectedContext(parameter_type, argument);
         } else null;
         try arguments.append(self.allocator, try self.analyzeExpressionExpected(builder, argument, expected));
     }
@@ -225,7 +226,7 @@ pub fn analyzeCall(self: anytype, builder: anytype, call: Ast.Expression.Call) !
         var viable = true;
         for (method.parameters[0..arguments.items.len], arguments.items) |parameter, argument| {
             if (parameter.type == argument.type) continue;
-            if (!Numeric.canWiden(argument.type, parameter.type)) {
+            if (!Numeric.canWiden(argument.type, parameter.type) and Optionals.conversionCost(argument.type, parameter.type) == null) {
                 viable = false;
                 break;
             }
@@ -402,9 +403,9 @@ fn analyzeMutatingStatements(
                     value = try self.analyzeExpressionExpected(
                         builder,
                         expression,
-                        if (method.return_type.isNumeric() and Support.acceptsNumericContext(expression)) method.return_type else null,
+                        Optionals.expectedContext(method.return_type, expression),
                     );
-                    if (value.?.type != method.return_type and Numeric.canWiden(value.?.type, method.return_type)) {
+                    if (value.?.type != method.return_type and (Numeric.canWiden(value.?.type, method.return_type) or Optionals.canConvert(value.?.type, method.return_type))) {
                         value = try self.coerce(builder, value.?, method.return_type, expression.position);
                     }
                     if (value.?.type != method.return_type) {

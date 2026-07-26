@@ -97,6 +97,11 @@ fn lowerInstruction(
             .result = layout.values[constant.result].start,
             .bits = constant.bits,
         } },
+        .optional_null => |optional| .{ .optional_null = .{ .result = layout.values[optional.result] } },
+        .optional_some => |optional| .{ .optional_some = .{
+            .result = layout.values[optional.result],
+            .operand = layout.values[optional.operand],
+        } },
         .copy => |copy| lowerCopy(layout.values[copy.result], layout.values[copy.operand]),
         .structure_init => |initialization| aggregate: {
             const fields = try allocator.alloc(Machine.Span, initialization.fields.len);
@@ -261,7 +266,7 @@ fn buildLayout(allocator: Allocator, program: Ir.Program, function: Ir.Function)
     for (function.local_types, 0..) |type_value, index| {
         locals[index] = try allocateSpan(program, type_value, &next);
     }
-    const return_aggregate = function.return_type.structureIndex() != null;
+    const return_aggregate = isAggregate(function.return_type);
     const return_width: u12 = if (function.return_type == .void)
         0
     else
@@ -290,7 +295,7 @@ fn allocateSpan(program: Ir.Program, type_value: Ir.Type, next: *usize) Machine.
     const result: Machine.Span = .{
         .start = try Machine.checkedSlot(next.*),
         .width = @intCast(width),
-        .aggregate = type_value.structureIndex() != null,
+        .aggregate = isAggregate(type_value),
     };
     next.* += width;
     if (next.* > Machine.max_slots) return error.FrameTooLarge;
@@ -298,6 +303,7 @@ fn allocateSpan(program: Ir.Program, type_value: Ir.Type, next: *usize) Machine.
 }
 
 fn leafCount(program: Ir.Program, type_value: Ir.Type) Machine.Error!usize {
+    if (type_value.optionalChild()) |child| return 1 + try leafCount(program, child);
     const structure_index = type_value.structureIndex() orelse return 1;
     if (structure_index >= program.structures.len) return error.InvalidMachineProgram;
     var result: usize = 0;
@@ -326,11 +332,19 @@ fn appendFlattenedTypes(
     type_value: Ir.Type,
     result: *std.ArrayList(Ir.Type),
 ) Machine.Error!void {
+    if (type_value.optionalChild()) |child| {
+        try result.append(allocator, .bool);
+        return appendFlattenedTypes(allocator, program, child, result);
+    }
     const structure_index = type_value.structureIndex() orelse return result.append(allocator, type_value);
     if (structure_index >= program.structures.len) return error.InvalidMachineProgram;
     for (program.structures[structure_index].fields) |field| {
         try appendFlattenedTypes(allocator, program, field.type, result);
     }
+}
+
+fn isAggregate(type_value: Ir.Type) bool {
+    return type_value.structureIndex() != null or type_value.optionalChild() != null;
 }
 
 fn internString(

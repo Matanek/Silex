@@ -4,6 +4,7 @@ const Ir = @import("../Ir.zig");
 const Numeric = @import("../Numeric.zig");
 const Support = @import("Support.zig");
 const Model = @import("Model.zig");
+const Optionals = @import("Optionals.zig");
 
 const AnalyzeError = error{ InvalidSource, OutOfMemory };
 
@@ -37,11 +38,11 @@ pub fn analyze(
             try self.analyzeExpressionExpected(
                 &builder,
                 expression,
-                if (field.type.isNumeric() and Support.acceptsNumericContext(expression)) field.type else null,
+                Optionals.expectedContext(field.type, expression),
             )
         else
             try self.emitIntrinsic(&builder, field.type, constructor.position);
-        if (value.type != field.type and Numeric.canWiden(value.type, field.type)) {
+        if (value.type != field.type and (Numeric.canWiden(value.type, field.type) or Optionals.canConvert(value.type, field.type))) {
             value = try self.coerce(&builder, value, field.type, constructor.position);
         }
         initial_fields[field_index] = value.value;
@@ -153,7 +154,7 @@ pub fn analyzeCall(
     for (call.arguments, 0..) |argument, argument_index| {
         const expected = if (arity_count == 1) expected: {
             const parameter_type = declaration.constructors[sole.?].parameters[argument_index].type;
-            break :expected if (parameter_type.isNumeric() and Support.acceptsNumericContext(argument)) parameter_type else null;
+            break :expected Optionals.expectedContext(parameter_type, argument);
         } else null;
         try arguments.append(self.allocator, try self.analyzeExpressionExpected(builder, argument, expected));
     }
@@ -168,7 +169,7 @@ pub fn analyzeCall(
         var viable = true;
         for (constructor.parameters[0..arguments.items.len], arguments.items) |parameter, argument| {
             if (parameter.type == argument.type) continue;
-            if (!Numeric.canWiden(argument.type, parameter.type)) {
+            if (!Numeric.canWiden(argument.type, parameter.type) and Optionals.conversionCost(argument.type, parameter.type) == null) {
                 viable = false;
                 break;
             }
@@ -374,9 +375,9 @@ fn analyzeSelfAssignment(
     var value = try self.analyzeExpressionExpected(
         builder,
         assignment.value.?,
-        if (field.type.isNumeric() and Support.acceptsNumericContext(assignment.value.?)) field.type else null,
+        Optionals.expectedContext(field.type, assignment.value.?),
     );
-    if (value.type != field.type and Numeric.canWiden(value.type, field.type)) {
+    if (value.type != field.type and (Numeric.canWiden(value.type, field.type) or Optionals.canConvert(value.type, field.type))) {
         value = try self.coerce(builder, value, field.type, assignment.value.?.position);
     }
     if (value.type != field.type) {

@@ -66,6 +66,8 @@ pub const Instruction = union(enum) {
     constant_str: ConstantStr,
     constant_float32: ConstantFloat32,
     constant_float64: ConstantFloat64,
+    optional_null: OptionalNull,
+    optional_some: OptionalSome,
     copy: Copy,
     structure_init: StructureInit,
     field_load: FieldLoad,
@@ -104,6 +106,15 @@ pub const Instruction = union(enum) {
     pub const ConstantFloat64 = struct {
         result: ValueId,
         bits: u64,
+    };
+
+    pub const OptionalNull = struct {
+        result: ValueId,
+    };
+
+    pub const OptionalSome = struct {
+        result: ValueId,
+        operand: ValueId,
     };
 
     pub const Copy = struct {
@@ -264,10 +275,10 @@ pub fn writeText(allocator: Allocator, program: Program) Error![]u8 {
             if (index != 0) try output.appendSlice(allocator, ", ");
             try appendValue(&output, allocator, index);
             try output.append(allocator, ':');
-            try output.appendSlice(allocator, parameter_type.name());
+            try appendType(&output, allocator, program, parameter_type);
         }
         try output.appendSlice(allocator, ") -> ");
-        try output.appendSlice(allocator, function.return_type.name());
+        try appendType(&output, allocator, program, function.return_type);
         try output.appendSlice(allocator, " {\n");
         for (function.blocks, 0..) |block, block_id| {
             try appendBlockName(&output, allocator, block_id);
@@ -295,31 +306,48 @@ fn writeInstruction(
 ) Error!void {
     switch (instruction) {
         .constant_int => |constant| {
-            try appendResult(output, allocator, function, constant.result);
+            try appendResult(output, allocator, program, function, constant.result);
             try output.appendSlice(allocator, "const ");
             try appendInteger(output, allocator, constant.bits, function.value_types[constant.result]);
         },
         .constant_bool => |constant| {
-            try appendResult(output, allocator, function, constant.result);
+            try appendResult(output, allocator, program, function, constant.result);
             try output.appendSlice(allocator, if (constant.value) "const true" else "const false");
         },
         .constant_str => |constant| {
-            try appendResult(output, allocator, function, constant.result);
+            try appendResult(output, allocator, program, function, constant.result);
             try output.appendSlice(allocator, "const ");
             try Strings.appendQuoted(output, allocator, constant.value);
         },
         .constant_float32 => |constant| {
-            try appendResult(output, allocator, function, constant.result);
+            try appendResult(output, allocator, program, function, constant.result);
             try output.appendSlice(allocator, "const ");
             try appendFloat(output, allocator, @as(f64, @floatCast(@as(f32, @bitCast(constant.bits)))));
         },
         .constant_float64 => |constant| {
-            try appendResult(output, allocator, function, constant.result);
+            try appendResult(output, allocator, program, function, constant.result);
             try output.appendSlice(allocator, "const ");
             try appendFloat(output, allocator, @as(f64, @bitCast(constant.bits)));
         },
+        .optional_null => |optional| {
+            if (optional.result >= function.value_types.len or function.value_types[optional.result].optionalChild() == null) {
+                return error.InvalidProgram;
+            }
+            try appendResult(output, allocator, program, function, optional.result);
+            try output.appendSlice(allocator, "optional.null");
+        },
+        .optional_some => |optional| {
+            if (optional.result >= function.value_types.len or optional.operand >= function.value_types.len or
+                function.value_types[optional.result].optionalChild() != function.value_types[optional.operand])
+            {
+                return error.InvalidProgram;
+            }
+            try appendResult(output, allocator, program, function, optional.result);
+            try output.appendSlice(allocator, "optional.some ");
+            try appendValueChecked(output, allocator, function, optional.operand);
+        },
         .copy => |copy| {
-            try appendResult(output, allocator, function, copy.result);
+            try appendResult(output, allocator, program, function, copy.result);
             try output.appendSlice(allocator, "copy ");
             try appendValueChecked(output, allocator, function, copy.operand);
         },
@@ -331,7 +359,7 @@ fn writeInstruction(
             {
                 return error.InvalidProgram;
             }
-            try appendResult(output, allocator, function, initialization.result);
+            try appendResult(output, allocator, program, function, initialization.result);
             try output.appendSlice(allocator, "struct.init @");
             try output.appendSlice(allocator, program.structures[initialization.structure].name);
             try output.append(allocator, '(');
@@ -360,14 +388,14 @@ fn writeInstruction(
             {
                 return error.InvalidProgram;
             }
-            try appendResult(output, allocator, function, load.result);
+            try appendResult(output, allocator, program, function, load.result);
             try output.appendSlice(allocator, "field ");
             try appendValueChecked(output, allocator, function, load.base);
             try output.appendSlice(allocator, ", .");
             try output.appendSlice(allocator, program.structures[structure_index].fields[load.field].name);
         },
         .local_load => |load| {
-            try appendResult(output, allocator, function, load.result);
+            try appendResult(output, allocator, program, function, load.result);
             try output.appendSlice(allocator, "load ");
             try appendLocalChecked(output, allocator, function, load.local);
             if (function.local_types[load.local] != function.value_types[load.result]) return error.InvalidProgram;
@@ -380,37 +408,37 @@ fn writeInstruction(
             if (function.local_types[store.local] != function.value_types[store.operand]) return error.InvalidProgram;
         },
         .convert => |conversion| {
-            try appendResult(output, allocator, function, conversion.result);
+            try appendResult(output, allocator, program, function, conversion.result);
             try output.appendSlice(allocator, "convert ");
             try appendValueChecked(output, allocator, function, conversion.operand);
             try output.appendSlice(allocator, " to ");
             try output.appendSlice(allocator, conversion.target.name());
         },
         .format_value => |format| {
-            try appendResult(output, allocator, function, format.result);
+            try appendResult(output, allocator, program, function, format.result);
             try output.appendSlice(allocator, "format ");
             try appendValueChecked(output, allocator, function, format.operand);
         },
         .string_concat => |concat| {
-            try appendResult(output, allocator, function, concat.result);
+            try appendResult(output, allocator, program, function, concat.result);
             try output.appendSlice(allocator, "str.concat ");
             try appendValueChecked(output, allocator, function, concat.left);
             try output.appendSlice(allocator, ", ");
             try appendValueChecked(output, allocator, function, concat.right);
         },
         .string_count => |count| {
-            try appendResult(output, allocator, function, count.result);
+            try appendResult(output, allocator, program, function, count.result);
             try output.appendSlice(allocator, "str.count ");
             try appendValueChecked(output, allocator, function, count.operand);
         },
         .unary => |unary| {
-            try appendResult(output, allocator, function, unary.result);
+            try appendResult(output, allocator, program, function, unary.result);
             try output.appendSlice(allocator, unary.operator.name());
             try output.append(allocator, ' ');
             try appendValueChecked(output, allocator, function, unary.operand);
         },
         .binary => |binary| {
-            try appendResult(output, allocator, function, binary.result);
+            try appendResult(output, allocator, program, function, binary.result);
             try output.appendSlice(allocator, binary.operator.name());
             try output.append(allocator, ' ');
             try appendValueChecked(output, allocator, function, binary.left);
@@ -419,7 +447,7 @@ fn writeInstruction(
         },
         .call => |call| {
             if (call.function >= program.functions.len) return error.InvalidProgram;
-            if (call.result) |result| try appendResult(output, allocator, function, result);
+            if (call.result) |result| try appendResult(output, allocator, program, function, result);
             try output.appendSlice(allocator, "call @");
             try output.appendSlice(allocator, program.functions[call.function].name);
             try output.append(allocator, '(');
@@ -444,6 +472,10 @@ fn writeInstruction(
 }
 
 fn appendType(output: *std.ArrayList(u8), allocator: Allocator, program: Program, type_value: Type) Error!void {
+    if (type_value.optionalChild()) |child| {
+        try appendType(output, allocator, program, child);
+        return output.append(allocator, '?');
+    }
     if (type_value.structureIndex()) |index| {
         if (index >= program.structures.len) return error.InvalidProgram;
         try output.append(allocator, '@');
@@ -493,11 +525,11 @@ fn appendBlockName(output: *std.ArrayList(u8), allocator: Allocator, block: Bloc
     try output.appendSlice(allocator, name);
 }
 
-fn appendResult(output: *std.ArrayList(u8), allocator: Allocator, function: Function, result: ValueId) Error!void {
+fn appendResult(output: *std.ArrayList(u8), allocator: Allocator, program: Program, function: Function, result: ValueId) Error!void {
     if (result >= function.value_types.len) return error.InvalidProgram;
     try appendValue(output, allocator, result);
     try output.append(allocator, ':');
-    try output.appendSlice(allocator, function.value_types[result].name());
+    try appendType(output, allocator, program, function.value_types[result]);
     try output.appendSlice(allocator, " = ");
 }
 

@@ -178,6 +178,7 @@ test {
     _ = @import("NativeEffects.zig");
     _ = @import("Modules.zig");
     _ = @import("Numeric.zig");
+    _ = @import("OptionalTests.zig");
     _ = @import("Packages.zig");
     _ = @import("Lexer.zig");
     _ = @import("Lsp/Completion.zig");

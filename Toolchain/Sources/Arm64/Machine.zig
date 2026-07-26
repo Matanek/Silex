@@ -58,6 +58,8 @@ pub const Instruction = union(enum) {
     constant_str: ConstantStr,
     constant_float32: ConstantFloat32,
     constant_float64: ConstantFloat64,
+    optional_null: OptionalNull,
+    optional_some: OptionalSome,
     copy: Copy,
     copy_range: CopyRange,
     aggregate_init: AggregateInit,
@@ -101,6 +103,15 @@ pub const Instruction = union(enum) {
     pub const ConstantFloat64 = struct {
         result: Slot,
         bits: u64,
+    };
+
+    pub const OptionalNull = struct {
+        result: Span,
+    };
+
+    pub const OptionalSome = struct {
+        result: Span,
+        operand: Span,
     };
 
     pub const Copy = struct {
@@ -248,6 +259,15 @@ pub fn validate(program: Program) Error!void {
             },
             .constant_float32 => |value| try requireSlot(function, value.result),
             .constant_float64 => |value| try requireSlot(function, value.result),
+            .optional_null => |value| {
+                try requireSpan(function, value.result);
+                if (!value.result.aggregate or value.result.width < 2) return error.InvalidMachineProgram;
+            },
+            .optional_some => |value| {
+                try requireSpan(function, value.result);
+                try requireSpan(function, value.operand);
+                if (!value.result.aggregate or value.result.width != value.operand.width + 1) return error.InvalidMachineProgram;
+            },
             .copy => |value| {
                 try requireSlot(function, value.result);
                 try requireSlot(function, value.operand);

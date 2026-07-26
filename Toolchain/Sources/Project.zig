@@ -429,6 +429,7 @@ pub const Compiler = struct {
     }
 
     fn activateType(self: *Compiler, module: usize, type_value: Ast.Type) Error!void {
+        if (type_value.optionalChild()) |child| return self.activateType(module, child);
         const index = type_value.structureIndex() orelse return;
         const program = self.units[module].program.?;
         if (index >= program.type_names.len) return;
@@ -868,6 +869,7 @@ pub const Compiler = struct {
         declaration_kind: []const u8,
         declaration_name: []const u8,
     ) Error!void {
+        if (type_value.optionalChild()) |child| return self.requirePublicOutputType(module, child, position, declaration_kind, declaration_name);
         const index = type_value.structureIndex() orelse return;
         const program = self.units[module].program.?;
         if (index >= program.type_names.len) return;
@@ -885,6 +887,7 @@ pub const Compiler = struct {
         declaration_kind: []const u8,
         declaration_name: []const u8,
     ) Error!void {
+        if (type_value.optionalChild()) |child| return self.requirePublicType(module, child, position, declaration_kind, declaration_name);
         const index = type_value.structureIndex() orelse return;
         const program = self.units[module].program.?;
         if (index >= program.type_names.len) return;
@@ -1145,6 +1148,7 @@ fn expressionPosition(module: usize) Source.Position {
 }
 
 fn remapType(type_value: Ast.Type, type_map: []const Ast.Type) Ast.Type {
+    if (type_value.optionalChild()) |child| return .optional(remapType(child, type_map));
     const index = type_value.structureIndex() orelse return type_value;
     return if (index < type_map.len) type_map[index] else type_value;
 }

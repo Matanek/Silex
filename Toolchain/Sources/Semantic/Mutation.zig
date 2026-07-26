@@ -3,6 +3,7 @@ const Ast = @import("../Ast.zig");
 const Ir = @import("../Ir.zig");
 const Numeric = @import("../Numeric.zig");
 const Support = @import("Support.zig");
+const Optionals = @import("Optionals.zig");
 
 const PathStep = struct {
     base: Ir.ValueId,
@@ -161,9 +162,9 @@ fn analyzeReplacement(
         var value = try self.analyzeExpressionExpected(
             builder,
             assignment.value.?,
-            if (target_type.isNumeric() and Support.acceptsNumericContext(assignment.value.?)) target_type else null,
+            Optionals.expectedContext(target_type, assignment.value.?),
         );
-        if (value.type != target_type and Numeric.canWiden(value.type, target_type)) {
+        if (value.type != target_type and (Numeric.canWiden(value.type, target_type) or Optionals.canConvert(value.type, target_type))) {
             value = try self.coerce(builder, value, target_type, assignment.value.?.position);
         }
         if (value.type != target_type) {
