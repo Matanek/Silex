@@ -69,6 +69,29 @@ through `!`, `&&`, `||`, a field or an indexed element. An immutable binding
 keeps the proof for the branch; assigning a `var` invalidates it for subsequent
 statements.
 
+An `if`, `elif`, `else if`, or `while` condition may instead bind the payload
+of an optional source. The unmarked form is an immutable `let`; `let` may be
+written explicitly, while `var` creates a mutable local copy:
+
+```sx
+if position = find_position() {
+    print(position.x)
+}
+
+while var item = next_item() {
+    item.advance()
+}
+```
+
+Parentheses may surround the complete binding, as in
+`if (let position = find_position())`, but the unparenthesized spelling is
+canonical. A binding contains exactly one unannotated name. Its source must be
+optional and is evaluated once when its branch is reached; a loop evaluates it
+before every attempt, including after `continue`. An absent result skips the
+body, and `break` performs no additional evaluation. The extracted name exists
+only inside its associated body and follows the ordinary collision and
+mutability rules.
+
 `use <type> as <name>` introduces a transparent local type alias. The alias is
 accepted everywhere its target type is accepted and does not create a new
 identity, conversion, representation or overload distinction:

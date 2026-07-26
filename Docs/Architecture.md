@@ -66,6 +66,11 @@ open Silex document
   lowering currently represents optionals as a presence slot followed by the
   flattened payload, but this layout is an experimental backend detail rather
   than a source ABI or serialized format.
+- Conditional optional bindings lower their source, presence comparison and
+  extraction directly into the existing CFG. The source stays in the reached
+  condition block, while the body-local binding begins with the proven unwrap;
+  loop backedges therefore preserve the source language's exact retry,
+  `continue`, and `break` evaluation rules.
 - Package manifests locate no source by consumer-provided path. The resolver
   derives canonical local and global locations from package identities, builds
   a single-version dependency graph, and enforces direct visibility.

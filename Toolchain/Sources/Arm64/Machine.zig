@@ -277,7 +277,9 @@ pub fn validate(program: Program) Error!void {
             .optional_unwrap => |value| {
                 try requireSpan(function, value.result);
                 try requireSpan(function, value.operand);
-                if (!value.operand.aggregate or value.operand.width != value.result.width + 1) return error.InvalidMachineProgram;
+                if (value.operand.width != value.result.width or value.operand.aggregate != value.result.aggregate) {
+                    return error.InvalidMachineProgram;
+                }
             },
             .copy => |value| {
                 try requireSlot(function, value.result);

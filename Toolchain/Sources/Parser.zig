@@ -371,7 +371,7 @@ pub const Parser = struct {
     fn parseWhile(self: *Parser) ParseError!Ast.Statement {
         const position = self.current.position;
         try self.advance();
-        const condition = try self.parseExpression(false);
+        const condition = try self.parseCondition();
         return .{ .while_statement = .{
             .position = position,
             .condition = condition,
@@ -396,7 +396,7 @@ pub const Parser = struct {
         while (self.current.tag == .keyword_if or self.current.tag == .keyword_elif) {
             const branch_position = self.current.position;
             try self.advance();
-            const condition = try self.parseExpression(false);
+            const condition = try self.parseCondition();
             const statements = try self.parseBlock();
             try branches.append(self.allocator, .{
                 .position = branch_position,
@@ -413,7 +413,7 @@ pub const Parser = struct {
                 while (true) {
                     const branch_position = self.current.position;
                     try self.advance();
-                    const condition = try self.parseExpression(false);
+                    const condition = try self.parseCondition();
                     const statements = try self.parseBlock();
                     try branches.append(self.allocator, .{
                         .position = branch_position,
@@ -437,6 +437,51 @@ pub const Parser = struct {
             .branches = try branches.toOwnedSlice(self.allocator),
             .else_statements = else_statements,
         } };
+    }
+
+    fn parseCondition(self: *Parser) ParseError!Ast.Condition {
+        const parenthesized_binding = self.current.tag == .left_parenthesis and try self.parenthesizedConditionStartsBinding();
+        const unparenthesized_binding = self.current.tag == .keyword_let or self.current.tag == .keyword_var or
+            (self.current.tag == .identifier and try self.nextTag() == .equal);
+        if (!parenthesized_binding and !unparenthesized_binding) {
+            return .{ .expression = try self.parseExpression(false) };
+        }
+
+        if (parenthesized_binding) try self.advance();
+        const position = self.current.position;
+        const explicit = self.current.tag == .keyword_let or self.current.tag == .keyword_var;
+        const mutable = self.current.tag == .keyword_var;
+        if (explicit) try self.advance();
+        if (self.current.tag != .identifier) return self.fail(if (explicit)
+            "expected binding name after 'let' or 'var'"
+        else
+            "expected conditional binding name");
+        const name = self.current.lexeme;
+        const name_position = self.current.position;
+        try self.advance();
+        try self.expect(.equal, "expected '=' after conditional binding name");
+        const source = try self.parseExpression(parenthesized_binding);
+        if (parenthesized_binding) try self.expect(.right_parenthesis, "expected ')' after conditional binding");
+        return .{ .binding = .{
+            .position = position,
+            .name_position = name_position,
+            .name = name,
+            .mutable = mutable,
+            .source = source,
+        } };
+    }
+
+    fn parenthesizedConditionStartsBinding(self: *const Parser) ParseError!bool {
+        var lexer = self.lexer;
+        const first = try lexer.next();
+        if (first.tag == .keyword_let or first.tag == .keyword_var) return true;
+        if (first.tag != .identifier) return false;
+        return (try lexer.next()).tag == .equal;
+    }
+
+    fn nextTag(self: *const Parser) ParseError!TokenTag {
+        var lexer = self.lexer;
+        return (try lexer.next()).tag;
     }
 
     fn parsePrint(self: *Parser) ParseError!Ast.Statement {
@@ -1091,7 +1136,7 @@ test "parse conditional alternatives and logical precedence" {
     const conditional = program.functions[0].statements[0].if_statement;
     try std.testing.expectEqual(@as(usize, 3), conditional.branches.len);
     try std.testing.expect(conditional.else_statements != null);
-    const logical_or = conditional.branches[0].condition.value.binary;
+    const logical_or = conditional.branches[0].condition.expression.value.binary;
     try std.testing.expectEqual(Ast.BinaryOperator.logical_or, logical_or.operator);
     try std.testing.expectEqual(Ast.BinaryOperator.logical_and, logical_or.left.value.binary.operator);
     try std.testing.expectEqual(Ast.UnaryOperator.logical_not, logical_or.left.value.binary.left.value.unary.operator);
@@ -1167,7 +1212,7 @@ test "parse while loops and their control statements" {
     );
     const statements = (try parser.parse()).functions[0].statements;
     const loop = statements[1].while_statement;
-    try std.testing.expectEqual(Ast.BinaryOperator.less, loop.condition.value.binary.operator);
+    try std.testing.expectEqual(Ast.BinaryOperator.less, loop.condition.expression.value.binary.operator);
     try std.testing.expectEqual(@as(usize, 2), loop.statements.len);
     try std.testing.expect(loop.statements[0].if_statement.branches[0].statements[0] == .continue_statement);
     try std.testing.expect(loop.statements[1] == .break_statement);

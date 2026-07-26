@@ -5,6 +5,7 @@ const Model = @import("Model.zig");
 const Numeric = @import("../Numeric.zig");
 const Support = @import("Support.zig");
 const Optionals = @import("Optionals.zig");
+const Control = @import("Control.zig");
 
 const AnalyzeError = error{ InvalidSource, OutOfMemory };
 
@@ -442,13 +443,13 @@ fn analyzeMutatingIf(
 ) AnalyzeError!bool {
     var exits: std.ArrayList(Ir.BlockId) = .empty;
     for (conditional.branches) |branch| {
-        const condition = try self.analyzeExpression(builder, branch.condition);
-        if (condition.type != .bool) return self.fail(branch.condition.position, "if condition expects 'bool'");
+        const analyzed = try Control.analyzeCondition(self, builder, branch.condition, "if");
         const body_block = try self.newBlock(builder);
         const next_block = try self.newBlock(builder);
-        self.terminate(builder, .{ .branch = .{ .condition = condition.value, .then_block = body_block, .else_block = next_block } });
+        self.terminate(builder, .{ .branch = .{ .condition = analyzed.condition.value, .then_block = body_block, .else_block = next_block } });
         builder.current_block = body_block;
         const binding_count = builder.bindings.items.len;
+        if (analyzed.binding) |binding| try Control.enterBinding(self, builder, binding);
         const terminated = try analyzeMutatingStatements(self, builder, method, structure_index, flat, self_local, branch.statements);
         builder.bindings.shrinkRetainingCapacity(binding_count);
         if (!terminated) try exits.append(self.allocator, builder.current_block);
@@ -481,12 +482,14 @@ fn analyzeMutatingWhile(
     const exit_block = try self.newBlock(builder);
     self.terminate(builder, .{ .jump = condition_block });
     builder.current_block = condition_block;
-    const condition = try self.analyzeExpression(builder, loop.condition);
-    if (condition.type != .bool) return self.fail(loop.condition.position, "while condition expects 'bool'");
-    self.terminate(builder, .{ .branch = .{ .condition = condition.value, .then_block = body_block, .else_block = exit_block } });
+    const analyzed = try Control.analyzeCondition(self, builder, loop.condition, "while");
+    self.terminate(builder, .{ .branch = .{ .condition = analyzed.condition.value, .then_block = body_block, .else_block = exit_block } });
     builder.current_block = body_block;
     try builder.loops.append(self.allocator, .{ .continue_block = condition_block, .break_block = exit_block });
+    const binding_count = builder.bindings.items.len;
+    if (analyzed.binding) |binding| try Control.enterBinding(self, builder, binding);
     const terminated = try analyzeMutatingStatements(self, builder, method, structure_index, flat, self_local, loop.statements);
+    builder.bindings.shrinkRetainingCapacity(binding_count);
     builder.loops.items.len -= 1;
     if (!terminated) self.terminate(builder, .{ .jump = condition_block });
     builder.current_block = exit_block;
@@ -580,11 +583,11 @@ fn statementsCallMutatingSelf(program: Ast.Program, structure_index: usize, stat
         .panic_statement => |panic_statement| if (expressionCallsMutatingSelf(program, structure_index, panic_statement.value, mutating)) return true,
         .if_statement => |conditional| {
             for (conditional.branches) |branch| {
-                if (expressionCallsMutatingSelf(program, structure_index, branch.condition, mutating) or statementsCallMutatingSelf(program, structure_index, branch.statements, mutating)) return true;
+                if (expressionCallsMutatingSelf(program, structure_index, branch.condition.source(), mutating) or statementsCallMutatingSelf(program, structure_index, branch.statements, mutating)) return true;
             }
             if (conditional.else_statements) |nested| if (statementsCallMutatingSelf(program, structure_index, nested, mutating)) return true;
         },
-        .while_statement => |loop| if (expressionCallsMutatingSelf(program, structure_index, loop.condition, mutating) or statementsCallMutatingSelf(program, structure_index, loop.statements, mutating)) return true,
+        .while_statement => |loop| if (expressionCallsMutatingSelf(program, structure_index, loop.condition.source(), mutating) or statementsCallMutatingSelf(program, structure_index, loop.statements, mutating)) return true,
         else => {},
     };
     return false;
