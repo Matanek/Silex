@@ -183,6 +183,23 @@ fn lowerInstruction(
             .result = layout.values[count.result].start,
             .collection = layout.values[count.collection].start,
         } },
+        .list_edit => |edit| edit_value: {
+            const collection = collectionForType(program, function.value_types[edit.collection]) orelse return error.InvalidMachineProgram;
+            const argument_collection = if (edit.argument) |argument| collectionForType(program, function.value_types[argument]) else null;
+            break :edit_value .{ .list_edit = .{
+                .result = layout.values[edit.result].start,
+                .collection = layout.values[edit.collection].start,
+                .kind = edit.kind,
+                .index = if (edit.index) |index| layout.values[index].start else null,
+                .argument = if (edit.argument) |argument| layout.values[argument] else null,
+                .argument_dynamic = if (argument_collection) |argument| argument.length == null else false,
+                .argument_count = if (argument_collection) |argument| @intCast(argument.length orelse 0) else 0,
+                .removed = if (edit.removed) |removed| layout.values[removed] else null,
+                .element_width = @intCast(try leafCount(program, collection.element)),
+                .header = try internString(allocator, strings, try collectionRuntimeHeader(allocator, program, edit.position)),
+                .tail = try internString(allocator, strings, " is out of bounds for count "),
+            } };
+        },
         .enum_payload => |payload| enum_payload: {
             if (payload.enumeration >= program.enums.len) return error.InvalidMachineProgram;
             const enumeration = program.enums[payload.enumeration];

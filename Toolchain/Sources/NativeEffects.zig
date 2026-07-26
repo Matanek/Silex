@@ -323,6 +323,33 @@ test "native dynamic lists match reference construction copies and bounds" {
     }
 }
 
+test "native collection mutations match the reference" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const source =
+        \\func main() {
+        \\    var fixed:int[3] = [1, 2, 3]; fixed.replace(1, 8); fixed.swap(0, -1); fixed.reverse()
+        \\    var values = [1, 2, 3]; let copy = values; values.replace(1, 8); values.swap(0, -1); values.reverse()
+        \\    print(values[0], values[1], values[2])
+        \\    values.append(4); values.append([5, 6]); values.prepend(0); values.insert(2, 7)
+        \\    print(values[0], values[1], values[2], values[3], values[-1])
+        \\    let removed = values.take(3); let first = values.take_first(); let last = values.take_last(); values.reverse()
+        \\    print(fixed[0], fixed[1], fixed[2], " ", removed, first, last, " ", values.count(), values[0], values[-1], " ", copy[1])
+        \\    values.clear(); print(values.count(), values.is_empty())
+        \\}
+    ;
+    var frontend = Frontend.Frontend.init(allocator);
+    var compilation = try frontend.compile(source);
+    compilation.ir.files = &.{"Main.sx"};
+    const reference = try Interpreter.runCapture(allocator, compilation.ir);
+    const native = try runMachine(allocator, try Lower.lower(allocator, compilation.ir));
+    try std.testing.expectEqual(reference.exit_code, exitCode(native));
+    try std.testing.expectEqualSlices(u8, reference.stdout, native.stdout);
+    try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
+}
+
 test "native optional transport matches the reference interpreter" {
     if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);

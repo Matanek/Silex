@@ -1030,6 +1030,9 @@ pub const Analyzer = struct {
     fn analyzeCall(self: *Analyzer, builder: *FunctionBuilder, call: Ast.Expression.Call) AnalyzeError!?TypedValue {
         if (call.receiver == null and std.mem.eql(u8, call.name, "map_error")) return try MapError.analyze(self, builder, call);
         if (call.receiver) |receiver_expression| {
+            if (Collections.isMutation(call.name) and Collections.receiverIsCollection(self.structures, builder, receiver_expression)) {
+                return try Collections.analyzeMutation(self, builder, call);
+            }
             if (try Collections.analyzeCall(self, builder, call)) |value| return value;
             if (receiver_expression.value == .identifier) {
                 if (Enums.find(self, receiver_expression.value.identifier)) |enum_index| {

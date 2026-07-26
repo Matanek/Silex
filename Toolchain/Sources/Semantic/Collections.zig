@@ -4,6 +4,153 @@ const Ir = @import("../Ir.zig");
 const Numeric = @import("../Numeric.zig");
 const Optionals = @import("Optionals.zig");
 const Model = @import("Model.zig");
+const Support = @import("Support.zig");
+
+pub fn isMutation(name: []const u8) bool {
+    return std.mem.eql(u8, name, "swap") or std.mem.eql(u8, name, "reverse") or std.mem.eql(u8, name, "replace") or
+        std.mem.eql(u8, name, "append") or std.mem.eql(u8, name, "prepend") or std.mem.eql(u8, name, "insert") or
+        std.mem.eql(u8, name, "take") or std.mem.eql(u8, name, "take_first") or std.mem.eql(u8, name, "take_last") or
+        std.mem.eql(u8, name, "clear");
+}
+
+pub fn receiverIsCollection(structures: []const Ir.Structure, builder: anytype, expression: *const Ast.Expression) bool {
+    const name = switch (expression.value) {
+        .identifier => |value| value,
+        else => return false,
+    };
+    const binding = Support.findBinding(builder.bindings.items, name) orelse return false;
+    return collectionForType(structures, binding.type) != null;
+}
+
+pub fn analyzeMutation(self: anytype, builder: anytype, call: Ast.Expression.Call) !?Model.TypedValue {
+    if (call.safe or call.named_arguments.len != 0 or call.type_arguments.len != 0) return self.fail(call.name_position, "collection mutations use positional arguments");
+    const receiver_expression = call.receiver.?;
+    const name = switch (receiver_expression.value) {
+        .identifier => |value| value,
+        else => return self.fail(receiver_expression.position, "collection mutation requires a var receiver"),
+    };
+    const binding = Support.findBinding(builder.bindings.items, name) orelse return self.fail(receiver_expression.position, "unknown collection variable");
+    if (!binding.mutable or binding.local == null) return self.fail(receiver_expression.position, "collection mutation requires a var receiver");
+    const collection = collectionForType(self.structures, binding.type) orelse return self.fail(receiver_expression.position, "collection mutation requires an array or list");
+    const source = try self.analyzeExpression(builder, receiver_expression);
+
+    if (std.mem.eql(u8, call.name, "replace")) {
+        try requireArity(self, call, 2);
+        const index = try requireIndex(self, builder, call.arguments[0]);
+        const replacement = try self.analyzeExpressionExpected(builder, call.arguments[1], collection.element);
+        const previous = try self.newValue(builder, collection.element);
+        try self.emit(builder, .{ .collection_load = .{ .result = previous, .collection = source.value, .index = index.value, .position = call.name_position } });
+        const updated = try self.newValue(builder, binding.type);
+        try self.emit(builder, .{ .collection_replace = .{ .result = updated, .collection = source.value, .index = index.value, .replacement = replacement.value, .position = call.name_position } });
+        try self.emit(builder, .{ .local_store = .{ .local = binding.local.?, .operand = updated } });
+        return .{ .type = collection.element, .value = previous };
+    }
+    if (std.mem.eql(u8, call.name, "swap")) {
+        try requireArity(self, call, 2);
+        const left_index = try requireIndex(self, builder, call.arguments[0]);
+        const right_index = try requireIndex(self, builder, call.arguments[1]);
+        const left = try self.newValue(builder, collection.element);
+        const right = try self.newValue(builder, collection.element);
+        try self.emit(builder, .{ .collection_load = .{ .result = left, .collection = source.value, .index = left_index.value, .position = call.name_position } });
+        try self.emit(builder, .{ .collection_load = .{ .result = right, .collection = source.value, .index = right_index.value, .position = call.name_position } });
+        const first = try self.newValue(builder, binding.type);
+        const updated = try self.newValue(builder, binding.type);
+        try self.emit(builder, .{ .collection_replace = .{ .result = first, .collection = source.value, .index = left_index.value, .replacement = right, .position = call.name_position } });
+        try self.emit(builder, .{ .collection_replace = .{ .result = updated, .collection = first, .index = right_index.value, .replacement = left, .position = call.name_position } });
+        try self.emit(builder, .{ .local_store = .{ .local = binding.local.?, .operand = updated } });
+        return .{ .type = binding.type, .value = updated };
+    }
+    if (collection.length != null and std.mem.eql(u8, call.name, "reverse")) {
+        try requireArity(self, call, 0);
+        var updated = source.value;
+        for (0..collection.length.? / 2) |left_index| {
+            const right_index = collection.length.? - 1 - left_index;
+            const left_constant = try constantIndex(self, builder, left_index);
+            const right_constant = try constantIndex(self, builder, right_index);
+            const left = try self.newValue(builder, collection.element);
+            const right = try self.newValue(builder, collection.element);
+            try self.emit(builder, .{ .collection_load = .{ .result = left, .collection = updated, .index = left_constant, .position = call.name_position } });
+            try self.emit(builder, .{ .collection_load = .{ .result = right, .collection = updated, .index = right_constant, .position = call.name_position } });
+            const first = try self.newValue(builder, binding.type);
+            const next = try self.newValue(builder, binding.type);
+            try self.emit(builder, .{ .collection_replace = .{ .result = first, .collection = updated, .index = left_constant, .replacement = right, .position = call.name_position } });
+            try self.emit(builder, .{ .collection_replace = .{ .result = next, .collection = first, .index = right_constant, .replacement = left, .position = call.name_position } });
+            updated = next;
+        }
+        try self.emit(builder, .{ .local_store = .{ .local = binding.local.?, .operand = updated } });
+        return .{ .type = binding.type, .value = updated };
+    }
+    if (collection.length != null) return self.fail(call.name_position, "fixed arrays only support swap, reverse, and replace");
+
+    var kind: Ir.Instruction.ListEditKind = undefined;
+    var index: ?Ir.ValueId = null;
+    var argument: ?Ir.ValueId = null;
+    var removed: ?Ir.ValueId = null;
+    var return_type = binding.type;
+    if (std.mem.eql(u8, call.name, "reverse")) {
+        try requireArity(self, call, 0);
+        kind = .reverse;
+    } else if (std.mem.eql(u8, call.name, "clear")) {
+        try requireArity(self, call, 0);
+        kind = .clear;
+    } else if (std.mem.eql(u8, call.name, "append")) {
+        try requireArity(self, call, 1);
+        const value = try self.analyzeExpression(builder, call.arguments[0]);
+        if (value.type == collection.element) {
+            kind = .append;
+            argument = value.value;
+        } else if (collectionForType(self.structures, value.type)) |other| {
+            if (other.element != collection.element) return self.fail(call.arguments[0].position, "append sequence element type is incompatible");
+            kind = .append_sequence;
+            argument = value.value;
+        } else return self.fail(call.arguments[0].position, "append expects an element or compatible sequence");
+    } else if (std.mem.eql(u8, call.name, "prepend")) {
+        try requireArity(self, call, 1);
+        kind = .prepend;
+        argument = (try self.analyzeExpressionExpected(builder, call.arguments[0], collection.element)).value;
+    } else if (std.mem.eql(u8, call.name, "insert")) {
+        try requireArity(self, call, 2);
+        kind = .insert;
+        index = (try requireIndex(self, builder, call.arguments[0])).value;
+        argument = (try self.analyzeExpressionExpected(builder, call.arguments[1], collection.element)).value;
+    } else {
+        return_type = collection.element;
+        removed = try self.newValue(builder, collection.element);
+        if (std.mem.eql(u8, call.name, "take")) {
+            try requireArity(self, call, 1);
+            kind = .take;
+            index = (try requireIndex(self, builder, call.arguments[0])).value;
+        } else if (std.mem.eql(u8, call.name, "take_first")) {
+            try requireArity(self, call, 0);
+            kind = .take_first;
+        } else {
+            try requireArity(self, call, 0);
+            kind = .take_last;
+        }
+    }
+    const updated = try self.newValue(builder, binding.type);
+    try self.emit(builder, .{ .list_edit = .{ .result = updated, .collection = source.value, .kind = kind, .index = index, .argument = argument, .removed = removed, .position = call.name_position } });
+    try self.emit(builder, .{ .local_store = .{ .local = binding.local.?, .operand = updated } });
+    return .{ .type = return_type, .value = removed orelse updated };
+}
+
+fn requireArity(self: anytype, call: Ast.Expression.Call, expected: usize) !void {
+    if (call.arguments.len == expected) return;
+    const message = try std.fmt.allocPrint(self.allocator, "collection operation '{s}' expects {d} arguments, found {d}", .{ call.name, expected, call.arguments.len });
+    return self.fail(call.name_position, message);
+}
+
+fn requireIndex(self: anytype, builder: anytype, expression: *const Ast.Expression) !Model.TypedValue {
+    const value = try self.analyzeExpression(builder, expression);
+    if (value.type != .int) return self.fail(expression.position, "collection index expects 'int'");
+    return value;
+}
+
+fn constantIndex(self: anytype, builder: anytype, value: usize) !Ir.ValueId {
+    const result = try self.newValue(builder, .int);
+    try self.emit(builder, .{ .constant_int = .{ .result = result, .bits = value } });
+    return result;
+}
 
 pub fn analyzeLiteral(
     self: anytype,
