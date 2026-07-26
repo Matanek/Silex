@@ -67,9 +67,15 @@ open Silex document
   name and complete parameter signature), the required parameter count that
   defines their effective call signatures, public nominal structures, fields,
   and constructor and method signatures. Default expressions remain source
-  semantics resolved in their declaring module. `public` is checked during
-  composition and semantic resolution; it is unrelated to Mach-O symbol export
-  or native layout.
+  semantics resolved in their declaring module. Public reexports add a visible
+  façade name to these identities without copying declarations or creating
+  backend symbols. Transparent type aliases are normalized to the same portable
+  type before signatures and IR are built; interfaces retain only their visible
+  source name and canonical target. `internal` is checked against preserved
+  source-file provenance and is removed from interfaces; opaque internal return
+  types remain typed without exposing their declarations or members. `public`
+  is checked during composition and semantic resolution; neither visibility is
+  related to Mach-O symbol export or native layout.
 - The composer resolves all calls and assigns deterministic `FunctionId`
   values before native lowering. The backend receives one portable IR program
   and knows nothing about manifests, package paths, or source visibility.

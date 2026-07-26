@@ -34,14 +34,23 @@ pub const Parser = struct {
         while (self.current.tag != .end) {
             switch (self.current.tag) {
                 .keyword_use => try uses.append(self.allocator, try self.parseUse(false)),
-                .keyword_struct => try structures.append(self.allocator, try self.parseStructure(false)),
-                .keyword_func => try functions.append(self.allocator, try self.parseFunction(false)),
+                .keyword_struct => try structures.append(self.allocator, try self.parseStructure(false, false)),
+                .keyword_func => try functions.append(self.allocator, try self.parseFunction(false, false)),
                 .keyword_public => {
                     try self.advance();
                     switch (self.current.tag) {
-                        .keyword_struct => try structures.append(self.allocator, try self.parseStructure(true)),
-                        .keyword_func => try functions.append(self.allocator, try self.parseFunction(true)),
-                        else => return self.fail("expected struct or function declaration after 'public'"),
+                        .keyword_use => try uses.append(self.allocator, try self.parseUse(true)),
+                        .keyword_struct => try structures.append(self.allocator, try self.parseStructure(true, false)),
+                        .keyword_func => try functions.append(self.allocator, try self.parseFunction(true, false)),
+                        else => return self.fail("expected use, struct, or function declaration after 'public'"),
+                    }
+                },
+                .keyword_internal => {
+                    try self.advance();
+                    switch (self.current.tag) {
+                        .keyword_struct => try structures.append(self.allocator, try self.parseStructure(false, true)),
+                        .keyword_func => try functions.append(self.allocator, try self.parseFunction(false, true)),
+                        else => return self.fail("expected struct or function declaration after 'internal'"),
                     }
                 },
                 else => return self.fail("expected use, struct, or function declaration"),
@@ -55,7 +64,7 @@ pub const Parser = struct {
         };
     }
 
-    fn parseStructure(self: *Parser, is_public: bool) ParseError!Ast.Structure {
+    fn parseStructure(self: *Parser, is_public: bool, is_internal: bool) ParseError!Ast.Structure {
         const position = self.current.position;
         try self.advance();
         if (self.current.tag != .identifier) return self.fail("expected structure name");
@@ -68,20 +77,18 @@ pub const Parser = struct {
         var constructors: std.ArrayList(Ast.Constructor) = .empty;
         var methods: std.ArrayList(Ast.Function) = .empty;
         while (self.current.tag != .right_brace and self.current.tag != .end) {
+            var member_internal = false;
+            if (self.current.tag == .keyword_public or self.current.tag == .keyword_internal) {
+                member_internal = self.current.tag == .keyword_internal;
+                try self.advance();
+            }
             if (self.current.tag == .keyword_init) {
-                try constructors.append(self.allocator, try self.parseConstructor());
+                try constructors.append(self.allocator, try self.parseConstructor(member_internal));
                 continue;
             }
             if (self.current.tag == .keyword_func) {
-                try methods.append(self.allocator, try self.parseFunction(true));
+                try methods.append(self.allocator, try self.parseFunction(!member_internal, member_internal));
                 continue;
-            }
-            if (self.current.tag == .keyword_public) {
-                try self.advance();
-                if (self.current.tag == .keyword_func) {
-                    try methods.append(self.allocator, try self.parseFunction(true));
-                    continue;
-                }
             }
             const mutable = switch (self.current.tag) {
                 .keyword_let => false,
@@ -103,7 +110,8 @@ pub const Parser = struct {
             }
             try self.expectStatementTerminator();
             try fields.append(self.allocator, .{
-                .is_public = true,
+                .is_public = !member_internal,
+                .is_internal = member_internal,
                 .position = field_position,
                 .name_position = field_name_position,
                 .name = field_name,
@@ -115,6 +123,7 @@ pub const Parser = struct {
         try self.expect(.right_brace, "expected '}' after structure fields");
         return .{
             .is_public = is_public,
+            .is_internal = is_internal,
             .position = position,
             .name_position = name_position,
             .name = name,
@@ -124,7 +133,7 @@ pub const Parser = struct {
         };
     }
 
-    fn parseConstructor(self: *Parser) ParseError!Ast.Constructor {
+    fn parseConstructor(self: *Parser, is_internal: bool) ParseError!Ast.Constructor {
         const position = self.current.position;
         try self.advance();
         try self.expect(.left_parenthesis, "expected '(' after 'init'");
@@ -145,6 +154,8 @@ pub const Parser = struct {
         }
         try self.expect(.right_parenthesis, "expected ')' after constructor parameters");
         return .{
+            .is_public = !is_internal,
+            .is_internal = is_internal,
             .position = position,
             .parameters = try parameters.toOwnedSlice(self.allocator),
             .statements = try self.parseBlock(),
@@ -154,6 +165,23 @@ pub const Parser = struct {
     fn parseUse(self: *Parser, is_public: bool) ParseError!Ast.Use {
         const position = self.current.position;
         try self.expect(.keyword_use, "expected 'use'");
+        if (isTypeToken(self.current.tag) and self.current.tag != .identifier) {
+            const type_target = try self.parseType();
+            try self.expect(.keyword_as, "type alias requires 'as'");
+            if (self.current.tag != .identifier) return self.fail("expected alias after 'as'");
+            const alias = self.current.lexeme;
+            const alias_position = self.current.position;
+            try self.advance();
+            try self.expectStatementTerminator();
+            return .{
+                .position = position,
+                .path = "",
+                .type_target = type_target,
+                .alias = alias,
+                .alias_position = alias_position,
+                .is_public = is_public,
+            };
+        }
         if (self.current.tag != .identifier) return self.fail("expected module path after 'use'");
         var path = self.current.lexeme;
         try self.advance();
@@ -173,6 +201,7 @@ pub const Parser = struct {
             alias_position = self.current.position;
             try self.advance();
         }
+        if (is_public and alias == null) return self.failAt(position, "public use requires an explicit alias");
         try self.expectStatementTerminator();
         return .{
             .position = position,
@@ -183,7 +212,7 @@ pub const Parser = struct {
         };
     }
 
-    fn parseFunction(self: *Parser, is_public: bool) ParseError!Ast.Function {
+    fn parseFunction(self: *Parser, is_public: bool, is_internal: bool) ParseError!Ast.Function {
         const position = self.current.position;
         try self.expect(.keyword_func, "expected 'func'");
         if (self.current.tag != .identifier) return self.fail("expected function name");
@@ -212,6 +241,7 @@ pub const Parser = struct {
         const return_type: Ast.Type = if (self.current.tag == .left_brace) .void else try self.parseType();
         return .{
             .is_public = is_public,
+            .is_internal = is_internal,
             .position = position,
             .name_position = name_position,
             .name = name,
@@ -270,6 +300,30 @@ pub const Parser = struct {
         };
         try self.advance();
         return result;
+    }
+
+    fn isTypeToken(tag: TokenTag) bool {
+        return switch (tag) {
+            .keyword_void,
+            .keyword_int,
+            .keyword_int8,
+            .keyword_int16,
+            .keyword_int32,
+            .keyword_int64,
+            .keyword_uint,
+            .keyword_uint8,
+            .keyword_uint16,
+            .keyword_uint32,
+            .keyword_uint64,
+            .keyword_bool,
+            .keyword_float,
+            .keyword_float32,
+            .keyword_float64,
+            .keyword_str,
+            .identifier,
+            => true,
+            else => false,
+        };
     }
 
     fn internTypeName(self: *Parser, name: []const u8) Allocator.Error!Ast.Type {

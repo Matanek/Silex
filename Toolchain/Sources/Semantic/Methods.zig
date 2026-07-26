@@ -165,17 +165,39 @@ pub fn analyzeCall(self: anytype, builder: anytype, call: Ast.Expression.Call) !
     };
     if (structure_index >= self.program.structures.len) return error.InvalidSource;
     const structure = self.program.structures[structure_index];
+    if (structure.is_internal and call.name_position.file != structure.position.file) {
+        const message = try std.fmt.allocPrint(
+            self.allocator,
+            "members of internal structure '{s}' are unavailable outside its source file",
+            .{structure.name},
+        );
+        return self.fail(call.name_position, message);
+    }
     if (call.named_arguments.len != 0) return self.fail(call.name_position, "methods use positional arguments");
 
     var arity_count: usize = 0;
     var sole: ?usize = null;
+    var inaccessible_internal = false;
     for (structure.methods, 0..) |method, method_index| {
-        if (std.mem.eql(u8, method.name, call.name) and Support.acceptsArity(method.parameters, call.arguments.len)) {
+        if (!std.mem.eql(u8, method.name, call.name)) continue;
+        if (!Support.memberVisible(call.name_position, method.position, method.is_internal)) {
+            inaccessible_internal = true;
+            continue;
+        }
+        if (Support.acceptsArity(method.parameters, call.arguments.len)) {
             arity_count += 1;
             sole = method_index;
         }
     }
     if (arity_count == 0) {
+        if (inaccessible_internal) {
+            const message = try std.fmt.allocPrint(
+                self.allocator,
+                "method '{s}' is internal to its source file",
+                .{call.name},
+            );
+            return self.fail(call.name_position, message);
+        }
         const message = try std.fmt.allocPrint(
             self.allocator,
             "structure '{s}' has no method named '{s}' accepting {d} arguments",
@@ -198,6 +220,7 @@ pub fn analyzeCall(self: anytype, builder: anytype, call: Ast.Expression.Call) !
     var ambiguous = false;
     for (structure.methods, 0..) |method, method_index| {
         if (!std.mem.eql(u8, method.name, call.name) or !Support.acceptsArity(method.parameters, arguments.items.len)) continue;
+        if (!Support.memberVisible(call.name_position, method.position, method.is_internal)) continue;
         var cost: usize = 0;
         var viable = true;
         for (method.parameters[0..arguments.items.len], arguments.items) |parameter, argument| {

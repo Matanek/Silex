@@ -5,6 +5,8 @@ const Ir = @import("Ir.zig");
 const Modules = @import("Modules.zig");
 const Packages = @import("Packages.zig");
 const ParserModule = @import("Parser.zig");
+const Reexports = @import("Project/Reexports.zig");
+const TypeAliases = @import("Project/TypeAliases.zig");
 const Semantic = @import("Semantic/Analyzer.zig");
 const Source = @import("Source.zig");
 
@@ -21,20 +23,8 @@ pub const Compilation = struct {
     files: []const []const u8,
 };
 
-const State = enum { fresh, loading, loaded };
-
-const Binding = struct {
-    alias: []const u8,
-    path: []const u8,
-    module: ?usize,
-    declaration: ?[]const u8,
-};
-
-const Unit = struct {
-    state: State = .fresh,
-    program: ?Ast.Program = null,
-    bindings: []const Binding = &.{},
-};
+const Binding = Reexports.Binding;
+const Unit = Reexports.Unit;
 
 pub const Compiler = struct {
     allocator: Allocator,
@@ -92,6 +82,8 @@ pub const Compiler = struct {
             "entry source is not a discovered module",
         );
         try self.loadModule(self.entry_module, null);
+        try self.validateTypeAliases();
+        try self.validateReexports();
 
         const composition = try self.composeAst();
         const ast = composition.program;
@@ -195,6 +187,15 @@ pub const Compiler = struct {
     }
 
     fn resolveUse(self: *Compiler, source_module: usize, use: Ast.Use) Error!Binding {
+        if (use.type_target) |type_target| return .{
+            .alias = use.alias.?,
+            .path = "",
+            .module = null,
+            .declaration = null,
+            .type_alias = type_target,
+            .is_public = use.is_public,
+            .position = use.position,
+        };
         const owner = self.index.providers[source_module].owner;
         if (self.findAccessibleModule(use.path, owner)) |module| {
             return .{
@@ -202,6 +203,8 @@ pub const Compiler = struct {
                 .path = use.path,
                 .module = module,
                 .declaration = null,
+                .is_public = use.is_public,
+                .position = use.position,
             };
         }
 
@@ -214,6 +217,8 @@ pub const Compiler = struct {
                     .path = prefix,
                     .module = module,
                     .declaration = use.path[at + 1 ..],
+                    .is_public = use.is_public,
+                    .position = use.position,
                 };
             }
             separator = std.mem.lastIndexOfScalar(u8, prefix, '.');
@@ -225,11 +230,181 @@ pub const Compiler = struct {
                 .path = use.path,
                 .module = null,
                 .declaration = null,
+                .is_public = use.is_public,
+                .position = use.position,
+            };
+        }
+
+        if (use.alias != null) {
+            if (findStructure(self.units[source_module].program.?, use.path) != null) return .{
+                .alias = use.alias.?,
+                .path = use.path,
+                .module = source_module,
+                .declaration = use.path,
+                .is_public = use.is_public,
+                .position = use.position,
+            };
+            return .{
+                .alias = use.alias.?,
+                .path = use.path,
+                .module = null,
+                .declaration = null,
+                .type_name = use.path,
+                .is_public = use.is_public,
+                .position = use.position,
             };
         }
 
         const message = try std.fmt.allocPrint(self.allocator, "unknown module or declaration '{s}'", .{use.path});
         return self.fail(use.position, message);
+    }
+
+    const DeclarationKind = Reexports.DeclarationKind;
+
+    fn validateTypeAliases(self: *Compiler) Error!void {
+        for (self.units, 0..) |unit, module| {
+            if (unit.state != .loaded) continue;
+            for (unit.bindings) |binding| {
+                if (binding.type_alias == null and binding.type_name == null) continue;
+                if (try self.resolveTypeAlias(module, binding.alias, binding.position, false) == null) {
+                    const message = try std.fmt.allocPrint(
+                        self.allocator,
+                        "unknown type alias target '{s}'",
+                        .{binding.path},
+                    );
+                    return self.fail(binding.position, message);
+                }
+            }
+        }
+    }
+
+    fn validateReexports(self: *Compiler) Error!void {
+        for (self.units, 0..) |unit, module| {
+            if (unit.state != .loaded) continue;
+            for (unit.bindings) |binding| {
+                if (!binding.is_public) continue;
+                if (binding.type_alias != null or binding.type_name != null) {
+                    const target = try self.resolveTypeAlias(module, binding.alias, binding.position, false) orelse {
+                        return self.fail(binding.position, "public type alias target is unknown");
+                    };
+                    try self.requirePublicAliasTarget(target, binding.position, binding.alias);
+                    continue;
+                }
+                if (binding.module == null or binding.declaration == null) {
+                    return self.fail(binding.position, "public use can only reexport a declaration");
+                }
+                const functions = try self.resolveReexport(
+                    binding.module.?,
+                    binding.declaration.?,
+                    .function,
+                    try self.allocator.alloc(bool, self.units.len),
+                );
+                const structures = try self.resolveReexport(
+                    binding.module.?,
+                    binding.declaration.?,
+                    .structure,
+                    try self.allocator.alloc(bool, self.units.len),
+                );
+                if (functions != null and structures != null) {
+                    const message = try std.fmt.allocPrint(
+                        self.allocator,
+                        "public use destination '{s}' is ambiguous",
+                        .{binding.alias},
+                    );
+                    return self.fail(binding.position, message);
+                }
+                if (functions == null and structures == null) {
+                    if (try self.resolveTypeAlias(
+                        binding.module.?,
+                        binding.declaration.?,
+                        binding.position,
+                        true,
+                    )) |target| {
+                        try self.requirePublicAliasTarget(target, binding.position, binding.alias);
+                        continue;
+                    }
+                    const message = try std.fmt.allocPrint(
+                        self.allocator,
+                        "public use cannot expose inaccessible declaration '{s}'",
+                        .{binding.declaration.?},
+                    );
+                    return self.fail(binding.position, message);
+                }
+            }
+        }
+    }
+
+    fn resolveTypeAlias(
+        self: *Compiler,
+        module: usize,
+        name: []const u8,
+        position: Source.Position,
+        exported_only: bool,
+    ) Error!?TypeAliases.Target {
+        var capacity = self.units.len;
+        for (self.units) |unit| capacity += unit.bindings.len;
+        const visits = try self.allocator.alloc(TypeAliases.Visit, capacity + 1);
+        const resolved = (if (exported_only)
+            TypeAliases.resolveExported(self.units, module, name, visits)
+        else
+            TypeAliases.resolve(self.units, module, name, visits)) catch {
+            const message = try std.fmt.allocPrint(self.allocator, "type alias cycle reaches '{s}'", .{name});
+            return self.fail(position, message);
+        };
+        if (resolved != null or exported_only or std.mem.indexOfScalar(u8, name, '.') == null) return resolved;
+        const target = try self.targetForCall(module, name) orelse return null;
+        return TypeAliases.resolveExported(
+            self.units,
+            target.module,
+            target.declaration,
+            visits,
+        ) catch {
+            const message = try std.fmt.allocPrint(self.allocator, "type alias cycle reaches '{s}'", .{name});
+            return self.fail(position, message);
+        };
+    }
+
+    fn requirePublicAliasTarget(
+        self: *Compiler,
+        target: TypeAliases.Target,
+        position: Source.Position,
+        alias: []const u8,
+    ) Error!void {
+        const structure_target = switch (target) {
+            .fundamental => return,
+            .structure => |structure| structure,
+        };
+        const structure = findStructure(
+            self.units[structure_target.module].program.?,
+            structure_target.declaration,
+        ).?;
+        if (structure.is_public) return;
+        const message = if (structure.is_internal)
+            try std.fmt.allocPrint(
+                self.allocator,
+                "public type alias '{s}' exposes internal structure '{s}'",
+                .{ alias, structure.name },
+            )
+        else
+            try std.fmt.allocPrint(
+                self.allocator,
+                "public type alias '{s}' exposes private structure '{s}'",
+                .{ alias, structure.name },
+            );
+        return self.fail(position, message);
+    }
+
+    fn resolveReexport(
+        self: *Compiler,
+        module: usize,
+        name: []const u8,
+        kind: DeclarationKind,
+        visiting: []bool,
+    ) Error!?CallTarget {
+        return Reexports.resolve(self.units, module, name, kind, visiting) catch {
+            const message = try std.fmt.allocPrint(self.allocator, "public use cycle reaches '{s}'", .{name});
+            return self.fail(expressionPosition(module), message);
+        };
     }
 
     fn activateQualifiedReferences(self: *Compiler, module: usize) Error!void {
@@ -327,10 +502,7 @@ pub const Compiler = struct {
         }
     }
 
-    const CallTarget = struct {
-        module: usize,
-        declaration: []const u8,
-    };
+    const CallTarget = Reexports.Target;
 
     fn targetForCall(self: *Compiler, module: usize, call_name: []const u8) Error!?CallTarget {
         const separator = std.mem.indexOfScalar(u8, call_name, '.');
@@ -371,14 +543,38 @@ pub const Compiler = struct {
                 .declaration = binding.declaration orelse lastSegment(self.index.providers[target_module].name),
             };
         }
+        if (try self.resolveTypeAlias(module, name, expressionPosition(module), false)) |target| {
+            return switch (target) {
+                .fundamental => null,
+                .structure => |structure| structure,
+            };
+        }
         return null;
     }
 
     fn structureTarget(self: *Compiler, module: usize, name: []const u8) Error!?CallTarget {
         const target = try self.structureCandidate(module, name) orelse return null;
         if (self.units[target.module].state != .loaded) return null;
-        if (findStructure(self.units[target.module].program.?, target.declaration) == null) return null;
-        return target;
+        if (findStructure(self.units[target.module].program.?, target.declaration) != null) return target;
+        return self.resolveReexport(
+            target.module,
+            target.declaration,
+            .structure,
+            try self.allocator.alloc(bool, self.units.len),
+        );
+    }
+
+    fn functionTarget(self: *Compiler, target: CallTarget) Error!?CallTarget {
+        const program = self.units[target.module].program orelse return null;
+        for (program.functions) |function| {
+            if (std.mem.eql(u8, function.name, target.declaration)) return target;
+        }
+        return self.resolveReexport(
+            target.module,
+            target.declaration,
+            .function,
+            try self.allocator.alloc(bool, self.units.len),
+        );
     }
 
     fn resolveStructure(self: *Compiler, module: usize, name: []const u8, position: Source.Position) Error!CallTarget {
@@ -394,11 +590,10 @@ pub const Compiler = struct {
         if (source_module == target.module) return;
         const structure = findStructure(self.units[target.module].program.?, target.declaration).?;
         if (structure.is_public) return;
-        const message = try std.fmt.allocPrint(
-            self.allocator,
-            "structure '{s}' is private outside its module",
-            .{target.declaration},
-        );
+        const message = if (structure.is_internal)
+            try std.fmt.allocPrint(self.allocator, "structure '{s}' is internal to its source file", .{target.declaration})
+        else
+            try std.fmt.allocPrint(self.allocator, "structure '{s}' is private outside its module", .{target.declaration});
         return self.fail(position, message);
     }
 
@@ -416,7 +611,7 @@ pub const Compiler = struct {
 
     const AstComposition = struct {
         program: Ast.Program,
-        type_maps: []const []const usize,
+        type_maps: []const []const Ast.Type,
     };
 
     fn composeAst(self: *Compiler) Error!AstComposition {
@@ -435,20 +630,37 @@ pub const Compiler = struct {
             }
         }
 
-        const type_maps = try self.allocator.alloc([]const usize, self.units.len);
+        const type_maps = try self.allocator.alloc([]const Ast.Type, self.units.len);
         @memset(type_maps, &.{});
         for (self.index.providers, 0..) |_, module| {
             if (self.units[module].state != .loaded) continue;
             const program = self.units[module].program.?;
-            const map = try self.allocator.alloc(usize, program.type_names.len);
+            const map = try self.allocator.alloc(Ast.Type, program.type_names.len);
             for (program.type_names, 0..) |name, index| {
+                if (try self.resolveTypeAlias(module, name, expressionPosition(module), false)) |alias_target| {
+                    map[index] = switch (alias_target) {
+                        .fundamental => |fundamental| fundamental,
+                        .structure => |target| structure_type: {
+                            try self.requirePublicStructure(module, target, expressionPosition(module));
+                            const canonical = try structureCanonicalName(
+                                self.allocator,
+                                self.index.providers[target.module].name,
+                                target.declaration,
+                            );
+                            break :structure_type .structure(
+                                findName(type_names.items, canonical) orelse return error.InvalidSource,
+                            );
+                        },
+                    };
+                    continue;
+                }
                 const target = try self.resolveStructure(module, name, expressionPosition(module));
                 const canonical = try structureCanonicalName(
                     self.allocator,
                     self.index.providers[target.module].name,
                     target.declaration,
                 );
-                map[index] = findName(type_names.items, canonical) orelse return error.InvalidSource;
+                map[index] = .structure(findName(type_names.items, canonical) orelse return error.InvalidSource);
             }
             type_maps[module] = map;
             try self.validatePublicTypeExposure(module);
@@ -527,18 +739,92 @@ pub const Compiler = struct {
         }, .type_maps = type_maps };
     }
 
-    fn buildInterfaces(self: *Compiler, type_maps: []const []const usize) Error![]const Interface.Module {
+    fn buildInterfaces(self: *Compiler, type_maps: []const []const Ast.Type) Error![]const Interface.Module {
         var interfaces: std.ArrayList(Interface.Module) = .empty;
+        const interface_by_module = try self.allocator.alloc(?usize, self.units.len);
+        @memset(interface_by_module, null);
         for (self.index.providers, 0..) |provider, module| {
             if (self.units[module].state != .loaded) continue;
             const owner: Interface.Owner = if (self.packages.packages[provider.owner].name) |name|
                 .{ .package = name }
             else
                 .project;
+            interface_by_module[module] = interfaces.items.len;
             try interfaces.append(
                 self.allocator,
                 try Interface.buildMapped(self.allocator, owner, provider.name, self.units[module].program.?, type_maps[module]),
             );
+        }
+        for (self.units, 0..) |unit, module| {
+            const destination_index = interface_by_module[module] orelse continue;
+            for (unit.bindings) |binding| {
+                if (!binding.is_public) continue;
+                const alias_target = if (binding.type_alias != null or binding.type_name != null)
+                    try self.resolveTypeAlias(module, binding.alias, binding.position, false)
+                else if (binding.module != null and binding.declaration != null)
+                    try self.resolveTypeAlias(binding.module.?, binding.declaration.?, binding.position, true)
+                else
+                    null;
+                if (alias_target) |target| switch (target) {
+                    .fundamental => |fundamental| {
+                        const previous = interfaces.items[destination_index].type_aliases;
+                        const expanded = try self.allocator.alloc(Interface.TypeAlias, previous.len + 1);
+                        @memcpy(expanded[0..previous.len], previous);
+                        expanded[previous.len] = .{ .name = binding.alias, .target = fundamental };
+                        interfaces.items[destination_index].type_aliases = expanded;
+                        continue;
+                    },
+                    .structure => |structure_target| {
+                        const source = interfaces.items[interface_by_module[structure_target.module].?];
+                        for (source.structures) |structure| {
+                            if (!std.mem.eql(u8, structure.id.name, structure_target.declaration)) continue;
+                            const previous = interfaces.items[destination_index].structures;
+                            const expanded = try self.allocator.alloc(Interface.Structure, previous.len + 1);
+                            @memcpy(expanded[0..previous.len], previous);
+                            expanded[previous.len] = structure;
+                            expanded[previous.len].export_name = binding.alias;
+                            interfaces.items[destination_index].structures = expanded;
+                        }
+                        continue;
+                    },
+                };
+                const function_target = try self.resolveReexport(
+                    binding.module.?,
+                    binding.declaration.?,
+                    .function,
+                    try self.allocator.alloc(bool, self.units.len),
+                );
+                if (function_target) |target| {
+                    const source = interfaces.items[interface_by_module[target.module].?];
+                    for (source.functions) |function| {
+                        if (!std.mem.eql(u8, function.id.name, target.declaration)) continue;
+                        const previous = interfaces.items[destination_index].functions;
+                        const expanded = try self.allocator.alloc(Interface.Function, previous.len + 1);
+                        @memcpy(expanded[0..previous.len], previous);
+                        expanded[previous.len] = function;
+                        expanded[previous.len].export_name = binding.alias;
+                        interfaces.items[destination_index].functions = expanded;
+                    }
+                }
+                const structure_target = try self.resolveReexport(
+                    binding.module.?,
+                    binding.declaration.?,
+                    .structure,
+                    try self.allocator.alloc(bool, self.units.len),
+                );
+                if (structure_target) |target| {
+                    const source = interfaces.items[interface_by_module[target.module].?];
+                    for (source.structures) |structure| {
+                        if (!std.mem.eql(u8, structure.id.name, target.declaration)) continue;
+                        const previous = interfaces.items[destination_index].structures;
+                        const expanded = try self.allocator.alloc(Interface.Structure, previous.len + 1);
+                        @memcpy(expanded[0..previous.len], previous);
+                        expanded[previous.len] = structure;
+                        expanded[previous.len].export_name = binding.alias;
+                        interfaces.items[destination_index].structures = expanded;
+                    }
+                }
+            }
         }
         return interfaces.toOwnedSlice(self.allocator);
     }
@@ -548,18 +834,21 @@ pub const Compiler = struct {
         for (program.structures) |structure| {
             if (!structure.is_public) continue;
             for (structure.fields) |field| {
+                if (field.is_internal) continue;
                 try self.requirePublicType(module, field.type, field.name_position, "public structure", structure.name);
             }
             for (structure.constructors) |constructor| {
+                if (constructor.is_internal) continue;
                 for (constructor.parameters) |parameter| {
                     try self.requirePublicType(module, parameter.type, parameter.position, "constructor of", structure.name);
                 }
             }
             for (structure.methods) |method| {
+                if (method.is_internal) continue;
                 for (method.parameters) |parameter| {
                     try self.requirePublicType(module, parameter.type, parameter.position, "method of", structure.name);
                 }
-                try self.requirePublicType(module, method.return_type, method.name_position, "method of", structure.name);
+                try self.requirePublicOutputType(module, method.return_type, method.name_position, "method of", structure.name);
             }
         }
         for (program.functions) |function| {
@@ -567,8 +856,25 @@ pub const Compiler = struct {
             for (function.parameters) |parameter| {
                 try self.requirePublicType(module, parameter.type, parameter.position, "public function", function.name);
             }
-            try self.requirePublicType(module, function.return_type, function.name_position, "public function", function.name);
+            try self.requirePublicOutputType(module, function.return_type, function.name_position, "public function", function.name);
         }
+    }
+
+    fn requirePublicOutputType(
+        self: *Compiler,
+        module: usize,
+        type_value: Ast.Type,
+        position: Source.Position,
+        declaration_kind: []const u8,
+        declaration_name: []const u8,
+    ) Error!void {
+        const index = type_value.structureIndex() orelse return;
+        const program = self.units[module].program.?;
+        if (index >= program.type_names.len) return;
+        const target = try self.structureTarget(module, program.type_names[index]) orelse return;
+        const structure = findStructure(self.units[target.module].program.?, target.declaration).?;
+        if (structure.is_internal) return;
+        return self.requirePublicType(module, type_value, position, declaration_kind, declaration_name);
     }
 
     fn requirePublicType(
@@ -585,15 +891,22 @@ pub const Compiler = struct {
         const target = try self.structureTarget(module, program.type_names[index]) orelse return;
         const structure = findStructure(self.units[target.module].program.?, target.declaration).?;
         if (structure.is_public) return;
-        const message = try std.fmt.allocPrint(
-            self.allocator,
-            "{s} '{s}' exposes private structure '{s}'",
-            .{ declaration_kind, declaration_name, structure.name },
-        );
+        const message = if (structure.is_internal)
+            try std.fmt.allocPrint(
+                self.allocator,
+                "{s} '{s}' exposes internal structure '{s}'",
+                .{ declaration_kind, declaration_name, structure.name },
+            )
+        else
+            try std.fmt.allocPrint(
+                self.allocator,
+                "{s} '{s}' exposes private structure '{s}'",
+                .{ declaration_kind, declaration_name, structure.name },
+            );
         return self.fail(position, message);
     }
 
-    fn rewriteStatements(self: *Compiler, module: usize, statements: []const Ast.Statement, type_map: []const usize) Error![]const Ast.Statement {
+    fn rewriteStatements(self: *Compiler, module: usize, statements: []const Ast.Statement, type_map: []const Ast.Type) Error![]const Ast.Statement {
         const rewritten = try self.allocator.alloc(Ast.Statement, statements.len);
         for (statements, 0..) |statement, index| rewritten[index] = switch (statement) {
             .variable_declaration => |declaration| variable: {
@@ -651,7 +964,7 @@ pub const Compiler = struct {
         return rewritten;
     }
 
-    fn rewriteExpression(self: *Compiler, module: usize, expression: *Ast.Expression, type_map: []const usize) Error!void {
+    fn rewriteExpression(self: *Compiler, module: usize, expression: *Ast.Expression, type_map: []const Ast.Type) Error!void {
         switch (expression.value) {
             .call => |*call| {
                 call.owner = self.index.providers[module].owner;
@@ -676,12 +989,14 @@ pub const Compiler = struct {
                         self.index.providers[target.module].name,
                         target.declaration,
                     );
-                } else if (try self.targetForCall(module, call.name)) |target| {
-                    call.name = try canonicalName(
-                        self.allocator,
-                        self.index.providers[target.module].name,
-                        target.declaration,
-                    );
+                } else if (try self.targetForCall(module, call.name)) |candidate| {
+                    if (try self.functionTarget(candidate)) |target| {
+                        call.name = try canonicalName(
+                            self.allocator,
+                            self.index.providers[target.module].name,
+                            target.declaration,
+                        );
+                    }
                 } else if (call.receiver == null and std.mem.indexOfScalar(u8, call.name, '.') == null) {
                     call.name = if (findStructure(self.units[module].program.?, call.name) != null)
                         try structureCanonicalName(self.allocator, self.index.providers[module].name, call.name)
@@ -829,9 +1144,9 @@ fn expressionPosition(module: usize) Source.Position {
     return .{ .offset = 0, .line = 1, .column = 1, .file = module };
 }
 
-fn remapType(type_value: Ast.Type, type_map: []const usize) Ast.Type {
+fn remapType(type_value: Ast.Type, type_map: []const Ast.Type) Ast.Type {
     const index = type_value.structureIndex() orelse return type_value;
-    return if (index < type_map.len) .structure(type_map[index]) else type_value;
+    return if (index < type_map.len) type_map[index] else type_value;
 }
 
 fn pathInside(path: []const u8, directory: []const u8) bool {
@@ -853,438 +1168,4 @@ fn findProjectRoot(allocator: Allocator, io: Io, input_path: []const u8) Error![
 fn fileExists(io: Io, path: []const u8) bool {
     _ = Io.Dir.cwd().statFile(io, path, .{}) catch return false;
     return true;
-}
-
-test "compile only the explicit local module closure" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-    var temporary = std.testing.tmpDir(.{});
-    defer temporary.cleanup();
-
-    try temporary.dir.createDirPath(std.testing.io, "Math");
-    try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "Main.sx",
-        .data =
-        \\use Math.Operations
-        \\func answer() int { return Operations.add(20, 22) }
-        \\func main() { answer() }
-        ,
-    });
-    try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "Math/Operations.sx",
-        .data = "func add(left:int, right:int) int { return left + right }",
-    });
-    try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "Unused.sx",
-        .data = "this source is deliberately invalid",
-    });
-
-    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
-    var compiler = Compiler.init(allocator, std.testing.io);
-    const compilation = try compiler.compile(input);
-    const Interpreter = @import("Interpreter.zig");
-    const answer = try Interpreter.invoke(allocator, compilation.ir, 0, &.{});
-    try std.testing.expectEqual(@as(i64, 42), answer.integer);
-    try std.testing.expectEqualStrings("Main.answer", compilation.ir.functions[0].name);
-    try std.testing.expectEqualStrings("Math.Operations.add", compilation.ir.functions[2].name);
-}
-
-test "report missing modules and duplicate aliases" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-    var temporary = std.testing.tmpDir(.{});
-    defer temporary.cleanup();
-
-    try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "Main.sx",
-        .data =
-        \\use Missing
-        \\func main() {}
-        ,
-    });
-    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
-    var compiler = Compiler.init(allocator, std.testing.io);
-    try std.testing.expectError(error.InvalidSource, compiler.compile(input));
-    try std.testing.expectEqualStrings("unknown module or declaration 'Missing'", compiler.diagnostic.?.message);
-
-    try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "One.sx",
-        .data = "func value() int { return 1 }",
-    });
-    try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "Two.sx",
-        .data = "func value() int { return 2 }",
-    });
-    try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "Main.sx",
-        .data = "use One as Same\nuse Two as Same\nfunc main() {}",
-    });
-    compiler = Compiler.init(allocator, std.testing.io);
-    try std.testing.expectError(error.InvalidSource, compiler.compile(input));
-    try std.testing.expectEqualStrings("use alias 'Same' is already declared", compiler.diagnostic.?.message);
-}
-
-test "resolve explicit module aliases direct declarations and grouping namespaces" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-    var temporary = std.testing.tmpDir(.{});
-    defer temporary.cleanup();
-
-    try temporary.dir.createDirPath(std.testing.io, "Math");
-    try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "Main.sx",
-        .data =
-        \\use Math.Operations as Ops
-        \\use Math.Operations.add as plus
-        \\use Math as Group
-        \\func byModule() int { return Ops.add(20, 22) }
-        \\func byDeclaration() int { return plus(21, 21) }
-        \\func byNamespace() int { return Group.Operations.add(40, 2) }
-        \\func main() {}
-        ,
-    });
-    try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "Math/Operations.sx",
-        .data = "func add(left:int, right:int) int { return left + right }",
-    });
-
-    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
-    var compiler = Compiler.init(allocator, std.testing.io);
-    const compilation = try compiler.compile(input);
-    const Interpreter = @import("Interpreter.zig");
-    for (0..3) |function| {
-        const answer = try Interpreter.invoke(allocator, compilation.ir, function, &.{});
-        try std.testing.expectEqual(@as(i64, 42), answer.integer);
-    }
-}
-
-test "reject alias collisions and dependency cycles across logical parents" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-    var temporary = std.testing.tmpDir(.{});
-    defer temporary.cleanup();
-
-    try temporary.dir.createDirPath(std.testing.io, "Group");
-    try temporary.dir.createDirPath(std.testing.io, "Other");
-    try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "Main.sx",
-        .data = "use Group.A\nfunc main() { A.run() }",
-    });
-    try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "Group/A.sx",
-        .data = "use Other.B\nfunc run() {}",
-    });
-    try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "Other/B.sx",
-        .data = "use Group.A\nfunc run() {}",
-    });
-
-    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
-    var compiler = Compiler.init(allocator, std.testing.io);
-    try std.testing.expectError(error.InvalidSource, compiler.compile(input));
-    try std.testing.expectEqualStrings(
-        "module dependency cycle crosses logical parents",
-        compiler.diagnostic.?.message,
-    );
-}
-
-test "allow dependency cycles under one logical parent" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-    var temporary = std.testing.tmpDir(.{});
-    defer temporary.cleanup();
-
-    try temporary.dir.createDirPath(std.testing.io, "Group");
-    try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "Main.sx",
-        .data = "use Group.A\nfunc main() { A.run() }",
-    });
-    try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "Group/A.sx",
-        .data = "use Group.B\nfunc run() { B.touch() }",
-    });
-    try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "Group/B.sx",
-        .data = "use Group.A\nfunc touch() {}",
-    });
-
-    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
-    var compiler = Compiler.init(allocator, std.testing.io);
-    const compilation = try compiler.compile(input);
-    _ = try @import("Interpreter.zig").run(allocator, compilation.ir);
-}
-
-test "collect public overloads before analyzing calls across files" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-    var temporary = std.testing.tmpDir(.{});
-    defer temporary.cleanup();
-
-    try temporary.dir.createDirPath(std.testing.io, "Math");
-    try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "Main.sx",
-        .data =
-        \\use Math.Operations
-        \\func answer() int { return Operations.value(20) + Operations.value(true) }
-        \\func main() {}
-        ,
-    });
-    try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "Math/Operations.sx",
-        .data =
-        \\public func value(input:int) int { return input }
-        \\public func value(input:bool) int { return 22 }
-        \\func hidden() int { return 0 }
-        ,
-    });
-
-    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
-    var compiler = Compiler.init(allocator, std.testing.io);
-    const compilation = try compiler.compile(input);
-    const answer = try @import("Interpreter.zig").invoke(allocator, compilation.ir, 0, &.{});
-    try std.testing.expectEqual(@as(i64, 42), answer.integer);
-    try std.testing.expectEqual(@as(usize, 2), compilation.interfaces.len);
-    try std.testing.expectEqual(@as(usize, 2), compilation.interfaces[1].functions.len);
-    try std.testing.expect(compilation.interfaces[1].functions[0].id.eql(.{
-        .owner = .project,
-        .module = "Math.Operations",
-        .name = "value",
-        .parameter_types = &.{.int},
-    }));
-}
-
-test "compose public parameter defaults in their declaring module" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-    var temporary = std.testing.tmpDir(.{});
-    defer temporary.cleanup();
-
-    try temporary.dir.createDirPath(std.testing.io, "Math");
-    try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "Main.sx",
-        .data =
-        \\use Math.Operations
-        \\func answer() int { return Operations.value() + Operations.Box().plus() }
-        \\func main() {}
-        ,
-    });
-    try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "Math/Operations.sx",
-        .data =
-        \\func seed() int { return 20 }
-        \\public func value(input:int = seed()) int { return input }
-        \\public struct Box {
-        \\    var value:int
-        \\    init(value:int = seed()) { self.value = value }
-        \\    func plus(amount:int = 2) int { return self.value + amount }
-        \\}
-        ,
-    });
-
-    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
-    var compiler = Compiler.init(allocator, std.testing.io);
-    const compilation = try compiler.compile(input);
-    const answer = try @import("Interpreter.zig").invoke(allocator, compilation.ir, 0, &.{});
-    try std.testing.expectEqual(@as(i64, 42), answer.integer);
-    try std.testing.expectEqual(@as(usize, 0), compilation.interfaces[1].functions[0].required_parameters);
-    try std.testing.expectEqual(@as(usize, 0), compilation.interfaces[1].structures[0].constructors[0].required_parameters);
-    try std.testing.expectEqual(@as(usize, 0), compilation.interfaces[1].structures[0].methods[0].required_parameters);
-}
-
-test "do not propagate private module access through a dependency" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-    var temporary = std.testing.tmpDir(.{});
-    defer temporary.cleanup();
-
-    try temporary.dir.createDirPath(std.testing.io, "Layer");
-    try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "Main.sx",
-        .data = "use Layer.A\nfunc main() { B.hidden() }",
-    });
-    try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "Layer/A.sx",
-        .data = "use Layer.B\nfunc touch() { B.hidden() }",
-    });
-    try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "Layer/B.sx",
-        .data = "func hidden() {}",
-    });
-
-    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
-    var compiler = Compiler.init(allocator, std.testing.io);
-    try std.testing.expectError(error.InvalidSource, compiler.compile(input));
-    try std.testing.expectEqualStrings("unknown function 'B.hidden'", compiler.diagnostic.?.message);
-}
-
-test "compose simple modules with an adjacent local package" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-    var temporary = std.testing.tmpDir(.{});
-    defer temporary.cleanup();
-
-    try temporary.dir.createDirPath(std.testing.io, "Foo");
-    try temporary.dir.createDirPath(std.testing.io, "MonPackage/Module");
-    try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "Main.sx",
-        .data =
-        \\use Foo.Bar
-        \\use MonPackage.Class1
-        \\func answer() int { return Bar.value() + Class1.value() }
-        \\func main() {}
-        ,
-    });
-    try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "Foo/Bar.sx",
-        .data = "func value() int { return 20 }",
-    });
-    try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "MonPackage/Package.json",
-        .data = "{\"name\":\"MonPackage\",\"version\":\"1.4.1\"}",
-    });
-    try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "MonPackage/Module/Class1.sx",
-        .data = "public func value() int { return 22 }",
-    });
-
-    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
-    var compiler = Compiler.init(allocator, std.testing.io);
-    const compilation = try compiler.compile(input);
-    const answer = try @import("Interpreter.zig").invoke(allocator, compilation.ir, 1, &.{});
-    try std.testing.expectEqual(@as(i64, 42), answer.integer);
-    try std.testing.expectEqual(@as(usize, 2), compilation.packages.packages.len);
-    try std.testing.expectEqualStrings("MonPackage.Class1", compilation.interfaces[2].name);
-}
-
-test "qualified packages share namespaces without sharing ownership" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-    var temporary = std.testing.tmpDir(.{});
-    defer temporary.cleanup();
-
-    const package_names = [_][]const u8{ "Silex", "Silex.Audio", "Silex.Bootstrap", "Silex.Rendering" };
-    for (package_names) |name| {
-        const module_path = try std.fs.path.join(allocator, &.{ name, "Module" });
-        try temporary.dir.createDirPath(std.testing.io, module_path);
-        const manifest_path = try std.fs.path.join(allocator, &.{ name, "Package.json" });
-        const manifest = try std.fmt.allocPrint(
-            allocator,
-            "{{\"name\":\"{s}\",\"version\":\"1.0.0\"}}",
-            .{name},
-        );
-        try temporary.dir.writeFile(std.testing.io, .{ .sub_path = manifest_path, .data = manifest });
-    }
-    try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "Main.sx",
-        .data =
-        \\use Silex.Core
-        \\use Silex.Audio.Mixer
-        \\use Silex.Bootstrap.Start
-        \\use Silex.Rendering.Texture
-        \\func answer() int { return Core.value() + Mixer.value() + Start.value() + Texture.value() }
-        \\func main() {}
-        ,
-    });
-    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Silex/Module/Core.sx", .data = "public func value() int { return 9 }" });
-    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Silex.Audio/Module/Mixer.sx", .data = "public func value() int { return 10 }" });
-    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Silex.Bootstrap/Module/Start.sx", .data = "public func value() int { return 11 }" });
-    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Silex.Rendering/Module/Texture.sx", .data = "public func value() int { return 12 }" });
-
-    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
-    var compiler = Compiler.init(allocator, std.testing.io);
-    const compilation = try compiler.compile(input);
-    const answer = try @import("Interpreter.zig").invoke(allocator, compilation.ir, 0, &.{});
-    try std.testing.expectEqual(@as(i64, 42), answer.integer);
-    try std.testing.expectEqual(@as(usize, 5), compilation.packages.packages.len);
-
-    try temporary.dir.createDirPath(std.testing.io, "Silex/Module/Rendering");
-    try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "Silex/Module/Rendering/Texture.sx",
-        .data = "public func duplicate() {}",
-    });
-    compiler = Compiler.init(allocator, std.testing.io);
-    try std.testing.expectError(error.InvalidSource, compiler.compile(input));
-    try std.testing.expectEqualStrings("multiple source files provide the same module", compiler.diagnostic.?.message);
-}
-
-test "enforce public package interfaces and direct dependency visibility" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-    var temporary = std.testing.tmpDir(.{});
-    defer temporary.cleanup();
-
-    try temporary.dir.createDirPath(std.testing.io, "A/Module");
-    try temporary.dir.createDirPath(std.testing.io, "B/Module");
-    try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "Package.json",
-        .data = "{\"dependencies\":{\"A\":\"=1.0.0\"}}",
-    });
-    try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "A/Package.json",
-        .data = "{\"name\":\"A\",\"version\":\"1.0.0\",\"dependencies\":{\"B\":\"=1.0.0\"}}",
-    });
-    try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "A/Module/Api.sx",
-        .data = "func hidden() {}\npublic func exposed() {}",
-    });
-    try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "B/Package.json",
-        .data = "{\"name\":\"B\",\"version\":\"1.0.0\"}",
-    });
-    try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "B/Module/Private.sx",
-        .data = "public func value() {}",
-    });
-    try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "Main.sx",
-        .data = "use A.Api\nfunc main() { Api.hidden() }",
-    });
-
-    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
-    var compiler = Compiler.init(allocator, std.testing.io);
-    try std.testing.expectError(error.InvalidSource, compiler.compile(input));
-    try std.testing.expectEqualStrings(
-        "function 'A.Api.hidden' is private outside its package",
-        compiler.diagnostic.?.message,
-    );
-
-    try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "Main.sx",
-        .data = "use B.Private\nfunc main() {}",
-    });
-    compiler = Compiler.init(allocator, std.testing.io);
-    try std.testing.expectError(error.InvalidSource, compiler.compile(input));
-    try std.testing.expectEqualStrings("unknown module or declaration 'B.Private'", compiler.diagnostic.?.message);
-}
-
-test "compose and execute structures inside their declaring module" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-    var temporary = std.testing.tmpDir(.{});
-    defer temporary.cleanup();
-
-    try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "Main.sx",
-        .data =
-        \\struct Point { var x:int; var y:int = 2 }
-        \\func main() { let point = Point(x:40); print(point.x + point.y) }
-        ,
-    });
-    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
-    var compiler = Compiler.init(allocator, std.testing.io);
-    const compilation = try compiler.compile(input);
-    const result = try @import("Interpreter.zig").runCapture(allocator, compilation.ir);
-    try std.testing.expectEqualStrings("42\n", result.stdout);
 }

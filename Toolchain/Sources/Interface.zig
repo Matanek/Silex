@@ -35,6 +35,7 @@ pub const DeclarationId = struct {
 };
 
 pub const Function = struct {
+    export_name: []const u8,
     id: DeclarationId,
     return_type: Types.Type,
     position: Source.Position,
@@ -72,6 +73,7 @@ pub const Method = struct {
 };
 
 pub const Structure = struct {
+    export_name: []const u8,
     id: TypeId,
     fields: []const StructureField,
     constructors: []const Constructor,
@@ -79,11 +81,17 @@ pub const Structure = struct {
     position: Source.Position,
 };
 
+pub const TypeAlias = struct {
+    name: []const u8,
+    target: Types.Type,
+};
+
 pub const Module = struct {
     owner: Owner,
     name: []const u8,
     structures: []const Structure,
     functions: []const Function,
+    type_aliases: []const TypeAlias = &.{},
 };
 
 pub fn build(
@@ -92,9 +100,9 @@ pub fn build(
     module_name: []const u8,
     program: Ast.Program,
 ) Allocator.Error!Module {
-    const type_map = try allocator.alloc(usize, program.type_names.len);
+    const type_map = try allocator.alloc(Types.Type, program.type_names.len);
     defer allocator.free(type_map);
-    for (type_map, 0..) |*mapped, index| mapped.* = index;
+    for (type_map, 0..) |*mapped, index| mapped.* = .structure(index);
     return buildMapped(allocator, owner, module_name, program, type_map);
 }
 
@@ -103,46 +111,52 @@ pub fn buildMapped(
     owner: Owner,
     module_name: []const u8,
     program: Ast.Program,
-    type_map: []const usize,
+    type_map: []const Types.Type,
 ) Allocator.Error!Module {
     var structures: std.ArrayList(Structure) = .empty;
     for (program.structures) |structure| {
         if (!structure.is_public) continue;
-        const fields = try allocator.alloc(StructureField, structure.fields.len);
-        for (structure.fields, 0..) |field, index| fields[index] = .{
-            .name = field.name,
-            .type = mappedType(field.type, type_map),
-            .mutable = field.mutable,
-        };
-        const constructors = try allocator.alloc(Constructor, structure.constructors.len);
-        for (structure.constructors, 0..) |constructor, constructor_index| {
+        var fields: std.ArrayList(StructureField) = .empty;
+        for (structure.fields) |field| {
+            if (!field.is_public or field.is_internal) continue;
+            try fields.append(allocator, .{
+                .name = field.name,
+                .type = mappedType(field.type, type_map),
+                .mutable = field.mutable,
+            });
+        }
+        var constructors: std.ArrayList(Constructor) = .empty;
+        for (structure.constructors) |constructor| {
+            if (!constructor.is_public or constructor.is_internal) continue;
             const parameters = try allocator.alloc(Types.Type, constructor.parameters.len);
             for (constructor.parameters, 0..) |parameter, parameter_index| {
                 parameters[parameter_index] = mappedType(parameter.type, type_map);
             }
-            constructors[constructor_index] = .{
+            try constructors.append(allocator, .{
                 .parameter_types = parameters,
                 .required_parameters = requiredParameterCount(constructor.parameters),
-            };
+            });
         }
-        const methods = try allocator.alloc(Method, structure.methods.len);
-        for (structure.methods, 0..) |method, method_index| {
+        var methods: std.ArrayList(Method) = .empty;
+        for (structure.methods) |method| {
+            if (!method.is_public or method.is_internal) continue;
             const parameters = try allocator.alloc(Types.Type, method.parameters.len);
             for (method.parameters, 0..) |parameter, parameter_index| {
                 parameters[parameter_index] = mappedType(parameter.type, type_map);
             }
-            methods[method_index] = .{
+            try methods.append(allocator, .{
                 .name = method.name,
                 .parameter_types = parameters,
                 .return_type = mappedType(method.return_type, type_map),
                 .required_parameters = requiredParameterCount(method.parameters),
-            };
+            });
         }
         try structures.append(allocator, .{
+            .export_name = structure.name,
             .id = .{ .owner = owner, .module = module_name, .name = structure.name },
-            .fields = fields,
-            .constructors = constructors,
-            .methods = methods,
+            .fields = try fields.toOwnedSlice(allocator),
+            .constructors = try constructors.toOwnedSlice(allocator),
+            .methods = try methods.toOwnedSlice(allocator),
             .position = structure.position,
         });
     }
@@ -152,6 +166,7 @@ pub fn buildMapped(
         const parameter_types = try allocator.alloc(Types.Type, function.parameters.len);
         for (function.parameters, 0..) |parameter, index| parameter_types[index] = mappedType(parameter.type, type_map);
         try functions.append(allocator, .{
+            .export_name = function.name,
             .id = .{
                 .owner = owner,
                 .module = module_name,
@@ -168,6 +183,7 @@ pub fn buildMapped(
         .name = module_name,
         .structures = try structures.toOwnedSlice(allocator),
         .functions = try functions.toOwnedSlice(allocator),
+        .type_aliases = &.{},
     };
 }
 
@@ -178,9 +194,9 @@ fn requiredParameterCount(parameters: []const Ast.Parameter) usize {
     return parameters.len;
 }
 
-fn mappedType(type_value: Types.Type, type_map: []const usize) Types.Type {
+fn mappedType(type_value: Types.Type, type_map: []const Types.Type) Types.Type {
     const index = type_value.structureIndex() orelse return type_value;
-    return if (index < type_map.len) .structure(type_map[index]) else type_value;
+    return if (index < type_map.len) type_map[index] else type_value;
 }
 
 test "build stable typed identities from public declarations only" {
