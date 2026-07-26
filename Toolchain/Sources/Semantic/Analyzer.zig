@@ -7,6 +7,7 @@ const Source = @import("../Source.zig");
 const Mutation = @import("Mutation.zig");
 const Optionals = @import("Optionals.zig");
 const Constructors = @import("Constructors.zig");
+const Collections = @import("Collections.zig");
 const Model = @import("Model.zig");
 const Methods = @import("Methods.zig");
 const Control = @import("Control.zig");
@@ -474,6 +475,8 @@ pub const Analyzer = struct {
             .binary => |binary| self.analyzeBinary(builder, binary, expected),
             .conversion => |conversion| self.analyzeConversion(builder, conversion),
             .string_count => |operand| self.analyzeStringCount(builder, operand),
+            .sequence_literal => |values| Collections.analyzeLiteral(self, builder, values, expected, expression.position),
+            .index_access => |access| Collections.analyzeIndex(self, builder, access),
             .match_expression => |match_value| Matches.analyze(self, builder, match_value),
         };
         if (expected) |target| return self.coerce(builder, value, target, expression.position);
@@ -743,7 +746,7 @@ pub const Analyzer = struct {
                 .type = field.type,
                 .mutable = field.mutable,
             };
-            structures[type_index] = .{ .name = name, .fields = fields };
+            structures[type_index] = .{ .name = name, .fields = fields, .collection = declaration.collection };
         }
         self.structures = structures;
 
@@ -1027,6 +1030,7 @@ pub const Analyzer = struct {
     fn analyzeCall(self: *Analyzer, builder: *FunctionBuilder, call: Ast.Expression.Call) AnalyzeError!?TypedValue {
         if (call.receiver == null and std.mem.eql(u8, call.name, "map_error")) return try MapError.analyze(self, builder, call);
         if (call.receiver) |receiver_expression| {
+            if (try Collections.analyzeCall(self, builder, call)) |value| return value;
             if (receiver_expression.value == .identifier) {
                 if (Enums.find(self, receiver_expression.value.identifier)) |enum_index| {
                     return try Enums.analyzeInitializer(self, builder, call, enum_index);
@@ -1246,7 +1250,7 @@ pub const Analyzer = struct {
         target: Types.Type,
         position: Source.Position,
     ) AnalyzeError!TypedValue {
-        const magnitude = try self.parseIntegerMagnitude(lexeme, position);
+        const magnitude = try Support.parseIntegerMagnitude(self, lexeme, position);
         if (!Numeric.fitsMagnitude(magnitude, negative, target)) {
             const message = try std.fmt.allocPrint(self.allocator, "integer literal is outside the range of '{s}'", .{target.name()});
             return self.fail(position, message);
@@ -1442,18 +1446,6 @@ pub const Analyzer = struct {
         const result = builder.value_types.items.len;
         try builder.value_types.append(self.allocator, type_value);
         return result;
-    }
-
-    fn parseIntegerMagnitude(self: *Analyzer, lexeme: []const u8, position: Source.Position) AnalyzeError!u64 {
-        const literal = try Support.removeSeparators(self.allocator, lexeme);
-        const base: u8 = if (literal.len > 2 and literal[0] == '0') switch (literal[1]) {
-            'b', 'B' => 2,
-            'o', 'O' => 8,
-            'x', 'X' => 16,
-            else => 10,
-        } else 10;
-        const digits = if (base == 10) literal else literal[2..];
-        return std.fmt.parseInt(u64, digits, base) catch self.fail(position, "integer literal is outside the range of 'uint'");
     }
 
     pub fn fail(self: *Analyzer, position: Source.Position, message: []const u8) Source.Error {

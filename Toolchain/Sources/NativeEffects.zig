@@ -279,6 +279,29 @@ test "native recoverable main matches the exact process boundary" {
     }
 }
 
+test "native fixed arrays match reference reads writes copies and bounds" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const sources = [_][]const u8{
+        \\func changed(values:int[3]) int[3] { var copy = values; copy[0] = 9; return copy }
+        \\func main() { var values:int[3] = [1, 2, 3]; let copy = changed(values); values[-1] += 4; print(values[0], values[-1], copy[0], copy[2]) }
+        ,
+        "func main() { let values:int[3] = [1, 2, 3]; print(values[-4]) }",
+    };
+    for (sources) |source| {
+        var frontend = Frontend.Frontend.init(allocator);
+        var compilation = try frontend.compile(source);
+        compilation.ir.files = &.{"Main.sx"};
+        const reference = try Interpreter.runCapture(allocator, compilation.ir);
+        const native = try runMachine(allocator, try Lower.lower(allocator, compilation.ir));
+        try std.testing.expectEqual(reference.exit_code, exitCode(native));
+        try std.testing.expectEqualSlices(u8, reference.stdout, native.stdout);
+        try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
+    }
+}
+
 test "native optional transport matches the reference interpreter" {
     if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);

@@ -60,6 +60,18 @@ pub fn removeSeparators(allocator: Allocator, text: []const u8) Allocator.Error!
     return normalized[0..length];
 }
 
+pub fn parseIntegerMagnitude(self: anytype, lexeme: []const u8, position: @import("../Source.zig").Position) !u64 {
+    const literal = try removeSeparators(self.allocator, lexeme);
+    const base: u8 = if (literal.len > 2 and literal[0] == '0') switch (literal[1]) {
+        'b', 'B' => 2,
+        'o', 'O' => 8,
+        'x', 'X' => 16,
+        else => 10,
+    } else 10;
+    const digits = if (base == 10) literal else literal[2..];
+    return std.fmt.parseInt(u64, digits, base) catch self.fail(position, "integer literal is outside the range of 'uint'");
+}
+
 pub fn isNumericLiteral(expression: *const Ast.Expression) bool {
     return switch (expression.value) {
         .integer, .floating => true,

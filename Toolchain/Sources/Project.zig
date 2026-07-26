@@ -12,6 +12,7 @@ const Reexports = @import("Project/Reexports.zig");
 const TypeAliases = @import("Project/TypeAliases.zig");
 const GenericTypes = @import("Project/GenericTypes.zig");
 const Paths = @import("Project/Paths.zig");
+const Lookup = @import("Project/Lookup.zig");
 const Semantic = @import("Semantic/Analyzer.zig");
 const Source = @import("Source.zig");
 
@@ -25,7 +26,6 @@ const findName = Names.find;
 const findStructure = Names.findStructure;
 const lastSegment = Names.lastSegment;
 const parent = Names.parent;
-const pathInside = Names.pathInside;
 const sameParent = Names.sameParent;
 const structureCanonicalName = Names.nominal;
 
@@ -77,7 +77,7 @@ pub const Compiler = struct {
             ),
             else => |other| return other,
         };
-        self.index = self.discoverProviders() catch |err| switch (err) {
+        self.index = Lookup.discoverProviders(self) catch |err| switch (err) {
             error.DuplicateModule => return self.fail(
                 .{ .offset = 0, .line = 1, .column = 1 },
                 "multiple source files provide the same module",
@@ -94,7 +94,7 @@ pub const Compiler = struct {
         for (self.index.providers, 0..) |provider, file| files[file] = provider.path;
         self.files = files;
 
-        self.entry_module = self.findProviderPath(input_path) orelse return self.fail(
+        self.entry_module = Lookup.findProviderPath(self, input_path) orelse return self.fail(
             .{ .offset = 0, .line = 1, .column = 1 },
             "entry source is not a discovered module",
         );
@@ -232,7 +232,7 @@ pub const Compiler = struct {
             };
         }
         const owner = self.index.providers[source_module].owner;
-        if (self.findAccessibleModule(use.path, owner)) |module| {
+        if (Lookup.findAccessibleModule(self, use.path, owner)) |module| {
             return .{
                 .alias = use.alias orelse lastSegment(use.path),
                 .path = use.path,
@@ -246,7 +246,7 @@ pub const Compiler = struct {
         var separator = std.mem.lastIndexOfScalar(u8, use.path, '.');
         while (separator) |at| {
             const prefix = use.path[0..at];
-            if (self.findAccessibleModule(prefix, owner)) |module| {
+            if (Lookup.findAccessibleModule(self, prefix, owner)) |module| {
                 return .{
                     .alias = use.alias orelse lastSegment(use.path),
                     .path = prefix,
@@ -259,7 +259,7 @@ pub const Compiler = struct {
             separator = std.mem.lastIndexOfScalar(u8, prefix, '.');
         }
 
-        if (self.isAccessibleNamespace(use.path, owner)) {
+        if (Lookup.isAccessibleNamespace(self, use.path, owner)) {
             return .{
                 .alias = use.alias orelse lastSegment(use.path),
                 .path = use.path,
@@ -526,8 +526,10 @@ pub const Compiler = struct {
         switch (statement) {
             .variable_declaration => |declaration| if (declaration.initializer) |value|
                 try self.activateExpression(module, value),
-            .assignment_statement => |assignment| if (assignment.value) |value|
-                try self.activateExpression(module, value),
+            .assignment_statement => |assignment| {
+                if (assignment.value) |value| try self.activateExpression(module, value);
+                for (assignment.target.indices) |target_index| try self.activateExpression(module, target_index.value);
+            },
             .return_statement => |value| if (value.value) |expression|
                 try self.activateExpression(module, expression),
             .expression_statement => |expression| try self.activateExpression(module, expression),
@@ -587,6 +589,11 @@ pub const Compiler = struct {
             },
             .conversion => |conversion| try self.activateExpression(module, conversion.operand),
             .string_count => |operand| try self.activateExpression(module, operand),
+            .sequence_literal => |values| for (values) |value| try self.activateExpression(module, value),
+            .index_access => |access| {
+                try self.activateExpression(module, access.base);
+                try self.activateExpression(module, access.index);
+            },
             .interpolated_string => |interpolated| for (interpolated.parts) |part| switch (part) {
                 .text => {},
                 .expression => |value| try self.activateExpression(module, value),
@@ -779,7 +786,7 @@ pub const Compiler = struct {
         var end = path.len;
         while (true) {
             const prefix = path[0..end];
-            if (self.findAccessibleModule(prefix, owner)) |module| {
+            if (Lookup.findAccessibleModule(self, prefix, owner)) |module| {
                 if (end == path.len) return null;
                 return .{ .module = module, .declaration = path[end + 1 ..] };
             }
@@ -792,19 +799,51 @@ pub const Compiler = struct {
         type_maps: []const []const Ast.Type,
     };
 
+    fn collectionCanonicalName(self: *Compiler, module: usize, collection: Ast.Collection) Error![]const u8 {
+        const element = try self.canonicalTypeSpelling(module, collection.element);
+        return std.fmt.allocPrint(self.allocator, "{s}[{d}]", .{ element, collection.length.? });
+    }
+
+    fn canonicalTypeSpelling(self: *Compiler, module: usize, type_value: Ast.Type) Error![]const u8 {
+        if (type_value.optionalChild()) |child| return std.fmt.allocPrint(self.allocator, "{s}?", .{try self.canonicalTypeSpelling(module, child)});
+        if (type_value.genericParameterIndex()) |index| return std.fmt.allocPrint(self.allocator, "T{d}", .{index});
+        if (type_value.genericInstantiationIndex()) |index| {
+            const generic = self.units[module].program.?.generic_types[index];
+            var name = try self.allocator.dupe(u8, try self.canonicalTypeSpelling(module, generic.base));
+            for (generic.arguments, 0..) |argument, argument_index| name = try std.fmt.allocPrint(
+                self.allocator,
+                "{s}{s}{s}",
+                .{ name, if (argument_index == 0) "<" else ",", try self.canonicalTypeSpelling(module, argument) },
+            );
+            return std.fmt.allocPrint(self.allocator, "{s}>", .{name});
+        }
+        const index = type_value.structureIndex() orelse return type_value.name();
+        const program = self.units[module].program.?;
+        if (index >= program.type_names.len) return type_value.name();
+        const local_name = program.type_names[index];
+        if (findStructure(program, local_name)) |structure| {
+            if (structure.collection) |collection| return self.collectionCanonicalName(module, collection);
+        }
+        const target = try self.structureTarget(module, local_name) orelse try self.enumTarget(module, local_name) orelse return local_name;
+        return structureCanonicalName(self.allocator, self.index.providers[target.module].name, target.declaration);
+    }
+
     fn composeAst(self: *Compiler) Error!AstComposition {
         var type_names: std.ArrayList([]const u8) = .empty;
         for (self.index.providers, 0..) |provider, module| {
             if (self.units[module].state != .loaded) continue;
             for (self.units[module].program.?.structures) |structure| {
-                const name = try structureCanonicalName(self.allocator, provider.name, structure.name);
+                const name = if (structure.collection) |collection|
+                    try self.collectionCanonicalName(module, collection)
+                else
+                    try structureCanonicalName(self.allocator, provider.name, structure.name);
                 for (type_names.items) |existing| {
                     if (std.mem.eql(u8, existing, name)) {
+                        if (structure.collection != null) break;
                         const message = try std.fmt.allocPrint(self.allocator, "structure identity '{s}' is already provided", .{name});
                         return self.fail(structure.name_position, message);
                     }
-                }
-                try type_names.append(self.allocator, name);
+                } else try type_names.append(self.allocator, name);
             }
             for (self.units[module].program.?.enums) |enumeration| {
                 const name = try structureCanonicalName(self.allocator, provider.name, enumeration.name);
@@ -826,6 +865,10 @@ pub const Compiler = struct {
             const program = self.units[module].program.?;
             const map = try self.allocator.alloc(Ast.Type, program.type_names.len);
             for (program.type_names, 0..) |name, index| {
+                if (findStructure(program, name)) |structure| if (structure.collection) |collection| {
+                    map[index] = .structure(findName(type_names.items, try self.collectionCanonicalName(module, collection)) orelse return error.InvalidSource);
+                    continue;
+                };
                 if (try self.resolveTypeAlias(module, name, expressionPosition(module), false)) |alias_target| {
                     map[index] = switch (alias_target) {
                         .fundamental => |fundamental| fundamental,
@@ -885,9 +928,25 @@ pub const Compiler = struct {
             const type_map = type_maps[module];
             const generic_map = self.generic_type_maps[module];
             for (program.structures) |structure| {
+                const composed_name = if (structure.collection) |collection|
+                    try self.collectionCanonicalName(module, collection)
+                else
+                    try structureCanonicalName(self.allocator, provider.name, structure.name);
+                if (structure.collection != null) {
+                    var already_composed = false;
+                    for (structures.items) |existing| if (std.mem.eql(u8, existing.name, composed_name)) {
+                        already_composed = true;
+                        break;
+                    };
+                    if (already_composed) continue;
+                }
                 var composed_structure = structure;
                 composed_structure.owner = provider.owner;
-                composed_structure.name = try structureCanonicalName(self.allocator, provider.name, structure.name);
+                composed_structure.name = composed_name;
+                if (structure.collection) |collection| composed_structure.collection = .{
+                    .element = GenericTypes.remap(collection.element, type_map, generic_map),
+                    .length = collection.length,
+                };
                 const fields = try self.allocator.alloc(Ast.StructureField, structure.fields.len);
                 for (structure.fields, 0..) |field, index| {
                     fields[index] = field;
@@ -1198,6 +1257,9 @@ pub const Compiler = struct {
         const target = try self.structureTarget(module, name) orelse try self.enumTarget(module, name) orelse return;
         const target_program = self.units[target.module].program.?;
         if (findStructure(target_program, target.declaration)) |structure| {
+            if (structure.collection) |collection| {
+                return self.requirePublicType(module, collection.element, position, declaration_kind, declaration_name);
+            }
             if (structure.is_public) return;
             const message = if (structure.is_internal)
                 try std.fmt.allocPrint(
@@ -1241,6 +1303,7 @@ pub const Compiler = struct {
             },
             .assignment_statement => |assignment| assignment_statement: {
                 if (assignment.value) |value| try self.rewriteExpression(module, value, type_map);
+                for (assignment.target.indices) |target_index| try self.rewriteExpression(module, target_index.value, type_map);
                 break :assignment_statement .{ .assignment_statement = assignment };
             },
             .return_statement => |value| return_statement: {
@@ -1340,7 +1403,7 @@ pub const Compiler = struct {
                                 self.index.providers[target.module].name,
                                 target.declaration,
                             );
-                        } else if (self.findLocalFunction(self.units[module].program.?, transformer.*)) {
+                        } else if (Lookup.findLocalFunction(self.units[module].program.?, transformer.*)) {
                             transformer.* = try canonicalName(self.allocator, self.index.providers[module].name, transformer.*);
                         }
                     }
@@ -1384,6 +1447,11 @@ pub const Compiler = struct {
                 try self.rewriteExpression(module, conversion.operand, type_map);
             },
             .string_count => |operand| try self.rewriteExpression(module, operand, type_map),
+            .sequence_literal => |values| for (values) |value| try self.rewriteExpression(module, value, type_map),
+            .index_access => |access| {
+                try self.rewriteExpression(module, access.base, type_map);
+                try self.rewriteExpression(module, access.index, type_map);
+            },
             .interpolated_string => |interpolated| for (interpolated.parts) |part| switch (part) {
                 .text => {},
                 .expression => |value| try self.rewriteExpression(module, value, type_map),
@@ -1402,74 +1470,6 @@ pub const Compiler = struct {
             },
             else => {},
         }
-    }
-
-    fn findModule(self: Compiler, name: []const u8) ?usize {
-        for (self.index.providers, 0..) |provider, module| {
-            if (std.mem.eql(u8, provider.name, name)) return module;
-        }
-        return null;
-    }
-
-    fn findAccessibleModule(self: Compiler, name: []const u8, owner: usize) ?usize {
-        const module = self.findModule(name) orelse return null;
-        const provider = self.index.providers[module];
-        if (!self.packages.canAccess(owner, provider.owner, provider.name)) return null;
-        return module;
-    }
-
-    fn isAccessibleNamespace(self: Compiler, name: []const u8, owner: usize) bool {
-        for (self.index.providers) |provider| {
-            if (!self.packages.canAccess(owner, provider.owner, provider.name)) continue;
-            if (std.mem.eql(u8, provider.name, name)) return true;
-            if (provider.name.len > name.len and std.mem.startsWith(u8, provider.name, name) and
-                provider.name[name.len] == '.') return true;
-        }
-        return false;
-    }
-
-    fn findProviderPath(self: Compiler, path: []const u8) ?usize {
-        for (self.index.providers, 0..) |provider, index| {
-            if (std.mem.eql(u8, provider.path, path)) return index;
-        }
-        return null;
-    }
-
-    fn findLocalFunction(_: Compiler, program: Ast.Program, name: []const u8) bool {
-        for (program.functions) |function| if (std.mem.eql(u8, function.name, name)) return true;
-        return false;
-    }
-
-    fn discoverProviders(self: *Compiler) Error!Modules.Index {
-        const indexes = try self.allocator.alloc(Modules.Index, self.packages.packages.len);
-        for (self.packages.packages, 0..) |package, owner| {
-            const prefix = package.name;
-            var discovered = try Modules.discoverOwned(
-                self.allocator,
-                self.io,
-                package.module_root,
-                prefix,
-                owner,
-            );
-            if (owner == 0) discovered = try self.excludePackageSources(discovered);
-            indexes[owner] = discovered;
-        }
-        return Modules.combine(self.allocator, indexes);
-    }
-
-    fn excludePackageSources(self: *Compiler, index: Modules.Index) Allocator.Error!Modules.Index {
-        var providers: std.ArrayList(Modules.Provider) = .empty;
-        for (index.providers) |provider| {
-            var excluded = false;
-            for (self.packages.packages[1..]) |package| {
-                if (pathInside(provider.path, package.root)) {
-                    excluded = true;
-                    break;
-                }
-            }
-            if (!excluded) try providers.append(self.allocator, provider);
-        }
-        return .{ .providers = try providers.toOwnedSlice(self.allocator) };
     }
 
     fn fail(self: *Compiler, position: Source.Position, message: []const u8) Source.Error {

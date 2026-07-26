@@ -76,6 +76,8 @@ pub const Instruction = union(enum) {
     enum_payload: EnumPayload,
     enum_raw: EnumRaw,
     field_load: FieldLoad,
+    collection_load: CollectionLoad,
+    collection_replace: CollectionReplace,
     local_load: LocalLoad,
     local_store: LocalStore,
     convert: Convert,
@@ -170,6 +172,21 @@ pub const Instruction = union(enum) {
         result: ValueId,
         base: ValueId,
         field: usize,
+    };
+
+    pub const CollectionLoad = struct {
+        result: ValueId,
+        collection: ValueId,
+        index: ValueId,
+        position: Source.Position,
+    };
+
+    pub const CollectionReplace = struct {
+        result: ValueId,
+        collection: ValueId,
+        index: ValueId,
+        replacement: ValueId,
+        position: Source.Position,
     };
 
     pub const LocalLoad = struct {
@@ -280,6 +297,7 @@ pub const StructureField = struct {
 pub const Structure = struct {
     name: []const u8,
     fields: []const StructureField,
+    collection: ?Types.Collection = null,
 };
 
 pub const EnumVariant = struct {
@@ -553,6 +571,22 @@ fn writeInstruction(
             try appendValueChecked(output, allocator, function, load.base);
             try output.appendSlice(allocator, ", .");
             try output.appendSlice(allocator, program.structures[structure_index].fields[load.field].name);
+        },
+        .collection_load => |load| {
+            try appendResult(output, allocator, program, function, load.result);
+            try output.appendSlice(allocator, "collection.load ");
+            try appendValueChecked(output, allocator, function, load.collection);
+            try output.appendSlice(allocator, ", ");
+            try appendValueChecked(output, allocator, function, load.index);
+        },
+        .collection_replace => |replacement| {
+            try appendResult(output, allocator, program, function, replacement.result);
+            try output.appendSlice(allocator, "collection.replace ");
+            try appendValueChecked(output, allocator, function, replacement.collection);
+            try output.appendSlice(allocator, ", ");
+            try appendValueChecked(output, allocator, function, replacement.index);
+            try output.appendSlice(allocator, ", ");
+            try appendValueChecked(output, allocator, function, replacement.replacement);
         },
         .local_load => |load| {
             try appendResult(output, allocator, program, function, load.result);

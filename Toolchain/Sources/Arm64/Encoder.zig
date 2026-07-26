@@ -334,6 +334,8 @@ fn encodeFunction(
                 try patch19(words.items, skip_true, words.items.len);
                 try words.append(allocator, storeStack(.x11, test_value.result));
             },
+            .collection_load => |access| try encodeCollectionLoad(allocator, words, data_fixups, &fixups, program, access),
+            .collection_replace => |replacement| try encodeCollectionReplace(allocator, words, data_fixups, &fixups, program, replacement),
             .aggregate_equal => |comparison| try encodeAggregateEqual(allocator, words, &fixups, comparison),
             .convert => |conversion| try encodeConversion(
                 allocator,
@@ -394,7 +396,7 @@ fn encodeFunction(
                 if (call.result) |result| if (!result.aggregate) try words.append(allocator, storeStack(.x0, result.start));
             },
             .print => |value| switch (value.kind) {
-                .signed_integer => try emitPrintInteger(allocator, words, value.value, value.newline),
+                .signed_integer => try emitPrintInteger(allocator, words, value.value, 1, value.newline),
                 .unsigned_integer => try emitPrintUnsigned(allocator, words, value.value, value.newline),
                 .float32, .float64 => try emitPrintFloat(
                     allocator,
@@ -576,6 +578,93 @@ fn encodeAggregateEqual(
     const done = words.items.len;
     for (unequal_branches.items) |at| try patch19(words.items, at, unequal);
     try patch26(words.items, done_branch, done);
+}
+
+const CollectionBounds = struct { negative: usize, upper: usize };
+
+fn emitCollectionBounds(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    index: Machine.Slot,
+    count: u32,
+) Error!CollectionBounds {
+    try words.append(allocator, loadStack(.x9, index));
+    try words.append(allocator, compareRegisters(.x9, .zero_or_sp));
+    const nonnegative = words.items.len;
+    try words.append(allocator, conditionalBranch(.greater_equal));
+    try emitImmediate64(allocator, words, .x10, count);
+    try words.append(allocator, addRegisters(.x9, .x9, .x10));
+    try patch19(words.items, nonnegative, words.items.len);
+    try words.append(allocator, compareRegisters(.x9, .zero_or_sp));
+    const negative = words.items.len;
+    try words.append(allocator, conditionalBranch(.less));
+    try emitImmediate64(allocator, words, .x10, count);
+    try words.append(allocator, compareRegisters(.x9, .x10));
+    const upper = words.items.len;
+    try words.append(allocator, conditionalBranch(.greater_equal));
+    return .{ .negative = negative, .upper = upper };
+}
+
+fn encodeCollectionLoad(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    data_fixups: *std.ArrayList(DataFixup),
+    function_fixups: *FunctionFixups,
+    program: Machine.Program,
+    access: Machine.Instruction.CollectionLoad,
+) Error!void {
+    const bounds = try emitCollectionBounds(allocator, words, access.index, access.count);
+    try emitStackAddress(allocator, words, .x10, access.collection.start);
+    try emitImmediate64(allocator, words, .x11, @as(u64, access.result.width) * Machine.slot_size);
+    try words.append(allocator, multiply(.x9, .x9, .x11));
+    try words.append(allocator, addRegisters(.x10, .x10, .x9));
+    for (0..access.result.width) |leaf| {
+        try emitLoadAtOffset(allocator, words, .x12, .x10, leaf * Machine.slot_size);
+        try words.append(allocator, storeStack(.x12, @intCast(@as(usize, access.result.start) + leaf)));
+    }
+    const complete = words.items.len;
+    try words.append(allocator, branch());
+    const failure = words.items.len;
+    try patch19(words.items, bounds.negative, failure);
+    try patch19(words.items, bounds.upper, failure);
+    try StringRuntime.emitWriteStatic(allocator, words, data_fixups, program, access.header, 2);
+    try emitPrintInteger(allocator, words, access.index, 2, false);
+    try StringRuntime.emitWriteStatic(allocator, words, data_fixups, program, access.tail, 2);
+    try words.append(allocator, moveWideZero32(.x8, @intFromEnum(Machine.Status.runtime_failure)));
+    try appendFixup(allocator, words, &function_fixups.epilogue, branch(), .imm26);
+    try patch26(words.items, complete, words.items.len);
+}
+
+fn encodeCollectionReplace(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    data_fixups: *std.ArrayList(DataFixup),
+    function_fixups: *FunctionFixups,
+    program: Machine.Program,
+    replacement: Machine.Instruction.CollectionReplace,
+) Error!void {
+    const bounds = try emitCollectionBounds(allocator, words, replacement.index, replacement.count);
+    try words.append(allocator, moveRegister(.x13, .x9));
+    try emitSpanCopy(allocator, words, replacement.result, replacement.collection);
+    try emitStackAddress(allocator, words, .x10, replacement.result.start);
+    try emitImmediate64(allocator, words, .x11, @as(u64, replacement.replacement.width) * Machine.slot_size);
+    try words.append(allocator, multiply(.x9, .x13, .x11));
+    try words.append(allocator, addRegisters(.x10, .x10, .x9));
+    for (0..replacement.replacement.width) |leaf| {
+        try words.append(allocator, loadStack(.x12, @intCast(@as(usize, replacement.replacement.start) + leaf)));
+        try emitStoreAtOffset(allocator, words, .x12, .x10, leaf * Machine.slot_size);
+    }
+    const complete = words.items.len;
+    try words.append(allocator, branch());
+    const failure = words.items.len;
+    try patch19(words.items, bounds.negative, failure);
+    try patch19(words.items, bounds.upper, failure);
+    try StringRuntime.emitWriteStatic(allocator, words, data_fixups, program, replacement.header, 2);
+    try emitPrintInteger(allocator, words, replacement.index, 2, false);
+    try StringRuntime.emitWriteStatic(allocator, words, data_fixups, program, replacement.tail, 2);
+    try words.append(allocator, moveWideZero32(.x8, @intFromEnum(Machine.Status.runtime_failure)));
+    try appendFixup(allocator, words, &function_fixups.epilogue, branch(), .imm26);
+    try patch26(words.items, complete, words.items.len);
 }
 
 fn encodeBinary(
@@ -997,6 +1086,7 @@ fn emitPrintInteger(
     allocator: Allocator,
     words: *std.ArrayList(u32),
     slot: Machine.Slot,
+    descriptor: u16,
     newline: bool,
 ) Error!void {
     try words.append(allocator, loadStack(.x9, slot));
@@ -1052,7 +1142,7 @@ fn emitPrintInteger(
     try patch19(words.items, unsigned, words.items.len);
 
     try patch26(words.items, zero_finished, words.items.len);
-    try words.append(allocator, moveWideZero32(.x0, 1));
+    try words.append(allocator, moveWideZero32(.x0, descriptor));
     try words.append(allocator, moveRegister(.x1, .x11));
     try words.append(allocator, moveRegister(.x2, .x12));
     try words.append(allocator, moveWideZero32(.x16, 4));

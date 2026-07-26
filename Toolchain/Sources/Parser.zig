@@ -7,6 +7,7 @@ const Matches = @import("Parser/Matches.zig");
 const EnumParser = @import("Parser/Enums.zig");
 const Generics = @import("Parser/Generics.zig");
 const Uses = @import("Parser/Uses.zig");
+const Collections = @import("Parser/Collections.zig");
 
 const Allocator = std.mem.Allocator;
 const Token = LexerModule.Token;
@@ -22,6 +23,7 @@ pub const Parser = struct {
     diagnostic: ?Source.Diagnostic = null,
     type_names: std.ArrayList([]const u8) = .empty,
     generic_types: std.ArrayList(Ast.GenericType) = .empty,
+    collection_structures: std.ArrayList(Ast.Structure) = .empty,
     type_parameters: []const Ast.TypeParameter = &.{},
     match_depth: usize = 0,
 
@@ -67,6 +69,7 @@ pub const Parser = struct {
                 else => return self.fail("expected use, enum, struct, or function declaration"),
             }
         }
+        try structures.appendSlice(self.allocator, self.collection_structures.items);
         return .{
             .uses = try uses.toOwnedSlice(self.allocator),
             .type_names = try self.type_names.toOwnedSlice(self.allocator),
@@ -290,6 +293,17 @@ pub const Parser = struct {
             const arguments = try Generics.parseTypeArguments(self);
             result = try self.internGenericType(type_position, result, arguments);
         }
+        while (self.current.tag == .left_bracket) {
+            const bracket_position = self.current.position;
+            try self.advance();
+            if (self.current.tag == .right_bracket) return self.failAt(bracket_position, "fixed array type requires a length");
+            if (self.current.tag != .integer) return self.fail("fixed array length must be an integer literal");
+            const length = std.fmt.parseInt(usize, self.current.lexeme, 10) catch return self.failAt(self.current.position, "fixed array length is too large");
+            try self.advance();
+            try self.expect(.right_bracket, "expected ']' after fixed array length");
+            if (result == .void) return self.failAt(bracket_position, "array element type cannot be 'void'");
+            result = try Collections.internFixedType(self, type_position, result, length);
+        }
         if (self.current.tag == .question) {
             if (result == .void) return self.fail("'void?' is not a valid type");
             result = .optional(result);
@@ -300,12 +314,7 @@ pub const Parser = struct {
     }
 
     pub fn internTypeName(self: *Parser, name: []const u8) Allocator.Error!Ast.Type {
-        for (self.type_names.items, 0..) |existing, index| {
-            if (std.mem.eql(u8, existing, name)) return .structure(index);
-        }
-        const index = self.type_names.items.len;
-        try self.type_names.append(self.allocator, name);
-        return .structure(index);
+        return Collections.internNamedType(self, name);
     }
 
     pub fn internGenericType(self: *Parser, position: Source.Position, base: Ast.Type, arguments: []const Ast.Type) Allocator.Error!Ast.Type {
@@ -594,14 +603,17 @@ pub const Parser = struct {
 
     fn assignmentTarget(self: *Parser, expression: *Ast.Expression) ParseError!Ast.AssignmentTarget {
         var fields: std.ArrayList(Ast.AssignmentTarget.Field) = .empty;
+        var indices: std.ArrayList(Ast.AssignmentTarget.Index) = .empty;
         var current = expression;
         while (true) switch (current.value) {
             .identifier => |name| {
                 std.mem.reverse(Ast.AssignmentTarget.Field, fields.items);
+                std.mem.reverse(Ast.AssignmentTarget.Index, indices.items);
                 return .{
                     .name_position = current.position,
                     .name = name,
                     .fields = try fields.toOwnedSlice(self.allocator),
+                    .indices = try indices.toOwnedSlice(self.allocator),
                 };
             },
             .field_access => |access| {
@@ -609,6 +621,11 @@ pub const Parser = struct {
                     .name_position = access.name_position,
                     .name = access.name,
                 });
+                current = access.base;
+            },
+            .index_access => |access| {
+                if (fields.items.len != 0) return self.failAt(access.bracket_position, "field assignment after collection indexing is not supported yet");
+                try indices.append(self.allocator, .{ .position = access.bracket_position, .value = access.index });
                 current = access.base;
             },
             else => return self.failAt(expression.position, "assignment target must be a variable or field path"),
@@ -777,6 +794,18 @@ pub const Parser = struct {
                 expression = try self.parseCallAfterName(name, null, false, &.{});
                 continue;
             }
+            if (self.current.tag == .left_bracket) {
+                const position = self.current.position;
+                try self.advance();
+                if (self.current.tag == .right_bracket) return self.fail("expected collection index");
+                const index = try self.parseExpression(true);
+                try self.expect(.right_bracket, "expected ']' after collection index");
+                expression = try self.newExpression(.{
+                    .position = expression.position,
+                    .value = .{ .index_access = .{ .base = expression, .index = index, .bracket_position = position } },
+                });
+                continue;
+            }
             if (self.current.tag == .dot or self.current.tag == .question_dot) {
                 const safe = self.current.tag == .question_dot;
                 try self.advance();
@@ -875,6 +904,7 @@ pub const Parser = struct {
                 try self.expect(.right_parenthesis, "expected ')' after expression");
                 return expression;
             },
+            .left_bracket => return Collections.parseLiteral(self, token.position),
             .keyword_match => return Matches.parse(self),
             else => return self.fail("expected expression"),
         }
