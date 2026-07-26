@@ -8,6 +8,7 @@ const Optionals = @import("Optionals.zig");
 const Control = @import("Control.zig");
 const Borrowing = @import("Borrowing.zig");
 const MutableReferences = @import("MutableReferences.zig");
+const Resources = @import("Resources.zig");
 
 const AnalyzeError = error{ InvalidSource, OutOfMemory };
 
@@ -345,6 +346,7 @@ fn analyzeCallWithReceiver(
             try argument_ids.append(self.allocator, prepared.reference);
             continue;
         }
+        if (parameter.mode == .value) try Resources.requireTransfer(self, call.arguments[index], argument.type, "passing it by value");
         if (parameter.mode != .read) try Borrowing.requireOwned(self, argument, call.arguments[index].position, "passed by value");
         try argument_ids.append(
             self.allocator,

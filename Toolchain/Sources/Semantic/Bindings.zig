@@ -4,6 +4,7 @@ const Numeric = @import("../Numeric.zig");
 const Borrowing = @import("Borrowing.zig");
 const Optionals = @import("Optionals.zig");
 const Support = @import("Support.zig");
+const Resources = @import("Resources.zig");
 
 pub fn analyzeVariable(self: anytype, builder: anytype, declaration: Ast.VariableDeclaration) !void {
     if (Support.findBinding(builder.bindings.items, declaration.name) != null) {
@@ -48,6 +49,7 @@ pub fn analyzeVariable(self: anytype, builder: anytype, declaration: Ast.Variabl
         });
         return;
     }
+    if (declaration.initializer) |expression| try Resources.requireTransfer(self, expression, declared_type, "storing it");
     try Borrowing.requireOwned(self, initializer, if (declaration.initializer) |value| value.position else declaration.name_position, "stored");
     if (initializer.type != declared_type and (Numeric.canWiden(initializer.type, declared_type) or Optionals.canConvert(initializer.type, declared_type))) {
         initializer = try self.coerce(builder, initializer, declared_type, declaration.initializer.?.position);
@@ -108,6 +110,7 @@ pub fn analyzeReturn(self: anytype, builder: anytype, function: Ast.Function, st
             self.terminate(builder, .{ .return_value = if (function.return_mode == .mutable) value.reference.? else value.value });
             return;
         }
+        try Resources.requireTransfer(self, expression, value.type, "returning it");
         try Borrowing.requireOwned(self, value, expression.position, "returned");
         self.terminate(builder, .{ .return_value = value.value });
         return;

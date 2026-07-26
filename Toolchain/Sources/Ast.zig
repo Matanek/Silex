@@ -361,7 +361,13 @@ pub const Structure = struct {
     fields: []const StructureField,
     constructors: []const Constructor = &.{},
     methods: []const Function = &.{},
+    drop: ?Drop = null,
     collection: ?Collection = null,
+};
+
+pub const Drop = struct {
+    position: Source.Position,
+    statements: []const Statement,
 };
 
 pub const Collection = Types.Collection;

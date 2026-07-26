@@ -8,6 +8,7 @@ const Enums = @import("Enums.zig");
 const Collections = @import("Collections.zig");
 const Moves = @import("Moves.zig");
 const Borrowing = @import("Borrowing.zig");
+const Resources = @import("Resources.zig");
 
 const PathStep = union(enum) {
     field: struct { base: Ir.ValueId, structure: usize, field: usize },
@@ -53,6 +54,12 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
             const message = try std.fmt.allocPrint(self.allocator, "cannot move value '{s}' into itself", .{target.name});
             return self.fail(value.position, message);
         };
+        if (assignment.operator == .assign and assignment.value != null) {
+            try Resources.requireTransfer(self, assignment.value.?, binding.type, "assigning it");
+            if (binding.available and Resources.isOwner(self, binding.type)) {
+                try Resources.emitDrop(self, builder, binding.type, try loadBinding(self, builder, binding));
+            }
+        }
         const current = if (assignment.operator == .assign) null else try loadBinding(self, builder, binding);
         const replacement = try analyzeReplacement(self, builder, assignment, binding.type, current, target.name, false);
         try storeBinding(self, builder, binding, replacement);
@@ -79,6 +86,9 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
         }
         const structure = self.structures[structure_index];
         const source_structure = self.program.structures[structure_index];
+        if (source_structure.drop != null and !self.ownerStorageVisible(structure_index, target_field.name_position)) {
+            return self.fail(target_field.name_position, "owner structure storage is private to its declaring file and direct module users");
+        }
         if (source_structure.is_internal and target_field.name_position.file != source_structure.position.file) {
             const message = try std.fmt.allocPrint(
                 self.allocator,

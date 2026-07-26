@@ -99,9 +99,12 @@ pub const Parser = struct {
         var fields: std.ArrayList(Ast.StructureField) = .empty;
         var constructors: std.ArrayList(Ast.Constructor) = .empty;
         var methods: std.ArrayList(Ast.Function) = .empty;
+        var drop: ?Ast.Drop = null;
         while (self.current.tag != .right_brace and self.current.tag != .end) {
             var member_internal = false;
+            var member_visibility = false;
             if (self.current.tag == .keyword_public or self.current.tag == .keyword_internal) {
+                member_visibility = true;
                 member_internal = self.current.tag == .keyword_internal;
                 try self.advance();
             }
@@ -111,6 +114,15 @@ pub const Parser = struct {
             }
             if (self.current.tag == .keyword_func) {
                 try methods.append(self.allocator, try self.parseFunction(!member_internal, member_internal));
+                continue;
+            }
+            if (self.current.tag == .keyword_drop) {
+                if (member_visibility) return self.fail("drop cannot declare visibility");
+                if (drop != null) return self.fail("structure already declares drop");
+                const drop_position = self.current.position;
+                try self.advance();
+                if (self.current.tag != .left_brace) return self.fail("drop has no parameters or return type");
+                drop = .{ .position = drop_position, .statements = try self.parseBlock() };
                 continue;
             }
             const mutable = switch (self.current.tag) {
@@ -154,6 +166,7 @@ pub const Parser = struct {
             .fields = try fields.toOwnedSlice(self.allocator),
             .constructors = try constructors.toOwnedSlice(self.allocator),
             .methods = try methods.toOwnedSlice(self.allocator),
+            .drop = drop,
         };
     }
 
