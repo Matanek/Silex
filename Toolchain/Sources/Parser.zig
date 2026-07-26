@@ -338,6 +338,7 @@ pub const Parser = struct {
             .keyword_break => self.parseLoopControl(false),
             .keyword_continue => self.parseLoopControl(true),
             .keyword_match => self.parseMatchStatement(),
+            .keyword_try => self.parseMatchStatement(),
             .identifier, .keyword_self => self.parseIdentifierStatement(),
             else => self.fail("expected statement"),
         };
@@ -716,13 +717,18 @@ pub const Parser = struct {
     }
 
     fn parseUnary(self: *Parser, allow_line_breaks: bool) ParseError!*Ast.Expression {
-        if (self.current.tag != .minus and self.current.tag != .bang) return self.parseConversion();
+        if (self.current.tag != .minus and self.current.tag != .bang and self.current.tag != .keyword_try) return self.parseConversion();
         const operator = self.current;
         try self.advance();
         return self.newExpression(.{
             .position = operator.position,
             .value = .{ .unary = .{
-                .operator = if (operator.tag == .minus) .negate else .logical_not,
+                .operator = switch (operator.tag) {
+                    .minus => .negate,
+                    .bang => .logical_not,
+                    .keyword_try => .propagate,
+                    else => unreachable,
+                },
                 .operator_position = operator.position,
                 .operand = try self.parseUnary(allow_line_breaks),
             } },

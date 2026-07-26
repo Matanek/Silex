@@ -6,6 +6,7 @@ pub const Type = Types.Type;
 pub const UnaryOperator = enum {
     negate,
     logical_not,
+    propagate,
 };
 
 pub const BinaryOperator = enum {

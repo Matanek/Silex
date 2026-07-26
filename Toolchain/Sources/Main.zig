@@ -183,6 +183,7 @@ test {
     _ = @import("Numeric.zig");
     _ = @import("OptionalTests.zig");
     _ = @import("ResultTests.zig");
+    _ = @import("TryTests.zig");
     _ = @import("Packages.zig");
     _ = @import("Lexer.zig");
     _ = @import("Lsp/Completion.zig");
