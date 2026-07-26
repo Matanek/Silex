@@ -213,6 +213,11 @@ pub const Specializer = struct {
             try concrete_methods.append(self.allocator, method);
         };
         structure.methods = try concrete_methods.toOwnedSlice(self.allocator);
+        if (structure.drop) |*drop| {
+            var locals: std.ArrayList(Binding) = .empty;
+            try locals.append(self.allocator, .{ .name = "self", .type = self_type });
+            drop.statements = try self.rewriteStatements(drop.statements, arguments, &locals);
+        }
         self.structures.items[structure_index] = structure;
         const initial_method_count = structure.methods.len;
         for (0..initial_method_count) |method_index| {

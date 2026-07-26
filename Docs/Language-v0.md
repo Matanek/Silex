@@ -395,6 +395,28 @@ be retained in a lexical local: `let` keeps a shared alias, while `var` keeps a
 mutable result. Such aliases cannot escape into aggregates or outlive their
 root, and a stored mutable alias is exclusive until its lexical scope ends.
 
+## Owner structures and `drop`
+
+A structure that declares `drop` owns a unique resource and is nominally
+non-copyable. The block receives `self` implicitly and has no parameters,
+parentheses, return type, visibility, `return`, or `try`.
+
+```sx
+struct File {
+    let descriptor:int
+
+    drop {
+        print("close ", self.descriptor)
+    }
+}
+```
+
+A newly constructed owner transfers directly into its destination. A named
+owner requires `move` when stored again, assigned, passed by value, or returned.
+It may still be inspected through `@T`, but cannot be compared or passed through
+`&T`. Replacing an available owner `var` runs its `drop` before installing the
+new value; a moved source no longer runs it.
+
 ## Associated enum values
 
 `enum` declares a nominal closed set of variants. A variant may carry zero or
@@ -952,7 +974,8 @@ program         = (use | enum | structure | function)* EOF ;
 use             = "public"? "use"
                   (qualified_identifier ("as" identifier)? | type "as" identifier) ;
 visibility      = "public" | "internal" ;
-structure       = visibility? "struct" identifier type_parameters? "{" (structure_field | constructor | method)* "}" ;
+structure       = visibility? "struct" identifier type_parameters? "{" (structure_field | constructor | method | drop_definition)* "}" ;
+drop_definition = "drop" block ;
 enum            = visibility? "enum" identifier type_parameters? "{" enum_variant+ "}" ;
 enum_variant    = identifier ("(" type ("," type)* ")")? ;
 structure_field = visibility? ("let" | "var") identifier ":" type ("=" field_default)? ;

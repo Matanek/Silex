@@ -9,6 +9,7 @@ const Moves = @import("Moves.zig");
 const Borrowing = @import("Borrowing.zig");
 const Bindings = @import("Bindings.zig");
 const MutableReferences = @import("MutableReferences.zig");
+const Resources = @import("Resources.zig");
 const Optionals = @import("Optionals.zig");
 const Constructors = @import("Constructors.zig");
 const Collections = @import("Collections.zig");
@@ -66,6 +67,11 @@ pub const Analyzer = struct {
                 );
             }
         }
+        for (program.structures, 0..) |structure, structure_index| if (structure.drop) |drop| {
+            const nominal = self.structureIndex(structure.name) orelse return error.InvalidSource;
+            try functions.append(self.allocator, try Resources.analyzeDrop(self, nominal, structure, drop));
+            _ = structure_index;
+        };
         for (program.structures, 0..) |structure, structure_index| {
             for (structure.methods, 0..) |method, method_index| {
                 try functions.append(
@@ -85,6 +91,7 @@ pub const Analyzer = struct {
                 main = function;
             }
             for (function.parameters, 0..) |parameter, index| {
+                try Resources.validateParameter(self, parameter);
                 for (function.parameters[0..index]) |previous| {
                     if (std.mem.eql(u8, parameter.name, previous.name)) {
                         const message = try std.fmt.allocPrint(self.allocator, "parameter '{s}' is already declared", .{parameter.name});
@@ -127,8 +134,10 @@ pub const Analyzer = struct {
             }
         }
         for (self.program.structures) |structure| {
+            if (structure.drop) |drop| try Resources.validateDrop(self, drop);
             for (structure.constructors, 0..) |constructor, index| {
                 for (constructor.parameters, 0..) |parameter, parameter_index| {
+                    try Resources.validateParameter(self, parameter);
                     for (constructor.parameters[0..parameter_index]) |previous| {
                         if (std.mem.eql(u8, parameter.name, previous.name)) {
                             const message = try std.fmt.allocPrint(self.allocator, "parameter '{s}' is already declared", .{parameter.name});
@@ -160,6 +169,7 @@ pub const Analyzer = struct {
             }
             for (structure.methods, 0..) |method, index| {
                 for (method.parameters, 0..) |parameter, parameter_index| {
+                    try Resources.validateParameter(self, parameter);
                     for (method.parameters[0..parameter_index]) |previous| {
                         if (std.mem.eql(u8, parameter.name, previous.name)) {
                             const message = try std.fmt.allocPrint(self.allocator, "parameter '{s}' is already declared", .{parameter.name});
@@ -258,7 +268,10 @@ pub const Analyzer = struct {
 
         const ends_with_return = try self.analyzeStatements(&builder, function, function.statements);
         if (function.return_type == .void) {
-            if (!ends_with_return) self.terminate(&builder, .return_void);
+            if (!ends_with_return) {
+                try Resources.emitActiveDrops(self, &builder, 0);
+                self.terminate(&builder, .return_void);
+            }
         } else if (!ends_with_return) {
             const message = try std.fmt.allocPrint(
                 self.allocator,
@@ -520,6 +533,9 @@ pub const Analyzer = struct {
             }
         }
         const same_numeric = left.type == right.type and left.type.isNumeric();
+        if (equality and left.type == right.type and Resources.isOwner(self, left.type)) {
+            return self.fail(binary.operator_position, "owner structures cannot be compared");
+        }
         const valid = if (bitwise)
             same_numeric and left.type.isInteger() and !left.type.isSignedInteger()
         else if (shift)
@@ -736,6 +752,15 @@ pub const Analyzer = struct {
         return null;
     }
 
+    pub fn ownerStorageVisible(self: *Analyzer, structure_index: usize, position: Source.Position) bool {
+        const declaration = self.findAstStructure(self.structures[structure_index].name) orelse return false;
+        if (position.file == declaration.position.file) return true;
+        for (self.program.uses) |use_value| {
+            if (use_value.position.file == position.file and use_value.type_target != null and use_value.type_target.? == Ast.Type.structure(structure_index)) return true;
+        }
+        return false;
+    }
+
     pub fn typeName(self: *Analyzer, type_value: Types.Type) []const u8 {
         if (type_value.optionalChild()) |child| {
             return std.fmt.allocPrint(self.allocator, "{s}?", .{self.typeName(child)}) catch "optional";
@@ -808,6 +833,9 @@ pub const Analyzer = struct {
             const message = try std.fmt.allocPrint(self.allocator, "type '{s}' has no fields", .{self.typeName(base.type)});
             return self.fail(access.name_position, message);
         };
+        if (declaration.drop != null and !self.ownerStorageVisible(structure_index, access.name_position)) {
+            return self.fail(access.name_position, "owner structure storage is private to its declaring file and direct module users");
+        }
         if (declaration.is_internal and access.name_position.file != declaration.position.file) {
             const message = try std.fmt.allocPrint(
                 self.allocator,
@@ -857,6 +885,9 @@ pub const Analyzer = struct {
     ) AnalyzeError!TypedValue {
         const structure = self.structures[structure_index];
         const declaration = self.findAstStructure(structure.name).?;
+        if (declaration.drop != null and !self.ownerStorageVisible(structure_index, call.name_position)) {
+            return self.fail(call.name_position, "owner structure aggregate initializer is private to its declaring file and direct module users");
+        }
         if (declaration.constructors.len != 0) {
             return Constructors.analyzeCall(self, builder, structure_index, declaration, call);
         }
@@ -1154,6 +1185,7 @@ pub const Analyzer = struct {
                 }
                 continue;
             }
+            if (parameter.mode == .value) try Resources.requireTransfer(self, call.arguments[index], argument.type, "passing it by value");
             if (parameter.mode != .read) try Borrowing.requireOwned(self, argument, call.arguments[index].position, "passed by value");
             const converted = try self.coerce(builder, argument, parameter.type, call.name_position);
             try argument_ids.append(self.allocator, converted.value);

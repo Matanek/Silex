@@ -992,6 +992,7 @@ pub const Compiler = struct {
                     methods[method_index].statements = try self.rewriteStatements(module, method.statements, type_map);
                 }
                 composed_structure.methods = methods;
+                if (composed_structure.drop) |*drop| drop.statements = try self.rewriteStatements(module, drop.statements, type_map);
                 try structures.append(self.allocator, composed_structure);
             }
             for (program.enums) |enumeration| {
