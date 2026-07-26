@@ -56,6 +56,7 @@ pub const Expression = struct {
         safe: bool = false,
         arguments: []const *Expression,
         named_arguments: []const NamedArgument = &.{},
+        type_arguments: []const Type = &.{},
         owner: usize = 0,
     };
 
@@ -261,6 +262,11 @@ pub const Parameter = struct {
     default: ?*Expression = null,
 };
 
+pub const TypeParameter = struct {
+    position: Source.Position,
+    name: []const u8,
+};
+
 pub const StructureField = struct {
     is_public: bool = true,
     is_internal: bool = false,
@@ -287,6 +293,7 @@ pub const Structure = struct {
     position: Source.Position,
     name_position: Source.Position,
     name: []const u8,
+    type_parameters: []const TypeParameter = &.{},
     fields: []const StructureField,
     constructors: []const Constructor = &.{},
     methods: []const Function = &.{},
@@ -311,6 +318,7 @@ pub const Enum = struct {
     position: Source.Position,
     name_position: Source.Position,
     name: []const u8,
+    type_parameters: []const TypeParameter = &.{},
     raw_type: ?Type = null,
     variants: []const EnumVariant,
 };
@@ -331,6 +339,7 @@ pub const Function = struct {
     position: Source.Position,
     name_position: Source.Position,
     name: []const u8,
+    type_parameters: []const TypeParameter = &.{},
     parameters: []const Parameter,
     return_type: Type,
     statements: []const Statement,

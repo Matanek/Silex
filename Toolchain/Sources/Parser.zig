@@ -5,6 +5,7 @@ const Source = @import("Source.zig");
 const Strings = @import("Strings.zig");
 const Matches = @import("Parser/Matches.zig");
 const EnumParser = @import("Parser/Enums.zig");
+const Generics = @import("Parser/Generics.zig");
 
 const Allocator = std.mem.Allocator;
 const Token = LexerModule.Token;
@@ -19,6 +20,7 @@ pub const Parser = struct {
     started: bool = false,
     diagnostic: ?Source.Diagnostic = null,
     type_names: std.ArrayList([]const u8) = .empty,
+    type_parameters: []const Ast.TypeParameter = &.{},
     match_depth: usize = 0,
 
     pub fn init(allocator: Allocator, source: []const u8) Parser {
@@ -227,6 +229,10 @@ pub const Parser = struct {
         const name = self.current.lexeme;
         const name_position = self.current.position;
         try self.advance();
+        const type_parameters = try Generics.parseTypeParameters(self);
+        const enclosing_type_parameters = self.type_parameters;
+        self.type_parameters = type_parameters;
+        defer self.type_parameters = enclosing_type_parameters;
         try self.expect(.left_parenthesis, "expected '(' after function name");
 
         var parameters: std.ArrayList(Ast.Parameter) = .empty;
@@ -253,6 +259,7 @@ pub const Parser = struct {
             .position = position,
             .name_position = name_position,
             .name = name,
+            .type_parameters = type_parameters,
             .parameters = try parameters.toOwnedSlice(self.allocator),
             .return_type = return_type,
             .statements = try self.parseBlock(),
@@ -291,6 +298,11 @@ pub const Parser = struct {
             .keyword_float64 => .float64,
             .keyword_str => .str,
             .identifier => identifier: {
+                for (self.type_parameters, 0..) |parameter, index| {
+                    if (std.mem.eql(u8, parameter.name, self.current.lexeme)) {
+                        break :identifier .genericParameter(index);
+                    }
+                }
                 var name = self.current.lexeme;
                 while (true) {
                     var lexer = self.lexer;
@@ -766,6 +778,18 @@ pub const Parser = struct {
     fn parseConversion(self: *Parser) ParseError!*Ast.Expression {
         var expression = try self.parsePrimary();
         while (true) {
+            if (self.current.tag == .less and expression.value == .identifier and try Generics.callArgumentsFollow(self)) {
+                const type_arguments = try Generics.parseTypeArguments(self);
+                const name = Token{
+                    .tag = .identifier,
+                    .lexeme = expression.value.identifier,
+                    .position = expression.position,
+                    .start = 0,
+                    .end = 0,
+                };
+                expression = try self.parseCallAfterName(name, null, false, type_arguments);
+                continue;
+            }
             if (self.current.tag == .left_parenthesis) {
                 const name = switch (expression.value) {
                     .identifier => |value| Token{
@@ -777,7 +801,7 @@ pub const Parser = struct {
                     },
                     else => return self.fail("only a named declaration can be called directly"),
                 };
-                expression = try self.parseCallAfterName(name, null, false);
+                expression = try self.parseCallAfterName(name, null, false, &.{});
                 continue;
             }
             if (self.current.tag == .dot or self.current.tag == .question_dot) {
@@ -789,8 +813,14 @@ pub const Parser = struct {
                     "expected member name after '.'");
                 const member = self.current;
                 try self.advance();
+                const type_arguments = if (self.current.tag == .less and try Generics.callArgumentsFollow(self))
+                    try Generics.parseTypeArguments(self)
+                else
+                    &.{};
                 if (self.current.tag == .left_parenthesis) {
-                    expression = try self.parseCallAfterName(member, expression, safe);
+                    expression = try self.parseCallAfterName(member, expression, safe, type_arguments);
+                } else if (type_arguments.len != 0) {
+                    return self.fail("expected '(' after method type arguments");
                 } else expression = try self.newExpression(.{
                     .position = expression.position,
                     .value = .{ .field_access = .{
@@ -893,7 +923,7 @@ pub const Parser = struct {
         });
     }
 
-    fn parseCallAfterName(self: *Parser, name: Token, receiver: ?*Ast.Expression, safe: bool) ParseError!*Ast.Expression {
+    fn parseCallAfterName(self: *Parser, name: Token, receiver: ?*Ast.Expression, safe: bool, type_arguments: []const Ast.Type) ParseError!*Ast.Expression {
         try self.expect(.left_parenthesis, "expected '(' after function name");
         var arguments: std.ArrayList(*Ast.Expression) = .empty;
         var named_arguments: std.ArrayList(Ast.Expression.NamedArgument) = .empty;
@@ -933,6 +963,7 @@ pub const Parser = struct {
                 .safe = safe,
                 .arguments = try arguments.toOwnedSlice(self.allocator),
                 .named_arguments = try named_arguments.toOwnedSlice(self.allocator),
+                .type_arguments = type_arguments,
             } },
         });
     }

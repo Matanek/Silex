@@ -1,6 +1,7 @@
 const std = @import("std");
 const Ast = @import("Ast.zig");
 const Interface = @import("Interface.zig");
+const GenericSpecializer = @import("Generics/Specializer.zig").Specializer;
 const Ir = @import("Ir.zig");
 const Modules = @import("Modules.zig");
 const Packages = @import("Packages.zig");
@@ -86,7 +87,11 @@ pub const Compiler = struct {
         try self.validateReexports();
 
         const composition = try self.composeAst();
-        const ast = composition.program;
+        var specializer = GenericSpecializer.init(self.allocator);
+        const ast = specializer.specialize(composition.program) catch |err| {
+            self.diagnostic = specializer.diagnostic;
+            return err;
+        };
         const interfaces = try self.buildInterfaces(composition.type_maps);
         var analyzer = Semantic.Analyzer.init(self.allocator);
         var ir = analyzer.analyze(ast) catch |err| {
@@ -1204,6 +1209,9 @@ pub const Compiler = struct {
         switch (expression.value) {
             .call => |*call| {
                 call.owner = self.index.providers[module].owner;
+                const type_arguments = try self.allocator.alloc(Ast.Type, call.type_arguments.len);
+                for (call.type_arguments, 0..) |type_argument, index| type_arguments[index] = remapType(type_argument, type_map);
+                call.type_arguments = type_arguments;
                 for (call.arguments) |argument| try self.rewriteExpression(module, argument, type_map);
                 for (call.named_arguments) |argument| try self.rewriteExpression(module, argument.value, type_map);
                 if (call.receiver) |receiver| {
