@@ -11,6 +11,7 @@ pub fn parse(parser: anytype) !*Ast.Expression {
     try parser.expect(.left_brace, "expected '{' after match subject");
 
     var branches: std.ArrayList(Ast.Expression.MatchBranch) = .empty;
+    var imperative: ?bool = null;
     while (parser.current.tag != .right_brace and parser.current.tag != .end) {
         const is_else = parser.current.tag == .keyword_else;
         if (!is_else and parser.current.tag != .identifier) return parser.fail("expected enum variant or 'else' in match branch");
@@ -43,8 +44,12 @@ pub fn parse(parser: anytype) !*Ast.Expression {
             try parser.expect(.right_parenthesis, "expected ')' after match bindings");
         }
         try parser.expect(.fat_arrow, "expected '=>' after match pattern");
-        if (parser.current.tag == .left_brace) return parser.fail("expression match branches require an expression");
-        const value = try parser.parseExpression(false);
+        const branch_imperative = parser.current.tag == .left_brace;
+        if (imperative) |expected| {
+            if (expected != branch_imperative) return parser.fail("match cannot mix expression and block branches");
+        } else imperative = branch_imperative;
+        const statements = if (branch_imperative) try parser.parseBlock() else null;
+        const value = if (branch_imperative) null else try parser.parseExpression(false);
         try parser.expectStatementTerminator();
         try branches.append(parser.allocator, .{
             .position = branch_position,
@@ -52,6 +57,7 @@ pub fn parse(parser: anytype) !*Ast.Expression {
             .is_else = is_else,
             .bindings = try bindings.toOwnedSlice(parser.allocator),
             .value = value,
+            .statements = statements,
         });
         if (is_else and parser.current.tag != .right_brace) return parser.fail("else match branch must be last");
     }
@@ -60,5 +66,6 @@ pub fn parse(parser: anytype) !*Ast.Expression {
     return parser.newExpression(.{ .position = position, .value = .{ .match_expression = .{
         .subject = subject,
         .branches = try branches.toOwnedSlice(parser.allocator),
+        .imperative = imperative.?,
     } } });
 }

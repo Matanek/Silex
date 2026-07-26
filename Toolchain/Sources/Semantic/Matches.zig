@@ -5,7 +5,73 @@ const Enums = @import("Enums.zig");
 const Model = @import("Model.zig");
 const Support = @import("Support.zig");
 
+const Prepared = struct {
+    subject: Model.TypedValue,
+    enum_index: usize,
+    variant_indices: []const ?usize,
+    branch_blocks: []const Ir.BlockId,
+    merge_block: Ir.BlockId,
+};
+
 pub fn analyze(self: anytype, builder: anytype, match_value: Ast.Expression.Match) !Model.TypedValue {
+    if (match_value.imperative) return self.fail(match_value.subject.position, "imperative match cannot be used as a value");
+    const prepared = try prepare(self, builder, match_value);
+    var result: ?Ir.ValueId = null;
+    var result_type: ?Ast.Type = null;
+    for (match_value.branches, prepared.branch_blocks, prepared.variant_indices) |branch, branch_block, variant_index| {
+        builder.current_block = branch_block;
+        const binding_count = builder.bindings.items.len;
+        defer builder.bindings.shrinkRetainingCapacity(binding_count);
+        try bindBranch(self, builder, prepared, branch, variant_index);
+        const branch_value = try self.analyzeExpression(builder, branch.value.?);
+        if (result_type) |expected| {
+            if (branch_value.type != expected) {
+                const message = try std.fmt.allocPrint(self.allocator, "match branch expects exact type '{s}', found '{s}'", .{
+                    self.typeName(expected), self.typeName(branch_value.type),
+                });
+                return self.fail(branch.value.?.position, message);
+            }
+        } else {
+            result_type = branch_value.type;
+            result = try self.newValue(builder, branch_value.type);
+        }
+        try self.emit(builder, .{ .copy = .{ .result = result.?, .operand = branch_value.value } });
+        self.terminate(builder, .{ .jump = prepared.merge_block });
+    }
+    builder.current_block = prepared.merge_block;
+    return .{ .type = result_type.?, .value = result.? };
+}
+
+pub fn analyzeStatement(
+    self: anytype,
+    builder: anytype,
+    function: Ast.Function,
+    match_value: Ast.Expression.Match,
+) !bool {
+    if (!match_value.imperative) return self.fail(match_value.subject.position, "match statement requires block branches");
+    const prepared = try prepare(self, builder, match_value);
+    var all_terminated = true;
+    for (match_value.branches, prepared.branch_blocks, prepared.variant_indices) |branch, branch_block, variant_index| {
+        builder.current_block = branch_block;
+        const binding_count = builder.bindings.items.len;
+        defer builder.bindings.shrinkRetainingCapacity(binding_count);
+        try bindBranch(self, builder, prepared, branch, variant_index);
+        const terminated = try self.analyzeStatements(builder, function, branch.statements.?);
+        if (!terminated) {
+            all_terminated = false;
+            self.terminate(builder, .{ .jump = prepared.merge_block });
+        }
+    }
+    if (all_terminated) {
+        std.debug.assert(prepared.merge_block + 1 == builder.blocks.items.len);
+        builder.blocks.items.len -= 1;
+        return true;
+    }
+    builder.current_block = prepared.merge_block;
+    return false;
+}
+
+fn prepare(self: anytype, builder: anytype, match_value: Ast.Expression.Match) !Prepared {
     const subject = try self.analyzeExpression(builder, match_value.subject);
     const enum_index = Enums.findByType(self, subject.type) orelse {
         const message = try std.fmt.allocPrint(self.allocator, "match requires an enum subject, found '{s}'", .{self.typeName(subject.type)});
@@ -21,9 +87,9 @@ pub fn analyze(self: anytype, builder: anytype, match_value: Ast.Expression.Matc
     if (else_index == null and match_value.branches.len != enumeration.variants.len) {
         for (enumeration.variants) |variant| {
             var found = false;
-            for (match_value.branches) |branch| if (!branch.is_else and std.mem.eql(u8, branch.variant, variant.name)) {
-                found = true;
-            };
+            for (match_value.branches) |branch| {
+                if (!branch.is_else and std.mem.eql(u8, branch.variant, variant.name)) found = true;
+            }
             if (!found) {
                 const message = try std.fmt.allocPrint(self.allocator, "match is missing variant '{s}'", .{variant.name});
                 return self.fail(match_value.subject.position, message);
@@ -45,12 +111,10 @@ pub fn analyze(self: anytype, builder: anytype, match_value: Ast.Expression.Matc
             const message = try std.fmt.allocPrint(self.allocator, "enum '{s}' has no variant named '{s}'", .{ enumeration.name, branch.variant });
             return self.fail(branch.position, message);
         };
-        for (match_value.branches[0..branch_index]) |previous| {
-            if (!previous.is_else and std.mem.eql(u8, previous.variant, branch.variant)) {
-                const message = try std.fmt.allocPrint(self.allocator, "variant '{s}' is matched more than once", .{branch.variant});
-                return self.fail(branch.position, message);
-            }
-        }
+        for (match_value.branches[0..branch_index]) |previous| if (!previous.is_else and std.mem.eql(u8, previous.variant, branch.variant)) {
+            const message = try std.fmt.allocPrint(self.allocator, "variant '{s}' is matched more than once", .{branch.variant});
+            return self.fail(branch.position, message);
+        };
         const variant = enumeration.variants[variant_index];
         if (branch.bindings.len != variant.associated_types.len) {
             const message = try std.fmt.allocPrint(self.allocator, "variant '{s}' exposes {d} associated values, pattern binds {d}", .{
@@ -76,7 +140,6 @@ pub fn analyze(self: anytype, builder: anytype, match_value: Ast.Expression.Matc
 
     const branch_blocks = try self.allocator.alloc(Ir.BlockId, match_value.branches.len);
     for (branch_blocks) |*block| block.* = try self.newBlock(builder);
-    const merge_block = try self.newBlock(builder);
     for (branch_blocks[0 .. branch_blocks.len - 1], 0..) |branch_block, branch_index| {
         const test_value = try self.newValue(builder, .bool);
         try self.emit(builder, .{ .enum_test = .{
@@ -86,56 +149,43 @@ pub fn analyze(self: anytype, builder: anytype, match_value: Ast.Expression.Matc
             .variant = variant_indices[branch_index].?,
         } });
         const next = try self.newBlock(builder);
-        self.terminate(builder, .{ .branch = .{
-            .condition = test_value,
-            .then_block = branch_block,
-            .else_block = next,
-        } });
+        self.terminate(builder, .{ .branch = .{ .condition = test_value, .then_block = branch_block, .else_block = next } });
         builder.current_block = next;
     }
     self.terminate(builder, .{ .jump = branch_blocks[branch_blocks.len - 1] });
+    const merge_block = try self.newBlock(builder);
+    return .{
+        .subject = subject,
+        .enum_index = enum_index,
+        .variant_indices = variant_indices,
+        .branch_blocks = branch_blocks,
+        .merge_block = merge_block,
+    };
+}
 
-    var result: ?Ir.ValueId = null;
-    var result_type: ?Ast.Type = null;
-    for (match_value.branches, branch_blocks, variant_indices) |branch, branch_block, optional_variant_index| {
-        builder.current_block = branch_block;
-        const binding_count = builder.bindings.items.len;
-        defer builder.bindings.shrinkRetainingCapacity(binding_count);
-        const associated_types = if (optional_variant_index) |variant_index|
-            enumeration.variants[variant_index].associated_types
-        else
-            &.{};
-        for (branch.bindings, associated_types, 0..) |binding, binding_type, payload_index| {
-            const payload = try self.newValue(builder, binding_type);
-            try self.emit(builder, .{ .enum_payload = .{
-                .result = payload,
-                .operand = subject.value,
-                .enumeration = enum_index,
-                .variant = optional_variant_index.?,
-                .index = payload_index,
-            } });
-            if (binding.mutable) {
-                const local = builder.local_types.items.len;
-                try builder.local_types.append(self.allocator, binding_type);
-                try self.emit(builder, .{ .local_store = .{ .local = local, .operand = payload } });
-                try builder.bindings.append(self.allocator, .{ .name = binding.name, .type = binding_type, .local = local, .mutable = true });
-            } else try builder.bindings.append(self.allocator, .{ .name = binding.name, .type = binding_type, .value = payload });
-        }
-        const branch_value = try self.analyzeExpression(builder, branch.value);
-        if (result_type) |expected| {
-            if (branch_value.type != expected) {
-                const message = try std.fmt.allocPrint(self.allocator, "match branch expects exact type '{s}', found '{s}'", .{
-                    self.typeName(expected), self.typeName(branch_value.type),
-                });
-                return self.fail(branch.value.position, message);
-            }
-        } else {
-            result_type = branch_value.type;
-            result = try self.newValue(builder, branch_value.type);
-        }
-        try self.emit(builder, .{ .copy = .{ .result = result.?, .operand = branch_value.value } });
-        self.terminate(builder, .{ .jump = merge_block });
+fn bindBranch(
+    self: anytype,
+    builder: anytype,
+    prepared: Prepared,
+    branch: Ast.Expression.MatchBranch,
+    optional_variant_index: ?usize,
+) !void {
+    const enumeration = self.program.enums[prepared.enum_index];
+    const associated_types = if (optional_variant_index) |variant_index| enumeration.variants[variant_index].associated_types else &.{};
+    for (branch.bindings, associated_types, 0..) |binding, binding_type, payload_index| {
+        const payload = try self.newValue(builder, binding_type);
+        try self.emit(builder, .{ .enum_payload = .{
+            .result = payload,
+            .operand = prepared.subject.value,
+            .enumeration = prepared.enum_index,
+            .variant = optional_variant_index.?,
+            .index = payload_index,
+        } });
+        if (binding.mutable) {
+            const local = builder.local_types.items.len;
+            try builder.local_types.append(self.allocator, binding_type);
+            try self.emit(builder, .{ .local_store = .{ .local = local, .operand = payload } });
+            try builder.bindings.append(self.allocator, .{ .name = binding.name, .type = binding_type, .local = local, .mutable = true });
+        } else try builder.bindings.append(self.allocator, .{ .name = binding.name, .type = binding_type, .value = payload });
     }
-    builder.current_block = merge_block;
-    return .{ .type = result_type.?, .value = result.? };
 }

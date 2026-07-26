@@ -352,6 +352,23 @@ variants have already been covered, because it would be unreachable. Adding a
 future enum variant deliberately routes it through an existing `else`; a match
 without `else` instead becomes non-exhaustive and reveals the required update.
 
+When every branch contains a block, `match` is an imperative `void` statement:
+
+```sx
+match connection {
+    waiting => { print("waiting") }
+    connected(var name) => { print(name) }
+    closed(reason) => { print(reason) }
+}
+```
+
+All branches must use blocks; expression and block bodies cannot mix. Each
+block has its own lexical scope and follows the same exhaustive patterns,
+payload copies and terminal `else` rules. `return`, `break` and `continue`
+retain their meaning in the surrounding function or loop, while a copiable
+subject remains available after a branch that continues. There is no
+fallthrough, guard or additional pattern form.
+
 ## Structure values
 
 `struct` declares a nominal value type in its source module. Every field starts

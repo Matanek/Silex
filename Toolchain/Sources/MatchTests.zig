@@ -121,3 +121,72 @@ test "diagnose invalid else match branches" {
         "match branch expects exact type 'int8', found 'int'",
     );
 }
+
+test "execute imperative match blocks with branch-local mutable copies" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\enum State { waiting; connected(str); closed(str) }
+        \\func show(value:State) {
+        \\    match value {
+        \\        waiting => { print("waiting") }
+        \\        connected(var name) => { name = "changed"; print(name) }
+        \\        closed(reason) => { print(reason) }
+        \\    }
+        \\    match value { waiting => { print("kept") }; else => { print("kept other") } }
+        \\}
+        \\func classify(value:State) int {
+        \\    match value { waiting => { return 1 }; connected(name) => { return 2 }; else => { return 3 } }
+        \\}
+        \\func main() {
+        \\    show(State.waiting())
+        \\    show(State.connected("server"))
+        \\    print(classify(State.closed("done")))
+        \\}
+    );
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("waiting\nkept\nchanged\nkept other\n3\n", result.stdout);
+}
+
+test "preserve enclosing break and continue through imperative match" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\enum Action { stop; retry }
+        \\func run(action:Action) {
+        \\    var active = true
+        \\    while active {
+        \\        active = false
+        \\        match action { stop => { break }; retry => { continue } }
+        \\        print("unreachable")
+        \\    }
+        \\    print("done")
+        \\}
+        \\func main() { run(Action.stop()); run(Action.retry()) }
+    );
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("done\ndone\n", result.stdout);
+}
+
+test "diagnose mixed and misplaced match branch forms" {
+    try expectCompileError(
+        "enum Choice { left; right } func main() { match Choice.left() { left => { print(1) }; right => 2 } }",
+        "match cannot mix expression and block branches",
+    );
+    try expectCompileError(
+        "enum Choice { left; right } func main() { let value = match Choice.left() { left => { print(1) }; right => { print(2) } } }",
+        "imperative match cannot be used as a value",
+    );
+    try expectCompileError(
+        "enum Choice { left; right } func main() { match Choice.left() { left => 1; right => 2 } }",
+        "match statement requires block branches",
+    );
+    try expectCompileError(
+        "enum Choice { value(int); empty } func main() { match Choice.value(1) { value(number) => { print(number) }; empty => {} }; print(number) }",
+        "unknown variable 'number'",
+    );
+}

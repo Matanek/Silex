@@ -349,7 +349,7 @@ pub const Parser = struct {
         return .structure(index);
     }
 
-    fn parseBlock(self: *Parser) ParseError![]const Ast.Statement {
+    pub fn parseBlock(self: *Parser) ParseError![]const Ast.Statement {
         try self.expect(.left_brace, "expected '{' before function body");
         var statements: std.ArrayList(Ast.Statement) = .empty;
         while (self.current.tag != .right_brace and self.current.tag != .end) {
@@ -371,9 +371,16 @@ pub const Parser = struct {
             .keyword_while => self.parseWhile(),
             .keyword_break => self.parseLoopControl(false),
             .keyword_continue => self.parseLoopControl(true),
+            .keyword_match => self.parseMatchStatement(),
             .identifier, .keyword_self => self.parseIdentifierStatement(),
             else => self.fail("expected statement"),
         };
+    }
+
+    fn parseMatchStatement(self: *Parser) ParseError!Ast.Statement {
+        const expression = try self.parseExpression(false);
+        try self.expectStatementTerminator();
+        return .{ .expression_statement = expression };
     }
 
     fn parseWhile(self: *Parser) ParseError!Ast.Statement {

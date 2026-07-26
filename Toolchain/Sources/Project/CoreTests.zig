@@ -450,6 +450,9 @@ test "compose public associated enums across modules" {
         \\public func describe(value:Message) str {
         \\    return match value { empty => "empty"; text(content) => content }
         \\}
+        \\public func show(value:Message) {
+        \\    match value { empty => { print("empty") }; text(content) => { print(content) } }
+        \\}
         ,
     });
     try temporary.dir.writeFile(std.testing.io, .{
@@ -458,14 +461,15 @@ test "compose public associated enums across modules" {
         \\use Api.Message
         \\use Api.accept
         \\use Api.describe
-        \\func main() { let value = Message.text("hello"); print(accept(value)); print(describe(value)) }
+        \\use Api.show
+        \\func main() { let value = Message.text("hello"); print(accept(value)); print(describe(value)); show(Message.text("api")) }
         ,
     });
     const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
     var compiler = Compiler.init(allocator, std.testing.io);
     const compilation = try compiler.compile(input);
     const result = try @import("../Interpreter.zig").runCapture(allocator, compilation.ir);
-    try std.testing.expectEqualStrings("42\nhello\n", result.stdout);
+    try std.testing.expectEqualStrings("42\nhello\napi\n", result.stdout);
     var found_interface = false;
     for (compilation.interfaces) |interface| {
         if (!std.mem.eql(u8, interface.name, "Api")) continue;
