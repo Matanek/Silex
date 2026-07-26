@@ -726,6 +726,15 @@ pub const Parser = struct {
     fn parseConversion(self: *Parser) ParseError!*Ast.Expression {
         var expression = try self.parsePrimary();
         while (true) {
+            if (self.current.tag == .less and expression.value == .identifier and try Generics.memberFollows(self)) {
+                const generic_name = expression.value.identifier;
+                const type_arguments = try Generics.parseTypeArguments(self);
+                expression.value = .{ .generic_reference = .{
+                    .name = generic_name,
+                    .type_arguments = type_arguments,
+                } };
+                continue;
+            }
             if (self.current.tag == .less and expression.value == .identifier and try Generics.callArgumentsFollow(self)) {
                 const type_arguments = try Generics.parseTypeArguments(self);
                 const name = Token{
@@ -761,6 +770,17 @@ pub const Parser = struct {
                     "expected member name after '.'");
                 const member = self.current;
                 try self.advance();
+                if (self.current.tag == .less and try Generics.memberFollows(self)) {
+                    const prefix = try Generics.qualifiedName(self.allocator, expression) orelse return self.fail("generic type owner must be a qualified name");
+                    expression = try self.newExpression(.{
+                        .position = expression.position,
+                        .value = .{ .generic_reference = .{
+                            .name = try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ prefix, member.lexeme }),
+                            .type_arguments = try Generics.parseTypeArguments(self),
+                        } },
+                    });
+                    continue;
+                }
                 const type_arguments = if (self.current.tag == .less and try Generics.callArgumentsFollow(self))
                     try Generics.parseTypeArguments(self)
                 else

@@ -26,14 +26,29 @@ const StructureSpecialization = struct {
     visiting: bool = true,
 };
 
+const EnumSpecialization = struct {
+    template_position: Source.Position,
+    arguments: []const Ast.Type,
+    name: []const u8,
+    type: Ast.Type,
+    visiting: bool = true,
+};
+
+const SpecializedType = struct {
+    template_position: Source.Position,
+    arguments: []const Ast.Type,
+};
+
 pub const Specializer = struct {
     allocator: Allocator,
     source: Ast.Program = undefined,
     functions: std.ArrayList(Ast.Function) = .empty,
     structures: std.ArrayList(Ast.Structure) = .empty,
+    enums: std.ArrayList(Ast.Enum) = .empty,
     type_names: std.ArrayList([]const u8) = .empty,
     specializations: std.ArrayList(FunctionSpecialization) = .empty,
     structure_specializations: std.ArrayList(StructureSpecialization) = .empty,
+    enum_specializations: std.ArrayList(EnumSpecialization) = .empty,
     diagnostic: ?Source.Diagnostic = null,
 
     pub fn init(allocator: Allocator) Specializer {
@@ -44,6 +59,11 @@ pub const Specializer = struct {
         self.source = program;
         self.diagnostic = null;
         try self.type_names.appendSlice(self.allocator, program.type_names);
+        for (program.enums) |enumeration| {
+            if (enumeration.type_parameters.len == 0) try self.enums.append(self.allocator, enumeration);
+        }
+        const concrete_enum_count = self.enums.items.len;
+        for (0..concrete_enum_count) |enum_index| try self.rewriteEnumAt(enum_index, &.{});
         for (program.structures) |structure| {
             if (structure.type_parameters.len == 0) try self.structures.append(self.allocator, structure);
         }
@@ -71,6 +91,7 @@ pub const Specializer = struct {
         result.type_names = try self.type_names.toOwnedSlice(self.allocator);
         result.generic_types = &.{};
         result.structures = try self.structures.toOwnedSlice(self.allocator);
+        result.enums = try self.enums.toOwnedSlice(self.allocator);
         result.functions = try self.functions.toOwnedSlice(self.allocator);
         return result;
     }
@@ -85,7 +106,7 @@ pub const Specializer = struct {
                 keep = true;
                 break;
             };
-            if (!keep) for (self.source.enums) |enumeration| if (std.mem.eql(u8, enumeration.name, name)) {
+            if (!keep) for (self.enums.items) |enumeration| if (std.mem.eql(u8, enumeration.name, name)) {
                 keep = true;
                 break;
             };
@@ -110,7 +131,30 @@ pub const Specializer = struct {
             function.return_type = remapConcreteType(function.return_type, map);
             remapStatementTypes(function.statements, map);
         }
+        for (self.enums.items) |*enumeration| {
+            for (@constCast(enumeration.variants)) |*variant| {
+                for (@constCast(variant.associated_types)) |*associated_type| {
+                    associated_type.* = remapConcreteType(associated_type.*, map);
+                }
+            }
+        }
         self.type_names = names;
+    }
+
+    fn rewriteEnumAt(self: *Specializer, enum_index: usize, arguments: []const Ast.Type) SpecializeError!void {
+        var enumeration = self.enums.items[enum_index];
+        enumeration.type_parameters = &.{};
+        const variants = try self.allocator.alloc(Ast.EnumVariant, enumeration.variants.len);
+        for (enumeration.variants, 0..) |variant, variant_index| {
+            variants[variant_index] = variant;
+            const associated_types = try self.allocator.alloc(Ast.Type, variant.associated_types.len);
+            for (variant.associated_types, 0..) |associated_type, type_index| {
+                associated_types[type_index] = try self.rewriteType(associated_type, arguments, variant.position);
+            }
+            variants[variant_index].associated_types = associated_types;
+        }
+        enumeration.variants = variants;
+        self.enums.items[enum_index] = enumeration;
     }
 
     fn rewriteStructureAt(self: *Specializer, structure_index: usize, arguments: []const Ast.Type) SpecializeError!void {
@@ -305,6 +349,18 @@ pub const Specializer = struct {
                 const type_arguments = try self.allocator.alloc(Ast.Type, copy.type_arguments.len);
                 for (copy.type_arguments, 0..) |type_argument, index| type_arguments[index] = try self.rewriteType(type_argument, arguments, copy.name_position);
                 copy.type_arguments = type_arguments;
+                if (copy.receiver) |receiver| if (receiver.value == .identifier) {
+                    if (self.typeForName(receiver.value.identifier)) |receiver_type| {
+                        if (self.enumTemplateForType(receiver_type)) |template| {
+                            const message = try std.fmt.allocPrint(
+                                self.allocator,
+                                "generic enum '{s}' requires {d} type argument{s}",
+                                .{ template.name, template.type_parameters.len, if (template.type_parameters.len == 1) "" else "s" },
+                            );
+                            return self.fail(receiver.position, message);
+                        }
+                    }
+                };
                 if (copy.receiver == null) {
                     if (try self.specializeStructureCall(copy)) |specialized| {
                         copy.name = specialized;
@@ -364,6 +420,21 @@ pub const Specializer = struct {
                 }
                 copy.branches = branches;
                 break :value .{ .match_expression = copy };
+            },
+            .generic_reference => |reference| value: {
+                const base = self.typeForName(reference.name) orelse {
+                    const message = try std.fmt.allocPrint(self.allocator, "unknown generic type '{s}'", .{reference.name});
+                    return self.fail(expression.position, message);
+                };
+                const type_arguments = try self.allocator.alloc(Ast.Type, reference.type_arguments.len);
+                for (reference.type_arguments, 0..) |type_argument, index| {
+                    type_arguments[index] = try self.rewriteType(type_argument, arguments, expression.position);
+                }
+                const specialized = if (self.enumTemplateForType(base) != null or self.enumForType(base) != null)
+                    try self.instantiateEnum(base, type_arguments, expression.position)
+                else
+                    try self.instantiateStructure(base, type_arguments, expression.position);
+                break :value .{ .identifier = self.typeName(specialized) };
             },
             else => expression.value,
         };
@@ -490,12 +561,21 @@ pub const Specializer = struct {
             for (generic.arguments, 0..) |argument, index| {
                 concrete_arguments[index] = try self.rewriteType(argument, arguments, generic.position);
             }
+            if (self.enumTemplateForType(base) != null or self.enumForType(base) != null) return self.instantiateEnum(base, concrete_arguments, generic.position);
             return self.instantiateStructure(base, concrete_arguments, generic.position);
         }
         if (self.structureTemplateForType(type_value)) |template| {
             const message = try std.fmt.allocPrint(
                 self.allocator,
                 "generic struct '{s}' requires {d} type argument{s}",
+                .{ template.name, template.type_parameters.len, if (template.type_parameters.len == 1) "" else "s" },
+            );
+            return self.fail(position, message);
+        }
+        if (self.enumTemplateForType(type_value)) |template| {
+            const message = try std.fmt.allocPrint(
+                self.allocator,
+                "generic enum '{s}' requires {d} type argument{s}",
                 .{ template.name, template.type_parameters.len, if (template.type_parameters.len == 1) "" else "s" },
             );
             return self.fail(position, message);
@@ -577,6 +657,57 @@ pub const Specializer = struct {
         return type_value;
     }
 
+    fn instantiateEnum(
+        self: *Specializer,
+        base: Ast.Type,
+        arguments: []const Ast.Type,
+        position: Source.Position,
+    ) SpecializeError!Ast.Type {
+        const template = self.enumTemplateForType(base) orelse {
+            const message = try std.fmt.allocPrint(self.allocator, "enum '{s}' does not accept type arguments", .{self.typeName(base)});
+            return self.fail(position, message);
+        };
+        if (arguments.len != template.type_parameters.len) {
+            const message = try std.fmt.allocPrint(
+                self.allocator,
+                "generic enum '{s}' expects {d} type argument{s}, found {d}",
+                .{ template.name, template.type_parameters.len, if (template.type_parameters.len == 1) "" else "s", arguments.len },
+            );
+            return self.fail(position, message);
+        }
+        for (arguments) |argument| if (argument == .void) return self.fail(position, "'void' is not a generic type argument");
+        for (self.enum_specializations.items) |specialization| {
+            if (!samePosition(specialization.template_position, template.name_position)) continue;
+            if (std.mem.eql(Ast.Type, specialization.arguments, arguments)) return specialization.type;
+            if (specialization.visiting) {
+                const message = try std.fmt.allocPrint(
+                    self.allocator,
+                    "generic enum '{s}' recursively expands with different type arguments",
+                    .{template.name},
+                );
+                return self.fail(position, message);
+            }
+        }
+        const name = try self.specializationName(template.name, arguments);
+        const type_value: Ast.Type = .structure(self.type_names.items.len);
+        try self.type_names.append(self.allocator, name);
+        const specialization_index = self.enum_specializations.items.len;
+        try self.enum_specializations.append(self.allocator, .{
+            .template_position = template.name_position,
+            .arguments = try self.allocator.dupe(Ast.Type, arguments),
+            .name = name,
+            .type = type_value,
+        });
+        var concrete = template;
+        concrete.name = name;
+        concrete.type_parameters = &.{};
+        const enum_index = self.enums.items.len;
+        try self.enums.append(self.allocator, concrete);
+        try self.rewriteEnumAt(enum_index, arguments);
+        self.enum_specializations.items[specialization_index].visiting = false;
+        return type_value;
+    }
+
     fn inferTypeArguments(self: *Specializer, template: Ast.Function, actual: []const Ast.Type) Allocator.Error!?[]const Ast.Type {
         const inferred = try self.allocator.alloc(?Ast.Type, template.type_parameters.len);
         @memset(inferred, null);
@@ -609,9 +740,14 @@ pub const Specializer = struct {
         if (pattern.genericInstantiationIndex()) |generic_index| {
             if (generic_index >= self.source.generic_types.len) return false;
             const generic = self.source.generic_types[generic_index];
-            const specialization = self.structureSpecializationForType(actual) orelse return false;
-            const template = self.structureTemplateForType(generic.base) orelse return false;
-            if (!samePosition(template.name_position, specialization.template_position) or
+            const specialization = self.specializedType(actual) orelse return false;
+            const template_position = if (self.structureTemplateForType(generic.base)) |template|
+                template.name_position
+            else if (self.enumTemplateForType(generic.base)) |template|
+                template.name_position
+            else
+                return false;
+            if (!samePosition(template_position, specialization.template_position) or
                 generic.arguments.len != specialization.arguments.len) return false;
             for (generic.arguments, specialization.arguments) |nested_pattern, nested_actual| {
                 if (!self.unifyType(nested_pattern, nested_actual, inferred)) return false;
@@ -640,9 +776,14 @@ pub const Specializer = struct {
         if (pattern.genericInstantiationIndex()) |generic_index| {
             if (generic_index >= self.source.generic_types.len) return false;
             const generic = self.source.generic_types[generic_index];
-            const specialization = self.structureSpecializationForType(actual) orelse return false;
-            const template = self.structureTemplateForType(generic.base) orelse return false;
-            if (!samePosition(template.name_position, specialization.template_position) or
+            const specialization = self.specializedType(actual) orelse return false;
+            const template_position = if (self.structureTemplateForType(generic.base)) |template|
+                template.name_position
+            else if (self.enumTemplateForType(generic.base)) |template|
+                template.name_position
+            else
+                return false;
+            if (!samePosition(template_position, specialization.template_position) or
                 generic.arguments.len != specialization.arguments.len) return false;
             for (generic.arguments, specialization.arguments) |nested_pattern, nested_actual| {
                 if (!self.matchesPattern(nested_pattern, nested_actual, arguments)) return false;
@@ -665,6 +806,7 @@ pub const Specializer = struct {
             .boolean => .bool,
             .string, .interpolated_string => .str,
             .null_value => null,
+            .generic_reference => null,
             .identifier => |name| local: {
                 var index = locals.len;
                 while (index != 0) {
@@ -741,8 +883,38 @@ pub const Specializer = struct {
         return null;
     }
 
+    fn enumTemplateForType(self: *Specializer, type_value: Ast.Type) ?Ast.Enum {
+        const index = type_value.structureIndex() orelse return null;
+        if (index >= self.type_names.items.len) return null;
+        const name = self.type_names.items[index];
+        for (self.source.enums) |enumeration| {
+            if (enumeration.type_parameters.len != 0 and std.mem.eql(u8, enumeration.name, name)) return enumeration;
+        }
+        return null;
+    }
+
+    fn enumForType(self: *Specializer, type_value: Ast.Type) ?Ast.Enum {
+        const index = type_value.structureIndex() orelse return null;
+        if (index >= self.type_names.items.len) return null;
+        const name = self.type_names.items[index];
+        for (self.enums.items) |enumeration| if (std.mem.eql(u8, enumeration.name, name)) return enumeration;
+        return null;
+    }
+
     fn structureSpecializationForType(self: *Specializer, type_value: Ast.Type) ?StructureSpecialization {
         for (self.structure_specializations.items) |specialization| if (specialization.type == type_value) return specialization;
+        return null;
+    }
+
+    fn specializedType(self: *Specializer, type_value: Ast.Type) ?SpecializedType {
+        if (self.structureSpecializationForType(type_value)) |specialization| return .{
+            .template_position = specialization.template_position,
+            .arguments = specialization.arguments,
+        };
+        for (self.enum_specializations.items) |specialization| if (specialization.type == type_value) return .{
+            .template_position = specialization.template_position,
+            .arguments = specialization.arguments,
+        };
         return null;
     }
 
@@ -851,6 +1023,9 @@ fn remapExpressionTypes(expression: *Ast.Expression, map: []const ?Ast.Type) voi
             if (call.receiver) |receiver| remapExpressionTypes(receiver, map);
         },
         .field_access => |access| remapExpressionTypes(access.base, map),
+        .generic_reference => |reference| for (@constCast(reference.type_arguments)) |*argument| {
+            argument.* = remapConcreteType(argument.*, map);
+        },
         .unary => |unary| remapExpressionTypes(unary.operand, map),
         .binary => |binary| {
             remapExpressionTypes(binary.left, map);

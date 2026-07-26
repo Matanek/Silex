@@ -1097,8 +1097,12 @@ pub const Compiler = struct {
         if (!referenced) return null;
         const target = self.longestModulePrefix(name, self.index.providers[module].owner) orelse return null;
         if (self.units[target.module].state != .loaded) return null;
-        if (findStructure(self.units[target.module].program.?, target.declaration) == null) return null;
-        self.requirePublicStructure(module, target, expressionPosition(module)) catch return null;
+        const target_program = self.units[target.module].program.?;
+        if (findStructure(target_program, target.declaration) != null) {
+            self.requirePublicStructure(module, target, expressionPosition(module)) catch return null;
+        } else if (findEnum(target_program, target.declaration) != null) {
+            self.requirePublicEnum(module, target, expressionPosition(module)) catch return null;
+        } else return null;
         return target;
     }
 
@@ -1272,7 +1276,18 @@ pub const Compiler = struct {
                 for (call.arguments) |argument| try self.rewriteExpression(module, argument, type_map);
                 for (call.named_arguments) |argument| try self.rewriteExpression(module, argument.value, type_map);
                 if (call.receiver) |receiver| {
-                    if (try expressionName(self.allocator, receiver)) |prefix| {
+                    if (receiver.value == .generic_reference) {
+                        const reference = &receiver.value.generic_reference;
+                        const target = try self.enumReceiverTarget(module, reference.name) orelse {
+                            const message = try std.fmt.allocPrint(self.allocator, "unknown generic enum '{s}'", .{reference.name});
+                            return self.fail(receiver.position, message);
+                        };
+                        try self.requirePublicEnum(module, target, call.name_position);
+                        reference.name = try structureCanonicalName(self.allocator, self.index.providers[target.module].name, target.declaration);
+                        for (@constCast(reference.type_arguments)) |*argument| {
+                            argument.* = GenericTypes.remap(argument.*, type_map, self.generic_type_maps[module]);
+                        }
+                    } else if (try expressionName(self.allocator, receiver)) |prefix| {
                         if (try self.enumReceiverTarget(module, prefix)) |target| {
                             try self.requirePublicEnum(module, target, call.name_position);
                             receiver.value = .{ .identifier = try structureCanonicalName(
@@ -1315,6 +1330,11 @@ pub const Compiler = struct {
                 }
             },
             .field_access => |access| try self.rewriteExpression(module, access.base, type_map),
+            .generic_reference => |*reference| {
+                for (@constCast(reference.type_arguments)) |*argument| {
+                    argument.* = GenericTypes.remap(argument.*, type_map, self.generic_type_maps[module]);
+                }
+            },
             .unary => |unary| try self.rewriteExpression(module, unary.operand, type_map),
             .binary => |binary| {
                 try self.rewriteExpression(module, binary.left, type_map);
@@ -1447,6 +1467,7 @@ fn findEnum(program: Ast.Program, name: []const u8) ?Ast.Enum {
 fn expressionName(allocator: Allocator, expression: *const Ast.Expression) Allocator.Error!?[]const u8 {
     return switch (expression.value) {
         .identifier => |name| name,
+        .generic_reference => |reference| reference.name,
         .field_access => |access| if (try expressionName(allocator, access.base)) |prefix|
             try std.fmt.allocPrint(allocator, "{s}.{s}", .{ prefix, access.name })
         else

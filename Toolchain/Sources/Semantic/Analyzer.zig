@@ -465,6 +465,7 @@ pub const Analyzer = struct {
             .string => |value| self.emitString(builder, value),
             .interpolated_string => |value| self.analyzeInterpolatedString(builder, value),
             .identifier => |name| self.analyzeIdentifier(builder, expression.position, name),
+            .generic_reference => self.fail(expression.position, "generic type reference was not specialized"),
             .field_access => |access| self.analyzeFieldAccess(builder, access),
             .call => |call| (try self.analyzeCall(builder, call)) orelse {
                 const message = try std.fmt.allocPrint(self.allocator, "function '{s}' returns 'void' and cannot be used as a value", .{call.name});
