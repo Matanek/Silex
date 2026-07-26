@@ -265,6 +265,22 @@ fn encodeFunction(
                     destination_offset += field.width;
                 }
             },
+            .enum_init => |initialization| {
+                try emitImmediate64(allocator, words, .x9, initialization.tag);
+                for (0..initialization.result.width) |index| {
+                    if (index != 0) try words.append(allocator, moveWideZero32(.x9, 0));
+                    try words.append(allocator, storeStack(.x9, @intCast(@as(usize, initialization.result.start) + index)));
+                }
+                var destination_offset: usize = 1;
+                for (initialization.values) |value| {
+                    var destination = initialization.result;
+                    destination.start = @intCast(@as(usize, destination.start) + destination_offset);
+                    destination.width = value.width;
+                    destination.aggregate = value.aggregate;
+                    try emitSpanCopy(allocator, words, destination, value);
+                    destination_offset += value.width;
+                }
+            },
             .aggregate_equal => |comparison| try encodeAggregateEqual(allocator, words, &fixups, comparison),
             .convert => |conversion| try encodeConversion(
                 allocator,

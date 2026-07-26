@@ -270,6 +270,22 @@ pub const Structure = struct {
     methods: []const Function = &.{},
 };
 
+pub const EnumVariant = struct {
+    position: Source.Position,
+    name: []const u8,
+    associated_types: []const Type = &.{},
+};
+
+pub const Enum = struct {
+    is_public: bool = false,
+    is_internal: bool = false,
+    owner: usize = 0,
+    position: Source.Position,
+    name_position: Source.Position,
+    name: []const u8,
+    variants: []const EnumVariant,
+};
+
 pub const Use = struct {
     position: Source.Position,
     path: []const u8,
@@ -295,5 +311,6 @@ pub const Program = struct {
     uses: []const Use = &.{},
     type_names: []const []const u8 = &.{},
     structures: []const Structure = &.{},
+    enums: []const Enum = &.{},
     functions: []const Function,
 };

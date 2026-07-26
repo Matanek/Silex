@@ -30,37 +30,91 @@ pub const Parser = struct {
         try self.advance();
         var uses: std.ArrayList(Ast.Use) = .empty;
         var structures: std.ArrayList(Ast.Structure) = .empty;
+        var enums: std.ArrayList(Ast.Enum) = .empty;
         var functions: std.ArrayList(Ast.Function) = .empty;
         while (self.current.tag != .end) {
             switch (self.current.tag) {
                 .keyword_use => try uses.append(self.allocator, try self.parseUse(false)),
                 .keyword_struct => try structures.append(self.allocator, try self.parseStructure(false, false)),
+                .keyword_enum => try enums.append(self.allocator, try self.parseEnum(false, false)),
                 .keyword_func => try functions.append(self.allocator, try self.parseFunction(false, false)),
                 .keyword_public => {
                     try self.advance();
                     switch (self.current.tag) {
                         .keyword_use => try uses.append(self.allocator, try self.parseUse(true)),
                         .keyword_struct => try structures.append(self.allocator, try self.parseStructure(true, false)),
+                        .keyword_enum => try enums.append(self.allocator, try self.parseEnum(true, false)),
                         .keyword_func => try functions.append(self.allocator, try self.parseFunction(true, false)),
-                        else => return self.fail("expected use, struct, or function declaration after 'public'"),
+                        else => return self.fail("expected use, enum, struct, or function declaration after 'public'"),
                     }
                 },
                 .keyword_internal => {
                     try self.advance();
                     switch (self.current.tag) {
                         .keyword_struct => try structures.append(self.allocator, try self.parseStructure(false, true)),
+                        .keyword_enum => try enums.append(self.allocator, try self.parseEnum(false, true)),
                         .keyword_func => try functions.append(self.allocator, try self.parseFunction(false, true)),
-                        else => return self.fail("expected struct or function declaration after 'internal'"),
+                        else => return self.fail("expected enum, struct, or function declaration after 'internal'"),
                     }
                 },
-                else => return self.fail("expected use, struct, or function declaration"),
+                else => return self.fail("expected use, enum, struct, or function declaration"),
             }
         }
         return .{
             .uses = try uses.toOwnedSlice(self.allocator),
             .type_names = try self.type_names.toOwnedSlice(self.allocator),
             .structures = try structures.toOwnedSlice(self.allocator),
+            .enums = try enums.toOwnedSlice(self.allocator),
             .functions = try functions.toOwnedSlice(self.allocator),
+        };
+    }
+
+    fn parseEnum(self: *Parser, is_public: bool, is_internal: bool) ParseError!Ast.Enum {
+        const position = self.current.position;
+        try self.advance();
+        if (self.current.tag != .identifier) return self.fail("expected enum name");
+        const name = self.current.lexeme;
+        const name_position = self.current.position;
+        _ = try self.internTypeName(name);
+        try self.advance();
+        try self.expect(.left_brace, "expected '{' after enum name");
+        var variants: std.ArrayList(Ast.EnumVariant) = .empty;
+        while (self.current.tag != .right_brace and self.current.tag != .end) {
+            if (self.current.tag != .identifier) return self.fail("expected enum variant name");
+            const variant_name = self.current.lexeme;
+            const variant_position = self.current.position;
+            try self.advance();
+            var associated_types: std.ArrayList(Ast.Type) = .empty;
+            if (self.current.tag == .left_parenthesis) {
+                try self.advance();
+                if (self.current.tag == .right_parenthesis) return self.fail("an empty enum variant does not use parentheses");
+                while (true) {
+                    try associated_types.append(self.allocator, try self.parseType());
+                    if (self.current.tag != .comma) break;
+                    try self.advance();
+                    if (self.current.tag == .right_parenthesis) return self.fail("expected associated value type after ','");
+                }
+                try self.expect(.right_parenthesis, "expected ')' after associated value types");
+            }
+            for (variants.items) |variant| if (std.mem.eql(u8, variant.name, variant_name)) {
+                return self.failAt(variant_position, "enum variant is already declared");
+            };
+            try variants.append(self.allocator, .{
+                .position = variant_position,
+                .name = variant_name,
+                .associated_types = try associated_types.toOwnedSlice(self.allocator),
+            });
+            try self.expectStatementTerminator();
+        }
+        try self.expect(.right_brace, "expected '}' after enum variants");
+        if (variants.items.len == 0) return self.failAt(name_position, "an enum requires at least one variant");
+        return .{
+            .is_public = is_public,
+            .is_internal = is_internal,
+            .position = position,
+            .name_position = name_position,
+            .name = name,
+            .variants = try variants.toOwnedSlice(self.allocator),
         };
     }
 

@@ -16,7 +16,8 @@ pub fn analyze(
     constructor: Ast.Constructor,
 ) !Ir.Function {
     const declaration = self.program.structures[structure_index];
-    const structure_type = Ast.Type.structure(structure_index);
+    const nominal_index = self.structureIndex(declaration.name) orelse return error.InvalidSource;
+    const structure_type = Ast.Type.structure(nominal_index);
     var builder: Model.FunctionBuilder = .{};
     try builder.blocks.append(self.allocator, .{});
 
@@ -52,7 +53,7 @@ pub fn analyze(
     const initial_self = try self.newValue(&builder, structure_type);
     try self.emit(&builder, .{ .structure_init = .{
         .result = initial_self,
-        .structure = structure_index,
+        .structure = nominal_index,
         .fields = initial_fields,
     } });
     const self_local = builder.local_types.items.len;
@@ -211,15 +212,18 @@ pub fn analyzeCall(
     const result = try self.newValue(builder, result_type);
     try self.emit(builder, .{ .call = .{
         .result = result,
-        .function = constructorFunctionId(self.program, structure_index, constructor_index),
+        .function = constructorFunctionId(self.program, declaration.name, constructor_index),
         .arguments = try argument_ids.toOwnedSlice(self.allocator),
     } });
     return .{ .type = result_type, .value = result };
 }
 
-fn constructorFunctionId(program: Ast.Program, structure_index: usize, constructor_index: usize) Ir.FunctionId {
+fn constructorFunctionId(program: Ast.Program, structure_name: []const u8, constructor_index: usize) Ir.FunctionId {
     var result = program.functions.len;
-    for (program.structures[0..structure_index]) |structure| result += structure.constructors.len;
+    for (program.structures) |structure| {
+        if (std.mem.eql(u8, structure.name, structure_name)) return result + constructor_index;
+        result += structure.constructors.len;
+    }
     return result + constructor_index;
 }
 

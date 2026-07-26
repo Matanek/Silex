@@ -24,6 +24,7 @@ pub const Value = union(enum) {
     boolean: bool,
     string: []const u8,
     structure: Structure,
+    enumeration: *const Enumeration,
     optional: Optional,
 
     pub const Structure = struct {
@@ -36,6 +37,13 @@ pub const Value = union(enum) {
         value: ?*const Value,
     };
 
+    pub const Enumeration = struct {
+        type: Ir.Type,
+        enumeration: usize,
+        variant: usize,
+        values: []const Value,
+    };
+
     pub fn typeOf(self: Value) Ir.Type {
         return switch (self) {
             .void => .void,
@@ -46,6 +54,7 @@ pub const Value = union(enum) {
             .boolean => .bool,
             .string => .str,
             .structure => |value| value.type,
+            .enumeration => |value| value.type,
             .optional => |value| value.type,
         };
     }
@@ -222,6 +231,26 @@ fn executeInstruction(
                 .fields = fields,
             } });
         },
+        .enum_init => |initialization| {
+            if (initialization.enumeration >= program.enums.len) return error.InvalidProgram;
+            const enumeration = program.enums[initialization.enumeration];
+            if (initialization.variant >= enumeration.variants.len) return error.InvalidProgram;
+            const variant = enumeration.variants[initialization.variant];
+            if (initialization.values.len != variant.associated_types.len) return error.InvalidProgram;
+            const payload = try allocator.alloc(Value, initialization.values.len);
+            for (initialization.values, 0..) |value, index| {
+                payload[index] = try cloneValue(allocator, try load(values, value));
+                if (payload[index].typeOf() != variant.associated_types[index]) return error.InvalidProgram;
+            }
+            const value = try allocator.create(Value.Enumeration);
+            value.* = .{
+                .type = .structure(enumeration.type_index),
+                .enumeration = initialization.enumeration,
+                .variant = initialization.variant,
+                .values = payload,
+            };
+            try store(function, values, initialization.result, .{ .enumeration = value });
+        },
         .field_load => |field| {
             const aggregate = switch (try load(values, field.base)) {
                 .structure => |value| value,
@@ -329,6 +358,18 @@ fn cloneValue(allocator: Allocator, value: Value) Error!Value {
             const fields = try allocator.alloc(Value, aggregate.fields.len);
             for (aggregate.fields, 0..) |field, index| fields[index] = try cloneValue(allocator, field);
             break :cloned .{ .structure = .{ .type = aggregate.type, .fields = fields } };
+        },
+        .enumeration => |enumeration| cloned: {
+            const values = try allocator.alloc(Value, enumeration.values.len);
+            for (enumeration.values, 0..) |item, index| values[index] = try cloneValue(allocator, item);
+            const copy = try allocator.create(Value.Enumeration);
+            copy.* = .{
+                .type = enumeration.type,
+                .enumeration = enumeration.enumeration,
+                .variant = enumeration.variant,
+                .values = values,
+            };
+            break :cloned .{ .enumeration = copy };
         },
         .optional => |optional| cloned: {
             const payload = if (optional.value) |present| payload: {
@@ -592,6 +633,7 @@ fn equal(left: Value, right: Value) Error!bool {
             }
             break :structure true;
         },
+        .enumeration => return error.InvalidProgram,
         .optional => |optional| optional_value: {
             if ((optional.value == null) != (right.optional.value == null)) break :optional_value false;
             if (optional.value) |payload| break :optional_value try equal(payload.*, right.optional.value.?.*);
@@ -625,6 +667,7 @@ fn appendValueText(output: *std.ArrayList(u8), allocator: Allocator, value: Valu
         else
             try output.appendSlice(allocator, "null"),
         .structure => return error.InvalidProgram,
+        .enumeration => return error.InvalidProgram,
         .void => return error.InvalidProgram,
     }
 }

@@ -5,6 +5,7 @@ const Reexports = @import("Reexports.zig");
 pub const Target = union(enum) {
     fundamental: Ast.Type,
     structure: Reexports.Target,
+    enumeration: Reexports.Target,
 };
 
 pub const Visit = struct { module: usize, name: []const u8 };
@@ -45,6 +46,11 @@ fn resolveInner(
     for (program.structures) |structure| {
         if (std.mem.eql(u8, structure.name, name) and (!exported_only or structure.is_public)) {
             return .{ .structure = .{ .module = module, .declaration = name } };
+        }
+    }
+    for (program.enums) |enumeration| {
+        if (std.mem.eql(u8, enumeration.name, name) and (!exported_only or enumeration.is_public)) {
+            return .{ .enumeration = .{ .module = module, .declaration = name } };
         }
     }
     for (units[module].bindings) |binding| {
