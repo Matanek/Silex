@@ -154,6 +154,12 @@ pub fn analyzeFor(self: anytype, builder: anytype, function: Ast.Function, loop:
 fn analyzeCollectionFor(self: anytype, builder: anytype, function: Ast.Function, loop: Ast.ForStatement, source_expression: *Ast.Expression) !bool {
     const source = try self.analyzeExpression(builder, source_expression);
     const collection = Collections.collectionForType(self.structures, source.type) orelse return self.fail(source_expression.position, "for source expects an array or list");
+    const source_root: ?[]const u8 = switch (source_expression.value) {
+        .identifier => |name| name,
+        else => null,
+    };
+    const element_noncopyable = Resources.isNoncopyable(self, collection.element);
+    const outer_binding_count = builder.bindings.items.len;
     const collection_local: Ir.LocalId = if (loop.mode == .mutable) mutable: {
         const name = switch (source_expression.value) {
             .identifier => |value| value,
@@ -168,6 +174,12 @@ fn analyzeCollectionFor(self: anytype, builder: anytype, function: Ast.Function,
         try self.emit(builder, .{ .local_store = .{ .local = value, .operand = source.value } });
         break :local value;
     };
+    const owns_source = source_root == null and Resources.isNoncopyable(self, source.type);
+    if (owns_source) try builder.bindings.append(self.allocator, .{
+        .name = "$for-source",
+        .type = source.type,
+        .local = collection_local,
+    });
     const index_local = builder.local_types.items.len;
     try builder.local_types.append(self.allocator, .int);
     try self.emit(builder, .{ .local_store = .{ .local = index_local, .operand = try emitInt(self, builder, 0) } });
@@ -202,8 +214,21 @@ fn analyzeCollectionFor(self: anytype, builder: anytype, function: Ast.Function,
         element_local = builder.local_types.items.len;
         try builder.local_types.append(self.allocator, collection.element);
         try self.emit(builder, .{ .local_store = .{ .local = element_local.?, .operand = element } });
-        try builder.bindings.append(self.allocator, .{ .name = loop.name, .type = collection.element, .local = element_local, .mutable = true });
-    } else try builder.bindings.append(self.allocator, .{ .name = loop.name, .type = collection.element, .value = element });
+        try builder.bindings.append(self.allocator, .{
+            .name = loop.name,
+            .type = collection.element,
+            .local = element_local,
+            .mutable = true,
+            .borrowed_root = if (element_noncopyable) source_root orelse "$for-source" else null,
+            .borrowed_mode = if (element_noncopyable) .mutable else .value,
+        });
+    } else try builder.bindings.append(self.allocator, .{
+        .name = loop.name,
+        .type = collection.element,
+        .value = element,
+        .borrowed_root = if (element_noncopyable) source_root orelse "$for-source" else null,
+        .borrowed_mode = if (element_noncopyable) .read else .value,
+    });
     try builder.loops.append(self.allocator, .{
         .continue_block = update_block,
         .break_block = if (loop.mode == .mutable) break_update_block else exit_block,
@@ -243,6 +268,10 @@ fn analyzeCollectionFor(self: anytype, builder: anytype, function: Ast.Function,
     const exit_availability = try self.allocator.dupe(bool, header_availability);
     for (loop_context.break_availabilities.items) |state| Availability.merge(exit_availability, state);
     Availability.restore(builder.bindings.items, exit_availability);
+    if (owns_source) {
+        try Resources.emitActiveDrops(self, builder, outer_binding_count);
+        builder.bindings.shrinkRetainingCapacity(outer_binding_count);
+    }
     return false;
 }
 

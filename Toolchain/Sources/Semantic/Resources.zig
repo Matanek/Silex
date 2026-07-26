@@ -49,7 +49,10 @@ pub fn requireTransfer(self: anytype, expression: *const Ast.Expression, type_va
         else => false,
     };
     if (transferred) return;
-    const message = try std.fmt.allocPrint(self.allocator, "named owner value requires 'move' when {s}", .{action});
+    if (expression.value == .index_access) {
+        return self.fail(expression.position, "indexed access cannot copy a noncopyable element; use '@T' inspection or an extracting collection operation");
+    }
+    const message = try std.fmt.allocPrint(self.allocator, "named noncopyable value requires 'move' when {s}", .{action});
     return self.fail(expression.position, message);
 }
 
