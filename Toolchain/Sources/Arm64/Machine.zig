@@ -238,6 +238,7 @@ pub const Function = struct {
     return_type: Types.Type,
     return_width: u12 = 0,
     return_aggregate: bool = false,
+    recoverable_entry_result: bool = false,
     hidden_return_slot: ?Slot = null,
     slot_count: u12,
     frame_size: u16,
@@ -417,10 +418,11 @@ pub fn validate(program: Program) Error!void {
         if (function.parameters.len != function.parameter_count) return error.InvalidMachineProgram;
         for (function.parameters) |parameter| try requireSpan(function, parameter);
         if (function.return_type == .void) {
-            if (function.return_width != 0 or function.return_aggregate or function.hidden_return_slot != null) {
+            if (function.return_width != 0 or function.return_aggregate or function.recoverable_entry_result or function.hidden_return_slot != null) {
                 return error.InvalidMachineProgram;
             }
         } else if (function.return_aggregate != (function.hidden_return_slot != null)) return error.InvalidMachineProgram;
+        if (function.recoverable_entry_result and (!function.return_aggregate or function.return_width != 2)) return error.InvalidMachineProgram;
         if (function.hidden_return_slot) |slot| try requireSlot(function, slot);
     }
 }

@@ -169,7 +169,9 @@ fn findMain(program: Machine.Program) Error!Machine.FunctionId {
     var found: ?Machine.FunctionId = null;
     for (program.functions, 0..) |function, id| {
         if (!std.mem.eql(u8, function.name, "main")) continue;
-        if (found != null or function.parameter_count != 0 or function.return_type != .void) {
+        if (found != null or function.parameter_count != 0 or
+            (function.return_type != .void and !function.recoverable_entry_result))
+        {
             return error.InvalidMain;
         }
         found = id;

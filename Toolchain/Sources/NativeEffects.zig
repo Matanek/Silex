@@ -259,6 +259,26 @@ test "native map_error transformation matches the reference interpreter" {
     try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
 }
 
+test "native recoverable main matches the exact process boundary" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    const Case = struct { source: []const u8, exit_code: u8, stdout: []const u8 = "", stderr: []const u8 };
+    const cases = [_]Case{
+        .{ .source = "func main() Result<void,str> { return Result<void,str>.success() }", .exit_code = 0, .stderr = "" },
+        .{ .source = "func main() Result<void,str> { print(\"before\"); return Result<void,str>.failure(\"configuration missing\") }", .exit_code = 1, .stdout = "before\n", .stderr = "error: configuration missing\n" },
+        .{ .source = "func main() Result<void,str> { return Result<void,str>.failure(\"\") }", .exit_code = 1, .stderr = "error: \n" },
+        .{ .source = "func main() Result<void,str> { return Result<void,str>.failure(\"échec 🔥\") }", .exit_code = 1, .stderr = "error: échec 🔥\n" },
+        .{ .source = "func main() Result<void,str> { return Result<void,str>.failure(\"line\\n\") }", .exit_code = 1, .stderr = "error: line\n\n" },
+    };
+    for (cases) |case| {
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+        const native = try compileAndRun(arena.allocator(), case.source);
+        try std.testing.expectEqual(case.exit_code, exitCode(native));
+        try std.testing.expectEqualSlices(u8, case.stdout, native.stdout);
+        try std.testing.expectEqualSlices(u8, case.stderr, native.stderr);
+    }
+}
+
 test "native optional transport matches the reference interpreter" {
     if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);

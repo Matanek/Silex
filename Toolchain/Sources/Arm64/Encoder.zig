@@ -119,18 +119,40 @@ pub fn encode(allocator: Allocator, program: Machine.Program, entry: Entry) Erro
         },
         .executable_main => |function| entry: {
             if (function >= program.functions.len) return error.InvalidMachineProgram;
+            const main = program.functions[function];
+            if (main.parameter_count != 0 or (main.return_type != .void and !main.recoverable_entry_result)) {
+                return error.InvalidMachineProgram;
+            }
             const offset: u32 = @intCast(words.items.len * 4);
             try words.append(allocator, saveFrame());
             try words.append(allocator, moveFramePointer());
+            if (main.recoverable_entry_result) {
+                try emitStackAdjustment(allocator, &words, 16, false);
+                try words.append(allocator, addSubtractImmediate(.x15, .zero_or_sp, 0, true));
+            }
             try calls.append(allocator, .{ .at = words.items.len, .function = function });
             try words.append(allocator, branchLink());
-            const success_branch = words.items.len;
+            const runtime_success = words.items.len;
             try words.append(allocator, compareBranchZero(.x8));
+            if (main.recoverable_entry_result) try emitStackAdjustment(allocator, &words, 16, true);
             try words.append(allocator, moveWideZero32(.x0, 1));
             try words.append(allocator, restoreFrame());
             try words.append(allocator, returnInstruction());
-            const success = words.items.len;
-            try patch19(words.items, success_branch, success);
+            try patch19(words.items, runtime_success, words.items.len);
+            if (main.recoverable_entry_result) {
+                try words.append(allocator, loadStack(.x9, 0));
+                const result_success = words.items.len;
+                try words.append(allocator, compareBranchZero(.x9));
+                const prefix = findString(program, "error: ") orelse return error.InvalidMachineProgram;
+                try StringRuntime.emitWriteStatic(allocator, &words, &data_fixups, program, prefix, 2);
+                try StringRuntime.emitPrint(allocator, &words, &data_fixups, program, 1, 2, true);
+                try words.append(allocator, moveWideZero32(.x0, 1));
+                try emitStackAdjustment(allocator, &words, 16, true);
+                try words.append(allocator, restoreFrame());
+                try words.append(allocator, returnInstruction());
+                try patch19(words.items, result_success, words.items.len);
+                try emitStackAdjustment(allocator, &words, 16, true);
+            }
             try words.append(allocator, moveWideZero32(.x0, 0));
             try words.append(allocator, restoreFrame());
             try words.append(allocator, returnInstruction());
@@ -180,6 +202,13 @@ pub fn encode(allocator: Allocator, program: Machine.Program, entry: Entry) Erro
         @memcpy(code[descriptor + 8 ..][0..string.len], string);
     }
     return .{ .code = code, .function_offsets = offsets, .entry_offset = entry_offset };
+}
+
+fn findString(program: Machine.Program, value: []const u8) ?usize {
+    for (program.strings, 0..) |candidate, index| {
+        if (std.mem.eql(u8, candidate, value)) return index;
+    }
+    return null;
 }
 
 fn encodeFunction(
