@@ -66,7 +66,7 @@ fn syntacticType(expression: *const Ast.Expression) ?Ast.Type {
 
 pub fn internDynamicType(self: anytype, position: Source.Position, element: Ast.Type) !Ast.Type {
     for (self.collection_structures.items) |structure| if (structure.collection) |collection| {
-        if (collection.element == element and collection.length == null) return self.internTypeName(structure.name);
+        if (collection.element == element and collection.length == null and !collection.view) return self.internTypeName(structure.name);
     };
     const name = try std.fmt.allocPrint(self.allocator, "{s}[]", .{try typeSpelling(self, element)});
     const type_value = try self.internTypeName(name);
@@ -76,6 +76,23 @@ pub fn internDynamicType(self: anytype, position: Source.Position, element: Ast.
         .name = name,
         .fields = &.{},
         .collection = .{ .element = element, .length = null },
+    });
+    _ = try internViewType(self, position, element);
+    return type_value;
+}
+
+pub fn internViewType(self: anytype, position: Source.Position, element: Ast.Type) !Ast.Type {
+    for (self.collection_structures.items) |structure| if (structure.collection) |collection| {
+        if (collection.element == element and collection.view) return self.internTypeName(structure.name);
+    };
+    const name = try std.fmt.allocPrint(self.allocator, "{s}[..]", .{try typeSpelling(self, element)});
+    const type_value = try self.internTypeName(name);
+    try self.collection_structures.append(self.allocator, .{
+        .position = position,
+        .name_position = position,
+        .name = name,
+        .fields = &.{},
+        .collection = .{ .element = element, .length = null, .view = true },
     });
     return type_value;
 }
@@ -102,6 +119,7 @@ pub fn internFixedType(self: anytype, position: Source.Position, element: Ast.Ty
         .fields = fields,
         .collection = .{ .element = element, .length = length },
     });
+    _ = try internViewType(self, position, element);
     return type_value;
 }
 

@@ -11,14 +11,17 @@ pub fn prepare(self: anytype) ![]const Ir.Enum {
     for (self.program.enums, 0..) |enumeration, enum_index| {
         const type_index = typeIndex(self.program, enumeration.name) orelse return self.fail(enumeration.name_position, "enum type is unavailable");
         const variants = try self.allocator.alloc(Ir.EnumVariant, enumeration.variants.len);
-        for (enumeration.variants, 0..) |variant, variant_index| variants[variant_index] = .{
-            .name = variant.name,
-            .associated_types = variant.associated_types,
-            .raw_value = if (variant.raw_value) |raw_value| switch (raw_value) {
-                .integer => |value| .{ .integer = value },
-                .string => |value| .{ .string = value },
-            } else null,
-        };
+        for (enumeration.variants, 0..) |variant, variant_index| {
+            for (variant.associated_types) |associated| try Resources.validateStoredType(self, associated, variant.position, "in an enum payload");
+            variants[variant_index] = .{
+                .name = variant.name,
+                .associated_types = variant.associated_types,
+                .raw_value = if (variant.raw_value) |raw_value| switch (raw_value) {
+                    .integer => |value| .{ .integer = value },
+                    .string => |value| .{ .string = value },
+                } else null,
+            };
+        }
         result[enum_index] = .{
             .name = enumeration.name,
             .type_index = type_index,

@@ -128,4 +128,5 @@ pub const Type = enum(u32) {
 pub const Collection = struct {
     element: Type,
     length: ?usize,
+    view: bool = false,
 };

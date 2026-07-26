@@ -5,6 +5,7 @@ const Borrowing = @import("Borrowing.zig");
 const Optionals = @import("Optionals.zig");
 const Support = @import("Support.zig");
 const Resources = @import("Resources.zig");
+const Collections = @import("Collections.zig");
 
 pub fn analyzeVariable(self: anytype, builder: anytype, declaration: Ast.VariableDeclaration) !void {
     if (Support.findBinding(builder.bindings.items, declaration.name) != null) {
@@ -12,6 +13,11 @@ pub fn analyzeVariable(self: anytype, builder: anytype, declaration: Ast.Variabl
         return self.fail(declaration.name_position, message);
     }
 
+    if (declaration.annotation) |annotation| {
+        if (Collections.isViewType(self.structures, annotation)) {
+            if (declaration.annotation_mode == .value) return self.fail(declaration.name_position, "a view annotation must retain its '@T[..]' or '&T[..]' mode");
+        } else try Resources.validateStoredType(self, annotation, declaration.name_position, "inside another local type");
+    }
     var initializer = if (declaration.initializer) |expression|
         try self.analyzeExpressionExpected(
             builder,
@@ -31,14 +37,28 @@ pub fn analyzeVariable(self: anytype, builder: anytype, declaration: Ast.Variabl
             initializer.borrowed_mode
         else
             .read;
-        if (alias_mode == .mutable and (!declaration.mutable or initializer.borrowed_mode != .mutable or initializer.reference == null)) {
+        if (alias_mode == .mutable and (!declaration.mutable or initializer.borrowed_mode != .mutable or
+            (initializer.reference == null and !Collections.isViewType(self.structures, declared_type))))
+        {
             return self.fail(declaration.name_position, "mutable alias requires 'var' and a mutable borrowed value");
         }
         if (declaration.initializer) |expression| if (expression.value == .identifier) {
             const source = Support.findBinding(builder.bindings.items, expression.value.identifier);
             if (source != null and source.?.borrowed_mode == .mutable) return self.fail(expression.position, "a mutable alias cannot be copied or weakened by another declaration");
         };
-        try builder.bindings.append(self.allocator, .{
+        if (alias_mode == .mutable and Collections.isViewType(self.structures, declared_type)) {
+            const local = builder.local_types.items.len;
+            try builder.local_types.append(self.allocator, declared_type);
+            try self.emit(builder, .{ .local_store = .{ .local = local, .operand = initializer.value } });
+            try builder.bindings.append(self.allocator, .{
+                .name = declaration.name,
+                .type = declared_type,
+                .local = local,
+                .mutable = true,
+                .borrowed_root = initializer.borrowed_root,
+                .borrowed_mode = .mutable,
+            });
+        } else try builder.bindings.append(self.allocator, .{
             .name = declaration.name,
             .type = declared_type,
             .value = if (alias_mode == .read) initializer.value else null,
@@ -104,11 +124,12 @@ pub fn analyzeReturn(self: anytype, builder: anytype, function: Ast.Function, st
                 const message = try std.fmt.allocPrint(self.allocator, "borrowed return must originate from parameter '{s}'", .{provenance});
                 return self.fail(expression.position, message);
             }
-            if (function.return_mode == .mutable and (value.borrowed_mode != .mutable or value.reference == null)) {
+            const view_return = Collections.isViewType(self.structures, function.return_type);
+            if (function.return_mode == .mutable and (value.borrowed_mode != .mutable or (!view_return and value.reference == null))) {
                 return self.fail(expression.position, "mutable borrowed return requires a mutable place from an '&' parameter");
             }
             try Resources.emitActiveDrops(self, builder, 0);
-            self.terminate(builder, .{ .return_value = if (function.return_mode == .mutable) value.reference.? else value.value });
+            self.terminate(builder, .{ .return_value = if (function.return_mode == .mutable and !view_return) value.reference.? else value.value });
             return;
         }
         try Resources.requireTransfer(self, expression, value.type, "returning it");

@@ -958,6 +958,36 @@ are evaluated once from left to right; the result is a copy, never a view. A
 copied slice is rejected when the element type is non-copyable; borrowed slices
 are defined separately as views.
 
+`@collection[start:end]` creates a shared contiguous view `@T[..]`, while
+`&collection[start:end]` creates a mutable view `&T[..]`. A view borrows the
+source collection for its lexical lifetime: it carries bounds and provenance,
+but owns no storage or elements. The prefixes belong to view creation and to
+parameter or return modes; reading through a view uses an ordinary expression.
+
+```sx
+func identity(values:@int[..]) @values:int[..] {
+    return values
+}
+
+let inspected = @values[1:4]
+let inner = @inspected[1:2]
+var editable = &values[1:4]
+editable[0] = 40
+```
+
+View bounds have the same required endpoints, normalization, clamping, and
+left-to-right single evaluation as copied slices. Shared and mutable views both
+provide `count()`, `is_empty()`, indexing, subviews, and iteration. A mutable
+view additionally permits indexed writes, `for var`, and `swap`. A subview
+retains the original root and borrow mode.
+
+Views cannot resize or globally reorder their source, remove or transfer an
+element, or become owners. They are accepted only as lexical bindings and as
+provenance-qualified borrowed parameters or returns. They cannot be stored in
+structure or enum payloads, optionals, collections, statics, or captures. While
+a view is live, the usual shared-versus-exclusive borrowing rules protect its
+root. A slice without `@` or `&` remains an independent copied list.
+
 ## Observable statements
 
 `print(expression, ...)` accepts one or more expressions. It evaluates every
@@ -1014,7 +1044,7 @@ type_parameters = "<" identifier ("," identifier)* ">" ;
 parameters      = parameter ("," parameter)* ;
 parameter       = identifier ":" ("@" | "&")? type ("=" expression)? ;
 return_type     = (("@" | "&") (identifier ":")?)? type ;
-type            = type_atom ("[" integer? "]")* "?"? ;
+type            = type_atom ("[" (integer | "..")? "]")* "?"? ;
 type_atom       = "void" | "int8" | "int16" | "int32" | "int64" | "int"
                 | "uint8" | "uint16" | "uint32" | "uint64" | "uint"
                 | "float" | "float32" | "float64" | "bool" | "str"
@@ -1052,7 +1082,7 @@ bit_and         = shift ("&" shift)* ;
 shift           = additive (("<<" | ">>") additive)* ;
 additive        = multiplicative (("+" | "-") multiplicative)* ;
 multiplicative  = unary (("*" | "/" | "%") unary)* ;
-unary           = ("-" | "!" | "try" | "move") unary | conversion ;
+unary           = ("-" | "!" | "try" | "move" | "@" | "&") unary | conversion ;
 conversion      = postfix ("as" type)* ;
 postfix         = primary (("(" arguments? ")")
                 | ("." identifier ("(" arguments? ")")?)

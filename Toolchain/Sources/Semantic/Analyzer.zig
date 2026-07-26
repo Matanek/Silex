@@ -108,6 +108,7 @@ pub const Analyzer = struct {
                 };
                 if (!compatible) return self.fail(function.name_position, "borrowed return provenance must name a compatible borrowed parameter");
             }
+            try Resources.validateReturn(self, function);
         }
         for (self.program.functions, 0..) |function, index| {
             for (self.program.functions[0..index]) |previous| {
@@ -252,18 +253,7 @@ pub const Analyzer = struct {
         try builder.blocks.append(self.allocator, .{});
         var parameter_types: std.ArrayList(Types.Type) = .empty;
         for (function.parameters, 0..) |parameter, value| {
-            const lowered_type: Types.Type = if (parameter.mode == .mutable) .address else parameter.type;
-            try parameter_types.append(self.allocator, lowered_type);
-            try builder.value_types.append(self.allocator, lowered_type);
-            try builder.bindings.append(self.allocator, .{
-                .name = parameter.name,
-                .type = parameter.type,
-                .value = if (parameter.mode == .mutable) null else value,
-                .reference = if (parameter.mode == .mutable) value else null,
-                .mutable = parameter.mode == .mutable,
-                .parameter = true,
-                .parameter_mode = parameter.mode,
-            });
+            try parameter_types.append(self.allocator, try Collections.bindFunctionParameter(self, &builder, parameter, value));
         }
 
         const ends_with_return = try self.analyzeStatements(&builder, function, function.statements);
@@ -292,7 +282,7 @@ pub const Analyzer = struct {
         return .{
             .name = function.name,
             .parameter_types = try parameter_types.toOwnedSlice(self.allocator),
-            .return_type = if (function.return_mode == .mutable) .address else function.return_type,
+            .return_type = Collections.loweredBorrowType(self.structures, function.return_mode, function.return_type),
             .value_types = try builder.value_types.toOwnedSlice(self.allocator),
             .local_types = try builder.local_types.toOwnedSlice(self.allocator),
             .blocks = owned_blocks,
@@ -444,6 +434,7 @@ pub const Analyzer = struct {
     ) AnalyzeError!TypedValue {
         if (unary.operator == .propagate) return Try.analyzeValue(self, builder, unary);
         if (unary.operator == .move) return Moves.analyze(self, builder, unary);
+        if (unary.operator == .borrow_read or unary.operator == .borrow_mutable) return Collections.analyzeView(self, builder, unary);
         if (unary.operator == .logical_not) {
             const operand = try self.analyzeExpressionExpected(builder, unary.operand, .bool);
             if (operand.type != .bool) {
@@ -681,13 +672,17 @@ pub const Analyzer = struct {
         }
         self.structures = structures;
 
+        for (self.program.structures) |structure| for (structure.fields) |field| {
+            try Resources.validateStoredType(self, field.type, field.position, "in a structure field");
+        };
+
         const states = try self.allocator.alloc(StructureState, structures.len);
         @memset(states, .unseen);
         for (structures, 0..) |_, index| try self.validateStructureCycle(index, states);
 
         for (self.program.structures) |structure| {
             for (structure.fields) |field| if (field.default) |default| {
-                if (!restrictedFieldDefault(self, default)) {
+                if (!Constructors.restrictedFieldDefault(self, default)) {
                     return self.fail(default.position, "field default must be a fundamental literal or structure aggregate");
                 }
                 var builder: FunctionBuilder = .{};
@@ -1173,6 +1168,11 @@ pub const Analyzer = struct {
                 return self.fail(call.arguments[index].position, message);
             }
             if (parameter.mode == .mutable) {
+                if (Collections.isViewType(self.structures, parameter.type)) {
+                    if (argument.borrowed_mode != .mutable) return self.fail(call.arguments[index].position, "mutable view parameter requires an '&T[..]' argument");
+                    try argument_ids.append(self.allocator, argument.value);
+                    continue;
+                }
                 var reused: ?Ir.ValueId = null;
                 for (mutable_arguments.items) |previous| if (MutableReferences.samePlace(previous.source, call.arguments[index])) {
                     reused = previous.prepared.reference;
@@ -1196,7 +1196,7 @@ pub const Analyzer = struct {
             const value = try self.analyzeParameterDefault(builder, parameter);
             try argument_ids.append(self.allocator, value.value);
         }
-        const result_type: Types.Type = if (function.return_mode == .mutable) .address else function.return_type;
+        const result_type = Collections.loweredBorrowType(self.structures, function.return_mode, function.return_type);
         const result: ?Ir.ValueId = if (function.return_type == .void)
             null
         else result: {
@@ -1232,6 +1232,12 @@ pub const Analyzer = struct {
             .value = result.?,
             .borrowed_root = root,
             .borrowed_mode = .read,
+        };
+        if (Collections.isViewType(self.structures, function.return_type)) return .{
+            .type = function.return_type,
+            .value = result.?,
+            .borrowed_root = root,
+            .borrowed_mode = .mutable,
         };
         const loaded = try self.newValue(builder, function.return_type);
         try self.emit(builder, .{ .reference_load = .{ .result = loaded, .reference = result.? } });
@@ -1461,23 +1467,6 @@ pub const Analyzer = struct {
         return error.InvalidSource;
     }
 };
-
-fn restrictedFieldDefault(self: *Analyzer, expression: *const Ast.Expression) bool {
-    return switch (expression.value) {
-        .integer, .floating, .boolean, .null_value, .string => true,
-        .unary => |unary| unary.operator == .negate and switch (unary.operand.value) {
-            .integer, .floating => true,
-            else => false,
-        },
-        .call => |call| call.arguments.len == 0 and self.structureIndex(call.name) != null and blk: {
-            for (call.named_arguments) |argument| {
-                if (!restrictedFieldDefault(self, argument.value)) break :blk false;
-            }
-            break :blk true;
-        },
-        else => false,
-    };
-}
 
 fn conversionCost(source: Types.Type, target: Types.Type) ?u8 {
     if (source == target) return 0;

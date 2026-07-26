@@ -713,7 +713,7 @@ pub const Parser = struct {
     }
 
     fn parseUnary(self: *Parser, allow_line_breaks: bool) ParseError!*Ast.Expression {
-        if (self.current.tag != .minus and self.current.tag != .bang and self.current.tag != .keyword_try and self.current.tag != .keyword_move) return self.parseConversion();
+        if (self.current.tag != .minus and self.current.tag != .bang and self.current.tag != .keyword_try and self.current.tag != .keyword_move and self.current.tag != .at and self.current.tag != .amp) return self.parseConversion();
         const operator = self.current;
         try self.advance();
         return self.newExpression(.{
@@ -724,6 +724,8 @@ pub const Parser = struct {
                     .bang => .logical_not,
                     .keyword_try => .propagate,
                     .keyword_move => .move,
+                    .at => .borrow_read,
+                    .amp => .borrow_mutable,
                     else => unreachable,
                 },
                 .operator_position = operator.position,

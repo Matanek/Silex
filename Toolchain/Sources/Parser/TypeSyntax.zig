@@ -74,6 +74,13 @@ pub fn parseType(self: anytype) !Ast.Type {
     while (self.current.tag == .left_bracket) {
         const bracket_position = self.current.position;
         try self.advance();
+        if (self.current.tag == .dot_dot) {
+            try self.advance();
+            try self.expect(.right_bracket, "expected ']' after view type");
+            if (result == .void) return self.failAt(bracket_position, "view element type cannot be 'void'");
+            result = try Collections.internViewType(self, type_position, result);
+            continue;
+        }
         if (self.current.tag == .right_bracket) {
             try self.advance();
             if (result == .void) return self.failAt(bracket_position, "list element type cannot be 'void'");

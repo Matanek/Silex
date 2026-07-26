@@ -1031,6 +1031,39 @@ test "native noncopyable collection transfers match the reference interpreter" {
     try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
 }
 
+test "native borrowed views match the reference interpreter" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const source =
+        \\func sum(values:@int[..]) int { return values[0] + values[-1] }
+        \\func tail(values:&int[..]) &values:int[..] { return &values[1:values.count()] }
+        \\func main() {
+        \\    var fixed:int[5] = [0, 1, 2, 3, 4]
+        \\    if true {
+        \\        var middle = &fixed[1:4]
+        \\        middle[0] = 8
+        \\        middle.swap(1, -1)
+        \\    }
+        \\    var values = [10, 20, 30, 40]
+        \\    let copied = values
+        \\    print(sum(@values[1:4]))
+        \\    if true {
+        \\        var rest = tail(&values[0:4])
+        \\        rest[1] = 99
+        \\    }
+        \\    print(fixed[1], fixed[2], fixed[3], " ", values[2], " ", copied[2])
+        \\}
+    ;
+    var frontend = Frontend.Frontend.init(allocator);
+    const reference = try Interpreter.runCapture(allocator, (try frontend.compile(source)).ir);
+    const native = try compileAndRun(allocator, source);
+    try std.testing.expectEqual(reference.exit_code, exitCode(native));
+    try std.testing.expectEqualSlices(u8, reference.stdout, native.stdout);
+    try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
+}
+
 test "native checked float conversion returns an exact integer" {
     if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);

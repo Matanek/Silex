@@ -82,6 +82,7 @@ pub const Instruction = union(enum) {
     collection_count: CollectionCount,
     list_edit: ListEdit,
     collection_slice: CollectionSlice,
+    collection_view: CollectionSlice,
     local_load: LocalLoad,
     local_store: LocalStore,
     local_address: LocalAddress,
@@ -223,6 +224,7 @@ pub const Instruction = union(enum) {
         collection: ValueId,
         start: ValueId,
         end: ValueId,
+        reference: ?ValueId = null,
     };
 
     pub const LocalLoad = struct {
@@ -683,6 +685,19 @@ fn writeInstruction(
             try appendValueChecked(output, allocator, function, slice.start);
             try output.appendSlice(allocator, ", ");
             try appendValueChecked(output, allocator, function, slice.end);
+        },
+        .collection_view => |view| {
+            try appendResult(output, allocator, program, function, view.result);
+            try output.appendSlice(allocator, "collection.view ");
+            try appendValueChecked(output, allocator, function, view.collection);
+            try output.appendSlice(allocator, ", ");
+            try appendValueChecked(output, allocator, function, view.start);
+            try output.appendSlice(allocator, ", ");
+            try appendValueChecked(output, allocator, function, view.end);
+            if (view.reference) |reference| {
+                try output.appendSlice(allocator, ", through ");
+                try appendValueChecked(output, allocator, function, reference);
+            }
         },
         .local_load => |load| {
             try appendResult(output, allocator, program, function, load.result);
