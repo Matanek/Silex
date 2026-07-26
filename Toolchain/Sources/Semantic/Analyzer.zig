@@ -12,19 +12,15 @@ const Control = @import("Control.zig");
 const Enums = @import("Enums.zig");
 const Matches = @import("Matches.zig");
 const Support = @import("Support.zig");
+const Try = @import("Try.zig");
 const Types = @import("../Types.zig");
-
 const Allocator = std.mem.Allocator;
 const AnalyzeError = Source.Error || Allocator.Error;
-
 pub const Binding = Model.Binding;
 pub const TypedValue = Model.TypedValue;
 pub const BlockBuilder = Model.BlockBuilder;
-
 const StructureState = enum { unseen, visiting, complete };
-
 pub const FunctionBuilder = Model.FunctionBuilder;
-
 pub const Analyzer = struct {
     allocator: Allocator,
     program: Ast.Program = undefined,
@@ -37,7 +33,6 @@ pub const Analyzer = struct {
     pub fn init(allocator: Allocator) Analyzer {
         return .{ .allocator = allocator };
     }
-
     pub fn analyze(self: *Analyzer, program: Ast.Program) AnalyzeError!Ir.Program {
         return self.analyzeProgram(program, true);
     }
@@ -45,7 +40,6 @@ pub const Analyzer = struct {
     pub fn analyzeUnit(self: *Analyzer, program: Ast.Program) AnalyzeError!Ir.Program {
         return self.analyzeProgram(program, false);
     }
-
     fn analyzeProgram(self: *Analyzer, program: Ast.Program, require_entry: bool) AnalyzeError!Ir.Program {
         self.program = program;
         self.diagnostic = null;
@@ -55,7 +49,6 @@ pub const Analyzer = struct {
         self.structures = try Methods.extendStructures(self.allocator, self.program, self.structures, self.method_mutability);
         try self.validateDeclarations(require_entry);
         try self.validateParameterDefaults();
-
         var functions: std.ArrayList(Ir.Function) = .empty;
         for (program.functions, 0..) |function, function_id| {
             try functions.append(self.allocator, try self.analyzeFunction(function_id, function));
@@ -235,7 +228,7 @@ pub const Analyzer = struct {
 
     fn analyzeFunction(self: *Analyzer, function_id: Ir.FunctionId, function: Ast.Function) AnalyzeError!Ir.Function {
         _ = function_id;
-        var builder: FunctionBuilder = .{};
+        var builder: FunctionBuilder = .{ .return_type = function.return_type };
         try builder.blocks.append(self.allocator, .{});
         var parameter_types: std.ArrayList(Types.Type) = .empty;
         for (function.parameters, 0..) |parameter, value| {
@@ -300,8 +293,13 @@ pub const Analyzer = struct {
         try self.default_expansions.append(self.allocator, expression);
         defer _ = self.default_expansions.pop();
         const caller_bindings = builder.bindings;
+        const caller_return_type = builder.return_type;
         builder.bindings = .empty;
-        defer builder.bindings = caller_bindings;
+        builder.return_type = null;
+        defer {
+            builder.bindings = caller_bindings;
+            builder.return_type = caller_return_type;
+        }
         var value = try self.analyzeExpressionExpected(
             builder,
             expression,
@@ -341,6 +339,10 @@ pub const Analyzer = struct {
                     return false;
                 },
                 .match_expression => |match_value| return Matches.analyzeStatement(self, builder, function, match_value),
+                .unary => |unary| if (unary.operator == .propagate) {
+                    try Try.analyzeStatement(self, builder, unary);
+                    return false;
+                } else unreachable,
                 else => unreachable,
             },
             .print_statement => |print_statement| effect: {
@@ -513,6 +515,7 @@ pub const Analyzer = struct {
         unary: Ast.Expression.Unary,
         expected: ?Types.Type,
     ) AnalyzeError!TypedValue {
+        if (unary.operator == .propagate) return Try.analyzeValue(self, builder, unary);
         if (unary.operator == .logical_not) {
             const operand = try self.analyzeExpressionExpected(builder, unary.operand, .bool);
             if (operand.type != .bool) {

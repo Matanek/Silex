@@ -85,13 +85,17 @@ pub const Specializer = struct {
             if (function.type_parameters.len == 0) try self.functions.append(self.allocator, function);
         }
 
+        for (self.functions.items) |*function| {
+            var locals: std.ArrayList(Binding) = .empty;
+            function.parameters = try self.rewriteParameters(function.parameters, &.{}, &locals);
+            function.return_type = try self.rewriteType(function.return_type, &.{}, function.name_position);
+        }
+
         var function_index: usize = 0;
         while (function_index < self.functions.items.len) : (function_index += 1) {
             var function = self.functions.items[function_index];
             var locals: std.ArrayList(Binding) = .empty;
             for (function.parameters) |parameter| try locals.append(self.allocator, .{ .name = parameter.name, .type = parameter.type });
-            function.parameters = try self.rewriteParameters(function.parameters, &.{}, &locals);
-            function.return_type = try self.rewriteType(function.return_type, &.{}, function.name_position);
             function.statements = try self.rewriteStatements(function.statements, &.{}, &locals);
             self.functions.items[function_index] = function;
         }
@@ -981,7 +985,12 @@ pub const Specializer = struct {
                 };
                 break :field_type null;
             },
-            .unary => |unary| if (unary.operator == .logical_not) .bool else self.inferExpressionType(unary.operand, locals),
+            .unary => |unary| if (unary.operator == .logical_not)
+                .bool
+            else if (unary.operator == .propagate)
+                self.inferPropagatedType(unary.operand, locals)
+            else
+                self.inferExpressionType(unary.operand, locals),
             .binary => |binary| switch (binary.operator) {
                 .less, .less_equal, .greater, .greater_equal, .equal, .not_equal, .logical_and, .logical_or => .bool,
                 else => self.inferExpressionType(binary.left, locals),
@@ -1003,6 +1012,12 @@ pub const Specializer = struct {
         const name = self.type_names.items[index];
         for (self.structures.items) |structure| if (std.mem.eql(u8, structure.name, name)) return structure;
         return null;
+    }
+
+    fn inferPropagatedType(self: *Specializer, operand: *const Ast.Expression, locals: []const Binding) ?Ast.Type {
+        const operand_type = self.inferExpressionType(operand, locals) orelse return null;
+        const enumeration = self.enumForType(operand_type) orelse return null;
+        return Result.successType(enumeration);
     }
 
     fn sourceStructureForType(self: *Specializer, type_value: Ast.Type) ?Ast.Structure {

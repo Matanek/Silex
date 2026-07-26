@@ -29,6 +29,7 @@ pub const LoopContext = struct {
 };
 
 pub const FunctionBuilder = struct {
+    return_type: ?Types.Type = null,
     value_types: std.ArrayList(Types.Type) = .empty,
     local_types: std.ArrayList(Types.Type) = .empty,
     blocks: std.ArrayList(BlockBuilder) = .empty,

@@ -53,3 +53,23 @@ pub fn hasVoidSuccess(enumeration: Ast.Enum, variant: Ast.EnumVariant, associate
         std.mem.eql(u8, variant.name, "success") and
         associated_types.len == 1 and associated_types[0] == .void;
 }
+
+pub fn isConcrete(enumeration: anytype) bool {
+    return std.mem.startsWith(u8, enumeration.name, "Result<");
+}
+
+pub fn successType(enumeration: anytype) ?Ast.Type {
+    if (!isConcrete(enumeration)) return null;
+    for (enumeration.variants) |variant| if (std.mem.eql(u8, variant.name, "success")) {
+        return if (variant.associated_types.len == 0) .void else variant.associated_types[0];
+    };
+    return null;
+}
+
+pub fn errorType(enumeration: anytype) ?Ast.Type {
+    if (!isConcrete(enumeration)) return null;
+    for (enumeration.variants) |variant| if (std.mem.eql(u8, variant.name, "failure") and variant.associated_types.len == 1) {
+        return variant.associated_types[0];
+    };
+    return null;
+}

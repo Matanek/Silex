@@ -383,6 +383,29 @@ introduced by a declaration or a type or module alias. Propagation and error
 transformation are separate language operations described below when they are
 available.
 
+### Propagation with `try`
+
+The prefix expression `try` evaluates one `Result<T,E>`. A success produces
+its `T`; a failure immediately returns `Result<U,E>.failure(error)` from the
+enclosing function. The success types may differ, but the error types must be
+identical after transparent aliases are resolved:
+
+```sx
+func load(text:str) Result<int, ParseError> {
+    let value = try parse(text)
+    return Result<int, ParseError>.success(value)
+}
+```
+
+Calls and member access bind inside the operand while binary operators use the
+success value, so `try parse(text) + 1` means `(try parse(text)) + 1`. The
+operand is evaluated exactly once. `Result<void,E>` uses `try operation()` as
+a complete statement; a non-void success must be used. Propagation is ordinary
+early-return control flow, not an exception, and follows the same scope exit as
+an explicit return. `try` is rejected for non-`Result` operands, incompatible
+error types, non-`Result` enclosing returns and constructors. Error
+transformation remains explicit.
+
 An enum may instead declare `int` or `str` as a raw type. Every variant then
 provides exactly one literal of that type:
 
@@ -762,7 +785,7 @@ bit_and         = shift ("&" shift)* ;
 shift           = additive (("<<" | ">>") additive)* ;
 additive        = multiplicative (("+" | "-") multiplicative)* ;
 multiplicative  = unary (("*" | "/" | "%") unary)* ;
-unary           = ("-" | "!") unary | conversion ;
+unary           = ("-" | "!" | "try") unary | conversion ;
 conversion      = postfix ("as" type)* ;
 postfix         = primary (("(" arguments? ")")
                 | ("." identifier ("(" arguments? ")")?))* ;

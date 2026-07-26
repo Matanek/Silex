@@ -85,7 +85,7 @@ pub fn analyze(self: anytype, structure_index: usize, method_index: usize, metho
     const flat = flatMethodIndex(self.program, structure_index, method_index);
     const mutating = self.method_mutability[flat];
     const receiver_type = Ast.Type.structure(structure_index);
-    var builder: Model.FunctionBuilder = .{};
+    var builder: Model.FunctionBuilder = .{ .return_type = if (mutating) null else method.return_type };
     try builder.blocks.append(self.allocator, .{});
 
     const parameter_types = try self.allocator.alloc(Ast.Type, method.parameters.len + 1);
