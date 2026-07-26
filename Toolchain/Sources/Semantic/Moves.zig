@@ -13,6 +13,9 @@ pub fn analyze(self: anytype, builder: anytype, unary: Ast.Expression.Unary) !Mo
         const message = try std.fmt.allocPrint(self.allocator, "unknown variable '{s}'", .{name});
         return self.fail(unary.operand.position, message);
     };
+    if (builder.bindings.items[index].parameter_mode == .read) {
+        return self.fail(unary.operator_position, "a read-reference parameter cannot be consumed with 'move'");
+    }
     const value = try self.analyzeExpression(builder, unary.operand);
     builder.bindings.items[index].available = false;
     builder.bindings.items[index].refined_type = null;

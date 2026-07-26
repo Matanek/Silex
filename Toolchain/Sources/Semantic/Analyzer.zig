@@ -6,6 +6,7 @@ const Numeric = @import("../Numeric.zig");
 const Source = @import("../Source.zig");
 const Mutation = @import("Mutation.zig");
 const Moves = @import("Moves.zig");
+const Borrowing = @import("Borrowing.zig");
 const Optionals = @import("Optionals.zig");
 const Constructors = @import("Constructors.zig");
 const Collections = @import("Collections.zig");
@@ -236,6 +237,7 @@ pub const Analyzer = struct {
                 .type = parameter.type,
                 .value = value,
                 .parameter = true,
+                .parameter_mode = parameter.mode,
             });
         }
 
@@ -379,6 +381,7 @@ pub const Analyzer = struct {
             break :intrinsic try self.emitIntrinsic(builder, annotation, declaration.name_position);
         };
         const declared_type = declaration.annotation orelse initializer.type;
+        try Borrowing.requireOwned(self, initializer, if (declaration.initializer) |value| value.position else declaration.name_position, "stored");
         if (initializer.type != declared_type and (Numeric.canWiden(initializer.type, declared_type) or Optionals.canConvert(initializer.type, declared_type))) {
             initializer = try self.coerce(builder, initializer, declared_type, declaration.initializer.?.position);
         }
@@ -426,6 +429,7 @@ pub const Analyzer = struct {
                 );
                 return self.fail(expression.position, message);
             }
+            try Borrowing.requireOwned(self, value, expression.position, "returned");
             self.terminate(builder, .{ .return_value = value.value });
             return;
         }
@@ -464,7 +468,7 @@ pub const Analyzer = struct {
             .null_value => Optionals.analyzeNull(self, builder, expected, expression.position),
             .string => |value| self.emitString(builder, value),
             .interpolated_string => |value| self.analyzeInterpolatedString(builder, value),
-            .identifier => |name| self.analyzeIdentifier(builder, expression.position, name),
+            .identifier => |name| Borrowing.analyzeIdentifier(self, builder, expression.position, name),
             .generic_reference => self.fail(expression.position, "generic type reference was not specialized"),
             .field_access => |access| self.analyzeFieldAccess(builder, access),
             .call => |call| (try self.analyzeCall(builder, call)) orelse {
@@ -482,36 +486,6 @@ pub const Analyzer = struct {
         };
         if (expected) |target| return self.coerce(builder, value, target, expression.position);
         return value;
-    }
-
-    fn analyzeIdentifier(
-        self: *Analyzer,
-        builder: *FunctionBuilder,
-        position: Source.Position,
-        name: []const u8,
-    ) AnalyzeError!TypedValue {
-        const binding = Support.findBinding(builder.bindings.items, name) orelse {
-            const message = try std.fmt.allocPrint(self.allocator, "unknown variable '{s}'", .{name});
-            return self.fail(position, message);
-        };
-        if (!binding.available) {
-            const message = try std.fmt.allocPrint(self.allocator, "value '{s}' was moved and is unavailable", .{name});
-            return self.fail(position, message);
-        }
-        if (binding.refined_type) |type_value| return .{
-            .type = type_value,
-            .value = binding.refined_value.?,
-        };
-        if (!binding.type.hasRuntimeValue()) {
-            const message = try std.fmt.allocPrint(self.allocator, "values of type '{s}' are not executable yet", .{binding.type.name()});
-            return self.fail(position, message);
-        }
-        if (binding.local) |local| {
-            const result = try self.newValue(builder, binding.type);
-            try self.emit(builder, .{ .local_load = .{ .result = result, .local = local } });
-            return .{ .type = binding.type, .value = result };
-        }
-        return .{ .type = binding.type, .value = binding.value.? };
     }
 
     fn analyzeUnary(
@@ -921,7 +895,7 @@ pub const Analyzer = struct {
             }
             const result = try self.newValue(builder, field.type);
             try self.emit(builder, .{ .field_load = .{ .result = result, .base = base.value, .field = field_index } });
-            return .{ .type = field.type, .value = result };
+            return .{ .type = field.type, .value = result, .borrowed_root = base.borrowed_root };
         }
         const message = try std.fmt.allocPrint(
             self.allocator,
@@ -1002,6 +976,7 @@ pub const Analyzer = struct {
                 );
                 return self.fail(if (provided) |expression| expression.position else call.name_position, message);
             }
+            try Borrowing.requireOwned(self, value, if (provided) |expression| expression.position else call.name_position, "stored");
             try field_values.append(self.allocator, value.value);
         }
         const result_type = Types.Type.structure(structure_index);
@@ -1207,6 +1182,7 @@ pub const Analyzer = struct {
             return self.fail(call.name_position, message);
         };
         const function = self.program.functions[function_id];
+        try Borrowing.validateReadArguments(self, function.parameters, call.arguments);
         var argument_ids: std.ArrayList(Ir.ValueId) = .empty;
         for (arguments.items, function.parameters[0..arguments.items.len], 0..) |argument, parameter, index| {
             if (argument.type != parameter.type and !Numeric.canWiden(argument.type, parameter.type) and !Optionals.canConvert(argument.type, parameter.type)) {
@@ -1217,6 +1193,7 @@ pub const Analyzer = struct {
                 );
                 return self.fail(call.arguments[index].position, message);
             }
+            if (parameter.mode != .read) try Borrowing.requireOwned(self, argument, call.arguments[index].position, "passed by value");
             const converted = try self.coerce(builder, argument, parameter.type, call.name_position);
             try argument_ids.append(self.allocator, converted.value);
         }

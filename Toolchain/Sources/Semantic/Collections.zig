@@ -5,6 +5,7 @@ const Numeric = @import("../Numeric.zig");
 const Optionals = @import("Optionals.zig");
 const Model = @import("Model.zig");
 const Support = @import("Support.zig");
+const Borrowing = @import("Borrowing.zig");
 
 pub fn isMutation(name: []const u8) bool {
     return std.mem.eql(u8, name, "swap") or std.mem.eql(u8, name, "reverse") or std.mem.eql(u8, name, "replace") or
@@ -181,6 +182,7 @@ pub fn analyzeLiteral(
             );
             return self.fail(expression.position, message);
         }
+        try Borrowing.requireOwned(self, value, expression.position, "stored in a collection");
         fields[index] = value.value;
     }
     const result = try self.newValue(builder, type_value);
@@ -209,7 +211,7 @@ pub fn analyzeIndex(self: anytype, builder: anytype, access: Ast.Expression.Inde
         .index = index.value,
         .position = access.bracket_position,
     } });
-    return .{ .type = collection.element, .value = result };
+    return .{ .type = collection.element, .value = result, .borrowed_root = source.borrowed_root };
 }
 
 pub fn analyzeSlice(self: anytype, builder: anytype, access: Ast.Expression.SliceAccess, expected: ?Ast.Type) !Model.TypedValue {
@@ -231,7 +233,7 @@ pub fn analyzeSlice(self: anytype, builder: anytype, access: Ast.Expression.Slic
     const target = result_type orelse return self.fail(access.bracket_position, "a fixed-array slice requires an expected dynamic list type");
     const result = try self.newValue(builder, target);
     try self.emit(builder, .{ .collection_slice = .{ .result = result, .collection = source.value, .start = start.value, .end = end.value } });
-    return .{ .type = target, .value = result };
+    return .{ .type = target, .value = result, .borrowed_root = source.borrowed_root };
 }
 
 pub fn analyzeCall(self: anytype, builder: anytype, call: Ast.Expression.Call) !?Model.TypedValue {

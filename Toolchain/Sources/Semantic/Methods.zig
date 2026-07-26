@@ -6,6 +6,7 @@ const Numeric = @import("../Numeric.zig");
 const Support = @import("Support.zig");
 const Optionals = @import("Optionals.zig");
 const Control = @import("Control.zig");
+const Borrowing = @import("Borrowing.zig");
 
 const AnalyzeError = error{ InvalidSource, OutOfMemory };
 
@@ -118,6 +119,7 @@ pub fn analyze(self: anytype, structure_index: usize, method_index: usize, metho
             .type = parameter.type,
             .value = value,
             .parameter = true,
+            .parameter_mode = parameter.mode,
         });
     }
 
@@ -299,6 +301,7 @@ fn analyzeCallWithReceiver(
         return self.fail(call.name_position, message);
     };
     const method = structure.methods[method_index];
+    try Borrowing.validateReadArguments(self, method.parameters, call.arguments);
     const flat = flatMethodIndex(self.program, structure_index, method_index);
     const mutating = self.method_mutability[flat];
     const place = if (mutating)
@@ -309,6 +312,7 @@ fn analyzeCallWithReceiver(
     var argument_ids: std.ArrayList(Ir.ValueId) = .empty;
     try argument_ids.append(self.allocator, receiver.value);
     for (arguments.items, method.parameters[0..arguments.items.len], 0..) |argument, parameter, index| {
+        if (parameter.mode != .read) try Borrowing.requireOwned(self, argument, call.arguments[index].position, "passed by value");
         try argument_ids.append(
             self.allocator,
             (try self.coerce(builder, argument, parameter.type, call.arguments[index].position)).value,

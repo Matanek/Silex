@@ -7,6 +7,7 @@ const Optionals = @import("Optionals.zig");
 const Enums = @import("Enums.zig");
 const Collections = @import("Collections.zig");
 const Moves = @import("Moves.zig");
+const Borrowing = @import("Borrowing.zig");
 
 const PathStep = union(enum) {
     field: struct { base: Ir.ValueId, structure: usize, field: usize },
@@ -236,6 +237,7 @@ fn analyzeReplacement(
                 );
             return self.fail(assignment.value.?.position, message);
         }
+        try Borrowing.requireOwned(self, value, assignment.value.?.position, "stored");
         return value.value;
     }
 

@@ -1,6 +1,7 @@
 const std = @import("std");
 const Ir = @import("../Ir.zig");
 const Types = @import("../Types.zig");
+const Ast = @import("../Ast.zig");
 
 pub const Binding = struct {
     name: []const u8,
@@ -9,6 +10,7 @@ pub const Binding = struct {
     local: ?Ir.LocalId = null,
     mutable: bool = false,
     parameter: bool = false,
+    parameter_mode: Ast.Parameter.Mode = .value,
     available: bool = true,
     refined_type: ?Types.Type = null,
     refined_value: ?Ir.ValueId = null,
@@ -17,6 +19,7 @@ pub const Binding = struct {
 pub const TypedValue = struct {
     type: Types.Type,
     value: Ir.ValueId,
+    borrowed_root: ?[]const u8 = null,
 };
 
 pub const BlockBuilder = struct {

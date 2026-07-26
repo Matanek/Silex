@@ -6,6 +6,7 @@ const Support = @import("Support.zig");
 const Model = @import("Model.zig");
 const Optionals = @import("Optionals.zig");
 const Control = @import("Control.zig");
+const Borrowing = @import("Borrowing.zig");
 
 const AnalyzeError = error{ InvalidSource, OutOfMemory };
 
@@ -30,6 +31,7 @@ pub fn analyze(
             .type = parameter.type,
             .value = value,
             .parameter = true,
+            .parameter_mode = parameter.mode,
         });
     }
 
@@ -197,8 +199,10 @@ pub fn analyzeCall(
         return self.fail(call.name_position, message);
     };
     const constructor = declaration.constructors[constructor_index];
+    try Borrowing.validateReadArguments(self, constructor.parameters, call.arguments);
     var argument_ids: std.ArrayList(Ir.ValueId) = .empty;
     for (arguments.items, constructor.parameters[0..arguments.items.len], 0..) |argument, parameter, index| {
+        if (parameter.mode != .read) try Borrowing.requireOwned(self, argument, call.arguments[index].position, "passed by value");
         try argument_ids.append(
             self.allocator,
             (try self.coerce(builder, argument, parameter.type, call.arguments[index].position)).value,

@@ -329,6 +329,28 @@ is rejected. At a control-flow join, a binding is available only when every
 continuing path preserves it; terminal paths do not constrain the join. Every
 loop back edge must restore the same availability as its header.
 
+A parameter written `name:@T` is a temporary read reference. Calls keep their
+ordinary syntax; a readable local, field, indexed element, literal, or
+temporary may provide the argument. The alias exists only for the synchronous
+call, and several `@T` parameters may read the same root.
+
+```sx
+func inspect(box:@Box) int {
+    return box.get()
+}
+
+print(inspect(box))
+```
+
+Inside the function, the parameter may be read, indexed, used as a non-mutating
+method receiver, or forwarded to another `@T`. It cannot be mutated, moved,
+returned directly, stored in another binding or aggregate, or passed to a
+by-value parameter. A root cannot be moved or mutated by another argument while
+the same call holds a read reference. The mode is not an overload distinction:
+declarations differing only by `T` and `@T` expose the same effective
+signature. `@T` is a controlled parameter mode, not a pointer or a generally
+storable type.
+
 ## Associated enum values
 
 `enum` declares a nominal closed set of variants. A variant may carry zero or
@@ -896,7 +918,7 @@ field_default   = fundamental_literal | structure_initializer ;
 function        = visibility? "func" identifier type_parameters? "(" parameters? ")" return_type? block ;
 type_parameters = "<" identifier ("," identifier)* ">" ;
 parameters      = parameter ("," parameter)* ;
-parameter       = identifier ":" type ("=" expression)? ;
+parameter       = identifier ":" "@"? type ("=" expression)? ;
 return_type     = type ;
 type            = type_atom ("[" integer? "]")* "?"? ;
 type_atom       = "void" | "int8" | "int16" | "int32" | "int64" | "int"
