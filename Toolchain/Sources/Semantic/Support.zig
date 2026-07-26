@@ -105,3 +105,12 @@ pub fn findBinding(bindings: anytype, name: []const u8) ?@TypeOf(bindings[0]) {
     }
     return null;
 }
+
+pub fn findBindingIndex(bindings: anytype, name: []const u8) ?usize {
+    var index = bindings.len;
+    while (index != 0) {
+        index -= 1;
+        if (std.mem.eql(u8, bindings[index].name, name)) return index;
+    }
+    return null;
+}

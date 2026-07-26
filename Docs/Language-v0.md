@@ -46,6 +46,29 @@ field. It cannot by itself infer the type of `let value = null`. `void?` and
 directly nested optionals such as `int??` are invalid. Presence tests and
 extraction are introduced separately from this transport contract.
 
+Optionals of the same type support `==` and `!=` when their underlying values
+are comparable. Two absent values are equal; an absent and a present value are
+different; two present values compare their payloads. Either operand may be
+the contextually typed `null` literal. A direct local comparison with `null`
+also refines the name in the branch that proves presence:
+
+```sx
+if position != null {
+    print(position.x)
+}
+
+if position == null {
+    print("missing")
+} else {
+    print(position.x)
+}
+```
+
+The proof applies only to that local name and branch. It does not propagate
+through `!`, `&&`, `||`, a field or an indexed element. An immutable binding
+keeps the proof for the branch; assigning a `var` invalidates it for subsequent
+statements.
+
 `use <type> as <name>` introduces a transparent local type alias. The alias is
 accepted everywhere its target type is accepted and does not create a new
 identity, conversion, representation or overload distinction:

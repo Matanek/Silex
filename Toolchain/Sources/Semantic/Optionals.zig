@@ -4,6 +4,16 @@ const Source = @import("../Source.zig");
 const Support = @import("Support.zig");
 const Model = @import("Model.zig");
 
+pub const PresenceProof = struct {
+    name: []const u8,
+    present_when_true: bool,
+};
+
+pub const SavedRefinement = struct {
+    index: usize,
+    binding: Model.Binding,
+};
+
 pub fn expectedContext(type_value: Types.Type, expression: *const Ast.Expression) ?Types.Type {
     if (type_value.optionalChild() != null) return type_value;
     return if (type_value.isNumeric() and Support.acceptsNumericContext(expression)) type_value else null;
@@ -47,4 +57,51 @@ pub fn conversionCost(source: Types.Type, target: Types.Type) ?u8 {
 
 pub fn canConvert(source: Types.Type, target: Types.Type) bool {
     return source == target or conversionCost(source, target) != null;
+}
+
+pub fn presenceProof(expression: *const Ast.Expression) ?PresenceProof {
+    const binary = switch (expression.value) {
+        .binary => |binary| binary,
+        else => return null,
+    };
+    if (binary.operator != .equal and binary.operator != .not_equal) return null;
+    const name = switch (binary.left.value) {
+        .identifier => |name| switch (binary.right.value) {
+            .null_value => name,
+            else => return null,
+        },
+        .null_value => switch (binary.right.value) {
+            .identifier => |name| name,
+            else => return null,
+        },
+        else => return null,
+    };
+    return .{ .name = name, .present_when_true = binary.operator == .not_equal };
+}
+
+pub fn applyRefinement(self: anytype, builder: anytype, proof: PresenceProof) !?SavedRefinement {
+    const index = Support.findBindingIndex(builder.bindings.items, proof.name) orelse return null;
+    const binding = builder.bindings.items[index];
+    if (binding.refined_type != null) return null;
+    const child = binding.type.optionalChild() orelse return null;
+    const operand = if (binding.local) |local| operand: {
+        const value = try self.newValue(builder, binding.type);
+        try self.emit(builder, .{ .local_load = .{ .result = value, .local = local } });
+        break :operand value;
+    } else binding.value.?;
+    const result = try self.newValue(builder, child);
+    try self.emit(builder, .{ .optional_unwrap = .{ .result = result, .operand = operand } });
+    builder.bindings.items[index].refined_type = child;
+    builder.bindings.items[index].refined_value = result;
+    return .{ .index = index, .binding = binding };
+}
+
+pub fn restoreRefinement(builder: anytype, saved: SavedRefinement) void {
+    builder.bindings.items[saved.index] = saved.binding;
+}
+
+pub fn invalidateRefinement(builder: anytype, name: []const u8) void {
+    const index = Support.findBindingIndex(builder.bindings.items, name) orelse return;
+    builder.bindings.items[index].refined_type = null;
+    builder.bindings.items[index].refined_value = null;
 }

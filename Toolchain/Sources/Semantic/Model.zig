@@ -9,6 +9,8 @@ pub const Binding = struct {
     local: ?Ir.LocalId = null,
     mutable: bool = false,
     parameter: bool = false,
+    refined_type: ?Types.Type = null,
+    refined_value: ?Ir.ValueId = null,
 };
 
 pub const TypedValue = struct {

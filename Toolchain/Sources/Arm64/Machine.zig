@@ -60,6 +60,7 @@ pub const Instruction = union(enum) {
     constant_float64: ConstantFloat64,
     optional_null: OptionalNull,
     optional_some: OptionalSome,
+    optional_unwrap: OptionalUnwrap,
     copy: Copy,
     copy_range: CopyRange,
     aggregate_init: AggregateInit,
@@ -110,6 +111,11 @@ pub const Instruction = union(enum) {
     };
 
     pub const OptionalSome = struct {
+        result: Span,
+        operand: Span,
+    };
+
+    pub const OptionalUnwrap = struct {
         result: Span,
         operand: Span,
     };
@@ -267,6 +273,11 @@ pub fn validate(program: Program) Error!void {
                 try requireSpan(function, value.result);
                 try requireSpan(function, value.operand);
                 if (!value.result.aggregate or value.result.width != value.operand.width + 1) return error.InvalidMachineProgram;
+            },
+            .optional_unwrap => |value| {
+                try requireSpan(function, value.result);
+                try requireSpan(function, value.operand);
+                if (!value.operand.aggregate or value.operand.width != value.result.width + 1) return error.InvalidMachineProgram;
             },
             .copy => |value| {
                 try requireSlot(function, value.result);

@@ -249,6 +249,7 @@ fn encodeFunction(
                 payload.width -= 1;
                 try emitSpanCopy(allocator, words, payload, optional.operand);
             },
+            .optional_unwrap => |optional| try emitSpanCopy(allocator, words, optional.result, optional.operand),
             .copy => |copy| {
                 try words.append(allocator, loadStack(.x9, copy.operand));
                 try words.append(allocator, storeStack(.x9, copy.result));

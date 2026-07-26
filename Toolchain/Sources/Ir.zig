@@ -68,6 +68,7 @@ pub const Instruction = union(enum) {
     constant_float64: ConstantFloat64,
     optional_null: OptionalNull,
     optional_some: OptionalSome,
+    optional_unwrap: OptionalUnwrap,
     copy: Copy,
     structure_init: StructureInit,
     field_load: FieldLoad,
@@ -113,6 +114,11 @@ pub const Instruction = union(enum) {
     };
 
     pub const OptionalSome = struct {
+        result: ValueId,
+        operand: ValueId,
+    };
+
+    pub const OptionalUnwrap = struct {
         result: ValueId,
         operand: ValueId,
     };
@@ -344,6 +350,16 @@ fn writeInstruction(
             }
             try appendResult(output, allocator, program, function, optional.result);
             try output.appendSlice(allocator, "optional.some ");
+            try appendValueChecked(output, allocator, function, optional.operand);
+        },
+        .optional_unwrap => |optional| {
+            if (optional.result >= function.value_types.len or optional.operand >= function.value_types.len or
+                function.value_types[optional.operand].optionalChild() != function.value_types[optional.result])
+            {
+                return error.InvalidProgram;
+            }
+            try appendResult(output, allocator, program, function, optional.result);
+            try output.appendSlice(allocator, "optional.unwrap ");
             try appendValueChecked(output, allocator, function, optional.operand);
         },
         .copy => |copy| {

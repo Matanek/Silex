@@ -350,7 +350,7 @@ pub const Analyzer = struct {
                 try self.analyzePanic(builder, panic_statement);
                 break :fatal true;
             },
-            .if_statement => |conditional| self.analyzeIf(builder, function, conditional),
+            .if_statement => |conditional| Control.analyzeIf(self, builder, function, conditional),
             .while_statement => |loop| Control.analyzeWhile(self, builder, function, loop),
             .break_statement => |position| Control.analyzeLoopControl(self, builder, position, false),
             .continue_statement => |position| Control.analyzeLoopControl(self, builder, position, true),
@@ -484,6 +484,10 @@ pub const Analyzer = struct {
             const message = try std.fmt.allocPrint(self.allocator, "unknown variable '{s}'", .{name});
             return self.fail(position, message);
         };
+        if (binding.refined_type) |type_value| return .{
+            .type = type_value,
+            .value = binding.refined_value.?,
+        };
         if (!binding.type.hasRuntimeValue()) {
             const message = try std.fmt.allocPrint(self.allocator, "values of type '{s}' are not executable yet", .{binding.type.name()});
             return self.fail(position, message);
@@ -553,13 +557,25 @@ pub const Analyzer = struct {
         if (binary.operator == .logical_and or binary.operator == .logical_or) {
             return self.analyzeLogical(builder, binary);
         }
-        const left_hint = if (expected != null and expected.?.isNumeric() and Support.isNumericLiteral(binary.left)) expected else null;
-        var left = try self.analyzeExpressionExpected(builder, binary.left, left_hint);
-        const right_hint = if (Support.isNumericLiteral(binary.right))
-            (if (expected != null and expected.?.isNumeric()) expected else if (left.type.isNumeric()) left.type else null)
-        else
-            null;
-        var right = try self.analyzeExpressionExpected(builder, binary.right, right_hint);
+        const equality = binary.operator == .equal or binary.operator == .not_equal;
+        var left: TypedValue = undefined;
+        var right: TypedValue = undefined;
+        if (equality and binary.left.value == .null_value) {
+            right = try self.analyzeExpression(builder, binary.right);
+            left = try self.analyzeExpressionExpected(builder, binary.left, right.type);
+        } else {
+            const left_hint = if (expected != null and expected.?.isNumeric() and Support.isNumericLiteral(binary.left)) expected else null;
+            left = try self.analyzeExpressionExpected(builder, binary.left, left_hint);
+            if (equality and binary.right.value == .null_value) {
+                right = try self.analyzeExpressionExpected(builder, binary.right, left.type);
+            } else {
+                const right_hint = if (Support.isNumericLiteral(binary.right))
+                    (if (expected != null and expected.?.isNumeric()) expected else if (left.type.isNumeric()) left.type else null)
+                else
+                    null;
+                right = try self.analyzeExpressionExpected(builder, binary.right, right_hint);
+            }
+        }
         if (binary.operator == .add and left.type == .str and right.type == .str) {
             const result = try self.newValue(builder, .str);
             try self.emit(builder, .{ .string_concat = .{
@@ -569,7 +585,6 @@ pub const Analyzer = struct {
             } });
             return .{ .type = .str, .value = result };
         }
-        const equality = binary.operator == .equal or binary.operator == .not_equal;
         const ordering = binary.operator == .less or binary.operator == .less_equal or
             binary.operator == .greater or binary.operator == .greater_equal;
         const bitwise = binary.operator == .bit_and or binary.operator == .bit_xor;
@@ -678,51 +693,6 @@ pub const Analyzer = struct {
         self.terminate(builder, .{ .jump = merge_block });
         builder.current_block = merge_block;
         return .{ .type = .bool, .value = result };
-    }
-
-    fn analyzeIf(
-        self: *Analyzer,
-        builder: *FunctionBuilder,
-        function: Ast.Function,
-        conditional: Ast.IfStatement,
-    ) AnalyzeError!bool {
-        var exits: std.ArrayList(Ir.BlockId) = .empty;
-        for (conditional.branches) |branch| {
-            const condition = try self.analyzeExpression(builder, branch.condition);
-            if (condition.type != .bool) return self.fail(branch.condition.position, "if condition expects 'bool'");
-
-            const body_block = try self.newBlock(builder);
-            const next_block = try self.newBlock(builder);
-            self.terminate(builder, .{ .branch = .{
-                .condition = condition.value,
-                .then_block = body_block,
-                .else_block = next_block,
-            } });
-
-            builder.current_block = body_block;
-            const binding_count = builder.bindings.items.len;
-            const terminated = try self.analyzeStatements(builder, function, branch.statements);
-            builder.bindings.shrinkRetainingCapacity(binding_count);
-            if (!terminated) try exits.append(self.allocator, builder.current_block);
-            builder.current_block = next_block;
-        }
-
-        if (conditional.else_statements) |statements| {
-            const binding_count = builder.bindings.items.len;
-            const terminated = try self.analyzeStatements(builder, function, statements);
-            builder.bindings.shrinkRetainingCapacity(binding_count);
-            if (!terminated) try exits.append(self.allocator, builder.current_block);
-        } else {
-            try exits.append(self.allocator, builder.current_block);
-        }
-
-        if (exits.items.len == 0) return true;
-        const merge_block = try self.newBlock(builder);
-        for (exits.items) |block_id| {
-            builder.blocks.items[block_id].terminator = .{ .jump = merge_block };
-        }
-        builder.current_block = merge_block;
-        return false;
     }
 
     fn prepareStructures(self: *Analyzer) AnalyzeError![]const Ir.Structure {
@@ -849,6 +819,7 @@ pub const Analyzer = struct {
     }
 
     fn isComparable(self: *Analyzer, type_value: Types.Type) bool {
+        if (type_value.optionalChild()) |child| return self.isComparable(child);
         if (type_value.structureIndex()) |index| {
             for (self.structures[index].fields) |field| {
                 if (!self.isComparable(field.type)) return false;
