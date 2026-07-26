@@ -68,6 +68,13 @@ pub const Specializer = struct {
     pub fn specialize(self: *Specializer, program: Ast.Program) SpecializeError!Ast.Program {
         self.source = program;
         self.diagnostic = null;
+        var found_main = false;
+        for (program.functions) |function| {
+            if (!std.mem.eql(u8, function.name, "main")) continue;
+            if (found_main) return self.fail(function.name_position, "'main' cannot be overloaded");
+            found_main = true;
+            if (function.type_parameters.len != 0) return self.fail(function.name_position, "'main' cannot be generic");
+        }
         try self.type_names.appendSlice(self.allocator, program.type_names);
         for (program.enums) |enumeration| {
             if (enumeration.type_parameters.len == 0) try self.enums.append(self.allocator, enumeration);

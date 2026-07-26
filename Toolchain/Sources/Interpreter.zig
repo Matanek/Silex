@@ -1,5 +1,6 @@
 const std = @import("std");
 const Ir = @import("Ir.zig");
+const MainBoundary = @import("MainBoundary.zig");
 const Numeric = @import("Numeric.zig");
 
 const Allocator = std.mem.Allocator;
@@ -86,7 +87,8 @@ pub fn runCapture(allocator: Allocator, program: Ir.Program) Error!RunResult {
     }
     const function_id = main orelse return error.InvalidProgram;
     const function = program.functions[function_id];
-    if (function.parameter_types.len != 0 or function.return_type != .void) return error.InvalidProgram;
+    const recoverable = MainBoundary.accepts(program.enums, function.return_type);
+    if (function.parameter_types.len != 0 or (function.return_type != .void and !recoverable)) return error.InvalidProgram;
     var session: Session = .{ .allocator = allocator };
     const result = invokeDepth(allocator, program, function_id, &.{}, 0, &session) catch |err| switch (err) {
         error.RuntimeTerminated => return .{
@@ -96,7 +98,31 @@ pub fn runCapture(allocator: Allocator, program: Ir.Program) Error!RunResult {
         },
         else => |other| return other,
     };
-    if (result != .void) return error.InvalidProgram;
+    if (function.return_type == .void) {
+        if (result != .void) return error.InvalidProgram;
+    } else {
+        const value = switch (result) {
+            .enumeration => |enumeration| enumeration,
+            else => return error.InvalidProgram,
+        };
+        const enumeration_index = MainBoundary.enumerationIndex(program.enums, function.return_type) orelse return error.InvalidProgram;
+        if (value.enumeration != enumeration_index) return error.InvalidProgram;
+        const enumeration = program.enums[enumeration_index];
+        const success = MainBoundary.variantIndex(enumeration, "success") orelse return error.InvalidProgram;
+        const failure = MainBoundary.variantIndex(enumeration, "failure") orelse return error.InvalidProgram;
+        if (value.variant == failure) {
+            if (value.values.len != 1 or value.values[0] != .string) return error.InvalidProgram;
+            try session.stderr.appendSlice(allocator, "error: ");
+            try session.stderr.appendSlice(allocator, value.values[0].string);
+            try session.stderr.append(allocator, '\n');
+            return .{
+                .exit_code = 1,
+                .stdout = try session.stdout.toOwnedSlice(allocator),
+                .stderr = try session.stderr.toOwnedSlice(allocator),
+            };
+        }
+        if (value.variant != success or value.values.len != 0) return error.InvalidProgram;
+    }
     return .{
         .exit_code = 0,
         .stdout = try session.stdout.toOwnedSlice(allocator),

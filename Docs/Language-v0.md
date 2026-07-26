@@ -197,7 +197,15 @@ Conversions between otherwise distinct effective signatures may still produce
 an ambiguity diagnosed at the call site.
 
 The name `main` is special only as the executable entry point. It must be unique,
-have no parameters, and return `void`.
+non-generic and have no parameters. It may return `void` or exactly
+`Result<void,str>`. Every ordinary path of the latter must return a value.
+
+A `Result<void,str>.success()` return exits with status 0 and adds no output. A
+`failure(message)` writes the exact UTF-8 bytes `error: `, then `message`, then
+an additional newline to stderr and exits with status 1. The newline is added
+even when the message already ends with one. Consequently, `try` in `main` may
+only propagate `str` failures. `panic` and failed `assert` remain distinct fatal
+runtime failures.
 
 ## Modules and `use`
 

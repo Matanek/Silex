@@ -1,5 +1,6 @@
 const std = @import("std");
 const Ir = @import("../Ir.zig");
+const MainBoundary = @import("../MainBoundary.zig");
 const Machine = @import("Machine.zig");
 
 const Allocator = std.mem.Allocator;
@@ -20,6 +21,7 @@ pub fn lower(allocator: Allocator, program: Ir.Program) Machine.Error!Machine.Pr
     try strings.append(allocator, "\n");
     try strings.append(allocator, "true");
     try strings.append(allocator, "false");
+    try strings.append(allocator, "error: ");
     for (program.functions) |function| {
         try functions.append(allocator, try lowerFunction(allocator, program, &strings, function));
     }
@@ -60,6 +62,7 @@ fn lowerFunction(
         .return_type = function.return_type,
         .return_width = layout.return_width,
         .return_aggregate = layout.return_aggregate,
+        .recoverable_entry_result = MainBoundary.accepts(program.enums, function.return_type),
         .hidden_return_slot = layout.hidden_return_slot,
         .slot_count = layout.slot_count,
         .frame_size = try Machine.frameSize(layout.slot_count),

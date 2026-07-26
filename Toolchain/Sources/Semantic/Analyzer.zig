@@ -1,6 +1,7 @@
 const std = @import("std");
 const Ast = @import("../Ast.zig");
 const Ir = @import("../Ir.zig");
+const MainBoundary = @import("../MainBoundary.zig");
 const Numeric = @import("../Numeric.zig");
 const Source = @import("../Source.zig");
 const Mutation = @import("Mutation.zig");
@@ -181,14 +182,11 @@ pub const Analyzer = struct {
         }
 
         const entry = main orelse {
-            if (require_entry) return self.fail(
-                .{ .offset = 0, .line = 1, .column = 1 },
-                "missing 'main' function",
-            );
+            if (require_entry) return self.fail(.{ .offset = 0, .line = 1, .column = 1 }, "missing 'main' function");
             return;
         };
         if (entry.parameters.len != 0) return self.fail(entry.name_position, "'main' must have no parameters");
-        if (entry.return_type != .void) return self.fail(entry.name_position, "'main' must return 'void'");
+        if (entry.return_type != .void and !MainBoundary.accepts(self.enums, entry.return_type)) return self.fail(entry.name_position, "'main' must return 'void' or 'Result<void,str>'");
     }
 
     fn validateParameterDefaults(self: *Analyzer) AnalyzeError!void {

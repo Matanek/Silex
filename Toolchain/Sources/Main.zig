@@ -178,6 +178,7 @@ test {
     _ = @import("GenericTests.zig");
     _ = @import("MatchTests.zig");
     _ = @import("MapErrorTests.zig");
+    _ = @import("MainResultTests.zig");
     _ = @import("NativeComposition.zig");
     _ = @import("NativeEffects.zig");
     _ = @import("Modules.zig");
