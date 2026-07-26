@@ -211,6 +211,7 @@ pub const Parameter = struct {
 
 pub const StructureField = struct {
     is_public: bool = true,
+    is_internal: bool = false,
     position: Source.Position,
     name_position: Source.Position,
     name: []const u8,
@@ -220,6 +221,8 @@ pub const StructureField = struct {
 };
 
 pub const Constructor = struct {
+    is_public: bool = true,
+    is_internal: bool = false,
     position: Source.Position,
     parameters: []const Parameter,
     statements: []const Statement,
@@ -227,6 +230,7 @@ pub const Constructor = struct {
 
 pub const Structure = struct {
     is_public: bool = false,
+    is_internal: bool = false,
     owner: usize = 0,
     position: Source.Position,
     name_position: Source.Position,
@@ -239,6 +243,7 @@ pub const Structure = struct {
 pub const Use = struct {
     position: Source.Position,
     path: []const u8,
+    type_target: ?Type = null,
     alias: ?[]const u8,
     alias_position: ?Source.Position,
     is_public: bool = false,
@@ -246,6 +251,7 @@ pub const Use = struct {
 
 pub const Function = struct {
     is_public: bool = false,
+    is_internal: bool = false,
     owner: usize = 0,
     position: Source.Position,
     name_position: Source.Position,

@@ -10,6 +10,9 @@ A function starts with `func`, has a user-chosen name, a typed parameter list,
 an optional return type, and a body. Omitting the return type means `void`.
 Functions are private by default. `public func` exposes a function through a
 package interface; `public` does not create a machine symbol or ABI.
+`internal func` instead restricts a function to its exact source file. A
+neighboring module in the same project or package cannot select, qualify or
+call it.
 
 ```sx
 func add(left:int, right:int) int {
@@ -26,6 +29,22 @@ The integer types are `int8`, `int16`, `int32`, `int64`, `uint8`, `uint16`,
 The floating types are IEEE-754 `float32` and `float64`; `float` is exactly
 `float32`. `bool` and immutable UTF-8 `str` complete the current value types.
 An embedded zero in a string remains ordinary data.
+
+`use <type> as <name>` introduces a transparent local type alias. The alias is
+accepted everywhere its target type is accepted and does not create a new
+identity, conversion, representation or overload distinction:
+
+```sx
+use int as Integer
+use Integer as Count
+use Geometry.Vector as Vector
+```
+
+An alias of a structure can construct the original nominal type. Alias chains
+are reduced to one canonical type and cannot be cyclic. `public use` exposes a
+type alias through the current module; consumers may qualify or rename it.
+Only the fundamental and nominal structure types currently implemented by this
+compiler can be aliased.
 
 Functions may share a name when their parameter types differ. Resolution
 prefers exact arguments, then same-family widening, then integer-to-float
@@ -98,6 +117,19 @@ The first declaration enables `Operations.add(...)`; the third selects one
 declaration directly. A grouping namespace may be bound, but does not load all
 its descendants. Only the entry module and the transitive closure selected by
 actual `use` declarations are parsed and composed.
+
+`public use` gives a module a deliberate façade. It requires an explicit alias
+and may only expose a public declaration, never a module or grouping namespace:
+
+```sx
+public use Geometry.Types.Vector as Vector
+public use Geometry.Operations.length as length
+```
+
+A consumer of this module names `Vector` and `length` under the façade. The
+declaration keeps its original nominal identity, overload set, default
+parameters and implementation; no machine symbol or duplicate type is created.
+Public reexports may form acyclic chains.
 
 ## Source packages
 
@@ -229,6 +261,15 @@ including through recursive call cycles. Mutating calls require a `var`
 receiver and write the returned value state back to that receiver; nonmutating
 calls accept `let`, `var`, and temporary receivers. Receiver and arguments are
 evaluated once in source order, and calls may chain through returned values.
+
+`internal` applies with the same exact file boundary to structures, fields,
+constructors and methods. All declarations in that file may use them. Their
+visibility never increases through a public containing type, an alias or a
+reexport, and editor completion omits them from every other file. A public
+operation may return an `internal` structure as an opaque inferred value, but
+public parameters and constructible inputs cannot require callers to name or
+provide that type. Members of such an opaque value remain inaccessible outside
+the defining file.
 Methods are public by default with their public structure; explicit `public`
 is accepted.
 
@@ -361,13 +402,15 @@ normative reference for these semantics.
 
 ```ebnf
 program         = (use | structure | function)* EOF ;
-use             = "use" qualified_identifier ("as" identifier)? ;
-structure       = "public"? "struct" identifier "{" (structure_field | constructor | method)* "}" ;
-structure_field = "public"? ("let" | "var") identifier ":" type ("=" field_default)? ;
-constructor     = "init" "(" parameters? ")" block ;
-method          = "public"? "func" identifier "(" parameters? ")" return_type? block ;
+use             = "public"? "use"
+                  (qualified_identifier ("as" identifier)? | type "as" identifier) ;
+visibility      = "public" | "internal" ;
+structure       = visibility? "struct" identifier "{" (structure_field | constructor | method)* "}" ;
+structure_field = visibility? ("let" | "var") identifier ":" type ("=" field_default)? ;
+constructor     = visibility? "init" "(" parameters? ")" block ;
+method          = visibility? "func" identifier "(" parameters? ")" return_type? block ;
 field_default   = fundamental_literal | structure_initializer ;
-function        = "public"? "func" identifier "(" parameters? ")" return_type? block ;
+function        = visibility? "func" identifier "(" parameters? ")" return_type? block ;
 parameters      = parameter ("," parameter)* ;
 parameter       = identifier ":" type ("=" expression)? ;
 return_type     = type ;

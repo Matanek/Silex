@@ -94,15 +94,28 @@ pub fn itemsAt(
                 8,
                 false,
             );
+            if (program) |parsed| for (parsed.uses) |use| {
+                if (use.type_target == null or use.alias == null) continue;
+                try appendCandidate(allocator, &candidates, context, .{
+                    .label = use.alias.?,
+                    .kind = CompletionKind.structure,
+                    .detail = try std.fmt.allocPrint(allocator, "type {s} = {s}", .{
+                        use.alias.?,
+                        use.type_target.?.name(),
+                    }),
+                }, 8, false);
+            };
         },
         .module_declaration => try appendKeywords(allocator, &candidates, context, &.{
             .{ "use", "Silex module import" },
             .{ "public", "Silex visibility" },
+            .{ "internal", "Silex file visibility" },
             .{ "struct", "Silex value type declaration" },
             .{ "func", "Silex function declaration" },
         }, 70),
         .structure_declaration => try appendKeywords(allocator, &candidates, context, &.{
             .{ "public", "Silex visibility" },
+            .{ "internal", "Silex file visibility" },
             .{ "let", "Silex immutable field" },
             .{ "var", "Silex mutable field" },
             .{ "init", "Silex value constructor" },
@@ -1176,6 +1189,32 @@ test "complete self and fundamental string members exclusively" {
     const string_items = try itemsAt(arena.allocator(), source, string_cursor, .trigger_character);
     try std.testing.expectEqual(@as(usize, 1), string_items.len);
     try std.testing.expectEqualStrings("count", string_items[0].label);
+}
+
+test "complete internal declarations and members inside their file" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source =
+        \\internal struct Handle {
+        \\    internal var value:int
+        \\    internal func read() int { return self.value }
+        \\}
+        \\internal func helper() int { return 1 }
+        \\func main() {
+        \\    let handle = Handle(value:1)
+        \\    print(handle.read() + helper())
+        \\}
+    ;
+    const member_cursor = std.mem.indexOf(u8, source, "handle.read").? + "handle.r".len;
+    const member_items = try itemsAt(arena.allocator(), source, member_cursor, .trigger_character);
+    try std.testing.expect(contains(member_items, "read"));
+
+    const helper_cursor = std.mem.indexOf(u8, source, "helper())").? + 3;
+    const helper_items = try itemsAt(arena.allocator(), source, helper_cursor, .invoked);
+    try std.testing.expect(contains(helper_items, "helper"));
+
+    const keyword_items = try itemsAt(arena.allocator(), "inte", "inte".len, .invoked);
+    try std.testing.expect(contains(keyword_items, "internal"));
 }
 
 test "offer branch continuations only after a conditional block" {

@@ -90,7 +90,7 @@ test "reject private structure access and public signature leaks" {
 
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Api.sx",
-        .data = "struct Hidden { var value:int } public func reveal() Hidden { return Hidden() }",
+        .data = "struct Hidden { var value:int } public func reveal(value:Hidden) {}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Main.sx",

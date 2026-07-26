@@ -54,6 +54,15 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
             return self.fail(target_field.name_position, message);
         };
         const structure = self.structures[structure_index];
+        const source_structure = self.program.structures[structure_index];
+        if (source_structure.is_internal and target_field.name_position.file != source_structure.position.file) {
+            const message = try std.fmt.allocPrint(
+                self.allocator,
+                "members of internal structure '{s}' are unavailable outside its source file",
+                .{structure.name},
+            );
+            return self.fail(target_field.name_position, message);
+        }
         var selected: ?usize = null;
         for (structure.fields, 0..) |field, field_index| {
             if (std.mem.eql(u8, field.name, target_field.name)) {
@@ -70,6 +79,15 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
             return self.fail(target_field.name_position, message);
         };
         const field = structure.fields[field_index];
+        const source_field = source_structure.fields[field_index];
+        if (!Support.memberVisible(target_field.name_position, source_field.position, source_field.is_internal)) {
+            const message = try std.fmt.allocPrint(
+                self.allocator,
+                "field '{s}' is internal to its source file",
+                .{field.name},
+            );
+            return self.fail(target_field.name_position, message);
+        }
         if (!field.mutable) {
             const message = try std.fmt.allocPrint(
                 self.allocator,

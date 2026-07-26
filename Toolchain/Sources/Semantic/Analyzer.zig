@@ -862,8 +862,26 @@ pub const Analyzer = struct {
             return self.fail(access.name_position, message);
         };
         const structure = self.structures[structure_index];
+        const declaration = self.program.structures[structure_index];
+        if (declaration.is_internal and access.name_position.file != declaration.position.file) {
+            const message = try std.fmt.allocPrint(
+                self.allocator,
+                "members of internal structure '{s}' are unavailable outside its source file",
+                .{structure.name},
+            );
+            return self.fail(access.name_position, message);
+        }
         for (structure.fields, 0..) |field, field_index| {
             if (!std.mem.eql(u8, field.name, access.name)) continue;
+            const source_field = declaration.fields[field_index];
+            if (!Support.memberVisible(access.name_position, source_field.position, source_field.is_internal)) {
+                const message = try std.fmt.allocPrint(
+                    self.allocator,
+                    "field '{s}' is internal to its source file",
+                    .{field.name},
+                );
+                return self.fail(access.name_position, message);
+            }
             const result = try self.newValue(builder, field.type);
             try self.emit(builder, .{ .field_load = .{ .result = result, .base = base.value, .field = field_index } });
             return .{ .type = field.type, .value = result };
@@ -899,7 +917,16 @@ pub const Analyzer = struct {
                 }
             }
             var known = false;
-            for (structure.fields) |field| if (std.mem.eql(u8, field.name, argument.name)) {
+            for (structure.fields, 0..) |field, field_index| if (std.mem.eql(u8, field.name, argument.name)) {
+                const source_field = declaration.fields[field_index];
+                if (!Support.memberVisible(argument.position, source_field.position, source_field.is_internal)) {
+                    const message = try std.fmt.allocPrint(
+                        self.allocator,
+                        "field '{s}' is internal to its source file",
+                        .{field.name},
+                    );
+                    return self.fail(argument.position, message);
+                }
                 known = true;
                 break;
             };
@@ -1006,11 +1033,14 @@ pub const Analyzer = struct {
             return self.fail(call.name_position, message);
         }
         if (named_count == 0) {
-            const message = try std.fmt.allocPrint(
-                self.allocator,
-                "function '{s}' is private outside its package",
-                .{call.name},
-            );
+            var has_internal = false;
+            for (self.program.functions) |function| {
+                if (std.mem.eql(u8, function.name, call.name) and function.is_internal) has_internal = true;
+            }
+            const message = if (has_internal)
+                try std.fmt.allocPrint(self.allocator, "function '{s}' is internal to its source file", .{call.name})
+            else
+                try std.fmt.allocPrint(self.allocator, "function '{s}' is private outside its package", .{call.name});
             return self.fail(call.name_position, message);
         }
         if (arity_count == 0) {

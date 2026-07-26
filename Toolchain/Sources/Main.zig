@@ -187,6 +187,8 @@ test {
     _ = @import("Lsp/Workspace.zig");
     _ = @import("Parser.zig");
     _ = @import("Project.zig");
+    _ = @import("Project/CoreTests.zig");
+    _ = @import("ProjectMigrationTests.zig");
     _ = @import("ProjectStructureTests.zig");
     _ = @import("Semantic/Analyzer.zig");
     _ = @import("Semantic/Tests.zig");

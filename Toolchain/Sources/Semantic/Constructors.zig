@@ -121,13 +121,26 @@ pub fn analyzeCall(
 
     var arity_count: usize = 0;
     var sole: ?usize = null;
+    var inaccessible_internal = false;
     for (declaration.constructors, 0..) |constructor, constructor_index| {
+        if (!Support.memberVisible(call.name_position, constructor.position, constructor.is_internal)) {
+            inaccessible_internal = true;
+            continue;
+        }
         if (Support.acceptsArity(constructor.parameters, call.arguments.len)) {
             arity_count += 1;
             sole = constructor_index;
         }
     }
     if (arity_count == 0) {
+        if (inaccessible_internal) {
+            const message = try std.fmt.allocPrint(
+                self.allocator,
+                "constructor of '{s}' is internal to its source file",
+                .{declaration.name},
+            );
+            return self.fail(call.name_position, message);
+        }
         const message = try std.fmt.allocPrint(
             self.allocator,
             "no constructor of '{s}' accepts {d} arguments",
@@ -150,6 +163,7 @@ pub fn analyzeCall(
     var ambiguous = false;
     for (declaration.constructors, 0..) |constructor, constructor_index| {
         if (!Support.acceptsArity(constructor.parameters, arguments.items.len)) continue;
+        if (!Support.memberVisible(call.name_position, constructor.position, constructor.is_internal)) continue;
         var cost: usize = 0;
         var viable = true;
         for (constructor.parameters[0..arguments.items.len], arguments.items) |parameter, argument| {
