@@ -6,6 +6,7 @@ const Support = @import("Support.zig");
 const Optionals = @import("Optionals.zig");
 const Enums = @import("Enums.zig");
 const Collections = @import("Collections.zig");
+const Moves = @import("Moves.zig");
 
 const PathStep = union(enum) {
     field: struct { base: Ir.ValueId, structure: usize, field: usize },
@@ -18,6 +19,12 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
         const message = try std.fmt.allocPrint(self.allocator, "unknown variable '{s}'", .{target.name});
         return self.fail(target.name_position, message);
     };
+    const binding_index = Support.findBindingIndex(builder.bindings.items, target.name).?;
+    const complete_assignment = target.fields.len == 0 and target.indices.len == 0 and assignment.operator == .assign;
+    if (!binding.available and !(binding.mutable and complete_assignment)) {
+        const message = try std.fmt.allocPrint(self.allocator, "value '{s}' was moved and is unavailable", .{target.name});
+        return self.fail(target.name_position, message);
+    }
     if (!binding.mutable) {
         const message = if (assignment.operator == .assign)
             if (binding.parameter)
@@ -40,9 +47,14 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
     }
 
     if (target.fields.len == 0 and target.indices.len == 0) {
+        if (assignment.value) |value| if (Moves.isSelfMove(value, target.name)) {
+            const message = try std.fmt.allocPrint(self.allocator, "cannot move value '{s}' into itself", .{target.name});
+            return self.fail(value.position, message);
+        };
         const current = if (assignment.operator == .assign) null else try loadLocal(self, builder, binding.local.?, binding.type);
         const replacement = try analyzeReplacement(self, builder, assignment, binding.type, current, target.name, false);
         try self.emit(builder, .{ .local_store = .{ .local = binding.local.?, .operand = replacement } });
+        builder.bindings.items[binding_index].available = true;
         Optionals.invalidateRefinement(builder, target.name);
         return;
     }

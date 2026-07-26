@@ -5,6 +5,7 @@ const MainBoundary = @import("../MainBoundary.zig");
 const Numeric = @import("../Numeric.zig");
 const Source = @import("../Source.zig");
 const Mutation = @import("Mutation.zig");
+const Moves = @import("Moves.zig");
 const Optionals = @import("Optionals.zig");
 const Constructors = @import("Constructors.zig");
 const Collections = @import("Collections.zig");
@@ -80,7 +81,6 @@ pub const Analyzer = struct {
                 if (main != null) return self.fail(function.name_position, "'main' cannot be overloaded");
                 main = function;
             }
-
             for (function.parameters, 0..) |parameter, index| {
                 for (function.parameters[0..index]) |previous| {
                     if (std.mem.eql(u8, parameter.name, previous.name)) {
@@ -90,7 +90,6 @@ pub const Analyzer = struct {
                 }
             }
         }
-
         for (self.program.functions, 0..) |function, index| {
             for (self.program.functions[0..index]) |previous| {
                 if (!std.mem.eql(u8, function.name, previous.name)) continue;
@@ -495,6 +494,10 @@ pub const Analyzer = struct {
             const message = try std.fmt.allocPrint(self.allocator, "unknown variable '{s}'", .{name});
             return self.fail(position, message);
         };
+        if (!binding.available) {
+            const message = try std.fmt.allocPrint(self.allocator, "value '{s}' was moved and is unavailable", .{name});
+            return self.fail(position, message);
+        }
         if (binding.refined_type) |type_value| return .{
             .type = type_value,
             .value = binding.refined_value.?,
@@ -518,6 +521,7 @@ pub const Analyzer = struct {
         expected: ?Types.Type,
     ) AnalyzeError!TypedValue {
         if (unary.operator == .propagate) return Try.analyzeValue(self, builder, unary);
+        if (unary.operator == .move) return Moves.analyze(self, builder, unary);
         if (unary.operator == .logical_not) {
             const operand = try self.analyzeExpressionExpected(builder, unary.operand, .bool);
             if (operand.type != .bool) {

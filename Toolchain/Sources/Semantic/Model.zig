@@ -9,6 +9,7 @@ pub const Binding = struct {
     local: ?Ir.LocalId = null,
     mutable: bool = false,
     parameter: bool = false,
+    available: bool = true,
     refined_type: ?Types.Type = null,
     refined_value: ?Ir.ValueId = null,
 };
@@ -26,6 +27,9 @@ pub const BlockBuilder = struct {
 pub const LoopContext = struct {
     continue_block: Ir.BlockId,
     break_block: Ir.BlockId,
+    availability_count: usize = 0,
+    header_availability: []const bool = &.{},
+    break_availabilities: std.ArrayList([]const bool) = .empty,
 };
 
 pub const FunctionBuilder = struct {

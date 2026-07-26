@@ -4,6 +4,7 @@ const Ir = @import("../Ir.zig");
 const Enums = @import("Enums.zig");
 const Model = @import("Model.zig");
 const Support = @import("Support.zig");
+const Availability = @import("Availability.zig");
 
 const Prepared = struct {
     subject: Model.TypedValue,
@@ -16,9 +17,13 @@ const Prepared = struct {
 pub fn analyze(self: anytype, builder: anytype, match_value: Ast.Expression.Match) !Model.TypedValue {
     if (match_value.imperative) return self.fail(match_value.subject.position, "imperative match cannot be used as a value");
     const prepared = try prepare(self, builder, match_value);
+    const availability_count = builder.bindings.items.len;
+    const branch_availability = try Availability.snapshot(self.allocator, builder.bindings.items, availability_count);
+    var exit_availabilities: std.ArrayList([]const bool) = .empty;
     var result: ?Ir.ValueId = null;
     var result_type: ?Ast.Type = null;
     for (match_value.branches, prepared.branch_blocks, prepared.variant_indices) |branch, branch_block, variant_index| {
+        Availability.restore(builder.bindings.items, branch_availability);
         builder.current_block = branch_block;
         const binding_count = builder.bindings.items.len;
         defer builder.bindings.shrinkRetainingCapacity(binding_count);
@@ -36,8 +41,12 @@ pub fn analyze(self: anytype, builder: anytype, match_value: Ast.Expression.Matc
             result = try self.newValue(builder, branch_value.type);
         }
         try self.emit(builder, .{ .copy = .{ .result = result.?, .operand = branch_value.value } });
+        try exit_availabilities.append(self.allocator, try Availability.snapshot(self.allocator, builder.bindings.items, availability_count));
         self.terminate(builder, .{ .jump = prepared.merge_block });
     }
+    const merged_availability = try self.allocator.dupe(bool, exit_availabilities.items[0]);
+    for (exit_availabilities.items[1..]) |state| Availability.merge(merged_availability, state);
+    Availability.restore(builder.bindings.items, merged_availability);
     builder.current_block = prepared.merge_block;
     return .{ .type = result_type.?, .value = result.? };
 }
@@ -50,8 +59,12 @@ pub fn analyzeStatement(
 ) !bool {
     if (!match_value.imperative) return self.fail(match_value.subject.position, "match statement requires block branches");
     const prepared = try prepare(self, builder, match_value);
+    const availability_count = builder.bindings.items.len;
+    const branch_availability = try Availability.snapshot(self.allocator, builder.bindings.items, availability_count);
+    var exit_availabilities: std.ArrayList([]const bool) = .empty;
     var all_terminated = true;
     for (match_value.branches, prepared.branch_blocks, prepared.variant_indices) |branch, branch_block, variant_index| {
+        Availability.restore(builder.bindings.items, branch_availability);
         builder.current_block = branch_block;
         const binding_count = builder.bindings.items.len;
         defer builder.bindings.shrinkRetainingCapacity(binding_count);
@@ -59,6 +72,7 @@ pub fn analyzeStatement(
         const terminated = try self.analyzeStatements(builder, function, branch.statements.?);
         if (!terminated) {
             all_terminated = false;
+            try exit_availabilities.append(self.allocator, try Availability.snapshot(self.allocator, builder.bindings.items, availability_count));
             self.terminate(builder, .{ .jump = prepared.merge_block });
         }
     }
@@ -67,6 +81,9 @@ pub fn analyzeStatement(
         builder.blocks.items.len -= 1;
         return true;
     }
+    const merged_availability = try self.allocator.dupe(bool, exit_availabilities.items[0]);
+    for (exit_availabilities.items[1..]) |state| Availability.merge(merged_availability, state);
+    Availability.restore(builder.bindings.items, merged_availability);
     builder.current_block = prepared.merge_block;
     return false;
 }

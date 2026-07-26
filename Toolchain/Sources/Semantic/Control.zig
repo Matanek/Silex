@@ -6,6 +6,7 @@ const Model = @import("Model.zig");
 const Optionals = @import("Optionals.zig");
 const Support = @import("Support.zig");
 const Collections = @import("Collections.zig");
+const Availability = @import("Availability.zig");
 
 pub const ConditionalValue = struct {
     condition: Model.TypedValue,
@@ -21,9 +22,14 @@ const BindingValue = struct {
 
 pub fn analyzeIf(self: anytype, builder: anytype, function: Ast.Function, conditional: Ast.IfStatement) !bool {
     var exits: std.ArrayList(Ir.BlockId) = .empty;
+    var exit_availabilities: std.ArrayList([]const bool) = .empty;
     var fallthrough_refinements: std.ArrayList(Optionals.SavedRefinement) = .empty;
+    const availability_count = builder.bindings.items.len;
+    var fallthrough_availability = try Availability.snapshot(self.allocator, builder.bindings.items, availability_count);
     for (conditional.branches) |branch| {
+        Availability.restore(builder.bindings.items, fallthrough_availability);
         const analyzed = try analyzeCondition(self, builder, branch.condition, "if");
+        fallthrough_availability = try Availability.snapshot(self.allocator, builder.bindings.items, availability_count);
         const proof = if (analyzed.expression) |expression| Optionals.presenceProof(expression) else null;
 
         const body_block = try self.newBlock(builder);
@@ -44,8 +50,12 @@ pub fn analyzeIf(self: anytype, builder: anytype, function: Ast.Function, condit
         const terminated = try self.analyzeStatements(builder, function, branch.statements);
         builder.bindings.shrinkRetainingCapacity(binding_count);
         if (body_refinement) |saved| Optionals.restoreRefinement(builder, saved);
-        if (!terminated) try exits.append(self.allocator, builder.current_block);
+        if (!terminated) {
+            try exits.append(self.allocator, builder.current_block);
+            try exit_availabilities.append(self.allocator, try Availability.snapshot(self.allocator, builder.bindings.items, availability_count));
+        }
         builder.current_block = next_block;
+        Availability.restore(builder.bindings.items, fallthrough_availability);
         if (proof != null and !proof.?.present_when_true) {
             if (try Optionals.applyRefinement(self, builder, proof.?)) |saved| {
                 try fallthrough_refinements.append(self.allocator, saved);
@@ -54,12 +64,17 @@ pub fn analyzeIf(self: anytype, builder: anytype, function: Ast.Function, condit
     }
 
     if (conditional.else_statements) |statements| {
+        Availability.restore(builder.bindings.items, fallthrough_availability);
         const binding_count = builder.bindings.items.len;
         const terminated = try self.analyzeStatements(builder, function, statements);
         builder.bindings.shrinkRetainingCapacity(binding_count);
-        if (!terminated) try exits.append(self.allocator, builder.current_block);
+        if (!terminated) {
+            try exits.append(self.allocator, builder.current_block);
+            try exit_availabilities.append(self.allocator, try Availability.snapshot(self.allocator, builder.bindings.items, availability_count));
+        }
     } else {
         try exits.append(self.allocator, builder.current_block);
+        try exit_availabilities.append(self.allocator, fallthrough_availability);
     }
 
     var refinement_index = fallthrough_refinements.items.len;
@@ -69,6 +84,9 @@ pub fn analyzeIf(self: anytype, builder: anytype, function: Ast.Function, condit
     }
 
     if (exits.items.len == 0) return true;
+    const merged_availability = try self.allocator.dupe(bool, exit_availabilities.items[0]);
+    for (exit_availabilities.items[1..]) |state| Availability.merge(merged_availability, state);
+    Availability.restore(builder.bindings.items, merged_availability);
     const merge_block = try self.newBlock(builder);
     for (exits.items) |block_id| builder.blocks.items[block_id].terminator = .{ .jump = merge_block };
     builder.current_block = merge_block;
@@ -76,6 +94,8 @@ pub fn analyzeIf(self: anytype, builder: anytype, function: Ast.Function, condit
 }
 
 pub fn analyzeWhile(self: anytype, builder: anytype, function: Ast.Function, loop: Ast.WhileStatement) !bool {
+    const availability_count = builder.bindings.items.len;
+    const header_availability = try Availability.snapshot(self.allocator, builder.bindings.items, availability_count);
     const condition_block = try self.newBlock(builder);
     const body_block = try self.newBlock(builder);
     const exit_block = try self.newBlock(builder);
@@ -83,6 +103,7 @@ pub fn analyzeWhile(self: anytype, builder: anytype, function: Ast.Function, loo
 
     builder.current_block = condition_block;
     const analyzed = try analyzeCondition(self, builder, loop.condition, "while");
+    const false_availability = try Availability.snapshot(self.allocator, builder.bindings.items, availability_count);
     self.terminate(builder, .{ .branch = .{
         .condition = analyzed.condition.value,
         .then_block = body_block,
@@ -93,15 +114,25 @@ pub fn analyzeWhile(self: anytype, builder: anytype, function: Ast.Function, loo
     try builder.loops.append(self.allocator, .{
         .continue_block = condition_block,
         .break_block = exit_block,
+        .availability_count = availability_count,
+        .header_availability = header_availability,
     });
+    const loop_index = builder.loops.items.len - 1;
     const binding_count = builder.bindings.items.len;
     if (analyzed.binding) |binding| try enterBinding(self, builder, binding);
     const terminated = try self.analyzeStatements(builder, function, loop.statements);
     builder.bindings.shrinkRetainingCapacity(binding_count);
+    const loop_context = builder.loops.items[loop_index];
     builder.loops.items.len -= 1;
-    if (!terminated) self.terminate(builder, .{ .jump = condition_block });
+    if (!terminated) {
+        try Availability.requireHeader(self, builder.bindings.items, header_availability, loop.position);
+        self.terminate(builder, .{ .jump = condition_block });
+    }
 
     builder.current_block = exit_block;
+    const exit_availability = try self.allocator.dupe(bool, false_availability);
+    for (loop_context.break_availabilities.items) |state| Availability.merge(exit_availability, state);
+    Availability.restore(builder.bindings.items, exit_availability);
     return false;
 }
 
@@ -136,6 +167,8 @@ fn analyzeCollectionFor(self: anytype, builder: anytype, function: Ast.Function,
     const index_local = builder.local_types.items.len;
     try builder.local_types.append(self.allocator, .int);
     try self.emit(builder, .{ .local_store = .{ .local = index_local, .operand = try emitInt(self, builder, 0) } });
+    const availability_count = builder.bindings.items.len;
+    const header_availability = try Availability.snapshot(self.allocator, builder.bindings.items, availability_count);
 
     const condition_block = try self.newBlock(builder);
     const body_block = try self.newBlock(builder);
@@ -170,11 +203,18 @@ fn analyzeCollectionFor(self: anytype, builder: anytype, function: Ast.Function,
     try builder.loops.append(self.allocator, .{
         .continue_block = update_block,
         .break_block = if (loop.mode == .mutable) break_update_block else exit_block,
+        .availability_count = availability_count,
+        .header_availability = header_availability,
     });
+    const loop_index = builder.loops.items.len - 1;
     const terminated = try self.analyzeStatements(builder, function, loop.statements);
+    const loop_context = builder.loops.items[loop_index];
     builder.loops.items.len -= 1;
     builder.bindings.shrinkRetainingCapacity(binding_count);
-    if (!terminated) self.terminate(builder, .{ .jump = update_block });
+    if (!terminated) {
+        try Availability.requireHeader(self, builder.bindings.items, header_availability, loop.position);
+        self.terminate(builder, .{ .jump = update_block });
+    }
 
     builder.current_block = update_block;
     if (element_local) |local| try writeCollectionElement(self, builder, collection_local, source.type, index_local, local, collection.element, loop.position);
@@ -195,6 +235,9 @@ fn analyzeCollectionFor(self: anytype, builder: anytype, function: Ast.Function,
         self.terminate(builder, .{ .jump = exit_block });
     }
     builder.current_block = exit_block;
+    const exit_availability = try self.allocator.dupe(bool, header_availability);
+    for (loop_context.break_availabilities.items) |state| Availability.merge(exit_availability, state);
+    Availability.restore(builder.bindings.items, exit_availability);
     return false;
 }
 
@@ -211,6 +254,8 @@ fn analyzeRangeFor(self: anytype, builder: anytype, function: Ast.Function, loop
     try self.emit(builder, .{ .local_store = .{ .local = current_local, .operand = start.value } });
     try self.emit(builder, .{ .local_store = .{ .local = end_local, .operand = end.value } });
     try self.emit(builder, .{ .local_store = .{ .local = step_local, .operand = try emitInt(self, builder, std.math.maxInt(u64)) } });
+    const availability_count = builder.bindings.items.len;
+    const header_availability = try Availability.snapshot(self.allocator, builder.bindings.items, availability_count);
     const ascending_block = try self.newBlock(builder);
     const condition_block = try self.newBlock(builder);
     const body_block = try self.newBlock(builder);
@@ -235,16 +280,29 @@ fn analyzeRangeFor(self: anytype, builder: anytype, function: Ast.Function, loop
         try self.emit(builder, .{ .local_store = .{ .local = local, .operand = current } });
         try builder.bindings.append(self.allocator, .{ .name = loop.name, .type = .int, .local = local, .mutable = true });
     } else try builder.bindings.append(self.allocator, .{ .name = loop.name, .type = .int, .value = current });
-    try builder.loops.append(self.allocator, .{ .continue_block = update_block, .break_block = exit_block });
+    try builder.loops.append(self.allocator, .{
+        .continue_block = update_block,
+        .break_block = exit_block,
+        .availability_count = availability_count,
+        .header_availability = header_availability,
+    });
+    const loop_index = builder.loops.items.len - 1;
     const terminated = try self.analyzeStatements(builder, function, loop.statements);
+    const loop_context = builder.loops.items[loop_index];
     builder.loops.items.len -= 1;
     builder.bindings.shrinkRetainingCapacity(binding_count);
-    if (!terminated) self.terminate(builder, .{ .jump = update_block });
+    if (!terminated) {
+        try Availability.requireHeader(self, builder.bindings.items, header_availability, loop.position);
+        self.terminate(builder, .{ .jump = update_block });
+    }
     builder.current_block = update_block;
     const next = try emitBinary(self, builder, .add, try loadLocalValue(self, builder, current_local, .int), try loadLocalValue(self, builder, step_local, .int), .int);
     try self.emit(builder, .{ .local_store = .{ .local = current_local, .operand = next } });
     self.terminate(builder, .{ .jump = condition_block });
     builder.current_block = exit_block;
+    const exit_availability = try self.allocator.dupe(bool, header_availability);
+    for (loop_context.break_availabilities.items) |state| Availability.merge(exit_availability, state);
+    Availability.restore(builder.bindings.items, exit_availability);
     return false;
 }
 
@@ -347,7 +405,15 @@ pub fn analyzeLoopControl(
         else
             "'break' is only valid inside a loop");
     }
-    const loop = builder.loops.items[builder.loops.items.len - 1];
+    const loop = &builder.loops.items[builder.loops.items.len - 1];
+    if (is_continue) {
+        try Availability.requireHeader(self, builder.bindings.items, loop.header_availability, position);
+    } else {
+        try loop.break_availabilities.append(
+            self.allocator,
+            try Availability.snapshot(self.allocator, builder.bindings.items, loop.availability_count),
+        );
+    }
     self.terminate(builder, .{ .jump = if (is_continue) loop.continue_block else loop.break_block });
     return true;
 }

@@ -311,6 +311,24 @@ optional type. Numeric initializers may use the widening rules. A local name
 cannot reuse a parameter or another local name visible in its lexical scope;
 sibling branches may reuse a name.
 
+`move name` explicitly transfers a complete local or ordinary parameter and
+makes that source binding unavailable. It is optional for the currently
+copyable values, but already records the ownership intention used by resource
+types. A consumed `var` becomes available again after a complete assignment;
+a consumed `let` cannot be reinitialized.
+
+```sx
+var original = 40
+let transferred = move original
+original = 2
+```
+
+Fields, indexed elements, `self`, and temporary expressions are not valid
+explicit move sources. Reading, modifying, or moving a consumed binding again
+is rejected. At a control-flow join, a binding is available only when every
+continuing path preserves it; terminal paths do not constrain the join. Every
+loop back edge must restore the same availability as its header.
+
 ## Associated enum values
 
 `enum` declares a nominal closed set of variants. A variant may carry zero or
@@ -658,7 +676,8 @@ an escape.
 
 ## Expressions, calls, and returns
 
-The operators, in decreasing precedence, are postfix `as`; unary `-` and `!`;
+The operators, in decreasing precedence, are postfix `as`; unary `-`, `!`,
+`try`, and `move`;
 multiplicative `*`, `/`, `%`; additive `+`, `-`; unsigned shifts `<<`, `>>`;
 unsigned `&`; unsigned `^`; ordering `<`, `<=`, `>`, `>=`; equality `==`,
 `!=`; logical `&&`; then logical `||`. Binary operators associate to the left.
@@ -917,7 +936,7 @@ bit_and         = shift ("&" shift)* ;
 shift           = additive (("<<" | ">>") additive)* ;
 additive        = multiplicative (("+" | "-") multiplicative)* ;
 multiplicative  = unary (("*" | "/" | "%") unary)* ;
-unary           = ("-" | "!" | "try") unary | conversion ;
+unary           = ("-" | "!" | "try" | "move") unary | conversion ;
 conversion      = postfix ("as" type)* ;
 postfix         = primary (("(" arguments? ")")
                 | ("." identifier ("(" arguments? ")")?)

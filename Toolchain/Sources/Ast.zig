@@ -7,6 +7,7 @@ pub const UnaryOperator = enum {
     negate,
     logical_not,
     propagate,
+    move,
 };
 
 pub const BinaryOperator = enum {
