@@ -7,6 +7,7 @@ const Optionals = @import("Optionals.zig");
 const Support = @import("Support.zig");
 const Collections = @import("Collections.zig");
 const Availability = @import("Availability.zig");
+const Resources = @import("Resources.zig");
 
 pub const ConditionalValue = struct {
     condition: Model.TypedValue,
@@ -48,6 +49,7 @@ pub fn analyzeIf(self: anytype, builder: anytype, function: Ast.Function, condit
         else
             null;
         const terminated = try self.analyzeStatements(builder, function, branch.statements);
+        if (!terminated) try Resources.emitActiveDrops(self, builder, binding_count);
         builder.bindings.shrinkRetainingCapacity(binding_count);
         if (body_refinement) |saved| Optionals.restoreRefinement(builder, saved);
         if (!terminated) {
@@ -67,6 +69,7 @@ pub fn analyzeIf(self: anytype, builder: anytype, function: Ast.Function, condit
         Availability.restore(builder.bindings.items, fallthrough_availability);
         const binding_count = builder.bindings.items.len;
         const terminated = try self.analyzeStatements(builder, function, statements);
+        if (!terminated) try Resources.emitActiveDrops(self, builder, binding_count);
         builder.bindings.shrinkRetainingCapacity(binding_count);
         if (!terminated) {
             try exits.append(self.allocator, builder.current_block);
@@ -121,6 +124,7 @@ pub fn analyzeWhile(self: anytype, builder: anytype, function: Ast.Function, loo
     const binding_count = builder.bindings.items.len;
     if (analyzed.binding) |binding| try enterBinding(self, builder, binding);
     const terminated = try self.analyzeStatements(builder, function, loop.statements);
+    if (!terminated) try Resources.emitActiveDrops(self, builder, binding_count);
     builder.bindings.shrinkRetainingCapacity(binding_count);
     const loop_context = builder.loops.items[loop_index];
     builder.loops.items.len -= 1;
@@ -210,6 +214,7 @@ fn analyzeCollectionFor(self: anytype, builder: anytype, function: Ast.Function,
     const terminated = try self.analyzeStatements(builder, function, loop.statements);
     const loop_context = builder.loops.items[loop_index];
     builder.loops.items.len -= 1;
+    if (!terminated) try Resources.emitActiveDrops(self, builder, binding_count);
     builder.bindings.shrinkRetainingCapacity(binding_count);
     if (!terminated) {
         try Availability.requireHeader(self, builder.bindings.items, header_availability, loop.position);
@@ -290,6 +295,7 @@ fn analyzeRangeFor(self: anytype, builder: anytype, function: Ast.Function, loop
     const terminated = try self.analyzeStatements(builder, function, loop.statements);
     const loop_context = builder.loops.items[loop_index];
     builder.loops.items.len -= 1;
+    if (!terminated) try Resources.emitActiveDrops(self, builder, binding_count);
     builder.bindings.shrinkRetainingCapacity(binding_count);
     if (!terminated) {
         try Availability.requireHeader(self, builder.bindings.items, header_availability, loop.position);
@@ -357,6 +363,9 @@ pub fn analyzeCondition(self: anytype, builder: anytype, condition: Ast.Conditio
                 );
                 return self.fail(binding.source.position, message);
             };
+            if (Resources.isNoncopyable(self, child)) {
+                try Resources.requireTransfer(self, binding.source, source.type, "opening it in a conditional binding");
+            }
             const absent = (try Optionals.intrinsic(self, builder, source.type)).?;
             const result = try self.newValue(builder, .bool);
             try self.emit(builder, .{ .binary = .{
@@ -414,6 +423,7 @@ pub fn analyzeLoopControl(
             try Availability.snapshot(self.allocator, builder.bindings.items, loop.availability_count),
         );
     }
+    try Resources.emitActiveDrops(self, builder, loop.availability_count);
     self.terminate(builder, .{ .jump = if (is_continue) loop.continue_block else loop.break_block });
     return true;
 }

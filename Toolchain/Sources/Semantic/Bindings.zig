@@ -107,11 +107,13 @@ pub fn analyzeReturn(self: anytype, builder: anytype, function: Ast.Function, st
             if (function.return_mode == .mutable and (value.borrowed_mode != .mutable or value.reference == null)) {
                 return self.fail(expression.position, "mutable borrowed return requires a mutable place from an '&' parameter");
             }
+            try Resources.emitActiveDrops(self, builder, 0);
             self.terminate(builder, .{ .return_value = if (function.return_mode == .mutable) value.reference.? else value.value });
             return;
         }
         try Resources.requireTransfer(self, expression, value.type, "returning it");
         try Borrowing.requireOwned(self, value, expression.position, "returned");
+        try Resources.emitActiveDrops(self, builder, 0);
         self.terminate(builder, .{ .return_value = value.value });
         return;
     }
@@ -120,5 +122,6 @@ pub fn analyzeReturn(self: anytype, builder: anytype, function: Ast.Function, st
         const message = try std.fmt.allocPrint(self.allocator, "expected return value of type '{s}'", .{self.typeName(function.return_type)});
         return self.fail(statement.position, message);
     }
+    try Resources.emitActiveDrops(self, builder, 0);
     self.terminate(builder, .return_void);
 }

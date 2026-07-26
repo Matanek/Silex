@@ -3,22 +3,49 @@ const Ast = @import("../Ast.zig");
 const Ir = @import("../Ir.zig");
 const Model = @import("Model.zig");
 
+const AnalyzeError = error{ InvalidSource, OutOfMemory };
+
 pub fn isOwner(self: anytype, type_value: Ast.Type) bool {
+    return isNoncopyable(self, type_value);
+}
+
+pub fn isNoncopyable(self: anytype, type_value: Ast.Type) bool {
+    return isNoncopyableInner(self, type_value, 0);
+}
+
+fn isNoncopyableInner(self: anytype, type_value: Ast.Type, depth: usize) bool {
+    if (depth > self.structures.len + self.enums.len + 1) return false;
+    if (type_value.optionalChild()) |child| return isNoncopyableInner(self, child, depth + 1);
     const index = type_value.structureIndex() orelse return false;
     if (index >= self.structures.len) return false;
+    if (self.structures[index].collection) |collection| {
+        return isNoncopyableInner(self, collection.element, depth + 1);
+    }
+    for (self.enums) |enumeration| if (enumeration.type_index == index) {
+        for (enumeration.variants) |variant| for (variant.associated_types) |associated| {
+            if (isNoncopyableInner(self, associated, depth + 1)) return true;
+        };
+        return false;
+    };
     const name = self.structures[index].name;
     for (self.program.structures) |structure| {
-        if (std.mem.eql(u8, structure.name, name)) return structure.drop != null;
+        if (!std.mem.eql(u8, structure.name, name)) continue;
+        if (structure.drop != null) return true;
+        for (self.structures[index].fields) |field| {
+            if (isNoncopyableInner(self, field.type, depth + 1)) return true;
+        }
+        return false;
     }
     return false;
 }
 
 pub fn requireTransfer(self: anytype, expression: *const Ast.Expression, type_value: Ast.Type, action: []const u8) !void {
-    if (!isOwner(self, type_value)) return;
+    if (!isNoncopyable(self, type_value)) return;
     const transferred = switch (expression.value) {
-        .unary => |unary| unary.operator == .move,
+        .unary => |unary| unary.operator == .move or unary.operator == .propagate,
         .call => true,
         .match_expression => true,
+        .sequence_literal => true,
         else => false,
     };
     if (transferred) return;
@@ -27,8 +54,8 @@ pub fn requireTransfer(self: anytype, expression: *const Ast.Expression, type_va
 }
 
 pub fn validateParameter(self: anytype, parameter: Ast.Parameter) !void {
-    if (parameter.mode == .mutable and isOwner(self, parameter.type)) {
-        return self.fail(parameter.position, "an owner structure cannot be passed through '&T'; use '@T' or transfer it");
+    if (parameter.mode == .mutable and isNoncopyable(self, parameter.type)) {
+        return self.fail(parameter.position, "a noncopyable value cannot be passed through '&T'; use '@T' or transfer it");
     }
 }
 
@@ -52,7 +79,10 @@ pub fn analyzeDrop(self: anytype, structure_index: usize, declaration: Ast.Struc
         .return_type = .void,
         .statements = drop.statements,
     };
-    if (!try self.analyzeStatements(&builder, function, drop.statements)) self.terminate(&builder, .return_void);
+    if (!try self.analyzeStatements(&builder, function, drop.statements)) {
+        try emitActiveDrops(self, &builder, 1);
+        self.terminate(&builder, .return_void);
+    }
     const blocks = try self.allocator.alloc(Ir.Block, builder.blocks.items.len);
     for (builder.blocks.items, 0..) |*block, index| blocks[index] = .{
         .instructions = try block.instructions.toOwnedSlice(self.allocator),
@@ -68,13 +98,48 @@ pub fn analyzeDrop(self: anytype, structure_index: usize, declaration: Ast.Struc
     };
 }
 
-pub fn emitDrop(self: anytype, builder: anytype, type_value: Ast.Type, value: Ir.ValueId) !void {
-    const function = dropFunctionId(self, type_value) orelse return;
-    try self.emit(builder, .{ .call = .{
+pub fn emitDrop(self: anytype, builder: anytype, type_value: Ast.Type, value: Ir.ValueId) AnalyzeError!void {
+    if (type_value.optionalChild()) |child| {
+        if (!isNoncopyable(self, child)) return;
+        const absent = try self.newValue(builder, type_value);
+        try self.emit(builder, .{ .optional_null = .{ .result = absent } });
+        const present = try self.newValue(builder, .bool);
+        try self.emit(builder, .{ .binary = .{ .result = present, .operator = .not_equal, .left = value, .right = absent } });
+        const drop_block = try self.newBlock(builder);
+        const merge_block = try self.newBlock(builder);
+        self.terminate(builder, .{ .branch = .{ .condition = present, .then_block = drop_block, .else_block = merge_block } });
+        builder.current_block = drop_block;
+        const payload = try self.newValue(builder, child);
+        try self.emit(builder, .{ .optional_unwrap = .{ .result = payload, .operand = value } });
+        try emitDrop(self, builder, child, payload);
+        self.terminate(builder, .{ .jump = merge_block });
+        builder.current_block = merge_block;
+        return;
+    }
+    const type_index = type_value.structureIndex() orelse return;
+    if (type_index >= self.structures.len) return;
+    if (enumIndex(self, type_index)) |enumeration_index| {
+        try emitEnumDrop(self, builder, enumeration_index, value);
+        return;
+    }
+    if (self.structures[type_index].collection) |collection| {
+        try emitCollectionDrop(self, builder, type_value, collection, value);
+        return;
+    }
+    if (dropFunctionId(self, type_value)) |function| try self.emit(builder, .{ .call = .{
         .result = null,
         .function = function,
         .arguments = try self.allocator.dupe(Ir.ValueId, &.{value}),
     } });
+    var field_index = self.structures[type_index].fields.len;
+    while (field_index > 0) {
+        field_index -= 1;
+        const field = self.structures[type_index].fields[field_index];
+        if (!isNoncopyable(self, field.type)) continue;
+        const field_value = try self.newValue(builder, field.type);
+        try self.emit(builder, .{ .field_load = .{ .result = field_value, .base = value, .field = field_index } });
+        try emitDrop(self, builder, field.type, field_value);
+    }
 }
 
 pub fn emitActiveDrops(self: anytype, builder: anytype, first_binding: usize) !void {
@@ -83,7 +148,7 @@ pub fn emitActiveDrops(self: anytype, builder: anytype, first_binding: usize) !v
         index -= 1;
         const binding = builder.bindings.items[index];
         if (!binding.available or binding.borrowed_root != null or binding.parameter_mode != .value or
-            std.mem.eql(u8, binding.name, "self") or !isOwner(self, binding.type)) continue;
+            std.mem.eql(u8, binding.name, "self") or !isNoncopyable(self, binding.type)) continue;
         const value = if (binding.local) |local| value: {
             const loaded = try self.newValue(builder, binding.type);
             try self.emit(builder, .{ .local_load = .{ .result = loaded, .local = local } });
@@ -91,6 +156,95 @@ pub fn emitActiveDrops(self: anytype, builder: anytype, first_binding: usize) !v
         } else binding.value orelse continue;
         try emitDrop(self, builder, binding.type, value);
     }
+}
+
+fn emitEnumDrop(self: anytype, builder: anytype, enumeration_index: usize, value: Ir.ValueId) AnalyzeError!void {
+    const enumeration = self.enums[enumeration_index];
+    const merge_block = try self.newBlock(builder);
+    for (enumeration.variants, 0..) |variant, variant_index| {
+        var needs_drop = false;
+        for (variant.associated_types) |payload_type| if (isNoncopyable(self, payload_type)) {
+            needs_drop = true;
+            break;
+        };
+        if (!needs_drop) continue;
+        const active = try self.newValue(builder, .bool);
+        try self.emit(builder, .{ .enum_test = .{
+            .result = active,
+            .operand = value,
+            .enumeration = enumeration_index,
+            .variant = variant_index,
+        } });
+        const drop_block = try self.newBlock(builder);
+        const next_block = try self.newBlock(builder);
+        self.terminate(builder, .{ .branch = .{ .condition = active, .then_block = drop_block, .else_block = next_block } });
+        builder.current_block = drop_block;
+        var payload_index = variant.associated_types.len;
+        while (payload_index > 0) {
+            payload_index -= 1;
+            const payload_type = variant.associated_types[payload_index];
+            if (!isNoncopyable(self, payload_type)) continue;
+            const payload = try self.newValue(builder, payload_type);
+            try self.emit(builder, .{ .enum_payload = .{
+                .result = payload,
+                .operand = value,
+                .enumeration = enumeration_index,
+                .variant = variant_index,
+                .index = payload_index,
+            } });
+            try emitDrop(self, builder, payload_type, payload);
+        }
+        self.terminate(builder, .{ .jump = merge_block });
+        builder.current_block = next_block;
+    }
+    self.terminate(builder, .{ .jump = merge_block });
+    builder.current_block = merge_block;
+}
+
+fn emitCollectionDrop(self: anytype, builder: anytype, collection_type: Ast.Type, collection: Ast.Collection, value: Ir.ValueId) AnalyzeError!void {
+    if (!isNoncopyable(self, collection.element)) return;
+    const index_local = builder.local_types.items.len;
+    try builder.local_types.append(self.allocator, .int);
+    const count = try self.newValue(builder, .int);
+    if (collection.length) |length|
+        try self.emit(builder, .{ .constant_int = .{ .result = count, .bits = length } })
+    else
+        try self.emit(builder, .{ .collection_count = .{ .result = count, .collection = value } });
+    try self.emit(builder, .{ .local_store = .{ .local = index_local, .operand = count } });
+    const condition_block = try self.newBlock(builder);
+    const body_block = try self.newBlock(builder);
+    const exit_block = try self.newBlock(builder);
+    self.terminate(builder, .{ .jump = condition_block });
+    builder.current_block = condition_block;
+    const index = try self.newValue(builder, .int);
+    try self.emit(builder, .{ .local_load = .{ .result = index, .local = index_local } });
+    const zero = try self.newValue(builder, .int);
+    try self.emit(builder, .{ .constant_int = .{ .result = zero, .bits = 0 } });
+    const has_value = try self.newValue(builder, .bool);
+    try self.emit(builder, .{ .binary = .{ .result = has_value, .operator = .not_equal, .left = index, .right = zero } });
+    self.terminate(builder, .{ .branch = .{ .condition = has_value, .then_block = body_block, .else_block = exit_block } });
+    builder.current_block = body_block;
+    const one = try self.newValue(builder, .int);
+    try self.emit(builder, .{ .constant_int = .{ .result = one, .bits = 1 } });
+    const previous = try self.newValue(builder, .int);
+    try self.emit(builder, .{ .binary = .{ .result = previous, .operator = .subtract, .left = index, .right = one } });
+    try self.emit(builder, .{ .local_store = .{ .local = index_local, .operand = previous } });
+    const element = try self.newValue(builder, collection.element);
+    try self.emit(builder, .{ .collection_load = .{
+        .result = element,
+        .collection = value,
+        .index = previous,
+        .position = .{ .offset = 0, .line = 1, .column = 1 },
+    } });
+    try emitDrop(self, builder, collection.element, element);
+    self.terminate(builder, .{ .jump = condition_block });
+    builder.current_block = exit_block;
+    _ = collection_type;
+}
+
+fn enumIndex(self: anytype, type_index: usize) ?usize {
+    for (self.enums, 0..) |enumeration, index| if (enumeration.type_index == type_index) return index;
+    return null;
 }
 
 fn dropFunctionId(self: anytype, type_value: Ast.Type) ?Ir.FunctionId {

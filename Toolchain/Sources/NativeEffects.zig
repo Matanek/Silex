@@ -982,6 +982,30 @@ test "native concatenation owns large results across function returns" {
     try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
 }
 
+test "native recursive resource destruction matches the reference interpreter" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const source =
+        \\struct Leaf { let id:int; drop { print("leaf ", self.id) } }
+        \\struct Pair { let first:Leaf; let second:Leaf; drop { print("pair") } }
+        \\enum Choice { empty; filled(Leaf, Leaf) }
+        \\func main() {
+        \\    let pair = Pair(first:Leaf(id:1), second:Leaf(id:2))
+        \\    let choice = Choice.filled(Leaf(id:3), Leaf(id:4))
+        \\    if true { let branch = Leaf(id:5); print("branch") }
+        \\    print("end")
+        \\}
+    ;
+    var frontend = Frontend.Frontend.init(allocator);
+    const reference = try Interpreter.runCapture(allocator, (try frontend.compile(source)).ir);
+    const native = try compileAndRun(allocator, source);
+    try std.testing.expectEqual(reference.exit_code, exitCode(native));
+    try std.testing.expectEqualSlices(u8, reference.stdout, native.stdout);
+    try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
+}
+
 test "native checked float conversion returns an exact integer" {
     if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);

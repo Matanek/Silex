@@ -56,7 +56,7 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
         };
         if (assignment.operator == .assign and assignment.value != null) {
             try Resources.requireTransfer(self, assignment.value.?, binding.type, "assigning it");
-            if (binding.available and Resources.isOwner(self, binding.type)) {
+            if (binding.available and Resources.isNoncopyable(self, binding.type)) {
                 try Resources.emitDrop(self, builder, binding.type, try loadBinding(self, builder, binding));
             }
         }

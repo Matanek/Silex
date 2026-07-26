@@ -398,7 +398,9 @@ root, and a stored mutable alias is exclusive until its lexical scope ends.
 ## Owner structures and `drop`
 
 A structure that declares `drop` owns a unique resource and is nominally
-non-copyable. The block receives `self` implicitly and has no parameters,
+non-copyable. Non-copyability propagates through containing structures, enums,
+`Result`, optionals, fixed arrays, and lists. The block receives `self`
+implicitly and has no parameters,
 parentheses, return type, visibility, `return`, or `try`.
 
 ```sx
@@ -412,10 +414,20 @@ struct File {
 ```
 
 A newly constructed owner transfers directly into its destination. A named
-owner requires `move` when stored again, assigned, passed by value, or returned.
-It may still be inspected through `@T`, but cannot be compared or passed through
-`&T`. Replacing an available owner `var` runs its `drop` before installing the
-new value; a moved source no longer runs it.
+non-copyable value requires `move` when stored again, assigned, passed by value,
+returned, or consumed by a pattern. It may still be inspected through `@T`, but
+cannot be compared or passed through `&T`. Replacing an available non-copyable
+`var` destroys its old value before installing the new one; a moved source no
+longer participates in destruction.
+
+Every completely constructed, untransferred value is destroyed exactly once on
+ordinary scope exit, including a block end, `return`, `break`, `continue`, and
+failure propagation with `try`. Locals are visited in reverse construction
+order. A structure runs its own `drop` before recursively visiting fields in
+reverse declaration order; an optional visits its present value, an enum its
+active payloads in reverse order, and a collection its elements from last to
+first. Fatal `panic`, failed `assert`, and forced process termination do not
+promise cleanup.
 
 ## Associated enum values
 
@@ -439,7 +451,8 @@ argument types are checked at the construction site; named arguments, an
 implicit integer value, raw conversion, fields, methods, equality and printing
 of a complete enum value are not part of this contract.
 
-Associated enums are ordinary copied values. Their nominal type, selected
+Associated enums are ordinary copied values when all their payload types are
+copyable; otherwise they inherit non-copyability. Their nominal type, selected
 variant and associated values survive local storage, structure fields,
 parameters, returns, module composition, the reference interpreter and the
 macOS ARM64 backend. `public enum` exposes the enum and all its variants as one
@@ -486,8 +499,9 @@ func parse(text:str) Result<int, ParseError> {
 
 Construction is explicit and ordinary exhaustive `match` handles both
 variants. There is no implicit conversion from `T` or `E`, default success,
-field or intrinsic method. `Result` retains the copy, composition and nominal
-identity rules of a specialized enum.
+field or intrinsic method. `Result` retains the composition and nominal identity
+rules of a specialized enum, and is non-copyable whenever its success or failure
+payload is.
 
 `Result<void,E>` is the sole generic specialization that accepts `void`. Its
 success is constructed with `success()` and matched with `success` without a

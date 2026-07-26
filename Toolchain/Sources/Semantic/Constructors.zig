@@ -95,6 +95,7 @@ pub fn analyze(
         }
         const result = try self.newValue(&builder, structure_type);
         try self.emit(&builder, .{ .local_load = .{ .result = result, .local = self_local } });
+        try Resources.emitActiveDrops(self, &builder, 0);
         self.terminate(&builder, .{ .return_value = result });
     }
 
@@ -309,6 +310,7 @@ fn analyzeIf(
         const binding_count = builder.bindings.items.len;
         if (analyzed.binding) |binding| try Control.enterBinding(self, builder, binding);
         const terminated = try analyzeStatements(self, builder, function, structure, self_local, branch.statements, branch_state);
+        if (!terminated) try Resources.emitActiveDrops(self, builder, binding_count);
         builder.bindings.shrinkRetainingCapacity(binding_count);
         if (!terminated) {
             try exits.append(self.allocator, builder.current_block);
@@ -321,6 +323,7 @@ fn analyzeIf(
         const else_state = try self.allocator.dupe(bool, incoming);
         const binding_count = builder.bindings.items.len;
         const terminated = try analyzeStatements(self, builder, function, structure, self_local, statements, else_state);
+        if (!terminated) try Resources.emitActiveDrops(self, builder, binding_count);
         builder.bindings.shrinkRetainingCapacity(binding_count);
         if (!terminated) {
             try exits.append(self.allocator, builder.current_block);
@@ -412,6 +415,7 @@ fn analyzeSelfAssignment(
         );
         return self.fail(assignment.value.?.position, message);
     }
+    try Resources.requireTransfer(self, assignment.value.?, field.type, "storing it in a structure");
 
     const structure_type = Ast.Type.structure(fieldOwnerIndex(self, structure.name));
     const base = try self.newValue(builder, structure_type);
