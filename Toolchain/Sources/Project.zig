@@ -594,6 +594,11 @@ pub const Compiler = struct {
                 try self.activateExpression(module, access.base);
                 try self.activateExpression(module, access.index);
             },
+            .slice_access => |access| {
+                try self.activateExpression(module, access.base);
+                try self.activateExpression(module, access.start);
+                try self.activateExpression(module, access.end);
+            },
             .interpolated_string => |interpolated| for (interpolated.parts) |part| switch (part) {
                 .text => {},
                 .expression => |value| try self.activateExpression(module, value),
@@ -1457,6 +1462,11 @@ pub const Compiler = struct {
             .index_access => |access| {
                 try self.rewriteExpression(module, access.base, type_map);
                 try self.rewriteExpression(module, access.index, type_map);
+            },
+            .slice_access => |access| {
+                try self.rewriteExpression(module, access.base, type_map);
+                try self.rewriteExpression(module, access.start, type_map);
+                try self.rewriteExpression(module, access.end, type_map);
             },
             .interpolated_string => |interpolated| for (interpolated.parts) |part| switch (part) {
                 .text => {},

@@ -783,6 +783,13 @@ All receiver, index, and value expressions run exactly once in source order.
 An invalid index terminates before the root `var` is changed. Every operation
 is rejected through a `let`; mutating one copied list never changes another.
 
+`collection[start:end]` creates an independent dynamic list from either an
+array or a list. Both bounds are mandatory; the start is included and the end
+excluded. Negative bounds are first made relative to `count()`, then each bound
+is clamped to `[0, count()]`. An empty list results whenever the normalized
+start is greater than or equal to the normalized end. Source, start, and end
+are evaluated once from left to right; the result is a copy, never a view.
+
 ## Observable statements
 
 `print(expression, ...)` accepts one or more expressions. It evaluates every
@@ -876,7 +883,7 @@ unary           = ("-" | "!" | "try") unary | conversion ;
 conversion      = postfix ("as" type)* ;
 postfix         = primary (("(" arguments? ")")
                 | ("." identifier ("(" arguments? ")")?)
-                | ("[" expression "]"))* ;
+                | ("[" expression (":" expression)? "]"))* ;
 primary         = integer | floating | string | "true" | "false" | identifier
                 | "self" | sequence_literal | "(" expression ")" ;
 sequence_literal = "[" (expression ("," expression)* ","?)? "]" ;

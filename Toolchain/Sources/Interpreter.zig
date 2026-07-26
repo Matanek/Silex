@@ -4,7 +4,7 @@ const MainBoundary = @import("MainBoundary.zig");
 const Numeric = @import("Numeric.zig");
 
 const Allocator = std.mem.Allocator;
-const max_call_depth = 1024;
+const max_call_depth = 768;
 
 pub const Error = Allocator.Error || error{
     InvalidProgram,
@@ -170,7 +170,7 @@ fn invokeDepth(
     while (true) {
         if (block_id >= function.blocks.len) return error.InvalidProgram;
         const block = function.blocks[block_id];
-        for (block.instructions) |instruction| {
+        for (block.instructions) |*instruction| {
             if (try executeInstruction(allocator, program, function, values, locals, instruction, depth, session)) |result| return result;
         }
         switch (block.terminator) {
@@ -201,11 +201,11 @@ fn executeInstruction(
     function: Ir.Function,
     values: []?Value,
     locals: []?Value,
-    instruction: Ir.Instruction,
+    instruction: *const Ir.Instruction,
     depth: usize,
     session: *Session,
 ) Error!?Value {
-    switch (instruction) {
+    switch (instruction.*) {
         .constant_int => |constant| {
             const type_value = function.value_types[constant.result];
             const value: Value = if (type_value == .int)
@@ -320,6 +320,7 @@ fn executeInstruction(
         .collection_replace => |replacement| try executeCollectionReplace(allocator, program, function, values, replacement, session),
         .collection_count => |count| try executeCollectionCount(function, values, count),
         .list_edit => |edit| try executeListEdit(allocator, program, function, values, edit, session),
+        .collection_slice => |slice| try executeCollectionSlice(allocator, function, values, slice),
         .local_load => |local| {
             const value = try cloneValue(allocator, try loadLocal(function, locals, local.local));
             try store(function, values, local.result, value);
@@ -553,6 +554,27 @@ fn executeListEdit(
         },
     }
     try store(function, values, edit.result, .{ .structure = .{ .type = source.type, .fields = result } });
+}
+
+fn executeCollectionSlice(allocator: Allocator, function: Ir.Function, values: []?Value, slice: Ir.Instruction.CollectionSlice) Error!void {
+    const source = switch (try load(values, slice.collection)) {
+        .structure => |value| value,
+        else => return error.InvalidProgram,
+    };
+    const count: i64 = @intCast(source.fields.len);
+    var start = try integer(try load(values, slice.start));
+    var end = try integer(try load(values, slice.end));
+    if (start < 0) start += count;
+    if (end < 0) end += count;
+    start = std.math.clamp(start, 0, count);
+    end = std.math.clamp(end, 0, count);
+    const length: usize = if (start < end) @intCast(end - start) else 0;
+    const result = try allocator.alloc(Value, length);
+    for (result, 0..) |*item, index| item.* = try cloneValue(allocator, source.fields[@as(usize, @intCast(start)) + index]);
+    try store(function, values, slice.result, .{ .structure = .{
+        .type = function.value_types[slice.result],
+        .fields = result,
+    } });
 }
 
 fn executeCollectionLoad(

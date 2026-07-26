@@ -796,14 +796,7 @@ pub const Parser = struct {
             }
             if (self.current.tag == .left_bracket) {
                 const position = self.current.position;
-                try self.advance();
-                if (self.current.tag == .right_bracket) return self.fail("expected collection index");
-                const index = try self.parseExpression(true);
-                try self.expect(.right_bracket, "expected ']' after collection index");
-                expression = try self.newExpression(.{
-                    .position = expression.position,
-                    .value = .{ .index_access = .{ .base = expression, .index = index, .bracket_position = position } },
-                });
+                expression = try Collections.parsePostfix(self, expression, position);
                 continue;
             }
             if (self.current.tag == .dot or self.current.tag == .question_dot) {

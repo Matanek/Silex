@@ -38,6 +38,21 @@ pub fn parseLiteral(self: anytype, position: Source.Position) !*Ast.Expression {
     return self.newExpression(.{ .position = position, .value = .{ .sequence_literal = .{ .values = items, .inferred_type = inferred_type } } });
 }
 
+pub fn parsePostfix(self: anytype, base: *Ast.Expression, position: Source.Position) !*Ast.Expression {
+    try self.advance();
+    if (self.current.tag == .right_bracket or self.current.tag == .colon) return self.fail("slice and index bounds cannot be omitted");
+    const first = try self.parseExpression(true);
+    if (self.current.tag != .colon) {
+        try self.expect(.right_bracket, "expected ']' after collection index");
+        return self.newExpression(.{ .position = base.position, .value = .{ .index_access = .{ .base = base, .index = first, .bracket_position = position } } });
+    }
+    try self.advance();
+    if (self.current.tag == .right_bracket) return self.fail("slice end cannot be omitted");
+    const end = try self.parseExpression(true);
+    try self.expect(.right_bracket, "expected ']' after slice end");
+    return self.newExpression(.{ .position = base.position, .value = .{ .slice_access = .{ .base = base, .start = first, .end = end, .bracket_position = position } } });
+}
+
 fn syntacticType(expression: *const Ast.Expression) ?Ast.Type {
     return switch (expression.value) {
         .integer => .int,

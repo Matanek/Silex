@@ -71,6 +71,7 @@ pub const Instruction = union(enum) {
     collection_replace: CollectionReplace,
     collection_count: CollectionCount,
     list_edit: ListEdit,
+    collection_slice: CollectionSlice,
     aggregate_equal: AggregateEqual,
     convert: Convert,
     format_value: FormatValue,
@@ -201,6 +202,16 @@ pub const Instruction = union(enum) {
         element_width: u12,
         header: usize,
         tail: usize,
+    };
+
+    pub const CollectionSlice = struct {
+        result: Slot,
+        collection: Span,
+        start: Slot,
+        end: Slot,
+        count: u32,
+        dynamic: bool,
+        element_width: u12,
     };
 
     pub const AggregateEqual = struct {
@@ -424,6 +435,13 @@ pub fn validate(program: Program) Error!void {
                 if (value.argument) |span| try requireSpan(function, span);
                 if (value.removed) |span| try requireSpan(function, span);
                 if (value.element_width == 0 or value.header >= program.strings.len or value.tail >= program.strings.len) return error.InvalidMachineProgram;
+            },
+            .collection_slice => |value| {
+                try requireSlot(function, value.result);
+                try requireSpan(function, value.collection);
+                try requireSlot(function, value.start);
+                try requireSlot(function, value.end);
+                if (value.element_width == 0) return error.InvalidMachineProgram;
             },
             .aggregate_equal => |value| {
                 try requireSlot(function, value.result);
