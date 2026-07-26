@@ -158,8 +158,35 @@ pub const AssertStatement = struct {
 
 pub const ConditionalBranch = struct {
     position: Source.Position,
-    condition: *Expression,
+    condition: Condition,
     statements: []const Statement,
+};
+
+pub const Condition = union(enum) {
+    expression: *Expression,
+    binding: ConditionalBinding,
+
+    pub fn source(self: Condition) *Expression {
+        return switch (self) {
+            .expression => |expression| expression,
+            .binding => |binding| binding.source,
+        };
+    }
+
+    pub fn position(self: Condition) Source.Position {
+        return switch (self) {
+            .expression => |expression| expression.position,
+            .binding => |binding| binding.position,
+        };
+    }
+};
+
+pub const ConditionalBinding = struct {
+    position: Source.Position,
+    name_position: Source.Position,
+    name: []const u8,
+    mutable: bool,
+    source: *Expression,
 };
 
 pub const IfStatement = struct {
@@ -170,7 +197,7 @@ pub const IfStatement = struct {
 
 pub const WhileStatement = struct {
     position: Source.Position,
-    condition: *Expression,
+    condition: Condition,
     statements: []const Statement,
 };
 

@@ -5,6 +5,7 @@ const Numeric = @import("../Numeric.zig");
 const Support = @import("Support.zig");
 const Model = @import("Model.zig");
 const Optionals = @import("Optionals.zig");
+const Control = @import("Control.zig");
 
 const AnalyzeError = error{ InvalidSource, OutOfMemory };
 
@@ -270,13 +271,12 @@ fn analyzeIf(
     var merged: ?[]bool = null;
     var exits: std.ArrayList(Ir.BlockId) = .empty;
     for (conditional.branches) |branch| {
-        try validateExpressionReads(self, structure, branch.condition, incoming);
-        const condition = try self.analyzeExpression(builder, branch.condition);
-        if (condition.type != .bool) return self.fail(branch.condition.position, "if condition expects 'bool'");
+        try validateExpressionReads(self, structure, branch.condition.source(), incoming);
+        const analyzed = try Control.analyzeCondition(self, builder, branch.condition, "if");
         const body_block = try self.newBlock(builder);
         const next_block = try self.newBlock(builder);
         self.terminate(builder, .{ .branch = .{
-            .condition = condition.value,
+            .condition = analyzed.condition.value,
             .then_block = body_block,
             .else_block = next_block,
         } });
@@ -284,6 +284,7 @@ fn analyzeIf(
         builder.current_block = body_block;
         const branch_state = try self.allocator.dupe(bool, incoming);
         const binding_count = builder.bindings.items.len;
+        if (analyzed.binding) |binding| try Control.enterBinding(self, builder, binding);
         const terminated = try analyzeStatements(self, builder, function, structure, self_local, branch.statements, branch_state);
         builder.bindings.shrinkRetainingCapacity(binding_count);
         if (!terminated) {

@@ -180,3 +180,53 @@ test "invalidate mutable proofs and keep compound or member proofs local" {
         "operator '+' does not accept 'int?' and 'int'",
     );
 }
+
+test "bind optional values across conditional forms with deterministic effects" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const source =
+        \\func observed(value:int?) int? { print("source"); return value }
+        \\func main() {
+        \\    if item = observed(1) { print(item) }
+        \\    if missing = observed(null) { print(100) }
+        \\    if true {} elif skipped = observed(2) { print(skipped) }
+        \\    if false {} elif reached = observed(3) { print(reached) }
+        \\    if false {} else if (let alternative = observed(4)) { print(alternative) }
+        \\    if var mutable = observed(5) { mutable += 1; print(mutable) }
+        \\    var next:int? = 6
+        \\    while item = observed(next) { print(item); next = null; continue }
+        \\    next = 7
+        \\    while (var item = observed(next)) { item += 1; print(item); break }
+        \\}
+    ;
+    var frontend = Frontend.Frontend.init(allocator);
+    const result = try Interpreter.runCapture(allocator, (try frontend.compile(source)).ir);
+    try std.testing.expectEqualStrings(
+        "source\n1\nsource\nsource\n3\nsource\n4\nsource\n6\nsource\n6\nsource\nsource\n8\n",
+        result.stdout,
+    );
+}
+
+test "enforce conditional binding type mutability scope and collisions" {
+    try expectCompileError(
+        "func main() { if value = 1 { print(value) } }",
+        "conditional binding 'value' expects an optional source, found 'int'",
+    );
+    try expectCompileError(
+        "func main() { if let value:int = null {} }",
+        "expected '=' after conditional binding name",
+    );
+    try expectCompileError(
+        "func main() { let item = 1; if item = null {} }",
+        "variable 'item' is already declared in this scope",
+    );
+    try expectCompileError(
+        "func main() { let source:int? = 1; if item = source { item = 2 } }",
+        "cannot assign to immutable variable 'item'",
+    );
+    try expectCompileError(
+        "func main() { let source:int? = 1; if item = source {} print(item) }",
+        "unknown variable 'item'",
+    );
+}

@@ -454,7 +454,7 @@ pub const Compiler = struct {
             },
             .if_statement => |conditional| {
                 for (conditional.branches) |branch| {
-                    try self.activateExpression(module, branch.condition);
+                    try self.activateExpression(module, branch.condition.source());
                     for (branch.statements) |nested| try self.activateStatement(module, nested);
                 }
                 if (conditional.else_statements) |statements| {
@@ -462,7 +462,7 @@ pub const Compiler = struct {
                 }
             },
             .while_statement => |loop| {
-                try self.activateExpression(module, loop.condition);
+                try self.activateExpression(module, loop.condition.source());
                 for (loop.statements) |nested| try self.activateStatement(module, nested);
             },
             .break_statement, .continue_statement => {},
@@ -946,7 +946,7 @@ pub const Compiler = struct {
             .if_statement => |conditional| conditional_statement: {
                 const branches = try self.allocator.alloc(Ast.ConditionalBranch, conditional.branches.len);
                 for (conditional.branches, 0..) |branch, branch_index| {
-                    try self.rewriteExpression(module, branch.condition, type_map);
+                    try self.rewriteExpression(module, branch.condition.source(), type_map);
                     branches[branch_index] = branch;
                     branches[branch_index].statements = try self.rewriteStatements(module, branch.statements, type_map);
                 }
@@ -956,7 +956,7 @@ pub const Compiler = struct {
                 break :conditional_statement .{ .if_statement = value };
             },
             .while_statement => |loop| loop_statement: {
-                try self.rewriteExpression(module, loop.condition, type_map);
+                try self.rewriteExpression(module, loop.condition.source(), type_map);
                 var value = loop;
                 value.statements = try self.rewriteStatements(module, loop.statements, type_map);
                 break :loop_statement .{ .while_statement = value };
