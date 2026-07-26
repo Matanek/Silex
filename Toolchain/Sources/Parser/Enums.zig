@@ -1,6 +1,7 @@
 const std = @import("std");
 const Ast = @import("../Ast.zig");
 const Strings = @import("../Strings.zig");
+const Generics = @import("Generics.zig");
 
 pub fn parse(parser: anytype, is_public: bool, is_internal: bool) !Ast.Enum {
     const position = parser.current.position;
@@ -10,6 +11,10 @@ pub fn parse(parser: anytype, is_public: bool, is_internal: bool) !Ast.Enum {
     const name_position = parser.current.position;
     _ = try parser.internTypeName(name);
     try parser.advance();
+    const type_parameters = try Generics.parseTypeParameters(parser);
+    const enclosing_type_parameters = parser.type_parameters;
+    parser.type_parameters = type_parameters;
+    defer parser.type_parameters = enclosing_type_parameters;
     var raw_type: ?Ast.Type = null;
     if (parser.current.tag == .colon) {
         try parser.advance();
@@ -19,6 +24,7 @@ pub fn parse(parser: anytype, is_public: bool, is_internal: bool) !Ast.Enum {
             else => return parser.fail("raw enum type must be 'int' or 'str'"),
         };
         try parser.advance();
+        if (type_parameters.len != 0) return parser.failAt(name_position, "raw enums cannot be generic");
     }
     try parser.expect(.left_brace, "expected '{' after enum name");
     var variants: std.ArrayList(Ast.EnumVariant) = .empty;
@@ -75,6 +81,7 @@ pub fn parse(parser: anytype, is_public: bool, is_internal: bool) !Ast.Enum {
         .position = position,
         .name_position = name_position,
         .name = name,
+        .type_parameters = type_parameters,
         .raw_type = raw_type,
         .variants = try variants.toOwnedSlice(parser.allocator),
     };

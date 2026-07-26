@@ -39,6 +39,14 @@ pub fn parseTypeArguments(parser: anytype) ![]const Ast.Type {
 }
 
 pub fn callArgumentsFollow(parser: anytype) !bool {
+    return tokenFollowsArguments(parser, .left_parenthesis);
+}
+
+pub fn memberFollows(parser: anytype) !bool {
+    return tokenFollowsArguments(parser, .dot);
+}
+
+fn tokenFollowsArguments(parser: anytype, expected: anytype) !bool {
     if (parser.current.tag != .less) return false;
     var lexer = parser.lexer;
     var depth: usize = 1;
@@ -55,7 +63,7 @@ pub fn callArgumentsFollow(parser: anytype) !bool {
             else => {},
         }
     }
-    return (lexer.next() catch return false).tag == .left_parenthesis;
+    return (lexer.next() catch return false).tag == expected;
 }
 
 fn consumeGreater(parser: anytype, message: []const u8) !void {
@@ -80,5 +88,16 @@ fn consumeGreater(parser: anytype, message: []const u8) !void {
         },
         .start = token.start + 1,
         .end = token.end,
+    };
+}
+
+pub fn qualifiedName(allocator: std.mem.Allocator, expression: *const Ast.Expression) std.mem.Allocator.Error!?[]const u8 {
+    return switch (expression.value) {
+        .identifier => |name| name,
+        .field_access => |access| if (try qualifiedName(allocator, access.base)) |prefix|
+            try std.fmt.allocPrint(allocator, "{s}.{s}", .{ prefix, access.name })
+        else
+            null,
+        else => null,
     };
 }

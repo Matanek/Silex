@@ -333,6 +333,26 @@ public contract. A private enum remains local to its module; `internal enum`
 is restricted to its exact source file. The tag and payload layout remain
 compiler details and are not a source ABI.
 
+An associated enum may declare unconstrained type parameters and use them in
+its payloads:
+
+```sx
+enum Outcome<T, E> {
+    success(T)
+    failure(E)
+}
+
+let value = Outcome<int, str>.success(42)
+```
+
+Every use writes the complete argument list; variant construction and `match`
+never infer it. Each list denotes one concrete nominal enum throughout the
+composed program, and its match bindings use the specialized payload types.
+Payloads may themselves be generic specializations. Aliases and public
+reexports preserve identity. `void` arguments, missing or wrong arity,
+arguments on a concrete enum and generic raw enums are rejected. Generic enums
+do not add variant-level parameters, methods, conformance or raw conversion.
+
 An enum may instead declare `int` or `str` as a raw type. Every variant then
 provides exactly one literal of that type:
 
@@ -640,11 +660,13 @@ normative reference for these semantics.
 ## Grammar
 
 ```ebnf
-program         = (use | structure | function)* EOF ;
+program         = (use | enum | structure | function)* EOF ;
 use             = "public"? "use"
                   (qualified_identifier ("as" identifier)? | type "as" identifier) ;
 visibility      = "public" | "internal" ;
 structure       = visibility? "struct" identifier type_parameters? "{" (structure_field | constructor | method)* "}" ;
+enum            = visibility? "enum" identifier type_parameters? "{" enum_variant+ "}" ;
+enum_variant    = identifier ("(" type ("," type)* ")")? ;
 structure_field = visibility? ("let" | "var") identifier ":" type ("=" field_default)? ;
 constructor     = visibility? "init" "(" parameters? ")" block ;
 method          = visibility? "func" identifier "(" parameters? ")" return_type? block ;

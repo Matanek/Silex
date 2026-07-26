@@ -92,6 +92,7 @@ pub const EnumVariant = struct {
 pub const Enum = struct {
     export_name: []const u8,
     id: TypeId,
+    type_parameters: []const []const u8 = &.{},
     variants: []const EnumVariant,
     raw_type: ?Types.Type = null,
     position: Source.Position,
@@ -203,9 +204,12 @@ pub fn buildMappedGenerics(
             }
             variants[variant_index] = .{ .name = variant.name, .associated_types = associated_types, .raw_value = variant.raw_value };
         }
+        const type_parameters = try allocator.alloc([]const u8, enumeration.type_parameters.len);
+        for (enumeration.type_parameters, 0..) |parameter, index| type_parameters[index] = parameter.name;
         try enums.append(allocator, .{
             .export_name = enumeration.name,
             .id = .{ .owner = owner, .module = module_name, .name = enumeration.name },
+            .type_parameters = type_parameters,
             .variants = variants,
             .raw_type = enumeration.raw_type,
             .position = enumeration.position,

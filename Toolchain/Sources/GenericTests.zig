@@ -279,3 +279,103 @@ test "diagnose invalid generic structure uses and recursive expansion" {
         "generic struct 'Expand' recursively expands with different type arguments",
     );
 }
+
+test "specialize generic associated enums and match concrete payloads" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\struct Box<T> { let value:T }
+        \\enum Outcome<T, E> { success(Box<T>); failure(E) }
+        \\func describe<T>(value:Outcome<T, str>) str {
+        \\    return match value {
+        \\        success(box) => "value $(box.value)"
+        \\        failure(message) => message
+        \\    }
+        \\}
+        \\func main() {
+        \\    let success = Outcome<int, str>.success(Box<int>(value:42))
+        \\    let failure = Outcome<int, str>.failure("failed")
+        \\    let other = Outcome<str, int>.failure(7)
+        \\    print(describe(success))
+        \\    print(describe(failure))
+        \\    match other { success(box) => { print(box.value) }; failure(code) => { print(code) } }
+        \\}
+    );
+    try std.testing.expectEqual(@as(usize, 2), compilation.ir.enums.len);
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("value 42\nfailed\n7\n", result.stdout);
+}
+
+test "compose generic enums through modules aliases and reexports" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data =
+        \\use Api
+        \\use Facade
+        \\use Api.Outcome as LocalOutcome
+        \\func main() {
+        \\    let first:Facade.Outcome<int, str> = Facade.Outcome<int, str>.success(42)
+        \\    let second = LocalOutcome<int, str>.failure("failed")
+        \\    match first { success(value) => { print(value) }; failure(message) => { print(message) } }
+        \\    match second { success(value) => { print(value) }; failure(message) => { print(message) } }
+        \\}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Api.sx",
+        .data = "public enum Outcome<T, E> { success(T); failure(E) }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Facade.sx",
+        .data = "public use Api.Outcome as Outcome",
+    });
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(input);
+    try std.testing.expectEqual(@as(usize, 1), compilation.ir.enums.len);
+    var found_reexport = false;
+    for (compilation.interfaces) |interface| {
+        if (!std.mem.eql(u8, interface.name, "Facade")) continue;
+        for (interface.enums) |enumeration| if (std.mem.eql(u8, enumeration.export_name, "Outcome")) {
+            try std.testing.expectEqual(@as(usize, 2), enumeration.type_parameters.len);
+            found_reexport = true;
+        };
+    }
+    try std.testing.expect(found_reexport);
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("42\nfailed\n", result.stdout);
+}
+
+test "diagnose invalid generic enum uses" {
+    try expectCompileError(
+        "enum Outcome<T, E> { success(T); failure(E) } func main() { let value:Outcome }",
+        "generic enum 'Outcome' requires 2 type arguments",
+    );
+    try expectCompileError(
+        "enum Outcome<T> { success(T) } func main() { Outcome.success(1) }",
+        "generic enum 'Outcome' requires 1 type argument",
+    );
+    try expectCompileError(
+        "enum Outcome<T, E> { success(T); failure(E) } func main() { Outcome<int>.success(1) }",
+        "generic enum 'Outcome' expects 2 type arguments, found 1",
+    );
+    try expectCompileError(
+        "enum State { ready } func main() { State<int>.ready() }",
+        "enum 'State' does not accept type arguments",
+    );
+    try expectCompileError(
+        "enum Outcome<T> { success(T) } func main() { Outcome<void>.success() }",
+        "'void' is not a generic type argument",
+    );
+    try expectCompileError(
+        "enum Code<T>: int { ready = 1 } func main() {}",
+        "raw enums cannot be generic",
+    );
+}

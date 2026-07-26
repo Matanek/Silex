@@ -40,6 +40,7 @@ pub const Expression = struct {
         string: []const u8,
         interpolated_string: InterpolatedString,
         identifier: []const u8,
+        generic_reference: GenericReference,
         call: Call,
         field_access: FieldAccess,
         unary: Unary,
@@ -64,6 +65,11 @@ pub const Expression = struct {
         position: Source.Position,
         name: []const u8,
         value: *Expression,
+    };
+
+    pub const GenericReference = struct {
+        name: []const u8,
+        type_arguments: []const Type,
     };
 
     pub const FieldAccess = struct {
