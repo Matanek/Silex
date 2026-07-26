@@ -291,6 +291,16 @@ fn encodeFunction(
             },
             .reference_load => |load| try emitReferenceCopy(allocator, words, load.result, load.reference, true),
             .reference_store => |store| try emitReferenceCopy(allocator, words, store.operand, store.reference, false),
+            .reference_offset => |offset| {
+                try words.append(allocator, loadStack(.x9, offset.reference));
+                if (offset.byte_offset <= std.math.maxInt(u12)) {
+                    try words.append(allocator, addSubtractImmediate(.x9, .x9, @intCast(offset.byte_offset), true));
+                } else {
+                    try emitImmediate64(allocator, words, .x10, offset.byte_offset);
+                    try words.append(allocator, addRegisters(.x9, .x9, .x10));
+                }
+                try words.append(allocator, storeStack(.x9, offset.result));
+            },
             .aggregate_init => |initialization| {
                 var destination_offset: usize = 0;
                 for (initialization.fields) |field| {

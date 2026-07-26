@@ -159,6 +159,7 @@ pub const VariableDeclaration = struct {
     name: []const u8,
     mutable: bool = false,
     annotation: ?Type,
+    annotation_mode: Parameter.Mode = .value,
     initializer: ?*Expression,
 };
 
@@ -408,6 +409,8 @@ pub const Function = struct {
     type_parameters: []const TypeParameter = &.{},
     parameters: []const Parameter,
     return_type: Type,
+    return_mode: Parameter.Mode = .value,
+    return_provenance: ?[]const u8 = null,
     statements: []const Statement,
 };
 

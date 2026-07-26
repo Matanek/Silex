@@ -25,7 +25,7 @@ pub fn inferMutability(allocator: std.mem.Allocator, program: Ast.Program) ![]co
     var flat: usize = 0;
     for (program.structures) |structure| {
         for (structure.methods) |method| {
-            mutating[flat] = statementsWriteSelf(method.statements);
+            mutating[flat] = method.return_mode == .mutable or statementsWriteSelf(method.statements);
             flat += 1;
         }
     }
@@ -57,7 +57,7 @@ pub fn extendStructures(
     var flat: usize = 0;
     for (program.structures) |structure| {
         for (structure.methods) |method| {
-            if (mutating[flat] and method.return_type != .void) extra += 1;
+            if (mutating[flat] and method.return_type != .void and method.return_mode != .mutable) extra += 1;
             flat += 1;
         }
     }
@@ -67,7 +67,7 @@ pub fn extendStructures(
     flat = 0;
     for (program.structures, 0..) |structure, structure_index| {
         for (structure.methods, 0..) |method, method_index| {
-            if (mutating[flat] and method.return_type != .void) {
+            if (mutating[flat] and method.return_type != .void and method.return_mode != .mutable) {
                 const fields = try allocator.alloc(Ir.StructureField, 2);
                 fields[0] = .{ .name = "self", .type = .structure(structure_index), .mutable = false };
                 fields[1] = .{ .name = "value", .type = method.return_type, .mutable = false };
@@ -83,19 +83,33 @@ pub fn extendStructures(
     return structures;
 }
 
-pub fn analyze(self: anytype, structure_index: usize, method_index: usize, method: Ast.Function) !Ir.Function {
+pub fn analyze(self: anytype, structure_index: usize, method_index: usize, source_method: Ast.Function) !Ir.Function {
+    var method = source_method;
+    if (method.return_mode != .value and method.return_provenance == null) method.return_provenance = "self";
     const structure = self.program.structures[structure_index];
     const flat = flatMethodIndex(self.program, structure_index, method_index);
     const mutating = self.method_mutability[flat];
+    const borrowed_mutable = method.return_mode == .mutable;
     const receiver_type = Ast.Type.structure(structure_index);
-    var builder: Model.FunctionBuilder = .{ .return_type = if (mutating) null else method.return_type };
+    var builder: Model.FunctionBuilder = .{ .return_type = if (mutating and !borrowed_mutable) null else method.return_type };
     try builder.blocks.append(self.allocator, .{});
 
     const parameter_types = try self.allocator.alloc(Ast.Type, method.parameters.len + 1);
-    parameter_types[0] = receiver_type;
-    try builder.value_types.append(self.allocator, receiver_type);
+    parameter_types[0] = if (borrowed_mutable) .address else receiver_type;
+    try builder.value_types.append(self.allocator, parameter_types[0]);
     var self_local: ?Ir.LocalId = null;
-    if (mutating) {
+    if (borrowed_mutable) {
+        try builder.bindings.append(self.allocator, .{
+            .name = "self",
+            .type = receiver_type,
+            .reference = 0,
+            .mutable = true,
+            .parameter = true,
+            .parameter_mode = .mutable,
+            .borrowed_root = "self",
+            .borrowed_mode = .mutable,
+        });
+    } else if (mutating) {
         self_local = builder.local_types.items.len;
         try builder.local_types.append(self.allocator, receiver_type);
         try self.emit(&builder, .{ .local_store = .{ .local = self_local.?, .operand = 0 } });
@@ -110,6 +124,8 @@ pub fn analyze(self: anytype, structure_index: usize, method_index: usize, metho
         .type = receiver_type,
         .value = 0,
         .parameter = true,
+        .borrowed_root = if (method.return_mode == .read) "self" else null,
+        .borrowed_mode = if (method.return_mode == .read) .read else .value,
     });
 
     for (method.parameters, 0..) |parameter, parameter_index| {
@@ -128,7 +144,7 @@ pub fn analyze(self: anytype, structure_index: usize, method_index: usize, metho
         });
     }
 
-    const terminated = if (mutating)
+    const terminated = if (mutating and !borrowed_mutable)
         try analyzeMutatingStatements(self, &builder, method, structure_index, flat, self_local.?, method.statements)
     else
         try self.analyzeStatements(&builder, method, method.statements);
@@ -141,7 +157,7 @@ pub fn analyze(self: anytype, structure_index: usize, method_index: usize, metho
             );
             return self.fail(method.name_position, message);
         }
-        if (mutating) {
+        if (mutating and !borrowed_mutable) {
             try emitMutatingReturn(self, &builder, structure_index, flat, self_local.?, method, null);
         } else self.terminate(&builder, .return_void);
     }
@@ -154,7 +170,7 @@ pub fn analyze(self: anytype, structure_index: usize, method_index: usize, metho
     return .{
         .name = try std.fmt.allocPrint(self.allocator, "{s}.{s}#{d}", .{ structure.name, method.name, method_index }),
         .parameter_types = parameter_types,
-        .return_type = methodIrReturnType(self, structure_index, flat, method.return_type),
+        .return_type = methodIrReturnType(self, structure_index, flat, method),
         .value_types = try builder.value_types.toOwnedSlice(self.allocator),
         .local_types = try builder.local_types.toOwnedSlice(self.allocator),
         .blocks = blocks,
@@ -309,14 +325,19 @@ fn analyzeCallWithReceiver(
     try Borrowing.validateReadArguments(self, method.parameters, call.arguments);
     const flat = flatMethodIndex(self.program, structure_index, method_index);
     const mutating = self.method_mutability[flat];
-    const place = if (mutating)
+    const borrowed_mutable = method.return_mode == .mutable;
+    const place = if (mutating and !borrowed_mutable)
         try requireMutablePlace(self, builder, receiver_expression, call.name)
+    else
+        null;
+    const borrowed_receiver = if (borrowed_mutable)
+        try MutableReferences.prepare(self, builder, receiver_expression, receiver.type)
     else
         null;
 
     var argument_ids: std.ArrayList(Ir.ValueId) = .empty;
     var mutable_arguments: std.ArrayList(MutableReferences.Prepared) = .empty;
-    try argument_ids.append(self.allocator, receiver.value);
+    try argument_ids.append(self.allocator, if (borrowed_receiver) |prepared| prepared.reference else receiver.value);
     for (arguments.items, method.parameters[0..arguments.items.len], 0..) |argument, parameter, index| {
         if (parameter.mode == .mutable) {
             const prepared = try MutableReferences.prepare(self, builder, call.arguments[index], parameter.type);
@@ -335,7 +356,7 @@ fn analyzeCallWithReceiver(
         try argument_ids.append(self.allocator, value.value);
     }
 
-    const ir_return_type = methodIrReturnType(self, structure_index, flat, method.return_type);
+    const ir_return_type = methodIrReturnType(self, structure_index, flat, method);
     const call_result: ?Ir.ValueId = if (ir_return_type == .void) null else try self.newValue(builder, ir_return_type);
     try self.emit(builder, .{ .call = .{
         .result = call_result,
@@ -344,8 +365,21 @@ fn analyzeCallWithReceiver(
     } });
     for (mutable_arguments.items) |prepared| try MutableReferences.writeBack(self, builder, prepared);
 
+    if (borrowed_mutable) {
+        try MutableReferences.writeBack(self, builder, borrowed_receiver.?);
+        const root = receiver.borrowed_root orelse Borrowing.rootName(receiver_expression) orelse return self.fail(receiver_expression.position, "borrowed return cannot originate from a temporary");
+        const loaded = try self.newValue(builder, method.return_type);
+        try self.emit(builder, .{ .reference_load = .{ .result = loaded, .reference = call_result.? } });
+        return .{ .type = method.return_type, .value = loaded, .borrowed_root = root, .borrowed_mode = .mutable, .reference = call_result.? };
+    }
     if (!mutating) {
-        return if (call_result) |value| .{ .type = method.return_type, .value = value } else null;
+        if (call_result) |value| return .{
+            .type = method.return_type,
+            .value = value,
+            .borrowed_root = if (method.return_mode == .read) receiver.borrowed_root orelse Borrowing.rootName(receiver_expression) else null,
+            .borrowed_mode = method.return_mode,
+        };
+        return null;
     }
     if (method.return_type == .void) {
         const replacement = if (safe_receiver_type) |optional_type|
@@ -597,9 +631,10 @@ fn emitMutatingReturn(
     self.terminate(builder, .{ .return_value = result });
 }
 
-fn methodIrReturnType(self: anytype, structure_index: usize, flat: usize, source_return: Ast.Type) Ast.Type {
-    if (!self.method_mutability[flat]) return source_return;
-    if (source_return == .void) return .structure(structure_index);
+fn methodIrReturnType(self: anytype, structure_index: usize, flat: usize, method: Ast.Function) Ast.Type {
+    if (method.return_mode == .mutable) return .address;
+    if (!self.method_mutability[flat]) return method.return_type;
+    if (method.return_type == .void) return .structure(structure_index);
     return methodResultType(self.program, self.method_mutability, self.program.type_names.len, flat).?;
 }
 
@@ -608,8 +643,8 @@ fn methodResultType(program: Ast.Program, mutating: []const bool, base_count: us
     var flat: usize = 0;
     for (program.structures) |structure| {
         for (structure.methods) |method| {
-            if (flat == target_flat) return if (mutating[flat] and method.return_type != .void) .structure(result) else null;
-            if (mutating[flat] and method.return_type != .void) result += 1;
+            if (flat == target_flat) return if (mutating[flat] and method.return_type != .void and method.return_mode != .mutable) .structure(result) else null;
+            if (mutating[flat] and method.return_type != .void and method.return_mode != .mutable) result += 1;
             flat += 1;
         }
     }

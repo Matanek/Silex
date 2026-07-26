@@ -168,6 +168,31 @@ test "native mutable-reference parameters match the reference interpreter" {
     try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
 }
 
+test "native borrowed returns match the reference interpreter" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const source =
+        \\struct State { var value:int }
+        \\struct Owner { var state:State }
+        \\func inspect(owner:@Owner) @State { return owner.state }
+        \\func edit(owner:&Owner) &State { return owner.state }
+        \\func main() {
+        \\    var owner = Owner(state:State(value:40))
+        \\    if true { let view = inspect(owner); print(view.value) }
+        \\    if true { var alias = edit(owner); alias.value += 2; print(alias.value) }
+        \\    print(owner.state.value)
+        \\}
+    ;
+    var frontend = Frontend.Frontend.init(allocator);
+    const reference = try Interpreter.runCapture(allocator, (try frontend.compile(source)).ir);
+    const native = try compileAndRun(allocator, source);
+    try std.testing.expectEqual(reference.exit_code, exitCode(native));
+    try std.testing.expectEqualSlices(u8, reference.stdout, native.stdout);
+    try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
+}
+
 test "native generic function specializations match the reference interpreter" {
     if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);

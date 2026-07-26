@@ -27,11 +27,30 @@ pub const Value = union(enum) {
     structure: Structure,
     enumeration: *const Enumeration,
     optional: Optional,
-    reference: *?Value,
+    reference: Reference,
+
+    pub const Reference = union(enum) {
+        optional: *?Value,
+        value: *Value,
+
+        fn load(self: Reference) Error!Value {
+            return switch (self) {
+                .optional => |pointer| pointer.* orelse error.InvalidProgram,
+                .value => |pointer| pointer.*,
+            };
+        }
+
+        fn store(self: Reference, value: Value) void {
+            switch (self) {
+                .optional => |pointer| pointer.* = value,
+                .value => |pointer| pointer.* = value,
+            }
+        }
+    };
 
     pub const Structure = struct {
         type: Ir.Type,
-        fields: []const Value,
+        fields: []Value,
     };
 
     pub const Optional = struct {
@@ -335,21 +354,35 @@ fn executeInstruction(
         ),
         .local_address => |address| {
             if (address.local >= locals.len or locals[address.local] == null) return error.InvalidProgram;
-            try store(function, values, address.result, .{ .reference = &locals[address.local] });
+            try store(function, values, address.result, .{ .reference = .{ .optional = &locals[address.local] } });
         },
         .reference_load => |reference| {
             const pointer = switch (try load(values, reference.reference)) {
                 .reference => |value| value,
                 else => return error.InvalidProgram,
             };
-            try store(function, values, reference.result, try cloneValue(allocator, pointer.* orelse return error.InvalidProgram));
+            try store(function, values, reference.result, try cloneValue(allocator, try pointer.load()));
         },
         .reference_store => |reference| {
             const pointer = switch (try load(values, reference.reference)) {
                 .reference => |value| value,
                 else => return error.InvalidProgram,
             };
-            pointer.* = try cloneValue(allocator, try load(values, reference.operand));
+            pointer.store(try cloneValue(allocator, try load(values, reference.operand)));
+        },
+        .reference_field => |field| {
+            const pointer = switch (try load(values, field.reference)) {
+                .reference => |value| value,
+                else => return error.InvalidProgram,
+            };
+            const root = switch (pointer) {
+                .optional => |value| value.* orelse return error.InvalidProgram,
+                .value => |value| value.*,
+            };
+            if (root != .structure) return error.InvalidProgram;
+            var structure = root.structure;
+            if (structure.type.structureIndex() != field.structure or field.field >= structure.fields.len) return error.InvalidProgram;
+            try store(function, values, field.result, .{ .reference = .{ .value = &structure.fields[field.field] } });
         },
         .convert => |conversion| {
             const operand = try load(values, conversion.operand);

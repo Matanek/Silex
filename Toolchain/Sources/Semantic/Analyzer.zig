@@ -7,6 +7,7 @@ const Source = @import("../Source.zig");
 const Mutation = @import("Mutation.zig");
 const Moves = @import("Moves.zig");
 const Borrowing = @import("Borrowing.zig");
+const Bindings = @import("Bindings.zig");
 const MutableReferences = @import("MutableReferences.zig");
 const Optionals = @import("Optionals.zig");
 const Constructors = @import("Constructors.zig");
@@ -90,6 +91,15 @@ pub const Analyzer = struct {
                         return self.fail(parameter.position, message);
                     }
                 }
+            }
+            if (function.return_mode != .value) {
+                const provenance = function.return_provenance orelse return self.fail(function.name_position, "borrowed return provenance is ambiguous; qualify it with a parameter name");
+                var compatible = false;
+                for (function.parameters) |parameter| if (std.mem.eql(u8, parameter.name, provenance)) {
+                    compatible = if (function.return_mode == .read) parameter.mode != .value else parameter.mode == .mutable;
+                    break;
+                };
+                if (!compatible) return self.fail(function.name_position, "borrowed return provenance must name a compatible borrowed parameter");
             }
         }
         for (self.program.functions, 0..) |function, index| {
@@ -269,7 +279,7 @@ pub const Analyzer = struct {
         return .{
             .name = function.name,
             .parameter_types = try parameter_types.toOwnedSlice(self.allocator),
-            .return_type = function.return_type,
+            .return_type = if (function.return_mode == .mutable) .address else function.return_type,
             .value_types = try builder.value_types.toOwnedSlice(self.allocator),
             .local_types = try builder.local_types.toOwnedSlice(self.allocator),
             .blocks = owned_blocks,
@@ -326,7 +336,7 @@ pub const Analyzer = struct {
     fn analyzeStatement(self: *Analyzer, builder: *FunctionBuilder, function: Ast.Function, statement: Ast.Statement) AnalyzeError!bool {
         return switch (statement) {
             .variable_declaration => |declaration| variable: {
-                try self.analyzeVariable(builder, declaration);
+                try Bindings.analyzeVariable(self, builder, declaration);
                 break :variable false;
             },
             .assignment_statement => |assignment| assignment_statement: {
@@ -334,7 +344,7 @@ pub const Analyzer = struct {
                 break :assignment_statement false;
             },
             .return_statement => |return_statement| return_value: {
-                try self.analyzeReturn(builder, function, return_statement);
+                try Bindings.analyzeReturn(self, builder, function, return_statement);
                 break :return_value true;
             },
             .expression_statement => |expression| switch (expression.value) {
@@ -367,87 +377,6 @@ pub const Analyzer = struct {
             .break_statement => |position| Control.analyzeLoopControl(self, builder, position, false),
             .continue_statement => |position| Control.analyzeLoopControl(self, builder, position, true),
         };
-    }
-
-    fn analyzeVariable(self: *Analyzer, builder: *FunctionBuilder, declaration: Ast.VariableDeclaration) AnalyzeError!void {
-        if (Support.findBinding(builder.bindings.items, declaration.name) != null) {
-            const message = try std.fmt.allocPrint(self.allocator, "variable '{s}' is already declared in this scope", .{declaration.name});
-            return self.fail(declaration.name_position, message);
-        }
-
-        var initializer: TypedValue = if (declaration.initializer) |expression|
-            try self.analyzeExpressionExpected(
-                builder,
-                expression,
-                if (declaration.annotation) |annotation| Optionals.expectedContext(annotation, expression) else null,
-            )
-        else intrinsic: {
-            const annotation = declaration.annotation.?;
-            break :intrinsic try self.emitIntrinsic(builder, annotation, declaration.name_position);
-        };
-        const declared_type = declaration.annotation orelse initializer.type;
-        try Borrowing.requireOwned(self, initializer, if (declaration.initializer) |value| value.position else declaration.name_position, "stored");
-        if (initializer.type != declared_type and (Numeric.canWiden(initializer.type, declared_type) or Optionals.canConvert(initializer.type, declared_type))) {
-            initializer = try self.coerce(builder, initializer, declared_type, declaration.initializer.?.position);
-        }
-        if (initializer.type != declared_type) {
-            const message = try std.fmt.allocPrint(
-                self.allocator,
-                "variable '{s}' expects '{s}', found '{s}'",
-                .{ declaration.name, self.typeName(declared_type), self.typeName(initializer.type) },
-            );
-            return self.fail(if (declaration.initializer) |value| value.position else declaration.name_position, message);
-        }
-        if (declaration.mutable) {
-            const local = builder.local_types.items.len;
-            try builder.local_types.append(self.allocator, declared_type);
-            try self.emit(builder, .{ .local_store = .{ .local = local, .operand = initializer.value } });
-            try builder.bindings.append(self.allocator, .{
-                .name = declaration.name,
-                .type = declared_type,
-                .local = local,
-                .mutable = true,
-            });
-        } else try builder.bindings.append(self.allocator, .{
-            .name = declaration.name,
-            .type = declared_type,
-            .value = initializer.value,
-        });
-    }
-
-    fn analyzeReturn(self: *Analyzer, builder: *FunctionBuilder, function: Ast.Function, statement: Ast.ReturnStatement) AnalyzeError!void {
-        if (statement.value) |expression| {
-            if (function.return_type == .void) return self.fail(statement.position, "a void function cannot return a value");
-            var value = try self.analyzeExpressionExpected(
-                builder,
-                expression,
-                Optionals.expectedContext(function.return_type, expression),
-            );
-            if (value.type != function.return_type and (Numeric.canWiden(value.type, function.return_type) or Optionals.canConvert(value.type, function.return_type))) {
-                value = try self.coerce(builder, value, function.return_type, expression.position);
-            }
-            if (value.type != function.return_type) {
-                const message = try std.fmt.allocPrint(
-                    self.allocator,
-                    "return expects '{s}', found '{s}'",
-                    .{ self.typeName(function.return_type), self.typeName(value.type) },
-                );
-                return self.fail(expression.position, message);
-            }
-            try Borrowing.requireOwned(self, value, expression.position, "returned");
-            self.terminate(builder, .{ .return_value = value.value });
-            return;
-        }
-
-        if (function.return_type != .void) {
-            const message = try std.fmt.allocPrint(
-                self.allocator,
-                "expected return value of type '{s}'",
-                .{self.typeName(function.return_type)},
-            );
-            return self.fail(statement.position, message);
-        }
-        self.terminate(builder, .return_void);
     }
 
     pub fn analyzeExpression(self: *Analyzer, builder: *FunctionBuilder, expression: *const Ast.Expression) AnalyzeError!TypedValue {
@@ -900,7 +829,17 @@ pub const Analyzer = struct {
             }
             const result = try self.newValue(builder, field.type);
             try self.emit(builder, .{ .field_load = .{ .result = result, .base = base.value, .field = field_index } });
-            return .{ .type = field.type, .value = result, .borrowed_root = base.borrowed_root, .borrowed_mode = base.borrowed_mode };
+            const reference = if (base.reference != null and base.borrowed_mode == .mutable and field.mutable) reference: {
+                const field_reference = try self.newValue(builder, .address);
+                try self.emit(builder, .{ .reference_field = .{
+                    .result = field_reference,
+                    .reference = base.reference.?,
+                    .structure = structure_index,
+                    .field = field_index,
+                } });
+                break :reference field_reference;
+            } else null;
+            return .{ .type = field.type, .value = result, .borrowed_root = base.borrowed_root, .borrowed_mode = base.borrowed_mode, .reference = reference };
         }
         const message = try std.fmt.allocPrint(
             self.allocator,
@@ -1223,6 +1162,7 @@ pub const Analyzer = struct {
             const value = try self.analyzeParameterDefault(builder, parameter);
             try argument_ids.append(self.allocator, value.value);
         }
+        const result_type: Types.Type = if (function.return_mode == .mutable) .address else function.return_type;
         const result: ?Ir.ValueId = if (function.return_type == .void)
             null
         else result: {
@@ -1234,7 +1174,7 @@ pub const Analyzer = struct {
                 );
                 return self.fail(call.name_position, message);
             }
-            break :result try self.newValue(builder, function.return_type);
+            break :result try self.newValue(builder, result_type);
         };
         try self.emit(builder, .{ .call = .{
             .result = result,
@@ -1242,7 +1182,32 @@ pub const Analyzer = struct {
             .arguments = try argument_ids.toOwnedSlice(self.allocator),
         } });
         for (mutable_arguments.items) |argument| try MutableReferences.writeBack(self, builder, argument.prepared);
-        return if (result) |value| .{ .type = function.return_type, .value = value } else null;
+        if (result == null) return null;
+        if (function.return_mode == .value) return .{ .type = function.return_type, .value = result.? };
+        const provenance = function.return_provenance.?;
+        var parameter_index: ?usize = null;
+        for (function.parameters, 0..) |parameter, index| if (std.mem.eql(u8, parameter.name, provenance)) {
+            parameter_index = index;
+            break;
+        };
+        const source = arguments.items[parameter_index.?];
+        const root = source.borrowed_root orelse Borrowing.rootName(call.arguments[parameter_index.?]) orelse
+            return self.fail(call.name_position, "borrowed return cannot originate from a temporary");
+        if (function.return_mode == .read) return .{
+            .type = function.return_type,
+            .value = result.?,
+            .borrowed_root = root,
+            .borrowed_mode = .read,
+        };
+        const loaded = try self.newValue(builder, function.return_type);
+        try self.emit(builder, .{ .reference_load = .{ .result = loaded, .reference = result.? } });
+        return .{
+            .type = function.return_type,
+            .value = loaded,
+            .borrowed_root = root,
+            .borrowed_mode = .mutable,
+            .reference = result.?,
+        };
     }
 
     fn emitInteger(self: *Analyzer, builder: *FunctionBuilder, bits: u64, type_value: Types.Type) AnalyzeError!TypedValue {

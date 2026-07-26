@@ -66,6 +66,7 @@ pub const Instruction = union(enum) {
     local_address: LocalAddress,
     reference_load: ReferenceLoad,
     reference_store: ReferenceStore,
+    reference_offset: ReferenceOffset,
     aggregate_init: AggregateInit,
     list_init: ListInit,
     enum_init: EnumInit,
@@ -154,6 +155,12 @@ pub const Instruction = union(enum) {
     pub const ReferenceStore = struct {
         reference: Slot,
         operand: Span,
+    };
+
+    pub const ReferenceOffset = struct {
+        result: Slot,
+        reference: Slot,
+        byte_offset: u32,
     };
 
     pub const AggregateInit = struct {
@@ -399,6 +406,10 @@ pub fn validate(program: Program) Error!void {
             .reference_store => |value| {
                 try requireSlot(function, value.reference);
                 try requireSpan(function, value.operand);
+            },
+            .reference_offset => |value| {
+                try requireSlot(function, value.result);
+                try requireSlot(function, value.reference);
             },
             .aggregate_init => |value| {
                 try requireSpan(function, value.result);

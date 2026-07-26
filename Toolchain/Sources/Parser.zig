@@ -222,7 +222,34 @@ pub const Parser = struct {
         }
         try self.expect(.right_parenthesis, "expected ')' after parameters");
 
+        var return_mode: Ast.Parameter.Mode = .value;
+        var return_provenance: ?[]const u8 = null;
+        if (self.current.tag == .at or self.current.tag == .amp) {
+            return_mode = if (self.current.tag == .at) .read else .mutable;
+            try self.advance();
+            if (self.current.tag == .identifier) {
+                var lexer = self.lexer;
+                const next = try lexer.next();
+                if (next.tag == .colon) {
+                    return_provenance = self.current.lexeme;
+                    try self.advance();
+                    try self.expect(.colon, "expected ':' after borrowed return provenance");
+                }
+            }
+        }
         const return_type: Ast.Type = if (self.current.tag == .left_brace) .void else try self.parseType();
+        if (return_mode != .value and return_type == .void) return self.failAt(name_position, "a borrowed return cannot be 'void'");
+        if (return_mode != .value and return_provenance == null) {
+            var compatible: ?[]const u8 = null;
+            var count: usize = 0;
+            for (parameters.items) |parameter| {
+                const accepts = if (return_mode == .read) parameter.mode != .value else parameter.mode == .mutable;
+                if (!accepts) continue;
+                compatible = parameter.name;
+                count += 1;
+            }
+            if (count == 1) return_provenance = compatible;
+        }
         return .{
             .is_public = is_public,
             .is_internal = is_internal,
@@ -232,6 +259,8 @@ pub const Parser = struct {
             .type_parameters = type_parameters,
             .parameters = try parameters.toOwnedSlice(self.allocator),
             .return_type = return_type,
+            .return_mode = return_mode,
+            .return_provenance = return_provenance,
             .statements = try self.parseBlock(),
         };
     }
@@ -456,8 +485,13 @@ pub const Parser = struct {
         try self.advance();
 
         var annotation: ?Ast.Type = null;
+        var annotation_mode: Ast.Parameter.Mode = .value;
         if (self.current.tag == .colon) {
             try self.advance();
+            if (self.current.tag == .at or self.current.tag == .amp) {
+                annotation_mode = if (self.current.tag == .at) .read else .mutable;
+                try self.advance();
+            }
             annotation = try self.parseType();
         }
 
@@ -475,6 +509,7 @@ pub const Parser = struct {
             .name = name,
             .mutable = mutable,
             .annotation = annotation,
+            .annotation_mode = annotation_mode,
             .initializer = initializer,
         } };
     }

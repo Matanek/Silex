@@ -374,6 +374,27 @@ parameter cannot be moved, returned, stored in another binding or aggregate,
 or passed by value. Like `@T`, `&T` is a controlled parameter mode rather than
 a pointer or an overload distinction.
 
+The same modes may qualify a return type. The return expression does not repeat
+the mode: its ordinary field or call expression must carry compatible
+provenance from the parameter named by the signature.
+
+```sx
+func inspect(owner:@Owner) @State {
+    return owner.state
+}
+
+func edit(owner:&Owner) &State {
+    return owner.state
+}
+```
+
+When exactly one compatible borrowed parameter exists, its provenance is
+implicit. Otherwise the return names it, as in `@first:State`. A shared return
+may originate from `@` or `&`; a mutable return requires `&`. Borrowed calls may
+be retained in a lexical local: `let` keeps a shared alias, while `var` keeps a
+mutable result. Such aliases cannot escape into aggregates or outlive their
+root, and a stored mutable alias is exclusive until its lexical scope ends.
+
 ## Associated enum values
 
 `enum` declares a nominal closed set of variants. A variant may carry zero or
@@ -942,7 +963,7 @@ function        = visibility? "func" identifier type_parameters? "(" parameters?
 type_parameters = "<" identifier ("," identifier)* ">" ;
 parameters      = parameter ("," parameter)* ;
 parameter       = identifier ":" ("@" | "&")? type ("=" expression)? ;
-return_type     = type ;
+return_type     = (("@" | "&") (identifier ":")?)? type ;
 type            = type_atom ("[" integer? "]")* "?"? ;
 type_atom       = "void" | "int8" | "int16" | "int32" | "int64" | "int"
                 | "uint8" | "uint16" | "uint32" | "uint64" | "uint"
@@ -961,7 +982,7 @@ for_statement   = "for" (for_binding | "(" for_binding ")") block ;
 for_binding     = ("let" | "var")? identifier "in" for_source ;
 for_source      = expression ("..." expression)?
                 | "range" "(" expression "," expression ")" ;
-binding_statement = ("let" | "var") identifier (":" type)? ("=" expression)? ;
+binding_statement = ("let" | "var") identifier (":" ("@" | "&")? type)? ("=" expression)? ;
 assignment_statement = field_path ("=" | "+=" | "-=" | "*=" | "/=") expression
                      | field_path ("++" | "--") ;
 field_path      = identifier (("." identifier) | ("[" expression "]"))* ;

@@ -12,12 +12,15 @@ pub fn analyzeIdentifier(self: anytype, builder: anytype, position: @import("../
         const message = try std.fmt.allocPrint(self.allocator, "value '{s}' was moved and is unavailable", .{name});
         return self.fail(position, message);
     }
-    const borrowed_root = if (binding.parameter_mode != .value) binding.name else null;
+    if (binding.borrowed_root == null) try ensureRootReadable(self, builder, name, position);
+    const borrowed_root = binding.borrowed_root orelse if (binding.parameter_mode != .value) binding.name else null;
+    const borrowed_mode = if (binding.borrowed_mode != .value) binding.borrowed_mode else binding.parameter_mode;
     if (binding.refined_type) |type_value| return .{
         .type = type_value,
         .value = binding.refined_value.?,
         .borrowed_root = borrowed_root,
-        .borrowed_mode = binding.parameter_mode,
+        .borrowed_mode = borrowed_mode,
+        .reference = binding.reference,
     };
     if (!binding.type.hasRuntimeValue()) {
         const message = try std.fmt.allocPrint(self.allocator, "values of type '{s}' are not executable yet", .{binding.type.name()});
@@ -26,14 +29,14 @@ pub fn analyzeIdentifier(self: anytype, builder: anytype, position: @import("../
     if (binding.local) |local| {
         const result = try self.newValue(builder, binding.type);
         try self.emit(builder, .{ .local_load = .{ .result = result, .local = local } });
-        return .{ .type = binding.type, .value = result, .borrowed_root = borrowed_root, .borrowed_mode = binding.parameter_mode };
+        return .{ .type = binding.type, .value = result, .borrowed_root = borrowed_root, .borrowed_mode = borrowed_mode, .reference = binding.reference };
     }
     if (binding.reference) |reference| {
         const result = try self.newValue(builder, binding.type);
         try self.emit(builder, .{ .reference_load = .{ .result = result, .reference = reference } });
-        return .{ .type = binding.type, .value = result, .borrowed_root = borrowed_root, .borrowed_mode = binding.parameter_mode };
+        return .{ .type = binding.type, .value = result, .borrowed_root = borrowed_root, .borrowed_mode = borrowed_mode, .reference = reference };
     }
-    return .{ .type = binding.type, .value = binding.value.?, .borrowed_root = borrowed_root, .borrowed_mode = binding.parameter_mode };
+    return .{ .type = binding.type, .value = binding.value.?, .borrowed_root = borrowed_root, .borrowed_mode = borrowed_mode, .reference = binding.reference };
 }
 
 pub fn requireOwned(self: anytype, value: Model.TypedValue, position: @import("../Source.zig").Position, action: []const u8) !void {
@@ -64,6 +67,24 @@ pub fn validateReadArguments(self: anytype, parameters: []const Ast.Parameter, a
             const message = try std.fmt.allocPrint(self.allocator, "cannot move or mutate '{s}' while it is passed as '@{s}'", .{ root, parameter.type.name() });
             return self.fail(later.position, message);
         };
+    }
+}
+
+pub fn ensureRootUnborrowed(self: anytype, builder: anytype, root: []const u8, position: @import("../Source.zig").Position) !void {
+    for (builder.bindings.items) |binding| {
+        const borrowed_root = binding.borrowed_root orelse continue;
+        if (!std.mem.eql(u8, borrowed_root, root)) continue;
+        const message = try std.fmt.allocPrint(self.allocator, "cannot mutate or move '{s}' while alias '{s}' is alive", .{ root, binding.name });
+        return self.fail(position, message);
+    }
+}
+
+pub fn ensureRootReadable(self: anytype, builder: anytype, root: []const u8, position: @import("../Source.zig").Position) !void {
+    for (builder.bindings.items) |binding| {
+        const borrowed_root = binding.borrowed_root orelse continue;
+        if (binding.borrowed_mode != .mutable or !std.mem.eql(u8, borrowed_root, root)) continue;
+        const message = try std.fmt.allocPrint(self.allocator, "cannot read '{s}' while mutable alias '{s}' is alive", .{ root, binding.name });
+        return self.fail(position, message);
     }
 }
 
