@@ -80,6 +80,7 @@ pub const Instruction = union(enum) {
     collection_load: CollectionLoad,
     collection_replace: CollectionReplace,
     collection_count: CollectionCount,
+    list_edit: ListEdit,
     local_load: LocalLoad,
     local_store: LocalStore,
     convert: Convert,
@@ -199,6 +200,17 @@ pub const Instruction = union(enum) {
     pub const CollectionCount = struct {
         result: ValueId,
         collection: ValueId,
+    };
+
+    pub const ListEditKind = enum { append, append_sequence, prepend, insert, take, take_first, take_last, clear, reverse };
+    pub const ListEdit = struct {
+        result: ValueId,
+        collection: ValueId,
+        kind: ListEditKind,
+        index: ?ValueId = null,
+        argument: ?ValueId = null,
+        removed: ?ValueId = null,
+        position: Source.Position,
     };
 
     pub const LocalLoad = struct {
@@ -613,6 +625,21 @@ fn writeInstruction(
             try appendResult(output, allocator, program, function, count.result);
             try output.appendSlice(allocator, "collection.count ");
             try appendValueChecked(output, allocator, function, count.collection);
+        },
+        .list_edit => |edit| {
+            try appendResult(output, allocator, program, function, edit.result);
+            try output.appendSlice(allocator, "list.");
+            try output.appendSlice(allocator, @tagName(edit.kind));
+            try output.append(allocator, ' ');
+            try appendValueChecked(output, allocator, function, edit.collection);
+            if (edit.index) |index| {
+                try output.appendSlice(allocator, ", ");
+                try appendValueChecked(output, allocator, function, index);
+            }
+            if (edit.argument) |argument| {
+                try output.appendSlice(allocator, ", ");
+                try appendValueChecked(output, allocator, function, argument);
+            }
         },
         .local_load => |load| {
             try appendResult(output, allocator, program, function, load.result);

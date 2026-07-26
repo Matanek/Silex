@@ -773,6 +773,16 @@ indexing, mutability, evaluation-order, and bounds-diagnostic contracts as
 fixed arrays. Capacity, allocation strategy, and storage addresses are never
 part of the Silex API.
 
+Mutable arrays and lists provide `swap(left, right)`, `reverse()`, and
+`replace(index, value)`. `replace` returns the previous element. Dynamic lists
+also provide `append(value_or_sequence)`, `prepend(value)`,
+`insert(index, value)`, `take(index)`, `take_first()`, `take_last()`, and
+`clear()`. The three `take` forms return the removed element.
+
+All receiver, index, and value expressions run exactly once in source order.
+An invalid index terminates before the root `var` is changed. Every operation
+is rejected through a `let`; mutating one copied list never changes another.
+
 ## Observable statements
 
 `print(expression, ...)` accepts one or more expressions. It evaluates every

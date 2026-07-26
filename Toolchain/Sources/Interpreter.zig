@@ -319,6 +319,7 @@ fn executeInstruction(
         .collection_load => |access| try executeCollectionLoad(allocator, program, function, values, access, session),
         .collection_replace => |replacement| try executeCollectionReplace(allocator, program, function, values, replacement, session),
         .collection_count => |count| try executeCollectionCount(function, values, count),
+        .list_edit => |edit| try executeListEdit(allocator, program, function, values, edit, session),
         .local_load => |local| {
             const value = try cloneValue(allocator, try loadLocal(function, locals, local.local));
             try store(function, values, local.result, value);
@@ -483,6 +484,75 @@ fn executeCollectionCount(function: Ir.Function, values: []?Value, count: Ir.Ins
         else => return error.InvalidProgram,
     };
     try store(function, values, count.result, .{ .integer = @intCast(collection.fields.len) });
+}
+
+fn executeListEdit(
+    allocator: Allocator,
+    program: Ir.Program,
+    function: Ir.Function,
+    values: []?Value,
+    edit: Ir.Instruction.ListEdit,
+    session: *Session,
+) Error!void {
+    const source = switch (try load(values, edit.collection)) {
+        .structure => |value| value,
+        else => return error.InvalidProgram,
+    };
+    var index: usize = 0;
+    if (edit.kind == .insert or edit.kind == .take) {
+        const raw = try integer(try load(values, edit.index.?));
+        index = normalizedCollectionIndex(raw, source.fields.len) orelse {
+            const message = try std.fmt.allocPrint(allocator, "collection index {d} is out of bounds for count {d}", .{ raw, source.fields.len });
+            try appendRuntimeError(session, program, edit.position, "", message);
+            session.terminated = true;
+            return error.RuntimeTerminated;
+        };
+    } else if (edit.kind == .take_first or edit.kind == .take_last) {
+        if (source.fields.len == 0) {
+            try appendRuntimeError(session, program, edit.position, "", "cannot take an element from an empty list");
+            session.terminated = true;
+            return error.RuntimeTerminated;
+        }
+        index = if (edit.kind == .take_last) source.fields.len - 1 else 0;
+    }
+    const argument_values: []const Value = if (edit.kind == .append_sequence) switch (try load(values, edit.argument.?)) {
+        .structure => |value| value.fields,
+        else => return error.InvalidProgram,
+    } else &.{};
+    const new_len = switch (edit.kind) {
+        .append, .prepend, .insert => source.fields.len + 1,
+        .append_sequence => source.fields.len + argument_values.len,
+        .take, .take_first, .take_last => source.fields.len - 1,
+        .clear => 0,
+        .reverse => source.fields.len,
+    };
+    const result = try allocator.alloc(Value, new_len);
+    switch (edit.kind) {
+        .append => {
+            for (source.fields, 0..) |item, at| result[at] = try cloneValue(allocator, item);
+            result[new_len - 1] = try cloneValue(allocator, try load(values, edit.argument.?));
+        },
+        .append_sequence => {
+            for (source.fields, 0..) |item, at| result[at] = try cloneValue(allocator, item);
+            for (argument_values, source.fields.len..) |item, at| result[at] = try cloneValue(allocator, item);
+        },
+        .prepend, .insert => {
+            const insertion = if (edit.kind == .prepend) 0 else index;
+            for (result, 0..) |*item, at| item.* = try cloneValue(allocator, if (at == insertion)
+                try load(values, edit.argument.?)
+            else
+                source.fields[if (at < insertion) at else at - 1]);
+        },
+        .take, .take_first, .take_last => {
+            for (result, 0..) |*item, at| item.* = try cloneValue(allocator, source.fields[if (at < index) at else at + 1]);
+            try store(function, values, edit.removed.?, try cloneValue(allocator, source.fields[index]));
+        },
+        .clear => {},
+        .reverse => {
+            for (result, 0..) |*item, at| item.* = try cloneValue(allocator, source.fields[source.fields.len - 1 - at]);
+        },
+    }
+    try store(function, values, edit.result, .{ .structure = .{ .type = source.type, .fields = result } });
 }
 
 fn executeCollectionLoad(

@@ -70,6 +70,7 @@ pub const Instruction = union(enum) {
     collection_load: CollectionLoad,
     collection_replace: CollectionReplace,
     collection_count: CollectionCount,
+    list_edit: ListEdit,
     aggregate_equal: AggregateEqual,
     convert: Convert,
     format_value: FormatValue,
@@ -186,6 +187,20 @@ pub const Instruction = union(enum) {
     pub const CollectionCount = struct {
         result: Slot,
         collection: Slot,
+    };
+
+    pub const ListEdit = struct {
+        result: Slot,
+        collection: Slot,
+        kind: @import("../Ir.zig").Instruction.ListEditKind,
+        index: ?Slot,
+        argument: ?Span,
+        argument_dynamic: bool = false,
+        argument_count: u32 = 0,
+        removed: ?Span,
+        element_width: u12,
+        header: usize,
+        tail: usize,
     };
 
     pub const AggregateEqual = struct {
@@ -401,6 +416,14 @@ pub fn validate(program: Program) Error!void {
             .collection_count => |value| {
                 try requireSlot(function, value.result);
                 try requireSlot(function, value.collection);
+            },
+            .list_edit => |value| {
+                try requireSlot(function, value.result);
+                try requireSlot(function, value.collection);
+                if (value.index) |slot| try requireSlot(function, slot);
+                if (value.argument) |span| try requireSpan(function, span);
+                if (value.removed) |span| try requireSpan(function, span);
+                if (value.element_width == 0 or value.header >= program.strings.len or value.tail >= program.strings.len) return error.InvalidMachineProgram;
             },
             .aggregate_equal => |value| {
                 try requireSlot(function, value.result);
