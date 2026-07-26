@@ -25,6 +25,7 @@ pub const Value = union(enum) {
     boolean: bool,
     string: []const u8,
     structure: Structure,
+    view: View,
     enumeration: *const Enumeration,
     optional: Optional,
     reference: Reference,
@@ -53,6 +54,11 @@ pub const Value = union(enum) {
         fields: []Value,
     };
 
+    pub const View = struct {
+        type: Ir.Type,
+        fields: []Value,
+    };
+
     pub const Optional = struct {
         type: Ir.Type,
         value: ?*const Value,
@@ -75,6 +81,7 @@ pub const Value = union(enum) {
             .boolean => .bool,
             .string => .str,
             .structure => |value| value.type,
+            .view => |value| value.type,
             .enumeration => |value| value.type,
             .optional => |value| value.type,
             .reference => .address,
@@ -342,6 +349,7 @@ fn executeInstruction(
         .collection_count => |count| try executeCollectionCount(function, values, count),
         .list_edit => |edit| try executeListEdit(allocator, program, function, values, edit, session),
         .collection_slice => |slice| try executeCollectionSlice(allocator, function, values, slice),
+        .collection_view => |view| try executeCollectionView(function, values, view),
         .local_load => |local| {
             const value = try cloneValue(allocator, try loadLocal(function, locals, local.local));
             try store(function, values, local.result, value);
@@ -474,6 +482,7 @@ fn cloneValue(allocator: Allocator, value: Value) Error!Value {
             for (aggregate.fields, 0..) |field, index| fields[index] = try cloneValue(allocator, field);
             break :cloned .{ .structure = .{ .type = aggregate.type, .fields = fields } };
         },
+        .view => value,
         .enumeration => |enumeration| cloned: {
             const values = try allocator.alloc(Value, enumeration.values.len);
             for (enumeration.values, 0..) |item, index| values[index] = try cloneValue(allocator, item);
@@ -535,6 +544,7 @@ fn executeListInit(allocator: Allocator, function: Ir.Function, values: []?Value
 fn executeCollectionCount(function: Ir.Function, values: []?Value, count: Ir.Instruction.CollectionCount) Error!void {
     const collection = switch (try load(values, count.collection)) {
         .structure => |value| value,
+        .view => |value| Value.Structure{ .type = value.type, .fields = value.fields },
         else => return error.InvalidProgram,
     };
     try store(function, values, count.result, .{ .integer = @intCast(collection.fields.len) });
@@ -612,6 +622,7 @@ fn executeListEdit(
 fn executeCollectionSlice(allocator: Allocator, function: Ir.Function, values: []?Value, slice: Ir.Instruction.CollectionSlice) Error!void {
     const source = switch (try load(values, slice.collection)) {
         .structure => |value| value,
+        .view => |value| Value.Structure{ .type = value.type, .fields = value.fields },
         else => return error.InvalidProgram,
     };
     const count: i64 = @intCast(source.fields.len);
@@ -630,6 +641,31 @@ fn executeCollectionSlice(allocator: Allocator, function: Ir.Function, values: [
     } });
 }
 
+fn executeCollectionView(function: Ir.Function, values: []?Value, view: Ir.Instruction.CollectionSlice) Error!void {
+    const source_value = if (view.reference) |reference| switch (try load(values, reference)) {
+        .reference => |pointer| try pointer.load(),
+        else => return error.InvalidProgram,
+    } else try load(values, view.collection);
+    const fields = switch (source_value) {
+        .structure => |value| value.fields,
+        .view => |value| value.fields,
+        else => return error.InvalidProgram,
+    };
+    const count: i64 = @intCast(fields.len);
+    var start = try integer(try load(values, view.start));
+    var end = try integer(try load(values, view.end));
+    if (start < 0) start += count;
+    if (end < 0) end += count;
+    start = std.math.clamp(start, 0, count);
+    end = std.math.clamp(end, 0, count);
+    const length: usize = if (start < end) @intCast(end - start) else 0;
+    const offset: usize = @intCast(start);
+    try store(function, values, view.result, .{ .view = .{
+        .type = function.value_types[view.result],
+        .fields = fields[offset .. offset + length],
+    } });
+}
+
 fn executeCollectionLoad(
     allocator: Allocator,
     program: Ir.Program,
@@ -640,6 +676,7 @@ fn executeCollectionLoad(
 ) Error!void {
     const aggregate = switch (try load(values, access.collection)) {
         .structure => |value| value,
+        .view => |value| Value.Structure{ .type = value.type, .fields = value.fields },
         else => return error.InvalidProgram,
     };
     const source_index = try integer(try load(values, access.index));
@@ -660,8 +697,10 @@ fn executeCollectionReplace(
     replacement: Ir.Instruction.CollectionReplace,
     session: *Session,
 ) Error!void {
-    const aggregate = switch (try load(values, replacement.collection)) {
+    const source = try load(values, replacement.collection);
+    const aggregate = switch (source) {
         .structure => |value| value,
+        .view => |value| Value.Structure{ .type = value.type, .fields = value.fields },
         else => return error.InvalidProgram,
     };
     const source_index = try integer(try load(values, replacement.index));
@@ -671,6 +710,11 @@ fn executeCollectionReplace(
         session.terminated = true;
         return error.RuntimeTerminated;
     };
+    if (source == .view) {
+        aggregate.fields[offset] = try cloneValue(allocator, try load(values, replacement.replacement));
+        try store(function, values, replacement.result, source);
+        return;
+    }
     const fields = try allocator.alloc(Value, aggregate.fields.len);
     for (aggregate.fields, 0..) |field, index| {
         fields[index] = try cloneValue(allocator, if (index == offset) try load(values, replacement.replacement) else field);
@@ -909,6 +953,7 @@ fn equal(left: Value, right: Value) Error!bool {
             }
             break :structure true;
         },
+        .view => error.InvalidProgram,
         .enumeration => return error.InvalidProgram,
         .optional => |optional| optional_value: {
             if ((optional.value == null) != (right.optional.value == null)) break :optional_value false;
@@ -945,6 +990,7 @@ fn appendValueText(output: *std.ArrayList(u8), allocator: Allocator, value: Valu
             try output.appendSlice(allocator, "null"),
         .reference => return error.InvalidProgram,
         .structure => return error.InvalidProgram,
+        .view => return error.InvalidProgram,
         .enumeration => return error.InvalidProgram,
         .void => return error.InvalidProgram,
     }

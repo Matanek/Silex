@@ -8,6 +8,8 @@ pub const UnaryOperator = enum {
     logical_not,
     propagate,
     move,
+    borrow_read,
+    borrow_mutable,
 };
 
 pub const BinaryOperator = enum {

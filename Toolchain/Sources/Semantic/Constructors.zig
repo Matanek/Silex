@@ -12,6 +12,23 @@ const Resources = @import("Resources.zig");
 
 const AnalyzeError = error{ InvalidSource, OutOfMemory };
 
+pub fn restrictedFieldDefault(self: anytype, expression: *const Ast.Expression) bool {
+    return switch (expression.value) {
+        .integer, .floating, .boolean, .null_value, .string => true,
+        .unary => |unary| unary.operator == .negate and switch (unary.operand.value) {
+            .integer, .floating => true,
+            else => false,
+        },
+        .call => |call| call.arguments.len == 0 and self.structureIndex(call.name) != null and blk: {
+            for (call.named_arguments) |argument| {
+                if (!restrictedFieldDefault(self, argument.value)) break :blk false;
+            }
+            break :blk true;
+        },
+        else => false,
+    };
+}
+
 pub fn analyze(
     self: anytype,
     structure_index: usize,

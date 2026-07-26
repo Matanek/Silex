@@ -195,6 +195,7 @@ test {
     _ = @import("OptionalTests.zig");
     _ = @import("ResultTests.zig");
     _ = @import("TryTests.zig");
+    _ = @import("ViewTests.zig");
     _ = @import("Packages.zig");
     _ = @import("ReadReferenceTests.zig");
     _ = @import("RecursiveResourceTests.zig");

@@ -161,6 +161,7 @@ fn lowerInstruction(
                 .index = layout.values[access.index].start,
                 .count = count,
                 .dynamic = collection.length == null,
+                .view = collection.view,
                 .header = try internString(allocator, strings, try collectionRuntimeHeader(allocator, program, access.position)),
                 .tail = try internString(allocator, strings, if (collection.length == null) " is out of bounds for count " else try std.fmt.allocPrint(allocator, " is out of bounds for count {d}\n", .{count})),
             } };
@@ -175,13 +176,15 @@ fn lowerInstruction(
                 .replacement = layout.values[replacement.replacement],
                 .count = count,
                 .dynamic = collection.length == null,
+                .view = collection.view,
                 .header = try internString(allocator, strings, try collectionRuntimeHeader(allocator, program, replacement.position)),
                 .tail = try internString(allocator, strings, if (collection.length == null) " is out of bounds for count " else try std.fmt.allocPrint(allocator, " is out of bounds for count {d}\n", .{count})),
             } };
         },
         .collection_count => |count| .{ .collection_count = .{
             .result = layout.values[count.result].start,
-            .collection = layout.values[count.collection].start,
+            .collection = layout.values[count.collection],
+            .view = collectionForType(program, function.value_types[count.collection]).?.view,
         } },
         .list_edit => |edit| edit_value: {
             const collection = collectionForType(program, function.value_types[edit.collection]) orelse return error.InvalidMachineProgram;
@@ -209,7 +212,22 @@ fn lowerInstruction(
                 .end = layout.values[slice.end].start,
                 .count = @intCast(collection.length orelse 0),
                 .dynamic = collection.length == null,
+                .view = collection.view,
                 .element_width = @intCast(try leafCount(program, collection.element)),
+            } };
+        },
+        .collection_view => |view| view_value: {
+            const source = collectionForType(program, function.value_types[view.collection]) orelse return error.InvalidMachineProgram;
+            break :view_value .{ .collection_view = .{
+                .result = layout.values[view.result],
+                .collection = layout.values[view.collection],
+                .reference = if (view.reference) |reference| layout.values[reference].start else null,
+                .start = layout.values[view.start].start,
+                .end = layout.values[view.end].start,
+                .count = @intCast(source.length orelse 0),
+                .dynamic = source.length == null,
+                .source_view = source.view,
+                .element_width = @intCast(try leafCount(program, source.element)),
             } };
         },
         .enum_payload => |payload| enum_payload: {
@@ -456,7 +474,7 @@ fn leafCount(program: Ir.Program, type_value: Ir.Type) Machine.Error!usize {
     }
     const structure_index = type_value.structureIndex() orelse return 1;
     if (structure_index >= program.structures.len) return error.InvalidMachineProgram;
-    if (program.structures[structure_index].collection) |collection| if (collection.length == null) return 1;
+    if (program.structures[structure_index].collection) |collection| if (collection.length == null) return if (collection.view) 2 else 1;
     var result: usize = 0;
     for (program.structures[structure_index].fields) |field| result += try leafCount(program, field.type);
     return result;
@@ -525,7 +543,8 @@ fn flattenedTypesForList(allocator: Allocator, program: Ir.Program, types: []con
 fn isAggregate(program: Ir.Program, type_value: Ir.Type) bool {
     if (type_value.optionalChild() != null) return true;
     const index = type_value.structureIndex() orelse return false;
-    return index >= program.structures.len or program.structures[index].collection == null or program.structures[index].collection.?.length != null;
+    return index >= program.structures.len or program.structures[index].collection == null or
+        program.structures[index].collection.?.length != null or program.structures[index].collection.?.view;
 }
 
 fn internString(

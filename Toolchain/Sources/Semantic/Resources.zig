@@ -19,6 +19,7 @@ fn isNoncopyableInner(self: anytype, type_value: Ast.Type, depth: usize) bool {
     const index = type_value.structureIndex() orelse return false;
     if (index >= self.structures.len) return false;
     if (self.structures[index].collection) |collection| {
+        if (collection.view) return false;
         return isNoncopyableInner(self, collection.element, depth + 1);
     }
     for (self.enums) |enumeration| if (enumeration.type_index == index) {
@@ -57,9 +58,34 @@ pub fn requireTransfer(self: anytype, expression: *const Ast.Expression, type_va
 }
 
 pub fn validateParameter(self: anytype, parameter: Ast.Parameter) !void {
+    const direct_view = @import("Collections.zig").isViewType(self.structures, parameter.type);
+    if (containsView(self, parameter.type) and (!direct_view or parameter.mode == .value)) {
+        return self.fail(parameter.position, "a view parameter must use '@T[..]' or '&T[..]'");
+    }
     if (parameter.mode == .mutable and isNoncopyable(self, parameter.type)) {
         return self.fail(parameter.position, "a noncopyable value cannot be passed through '&T'; use '@T' or transfer it");
     }
+}
+
+pub fn validateReturn(self: anytype, function: Ast.Function) !void {
+    const direct_view = @import("Collections.zig").isViewType(self.structures, function.return_type);
+    if (containsView(self, function.return_type) and (!direct_view or function.return_mode == .value)) {
+        return self.fail(function.name_position, "a view return must use '@T[..]' or '&T[..]' and name compatible provenance");
+    }
+}
+
+pub fn validateStoredType(self: anytype, type_value: Ast.Type, position: @import("../Source.zig").Position, context: []const u8) !void {
+    if (!containsView(self, type_value)) return;
+    const message = try std.fmt.allocPrint(self.allocator, "a borrowed view cannot be stored {s}", .{context});
+    return self.fail(position, message);
+}
+
+fn containsView(self: anytype, type_value: Ast.Type) bool {
+    if (type_value.optionalChild()) |child| return containsView(self, child);
+    const index = type_value.structureIndex() orelse return false;
+    if (index >= self.structures.len) return false;
+    if (self.structures[index].collection) |collection| return collection.view or containsView(self, collection.element);
+    return false;
 }
 
 pub fn analyzeDrop(self: anytype, structure_index: usize, declaration: Ast.Structure, drop: Ast.Drop) !Ir.Function {
@@ -126,6 +152,7 @@ pub fn emitDrop(self: anytype, builder: anytype, type_value: Ast.Type, value: Ir
         return;
     }
     if (self.structures[type_index].collection) |collection| {
+        if (collection.view) return;
         try emitCollectionDrop(self, builder, type_value, collection, value);
         return;
     }
