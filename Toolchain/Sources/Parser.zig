@@ -189,6 +189,7 @@ pub const Parser = struct {
         const name = self.current.lexeme;
         const name_position = self.current.position;
         if (std.mem.eql(u8, name, "Result")) return self.failAt(name_position, "'Result' is a reserved intrinsic type name");
+        if (std.mem.eql(u8, name, "map_error")) return self.failAt(name_position, "'map_error' is a reserved intrinsic function name");
         try self.advance();
         const type_parameters = try Generics.parseTypeParameters(self);
         const enclosing_type_parameters = self.type_parameters;
@@ -234,6 +235,7 @@ pub const Parser = struct {
         if (self.current.tag != .identifier) return self.fail("expected parameter name");
         const position = self.current.position;
         const name = self.current.lexeme;
+        if (std.mem.eql(u8, name, "map_error")) return self.failAt(position, "'map_error' is a reserved intrinsic function name");
         try self.advance();
         try self.expect(.colon, "expected ':' after parameter name");
         const parameter_type = try self.parseType();
@@ -440,6 +442,7 @@ pub const Parser = struct {
             "expected conditional binding name");
         const name = self.current.lexeme;
         const name_position = self.current.position;
+        if (std.mem.eql(u8, name, "map_error")) return self.failAt(name_position, "'map_error' is a reserved intrinsic function name");
         try self.advance();
         try self.expect(.equal, "expected '=' after conditional binding name");
         const source = try self.parseExpression(parenthesized_binding);
@@ -513,6 +516,7 @@ pub const Parser = struct {
         if (self.current.tag != .identifier) return self.fail("expected variable name");
         const name = self.current.lexeme;
         const name_position = self.current.position;
+        if (std.mem.eql(u8, name, "map_error")) return self.failAt(name_position, "'map_error' is a reserved intrinsic function name");
         try self.advance();
 
         var annotation: ?Ast.Type = null;

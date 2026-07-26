@@ -381,6 +381,11 @@ pub const Specializer = struct {
                         }
                     }
                 };
+                if (copy.receiver == null and std.mem.eql(u8, copy.name, "map_error")) {
+                    copy.result_type = try self.specializeMapError(copy, locals.items);
+                    copy.type_arguments = &.{};
+                    break :value .{ .call = copy };
+                }
                 if (copy.receiver != null and copy.named_arguments.len == 0) {
                     if (try self.specializeMethodCall(copy, locals.items)) |name| {
                         copy.name = name;
@@ -523,6 +528,76 @@ pub const Specializer = struct {
             .{call.name},
         );
         return self.fail(call.name_position, message);
+    }
+
+    fn specializeMapError(self: *Specializer, call: Ast.Expression.Call, locals: []const Binding) SpecializeError!Ast.Type {
+        if (call.arguments.len != 2 or call.named_arguments.len != 0) {
+            return self.fail(call.name_position, "'map_error' expects a Result and one named transformation function");
+        }
+        const source_type = self.inferExpressionType(call.arguments[0], locals) orelse {
+            return self.fail(call.arguments[0].position, "cannot determine the Result type passed to 'map_error'");
+        };
+        const source = self.enumForType(source_type) orelse {
+            const message = try std.fmt.allocPrint(self.allocator, "'map_error' expects 'Result<T,E>', found '{s}'", .{self.typeName(source_type)});
+            return self.fail(call.arguments[0].position, message);
+        };
+        const success_type = Result.successType(source) orelse {
+            const message = try std.fmt.allocPrint(self.allocator, "'map_error' expects 'Result<T,E>', found '{s}'", .{self.typeName(source_type)});
+            return self.fail(call.arguments[0].position, message);
+        };
+        const error_type = Result.errorType(source).?;
+        if (call.arguments[1].value != .identifier) {
+            return self.fail(call.arguments[1].position, "'map_error' transformation must be a named function");
+        }
+        const expected_count: usize = if (success_type == .void) 2 else 3;
+        if (call.type_arguments.len != 0 and call.type_arguments.len != expected_count) {
+            const message = try std.fmt.allocPrint(
+                self.allocator,
+                "'map_error' expects {d} explicit type arguments matching its Result and transformation",
+                .{expected_count},
+            );
+            return self.fail(call.name_position, message);
+        }
+        const explicit_target: ?Ast.Type = if (call.type_arguments.len == 0) null else call.type_arguments[expected_count - 1];
+        if (call.type_arguments.len != 0) {
+            const source_arguments: []const Ast.Type = if (success_type == .void)
+                &.{error_type}
+            else
+                &.{ success_type, error_type };
+            if (!std.mem.eql(Ast.Type, call.type_arguments[0 .. expected_count - 1], source_arguments)) {
+                const message = try std.fmt.allocPrint(
+                    self.allocator,
+                    "'map_error' expects {d} explicit type arguments matching its Result and transformation",
+                    .{expected_count},
+                );
+                return self.fail(call.name_position, message);
+            }
+        }
+        const transformer_name = call.arguments[1].value.identifier;
+        var found_name = false;
+        var transformer: ?Ast.Function = null;
+        for (self.functions.items) |function| {
+            if (!std.mem.eql(u8, function.name, transformer_name)) continue;
+            found_name = true;
+            if (function.parameters.len != 1 or function.parameters[0].type != error_type or function.return_type == .void) continue;
+            if (explicit_target) |target| if (function.return_type != target) continue;
+            if (transformer != null) return self.fail(call.arguments[1].position, "'map_error' transformation function is ambiguous");
+            transformer = function;
+        }
+        if (!found_name) {
+            const message = try std.fmt.allocPrint(self.allocator, "unknown transformation function '{s}'", .{transformer_name});
+            return self.fail(call.arguments[1].position, message);
+        }
+        const function = transformer orelse {
+            const message = try std.fmt.allocPrint(
+                self.allocator,
+                "'map_error' transformation must have signature 'func({s}) F'",
+                .{self.typeName(error_type)},
+            );
+            return self.fail(call.arguments[1].position, message);
+        };
+        const result_base = self.typeForName(Result.name) orelse return error.InvalidSource;
+        return self.instantiateEnum(result_base, &.{ success_type, function.return_type }, call.name_position);
     }
 
     fn specializeMethodCall(self: *Specializer, call: Ast.Expression.Call, locals: []const Binding) SpecializeError!?[]const u8 {
@@ -952,6 +1027,7 @@ pub const Specializer = struct {
                 break :local null;
             },
             .call => |call| call_type: {
+                if (call.result_type) |result_type| break :call_type result_type;
                 if (call.receiver == null) {
                     for (self.functions.items) |function| {
                         if (std.mem.eql(u8, function.name, call.name) and parametersAcceptArity(function.parameters, call.arguments.len)) {
@@ -1204,6 +1280,7 @@ fn remapStatementTypes(statements: []const Ast.Statement, map: []const ?Ast.Type
 fn remapExpressionTypes(expression: *Ast.Expression, map: []const ?Ast.Type) void {
     switch (expression.value) {
         .call => |*call| {
+            if (call.result_type) |result_type| call.result_type = remapConcreteType(result_type, map);
             for (@constCast(call.type_arguments)) |*argument| argument.* = remapConcreteType(argument.*, map);
             for (call.arguments) |argument| remapExpressionTypes(argument, map);
             for (call.named_arguments) |argument| remapExpressionTypes(argument.value, map);

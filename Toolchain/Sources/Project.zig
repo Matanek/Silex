@@ -1331,6 +1331,21 @@ pub const Compiler = struct {
                         }
                     } else try self.rewriteExpression(module, receiver, type_map);
                 }
+                if (call.receiver == null and std.mem.eql(u8, call.name, "map_error")) {
+                    if (call.arguments.len == 2 and call.arguments[1].value == .identifier) {
+                        const transformer = &call.arguments[1].value.identifier;
+                        if (try self.targetForCall(module, transformer.*)) |candidate| {
+                            if (try self.functionTarget(candidate)) |target| transformer.* = try canonicalName(
+                                self.allocator,
+                                self.index.providers[target.module].name,
+                                target.declaration,
+                            );
+                        } else if (self.findLocalFunction(self.units[module].program.?, transformer.*)) {
+                            transformer.* = try canonicalName(self.allocator, self.index.providers[module].name, transformer.*);
+                        }
+                    }
+                    return;
+                }
                 if (try self.structureTarget(module, call.name)) |target| {
                     try self.requirePublicStructure(module, target, call.name_position);
                     call.name = try structureCanonicalName(
@@ -1418,6 +1433,11 @@ pub const Compiler = struct {
             if (std.mem.eql(u8, provider.path, path)) return index;
         }
         return null;
+    }
+
+    fn findLocalFunction(_: Compiler, program: Ast.Program, name: []const u8) bool {
+        for (program.functions) |function| if (std.mem.eql(u8, function.name, name)) return true;
+        return false;
     }
 
     fn discoverProviders(self: *Compiler) Error!Modules.Index {

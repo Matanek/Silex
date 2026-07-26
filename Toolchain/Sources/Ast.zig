@@ -59,6 +59,7 @@ pub const Expression = struct {
         arguments: []const *Expression,
         named_arguments: []const NamedArgument = &.{},
         type_arguments: []const Type = &.{},
+        result_type: ?Type = null,
         owner: usize = 0,
     };
 
