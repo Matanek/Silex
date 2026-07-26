@@ -5,6 +5,7 @@ pub const Type = Types.Type;
 
 pub const UnaryOperator = enum {
     negate,
+    logical_not,
 };
 
 pub const BinaryOperator = enum {
@@ -19,6 +20,12 @@ pub const BinaryOperator = enum {
     greater_equal,
     equal,
     not_equal,
+    logical_and,
+    logical_or,
+    bit_and,
+    bit_xor,
+    shift_left,
+    shift_right,
 };
 
 pub const Expression = struct {
@@ -27,12 +34,16 @@ pub const Expression = struct {
 
     pub const Value = union(enum) {
         integer: []const u8,
+        floating: []const u8,
         boolean: bool,
         string: []const u8,
+        interpolated_string: InterpolatedString,
         identifier: []const u8,
         call: Call,
         unary: Unary,
         binary: Binary,
+        conversion: Conversion,
+        string_count: *Expression,
     };
 
     pub const Call = struct {
@@ -54,6 +65,21 @@ pub const Expression = struct {
         operator_position: Source.Position,
         right: *Expression,
     };
+
+    pub const Conversion = struct {
+        operand: *Expression,
+        target: Type,
+        operator_position: Source.Position,
+    };
+
+    pub const StringPart = union(enum) {
+        text: []const u8,
+        expression: *Expression,
+    };
+
+    pub const InterpolatedString = struct {
+        parts: []const StringPart,
+    };
 };
 
 pub const VariableDeclaration = struct {
@@ -74,19 +100,37 @@ pub const EffectStatement = struct {
     value: *Expression,
 };
 
+pub const PrintStatement = struct {
+    position: Source.Position,
+    values: []const *Expression,
+};
+
 pub const AssertStatement = struct {
     position: Source.Position,
     condition: *Expression,
     message: *Expression,
 };
 
+pub const ConditionalBranch = struct {
+    position: Source.Position,
+    condition: *Expression,
+    statements: []const Statement,
+};
+
+pub const IfStatement = struct {
+    position: Source.Position,
+    branches: []const ConditionalBranch,
+    else_statements: ?[]const Statement,
+};
+
 pub const Statement = union(enum) {
     variable_declaration: VariableDeclaration,
     return_statement: ReturnStatement,
     expression_statement: *Expression,
-    print_statement: EffectStatement,
+    print_statement: PrintStatement,
     assert_statement: AssertStatement,
     panic_statement: EffectStatement,
+    if_statement: IfStatement,
 
     pub fn position(self: Statement) Source.Position {
         return switch (self) {
@@ -96,6 +140,7 @@ pub const Statement = union(enum) {
             .print_statement => |statement| statement.position,
             .assert_statement => |statement| statement.position,
             .panic_statement => |statement| statement.position,
+            .if_statement => |statement| statement.position,
         };
     }
 };

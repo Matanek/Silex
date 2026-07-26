@@ -8,6 +8,7 @@ const Allocator = std.mem.Allocator;
 pub const Type = Types.Type;
 pub const FunctionId = usize;
 pub const ValueId = usize;
+pub const BlockId = usize;
 pub const Error = Allocator.Error || error{InvalidProgram};
 
 pub const UnaryOperator = enum {
@@ -32,6 +33,10 @@ pub const BinaryOperator = enum {
     greater_equal,
     equal,
     not_equal,
+    bit_and,
+    bit_xor,
+    shift_left,
+    shift_right,
 
     fn name(self: BinaryOperator) []const u8 {
         return switch (self) {
@@ -46,6 +51,10 @@ pub const BinaryOperator = enum {
             .greater_equal => "ge",
             .equal => "eq",
             .not_equal => "ne",
+            .bit_and => "and",
+            .bit_xor => "xor",
+            .shift_left => "shl",
+            .shift_right => "shr",
         };
     }
 };
@@ -54,18 +63,22 @@ pub const Instruction = union(enum) {
     constant_int: ConstantInt,
     constant_bool: ConstantBool,
     constant_str: ConstantStr,
+    constant_float32: ConstantFloat32,
+    constant_float64: ConstantFloat64,
+    copy: Copy,
+    convert: Convert,
+    format_value: FormatValue,
+    string_concat: StringConcat,
+    string_count: StringCount,
     unary: Unary,
     binary: Binary,
     call: Call,
-    print: ValueId,
+    print: Print,
     assert: Assert,
-    panic: Panic,
-    return_value: ValueId,
-    return_void,
 
     pub const ConstantInt = struct {
         result: ValueId,
-        value: i64,
+        bits: u64,
     };
 
     pub const ConstantBool = struct {
@@ -76,6 +89,46 @@ pub const Instruction = union(enum) {
     pub const ConstantStr = struct {
         result: ValueId,
         value: []const u8,
+    };
+
+    pub const ConstantFloat32 = struct {
+        result: ValueId,
+        bits: u32,
+    };
+
+    pub const ConstantFloat64 = struct {
+        result: ValueId,
+        bits: u64,
+    };
+
+    pub const Copy = struct {
+        result: ValueId,
+        operand: ValueId,
+    };
+
+    pub const Convert = struct {
+        result: ValueId,
+        operand: ValueId,
+        source: Type,
+        target: Type,
+        position: Source.Position,
+        checked: bool,
+    };
+
+    pub const FormatValue = struct {
+        result: ValueId,
+        operand: ValueId,
+    };
+
+    pub const StringConcat = struct {
+        result: ValueId,
+        left: ValueId,
+        right: ValueId,
+    };
+
+    pub const StringCount = struct {
+        result: ValueId,
+        operand: ValueId,
     };
 
     pub const Unary = struct {
@@ -103,10 +156,34 @@ pub const Instruction = union(enum) {
         position: Source.Position,
     };
 
+    pub const Print = struct {
+        value: ValueId,
+        newline: bool,
+    };
+
     pub const Panic = struct {
         message: ValueId,
         position: Source.Position,
     };
+};
+
+pub const Terminator = union(enum) {
+    jump: BlockId,
+    branch: Branch,
+    return_value: ValueId,
+    return_void,
+    panic: Instruction.Panic,
+
+    pub const Branch = struct {
+        condition: ValueId,
+        then_block: BlockId,
+        else_block: BlockId,
+    };
+};
+
+pub const Block = struct {
+    instructions: []const Instruction,
+    terminator: Terminator,
 };
 
 pub const Function = struct {
@@ -114,7 +191,7 @@ pub const Function = struct {
     parameter_types: []const Type,
     return_type: Type,
     value_types: []const Type,
-    instructions: []const Instruction,
+    blocks: []const Block,
 };
 
 pub const Program = struct {
@@ -137,10 +214,17 @@ pub fn writeText(allocator: Allocator, program: Program) Error![]u8 {
         }
         try output.appendSlice(allocator, ") -> ");
         try output.appendSlice(allocator, function.return_type.name());
-        try output.appendSlice(allocator, " {\nentry:\n");
-        for (function.instructions) |instruction| {
+        try output.appendSlice(allocator, " {\n");
+        for (function.blocks, 0..) |block, block_id| {
+            try appendBlockName(&output, allocator, block_id);
+            try output.appendSlice(allocator, ":\n");
+            for (block.instructions) |instruction| {
+                try output.appendSlice(allocator, "    ");
+                try writeInstruction(&output, allocator, program, function, instruction);
+                try output.append(allocator, '\n');
+            }
             try output.appendSlice(allocator, "    ");
-            try writeInstruction(&output, allocator, program, function, instruction);
+            try writeTerminator(&output, allocator, function, block.terminator, function.blocks.len);
             try output.append(allocator, '\n');
         }
         try output.appendSlice(allocator, "}\n");
@@ -159,7 +243,7 @@ fn writeInstruction(
         .constant_int => |constant| {
             try appendResult(output, allocator, function, constant.result);
             try output.appendSlice(allocator, "const ");
-            try appendInt(output, allocator, constant.value);
+            try appendInteger(output, allocator, constant.bits, function.value_types[constant.result]);
         },
         .constant_bool => |constant| {
             try appendResult(output, allocator, function, constant.result);
@@ -169,6 +253,45 @@ fn writeInstruction(
             try appendResult(output, allocator, function, constant.result);
             try output.appendSlice(allocator, "const ");
             try Strings.appendQuoted(output, allocator, constant.value);
+        },
+        .constant_float32 => |constant| {
+            try appendResult(output, allocator, function, constant.result);
+            try output.appendSlice(allocator, "const ");
+            try appendFloat(output, allocator, @as(f64, @floatCast(@as(f32, @bitCast(constant.bits)))));
+        },
+        .constant_float64 => |constant| {
+            try appendResult(output, allocator, function, constant.result);
+            try output.appendSlice(allocator, "const ");
+            try appendFloat(output, allocator, @as(f64, @bitCast(constant.bits)));
+        },
+        .copy => |copy| {
+            try appendResult(output, allocator, function, copy.result);
+            try output.appendSlice(allocator, "copy ");
+            try appendValueChecked(output, allocator, function, copy.operand);
+        },
+        .convert => |conversion| {
+            try appendResult(output, allocator, function, conversion.result);
+            try output.appendSlice(allocator, "convert ");
+            try appendValueChecked(output, allocator, function, conversion.operand);
+            try output.appendSlice(allocator, " to ");
+            try output.appendSlice(allocator, conversion.target.name());
+        },
+        .format_value => |format| {
+            try appendResult(output, allocator, function, format.result);
+            try output.appendSlice(allocator, "format ");
+            try appendValueChecked(output, allocator, function, format.operand);
+        },
+        .string_concat => |concat| {
+            try appendResult(output, allocator, function, concat.result);
+            try output.appendSlice(allocator, "str.concat ");
+            try appendValueChecked(output, allocator, function, concat.left);
+            try output.appendSlice(allocator, ", ");
+            try appendValueChecked(output, allocator, function, concat.right);
+        },
+        .string_count => |count| {
+            try appendResult(output, allocator, function, count.result);
+            try output.appendSlice(allocator, "str.count ");
+            try appendValueChecked(output, allocator, function, count.operand);
         },
         .unary => |unary| {
             try appendResult(output, allocator, function, unary.result);
@@ -196,9 +319,10 @@ fn writeInstruction(
             }
             try output.append(allocator, ')');
         },
-        .print => |value| {
+        .print => |print_value| {
             try output.appendSlice(allocator, "print ");
-            try appendValueChecked(output, allocator, function, value);
+            try appendValueChecked(output, allocator, function, print_value.value);
+            if (!print_value.newline) try output.appendSlice(allocator, " without-newline");
         },
         .assert => |assertion| {
             try output.appendSlice(allocator, "assert ");
@@ -206,16 +330,48 @@ fn writeInstruction(
             try output.appendSlice(allocator, ", ");
             try appendValueChecked(output, allocator, function, assertion.message);
         },
-        .panic => |panic_value| {
-            try output.appendSlice(allocator, "panic ");
-            try appendValueChecked(output, allocator, function, panic_value.message);
+    }
+}
+
+fn writeTerminator(
+    output: *std.ArrayList(u8),
+    allocator: Allocator,
+    function: Function,
+    terminator: Terminator,
+    block_count: usize,
+) Error!void {
+    switch (terminator) {
+        .jump => |target| {
+            if (target >= block_count) return error.InvalidProgram;
+            try output.appendSlice(allocator, "jump ");
+            try appendBlockName(output, allocator, target);
+        },
+        .branch => |branch| {
+            if (branch.then_block >= block_count or branch.else_block >= block_count) return error.InvalidProgram;
+            try output.appendSlice(allocator, "branch ");
+            try appendValueChecked(output, allocator, function, branch.condition);
+            try output.appendSlice(allocator, ", ");
+            try appendBlockName(output, allocator, branch.then_block);
+            try output.appendSlice(allocator, ", ");
+            try appendBlockName(output, allocator, branch.else_block);
         },
         .return_value => |value| {
             try output.appendSlice(allocator, "return ");
             try appendValueChecked(output, allocator, function, value);
         },
         .return_void => try output.appendSlice(allocator, "return"),
+        .panic => |panic_value| {
+            try output.appendSlice(allocator, "panic ");
+            try appendValueChecked(output, allocator, function, panic_value.message);
+        },
     }
+}
+
+fn appendBlockName(output: *std.ArrayList(u8), allocator: Allocator, block: BlockId) Allocator.Error!void {
+    if (block == 0) return output.appendSlice(allocator, "entry");
+    var buffer: [32]u8 = undefined;
+    const name = std.fmt.bufPrint(&buffer, "bb{d}", .{block}) catch unreachable;
+    try output.appendSlice(allocator, name);
 }
 
 fn appendResult(output: *std.ArrayList(u8), allocator: Allocator, function: Function, result: ValueId) Error!void {
@@ -237,8 +393,17 @@ fn appendValue(output: *std.ArrayList(u8), allocator: Allocator, value: ValueId)
     try output.appendSlice(allocator, text);
 }
 
-fn appendInt(output: *std.ArrayList(u8), allocator: Allocator, value: i64) Allocator.Error!void {
+fn appendInteger(output: *std.ArrayList(u8), allocator: Allocator, bits: u64, type_value: Type) Allocator.Error!void {
     var buffer: [32]u8 = undefined;
+    const text = if (type_value.isSignedInteger())
+        std.fmt.bufPrint(&buffer, "{d}", .{@as(i64, @bitCast(@import("Numeric.zig").signExtend(bits, type_value.bitWidth())))}) catch unreachable
+    else
+        std.fmt.bufPrint(&buffer, "{d}", .{bits}) catch unreachable;
+    try output.appendSlice(allocator, text);
+}
+
+fn appendFloat(output: *std.ArrayList(u8), allocator: Allocator, value: f64) Allocator.Error!void {
+    var buffer: [64]u8 = undefined;
     const text = std.fmt.bufPrint(&buffer, "{d}", .{value}) catch unreachable;
     try output.appendSlice(allocator, text);
 }
@@ -249,30 +414,26 @@ test "write deterministic typed IR" {
 
     const answer_value_types = [_]Type{ .int, .int, .int };
     const answer_instructions = [_]Instruction{
-        .{ .constant_int = .{ .result = 0, .value = 40 } },
-        .{ .constant_int = .{ .result = 1, .value = 2 } },
+        .{ .constant_int = .{ .result = 0, .bits = 40 } },
+        .{ .constant_int = .{ .result = 1, .bits = 2 } },
         .{ .binary = .{ .result = 2, .operator = .add, .left = 0, .right = 1 } },
-        .{ .return_value = 2 },
     };
     const main_value_types = [_]Type{.int};
-    const main_instructions = [_]Instruction{
-        .{ .call = .{ .result = 0, .function = 0, .arguments = &.{} } },
-        .return_void,
-    };
+    const main_instructions = [_]Instruction{.{ .call = .{ .result = 0, .function = 0, .arguments = &.{} } }};
     const functions = [_]Function{
         .{
             .name = "answer",
             .parameter_types = &.{},
             .return_type = .int,
             .value_types = &answer_value_types,
-            .instructions = &answer_instructions,
+            .blocks = &.{.{ .instructions = &answer_instructions, .terminator = .{ .return_value = 2 } }},
         },
         .{
             .name = "main",
             .parameter_types = &.{},
             .return_type = .void,
             .value_types = &main_value_types,
-            .instructions = &main_instructions,
+            .blocks = &.{.{ .instructions = &main_instructions, .terminator = .return_void }},
         },
     };
     const text = try writeText(arena.allocator(), .{ .functions = &functions });

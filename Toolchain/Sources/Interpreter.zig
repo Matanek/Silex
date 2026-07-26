@@ -1,5 +1,6 @@
 const std = @import("std");
 const Ir = @import("Ir.zig");
+const Numeric = @import("Numeric.zig");
 
 const Allocator = std.mem.Allocator;
 const max_call_depth = 1024;
@@ -10,11 +11,16 @@ pub const Error = Allocator.Error || error{
     DivisionByZero,
     CallStackOverflow,
     RuntimeTerminated,
+    InvalidConversion,
+    InvalidShift,
 };
 
 pub const Value = union(enum) {
     void,
     integer: i64,
+    typed_integer: Numeric.Integer,
+    float32: f32,
+    float64: f64,
     boolean: bool,
     string: []const u8,
 
@@ -22,6 +28,9 @@ pub const Value = union(enum) {
         return switch (self) {
             .void => .void,
             .integer => .int,
+            .typed_integer => |value| value.type,
+            .float32 => .float32,
+            .float64 => .float64,
             .boolean => .bool,
             .string => .str,
         };
@@ -105,21 +114,97 @@ fn invokeDepth(
         values[index] = argument;
     }
 
-    for (function.instructions) |instruction| switch (instruction) {
-        .constant_int => |constant| try store(function, values, constant.result, .{ .integer = constant.value }),
+    var block_id: Ir.BlockId = 0;
+    while (true) {
+        if (block_id >= function.blocks.len) return error.InvalidProgram;
+        const block = function.blocks[block_id];
+        for (block.instructions) |instruction| {
+            if (try executeInstruction(allocator, program, function, values, instruction, depth, session)) |result| return result;
+        }
+        switch (block.terminator) {
+            .jump => |target| block_id = target,
+            .branch => |branch| block_id = if (try boolean(try load(values, branch.condition))) branch.then_block else branch.else_block,
+            .return_value => |value_id| {
+                const result = try load(values, value_id);
+                if (result.typeOf() != function.return_type or function.return_type == .void) return error.InvalidProgram;
+                return result;
+            },
+            .return_void => {
+                if (function.return_type != .void) return error.InvalidProgram;
+                return .void;
+            },
+            .panic => |panic_value| {
+                const message = try string(try load(values, panic_value.message));
+                try appendRuntimeError(session, program, panic_value.position, "", message);
+                session.terminated = true;
+                return error.RuntimeTerminated;
+            },
+        }
+    }
+}
+
+fn executeInstruction(
+    allocator: Allocator,
+    program: Ir.Program,
+    function: Ir.Function,
+    values: []?Value,
+    instruction: Ir.Instruction,
+    depth: usize,
+    session: *Session,
+) Error!?Value {
+    switch (instruction) {
+        .constant_int => |constant| {
+            const type_value = function.value_types[constant.result];
+            const value: Value = if (type_value == .int)
+                .{ .integer = @bitCast(constant.bits) }
+            else
+                .{ .typed_integer = .{ .type = type_value, .bits = constant.bits } };
+            try store(function, values, constant.result, value);
+        },
         .constant_bool => |constant| try store(function, values, constant.result, .{ .boolean = constant.value }),
         .constant_str => |constant| try store(function, values, constant.result, .{ .string = constant.value }),
+        .constant_float32 => |constant| try store(function, values, constant.result, .{ .float32 = @bitCast(constant.bits) }),
+        .constant_float64 => |constant| try store(function, values, constant.result, .{ .float64 = @bitCast(constant.bits) }),
+        .copy => |copy| try store(function, values, copy.result, try load(values, copy.operand)),
+        .convert => |conversion| {
+            const operand = try load(values, conversion.operand);
+            const converted = convert(operand, conversion.target, conversion.checked) catch |err| switch (err) {
+                error.InvalidConversion => {
+                    try appendRuntimeError(session, program, conversion.position, "", "invalid numeric conversion");
+                    session.terminated = true;
+                    return error.RuntimeTerminated;
+                },
+                else => |other| return other,
+            };
+            try store(function, values, conversion.result, converted);
+        },
+        .format_value => |format| {
+            var text: std.ArrayList(u8) = .empty;
+            try appendValueText(&text, allocator, try load(values, format.operand));
+            try store(function, values, format.result, .{ .string = try text.toOwnedSlice(allocator) });
+        },
+        .string_concat => |concat| {
+            const left = try string(try load(values, concat.left));
+            const right = try string(try load(values, concat.right));
+            const result = try allocator.alloc(u8, left.len + right.len);
+            @memcpy(result[0..left.len], left);
+            @memcpy(result[left.len..], right);
+            try store(function, values, concat.result, .{ .string = result });
+        },
+        .string_count => |count| {
+            const value = try string(try load(values, count.operand));
+            const scalar_count = std.unicode.utf8CountCodepoints(value) catch return error.InvalidProgram;
+            try store(function, values, count.result, .{ .integer = @intCast(scalar_count) });
+        },
         .unary => |unary| {
             const operand = try load(values, unary.operand);
-            const result: Value = switch (unary.operator) {
-                .negate => .{ .integer = try negate(try integer(operand)) },
-            };
+            const result = try negateValue(operand);
             try store(function, values, unary.result, result);
         },
         .binary => |binary| {
             const left = try load(values, binary.left);
             const right = try load(values, binary.right);
-            const result = try calculate(binary.operator, left, right);
+            const result = try calculate(binary.operator, left, right, function.value_types[binary.result]);
             try store(function, values, binary.result, result);
         },
         .call => |call| {
@@ -137,7 +222,10 @@ fn invokeDepth(
                 return error.InvalidProgram;
             }
         },
-        .print => |value_id| try appendPrinted(session, try load(values, value_id)),
+        .print => |print_value| {
+            try appendValueText(&session.stdout, session.allocator, try load(values, print_value.value));
+            if (print_value.newline) try session.stdout.append(session.allocator, '\n');
+        },
         .assert => |assertion| {
             const condition = try boolean(try load(values, assertion.condition));
             if (!condition) {
@@ -147,23 +235,8 @@ fn invokeDepth(
                 return error.RuntimeTerminated;
             }
         },
-        .panic => |panic_value| {
-            const message = try string(try load(values, panic_value.message));
-            try appendRuntimeError(session, program, panic_value.position, "", message);
-            session.terminated = true;
-            return error.RuntimeTerminated;
-        },
-        .return_value => |value_id| {
-            const result = try load(values, value_id);
-            if (result.typeOf() != function.return_type or function.return_type == .void) return error.InvalidProgram;
-            return result;
-        },
-        .return_void => {
-            if (function.return_type != .void) return error.InvalidProgram;
-            return .void;
-        },
-    };
-    return error.InvalidProgram;
+    }
+    return null;
 }
 
 fn store(function: Ir.Function, values: []?Value, id: Ir.ValueId, value: Value) Error!void {
@@ -183,25 +256,205 @@ fn integer(value: Value) Error!i64 {
     };
 }
 
+fn numericInteger(value: Value) Error!Numeric.Integer {
+    return switch (value) {
+        .integer => |result| .{ .type = .int, .bits = @bitCast(result) },
+        .typed_integer => |result| result,
+        else => error.InvalidProgram,
+    };
+}
+
 fn negate(value: i64) Error!i64 {
     if (value == std.math.minInt(i64)) return error.IntegerOverflow;
     return -value;
 }
 
-fn calculate(operator: Ir.BinaryOperator, left: Value, right: Value) Error!Value {
+fn negateValue(value: Value) Error!Value {
+    const type_value = value.typeOf();
+    if (type_value.isFloat()) return switch (value) {
+        .float32 => |number| .{ .float32 = -number },
+        .float64 => |number| .{ .float64 = -number },
+        else => error.InvalidProgram,
+    };
+    const number = try numericInteger(value);
+    if (!number.type.isSignedInteger()) {
+        if (number.bits != 0) return error.IntegerOverflow;
+        return .{ .typed_integer = number };
+    }
+    const signed = number.signed();
+    if (signed == Numeric.integerMin(number.type)) return error.IntegerOverflow;
+    const bits: u64 = @bitCast(-signed);
+    return if (number.type == .int) .{ .integer = @bitCast(bits) } else .{
+        .typed_integer = .{ .type = number.type, .bits = Numeric.normalize(bits, number.type) },
+    };
+}
+
+fn calculate(operator: Ir.BinaryOperator, left: Value, right: Value, result_type: Ir.Type) Error!Value {
+    if ((operator == .equal or operator == .not_equal) and !left.typeOf().isNumeric()) {
+        const result = try equal(left, right);
+        return .{ .boolean = if (operator == .equal) result else !result };
+    }
+    if (left.typeOf().isFloat()) return calculateFloat(operator, left, right, result_type);
+    const left_integer = try numericInteger(left);
+    const right_integer = try numericInteger(right);
     return switch (operator) {
-        .add => .{ .integer = try checkedAdd(try integer(left), try integer(right)) },
-        .subtract => .{ .integer = try checkedSubtract(try integer(left), try integer(right)) },
-        .multiply => .{ .integer = try checkedMultiply(try integer(left), try integer(right)) },
-        .divide => .{ .integer = try checkedDivide(try integer(left), try integer(right)) },
-        .remainder => .{ .integer = try checkedRemainder(try integer(left), try integer(right)) },
-        .less => .{ .boolean = try integer(left) < try integer(right) },
-        .less_equal => .{ .boolean = try integer(left) <= try integer(right) },
-        .greater => .{ .boolean = try integer(left) > try integer(right) },
-        .greater_equal => .{ .boolean = try integer(left) >= try integer(right) },
+        .add, .subtract, .multiply, .divide, .remainder => integerArithmetic(operator, left_integer, right_integer),
+        .bit_and => integerResult(left_integer.type, left_integer.bits & right_integer.bits),
+        .bit_xor => integerResult(left_integer.type, left_integer.bits ^ right_integer.bits),
+        .shift_left, .shift_right => shiftInteger(operator, left_integer, right_integer),
+        .less => .{ .boolean = integerLess(left_integer, right_integer) },
+        .less_equal => .{ .boolean = !integerLess(right_integer, left_integer) },
+        .greater => .{ .boolean = integerLess(right_integer, left_integer) },
+        .greater_equal => .{ .boolean = !integerLess(left_integer, right_integer) },
         .equal => .{ .boolean = try equal(left, right) },
         .not_equal => .{ .boolean = !try equal(left, right) },
     };
+}
+
+fn integerArithmetic(operator: Ir.BinaryOperator, left: Numeric.Integer, right: Numeric.Integer) Error!Value {
+    if (left.type != right.type) return error.InvalidProgram;
+    if (left.type.isSignedInteger()) {
+        const a: i128 = left.signed();
+        const b: i128 = right.signed();
+        if ((operator == .divide or operator == .remainder) and b == 0) return error.DivisionByZero;
+        if ((operator == .divide or operator == .remainder) and
+            a == Numeric.integerMin(left.type) and b == -1) return error.IntegerOverflow;
+        const result: i128 = switch (operator) {
+            .add => a + b,
+            .subtract => a - b,
+            .multiply => a * b,
+            .divide => @divTrunc(a, b),
+            .remainder => @rem(a, b),
+            else => unreachable,
+        };
+        if (result < Numeric.integerMin(left.type) or result > Numeric.integerMax(left.type)) return error.IntegerOverflow;
+        return integerResult(left.type, @bitCast(@as(i64, @intCast(result))));
+    }
+
+    const a: u128 = left.bits;
+    const b: u128 = right.bits;
+    if ((operator == .divide or operator == .remainder) and b == 0) return error.DivisionByZero;
+    if (operator == .subtract and b > a) return error.IntegerOverflow;
+    const result: u128 = switch (operator) {
+        .add => a + b,
+        .subtract => a - b,
+        .multiply => a * b,
+        .divide => a / b,
+        .remainder => a % b,
+        else => unreachable,
+    };
+    if (result > Numeric.integerMax(left.type)) return error.IntegerOverflow;
+    return integerResult(left.type, @intCast(result));
+}
+
+fn integerResult(type_value: Ir.Type, bits: u64) Value {
+    const normalized = Numeric.normalize(bits, type_value);
+    return if (type_value == .int)
+        .{ .integer = @bitCast(normalized) }
+    else
+        .{ .typed_integer = .{ .type = type_value, .bits = normalized } };
+}
+
+fn integerLess(left: Numeric.Integer, right: Numeric.Integer) bool {
+    std.debug.assert(left.type == right.type);
+    return if (left.type.isSignedInteger()) left.signed() < right.signed() else left.bits < right.bits;
+}
+
+fn shiftInteger(operator: Ir.BinaryOperator, left: Numeric.Integer, right: Numeric.Integer) Error!Value {
+    const count: u64 = if (right.type.isSignedInteger()) count: {
+        const signed = right.signed();
+        if (signed < 0) return error.InvalidShift;
+        break :count @intCast(signed);
+    } else right.bits;
+    if (count >= left.type.bitWidth()) return error.InvalidShift;
+    const shifted = if (operator == .shift_left) left.bits << @intCast(count) else left.bits >> @intCast(count);
+    return integerResult(left.type, shifted);
+}
+
+fn calculateFloat(operator: Ir.BinaryOperator, left: Value, right: Value, result_type: Ir.Type) Error!Value {
+    if (left.typeOf() != right.typeOf()) return error.InvalidProgram;
+    if (left.typeOf() == .float32) {
+        const a = left.float32;
+        const b = right.float32;
+        return switch (operator) {
+            .add => .{ .float32 = a + b },
+            .subtract => .{ .float32 = a - b },
+            .multiply => .{ .float32 = a * b },
+            .divide => .{ .float32 = a / b },
+            .less => .{ .boolean = a < b },
+            .less_equal => .{ .boolean = a <= b },
+            .greater => .{ .boolean = a > b },
+            .greater_equal => .{ .boolean = a >= b },
+            .equal => .{ .boolean = a == b },
+            .not_equal => .{ .boolean = a != b },
+            else => error.InvalidProgram,
+        };
+    }
+    _ = result_type;
+    const a = left.float64;
+    const b = right.float64;
+    return switch (operator) {
+        .add => .{ .float64 = a + b },
+        .subtract => .{ .float64 = a - b },
+        .multiply => .{ .float64 = a * b },
+        .divide => .{ .float64 = a / b },
+        .less => .{ .boolean = a < b },
+        .less_equal => .{ .boolean = a <= b },
+        .greater => .{ .boolean = a > b },
+        .greater_equal => .{ .boolean = a >= b },
+        .equal => .{ .boolean = a == b },
+        .not_equal => .{ .boolean = a != b },
+        else => error.InvalidProgram,
+    };
+}
+
+fn convert(value: Value, target: Ir.Type, checked: bool) Error!Value {
+    const source = value.typeOf();
+    if (source == target) return value;
+    if (source.isInteger() and target.isInteger()) {
+        const number = try numericInteger(value);
+        if (target.isSignedInteger()) {
+            const signed: i128 = if (source.isSignedInteger()) number.signed() else number.bits;
+            if (signed < Numeric.integerMin(target) or signed > Numeric.integerMax(target)) return error.InvalidConversion;
+            return integerResult(target, @bitCast(@as(i64, @intCast(signed))));
+        }
+        if (source.isSignedInteger() and number.signed() < 0) return error.InvalidConversion;
+        if (number.bits > Numeric.integerMax(target)) return error.InvalidConversion;
+        return integerResult(target, number.bits);
+    }
+    if (source.isInteger() and target.isFloat()) {
+        const number = try numericInteger(value);
+        if (target == .float32) {
+            const result: f32 = if (source.isSignedInteger()) @floatFromInt(number.signed()) else @floatFromInt(number.bits);
+            const exact: f64 = if (source.isSignedInteger()) @floatFromInt(number.signed()) else @floatFromInt(number.bits);
+            if (checked and @as(f64, result) != exact) return error.InvalidConversion;
+            return .{ .float32 = result };
+        }
+        const result: f64 = if (source.isSignedInteger()) @floatFromInt(number.signed()) else @floatFromInt(number.bits);
+        if (source.isSignedInteger()) {
+            if (checked and @as(i128, @intFromFloat(result)) != number.signed()) return error.InvalidConversion;
+        } else if (checked and @as(u128, @intFromFloat(result)) != number.bits) return error.InvalidConversion;
+        return .{ .float64 = result };
+    }
+    if (source == .float32 and target == .float64) return .{ .float64 = @floatCast(value.float32) };
+    if (source == .float64 and target == .float32) {
+        const result: f32 = @floatCast(value.float64);
+        if (@as(f64, @floatCast(result)) != value.float64) return error.InvalidConversion;
+        return .{ .float32 = result };
+    }
+    if (source.isFloat() and target.isInteger()) {
+        const number: f64 = if (source == .float32) value.float32 else value.float64;
+        if (!std.math.isFinite(number) or @trunc(number) != number) return error.InvalidConversion;
+        if (target.isSignedInteger()) {
+            const lower: f64 = @floatFromInt(Numeric.integerMin(target));
+            const upper_exclusive: f64 = @floatFromInt(@as(i128, Numeric.integerMax(target)) + 1);
+            if (number < lower or number >= upper_exclusive) return error.InvalidConversion;
+            return integerResult(target, @bitCast(@as(i64, @intFromFloat(number))));
+        }
+        if (number < 0 or number >= @as(f64, @floatFromInt(@as(u128, Numeric.integerMax(target)) + 1))) return error.InvalidConversion;
+        return integerResult(target, @intFromFloat(number));
+    }
+    return error.InvalidConversion;
 }
 
 fn boolean(value: Value) Error!bool {
@@ -222,23 +475,49 @@ fn equal(left: Value, right: Value) Error!bool {
     if (left.typeOf() != right.typeOf()) return error.InvalidProgram;
     return switch (left) {
         .integer => |value| value == right.integer,
+        .typed_integer => |value| value.bits == right.typed_integer.bits and value.type == right.typed_integer.type,
+        .float32 => |value| value == right.float32,
+        .float64 => |value| value == right.float64,
+        .string => |value| std.mem.eql(u8, value, right.string),
         .boolean => |value| value == right.boolean,
-        else => error.InvalidProgram,
+        .void => error.InvalidProgram,
     };
 }
 
-fn appendPrinted(session: *Session, value: Value) Error!void {
+fn appendValueText(output: *std.ArrayList(u8), allocator: Allocator, value: Value) Error!void {
     switch (value) {
         .integer => |number| {
             var buffer: [32]u8 = undefined;
             const text = std.fmt.bufPrint(&buffer, "{d}", .{number}) catch unreachable;
-            try session.stdout.appendSlice(session.allocator, text);
+            try output.appendSlice(allocator, text);
         },
-        .boolean => |flag| try session.stdout.appendSlice(session.allocator, if (flag) "true" else "false"),
-        .string => |text| try session.stdout.appendSlice(session.allocator, text),
+        .typed_integer => |number| {
+            var buffer: [32]u8 = undefined;
+            const text = if (number.type.isSignedInteger())
+                std.fmt.bufPrint(&buffer, "{d}", .{number.signed()}) catch unreachable
+            else
+                std.fmt.bufPrint(&buffer, "{d}", .{number.bits}) catch unreachable;
+            try output.appendSlice(allocator, text);
+        },
+        .float32 => |number| try appendFloat(output, allocator, number),
+        .float64 => |number| try appendFloat(output, allocator, number),
+        .boolean => |flag| try output.appendSlice(allocator, if (flag) "true" else "false"),
+        .string => |text| try output.appendSlice(allocator, text),
         .void => return error.InvalidProgram,
     }
-    try session.stdout.append(session.allocator, '\n');
+}
+
+fn appendFloat(output: *std.ArrayList(u8), allocator: Allocator, number: anytype) Error!void {
+    if (std.math.isNan(number)) return output.appendSlice(allocator, "nan");
+    if (std.math.isPositiveInf(number)) return output.appendSlice(allocator, "inf");
+    if (std.math.isNegativeInf(number)) return output.appendSlice(allocator, "-inf");
+    if (number == 0) {
+        return output.appendSlice(allocator, if (std.math.signbit(number)) "-0.0" else "0.0");
+    }
+    var buffer: [std.fmt.float.bufferSize(.decimal, f64)]u8 = undefined;
+    const text = std.fmt.bufPrint(&buffer, "{d}", .{number}) catch unreachable;
+    try output.appendSlice(allocator, text);
+    if (std.mem.indexOfAny(u8, text, ".eE") == null) try output.appendSlice(allocator, ".0");
 }
 
 fn appendRuntimeError(
@@ -362,13 +641,13 @@ test "limit recursive call depth" {
 test "reject inconsistent typed IR" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
-    const instructions = [_]Ir.Instruction{.return_void};
+    const blocks = [_]Ir.Block{.{ .instructions = &.{}, .terminator = .return_void }};
     const functions = [_]Ir.Function{.{
         .name = "value",
         .parameter_types = &.{},
         .return_type = .int,
         .value_types = &.{},
-        .instructions = &instructions,
+        .blocks = &blocks,
     }};
     try std.testing.expectError(error.InvalidProgram, invoke(arena.allocator(), .{ .functions = &functions }, 0, &.{}));
 }
@@ -389,6 +668,110 @@ test "execute UTF-8 strings through parameters returns and intrinsic values" {
     try std.testing.expectEqual(@as(u8, 0), result.exit_code);
     try std.testing.expectEqualSlices(u8, "Silex\n🔥\x00ok\n\n", result.stdout);
     try std.testing.expectEqualStrings("", result.stderr);
+}
+
+test "execute alternatives and short-circuit logical operands" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = @import("Frontend.zig").Frontend.init(allocator);
+    const program = (try frontend.compile(
+        \\func observed() bool { print("evaluated"); return true }
+        \\func main() {
+        \\    if false && observed() { print("bad") }
+        \\    elif true || observed() { print("selected") }
+        \\    else { print("bad") }
+        \\}
+    )).ir;
+    const result = try runCapture(allocator, program);
+    try std.testing.expectEqual(@as(u8, 0), result.exit_code);
+    try std.testing.expectEqualStrings("selected\n", result.stdout);
+    try std.testing.expectEqualStrings("", result.stderr);
+}
+
+test "execute integer families floats conversions and unsigned bit operations" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = @import("Frontend.zig").Frontend.init(allocator);
+    const program = (try frontend.compile(
+        \\func preserve(value:uint16) uint16 { return value }
+        \\func half(value:float64) float64 { return value / 2.0 }
+        \\func main() {
+        \\    let minimum:int8 = -128
+        \\    let maximum:uint = 18446744073709551615
+        \\    let flags:uint8 = 0x81
+        \\    let byte:uint8 = (255 as uint8) ^ (15 as uint8)
+        \\    print(minimum)
+        \\    print(maximum)
+        \\    print(preserve(65535))
+        \\    print(flags >> 7)
+        \\    print(byte)
+        \\    print(half(5.0))
+        \\}
+    )).ir;
+    const result = try runCapture(allocator, program);
+    try std.testing.expectEqualStrings(
+        "-128\n18446744073709551615\n65535\n1\n240\n2.5\n",
+        result.stdout,
+    );
+}
+
+test "execute immutable UTF-8 string operations" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = @import("Frontend.zig").Frontend.init(allocator);
+    const program = (try frontend.compile(
+        \\func join(left:str, right:str) str { return left + right }
+        \\func main() {
+        \\    let greeting = join("Bonjour, ", "Silex")
+        \\    print(greeting)
+        \\    print(greeting == "Bonjour, Silex")
+        \\    print("Aé🔥".count())
+        \\    print("A\0B".count())
+        \\}
+    )).ir;
+    const result = try runCapture(allocator, program);
+    try std.testing.expectEqualStrings("Bonjour, Silex\ntrue\n3\n3\n", result.stdout);
+}
+
+test "format IEEE floating special values deterministically" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = @import("Frontend.zig").Frontend.init(allocator);
+    const program = (try frontend.compile(
+        \\func main() {
+        \\    let zero:float64 = 0.0
+        \\    print(-zero)
+        \\    print(1.0 / zero)
+        \\    print(-1.0 / zero)
+        \\    print(zero / zero)
+        \\}
+    )).ir;
+    const result = try runCapture(allocator, program);
+    try std.testing.expectEqualStrings("-0.0\ninf\n-inf\nnan\n", result.stdout);
+}
+
+test "interpolate values and print multiple arguments without separators" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const program = try compile(
+        \\func observed(value:int) int { print("observed"); return value }
+        \\func main() {
+        \\    let value = 21
+        \\    let message = "Value: $(value * 2), $(true), $(1.5), $value, ${value}, $$(value)"
+        \\    print("Before ", observed(value), ": ", message)
+        \\}
+    , allocator);
+    const result = try runCapture(allocator, program);
+    try std.testing.expectEqualSlices(
+        u8,
+        "observed\nBefore 21: Value: 42, true, 1.5, $value, ${value}, $(value)\n",
+        result.stdout,
+    );
 }
 
 test "print reference values once and in source order" {

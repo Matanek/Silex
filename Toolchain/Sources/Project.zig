@@ -234,10 +234,20 @@ pub const Compiler = struct {
             .return_statement => |value| if (value.value) |expression|
                 try self.activateExpression(module, expression),
             .expression_statement => |expression| try self.activateExpression(module, expression),
-            .print_statement, .panic_statement => |effect| try self.activateExpression(module, effect.value),
+            .print_statement => |print_statement| for (print_statement.values) |value| try self.activateExpression(module, value),
+            .panic_statement => |effect| try self.activateExpression(module, effect.value),
             .assert_statement => |assertion| {
                 try self.activateExpression(module, assertion.condition);
                 try self.activateExpression(module, assertion.message);
+            },
+            .if_statement => |conditional| {
+                for (conditional.branches) |branch| {
+                    try self.activateExpression(module, branch.condition);
+                    for (branch.statements) |nested| try self.activateStatement(module, nested);
+                }
+                if (conditional.else_statements) |statements| {
+                    for (statements) |nested| try self.activateStatement(module, nested);
+                }
             },
         }
     }
@@ -254,6 +264,12 @@ pub const Compiler = struct {
             .binary => |binary| {
                 try self.activateExpression(module, binary.left);
                 try self.activateExpression(module, binary.right);
+            },
+            .conversion => |conversion| try self.activateExpression(module, conversion.operand),
+            .string_count => |operand| try self.activateExpression(module, operand),
+            .interpolated_string => |interpolated| for (interpolated.parts) |part| switch (part) {
+                .text => {},
+                .expression => |value| try self.activateExpression(module, value),
             },
             else => {},
         }
@@ -344,10 +360,20 @@ pub const Compiler = struct {
             .return_statement => |value| if (value.value) |expression|
                 try self.rewriteExpression(module, expression),
             .expression_statement => |expression| try self.rewriteExpression(module, expression),
-            .print_statement, .panic_statement => |effect| try self.rewriteExpression(module, effect.value),
+            .print_statement => |print_statement| for (print_statement.values) |value| try self.rewriteExpression(module, value),
+            .panic_statement => |effect| try self.rewriteExpression(module, effect.value),
             .assert_statement => |assertion| {
                 try self.rewriteExpression(module, assertion.condition);
                 try self.rewriteExpression(module, assertion.message);
+            },
+            .if_statement => |conditional| {
+                for (conditional.branches) |branch| {
+                    try self.rewriteExpression(module, branch.condition);
+                    for (branch.statements) |nested| try self.rewriteStatement(module, nested);
+                }
+                if (conditional.else_statements) |statements| {
+                    for (statements) |nested| try self.rewriteStatement(module, nested);
+                }
             },
         }
     }
@@ -371,6 +397,12 @@ pub const Compiler = struct {
             .binary => |binary| {
                 try self.rewriteExpression(module, binary.left);
                 try self.rewriteExpression(module, binary.right);
+            },
+            .conversion => |conversion| try self.rewriteExpression(module, conversion.operand),
+            .string_count => |operand| try self.rewriteExpression(module, operand),
+            .interpolated_string => |interpolated| for (interpolated.parts) |part| switch (part) {
+                .text => {},
+                .expression => |value| try self.rewriteExpression(module, value),
             },
             else => {},
         }

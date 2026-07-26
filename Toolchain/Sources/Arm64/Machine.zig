@@ -39,14 +39,25 @@ pub const BinaryOperator = enum {
     greater_equal,
     equal,
     not_equal,
+    bit_and,
+    bit_xor,
+    shift_left,
+    shift_right,
 };
 
-pub const PrintKind = enum { integer, boolean, string };
+pub const PrintKind = enum { signed_integer, unsigned_integer, float32, float64, boolean, string };
 
 pub const Instruction = union(enum) {
     constant_int: ConstantInt,
     constant_bool: ConstantBool,
     constant_str: ConstantStr,
+    constant_float32: ConstantFloat32,
+    constant_float64: ConstantFloat64,
+    copy: Copy,
+    convert: Convert,
+    format_value: FormatValue,
+    string_concat: StringConcat,
+    string_count: StringCount,
     unary: Unary,
     binary: Binary,
     call: Call,
@@ -55,10 +66,13 @@ pub const Instruction = union(enum) {
     panic: Panic,
     return_value: Slot,
     return_void,
+    jump: usize,
+    branch: Branch,
 
     pub const ConstantInt = struct {
         result: Slot,
-        value: i64,
+        bits: u64,
+        type: Types.Type = .int,
     };
 
     pub const ConstantBool = struct {
@@ -71,10 +85,52 @@ pub const Instruction = union(enum) {
         string: usize,
     };
 
+    pub const ConstantFloat32 = struct {
+        result: Slot,
+        bits: u32,
+    };
+
+    pub const ConstantFloat64 = struct {
+        result: Slot,
+        bits: u64,
+    };
+
+    pub const Copy = struct {
+        result: Slot,
+        operand: Slot,
+    };
+
+    pub const Convert = struct {
+        result: Slot,
+        operand: Slot,
+        source: Types.Type,
+        target: Types.Type,
+        header: usize,
+        checked: bool,
+    };
+
+    pub const FormatValue = struct {
+        result: Slot,
+        operand: Slot,
+        kind: PrintKind,
+    };
+
+    pub const StringConcat = struct {
+        result: Slot,
+        left: Slot,
+        right: Slot,
+    };
+
+    pub const StringCount = struct {
+        result: Slot,
+        operand: Slot,
+    };
+
     pub const Unary = struct {
         result: Slot,
         operator: UnaryOperator,
         operand: Slot,
+        type: Types.Type = .int,
     };
 
     pub const Binary = struct {
@@ -82,6 +138,7 @@ pub const Instruction = union(enum) {
         operator: BinaryOperator,
         left: Slot,
         right: Slot,
+        type: Types.Type = .int,
     };
 
     pub const Call = struct {
@@ -93,6 +150,7 @@ pub const Instruction = union(enum) {
     pub const Print = struct {
         value: Slot,
         kind: PrintKind,
+        newline: bool,
     };
 
     pub const Assert = struct {
@@ -104,6 +162,12 @@ pub const Instruction = union(enum) {
     pub const Panic = struct {
         message: Slot,
         header: usize,
+    };
+
+    pub const Branch = struct {
+        condition: Slot,
+        then_instruction: usize,
+        else_instruction: usize,
     };
 };
 
@@ -152,6 +216,30 @@ pub fn validate(program: Program) Error!void {
                 try requireSlot(function, value.result);
                 if (value.string >= program.strings.len) return error.InvalidMachineProgram;
             },
+            .constant_float32 => |value| try requireSlot(function, value.result),
+            .constant_float64 => |value| try requireSlot(function, value.result),
+            .copy => |value| {
+                try requireSlot(function, value.result);
+                try requireSlot(function, value.operand);
+            },
+            .convert => |value| {
+                try requireSlot(function, value.result);
+                try requireSlot(function, value.operand);
+                if (value.header >= program.strings.len) return error.InvalidMachineProgram;
+            },
+            .format_value => |value| {
+                try requireSlot(function, value.result);
+                try requireSlot(function, value.operand);
+            },
+            .string_concat => |value| {
+                try requireSlot(function, value.result);
+                try requireSlot(function, value.left);
+                try requireSlot(function, value.right);
+            },
+            .string_count => |value| {
+                try requireSlot(function, value.result);
+                try requireSlot(function, value.operand);
+            },
             .unary => |value| {
                 try requireSlot(function, value.result);
                 try requireSlot(function, value.operand);
@@ -180,6 +268,12 @@ pub fn validate(program: Program) Error!void {
             },
             .return_value => |value| try requireSlot(function, value),
             .return_void => {},
+            .jump => |target| if (target >= function.instructions.len) return error.InvalidMachineProgram,
+            .branch => |branch_value| {
+                try requireSlot(function, branch_value.condition);
+                if (branch_value.then_instruction >= function.instructions.len or
+                    branch_value.else_instruction >= function.instructions.len) return error.InvalidMachineProgram;
+            },
         };
     }
 }
@@ -204,8 +298,8 @@ test "validate function identities calls and slots" {
         .{ .return_value = 2 },
     };
     const main_instructions = [_]Instruction{
-        .{ .constant_int = .{ .result = 0, .value = 40 } },
-        .{ .constant_int = .{ .result = 1, .value = 2 } },
+        .{ .constant_int = .{ .result = 0, .bits = 40, .type = .int } },
+        .{ .constant_int = .{ .result = 1, .bits = 2, .type = .int } },
         .{ .call = .{ .result = 2, .function = 0, .arguments = &arguments } },
         .return_void,
     };

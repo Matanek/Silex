@@ -2,6 +2,7 @@ const std = @import("std");
 const Lower = @import("Arm64/Lower.zig");
 const Interpreter = @import("Interpreter.zig");
 const Ir = @import("Ir.zig");
+const Lsp = @import("Lsp/Server.zig");
 const MachO = @import("MacOS/MachO.zig");
 const Project = @import("Project.zig");
 
@@ -10,8 +11,10 @@ const Io = std.Io;
 const usage =
     \\Usage: silex run <source.sx> [--emit-ir]
     \\       silex compile <source.sx> -o <executable>
+    \\       silex lsp
     \\
-    \\Runs a Silex source file, or emits a native macos-arm64 executable.
+    \\Runs a Silex source file, emits a native macos-arm64 executable,
+    \\or serves editor requests over standard input and output.
     \\
 ;
 
@@ -31,8 +34,20 @@ fn runCli(init: std.process.Init) !u8 {
     }
     if (std.mem.eql(u8, args[1], "run")) return runSource(init, allocator, args[2..]);
     if (std.mem.eql(u8, args[1], "compile")) return compileNative(init, allocator, args[2..]);
+    if (std.mem.eql(u8, args[1], "lsp")) return runLanguageServer(init, args[2..]);
     std.debug.print("silex: unknown command '{s}'\n\n{s}", .{ args[1], usage });
     return 1;
+}
+
+fn runLanguageServer(init: std.process.Init, args: []const []const u8) !u8 {
+    if (args.len != 0) {
+        std.debug.print("silex: 'lsp' does not accept arguments\n", .{});
+        return 1;
+    }
+    var server = Lsp.Server.init(init.gpa, init.io);
+    defer server.deinit();
+    try server.run();
+    return 0;
 }
 
 fn runSource(init: std.process.Init, allocator: std.mem.Allocator, args: []const []const u8) !u8 {
@@ -148,6 +163,7 @@ fn globalPackagesRoot(
 test {
     _ = @import("Arm64/Differential.zig");
     _ = @import("Arm64/Encoder.zig");
+    _ = @import("Arm64/Instructions.zig");
     _ = @import("Arm64/Lower.zig");
     _ = @import("Arm64/Machine.zig");
     _ = @import("Arm64/Runner.zig");
@@ -157,11 +173,17 @@ test {
     _ = @import("NativeComposition.zig");
     _ = @import("NativeEffects.zig");
     _ = @import("Modules.zig");
+    _ = @import("Numeric.zig");
     _ = @import("Packages.zig");
     _ = @import("Lexer.zig");
+    _ = @import("Lsp/Completion.zig");
+    _ = @import("Lsp/Diagnostics.zig");
+    _ = @import("Lsp/Protocol.zig");
+    _ = @import("Lsp/Server.zig");
     _ = @import("Parser.zig");
     _ = @import("Project.zig");
     _ = @import("Semantic.zig");
+    _ = @import("SemanticTests.zig");
     _ = @import("Ir.zig");
     _ = @import("Interpreter.zig");
     _ = @import("Interface.zig");

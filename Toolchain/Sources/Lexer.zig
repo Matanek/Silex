@@ -64,6 +64,11 @@ pub const TokenTag = enum {
     integer,
     floating,
     string,
+    string_start,
+    string_text,
+    interpolation_start,
+    interpolation_end,
+    string_end,
     plus,
     plus_plus,
     plus_equal,
@@ -117,12 +122,19 @@ pub const Token = struct {
 };
 
 pub const Lexer = struct {
+    const Mode = union(enum) {
+        string,
+        interpolation: usize,
+    };
+
     source: []const u8,
     index: usize = 0,
     line: usize = 1,
     column: usize = 1,
     file: usize = 0,
     diagnostic: ?Source.Diagnostic = null,
+    modes: [32]Mode = undefined,
+    mode_count: usize = 0,
 
     pub fn init(source: []const u8) Lexer {
         return .{ .source = source };
@@ -133,6 +145,9 @@ pub const Lexer = struct {
     }
 
     pub fn next(self: *Lexer) Source.Error!Token {
+        if (self.mode_count != 0 and self.modes[self.mode_count - 1] == .string) {
+            return self.stringPartToken();
+        }
         self.skipIgnored();
 
         if (self.index == self.source.len) {
@@ -155,7 +170,15 @@ pub const Lexer = struct {
 
         if (std.ascii.isDigit(character)) return self.numericToken(start, position);
 
-        if (character == '"') return self.stringToken(position);
+        if (character == '"') return self.stringTokenOrStart(position);
+
+        if (self.interpolationDepth()) |depth| {
+            if (character == ')' and depth == 0) {
+                self.advance();
+                self.mode_count -= 1;
+                return self.token(.interpolation_end, start, position);
+            }
+        }
 
         if (character == '=') return self.equalToken(start, position);
         if (character == '!') return self.optionalDoubleToken(start, position, '=', .bang, .bang_equal);
@@ -187,14 +210,107 @@ pub const Lexer = struct {
             '@' => self.token(.at, start, position),
             '^' => self.token(.caret, start, position),
             ',' => self.token(.comma, start, position),
-            '(' => self.token(.left_parenthesis, start, position),
-            ')' => self.token(.right_parenthesis, start, position),
+            '(' => parenthesis: {
+                if (self.interpolationDepth()) |depth| self.modes[self.mode_count - 1] = .{ .interpolation = depth + 1 };
+                break :parenthesis self.token(.left_parenthesis, start, position);
+            },
+            ')' => parenthesis: {
+                if (self.interpolationDepth()) |depth| self.modes[self.mode_count - 1] = .{ .interpolation = depth - 1 };
+                break :parenthesis self.token(.right_parenthesis, start, position);
+            },
             '{' => self.token(.left_brace, start, position),
             '}' => self.token(.right_brace, start, position),
             '[' => self.token(.left_bracket, start, position),
             ']' => self.token(.right_bracket, start, position),
             ';' => self.token(.semicolon, start, position),
             else => self.fail(position, "invalid character"),
+        };
+    }
+
+    fn stringTokenOrStart(self: *Lexer, position: Source.Position) Source.Error!Token {
+        if (!self.containsInterpolation()) return self.stringToken(position);
+        const start = self.index;
+        self.advance();
+        try self.pushMode(.string, position);
+        return self.token(.string_start, start, position);
+    }
+
+    fn containsInterpolation(self: *const Lexer) bool {
+        var index = self.index + 1;
+        while (index < self.source.len) {
+            switch (self.source[index]) {
+                '"', '\n', '\r' => return false,
+                '\\' => index += 2,
+                '$' => {
+                    if (index + 1 >= self.source.len) return false;
+                    if (self.source[index + 1] == '$') {
+                        index += 2;
+                    } else if (self.source[index + 1] == '(') {
+                        return true;
+                    } else {
+                        index += 1;
+                    }
+                },
+                else => index += 1,
+            }
+        }
+        return false;
+    }
+
+    fn stringPartToken(self: *Lexer) Source.Error!Token {
+        const start = self.index;
+        const position = self.currentPosition();
+        if (self.index == self.source.len) return self.fail(position, "unterminated string literal");
+        if (self.source[self.index] == '"') {
+            self.advance();
+            self.mode_count -= 1;
+            return self.token(.string_end, start, position);
+        }
+        if (self.source[self.index] == '$' and self.index + 1 < self.source.len and self.source[self.index + 1] == '(') {
+            self.advance();
+            self.advance();
+            try self.pushMode(.{ .interpolation = 0 }, position);
+            return self.token(.interpolation_start, start, position);
+        }
+
+        while (self.index < self.source.len) {
+            switch (self.source[self.index]) {
+                '"' => break,
+                '\n', '\r' => return self.fail(position, "unterminated string literal"),
+                '\\' => {
+                    self.advance();
+                    if (self.index == self.source.len) return self.fail(position, "unterminated string literal");
+                    try self.stringEscape(position);
+                },
+                '$' => {
+                    if (self.index + 1 < self.source.len and self.source[self.index + 1] == '$') {
+                        self.advance();
+                        self.advance();
+                    } else if (self.index + 1 < self.source.len and self.source[self.index + 1] == '(') {
+                        break;
+                    } else {
+                        self.advance();
+                    }
+                },
+                else => self.advance(),
+            }
+        }
+        const lexeme = self.source[start..self.index];
+        if (!std.unicode.utf8ValidateSlice(lexeme)) return self.fail(position, "string literal is not valid UTF-8");
+        return .{ .tag = .string_text, .lexeme = lexeme, .position = position, .start = start, .end = self.index };
+    }
+
+    fn pushMode(self: *Lexer, mode: Mode, position: Source.Position) Source.Error!void {
+        if (self.mode_count == self.modes.len) return self.fail(position, "string interpolation nesting is too deep");
+        self.modes[self.mode_count] = mode;
+        self.mode_count += 1;
+    }
+
+    fn interpolationDepth(self: *const Lexer) ?usize {
+        if (self.mode_count == 0) return null;
+        return switch (self.modes[self.mode_count - 1]) {
+            .interpolation => |depth| depth,
+            .string => null,
         };
     }
 
@@ -779,8 +895,41 @@ test "recognize string escapes" {
     try std.testing.expectEqualStrings("line\\n\\u{00E9}", token.lexeme);
 }
 
+test "recognize string interpolation and nested parentheses" {
+    var lexer = Lexer.init("\"Value: $(double((21)))!\"");
+    const expected = [_]TokenTag{
+        .string_start,
+        .string_text,
+        .interpolation_start,
+        .identifier,
+        .left_parenthesis,
+        .left_parenthesis,
+        .integer,
+        .right_parenthesis,
+        .right_parenthesis,
+        .interpolation_end,
+        .string_text,
+        .string_end,
+        .end,
+    };
+    for (expected) |tag| try std.testing.expectEqual(tag, (try lexer.next()).tag);
+}
+
+test "doubled dollar does not start interpolation" {
+    var lexer = Lexer.init("\"$$(value) and $value and ${value}\"");
+    const token = try lexer.next();
+    try std.testing.expectEqual(TokenTag.string, token.tag);
+    try std.testing.expectEqualStrings("$$(value) and $value and ${value}", token.lexeme);
+}
+
 test "reject invalid string escape" {
     var lexer = Lexer.init("\"\\q\"");
+    try std.testing.expectError(error.InvalidSource, lexer.next());
+    try std.testing.expectEqualStrings("invalid escape sequence in string literal", lexer.diagnostic.?.message);
+}
+
+test "Swift-style interpolation is not a string escape" {
+    var lexer = Lexer.init("\"Value: \\(value)\"");
     try std.testing.expectError(error.InvalidSource, lexer.next());
     try std.testing.expectEqualStrings("invalid escape sequence in string literal", lexer.diagnostic.?.message);
 }

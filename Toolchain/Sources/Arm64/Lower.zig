@@ -34,8 +34,17 @@ fn lowerFunction(
     for (function.value_types) |type_value| try requireExecutableValueType(type_value);
 
     var instructions: std.ArrayList(Machine.Instruction) = .empty;
-    for (function.instructions) |instruction| {
-        try instructions.append(allocator, try lowerInstruction(allocator, program, strings, function, instruction));
+    const starts = try allocator.alloc(usize, function.blocks.len);
+    var next_instruction: usize = 0;
+    for (function.blocks, 0..) |block, block_id| {
+        starts[block_id] = next_instruction;
+        next_instruction += block.instructions.len + 1;
+    }
+    for (function.blocks) |block| {
+        for (block.instructions) |instruction| {
+            try instructions.append(allocator, try lowerInstruction(allocator, program, strings, function, instruction));
+        }
+        try instructions.append(allocator, try lowerTerminator(allocator, program, strings, block.terminator, starts));
     }
     return .{
         .name = function.name,
@@ -57,7 +66,8 @@ fn lowerInstruction(
     return switch (instruction) {
         .constant_int => |constant| .{ .constant_int = .{
             .result = try Machine.checkedSlot(constant.result),
-            .value = constant.value,
+            .bits = constant.bits,
+            .type = function.value_types[constant.result],
         } },
         .constant_bool => |constant| .{ .constant_bool = .{
             .result = try Machine.checkedSlot(constant.result),
@@ -67,12 +77,51 @@ fn lowerInstruction(
             .result = try Machine.checkedSlot(constant.result),
             .string = try internString(allocator, strings, constant.value),
         } },
+        .constant_float32 => |constant| .{ .constant_float32 = .{
+            .result = try Machine.checkedSlot(constant.result),
+            .bits = constant.bits,
+        } },
+        .constant_float64 => |constant| .{ .constant_float64 = .{
+            .result = try Machine.checkedSlot(constant.result),
+            .bits = constant.bits,
+        } },
+        .copy => |copy| .{ .copy = .{
+            .result = try Machine.checkedSlot(copy.result),
+            .operand = try Machine.checkedSlot(copy.operand),
+        } },
+        .convert => |conversion| .{ .convert = .{
+            .result = try Machine.checkedSlot(conversion.result),
+            .operand = try Machine.checkedSlot(conversion.operand),
+            .source = conversion.source,
+            .target = conversion.target,
+            .checked = conversion.checked,
+            .header = try internString(
+                allocator,
+                strings,
+                try runtimeConversionHeader(allocator, program, conversion.position),
+            ),
+        } },
+        .format_value => |format| .{ .format_value = .{
+            .result = try Machine.checkedSlot(format.result),
+            .operand = try Machine.checkedSlot(format.operand),
+            .kind = try printKind(function.value_types[format.operand]),
+        } },
+        .string_concat => |concat| .{ .string_concat = .{
+            .result = try Machine.checkedSlot(concat.result),
+            .left = try Machine.checkedSlot(concat.left),
+            .right = try Machine.checkedSlot(concat.right),
+        } },
+        .string_count => |count| .{ .string_count = .{
+            .result = try Machine.checkedSlot(count.result),
+            .operand = try Machine.checkedSlot(count.operand),
+        } },
         .unary => |unary| .{ .unary = .{
             .result = try Machine.checkedSlot(unary.result),
             .operator = switch (unary.operator) {
                 .negate => .negate,
             },
             .operand = try Machine.checkedSlot(unary.operand),
+            .type = function.value_types[unary.result],
         } },
         .binary => |binary| .{ .binary = .{
             .result = try Machine.checkedSlot(binary.result),
@@ -88,9 +137,14 @@ fn lowerInstruction(
                 .greater_equal => .greater_equal,
                 .equal => .equal,
                 .not_equal => .not_equal,
+                .bit_and => .bit_and,
+                .bit_xor => .bit_xor,
+                .shift_left => .shift_left,
+                .shift_right => .shift_right,
             },
             .left = try Machine.checkedSlot(binary.left),
             .right = try Machine.checkedSlot(binary.right),
+            .type = function.value_types[binary.left],
         } },
         .call => |call| call: {
             _ = try Machine.checkedArgumentCount(call.arguments.len);
@@ -103,39 +157,63 @@ fn lowerInstruction(
             } };
         },
         .print => |value| .{ .print = .{
-            .value = try Machine.checkedSlot(value),
-            .kind = switch (function.value_types[value]) {
-                .int => .integer,
-                .bool => .boolean,
-                .str => .string,
-                else => return error.UnsupportedType,
-            },
+            .value = try Machine.checkedSlot(value.value),
+            .kind = try printKind(function.value_types[value.value]),
+            .newline = value.newline,
         } },
         .assert => |assertion| .{ .assert = .{
             .condition = try Machine.checkedSlot(assertion.condition),
             .message = try Machine.checkedSlot(assertion.message),
             .header = try internString(allocator, strings, try runtimeHeader(allocator, program, assertion.position, true)),
         } },
+    };
+}
+
+fn printKind(type_value: Ir.Type) Machine.Error!Machine.PrintKind {
+    return switch (type_value) {
+        .int8, .int16, .int32, .int => .signed_integer,
+        .uint8, .uint16, .uint32, .uint => .unsigned_integer,
+        .float32 => .float32,
+        .float64 => .float64,
+        .bool => .boolean,
+        .str => .string,
+        else => error.UnsupportedType,
+    };
+}
+
+fn lowerTerminator(
+    allocator: Allocator,
+    program: Ir.Program,
+    strings: *std.ArrayList([]const u8),
+    terminator: Ir.Terminator,
+    starts: []const usize,
+) Machine.Error!Machine.Instruction {
+    return switch (terminator) {
+        .jump => |target| .{ .jump = starts[target] },
+        .branch => |branch| .{ .branch = .{
+            .condition = try Machine.checkedSlot(branch.condition),
+            .then_instruction = starts[branch.then_block],
+            .else_instruction = starts[branch.else_block],
+        } },
+        .return_value => |value| .{ .return_value = try Machine.checkedSlot(value) },
+        .return_void => .return_void,
         .panic => |panic_value| .{ .panic = .{
             .message = try Machine.checkedSlot(panic_value.message),
             .header = try internString(allocator, strings, try runtimeHeader(allocator, program, panic_value.position, false)),
         } },
-        .return_value => |value| .{ .return_value = try Machine.checkedSlot(value) },
-        .return_void => .return_void,
     };
 }
 
 fn requireExecutableReturnType(type_value: Ir.Type) Machine.Error!void {
     switch (type_value) {
-        .void, .int, .bool, .str => {},
-        .float32 => return error.UnsupportedType,
+        .void, .int8, .int16, .int32, .int, .uint8, .uint16, .uint32, .uint, .float32, .float64, .bool, .str => {},
     }
 }
 
 fn requireExecutableValueType(type_value: Ir.Type) Machine.Error!void {
     switch (type_value) {
-        .int, .bool, .str => {},
-        .void, .float32 => return error.UnsupportedType,
+        .int8, .int16, .int32, .int, .uint8, .uint16, .uint32, .uint, .float32, .float64, .bool, .str => {},
+        .void => return error.UnsupportedType,
     }
 }
 
@@ -171,6 +249,19 @@ fn runtimeHeader(
             "{s}:{d}:{d}: runtime error: ",
             .{ path, position.line, position.column },
         );
+}
+
+fn runtimeConversionHeader(
+    allocator: Allocator,
+    program: Ir.Program,
+    position: @import("../Source.zig").Position,
+) Allocator.Error![]const u8 {
+    const path = if (position.file < program.files.len) program.files[position.file] else "<source>";
+    return std.fmt.allocPrint(
+        allocator,
+        "{s}:{d}:{d}: runtime error: invalid numeric conversion\n",
+        .{ path, position.line, position.column },
+    );
 }
 
 fn compile(allocator: Allocator, source: []const u8) !Machine.Program {
@@ -212,7 +303,7 @@ test "reject target limits before encoding" {
         .parameter_types = &.{.float32},
         .return_type = .void,
         .value_types = &.{.float32},
-        .instructions = &.{.return_void},
+        .blocks = &.{.{ .instructions = &.{}, .terminator = .return_void }},
     }};
-    try std.testing.expectError(error.UnsupportedType, lower(allocator, .{ .functions = &functions }));
+    _ = try lower(allocator, .{ .functions = &functions });
 }

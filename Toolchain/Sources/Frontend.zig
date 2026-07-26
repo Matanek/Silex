@@ -35,6 +35,20 @@ pub const Frontend = struct {
         ir.files = &.{"<source>"};
         return .{ .ast = ast, .ir = ir };
     }
+
+    pub fn checkDocument(self: *Frontend, source: []const u8) CompileError!void {
+        var parser = ParserModule.Parser.init(self.allocator, source);
+        const ast = parser.parse() catch |err| {
+            self.diagnostic = parser.diagnostic;
+            return err;
+        };
+        if (ast.uses.len != 0) return;
+        var analyzer = Semantic.Analyzer.init(self.allocator);
+        _ = analyzer.analyzeUnit(ast) catch |err| {
+            self.diagnostic = analyzer.diagnostic;
+            return err;
+        };
+    }
 };
 
 test "compile the first Silex program through typed IR" {
@@ -52,5 +66,12 @@ test "compile parsed statements to typed IR" {
     var frontend = Frontend.init(arena.allocator());
     const compilation = try frontend.compile("func answer() int { return 40 + 2 } func main() { answer() }");
     try std.testing.expectEqual(@as(usize, 2), compilation.ir.functions.len);
-    try std.testing.expectEqual(@as(Ir.FunctionId, 0), compilation.ir.functions[1].instructions[0].call.function);
+    try std.testing.expectEqual(@as(Ir.FunctionId, 0), compilation.ir.functions[1].blocks[0].instructions[0].call.function);
+}
+
+test "check a library document without requiring an entry point" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var frontend = Frontend.init(arena.allocator());
+    try frontend.checkDocument("public func add(left:int, right:int) int { return left + right }");
 }

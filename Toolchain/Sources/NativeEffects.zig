@@ -4,6 +4,7 @@ const builtin = @import("builtin");
 const Frontend = @import("Frontend.zig");
 const Interpreter = @import("Interpreter.zig");
 const Lower = @import("Arm64/Lower.zig");
+const Runner = @import("Arm64/Runner.zig");
 const MachO = @import("MacOS/MachO.zig");
 const Project = @import("Project.zig");
 
@@ -64,6 +65,232 @@ test "native effects match the reference output" {
         \\    print(false == false)
         \\    assert(true, "must pass")
         \\}
+    ;
+    var frontend = Frontend.Frontend.init(allocator);
+    const reference = try Interpreter.runCapture(allocator, (try frontend.compile(source)).ir);
+    const native = try compileAndRun(allocator, source);
+    try std.testing.expectEqual(reference.exit_code, exitCode(native));
+    try std.testing.expectEqualSlices(u8, reference.stdout, native.stdout);
+    try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
+}
+
+test "native branches and short-circuit match the reference output" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const source =
+        \\func observed() bool { print("evaluated"); return true }
+        \\func classify(value:int) int {
+        \\    if value < 0 { return -1 }
+        \\    elif value == 0 { return 0 }
+        \\    else { return 1 }
+        \\}
+        \\func main() {
+        \\    if false && observed() { print("bad") }
+        \\    else if true || observed() { print(classify(42)) }
+        \\}
+    ;
+    var frontend = Frontend.Frontend.init(allocator);
+    const reference = try Interpreter.runCapture(allocator, (try frontend.compile(source)).ir);
+    const native = try compileAndRun(allocator, source);
+    try std.testing.expectEqual(reference.exit_code, exitCode(native));
+    try std.testing.expectEqualSlices(u8, reference.stdout, native.stdout);
+    try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
+}
+
+test "native integer families preserve signedness widths and decimal output" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const source =
+        \\func preserve(value:uint16) uint16 { return value }
+        \\func main() {
+        \\    let minimum:int8 = -128
+        \\    let maximum:uint = 18446744073709551615
+        \\    let flags:uint8 = 0x81
+        \\    print(minimum)
+        \\    print(maximum)
+        \\    print(maximum > 1)
+        \\    print(preserve(65535))
+        \\    print(flags >> 7)
+        \\    print(flags & (0xf0 as uint8))
+        \\    print(flags ^ (0xff as uint8))
+        \\}
+    ;
+    var frontend = Frontend.Frontend.init(allocator);
+    const reference = try Interpreter.runCapture(allocator, (try frontend.compile(source)).ir);
+    const native = try compileAndRun(allocator, source);
+    try std.testing.expectEqual(reference.exit_code, exitCode(native));
+    try std.testing.expectEqualSlices(u8, reference.stdout, native.stdout);
+    try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
+}
+
+test "native integer widening and checked conversions match the reference" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const source =
+        \\func sum(left:int8, right:int32) int32 { return left + right }
+        \\func main() {
+        \\    print(sum(-2, 44))
+        \\    print(255 as uint8)
+        \\}
+    ;
+    var frontend = Frontend.Frontend.init(allocator);
+    const reference = try Interpreter.runCapture(allocator, (try frontend.compile(source)).ir);
+    const native = try compileAndRun(allocator, source);
+    try std.testing.expectEqual(reference.exit_code, exitCode(native));
+    try std.testing.expectEqualSlices(u8, reference.stdout, native.stdout);
+    try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
+
+    const invalid_source = "func main() { print(256 as uint8) }";
+    var invalid_frontend = Frontend.Frontend.init(allocator);
+    var invalid_compilation = try invalid_frontend.compile(invalid_source);
+    invalid_compilation.ir.files = &.{"Main.sx"};
+    const invalid_reference = try Interpreter.runCapture(allocator, invalid_compilation.ir);
+    const invalid_native = try compileAndRun(allocator, invalid_source);
+    try std.testing.expectEqual(invalid_reference.exit_code, exitCode(invalid_native));
+    try std.testing.expectEqualSlices(u8, invalid_reference.stderr, invalid_native.stderr);
+}
+
+test "native floating arithmetic preserves float64 bits" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\func average(left:float64, right:float64) float64 { return (left + right) / 2.0 }
+        \\func main() {}
+    );
+    const machine = try Lower.lower(allocator, compilation.ir);
+    const left_bits: u64 = @bitCast(@as(f64, 1.5));
+    const right_bits: u64 = @bitCast(@as(f64, 2.5));
+    const native = try Runner.invoke(allocator, machine, 0, &.{ @bitCast(left_bits), @bitCast(right_bits) });
+    try std.testing.expectEqual(@import("Arm64/Machine.zig").Status.success, native.status);
+    try std.testing.expectEqual(@as(f64, 2.0), @as(f64, @bitCast(@as(u64, @bitCast(native.value)))));
+}
+
+test "native float printing matches decimal reference for IEEE edge values" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const source =
+        \\func average(left:float64, right:float64) float64 { return (left + right) / 2.0 }
+        \\func echo32(value:float32) float32 { return value }
+        \\func main() {
+        \\    let zero:float64 = 0.0
+        \\    let tiny32:float32 = 1e-45
+        \\    print(average(1.5, 2.5))
+        \\    print(echo32(tiny32))
+        \\    print(5e-324)
+        \\    print(1.7976931348623157e308)
+        \\    print(zero)
+        \\    print(-zero)
+        \\    print(1.0 / zero)
+        \\    print(-1.0 / zero)
+        \\    print(zero / zero)
+        \\}
+    ;
+    var frontend = Frontend.Frontend.init(allocator);
+    const reference = try Interpreter.runCapture(allocator, (try frontend.compile(source)).ir);
+    const native = try compileAndRun(allocator, source);
+    try std.testing.expectEqual(reference.exit_code, exitCode(native));
+    try std.testing.expectEqualSlices(u8, reference.stdout, native.stdout);
+    try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
+}
+
+test "native string operations match value semantics and Unicode scalar counts" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const source =
+        \\func observed(value:str) str { print(value); return value }
+        \\func join(left:str, right:str) str { return left + right }
+        \\func retain(value:str) str { return "[" + value + "]" }
+        \\func main() {
+        \\    let ordered = observed("left") + observed("right")
+        \\    let nested = retain(join(ordered, "!"))
+        \\    print(nested)
+        \\    print("Aé🔥".count())
+        \\    print("A\0B".count())
+        \\    print("A\0B" == join("A\0", "B"))
+        \\    print("é" == "é")
+        \\    print("" + nested == nested + "")
+        \\    print(join("0123456789012345678901234567890123456789", "abcdefghij"))
+        \\}
+    ;
+    var frontend = Frontend.Frontend.init(allocator);
+    const reference = try Interpreter.runCapture(allocator, (try frontend.compile(source)).ir);
+    const native = try compileAndRun(allocator, source);
+    try std.testing.expectEqual(reference.exit_code, exitCode(native));
+    try std.testing.expectEqualSlices(u8, reference.stdout, native.stdout);
+    try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
+}
+
+test "native interpolation and variadic print match the reference" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const source =
+        \\func observed(value:int) int { print("observed"); return value }
+        \\func identity(value:str) str { return value }
+        \\func main() {
+        \\    let value = 21
+        \\    let minimum:int = -9223372036854775808
+        \\    let maximum:uint = 18446744073709551615
+        \\    let zero:float64 = 0.0
+        \\    print("Before ", observed(value), ": $(value * 2), $(true), $(1.5), $$(value)")
+        \\    print("Edges: $(minimum), $(maximum), $(-zero), $(1.0 / zero), $(identity("ok"))")
+        \\}
+    ;
+    var frontend = Frontend.Frontend.init(allocator);
+    const reference = try Interpreter.runCapture(allocator, (try frontend.compile(source)).ir);
+    const native = try compileAndRun(allocator, source);
+    try std.testing.expectEqual(reference.exit_code, exitCode(native));
+    try std.testing.expectEqualSlices(u8, reference.stdout, native.stdout);
+    try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
+}
+
+test "native concatenation owns large results across function returns" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const left = try allocator.alloc(u8, 4096);
+    const right = try allocator.alloc(u8, 4096);
+    @memset(left, 'a');
+    @memset(right, 'b');
+    const source = try std.fmt.allocPrint(
+        allocator,
+        "func join(left:str, right:str) str {{ return left + right }} " ++
+            "func retain(value:str) str {{ return join(value, \"!\") }} " ++
+            "func main() {{ let value = retain(join(\"{s}\", \"{s}\")); " ++
+            "print(value.count()); print(value == join(join(\"{s}\", \"{s}\"), \"!\")) }}",
+        .{ left, right, left, right },
+    );
+    var frontend = Frontend.Frontend.init(allocator);
+    const reference = try Interpreter.runCapture(allocator, (try frontend.compile(source)).ir);
+    const native = try compileAndRun(allocator, source);
+    try std.testing.expectEqual(reference.exit_code, exitCode(native));
+    try std.testing.expectEqualSlices(u8, reference.stdout, native.stdout);
+    try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
+}
+
+test "native checked float conversion returns an exact integer" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const source =
+        \\func whole(value:float64) int16 { return value as int16 }
+        \\func main() { print(whole(12.0)) }
     ;
     var frontend = Frontend.Frontend.init(allocator);
     const reference = try Interpreter.runCapture(allocator, (try frontend.compile(source)).ir);

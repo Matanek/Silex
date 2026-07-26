@@ -9,6 +9,29 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    const runtime_target = b.resolveTargetQuery(.{
+        .cpu_arch = .aarch64,
+        .os_tag = .macos,
+    });
+    const float_runtime_module = b.createModule(.{
+        .root_source_file = b.path("Runtime/FloatFormat.zig"),
+        .target = runtime_target,
+        .optimize = .ReleaseSmall,
+        .strip = true,
+        .unwind_tables = .none,
+    });
+    const float_runtime = b.addExecutable(.{
+        .name = "silex-float-runtime",
+        .root_module = float_runtime_module,
+    });
+    float_runtime.entry = .{ .symbol_name = "_silex_format_float" };
+    const runtime_files = b.addWriteFiles();
+    _ = runtime_files.addCopyFile(float_runtime.getEmittedBin(), "silex-float-runtime.macho");
+    const runtime_module = runtime_files.add(
+        "FloatRuntimeObject.zig",
+        "pub const object_bytes = @embedFile(\"silex-float-runtime.macho\");\n",
+    );
+    module.addAnonymousImport("float_runtime_object", .{ .root_source_file = runtime_module });
     const executable = b.addExecutable(.{
         .name = "silex",
         .root_module = module,

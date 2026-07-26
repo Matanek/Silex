@@ -1,7 +1,9 @@
 const std = @import("std");
 const Ast = @import("Ast.zig");
 const Ir = @import("Ir.zig");
+const Numeric = @import("Numeric.zig");
 const Source = @import("Source.zig");
+const Support = @import("SemanticSupport.zig");
 const Types = @import("Types.zig");
 
 const Allocator = std.mem.Allocator;
@@ -18,9 +20,15 @@ const TypedValue = struct {
     value: Ir.ValueId,
 };
 
+const BlockBuilder = struct {
+    instructions: std.ArrayList(Ir.Instruction) = .empty,
+    terminator: ?Ir.Terminator = null,
+};
+
 const FunctionBuilder = struct {
     value_types: std.ArrayList(Types.Type) = .empty,
-    instructions: std.ArrayList(Ir.Instruction) = .empty,
+    blocks: std.ArrayList(BlockBuilder) = .empty,
+    current_block: Ir.BlockId = 0,
     bindings: std.ArrayList(Binding) = .empty,
 };
 
@@ -34,9 +42,17 @@ pub const Analyzer = struct {
     }
 
     pub fn analyze(self: *Analyzer, program: Ast.Program) AnalyzeError!Ir.Program {
+        return self.analyzeProgram(program, true);
+    }
+
+    pub fn analyzeUnit(self: *Analyzer, program: Ast.Program) AnalyzeError!Ir.Program {
+        return self.analyzeProgram(program, false);
+    }
+
+    fn analyzeProgram(self: *Analyzer, program: Ast.Program, require_entry: bool) AnalyzeError!Ir.Program {
         self.program = program;
         self.diagnostic = null;
-        try self.validateDeclarations();
+        try self.validateDeclarations(require_entry);
 
         var functions: std.ArrayList(Ir.Function) = .empty;
         for (program.functions, 0..) |function, function_id| {
@@ -45,7 +61,7 @@ pub const Analyzer = struct {
         return .{ .functions = try functions.toOwnedSlice(self.allocator) };
     }
 
-    fn validateDeclarations(self: *Analyzer) AnalyzeError!void {
+    fn validateDeclarations(self: *Analyzer, require_entry: bool) AnalyzeError!void {
         var main: ?Ast.Function = null;
         for (self.program.functions) |function| {
             if (std.mem.eql(u8, function.name, "main")) {
@@ -66,7 +82,7 @@ pub const Analyzer = struct {
         for (self.program.functions, 0..) |function, index| {
             for (self.program.functions[0..index]) |previous| {
                 if (!std.mem.eql(u8, function.name, previous.name)) continue;
-                if (!sameParameterTypes(function.parameters, previous.parameters)) continue;
+                if (!Support.sameParameterTypes(function.parameters, previous.parameters)) continue;
                 const message = try std.fmt.allocPrint(
                     self.allocator,
                     "function '{s}' with these parameter types is already declared",
@@ -76,10 +92,13 @@ pub const Analyzer = struct {
             }
         }
 
-        const entry = main orelse return self.fail(
-            .{ .offset = 0, .line = 1, .column = 1 },
-            "missing 'main' function",
-        );
+        const entry = main orelse {
+            if (require_entry) return self.fail(
+                .{ .offset = 0, .line = 1, .column = 1 },
+                "missing 'main' function",
+            );
+            return;
+        };
         if (entry.parameters.len != 0) return self.fail(entry.name_position, "'main' must have no parameters");
         if (entry.return_type != .void) return self.fail(entry.name_position, "'main' must return 'void'");
     }
@@ -87,6 +106,7 @@ pub const Analyzer = struct {
     fn analyzeFunction(self: *Analyzer, function_id: Ir.FunctionId, function: Ast.Function) AnalyzeError!Ir.Function {
         _ = function_id;
         var builder: FunctionBuilder = .{};
+        try builder.blocks.append(self.allocator, .{});
         var parameter_types: std.ArrayList(Types.Type) = .empty;
         for (function.parameters, 0..) |parameter, value| {
             try parameter_types.append(self.allocator, parameter.type);
@@ -98,16 +118,9 @@ pub const Analyzer = struct {
             });
         }
 
-        for (function.statements) |statement| try self.analyzeStatement(&builder, function, statement);
-
-        const ends_with_return = if (function.statements.len == 0)
-            false
-        else switch (function.statements[function.statements.len - 1]) {
-            .return_statement, .panic_statement => true,
-            else => false,
-        };
+        const ends_with_return = try self.analyzeStatements(&builder, function, function.statements);
         if (function.return_type == .void) {
-            if (!ends_with_return) try builder.instructions.append(self.allocator, .return_void);
+            if (!ends_with_return) self.terminate(&builder, .return_void);
         } else if (!ends_with_return) {
             const message = try std.fmt.allocPrint(
                 self.allocator,
@@ -117,29 +130,61 @@ pub const Analyzer = struct {
             return self.fail(function.name_position, message);
         }
 
+        var blocks: std.ArrayList(Ir.Block) = .empty;
+        for (builder.blocks.items) |*block| {
+            try blocks.append(self.allocator, .{
+                .instructions = try block.instructions.toOwnedSlice(self.allocator),
+                .terminator = block.terminator orelse return error.InvalidSource,
+            });
+        }
+        const owned_blocks = try blocks.toOwnedSlice(self.allocator);
         return .{
             .name = function.name,
             .parameter_types = try parameter_types.toOwnedSlice(self.allocator),
             .return_type = function.return_type,
             .value_types = try builder.value_types.toOwnedSlice(self.allocator),
-            .instructions = try builder.instructions.toOwnedSlice(self.allocator),
+            .blocks = owned_blocks,
         };
     }
 
-    fn analyzeStatement(self: *Analyzer, builder: *FunctionBuilder, function: Ast.Function, statement: Ast.Statement) AnalyzeError!void {
-        switch (statement) {
-            .variable_declaration => |declaration| try self.analyzeVariable(builder, declaration),
-            .return_statement => |return_statement| try self.analyzeReturn(builder, function, return_statement),
+    fn analyzeStatements(self: *Analyzer, builder: *FunctionBuilder, function: Ast.Function, statements: []const Ast.Statement) AnalyzeError!bool {
+        for (statements) |statement| {
+            if (try self.analyzeStatement(builder, function, statement)) return true;
+        }
+        return false;
+    }
+
+    fn analyzeStatement(self: *Analyzer, builder: *FunctionBuilder, function: Ast.Function, statement: Ast.Statement) AnalyzeError!bool {
+        return switch (statement) {
+            .variable_declaration => |declaration| variable: {
+                try self.analyzeVariable(builder, declaration);
+                break :variable false;
+            },
+            .return_statement => |return_statement| return_value: {
+                try self.analyzeReturn(builder, function, return_statement);
+                break :return_value true;
+            },
             .expression_statement => |expression| switch (expression.value) {
                 .call => |call| {
                     _ = try self.analyzeCall(builder, call);
+                    return false;
                 },
                 else => unreachable,
             },
-            .print_statement => |print_statement| try self.analyzePrint(builder, print_statement),
-            .assert_statement => |assert_statement| try self.analyzeAssert(builder, assert_statement),
-            .panic_statement => |panic_statement| try self.analyzePanic(builder, panic_statement),
-        }
+            .print_statement => |print_statement| effect: {
+                try self.analyzePrint(builder, print_statement);
+                break :effect false;
+            },
+            .assert_statement => |assert_statement| effect: {
+                try self.analyzeAssert(builder, assert_statement);
+                break :effect false;
+            },
+            .panic_statement => |panic_statement| fatal: {
+                try self.analyzePanic(builder, panic_statement);
+                break :fatal true;
+            },
+            .if_statement => |conditional| self.analyzeIf(builder, function, conditional),
+        };
     }
 
     fn analyzeVariable(self: *Analyzer, builder: *FunctionBuilder, declaration: Ast.VariableDeclaration) AnalyzeError!void {
@@ -148,13 +193,22 @@ pub const Analyzer = struct {
             return self.fail(declaration.name_position, message);
         }
 
-        const initializer: TypedValue = if (declaration.initializer) |expression|
-            try self.analyzeExpression(builder, expression)
+        var initializer: TypedValue = if (declaration.initializer) |expression|
+            try self.analyzeExpressionExpected(
+                builder,
+                expression,
+                if (declaration.annotation != null and declaration.annotation.?.isNumeric() and Support.acceptsNumericContext(expression))
+                    declaration.annotation
+                else
+                    null,
+            )
         else intrinsic: {
             const annotation = declaration.annotation.?;
             break :intrinsic switch (annotation) {
-                .int => try self.emitInt(builder, 0),
+                .int8, .int16, .int32, .int, .uint8, .uint16, .uint32, .uint => try self.emitInteger(builder, 0, annotation),
                 .bool => try self.emitBool(builder, false),
+                .float32 => try self.emitFloat32(builder, 0.0),
+                .float64 => try self.emitFloat64(builder, 0.0),
                 .str => try self.emitString(builder, ""),
                 else => {
                     const message = try std.fmt.allocPrint(
@@ -167,6 +221,9 @@ pub const Analyzer = struct {
             };
         };
         const declared_type = declaration.annotation orelse initializer.type;
+        if (initializer.type != declared_type and Numeric.canWiden(initializer.type, declared_type)) {
+            initializer = try self.coerce(builder, initializer, declared_type, declaration.initializer.?.position);
+        }
         if (initializer.type != declared_type) {
             const message = try std.fmt.allocPrint(
                 self.allocator,
@@ -185,7 +242,14 @@ pub const Analyzer = struct {
     fn analyzeReturn(self: *Analyzer, builder: *FunctionBuilder, function: Ast.Function, statement: Ast.ReturnStatement) AnalyzeError!void {
         if (statement.value) |expression| {
             if (function.return_type == .void) return self.fail(statement.position, "a void function cannot return a value");
-            const value = try self.analyzeExpression(builder, expression);
+            var value = try self.analyzeExpressionExpected(
+                builder,
+                expression,
+                if (function.return_type.isNumeric() and Support.acceptsNumericContext(expression)) function.return_type else null,
+            );
+            if (value.type != function.return_type and Numeric.canWiden(value.type, function.return_type)) {
+                value = try self.coerce(builder, value, function.return_type, expression.position);
+            }
             if (value.type != function.return_type) {
                 const message = try std.fmt.allocPrint(
                     self.allocator,
@@ -194,7 +258,7 @@ pub const Analyzer = struct {
                 );
                 return self.fail(expression.position, message);
             }
-            try builder.instructions.append(self.allocator, .{ .return_value = value.value });
+            self.terminate(builder, .{ .return_value = value.value });
             return;
         }
 
@@ -206,22 +270,43 @@ pub const Analyzer = struct {
             );
             return self.fail(statement.position, message);
         }
-        try builder.instructions.append(self.allocator, .return_void);
+        self.terminate(builder, .return_void);
     }
 
     fn analyzeExpression(self: *Analyzer, builder: *FunctionBuilder, expression: *const Ast.Expression) AnalyzeError!TypedValue {
-        return switch (expression.value) {
-            .integer => |lexeme| self.emitInt(builder, try self.parseInteger(lexeme, expression.position, false)),
+        return self.analyzeExpressionExpected(builder, expression, null);
+    }
+
+    fn analyzeExpressionExpected(
+        self: *Analyzer,
+        builder: *FunctionBuilder,
+        expression: *const Ast.Expression,
+        expected: ?Types.Type,
+    ) AnalyzeError!TypedValue {
+        const value = try switch (expression.value) {
+            .integer => |lexeme| integer: {
+                const target = if (expected != null and expected.?.isInteger()) expected.? else Types.Type.int;
+                break :integer try self.emitIntegerLiteral(builder, lexeme, false, target, expression.position);
+            },
+            .floating => |lexeme| floating: {
+                const target = if (expected != null and expected.?.isFloat()) expected.? else Types.Type.float32;
+                break :floating try self.emitFloatingLiteral(builder, lexeme, target, expression.position);
+            },
             .boolean => |value| self.emitBool(builder, value),
             .string => |value| self.emitString(builder, value),
+            .interpolated_string => |value| self.analyzeInterpolatedString(builder, value),
             .identifier => |name| self.analyzeIdentifier(builder, expression.position, name),
             .call => |call| (try self.analyzeCall(builder, call)) orelse {
                 const message = try std.fmt.allocPrint(self.allocator, "function '{s}' returns 'void' and cannot be used as a value", .{call.name});
                 return self.fail(call.name_position, message);
             },
-            .unary => |unary| self.analyzeUnary(builder, unary),
-            .binary => |binary| self.analyzeBinary(builder, binary),
+            .unary => |unary| self.analyzeUnary(builder, unary, expected),
+            .binary => |binary| self.analyzeBinary(builder, binary, expected),
+            .conversion => |conversion| self.analyzeConversion(builder, conversion),
+            .string_count => |operand| self.analyzeStringCount(builder, operand),
         };
+        if (expected) |target| return self.coerce(builder, value, target, expression.position);
+        return value;
     }
 
     fn analyzeIdentifier(
@@ -241,61 +326,117 @@ pub const Analyzer = struct {
         return .{ .type = binding.type, .value = binding.value };
     }
 
-    fn analyzeUnary(self: *Analyzer, builder: *FunctionBuilder, unary: Ast.Expression.Unary) AnalyzeError!TypedValue {
+    fn analyzeUnary(
+        self: *Analyzer,
+        builder: *FunctionBuilder,
+        unary: Ast.Expression.Unary,
+        expected: ?Types.Type,
+    ) AnalyzeError!TypedValue {
+        if (unary.operator == .logical_not) {
+            const operand = try self.analyzeExpressionExpected(builder, unary.operand, .bool);
+            if (operand.type != .bool) {
+                const message = try std.fmt.allocPrint(self.allocator, "operator '!' expects 'bool', found '{s}'", .{operand.type.name()});
+                return self.fail(unary.operator_position, message);
+            }
+            const false_value = try self.emitBool(builder, false);
+            const result = try self.newValue(builder, .bool);
+            try self.emit(builder, .{ .binary = .{
+                .result = result,
+                .operator = .equal,
+                .left = operand.value,
+                .right = false_value.value,
+            } });
+            return .{ .type = .bool, .value = result };
+        }
         switch (unary.operand.value) {
             .integer => |lexeme| {
-                const value = try self.parseInteger(lexeme, unary.operand.position, true);
-                return self.emitInt(builder, if (value == std.math.minInt(i64)) value else -value);
+                const target = if (expected != null and expected.?.isInteger()) expected.? else Types.Type.int;
+                if (target.isSignedInteger()) return self.emitIntegerLiteral(builder, lexeme, true, target, unary.operator_position);
             },
             else => {},
         }
 
-        const operand = try self.analyzeExpression(builder, unary.operand);
-        if (operand.type != .int) {
+        const operand = try self.analyzeExpressionExpected(builder, unary.operand, if (expected != null and expected.?.isNumeric()) expected else null);
+        if (!operand.type.isNumeric()) {
             const message = try std.fmt.allocPrint(
                 self.allocator,
-                "operator '-' expects 'int', found '{s}'",
+                "operator '-' expects a numeric value, found '{s}'",
                 .{operand.type.name()},
             );
             return self.fail(unary.operator_position, message);
         }
-        const result = try self.newValue(builder, .int);
-        try builder.instructions.append(self.allocator, .{ .unary = .{
+        const result = try self.newValue(builder, operand.type);
+        try self.emit(builder, .{ .unary = .{
             .result = result,
             .operator = .negate,
             .operand = operand.value,
         } });
-        return .{ .type = .int, .value = result };
+        return .{ .type = operand.type, .value = result };
     }
 
-    fn analyzeBinary(self: *Analyzer, builder: *FunctionBuilder, binary: Ast.Expression.Binary) AnalyzeError!TypedValue {
-        const left = try self.analyzeExpression(builder, binary.left);
-        const right = try self.analyzeExpression(builder, binary.right);
+    fn analyzeBinary(
+        self: *Analyzer,
+        builder: *FunctionBuilder,
+        binary: Ast.Expression.Binary,
+        expected: ?Types.Type,
+    ) AnalyzeError!TypedValue {
+        if (binary.operator == .logical_and or binary.operator == .logical_or) {
+            return self.analyzeLogical(builder, binary);
+        }
+        const left_hint = if (expected != null and expected.?.isNumeric() and Support.isNumericLiteral(binary.left)) expected else null;
+        var left = try self.analyzeExpressionExpected(builder, binary.left, left_hint);
+        const right_hint = if (Support.isNumericLiteral(binary.right))
+            (if (expected != null and expected.?.isNumeric()) expected else if (left.type.isNumeric()) left.type else null)
+        else
+            null;
+        var right = try self.analyzeExpressionExpected(builder, binary.right, right_hint);
+        if (binary.operator == .add and left.type == .str and right.type == .str) {
+            const result = try self.newValue(builder, .str);
+            try self.emit(builder, .{ .string_concat = .{
+                .result = result,
+                .left = left.value,
+                .right = right.value,
+            } });
+            return .{ .type = .str, .value = result };
+        }
         const equality = binary.operator == .equal or binary.operator == .not_equal;
         const ordering = binary.operator == .less or binary.operator == .less_equal or
             binary.operator == .greater or binary.operator == .greater_equal;
-        const valid = if (equality)
-            left.type == right.type and (left.type == .int or left.type == .bool)
+        const bitwise = binary.operator == .bit_and or binary.operator == .bit_xor;
+        const shift = binary.operator == .shift_left or binary.operator == .shift_right;
+        if (left.type.isNumeric() and right.type.isNumeric() and !shift) {
+            if (Numeric.commonNumeric(left.type, right.type)) |common| {
+                left = try self.coerce(builder, left, common, binary.left.position);
+                right = try self.coerce(builder, right, common, binary.right.position);
+            }
+        }
+        const same_numeric = left.type == right.type and left.type.isNumeric();
+        const valid = if (bitwise)
+            same_numeric and left.type.isInteger() and !left.type.isSignedInteger()
+        else if (shift)
+            left.type.isInteger() and !left.type.isSignedInteger() and right.type.isInteger()
+        else if (equality)
+            same_numeric or (left.type == right.type and (left.type == .bool or left.type == .str))
         else
-            left.type == .int and right.type == .int;
+            same_numeric and (!left.type.isFloat() or binary.operator != .remainder);
         if (!valid) {
             const message = if (!equality)
                 try std.fmt.allocPrint(
                     self.allocator,
-                    "operator '{s}' expects 'int' operands, found '{s}' and '{s}'",
-                    .{ binaryOperatorText(binary.operator), left.type.name(), right.type.name() },
+                    "operator '{s}' does not accept '{s}' and '{s}'",
+                    .{ Support.binaryOperatorText(binary.operator), left.type.name(), right.type.name() },
                 )
             else
                 try std.fmt.allocPrint(
                     self.allocator,
                     "operator '{s}' does not accept '{s}' and '{s}'",
-                    .{ binaryOperatorText(binary.operator), left.type.name(), right.type.name() },
+                    .{ Support.binaryOperatorText(binary.operator), left.type.name(), right.type.name() },
                 );
             return self.fail(binary.operator_position, message);
         }
-        const result_type: Types.Type = if (equality or ordering) .bool else .int;
+        const result_type: Types.Type = if (equality or ordering) .bool else left.type;
         const result = try self.newValue(builder, result_type);
-        try builder.instructions.append(self.allocator, .{ .binary = .{
+        try self.emit(builder, .{ .binary = .{
             .result = result,
             .operator = switch (binary.operator) {
                 .add => .add,
@@ -309,6 +450,11 @@ pub const Analyzer = struct {
                 .greater_equal => .greater_equal,
                 .equal => .equal,
                 .not_equal => .not_equal,
+                .logical_and, .logical_or => unreachable,
+                .bit_and => .bit_and,
+                .bit_xor => .bit_xor,
+                .shift_left => .shift_left,
+                .shift_right => .shift_right,
             },
             .left = left.value,
             .right = right.value,
@@ -316,14 +462,114 @@ pub const Analyzer = struct {
         return .{ .type = result_type, .value = result };
     }
 
+    fn analyzeLogical(self: *Analyzer, builder: *FunctionBuilder, binary: Ast.Expression.Binary) AnalyzeError!TypedValue {
+        const left = try self.analyzeExpression(builder, binary.left);
+        if (left.type != .bool) {
+            const message = try std.fmt.allocPrint(
+                self.allocator,
+                "operator '{s}' expects 'bool' operands, found '{s}'",
+                .{ Support.binaryOperatorText(binary.operator), left.type.name() },
+            );
+            return self.fail(binary.operator_position, message);
+        }
+
+        const result = try self.newValue(builder, .bool);
+        const right_block = try self.newBlock(builder);
+        const short_block = try self.newBlock(builder);
+        const merge_block = try self.newBlock(builder);
+        self.terminate(builder, .{ .branch = if (binary.operator == .logical_and) .{
+            .condition = left.value,
+            .then_block = right_block,
+            .else_block = short_block,
+        } else .{
+            .condition = left.value,
+            .then_block = short_block,
+            .else_block = right_block,
+        } });
+
+        builder.current_block = short_block;
+        try self.emit(builder, .{ .constant_bool = .{
+            .result = result,
+            .value = binary.operator == .logical_or,
+        } });
+        self.terminate(builder, .{ .jump = merge_block });
+
+        builder.current_block = right_block;
+        const right = try self.analyzeExpression(builder, binary.right);
+        if (right.type != .bool) {
+            const message = try std.fmt.allocPrint(
+                self.allocator,
+                "operator '{s}' expects 'bool' operands, found '{s}'",
+                .{ Support.binaryOperatorText(binary.operator), right.type.name() },
+            );
+            return self.fail(binary.operator_position, message);
+        }
+        try self.emit(builder, .{ .copy = .{ .result = result, .operand = right.value } });
+        self.terminate(builder, .{ .jump = merge_block });
+        builder.current_block = merge_block;
+        return .{ .type = .bool, .value = result };
+    }
+
+    fn analyzeIf(
+        self: *Analyzer,
+        builder: *FunctionBuilder,
+        function: Ast.Function,
+        conditional: Ast.IfStatement,
+    ) AnalyzeError!bool {
+        var exits: std.ArrayList(Ir.BlockId) = .empty;
+        for (conditional.branches) |branch| {
+            const condition = try self.analyzeExpression(builder, branch.condition);
+            if (condition.type != .bool) return self.fail(branch.condition.position, "if condition expects 'bool'");
+
+            const body_block = try self.newBlock(builder);
+            const next_block = try self.newBlock(builder);
+            self.terminate(builder, .{ .branch = .{
+                .condition = condition.value,
+                .then_block = body_block,
+                .else_block = next_block,
+            } });
+
+            builder.current_block = body_block;
+            const binding_count = builder.bindings.items.len;
+            const terminated = try self.analyzeStatements(builder, function, branch.statements);
+            builder.bindings.shrinkRetainingCapacity(binding_count);
+            if (!terminated) try exits.append(self.allocator, builder.current_block);
+            builder.current_block = next_block;
+        }
+
+        if (conditional.else_statements) |statements| {
+            const binding_count = builder.bindings.items.len;
+            const terminated = try self.analyzeStatements(builder, function, statements);
+            builder.bindings.shrinkRetainingCapacity(binding_count);
+            if (!terminated) try exits.append(self.allocator, builder.current_block);
+        } else {
+            try exits.append(self.allocator, builder.current_block);
+        }
+
+        if (exits.items.len == 0) return true;
+        const merge_block = try self.newBlock(builder);
+        for (exits.items) |block_id| {
+            builder.blocks.items[block_id].terminator = .{ .jump = merge_block };
+        }
+        builder.current_block = merge_block;
+        return false;
+    }
+
     fn analyzeCall(self: *Analyzer, builder: *FunctionBuilder, call: Ast.Expression.Call) AnalyzeError!?TypedValue {
+        if (std.mem.endsWith(u8, call.name, ".count") and call.arguments.len == 0) {
+            const receiver_name = call.name[0 .. call.name.len - ".count".len];
+            if (findBinding(builder.bindings.items, receiver_name)) |binding| {
+                if (binding.type != .str) return self.fail(call.name_position, "count() expects 'str'");
+                return try self.emitStringCount(builder, binding.value);
+            }
+        }
         var total_named: usize = 0;
         var named_count: usize = 0;
         var arity_count: usize = 0;
         for (self.program.functions) |function| {
             if (!std.mem.eql(u8, function.name, call.name)) continue;
             total_named += 1;
-            if (!functionVisible(call, function)) continue;
+            if (!Support.functionVisible(call, function)) continue;
             named_count += 1;
             if (function.parameters.len == call.arguments.len) arity_count += 1;
         }
@@ -341,7 +587,7 @@ pub const Analyzer = struct {
         }
         if (arity_count == 0) {
             const message = if (named_count == 1) single: {
-                const function = findVisibleFunctionByName(self.program, call).?;
+                const function = Support.findVisibleFunctionByName(self.program, call).?;
                 break :single try std.fmt.allocPrint(
                     self.allocator,
                     "function '{s}' expects {d} arguments, found {d}",
@@ -355,36 +601,76 @@ pub const Analyzer = struct {
             return self.fail(call.name_position, message);
         }
 
-        var arguments: std.ArrayList(TypedValue) = .empty;
-        var argument_ids: std.ArrayList(Ir.ValueId) = .empty;
-        for (call.arguments) |argument| {
-            const value = try self.analyzeExpression(builder, argument);
-            try arguments.append(self.allocator, value);
-            try argument_ids.append(self.allocator, value.value);
-        }
-
-        var resolved: ?Ir.FunctionId = null;
-        for (self.program.functions, 0..) |function, function_id| {
-            if (!std.mem.eql(u8, function.name, call.name) or function.parameters.len != arguments.items.len) continue;
-            if (!functionVisible(call, function)) continue;
-            var matches = true;
-            for (function.parameters, arguments.items) |parameter, argument| {
-                if (parameter.type != argument.type) {
-                    matches = false;
+        var sole_candidate: ?Ir.FunctionId = null;
+        if (arity_count == 1) {
+            for (self.program.functions, 0..) |function, function_id| {
+                if (std.mem.eql(u8, function.name, call.name) and function.parameters.len == call.arguments.len and
+                    Support.functionVisible(call, function))
+                {
+                    sole_candidate = function_id;
                     break;
                 }
             }
-            if (matches) {
-                resolved = function_id;
-                break;
+        }
+
+        var arguments: std.ArrayList(TypedValue) = .empty;
+        for (call.arguments, 0..) |argument, index| {
+            const expected = if (sole_candidate) |candidate| expected: {
+                const parameter_type = self.program.functions[candidate].parameters[index].type;
+                break :expected if (parameter_type.isNumeric() and Support.acceptsNumericContext(argument)) parameter_type else null;
+            } else null;
+            try arguments.append(self.allocator, try self.analyzeExpressionExpected(builder, argument, expected));
+        }
+
+        var resolved: ?Ir.FunctionId = sole_candidate;
+        var ambiguous = false;
+        if (sole_candidate == null) {
+            var viable: std.ArrayList(Ir.FunctionId) = .empty;
+            for (self.program.functions, 0..) |function, function_id| {
+                if (!std.mem.eql(u8, function.name, call.name) or function.parameters.len != arguments.items.len) continue;
+                if (!Support.functionVisible(call, function)) continue;
+                var matches = true;
+                for (function.parameters, arguments.items) |parameter, argument| {
+                    if (conversionCost(argument.type, parameter.type) == null) {
+                        matches = false;
+                        break;
+                    }
+                }
+                if (matches) try viable.append(self.allocator, function_id);
             }
+
+            var nondominated: usize = 0;
+            for (viable.items) |candidate_id| {
+                var dominated = false;
+                for (viable.items) |other_id| {
+                    if (candidate_id == other_id) continue;
+                    if (dominates(
+                        self.program.functions[other_id],
+                        self.program.functions[candidate_id],
+                        arguments.items,
+                    )) {
+                        dominated = true;
+                        break;
+                    }
+                }
+                if (!dominated) {
+                    resolved = candidate_id;
+                    nondominated += 1;
+                }
+            }
+            ambiguous = nondominated > 1;
+        }
+
+        if (ambiguous) {
+            const message = try std.fmt.allocPrint(self.allocator, "call to '{s}' is ambiguous", .{call.name});
+            return self.fail(call.name_position, message);
         }
 
         const function_id = resolved orelse {
             if (arity_count == 1) {
                 for (self.program.functions) |function| {
                     if (!std.mem.eql(u8, function.name, call.name) or function.parameters.len != arguments.items.len) continue;
-                    if (!functionVisible(call, function)) continue;
+                    if (!Support.functionVisible(call, function)) continue;
                     for (function.parameters, arguments.items, 0..) |parameter, argument, index| {
                         if (parameter.type == argument.type) continue;
                         const message = try std.fmt.allocPrint(
@@ -404,6 +690,19 @@ pub const Analyzer = struct {
             return self.fail(call.name_position, message);
         };
         const function = self.program.functions[function_id];
+        var argument_ids: std.ArrayList(Ir.ValueId) = .empty;
+        for (arguments.items, function.parameters, 0..) |argument, parameter, index| {
+            if (argument.type != parameter.type and !Numeric.canWiden(argument.type, parameter.type)) {
+                const message = try std.fmt.allocPrint(
+                    self.allocator,
+                    "argument {d} of '{s}' expects '{s}', found '{s}'",
+                    .{ index + 1, call.name, parameter.type.name(), argument.type.name() },
+                );
+                return self.fail(call.arguments[index].position, message);
+            }
+            const converted = try self.coerce(builder, argument, parameter.type, call.name_position);
+            try argument_ids.append(self.allocator, converted.value);
+        }
         const result: ?Ir.ValueId = if (function.return_type == .void)
             null
         else result: {
@@ -417,7 +716,7 @@ pub const Analyzer = struct {
             }
             break :result try self.newValue(builder, function.return_type);
         };
-        try builder.instructions.append(self.allocator, .{ .call = .{
+        try self.emit(builder, .{ .call = .{
             .result = result,
             .function = function_id,
             .arguments = try argument_ids.toOwnedSlice(self.allocator),
@@ -425,30 +724,112 @@ pub const Analyzer = struct {
         return if (result) |value| .{ .type = function.return_type, .value = value } else null;
     }
 
-    fn emitInt(self: *Analyzer, builder: *FunctionBuilder, value: i64) AnalyzeError!TypedValue {
-        const result = try self.newValue(builder, .int);
-        try builder.instructions.append(self.allocator, .{ .constant_int = .{ .result = result, .value = value } });
-        return .{ .type = .int, .value = result };
+    fn emitInteger(self: *Analyzer, builder: *FunctionBuilder, bits: u64, type_value: Types.Type) AnalyzeError!TypedValue {
+        const result = try self.newValue(builder, type_value);
+        try self.emit(builder, .{ .constant_int = .{ .result = result, .bits = Numeric.normalize(bits, type_value) } });
+        return .{ .type = type_value, .value = result };
+    }
+
+    fn emitIntegerLiteral(
+        self: *Analyzer,
+        builder: *FunctionBuilder,
+        lexeme: []const u8,
+        negative: bool,
+        target: Types.Type,
+        position: Source.Position,
+    ) AnalyzeError!TypedValue {
+        const magnitude = try self.parseIntegerMagnitude(lexeme, position);
+        if (!Numeric.fitsMagnitude(magnitude, negative, target)) {
+            const message = try std.fmt.allocPrint(self.allocator, "integer literal is outside the range of '{s}'", .{target.name()});
+            return self.fail(position, message);
+        }
+        return self.emitInteger(builder, Numeric.fromMagnitude(magnitude, negative, target).bits, target);
+    }
+
+    fn emitFloatingLiteral(
+        self: *Analyzer,
+        builder: *FunctionBuilder,
+        lexeme: []const u8,
+        target: Types.Type,
+        position: Source.Position,
+    ) AnalyzeError!TypedValue {
+        const normalized = try Support.removeSeparators(self.allocator, lexeme);
+        return switch (target) {
+            .float32 => self.emitFloat32(builder, std.fmt.parseFloat(f32, normalized) catch
+                return self.fail(position, "floating literal is outside the range of 'float'")),
+            .float64 => self.emitFloat64(builder, std.fmt.parseFloat(f64, normalized) catch
+                return self.fail(position, "floating literal is outside the range of 'float64'")),
+            else => unreachable,
+        };
+    }
+
+    fn emitFloat32(self: *Analyzer, builder: *FunctionBuilder, value: f32) AnalyzeError!TypedValue {
+        const result = try self.newValue(builder, .float32);
+        try self.emit(builder, .{ .constant_float32 = .{ .result = result, .bits = @bitCast(value) } });
+        return .{ .type = .float32, .value = result };
+    }
+
+    fn emitFloat64(self: *Analyzer, builder: *FunctionBuilder, value: f64) AnalyzeError!TypedValue {
+        const result = try self.newValue(builder, .float64);
+        try self.emit(builder, .{ .constant_float64 = .{ .result = result, .bits = @bitCast(value) } });
+        return .{ .type = .float64, .value = result };
     }
 
     fn emitBool(self: *Analyzer, builder: *FunctionBuilder, value: bool) AnalyzeError!TypedValue {
         const result = try self.newValue(builder, .bool);
-        try builder.instructions.append(self.allocator, .{ .constant_bool = .{ .result = result, .value = value } });
+        try self.emit(builder, .{ .constant_bool = .{ .result = result, .value = value } });
         return .{ .type = .bool, .value = result };
     }
 
     fn emitString(self: *Analyzer, builder: *FunctionBuilder, value: []const u8) AnalyzeError!TypedValue {
         const result = try self.newValue(builder, .str);
-        try builder.instructions.append(self.allocator, .{ .constant_str = .{ .result = result, .value = value } });
+        try self.emit(builder, .{ .constant_str = .{ .result = result, .value = value } });
         return .{ .type = .str, .value = result };
     }
 
-    fn analyzePrint(self: *Analyzer, builder: *FunctionBuilder, statement: Ast.EffectStatement) AnalyzeError!void {
-        const value = try self.analyzeExpression(builder, statement.value);
-        if (value.type != .str and value.type != .int and value.type != .bool) {
-            return self.fail(statement.value.position, "print expects 'str', 'int', or 'bool'");
+    fn analyzePrint(self: *Analyzer, builder: *FunctionBuilder, statement: Ast.PrintStatement) AnalyzeError!void {
+        const values = try self.allocator.alloc(TypedValue, statement.values.len);
+        for (statement.values, 0..) |expression, index| {
+            const value = try self.analyzeExpression(builder, expression);
+            if (value.type != .str and !value.type.isNumeric() and value.type != .bool) {
+                return self.fail(expression.position, "print expects 'str', a numeric value, or 'bool'");
+            }
+            values[index] = value;
         }
-        try builder.instructions.append(self.allocator, .{ .print = value.value });
+        for (values, 0..) |value, index| {
+            try self.emit(builder, .{ .print = .{ .value = value.value, .newline = index + 1 == values.len } });
+        }
+    }
+
+    fn analyzeInterpolatedString(
+        self: *Analyzer,
+        builder: *FunctionBuilder,
+        interpolated: Ast.Expression.InterpolatedString,
+    ) AnalyzeError!TypedValue {
+        var result = try self.emitString(builder, "");
+        for (interpolated.parts) |part| {
+            const text: TypedValue = switch (part) {
+                .text => |value| try self.emitString(builder, value),
+                .expression => |expression| value: {
+                    const value = try self.analyzeExpression(builder, expression);
+                    if (value.type != .str and !value.type.isNumeric() and value.type != .bool) {
+                        return self.fail(expression.position, "string interpolation expects 'str', a numeric value, or 'bool'");
+                    }
+                    if (value.type == .str) break :value value;
+                    const formatted = try self.newValue(builder, .str);
+                    try self.emit(builder, .{ .format_value = .{ .result = formatted, .operand = value.value } });
+                    break :value .{ .type = .str, .value = formatted };
+                },
+            };
+            const combined = try self.newValue(builder, .str);
+            try self.emit(builder, .{ .string_concat = .{
+                .result = combined,
+                .left = result.value,
+                .right = text.value,
+            } });
+            result = .{ .type = .str, .value = combined };
+        }
+        return result;
     }
 
     fn analyzeAssert(self: *Analyzer, builder: *FunctionBuilder, statement: Ast.AssertStatement) AnalyzeError!void {
@@ -456,7 +837,7 @@ pub const Analyzer = struct {
         const message = try self.analyzeExpression(builder, statement.message);
         if (condition.type != .bool) return self.fail(statement.condition.position, "assert condition expects 'bool'");
         if (message.type != .str) return self.fail(statement.message.position, "assert message expects 'str'");
-        try builder.instructions.append(self.allocator, .{ .assert = .{
+        try self.emit(builder, .{ .assert = .{
             .condition = condition.value,
             .message = message.value,
             .position = statement.position,
@@ -466,10 +847,86 @@ pub const Analyzer = struct {
     fn analyzePanic(self: *Analyzer, builder: *FunctionBuilder, statement: Ast.EffectStatement) AnalyzeError!void {
         const message = try self.analyzeExpression(builder, statement.value);
         if (message.type != .str) return self.fail(statement.value.position, "panic message expects 'str'");
-        try builder.instructions.append(self.allocator, .{ .panic = .{
-            .message = message.value,
-            .position = statement.position,
+        self.terminate(builder, .{ .panic = .{ .message = message.value, .position = statement.position } });
+    }
+
+    fn analyzeStringCount(self: *Analyzer, builder: *FunctionBuilder, operand: *const Ast.Expression) AnalyzeError!TypedValue {
+        const value = try self.analyzeExpression(builder, operand);
+        if (value.type != .str) return self.fail(operand.position, "count() expects 'str'");
+        return self.emitStringCount(builder, value.value);
+    }
+
+    fn emitStringCount(self: *Analyzer, builder: *FunctionBuilder, operand: Ir.ValueId) AnalyzeError!TypedValue {
+        const result = try self.newValue(builder, .int);
+        try self.emit(builder, .{ .string_count = .{ .result = result, .operand = operand } });
+        return .{ .type = .int, .value = result };
+    }
+
+    fn emit(self: *Analyzer, builder: *FunctionBuilder, instruction: Ir.Instruction) Allocator.Error!void {
+        try builder.blocks.items[builder.current_block].instructions.append(self.allocator, instruction);
+    }
+
+    fn terminate(_: *Analyzer, builder: *FunctionBuilder, terminator: Ir.Terminator) void {
+        std.debug.assert(builder.blocks.items[builder.current_block].terminator == null);
+        builder.blocks.items[builder.current_block].terminator = terminator;
+    }
+
+    fn newBlock(self: *Analyzer, builder: *FunctionBuilder) Allocator.Error!Ir.BlockId {
+        const block = builder.blocks.items.len;
+        try builder.blocks.append(self.allocator, .{});
+        return block;
+    }
+
+    fn analyzeConversion(
+        self: *Analyzer,
+        builder: *FunctionBuilder,
+        conversion: Ast.Expression.Conversion,
+    ) AnalyzeError!TypedValue {
+        const operand = try self.analyzeExpression(builder, conversion.operand);
+        if (!operand.type.isNumeric() or !conversion.target.isNumeric()) {
+            return self.fail(conversion.operator_position, "'as' requires numeric source and target types");
+        }
+        return self.emitConversion(builder, operand, conversion.target, conversion.operator_position, true);
+    }
+
+    fn coerce(
+        self: *Analyzer,
+        builder: *FunctionBuilder,
+        value: TypedValue,
+        target: Types.Type,
+        position: Source.Position,
+    ) AnalyzeError!TypedValue {
+        if (value.type == target) return value;
+        if (!Numeric.canWiden(value.type, target)) {
+            const message = try std.fmt.allocPrint(
+                self.allocator,
+                "cannot implicitly convert '{s}' to '{s}'",
+                .{ value.type.name(), target.name() },
+            );
+            return self.fail(position, message);
+        }
+        return self.emitConversion(builder, value, target, position, false);
+    }
+
+    fn emitConversion(
+        self: *Analyzer,
+        builder: *FunctionBuilder,
+        value: TypedValue,
+        target: Types.Type,
+        position: Source.Position,
+        checked: bool,
+    ) AnalyzeError!TypedValue {
+        if (value.type == target) return value;
+        const result = try self.newValue(builder, target);
+        try self.emit(builder, .{ .convert = .{
+            .result = result,
+            .operand = value.value,
+            .source = value.type,
+            .target = target,
+            .position = position,
+            .checked = checked,
         } });
+        return .{ .type = target, .value = result };
     }
 
     fn newValue(self: *Analyzer, builder: *FunctionBuilder, type_value: Types.Type) Allocator.Error!Ir.ValueId {
@@ -478,15 +935,8 @@ pub const Analyzer = struct {
         return result;
     }
 
-    fn parseInteger(self: *Analyzer, lexeme: []const u8, position: Source.Position, negative: bool) AnalyzeError!i64 {
-        const normalized = try self.allocator.alloc(u8, lexeme.len);
-        var length: usize = 0;
-        for (lexeme) |character| {
-            if (character == '_') continue;
-            normalized[length] = character;
-            length += 1;
-        }
-        const literal = normalized[0..length];
+    fn parseIntegerMagnitude(self: *Analyzer, lexeme: []const u8, position: Source.Position) AnalyzeError!u64 {
+        const literal = try Support.removeSeparators(self.allocator, lexeme);
         const base: u8 = if (literal.len > 2 and literal[0] == '0') switch (literal[1]) {
             'b', 'B' => 2,
             'o', 'O' => 8,
@@ -494,17 +944,7 @@ pub const Analyzer = struct {
             else => 10,
         } else 10;
         const digits = if (base == 10) literal else literal[2..];
-        const magnitude = std.fmt.parseInt(u64, digits, base) catch {
-            return self.fail(position, "integer literal is outside the range of 'int'");
-        };
-        const positive_limit: u64 = @intCast(std.math.maxInt(i64));
-        if (!negative) {
-            if (magnitude > positive_limit) return self.fail(position, "integer literal is outside the range of 'int'");
-            return @intCast(magnitude);
-        }
-        if (magnitude > positive_limit + 1) return self.fail(position, "integer literal is outside the range of 'int'");
-        if (magnitude == positive_limit + 1) return std.math.minInt(i64);
-        return @intCast(magnitude);
+        return std.fmt.parseInt(u64, digits, base) catch self.fail(position, "integer literal is outside the range of 'uint'");
     }
 
     fn fail(self: *Analyzer, position: Source.Position, message: []const u8) Source.Error {
@@ -512,14 +952,6 @@ pub const Analyzer = struct {
         return error.InvalidSource;
     }
 };
-
-fn sameParameterTypes(left: []const Ast.Parameter, right: []const Ast.Parameter) bool {
-    if (left.len != right.len) return false;
-    for (left, right) |left_parameter, right_parameter| {
-        if (left_parameter.type != right_parameter.type) return false;
-    }
-    return true;
-}
 
 fn findBinding(bindings: []const Binding, name: []const u8) ?Binding {
     var index = bindings.len;
@@ -530,227 +962,19 @@ fn findBinding(bindings: []const Binding, name: []const u8) ?Binding {
     return null;
 }
 
-fn findVisibleFunctionByName(program: Ast.Program, call: Ast.Expression.Call) ?Ast.Function {
-    for (program.functions) |function| {
-        if (std.mem.eql(u8, function.name, call.name) and functionVisible(call, function)) return function;
+fn conversionCost(source: Types.Type, target: Types.Type) ?u8 {
+    if (source == target) return 0;
+    if (!Numeric.canWiden(source, target)) return null;
+    return if (source.isInteger() and target.isFloat()) 2 else 1;
+}
+
+fn dominates(better: Ast.Function, worse: Ast.Function, arguments: []const TypedValue) bool {
+    var strictly_better = false;
+    for (better.parameters, worse.parameters, arguments) |better_parameter, worse_parameter, argument| {
+        const better_cost = conversionCost(argument.type, better_parameter.type) orelse return false;
+        const worse_cost = conversionCost(argument.type, worse_parameter.type) orelse return false;
+        if (better_cost > worse_cost) return false;
+        if (better_cost < worse_cost) strictly_better = true;
     }
-    return null;
-}
-
-fn functionVisible(call: Ast.Expression.Call, function: Ast.Function) bool {
-    return call.owner == function.owner or function.is_public;
-}
-
-fn binaryOperatorText(operator: Ast.BinaryOperator) []const u8 {
-    return switch (operator) {
-        .add => "+",
-        .subtract => "-",
-        .multiply => "*",
-        .divide => "/",
-        .remainder => "%",
-        .less => "<",
-        .less_equal => "<=",
-        .greater => ">",
-        .greater_equal => ">=",
-        .equal => "==",
-        .not_equal => "!=",
-    };
-}
-
-fn expectSemanticError(source: []const u8, message: []const u8) !void {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-    var parser = @import("Parser.zig").Parser.init(allocator, source);
-    var analyzer = Analyzer.init(allocator);
-    try std.testing.expectError(error.InvalidSource, analyzer.analyze(try parser.parse()));
-    try std.testing.expectEqualStrings(message, analyzer.diagnostic.?.message);
-}
-
-test "lower empty main to an explicit void return" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-    var parser = @import("Parser.zig").Parser.init(allocator, "func main() {}");
-    var analyzer = Analyzer.init(allocator);
-    const text = try Ir.writeText(allocator, try analyzer.analyze(try parser.parse()));
-    try std.testing.expectEqualStrings(
-        \\func @main() -> void {
-        \\entry:
-        \\    return
-        \\}
-        \\
-    , text);
-}
-
-test "resolve forward calls overloads locals and intrinsic values" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-    var parser = @import("Parser.zig").Parser.init(allocator,
-        \\func main() {
-        \\    answer()
-        \\    choose(true)
-        \\}
-        \\func choose(value:int) int { return value }
-        \\func choose(value:bool) bool { return value }
-        \\func answer() int {
-        \\    let left:int = 40
-        \\    let right:int = 2
-        \\    let ready:bool
-        \\    return left + right
-        \\}
-    );
-    var analyzer = Analyzer.init(allocator);
-    const program = try analyzer.analyze(try parser.parse());
-    try std.testing.expectEqual(@as(usize, 4), program.functions.len);
-    try std.testing.expectEqual(Types.Type.bool, program.functions[0].value_types[1]);
-    try std.testing.expectEqual(@as(Ir.FunctionId, 3), program.functions[0].instructions[0].call.function);
-    try std.testing.expectEqual(@as(i64, 2), program.functions[3].instructions[1].constant_int.value);
-    try std.testing.expect(!program.functions[3].instructions[2].constant_bool.value);
-}
-
-test "lower fundamental calculation to deterministic IR" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-    var parser = @import("Parser.zig").Parser.init(allocator,
-        \\func add(left:int, right:int) int {
-        \\    let result = left + right
-        \\    return result
-        \\}
-        \\func answer() int { return add(40, 2) }
-        \\func main() { answer() }
-    );
-    var analyzer = Analyzer.init(allocator);
-    const text = try Ir.writeText(allocator, try analyzer.analyze(try parser.parse()));
-    try std.testing.expectEqualStrings(
-        \\func @add(%0:int, %1:int) -> int {
-        \\entry:
-        \\    %2:int = add %0, %1
-        \\    return %2
-        \\}
-        \\
-        \\func @answer() -> int {
-        \\entry:
-        \\    %0:int = const 40
-        \\    %1:int = const 2
-        \\    %2:int = call @add(%0, %1)
-        \\    return %2
-        \\}
-        \\
-        \\func @main() -> void {
-        \\entry:
-        \\    %0:int = call @answer()
-        \\    return
-        \\}
-        \\
-    , text);
-}
-
-test "accept the minimum signed integer" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-    var parser = @import("Parser.zig").Parser.init(
-        allocator,
-        "func minimum() int { return -9223372036854775808 } func main() {}",
-    );
-    var analyzer = Analyzer.init(allocator);
-    const program = try analyzer.analyze(try parser.parse());
-    try std.testing.expectEqual(std.math.minInt(i64), program.functions[0].instructions[0].constant_int.value);
-}
-
-test "lower strings comparisons and effects to deterministic IR" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-    var parser = @import("Parser.zig").Parser.init(allocator,
-        \\func main() {
-        \\    let empty:str
-        \\    print("A\0B")
-        \\    assert(2 * 3 >= 6, "math")
-        \\    panic(empty)
-        \\}
-    );
-    var analyzer = Analyzer.init(allocator);
-    const text = try Ir.writeText(allocator, try analyzer.analyze(try parser.parse()));
-    try std.testing.expectEqualStrings(
-        \\func @main() -> void {
-        \\entry:
-        \\    %0:str = const ""
-        \\    %1:str = const "A\0B"
-        \\    print %1
-        \\    %2:int = const 2
-        \\    %3:int = const 3
-        \\    %4:int = mul %2, %3
-        \\    %5:int = const 6
-        \\    %6:bool = ge %4, %5
-        \\    %7:str = const "math"
-        \\    assert %6, %7
-        \\    panic %0
-        \\}
-        \\
-    , text);
-}
-
-test "report declaration and resolution errors" {
-    try expectSemanticError(
-        "func value(input:int) int { return input } func value(other:int) bool { return true } func main() {}",
-        "function 'value' with these parameter types is already declared",
-    );
-    try expectSemanticError(
-        "func value(input:int, input:int) int { return input } func main() {}",
-        "parameter 'input' is already declared",
-    );
-    try expectSemanticError(
-        "func main() { let value = 1; let value = 2 }",
-        "variable 'value' is already declared in this scope",
-    );
-    try expectSemanticError("func value() int { return missing } func main() {}", "unknown variable 'missing'");
-    try expectSemanticError("func main() { missing() }", "unknown function 'missing'");
-    try expectSemanticError(
-        "func add(left:int, right:int) int { return left + right } func main() { add(1) }",
-        "function 'add' expects 2 arguments, found 1",
-    );
-    try expectSemanticError(
-        "func enabled(value:bool) bool { return value } func main() { enabled(1) }",
-        "argument 1 of 'enabled' expects 'bool', found 'int'",
-    );
-    try expectSemanticError(
-        "func choose(left:int, right:int) int { return left } func choose(left:bool, right:bool) bool { return left } func main() { choose(1, true) }",
-        "no overload of function 'choose' matches the argument types",
-    );
-}
-
-test "report fundamental type and return errors" {
-    try expectSemanticError(
-        "func value() int { return true + 1 } func main() {}",
-        "operator '+' expects 'int' operands, found 'bool' and 'int'",
-    );
-    try expectSemanticError(
-        "func main() { let ready:bool = 1 }",
-        "variable 'ready' expects 'bool', found 'int'",
-    );
-    try expectSemanticError(
-        "func value() int { return 9223372036854775808 } func main() {}",
-        "integer literal is outside the range of 'int'",
-    );
-    try expectSemanticError(
-        "func value() int {} func main() {}",
-        "function 'value' must return 'int' on every path",
-    );
-    try expectSemanticError(
-        "func value() int { return } func main() {}",
-        "expected return value of type 'int'",
-    );
-    try expectSemanticError(
-        "func value() int { return false } func main() {}",
-        "return expects 'int', found 'bool'",
-    );
-    try expectSemanticError("func main() { return 1 }", "a void function cannot return a value");
-    try expectSemanticError("func main() { assert(1, \"message\") }", "assert condition expects 'bool'");
-    try expectSemanticError("func main() { assert(true, 1) }", "assert message expects 'str'");
-    try expectSemanticError("func main() { panic(false) }", "panic message expects 'str'");
-    try expectSemanticError("func main() { print(\"a\" == \"a\") }", "operator '==' does not accept 'str' and 'str'");
+    return strictly_better;
 }
