@@ -6,6 +6,11 @@ pub fn decode(allocator: Allocator, source: []const u8) Allocator.Error![]const 
     var result: std.ArrayList(u8) = .empty;
     var index: usize = 0;
     while (index < source.len) {
+        if (source[index] == '$' and index + 1 < source.len and source[index + 1] == '$') {
+            try result.append(allocator, '$');
+            index += 2;
+            continue;
+        }
         if (source[index] != '\\') {
             try result.append(allocator, source[index]);
             index += 1;
@@ -74,4 +79,10 @@ test "decode every supported escape exactly once" {
     const value = try decode(std.testing.allocator, "\\\\\"\\n\\r\\t\\0\\u{e9}");
     defer std.testing.allocator.free(value);
     try std.testing.expectEqualSlices(u8, "\\\"\n\r\t\x00é", value);
+}
+
+test "decode doubled dollars as one literal dollar" {
+    const value = try decode(std.testing.allocator, "$$value $$(value)");
+    defer std.testing.allocator.free(value);
+    try std.testing.expectEqualSlices(u8, "$value $(value)", value);
 }

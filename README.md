@@ -57,6 +57,7 @@ entry:
 Docs/           language and architecture contracts
 Examples/       executable Silex source files
 Toolchain/      autonomous Zig bootstrap project
+  Runtime/      self-contained target runtime sources bundled at build time
   Sources/      compiler implementation
 ```
 
@@ -67,16 +68,31 @@ programs. The native backend is experimental, currently supports only
 
 After `zig build`, add `Toolchain/zig-out/bin` to `PATH` during development to
 invoke the public CLI as `silex run <source.sx>` or
-`silex compile <source.sx> -o <executable>`.
+`silex compile <source.sx> -o <executable>`. The same executable exposes a
+minimal editor server with `silex lsp`. It synchronizes complete documents,
+publishes diagnostics from the current frontend and completes only the syntax,
+types and declarations implemented by this bootstrap.
 
-The executable subset includes immutable UTF-8 `str` values, `int` arithmetic,
-fundamental comparisons, and the observable statements `print`, `assert`, and
-`panic`. Their behavior is identical through `silex run` and a generated
-macOS ARM64 executable. These are language operations: programs never name a
-writer, descriptor, syscall, linker option, or native library.
+The executable subset includes structured conditionals, short-circuit boolean
+logic, immutable UTF-8 `str` values, the historical integer and floating-point
+families, checked numeric conversions, arithmetic, comparisons, and the
+observable statements `print`, `assert`, and `panic`. Integer behavior is
+validated against generated macOS ARM64 executables, including narrow domains
+and the complete unsigned 64-bit range. Floating-point calculation, conversion
+and decimal formatting are native too. Immutable string concatenation, exact
+byte equality, Unicode scalar counting, `$(expression)` interpolation and
+multiargument `print` have matching reference and native behavior. These are
+language operations: programs never name a writer,
+descriptor, allocator, syscall, linker option, or native library.
 
 Local packages are canonical sibling directories such as `Math/`, containing
 `Package.json` and `Module/`. Installed packages live under
 `~/.silex/packages/Name@MAJOR.MINOR.PATCH/`. Manifests declare dependencies as
 exact (`=1.4.1`) or caret (`^1.4.0`) constraints; they never declare paths,
 native symbols, or linkage options.
+
+The initial LSP analyzes each open document as an autonomous source unit.
+Syntax diagnostics always apply; semantic diagnostics apply to units without
+`use`, while imported graphs await overlay-aware project analysis. The server
+deliberately does not advertise navigation, rename, hover, formatting or
+semantic tokens yet.

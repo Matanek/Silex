@@ -24,6 +24,17 @@ typed Silex IR
     -> native executable
 ```
 
+The editor path reuses the same source contracts without exposing compiler
+internals through LSP:
+
+```text
+open Silex document
+    -> full-document synchronization
+    -> current lexer, parser and semantic analysis
+    -> LSP diagnostics
+    -> syntax-aware completion from current declarations
+```
+
 ## Current decisions
 
 - The established Silex syntax is input to the project, not something to
@@ -35,6 +46,9 @@ typed Silex IR
 - IR functions and values use structured numeric identities. Source names
   remain available for diagnostics and readable IR, but calls do not rely on
   linker symbols.
+- Portable functions are control-flow graphs of explicit blocks. Every block
+  ends in a branch, jump, return, or fatal terminator; target-dependent
+  fallthrough semantics never enter the frontend.
 - Package manifests locate no source by consumer-provided path. The resolver
   derives canonical local and global locations from package identities, builds
   a single-version dependency graph, and enforces direct visibility.
@@ -48,12 +62,21 @@ typed Silex IR
   oracle for native backends. Differential tests compare its results and
   exact observable output, exit status, and runtime diagnostics with generated
   ARM64 executables.
+- Text interpolation lowers through one typed value-to-`str` IR operation and
+  ordinary immutable concatenation. It shares its canonical formatting with
+  `print` without exposing a formatter or allocation surface.
 - `print`, `assert`, and `panic` lower as typed effects. Output channels,
   platform descriptors, source-location formatting, and the macOS execution
   boundary remain privileged compiler details and never enter the source API.
-- Native strings use an internal identity over immutable length-delimited byte
-  sequences. They can cross Silex calls without adopting a C ABI, a terminating
-  zero, or a linker-visible symbol.
+- Native strings use an internal descriptor containing an explicit byte length.
+  Literals and dynamically concatenated values share that representation and
+  can cross Silex calls without adopting a C ABI, a terminating zero, or a
+  linker-visible symbol. Dynamic storage is process-lived in this first runtime
+  model; allocation remains invisible to source code.
+- Decimal float formatting is a self-contained ARM64 runtime payload built with
+  the Zig bootstrap and bundled into the compiler. Native emission copies it
+  only when a program prints a float, patches a direct internal call, and never
+  resolves a C library or user symbol.
 - `main` is the only source name with entry-point semantics. Other function
   names are chosen freely by the user.
 - The initial backend targets only `macos-arm64`. It uses an internal
@@ -64,19 +87,26 @@ typed Silex IR
   object file or invoke an assembler, linker, or `codesign`.
 - The command `silex run <source.sx>` uses the reference interpreter.
   `silex compile <source.sx> -o <executable>` selects the native path.
+- The command `silex lsp` speaks framed JSON-RPC over standard input and
+  output. Its public capabilities describe editor intentions; AST and IR
+  structures remain private implementation details.
 
 ## Current limits
 
-- Executable values are limited to `int`, `bool`, `str`, and `void`.
-- Function bodies are linear: no conditions, loops, mutable variables or
-  assignment yet.
-- `float`/`float32` remains available in parsed signatures, but its values are
-  not executable yet. Strings have no concatenation, equality, indexing, count,
-  or allocation model yet.
-- No allocation, heap-managed value, public system API, or general runtime yet.
+- Executable values include every historical integer width, `float32`,
+  `float64`, `bool`, `str`, and `void`.
+- Conditions and short-circuit boolean expressions are implemented. Loops,
+  mutable variables and assignment are not.
+- String concatenation currently retains its native storage until process exit;
+  reclamation and a general allocation model remain future internal work.
+- No public system API or general native allocation API exists yet.
 - The native backend has no symbols, debugging information, dynamic imports,
   library model, or ABI stability guarantee yet.
 - Native executable emission and native tests currently require an Apple
   Silicon macOS host.
 - Interfaces, IR and package graphs are in-memory structures and have no stable
   serialized format yet.
+- The first LSP analyzes an open buffer as one autonomous source unit. Syntax
+  diagnostics always run; semantic diagnostics currently run only when the
+  unit has no `use`. Package graph overlays, navigation, rename, hover,
+  formatting and semantic tokens are not implemented yet.

@@ -21,14 +21,16 @@ func enabled() bool {
 }
 ```
 
-The executable value types are currently `int`, `bool`, and `str`. `int` is a
-signed 64-bit integer. `str` is an immutable sequence of valid UTF-8 bytes; it
-is not a zero-terminated C string, so an embedded zero byte remains data.
-The parser also preserves `float` and its equivalent spelling `float32` in
-signatures, but floating-point values are not executable yet.
+The integer types are `int8`, `int16`, `int32`, `int64`, `uint8`, `uint16`,
+`uint32`, and `uint64`. `int` is exactly `int64`; `uint` is exactly `uint64`.
+The floating types are IEEE-754 `float32` and `float64`; `float` is exactly
+`float32`. `bool` and immutable UTF-8 `str` complete the current value types.
+An embedded zero in a string remains ordinary data.
 
-Functions may share a name when their parameter types differ. Calls resolve to
-an exact parameter list; the return type alone never distinguishes an overload.
+Functions may share a name when their parameter types differ. Resolution
+prefers exact arguments, then same-family widening, then integer-to-float
+conversion; incomparable candidates are ambiguous. Aliases do not create
+distinct signatures. The return type alone never distinguishes an overload.
 All signatures are collected before bodies, so a call may target a function
 declared later in the source.
 
@@ -98,27 +100,54 @@ explicitly, or initialized from the intrinsic value of an explicit type:
 ```sx
 let inferred = 20
 let explicit:int = 22
+let byte:uint8 = 255
+let precise:float64 = 2.5
 let ready:bool
 let text:str
 ```
 
-The intrinsic value is `0` for `int`, `false` for `bool`, and the empty string
-for `str`. An explicit annotation must exactly match the initializer. A local
-name cannot reuse a parameter or another local name visible in the same
-function.
+The intrinsic value is the correctly typed positive zero for every numeric
+type, `false` for `bool`, and the empty string for `str`. Numeric initializers
+may use the widening rules. A local name cannot reuse a parameter or another
+local name visible in its lexical scope; sibling branches may reuse a name.
 
 Integer literals accept decimal, binary, octal, and hexadecimal notation with
-`_` separators. Boolean literals are `true` and `false`. String literals
-accept UTF-8 text and the escapes `\\`, `\"`, `\n`, `\r`, `\t`, `\0`, and
-`\u{H...}`. Escapes are decoded once when the source is compiled.
+`_` separators. They default to `int` but receive an expected integer type
+directly when context supplies one. Decimal floating literals default to
+`float` and accept exponents. Boolean literals are `true` and `false`. String
+literals accept UTF-8 text and the escapes `\\`, `\"`, `\n`, `\r`, `\t`, `\0`, and
+`\u{H...}`. Escapes are decoded once when the source is compiled. `\(` is not
+an escape.
 
 ## Expressions, calls, and returns
 
-The operators, in decreasing precedence, are unary `-`; multiplicative `*`,
-`/`, `%`; additive `+`, `-`; integer ordering `<`, `<=`, `>`, `>=`; then
-equality `==`, `!=`. Binary operators associate to the left. Arithmetic and
-ordering require `int`; equality accepts two `int` values or two `bool`
-values. String equality is intentionally not part of v0.
+The operators, in decreasing precedence, are postfix `as`; unary `-` and `!`;
+multiplicative `*`, `/`, `%`; additive `+`, `-`; unsigned shifts `<<`, `>>`;
+unsigned `&`; unsigned `^`; ordering `<`, `<=`, `>`, `>=`; equality `==`,
+`!=`; logical `&&`; then logical `||`. Binary operators associate to the left.
+Compatible integers widen within one signedness family. A floating operand
+selects `float32` or `float64` as the common type. Numeric arithmetic is typed;
+`%` remains integer-only. `&&` and `||` evaluate their right operand only when
+needed.
+
+`expression as type` performs a checked numeric conversion and fails at runtime
+if the current value is outside the target domain or would lose information.
+Unsigned `&`, `^`, `<<`, and `>>` preserve unsigned semantics; shift counts
+must be within the left operand's width.
+
+Strings compare by exact UTF-8 bytes. `+` concatenates immutable strings and
+`count()` returns the number of Unicode scalar values.
+
+`$(expression)` interpolates an expression and produces a normal `str` value.
+The expression is evaluated once in source order and uses the same canonical
+text as `print`. Only `$(` starts interpolation: `$value` and `${value}` are
+ordinary text. `$$` writes one literal dollar, so `"$$(value)"` evaluates to
+`"$(value)"`.
+
+```sx
+let value = 21
+let message = "Value: $(value * 2)"
+```
 
 Calls use positional arguments and can be nested in another call, initializer,
 arithmetic expression, or return. A direct call can also be a statement; its
@@ -135,16 +164,35 @@ func main() {
 ```
 
 `return` carries exactly one value in a non-`void` function and no value in a
-`void` function. With the current linear bodies, a non-`void` function must end
-with a value return or `panic`. A `void` function receives an implicit return
-at the end.
+`void` function. A non-`void` function must return or panic on every reachable
+path. A `void` function receives an implicit return when its end is reachable.
+
+## Conditional control flow
+
+`if` requires `bool`. `elif` is canonical; `else if` is accepted and may be
+mixed with it. Conditions run from top to bottom and stop after the first true
+branch. Every branch opens a sibling lexical scope.
+
+```sx
+if value < 0 {
+    print("negative")
+} elif value == 0 {
+    print("zero")
+} else {
+    print("positive")
+}
+```
 
 ## Observable statements
 
-`print(expression)` evaluates its expression once and writes one line to
-standard output. It accepts `str`, `int`, and `bool`; integers use decimal
-notation and booleans use `true` or `false`. String bytes are preserved
-exactly, including embedded zero bytes, before the final line break.
+`print(expression, ...)` accepts one or more expressions. It evaluates every
+argument exactly once from left to right, concatenates their representations
+without an implicit separator, then writes one line to standard output. It
+accepts `str`, every numeric type, and `bool`; integers use decimal notation and
+booleans use `true` or `false`. Floating values use the shortest deterministic
+round-trippable decimal spelling, with `-0.0`, `inf`, `-inf`, and `nan` for the
+special forms. String bytes are preserved exactly, including embedded zero
+bytes, before the final line break.
 
 `assert(condition, message)` requires `bool` then `str`. A true condition does
 nothing. A false condition writes this exact diagnostic to standard error and
@@ -180,23 +228,38 @@ function        = "public"? "func" identifier "(" parameters? ")" return_type? b
 parameters      = parameter ("," parameter)* ;
 parameter       = identifier ":" type ;
 return_type     = type ;
-type            = "void" | "int" | "bool" | "float" | "float32" | "str" ;
+type            = "void" | "int8" | "int16" | "int32" | "int64" | "int"
+                | "uint8" | "uint16" | "uint32" | "uint64" | "uint"
+                | "float" | "float32" | "float64" | "bool" | "str" ;
 block           = "{" statement* "}" ;
 statement       = let_statement | return_statement | call_expression
-                | print_statement | assert_statement | panic_statement ;
+                | print_statement | assert_statement | panic_statement
+                | if_statement ;
+if_statement    = "if" expression block
+                  (("elif" | "else" "if") expression block)*
+                  ("else" block)? ;
 let_statement   = "let" identifier (":" type)? ("=" expression)? ;
 return_statement = "return" expression? ;
-print_statement = "print" "(" expression ")" ;
+print_statement = "print" "(" expression ("," expression)* ")" ;
 assert_statement = "assert" "(" expression "," expression ")" ;
 panic_statement = "panic" "(" expression ")" ;
-expression      = equality ;
+expression      = logical_or ;
+logical_or      = logical_and ("||" logical_and)* ;
+logical_and     = equality ("&&" equality)* ;
 equality        = comparison (("==" | "!=") comparison)* ;
-comparison      = additive (("<" | "<=" | ">" | ">=") additive)* ;
+comparison      = bit_xor (("<" | "<=" | ">" | ">=") bit_xor)* ;
+bit_xor         = bit_and ("^" bit_and)* ;
+bit_and         = shift ("&" shift)* ;
+shift           = additive (("<<" | ">>") additive)* ;
 additive        = multiplicative (("+" | "-") multiplicative)* ;
 multiplicative  = unary (("*" | "/" | "%") unary)* ;
-unary           = "-" unary | primary ;
-primary         = integer | string | "true" | "false" | identifier
+unary           = ("-" | "!") unary | conversion ;
+conversion      = primary ("as" type | "." "count" "(" ")")* ;
+primary         = integer | floating | string | "true" | "false" | identifier
                 | call_expression | "(" expression ")" ;
+string          = '"' string_part* '"' ;
+string_part     = string_text | string_escape | "$$"
+                | "$(" expression ")" ;
 call_expression = qualified_identifier "(" arguments? ")" ;
 arguments       = expression ("," expression)* ;
 identifier      = (letter | "_") (letter | digit | "_")* ;
@@ -212,7 +275,8 @@ statements as described above.
 
 ## Current limits
 
-There are no mutable variables, assignments, logical operators, conditions,
-loops, string concatenation or equality, floating-point expressions,
-collections, methods, downloaded packages, package lockfiles, or visible
-native interop in this subset.
+There are no mutable variables, assignments, loops, collections, general
+methods, downloaded packages, package lockfiles, or visible native interop in
+this subset. String concatenation, byte equality and Unicode scalar `count()`
+have the same observable semantics in the interpreter and native backend, as
+does floating-point calculation and decimal `print` formatting.

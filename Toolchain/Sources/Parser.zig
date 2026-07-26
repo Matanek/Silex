@@ -126,8 +126,18 @@ pub const Parser = struct {
         const result: Ast.Type = switch (self.current.tag) {
             .keyword_void => .void,
             .keyword_int => .int,
+            .keyword_int8 => .int8,
+            .keyword_int16 => .int16,
+            .keyword_int32 => .int32,
+            .keyword_int64 => .int,
+            .keyword_uint => .uint,
+            .keyword_uint8 => .uint8,
+            .keyword_uint16 => .uint16,
+            .keyword_uint32 => .uint32,
+            .keyword_uint64 => .uint,
             .keyword_bool => .bool,
             .keyword_float, .keyword_float32 => .float32,
+            .keyword_float64 => .float64,
             .keyword_str => .str,
             .identifier => return self.fail("unknown type in language v0"),
             else => return self.fail("expected type name"),
@@ -150,17 +160,83 @@ pub const Parser = struct {
         return switch (self.current.tag) {
             .keyword_let => self.parseVariableDeclaration(),
             .keyword_return => self.parseReturn(),
-            .keyword_print => self.parseEffectStatement(.print),
+            .keyword_print => self.parsePrint(),
             .keyword_assert => self.parseAssert(),
             .keyword_panic => self.parseEffectStatement(.panic),
+            .keyword_if => self.parseIf(),
             .identifier => self.parseCallStatement(),
             else => self.fail("expected statement"),
         };
     }
 
-    const Effect = enum { print, panic };
+    fn parseIf(self: *Parser) ParseError!Ast.Statement {
+        const position = self.current.position;
+        var branches: std.ArrayList(Ast.ConditionalBranch) = .empty;
 
-    fn parseEffectStatement(self: *Parser, effect: Effect) ParseError!Ast.Statement {
+        while (self.current.tag == .keyword_if or self.current.tag == .keyword_elif) {
+            const branch_position = self.current.position;
+            try self.advance();
+            const condition = try self.parseExpression(false);
+            const statements = try self.parseBlock();
+            try branches.append(self.allocator, .{
+                .position = branch_position,
+                .condition = condition,
+                .statements = statements,
+            });
+            if (self.current.tag != .keyword_elif) break;
+        }
+
+        var else_statements: ?[]const Ast.Statement = null;
+        if (self.current.tag == .keyword_else) {
+            try self.advance();
+            if (self.current.tag == .keyword_if) {
+                while (true) {
+                    const branch_position = self.current.position;
+                    try self.advance();
+                    const condition = try self.parseExpression(false);
+                    const statements = try self.parseBlock();
+                    try branches.append(self.allocator, .{
+                        .position = branch_position,
+                        .condition = condition,
+                        .statements = statements,
+                    });
+                    if (self.current.tag == .keyword_elif) continue;
+                    if (self.current.tag == .keyword_else) {
+                        try self.advance();
+                        else_statements = try self.parseBlock();
+                    }
+                    break;
+                }
+            } else {
+                else_statements = try self.parseBlock();
+            }
+        }
+
+        return .{ .if_statement = .{
+            .position = position,
+            .branches = try branches.toOwnedSlice(self.allocator),
+            .else_statements = else_statements,
+        } };
+    }
+
+    fn parsePrint(self: *Parser) ParseError!Ast.Statement {
+        const position = self.current.position;
+        try self.advance();
+        try self.expect(.left_parenthesis, "expected '(' after 'print'");
+        if (self.current.tag == .right_parenthesis) return self.fail("print expects at least one value");
+        var values: std.ArrayList(*Ast.Expression) = .empty;
+        while (true) {
+            try values.append(self.allocator, try self.parseExpression(true));
+            if (self.current.tag != .comma) break;
+            try self.advance();
+            if (self.current.tag == .right_parenthesis) return self.fail("expected value after ','");
+        }
+        try self.expect(.right_parenthesis, "expected ')' after print values");
+        try self.expectStatementTerminator();
+        return .{ .print_statement = .{ .position = position, .values = try values.toOwnedSlice(self.allocator) } };
+    }
+
+    fn parseEffectStatement(self: *Parser, effect: enum { panic }) ParseError!Ast.Statement {
         const position = self.current.position;
         try self.advance();
         try self.expect(.left_parenthesis, "expected '(' after effect name");
@@ -168,7 +244,6 @@ pub const Parser = struct {
         try self.expect(.right_parenthesis, "expected ')' after effect value");
         try self.expectStatementTerminator();
         return switch (effect) {
-            .print => .{ .print_statement = .{ .position = position, .value = value } },
             .panic => .{ .panic_statement = .{ .position = position, .value = value } },
         };
     }
@@ -240,7 +315,27 @@ pub const Parser = struct {
     }
 
     fn parseExpression(self: *Parser, allow_line_breaks: bool) ParseError!*Ast.Expression {
-        return self.parseEquality(allow_line_breaks);
+        return self.parseLogicalOr(allow_line_breaks);
+    }
+
+    fn parseLogicalOr(self: *Parser, allow_line_breaks: bool) ParseError!*Ast.Expression {
+        var expression = try self.parseLogicalAnd(allow_line_breaks);
+        while (self.current.tag == .pipe_pipe and self.canContinueExpression(allow_line_breaks)) {
+            const operator = self.current;
+            try self.advance();
+            expression = try self.newBinary(expression, try self.parseLogicalAnd(allow_line_breaks), operator);
+        }
+        return expression;
+    }
+
+    fn parseLogicalAnd(self: *Parser, allow_line_breaks: bool) ParseError!*Ast.Expression {
+        var expression = try self.parseEquality(allow_line_breaks);
+        while (self.current.tag == .amp_amp and self.canContinueExpression(allow_line_breaks)) {
+            const operator = self.current;
+            try self.advance();
+            expression = try self.newBinary(expression, try self.parseEquality(allow_line_breaks), operator);
+        }
+        return expression;
     }
 
     fn parseEquality(self: *Parser, allow_line_breaks: bool) ParseError!*Ast.Expression {
@@ -256,9 +351,41 @@ pub const Parser = struct {
     }
 
     fn parseComparison(self: *Parser, allow_line_breaks: bool) ParseError!*Ast.Expression {
-        var expression = try self.parseAdditive(allow_line_breaks);
+        var expression = try self.parseBitXor(allow_line_breaks);
         while ((self.current.tag == .less or self.current.tag == .less_equal or
             self.current.tag == .greater or self.current.tag == .greater_equal) and
+            self.canContinueExpression(allow_line_breaks))
+        {
+            const operator = self.current;
+            try self.advance();
+            expression = try self.newBinary(expression, try self.parseBitXor(allow_line_breaks), operator);
+        }
+        return expression;
+    }
+
+    fn parseBitXor(self: *Parser, allow_line_breaks: bool) ParseError!*Ast.Expression {
+        var expression = try self.parseBitAnd(allow_line_breaks);
+        while (self.current.tag == .caret and self.canContinueExpression(allow_line_breaks)) {
+            const operator = self.current;
+            try self.advance();
+            expression = try self.newBinary(expression, try self.parseBitAnd(allow_line_breaks), operator);
+        }
+        return expression;
+    }
+
+    fn parseBitAnd(self: *Parser, allow_line_breaks: bool) ParseError!*Ast.Expression {
+        var expression = try self.parseShift(allow_line_breaks);
+        while (self.current.tag == .amp and self.canContinueExpression(allow_line_breaks)) {
+            const operator = self.current;
+            try self.advance();
+            expression = try self.newBinary(expression, try self.parseShift(allow_line_breaks), operator);
+        }
+        return expression;
+    }
+
+    fn parseShift(self: *Parser, allow_line_breaks: bool) ParseError!*Ast.Expression {
+        var expression = try self.parseAdditive(allow_line_breaks);
+        while ((self.current.tag == .shift_left or self.current.tag == .shift_right) and
             self.canContinueExpression(allow_line_breaks))
         {
             const operator = self.current;
@@ -293,17 +420,50 @@ pub const Parser = struct {
     }
 
     fn parseUnary(self: *Parser, allow_line_breaks: bool) ParseError!*Ast.Expression {
-        if (self.current.tag != .minus) return self.parsePrimary();
+        if (self.current.tag != .minus and self.current.tag != .bang) return self.parseConversion();
         const operator = self.current;
         try self.advance();
         return self.newExpression(.{
             .position = operator.position,
             .value = .{ .unary = .{
-                .operator = .negate,
+                .operator = if (operator.tag == .minus) .negate else .logical_not,
                 .operator_position = operator.position,
                 .operand = try self.parseUnary(allow_line_breaks),
             } },
         });
+    }
+
+    fn parseConversion(self: *Parser) ParseError!*Ast.Expression {
+        var expression = try self.parsePrimary();
+        while (true) {
+            if (self.current.tag == .dot) {
+                try self.advance();
+                if (self.current.tag != .identifier or !std.mem.eql(u8, self.current.lexeme, "count")) {
+                    return self.fail("only count() is available as a value method in this language slice");
+                }
+                try self.advance();
+                try self.expect(.left_parenthesis, "expected '(' after 'count'");
+                try self.expect(.right_parenthesis, "expected ')' after 'count('");
+                expression = try self.newExpression(.{
+                    .position = expression.position,
+                    .value = .{ .string_count = expression },
+                });
+                continue;
+            }
+            if (self.current.tag != .keyword_as) break;
+            const position = self.current.position;
+            try self.advance();
+            const target = try self.parseType();
+            expression = try self.newExpression(.{
+                .position = expression.position,
+                .value = .{ .conversion = .{
+                    .operand = expression,
+                    .target = target,
+                    .operator_position = position,
+                } },
+            });
+        }
+        return expression;
     }
 
     fn parsePrimary(self: *Parser) ParseError!*Ast.Expression {
@@ -312,6 +472,10 @@ pub const Parser = struct {
             .integer => {
                 try self.advance();
                 return self.newExpression(.{ .position = token.position, .value = .{ .integer = token.lexeme } });
+            },
+            .floating => {
+                try self.advance();
+                return self.newExpression(.{ .position = token.position, .value = .{ .floating = token.lexeme } });
             },
             .keyword_true, .keyword_false => {
                 try self.advance();
@@ -327,6 +491,7 @@ pub const Parser = struct {
                     .value = .{ .string = try Strings.decode(self.allocator, token.lexeme) },
                 });
             },
+            .string_start => return self.parseInterpolatedString(token),
             .identifier => {
                 try self.advance();
                 var name = token.lexeme;
@@ -355,6 +520,33 @@ pub const Parser = struct {
             },
             else => return self.fail("expected expression"),
         }
+    }
+
+    fn parseInterpolatedString(self: *Parser, token: Token) ParseError!*Ast.Expression {
+        try self.advance();
+        var parts: std.ArrayList(Ast.Expression.StringPart) = .empty;
+        while (self.current.tag != .string_end) {
+            switch (self.current.tag) {
+                .string_text => {
+                    try parts.append(self.allocator, .{ .text = try Strings.decode(self.allocator, self.current.lexeme) });
+                    try self.advance();
+                },
+                .interpolation_start => {
+                    try self.advance();
+                    if (self.current.tag == .interpolation_end) return self.fail("expected expression inside string interpolation");
+                    const expression = try self.parseExpression(true);
+                    try self.expect(.interpolation_end, "expected ')' after string interpolation");
+                    try parts.append(self.allocator, .{ .expression = expression });
+                },
+                .end => return self.fail("unterminated string literal"),
+                else => return self.fail("expected text or interpolation in string literal"),
+            }
+        }
+        try self.advance();
+        return self.newExpression(.{
+            .position = token.position,
+            .value = .{ .interpolated_string = .{ .parts = try parts.toOwnedSlice(self.allocator) } },
+        });
     }
 
     fn parseCallAfterName(self: *Parser, name: Token) ParseError!*Ast.Expression {
@@ -393,6 +585,12 @@ pub const Parser = struct {
             .greater_equal => .greater_equal,
             .equal_equal => .equal,
             .bang_equal => .not_equal,
+            .amp_amp => .logical_and,
+            .pipe_pipe => .logical_or,
+            .amp => .bit_and,
+            .caret => .bit_xor,
+            .shift_left => .shift_left,
+            .shift_right => .shift_right,
             else => unreachable,
         };
         return self.newExpression(.{
@@ -541,13 +739,54 @@ test "parse strings comparisons and observable statements" {
     );
     const program = try parser.parse();
     const statements = program.functions[0].statements;
-    try std.testing.expectEqualSlices(u8, "é\n", statements[0].print_statement.value.value.string);
+    try std.testing.expectEqualSlices(u8, "é\n", statements[0].print_statement.values[0].value.string);
     const equality = statements[1].assert_statement.condition.value.binary;
     try std.testing.expectEqual(Ast.BinaryOperator.equal, equality.operator);
     try std.testing.expectEqual(Ast.BinaryOperator.less, equality.left.value.binary.operator);
     try std.testing.expectEqual(Ast.BinaryOperator.add, equality.left.value.binary.left.value.binary.operator);
     try std.testing.expectEqual(Ast.BinaryOperator.multiply, equality.left.value.binary.left.value.binary.right.value.binary.operator);
     try std.testing.expectEqualSlices(u8, "stop", statements[2].panic_statement.value.value.string);
+}
+
+test "parse interpolated strings and variadic print" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(),
+        \\func main() {
+        \\    let value = 21
+        \\    let message = "Value: $(value * 2)"
+        \\    print(message, " / ", "$$(value)")
+        \\}
+    );
+    const program = try parser.parse();
+    const statements = program.functions[0].statements;
+    try std.testing.expectEqual(@as(usize, 3), statements.len);
+    const interpolated = statements[1].variable_declaration.initializer.?.value.interpolated_string;
+    try std.testing.expectEqual(@as(usize, 2), interpolated.parts.len);
+    try std.testing.expectEqualSlices(u8, "Value: ", interpolated.parts[0].text);
+    try std.testing.expectEqual(@as(usize, 3), statements[2].print_statement.values.len);
+    try std.testing.expectEqualSlices(u8, "$(value)", statements[2].print_statement.values[2].value.string);
+}
+
+test "parse conditional alternatives and logical precedence" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(),
+        \\func main() {
+        \\    if !false && true || false { print("first") }
+        \\    elif false { print("second") }
+        \\    else if true { print("third") }
+        \\    else { print("last") }
+        \\}
+    );
+    const program = try parser.parse();
+    const conditional = program.functions[0].statements[0].if_statement;
+    try std.testing.expectEqual(@as(usize, 3), conditional.branches.len);
+    try std.testing.expect(conditional.else_statements != null);
+    const logical_or = conditional.branches[0].condition.value.binary;
+    try std.testing.expectEqual(Ast.BinaryOperator.logical_or, logical_or.operator);
+    try std.testing.expectEqual(Ast.BinaryOperator.logical_and, logical_or.left.value.binary.operator);
+    try std.testing.expectEqual(Ast.UnaryOperator.logical_not, logical_or.left.value.binary.left.value.unary.operator);
 }
 
 test "parse module uses aliases and qualified calls" {
@@ -621,7 +860,11 @@ test "report malformed fundamental statements and expressions" {
     try expectParseError("func main() { call(1 2) }", "expected ',' or ')' after argument");
     try expectParseError("func main() { return 1 return }", "expected ';' or line break");
     try expectParseError("func main() { let first = 1 let second = 2 }", "expected ';' or line break");
-    try expectParseError("func main() { print() }", "expected expression");
+    try expectParseError("func main() { print() }", "print expects at least one value");
+    try expectParseError(
+        "func main() { let message = \"$()\" }",
+        "expected expression inside string interpolation",
+    );
     try expectParseError("func main() { assert(true) }", "expected ',' after assert condition");
     try expectParseError("func main() { assert(true, \"message\" }", "expected ')' after assert message");
     try expectParseError("func main() { panic(\"message\", \"extra\") }", "expected ')' after effect value");
