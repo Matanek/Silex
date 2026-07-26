@@ -76,6 +76,7 @@ pub const Method = struct {
 pub const Structure = struct {
     export_name: []const u8,
     id: TypeId,
+    type_parameters: []const []const u8 = &.{},
     fields: []const StructureField,
     constructors: []const Constructor,
     methods: []const Method,
@@ -129,6 +130,17 @@ pub fn buildMapped(
     program: Ast.Program,
     type_map: []const Types.Type,
 ) Allocator.Error!Module {
+    return buildMappedGenerics(allocator, owner, module_name, program, type_map, &.{});
+}
+
+pub fn buildMappedGenerics(
+    allocator: Allocator,
+    owner: Owner,
+    module_name: []const u8,
+    program: Ast.Program,
+    type_map: []const Types.Type,
+    generic_map: []const Types.Type,
+) Allocator.Error!Module {
     var structures: std.ArrayList(Structure) = .empty;
     for (program.structures) |structure| {
         if (!structure.is_public) continue;
@@ -137,7 +149,7 @@ pub fn buildMapped(
             if (!field.is_public or field.is_internal) continue;
             try fields.append(allocator, .{
                 .name = field.name,
-                .type = mappedType(field.type, type_map),
+                .type = mappedType(field.type, type_map, generic_map),
                 .mutable = field.mutable,
             });
         }
@@ -146,7 +158,7 @@ pub fn buildMapped(
             if (!constructor.is_public or constructor.is_internal) continue;
             const parameters = try allocator.alloc(Types.Type, constructor.parameters.len);
             for (constructor.parameters, 0..) |parameter, parameter_index| {
-                parameters[parameter_index] = mappedType(parameter.type, type_map);
+                parameters[parameter_index] = mappedType(parameter.type, type_map, generic_map);
             }
             try constructors.append(allocator, .{
                 .parameter_types = parameters,
@@ -158,18 +170,21 @@ pub fn buildMapped(
             if (!method.is_public or method.is_internal) continue;
             const parameters = try allocator.alloc(Types.Type, method.parameters.len);
             for (method.parameters, 0..) |parameter, parameter_index| {
-                parameters[parameter_index] = mappedType(parameter.type, type_map);
+                parameters[parameter_index] = mappedType(parameter.type, type_map, generic_map);
             }
             try methods.append(allocator, .{
                 .name = method.name,
                 .parameter_types = parameters,
-                .return_type = mappedType(method.return_type, type_map),
+                .return_type = mappedType(method.return_type, type_map, generic_map),
                 .required_parameters = requiredParameterCount(method.parameters),
             });
         }
+        const type_parameters = try allocator.alloc([]const u8, structure.type_parameters.len);
+        for (structure.type_parameters, 0..) |parameter, index| type_parameters[index] = parameter.name;
         try structures.append(allocator, .{
             .export_name = structure.name,
             .id = .{ .owner = owner, .module = module_name, .name = structure.name },
+            .type_parameters = type_parameters,
             .fields = try fields.toOwnedSlice(allocator),
             .constructors = try constructors.toOwnedSlice(allocator),
             .methods = try methods.toOwnedSlice(allocator),
@@ -184,7 +199,7 @@ pub fn buildMapped(
         for (enumeration.variants, 0..) |variant, variant_index| {
             const associated_types = try allocator.alloc(Types.Type, variant.associated_types.len);
             for (variant.associated_types, 0..) |associated_type, type_index| {
-                associated_types[type_index] = mappedType(associated_type, type_map);
+                associated_types[type_index] = mappedType(associated_type, type_map, generic_map);
             }
             variants[variant_index] = .{ .name = variant.name, .associated_types = associated_types, .raw_value = variant.raw_value };
         }
@@ -199,7 +214,7 @@ pub fn buildMapped(
     for (program.functions) |function| {
         if (!function.is_public) continue;
         const parameter_types = try allocator.alloc(Types.Type, function.parameters.len);
-        for (function.parameters, 0..) |parameter, index| parameter_types[index] = mappedType(parameter.type, type_map);
+        for (function.parameters, 0..) |parameter, index| parameter_types[index] = mappedType(parameter.type, type_map, generic_map);
         const type_parameters = try allocator.alloc([]const u8, function.type_parameters.len);
         for (function.type_parameters, 0..) |parameter, index| type_parameters[index] = parameter.name;
         try functions.append(allocator, .{
@@ -211,7 +226,7 @@ pub fn buildMapped(
                 .parameter_types = parameter_types,
             },
             .type_parameters = type_parameters,
-            .return_type = mappedType(function.return_type, type_map),
+            .return_type = mappedType(function.return_type, type_map, generic_map),
             .position = function.position,
             .required_parameters = requiredParameterCount(function.parameters),
         });
@@ -233,8 +248,11 @@ fn requiredParameterCount(parameters: []const Ast.Parameter) usize {
     return parameters.len;
 }
 
-fn mappedType(type_value: Types.Type, type_map: []const Types.Type) Types.Type {
-    if (type_value.optionalChild()) |child| return .optional(mappedType(child, type_map));
+fn mappedType(type_value: Types.Type, type_map: []const Types.Type, generic_map: []const Types.Type) Types.Type {
+    if (type_value.optionalChild()) |child| return .optional(mappedType(child, type_map, generic_map));
+    if (type_value.genericInstantiationIndex()) |index| {
+        return if (index < generic_map.len) generic_map[index] else type_value;
+    }
     const index = type_value.structureIndex() orelse return type_value;
     return if (index < type_map.len) type_map[index] else type_value;
 }

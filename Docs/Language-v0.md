@@ -460,6 +460,29 @@ is a `var` and every field on the path is also declared `var`; an intervening
 `+=`, `-=`, `*=`, `/=`, `++`, and `--` evaluate the target and operand once,
 retain every unaffected field, and behave identically in both execution paths.
 
+A structure may declare unconstrained type parameters after its name and use
+them in fields, constructors and methods:
+
+```sx
+struct Pair<T> {
+    let first:T
+    let second:T
+}
+
+let pair = Pair<int>(first:1, second:2)
+```
+
+Every use supplies the complete argument list; structure arguments are never
+inferred from fields or annotations. Each list creates one concrete nominal
+type shared across the composed program, so `Pair<int>` and `Pair<str>` are
+distinct while repeated `Pair<int>` uses have one identity. Nested
+specializations, transparent aliases and public reexports preserve that
+identity. The concrete field layout, copy, mutability, comparison,
+initialization, constructors and methods follow the ordinary structure rules.
+An incomplete template name, wrong arity, `void` argument, arguments on a
+non-generic structure, recursive value layout and endlessly changing recursive
+specialization are rejected.
+
 `init` declares a positional constructor inside a structure. `self` is
 implicit; assigning `self.field` initializes that field, and the completed
 value is returned implicitly. Declaring any constructor closes the named
@@ -621,7 +644,7 @@ program         = (use | structure | function)* EOF ;
 use             = "public"? "use"
                   (qualified_identifier ("as" identifier)? | type "as" identifier) ;
 visibility      = "public" | "internal" ;
-structure       = visibility? "struct" identifier "{" (structure_field | constructor | method)* "}" ;
+structure       = visibility? "struct" identifier type_parameters? "{" (structure_field | constructor | method)* "}" ;
 structure_field = visibility? ("let" | "var") identifier ":" type ("=" field_default)? ;
 constructor     = visibility? "init" "(" parameters? ")" block ;
 method          = visibility? "func" identifier "(" parameters? ")" return_type? block ;
@@ -634,7 +657,7 @@ return_type     = type ;
 type            = "void" | "int8" | "int16" | "int32" | "int64" | "int"
                 | "uint8" | "uint16" | "uint32" | "uint64" | "uint"
                 | "float" | "float32" | "float64" | "bool" | "str"
-                | identifier ;
+                | identifier type_arguments? ;
 block           = "{" statement* "}" ;
 statement       = binding_statement | assignment_statement | return_statement
                 | call_expression | break_statement | continue_statement
