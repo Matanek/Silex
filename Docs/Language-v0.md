@@ -406,6 +406,32 @@ an explicit return. `try` is rejected for non-`Result` operands, incompatible
 error types, non-`Result` enclosing returns and constructors. Error
 transformation remains explicit.
 
+### Explicit error transformation
+
+The intrinsic generic function `map_error` transforms `Result<T,E>` into
+`Result<T,F>` with a named ordinary function from `E` to `F`:
+
+```sx
+func convert(error:ParseError) AppError {
+    return AppError.input(error)
+}
+
+let config = map_error(parse(text), convert)
+```
+
+On success the exact `T` value is preserved and `convert` is not called. On
+failure it is called exactly once and its result becomes the new failure.
+`Result<void,E>` follows the same rule without inventing a success value. The
+transformation is neither stored nor called after `map_error` returns, and no
+success transformation, recovery or implicit conversion occurs.
+
+All type arguments are normally inferred. A value result may spell
+`map_error<T,E,F>(...)`; the `void` success overload spells
+`map_error<E,F>(...)`. The transformation must have exactly one `E` parameter
+and a non-void `F` return. Literal lambdas and general function values are not
+part of this subset, so the argument is a compatible named function. The name
+`map_error` is reserved against functions, local bindings and module aliases.
+
 An enum may instead declare `int` or `str` as a raw type. Every variant then
 provides exactly one literal of that type:
 

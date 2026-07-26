@@ -11,6 +11,7 @@ const Methods = @import("Methods.zig");
 const Control = @import("Control.zig");
 const Enums = @import("Enums.zig");
 const Matches = @import("Matches.zig");
+const MapError = @import("MapError.zig");
 const Support = @import("Support.zig");
 const Try = @import("Try.zig");
 const Types = @import("../Types.zig");
@@ -29,14 +30,12 @@ pub const Analyzer = struct {
     method_mutability: []const bool = &.{},
     default_expansions: std.ArrayList(*const Ast.Expression) = .empty,
     diagnostic: ?Source.Diagnostic = null,
-
     pub fn init(allocator: Allocator) Analyzer {
         return .{ .allocator = allocator };
     }
     pub fn analyze(self: *Analyzer, program: Ast.Program) AnalyzeError!Ir.Program {
         return self.analyzeProgram(program, true);
     }
-
     pub fn analyzeUnit(self: *Analyzer, program: Ast.Program) AnalyzeError!Ir.Program {
         return self.analyzeProgram(program, false);
     }
@@ -1028,6 +1027,7 @@ pub const Analyzer = struct {
     }
 
     fn analyzeCall(self: *Analyzer, builder: *FunctionBuilder, call: Ast.Expression.Call) AnalyzeError!?TypedValue {
+        if (call.receiver == null and std.mem.eql(u8, call.name, "map_error")) return try MapError.analyze(self, builder, call);
         if (call.receiver) |receiver_expression| {
             if (receiver_expression.value == .identifier) {
                 if (Enums.find(self, receiver_expression.value.identifier)) |enum_index| {
