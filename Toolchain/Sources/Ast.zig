@@ -48,6 +48,8 @@ pub const Expression = struct {
         binary: Binary,
         conversion: Conversion,
         string_count: *Expression,
+        sequence_literal: []const *Expression,
+        index_access: IndexAccess,
         match_expression: Match,
     };
 
@@ -121,6 +123,12 @@ pub const Expression = struct {
         operator_position: Source.Position,
     };
 
+    pub const IndexAccess = struct {
+        base: *Expression,
+        index: *Expression,
+        bracket_position: Source.Position,
+    };
+
     pub const StringPart = union(enum) {
         text: []const u8,
         expression: *Expression,
@@ -161,10 +169,16 @@ pub const AssignmentTarget = struct {
     name_position: Source.Position,
     name: []const u8,
     fields: []const Field = &.{},
+    indices: []const Index = &.{},
 
     pub const Field = struct {
         name_position: Source.Position,
         name: []const u8,
+    };
+
+    pub const Index = struct {
+        position: Source.Position,
+        value: *Expression,
     };
 };
 
@@ -311,7 +325,10 @@ pub const Structure = struct {
     fields: []const StructureField,
     constructors: []const Constructor = &.{},
     methods: []const Function = &.{},
+    collection: ?Collection = null,
 };
+
+pub const Collection = Types.Collection;
 
 pub const EnumVariant = struct {
     position: Source.Position,

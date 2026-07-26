@@ -137,6 +137,7 @@ pub const Specializer = struct {
             try names.append(self.allocator, name);
         }
         for (self.structures.items) |*structure| {
+            if (structure.collection) |collection| structure.collection.?.element = remapConcreteType(collection.element, map);
             for (@constCast(structure.fields)) |*field| field.type = remapConcreteType(field.type, map);
             for (@constCast(structure.constructors)) |*constructor| {
                 for (@constCast(constructor.parameters)) |*parameter| parameter.type = remapConcreteType(parameter.type, map);
@@ -193,6 +194,7 @@ pub const Specializer = struct {
             }
         }
         structure.fields = fields;
+        if (structure.collection) |collection| structure.collection.?.element = try self.rewriteType(collection.element, arguments, structure.position);
         self.structures.items[structure_index] = structure;
 
         const constructors = try self.allocator.alloc(Ast.Constructor, structure.constructors.len);
@@ -266,6 +268,7 @@ pub const Specializer = struct {
             .assignment_statement => |assignment| value: {
                 var copy = assignment;
                 if (copy.value) |expression| copy.value = try self.rewriteExpression(expression, arguments, locals);
+                for (@constCast(copy.target.indices)) |*target_index| target_index.value = try self.rewriteExpression(target_index.value, arguments, locals);
                 break :value .{ .assignment_statement = copy };
             },
             .return_statement => |statement_value| value: {
@@ -437,6 +440,17 @@ pub const Specializer = struct {
                 break :value .{ .conversion = copy };
             },
             .string_count => |operand| .{ .string_count = try self.rewriteExpression(operand, arguments, locals) },
+            .sequence_literal => |values| value: {
+                const copy = try self.allocator.alloc(*Ast.Expression, values.len);
+                for (values, 0..) |item, index| copy[index] = try self.rewriteExpression(item, arguments, locals);
+                break :value .{ .sequence_literal = copy };
+            },
+            .index_access => |access| value: {
+                var copy = access;
+                copy.base = try self.rewriteExpression(access.base, arguments, locals);
+                copy.index = try self.rewriteExpression(access.index, arguments, locals);
+                break :value .{ .index_access = copy };
+            },
             .interpolated_string => |interpolated| value: {
                 const parts = try self.allocator.alloc(Ast.Expression.StringPart, interpolated.parts.len);
                 for (interpolated.parts, 0..) |part, index| parts[index] = switch (part) {
@@ -1080,6 +1094,12 @@ pub const Specializer = struct {
             },
             .conversion => |conversion| conversion.target,
             .string_count => .int,
+            .sequence_literal => null,
+            .index_access => |access| index_type: {
+                const base = self.inferExpressionType(access.base, locals) orelse break :index_type null;
+                const structure = self.structureForType(base) orelse break :index_type null;
+                break :index_type if (structure.collection) |collection| collection.element else null;
+            },
             .match_expression => |match_value| match_type: {
                 for (match_value.branches) |branch| if (branch.value) |value| {
                     break :match_type self.inferExpressionType(value, locals);
@@ -1260,7 +1280,10 @@ fn remapStatementTypes(statements: []const Ast.Statement, map: []const ?Ast.Type
             if (declaration.annotation) |annotation| declaration.annotation = remapConcreteType(annotation, map);
             if (declaration.initializer) |initializer| remapExpressionTypes(initializer, map);
         },
-        .assignment_statement => |assignment| if (assignment.value) |value| remapExpressionTypes(value, map),
+        .assignment_statement => |assignment| {
+            if (assignment.value) |value| remapExpressionTypes(value, map);
+            for (assignment.target.indices) |target_index| remapExpressionTypes(target_index.value, map);
+        },
         .return_statement => |return_statement| if (return_statement.value) |value| remapExpressionTypes(value, map),
         .expression_statement => |expression| remapExpressionTypes(expression, map),
         .print_statement => |print_statement| for (print_statement.values) |value| remapExpressionTypes(value, map),
@@ -1307,6 +1330,11 @@ fn remapExpressionTypes(expression: *Ast.Expression, map: []const ?Ast.Type) voi
             remapExpressionTypes(conversion.operand, map);
         },
         .string_count => |operand| remapExpressionTypes(operand, map),
+        .sequence_literal => |values| for (values) |value| remapExpressionTypes(value, map),
+        .index_access => |access| {
+            remapExpressionTypes(access.base, map);
+            remapExpressionTypes(access.index, map);
+        },
         .interpolated_string => |interpolated| for (interpolated.parts) |part| switch (part) {
             .text => {},
             .expression => |nested| remapExpressionTypes(nested, map),

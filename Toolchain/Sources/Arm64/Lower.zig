@@ -142,6 +142,31 @@ fn lowerInstruction(
             .operand = layout.values[test_value.operand],
             .tag = test_value.variant,
         } },
+        .collection_load => |access| collection_load: {
+            const collection = collectionForType(program, function.value_types[access.collection]) orelse return error.InvalidMachineProgram;
+            const count: u32 = @intCast(collection.length orelse return error.InvalidMachineProgram);
+            break :collection_load .{ .collection_load = .{
+                .result = layout.values[access.result],
+                .collection = layout.values[access.collection],
+                .index = layout.values[access.index].start,
+                .count = count,
+                .header = try internString(allocator, strings, try collectionRuntimeHeader(allocator, program, access.position)),
+                .tail = try internString(allocator, strings, try std.fmt.allocPrint(allocator, " is out of bounds for count {d}\n", .{count})),
+            } };
+        },
+        .collection_replace => |replacement| collection_replace: {
+            const collection = collectionForType(program, function.value_types[replacement.collection]) orelse return error.InvalidMachineProgram;
+            const count: u32 = @intCast(collection.length orelse return error.InvalidMachineProgram);
+            break :collection_replace .{ .collection_replace = .{
+                .result = layout.values[replacement.result],
+                .collection = layout.values[replacement.collection],
+                .index = layout.values[replacement.index].start,
+                .replacement = layout.values[replacement.replacement],
+                .count = count,
+                .header = try internString(allocator, strings, try collectionRuntimeHeader(allocator, program, replacement.position)),
+                .tail = try internString(allocator, strings, try std.fmt.allocPrint(allocator, " is out of bounds for count {d}\n", .{count})),
+            } };
+        },
         .enum_payload => |payload| enum_payload: {
             if (payload.enumeration >= program.enums.len) return error.InvalidMachineProgram;
             const enumeration = program.enums[payload.enumeration];
@@ -422,6 +447,12 @@ fn enumByType(program: Ir.Program, type_value: Ir.Type) ?Ir.Enum {
     return null;
 }
 
+fn collectionForType(program: Ir.Program, type_value: Ir.Type) ?@import("../Types.zig").Collection {
+    const index = type_value.structureIndex() orelse return null;
+    if (index >= program.structures.len) return null;
+    return program.structures[index].collection;
+}
+
 fn flattenedTypesForList(allocator: Allocator, program: Ir.Program, types: []const Ir.Type) Machine.Error![]const Ir.Type {
     var result: std.ArrayList(Ir.Type) = .empty;
     for (types) |type_value| try appendFlattenedTypes(allocator, program, type_value, &result);
@@ -464,6 +495,15 @@ fn runtimeHeader(
             "{s}:{d}:{d}: runtime error: ",
             .{ path, position.line, position.column },
         );
+}
+
+fn collectionRuntimeHeader(
+    allocator: Allocator,
+    program: Ir.Program,
+    position: @import("../Source.zig").Position,
+) Allocator.Error![]const u8 {
+    const path = if (position.file < program.files.len) program.files[position.file] else "<source>";
+    return std.fmt.allocPrint(allocator, "{s}:{d}:{d}: runtime error: collection index ", .{ path, position.line, position.column });
 }
 
 fn runtimeConversionHeader(

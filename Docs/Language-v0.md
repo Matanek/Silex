@@ -731,6 +731,31 @@ while remaining > 0 {
 }
 ```
 
+## Fixed arrays
+
+`T[N]` is a fixed array of exactly `N` values of `T`. The length is part of
+the type, so `int[2]` and `int[3]` are distinct and incompatible. An array
+literal is checked against its expected type and must contain exactly that
+many elements; in particular, `[]` needs an explicit expected array type.
+
+```sx
+var axes:int[3] = [10, 20, 30]
+let empty:int[0] = []
+axes[-1] = 40
+print(axes.count(), " ", axes.is_empty(), " ", axes[2])
+```
+
+`count()` returns the fixed length and `is_empty()` reports whether it is zero.
+An integer index addresses one element. Negative indexes count from the end,
+so `-1` is the last element. An index outside `[-count(), count())` terminates
+execution with a bounds diagnostic. Indexing evaluates the array and the index
+exactly once, from left to right.
+
+Fixed arrays have value semantics across bindings, parameters, and return
+values. Assigning through an index therefore changes only the mutable root
+binding being addressed; immutable roots are rejected. Storage layout and
+index normalization are implementation details, not public collection API.
+
 ## Observable statements
 
 `print(expression, ...)` accepts one or more expressions. It evaluates every
@@ -786,7 +811,8 @@ type_parameters = "<" identifier ("," identifier)* ">" ;
 parameters      = parameter ("," parameter)* ;
 parameter       = identifier ":" type ("=" expression)? ;
 return_type     = type ;
-type            = "void" | "int8" | "int16" | "int32" | "int64" | "int"
+type            = type_atom ("[" integer "]")* "?"? ;
+type_atom       = "void" | "int8" | "int16" | "int32" | "int64" | "int"
                 | "uint8" | "uint16" | "uint32" | "uint64" | "uint"
                 | "float" | "float32" | "float64" | "bool" | "str"
                 | identifier type_arguments? ;
@@ -802,7 +828,7 @@ while_statement = "while" expression block ;
 binding_statement = ("let" | "var") identifier (":" type)? ("=" expression)? ;
 assignment_statement = field_path ("=" | "+=" | "-=" | "*=" | "/=") expression
                      | field_path ("++" | "--") ;
-field_path      = identifier ("." identifier)* ;
+field_path      = identifier (("." identifier) | ("[" expression "]"))* ;
 break_statement = "break" ;
 continue_statement = "continue" ;
 return_statement = "return" expression? ;
@@ -822,9 +848,11 @@ multiplicative  = unary (("*" | "/" | "%") unary)* ;
 unary           = ("-" | "!" | "try") unary | conversion ;
 conversion      = postfix ("as" type)* ;
 postfix         = primary (("(" arguments? ")")
-                | ("." identifier ("(" arguments? ")")?))* ;
+                | ("." identifier ("(" arguments? ")")?)
+                | ("[" expression "]"))* ;
 primary         = integer | floating | string | "true" | "false" | identifier
-                | "self" | "(" expression ")" ;
+                | "self" | sequence_literal | "(" expression ")" ;
+sequence_literal = "[" (expression ("," expression)* ","?)? "]" ;
 string          = '"' string_part* '"' ;
 string_part     = string_text | string_escape | "$$"
                 | "$(" expression ")" ;
@@ -849,7 +877,8 @@ statements as described above.
 
 ## Current limits
 
-There are no collections, method extraction, static methods, package lockfiles,
-or visible native interop in this subset. Fundamental and
+There are no dynamic lists, collection operations beyond fixed-array inspection
+and indexing, method extraction, static methods, package lockfiles, or visible
+native interop in this subset. Fundamental and
 structure values, constructors, instance methods, string operations and
 observable effects have matching reference and macOS ARM64 behavior.

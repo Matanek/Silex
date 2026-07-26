@@ -5,11 +5,11 @@ const Numeric = @import("../Numeric.zig");
 const Support = @import("Support.zig");
 const Optionals = @import("Optionals.zig");
 const Enums = @import("Enums.zig");
+const Collections = @import("Collections.zig");
 
-const PathStep = struct {
-    base: Ir.ValueId,
-    structure: usize,
-    field: usize,
+const PathStep = union(enum) {
+    field: struct { base: Ir.ValueId, structure: usize, field: usize },
+    collection: struct { base: Ir.ValueId, type: Ast.Type, index: Ir.ValueId, position: @import("../Source.zig").Position },
 };
 
 pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.AssignmentStatement) !void {
@@ -39,7 +39,7 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
         return self.fail(target.name_position, message);
     }
 
-    if (target.fields.len == 0) {
+    if (target.fields.len == 0 and target.indices.len == 0) {
         const current = if (assignment.operator == .assign) null else try loadLocal(self, builder, binding.local.?, binding.type);
         const replacement = try analyzeReplacement(self, builder, assignment, binding.type, current, target.name, false);
         try self.emit(builder, .{ .local_store = .{ .local = binding.local.?, .operand = replacement } });
@@ -106,11 +106,11 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
             );
             return self.fail(target_field.name_position, message);
         }
-        try steps.append(self.allocator, .{
+        try steps.append(self.allocator, .{ .field = .{
             .base = current_value,
             .structure = structure_index,
             .field = field_index,
-        });
+        } });
         const field_value = try self.newValue(builder, field.type);
         try self.emit(builder, .{ .field_load = .{
             .result = field_value,
@@ -121,33 +121,66 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
         current_value = field_value;
     }
 
-    const final_field_name = target.fields[target.fields.len - 1].name;
-    var replacement = try analyzeReplacement(self, builder, assignment, current_type, current_value, final_field_name, true);
+    for (target.indices) |target_index| {
+        const collection = Collections.collectionForType(self.structures, current_type) orelse {
+            const message = try std.fmt.allocPrint(self.allocator, "indexing requires an array, found '{s}'", .{self.typeName(current_type)});
+            return self.fail(target_index.position, message);
+        };
+        const index_value = try self.analyzeExpressionExpected(builder, target_index.value, .int);
+        if (index_value.type != .int) {
+            const message = try std.fmt.allocPrint(self.allocator, "collection index expects 'int', found '{s}'", .{self.typeName(index_value.type)});
+            return self.fail(target_index.value.position, message);
+        }
+        try steps.append(self.allocator, .{ .collection = .{
+            .base = current_value,
+            .type = current_type,
+            .index = index_value.value,
+            .position = target_index.position,
+        } });
+        const element = try self.newValue(builder, collection.element);
+        try self.emit(builder, .{ .collection_load = .{
+            .result = element,
+            .collection = current_value,
+            .index = index_value.value,
+            .position = target_index.position,
+        } });
+        current_type = collection.element;
+        current_value = element;
+    }
+
+    const final_name = if (target.indices.len != 0) "collection element" else target.fields[target.fields.len - 1].name;
+    var replacement = try analyzeReplacement(self, builder, assignment, current_type, current_value, final_name, target.indices.len == 0);
     var index = steps.items.len;
     while (index != 0) {
         index -= 1;
-        const step = steps.items[index];
-        const structure = self.structures[step.structure];
-        const fields = try self.allocator.alloc(Ir.ValueId, structure.fields.len);
-        for (structure.fields, 0..) |field, field_index| {
-            if (field_index == step.field) {
-                fields[field_index] = replacement;
-                continue;
-            }
-            const value = try self.newValue(builder, field.type);
-            try self.emit(builder, .{ .field_load = .{
-                .result = value,
-                .base = step.base,
-                .field = field_index,
-            } });
-            fields[field_index] = value;
+        switch (steps.items[index]) {
+            .field => |step| {
+                const structure = self.structures[step.structure];
+                const fields = try self.allocator.alloc(Ir.ValueId, structure.fields.len);
+                for (structure.fields, 0..) |field, field_index| {
+                    if (field_index == step.field) {
+                        fields[field_index] = replacement;
+                        continue;
+                    }
+                    const value = try self.newValue(builder, field.type);
+                    try self.emit(builder, .{ .field_load = .{ .result = value, .base = step.base, .field = field_index } });
+                    fields[field_index] = value;
+                }
+                replacement = try self.newValue(builder, .structure(step.structure));
+                try self.emit(builder, .{ .structure_init = .{ .result = replacement, .structure = step.structure, .fields = fields } });
+            },
+            .collection => |step| {
+                const result = try self.newValue(builder, step.type);
+                try self.emit(builder, .{ .collection_replace = .{
+                    .result = result,
+                    .collection = step.base,
+                    .index = step.index,
+                    .replacement = replacement,
+                    .position = step.position,
+                } });
+                replacement = result;
+            },
         }
-        replacement = try self.newValue(builder, .structure(step.structure));
-        try self.emit(builder, .{ .structure_init = .{
-            .result = replacement,
-            .structure = step.structure,
-            .fields = fields,
-        } });
     }
     try self.emit(builder, .{ .local_store = .{ .local = binding.local.?, .operand = replacement } });
 }

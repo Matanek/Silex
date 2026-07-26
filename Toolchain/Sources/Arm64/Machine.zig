@@ -66,6 +66,8 @@ pub const Instruction = union(enum) {
     aggregate_init: AggregateInit,
     enum_init: EnumInit,
     enum_test: EnumTest,
+    collection_load: CollectionLoad,
+    collection_replace: CollectionReplace,
     aggregate_equal: AggregateEqual,
     convert: Convert,
     format_value: FormatValue,
@@ -150,6 +152,25 @@ pub const Instruction = union(enum) {
         result: Slot,
         operand: Span,
         tag: u64,
+    };
+
+    pub const CollectionLoad = struct {
+        result: Span,
+        collection: Span,
+        index: Slot,
+        count: u32,
+        header: usize,
+        tail: usize,
+    };
+
+    pub const CollectionReplace = struct {
+        result: Span,
+        collection: Span,
+        index: Slot,
+        replacement: Span,
+        count: u32,
+        header: usize,
+        tail: usize,
     };
 
     pub const AggregateEqual = struct {
@@ -335,6 +356,22 @@ pub fn validate(program: Program) Error!void {
                 try requireSlot(function, value.result);
                 try requireSpan(function, value.operand);
                 if (!value.operand.aggregate or value.operand.width == 0) return error.InvalidMachineProgram;
+            },
+            .collection_load => |value| {
+                try requireSpan(function, value.result);
+                try requireSpan(function, value.collection);
+                try requireSlot(function, value.index);
+                if (!value.collection.aggregate or value.collection.width != value.result.width * value.count or
+                    value.header >= program.strings.len or value.tail >= program.strings.len) return error.InvalidMachineProgram;
+            },
+            .collection_replace => |value| {
+                try requireSpan(function, value.result);
+                try requireSpan(function, value.collection);
+                try requireSlot(function, value.index);
+                try requireSpan(function, value.replacement);
+                if (!value.result.aggregate or value.result.width != value.collection.width or
+                    value.collection.width != value.replacement.width * value.count or
+                    value.header >= program.strings.len or value.tail >= program.strings.len) return error.InvalidMachineProgram;
             },
             .aggregate_equal => |value| {
                 try requireSlot(function, value.result);

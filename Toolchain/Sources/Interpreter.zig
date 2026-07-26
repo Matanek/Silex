@@ -315,6 +315,8 @@ fn executeInstruction(
             if (field.field >= aggregate.fields.len) return error.InvalidProgram;
             try store(function, values, field.result, try cloneValue(allocator, aggregate.fields[field.field]));
         },
+        .collection_load => |access| try executeCollectionLoad(allocator, program, function, values, access, session),
+        .collection_replace => |replacement| try executeCollectionReplace(allocator, program, function, values, replacement, session),
         .local_load => |local| {
             const value = try cloneValue(allocator, try loadLocal(function, locals, local.local));
             try store(function, values, local.result, value);
@@ -456,6 +458,60 @@ fn integer(value: Value) Error!i64 {
         .integer => |result| result,
         else => error.InvalidProgram,
     };
+}
+
+fn normalizedCollectionIndex(index: i64, count: usize) ?usize {
+    const normalized = if (index < 0) index + @as(i64, @intCast(count)) else index;
+    if (normalized < 0 or normalized >= count) return null;
+    return @intCast(normalized);
+}
+
+fn executeCollectionLoad(
+    allocator: Allocator,
+    program: Ir.Program,
+    function: Ir.Function,
+    values: []?Value,
+    access: Ir.Instruction.CollectionLoad,
+    session: *Session,
+) Error!void {
+    const aggregate = switch (try load(values, access.collection)) {
+        .structure => |value| value,
+        else => return error.InvalidProgram,
+    };
+    const source_index = try integer(try load(values, access.index));
+    const offset = normalizedCollectionIndex(source_index, aggregate.fields.len) orelse {
+        const message = try std.fmt.allocPrint(allocator, "collection index {d} is out of bounds for count {d}", .{ source_index, aggregate.fields.len });
+        try appendRuntimeError(session, program, access.position, "", message);
+        session.terminated = true;
+        return error.RuntimeTerminated;
+    };
+    try store(function, values, access.result, try cloneValue(allocator, aggregate.fields[offset]));
+}
+
+fn executeCollectionReplace(
+    allocator: Allocator,
+    program: Ir.Program,
+    function: Ir.Function,
+    values: []?Value,
+    replacement: Ir.Instruction.CollectionReplace,
+    session: *Session,
+) Error!void {
+    const aggregate = switch (try load(values, replacement.collection)) {
+        .structure => |value| value,
+        else => return error.InvalidProgram,
+    };
+    const source_index = try integer(try load(values, replacement.index));
+    const offset = normalizedCollectionIndex(source_index, aggregate.fields.len) orelse {
+        const message = try std.fmt.allocPrint(allocator, "collection index {d} is out of bounds for count {d}", .{ source_index, aggregate.fields.len });
+        try appendRuntimeError(session, program, replacement.position, "", message);
+        session.terminated = true;
+        return error.RuntimeTerminated;
+    };
+    const fields = try allocator.alloc(Value, aggregate.fields.len);
+    for (aggregate.fields, 0..) |field, index| {
+        fields[index] = try cloneValue(allocator, if (index == offset) try load(values, replacement.replacement) else field);
+    }
+    try store(function, values, replacement.result, .{ .structure = .{ .type = aggregate.type, .fields = fields } });
 }
 
 fn numericInteger(value: Value) Error!Numeric.Integer {
