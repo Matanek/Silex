@@ -71,6 +71,10 @@ open Silex document
   condition block, while the body-local binding begins with the proven unwrap;
   loop backedges therefore preserve the source language's exact retry,
   `continue`, and `break` evaluation rules.
+- Safe member access uses the same pattern at expression granularity: one
+  receiver evaluation, a presence branch, ordinary member resolution on the
+  unwrapped child, and a flat optional result merged with the absent edge.
+  Arguments and mutating write-back live exclusively on the present edge.
 - Package manifests locate no source by consumer-provided path. The resolver
   derives canonical local and global locations from package identities, builds
   a single-version dependency graph, and enforces direct visibility.

@@ -52,6 +52,7 @@ pub const Expression = struct {
         name: []const u8,
         name_position: Source.Position,
         receiver: ?*Expression = null,
+        safe: bool = false,
         arguments: []const *Expression,
         named_arguments: []const NamedArgument = &.{},
         owner: usize = 0,
@@ -67,6 +68,7 @@ pub const Expression = struct {
         base: *Expression,
         name_position: Source.Position,
         name: []const u8,
+        safe: bool = false,
     };
 
     pub const Unary = struct {

@@ -157,6 +157,56 @@ pub fn analyze(self: anytype, structure_index: usize, method_index: usize, metho
 pub fn analyzeCall(self: anytype, builder: anytype, call: Ast.Expression.Call) !?Model.TypedValue {
     const receiver_expression = call.receiver.?;
     const receiver = try self.analyzeExpression(builder, receiver_expression);
+    if (call.safe) return analyzeSafeCall(self, builder, call, receiver);
+    return analyzeCallWithReceiver(self, builder, call, receiver, null);
+}
+
+fn analyzeSafeCall(self: anytype, builder: anytype, call: Ast.Expression.Call, optional_receiver: Model.TypedValue) !?Model.TypedValue {
+    if (optional_receiver.type.optionalChild() == null) {
+        const message = try std.fmt.allocPrint(
+            self.allocator,
+            "safe access '?.' requires an optional receiver, found '{s}'",
+            .{self.typeName(optional_receiver.type)},
+        );
+        return self.fail(call.name_position, message);
+    }
+    const presence = try Optionals.emitPresence(self, builder, optional_receiver);
+    const present_block = try self.newBlock(builder);
+    const absent_block = try self.newBlock(builder);
+    const merge_block = try self.newBlock(builder);
+    self.terminate(builder, .{ .branch = .{
+        .condition = presence.value,
+        .then_block = present_block,
+        .else_block = absent_block,
+    } });
+
+    builder.current_block = present_block;
+    const receiver = try Optionals.unwrap(self, builder, optional_receiver);
+    const call_result = try analyzeCallWithReceiver(self, builder, call, receiver, optional_receiver.type);
+    const result: ?Model.TypedValue = if (call_result) |value|
+        if (value.type.optionalChild() != null)
+            value
+        else
+            (try Optionals.promote(self, builder, value, .optional(value.type))).?
+    else
+        null;
+    self.terminate(builder, .{ .jump = merge_block });
+
+    builder.current_block = absent_block;
+    if (result) |value| try self.emit(builder, .{ .optional_null = .{ .result = value.value } });
+    self.terminate(builder, .{ .jump = merge_block });
+    builder.current_block = merge_block;
+    return result;
+}
+
+fn analyzeCallWithReceiver(
+    self: anytype,
+    builder: anytype,
+    call: Ast.Expression.Call,
+    receiver: Model.TypedValue,
+    safe_receiver_type: ?Ast.Type,
+) !?Model.TypedValue {
+    const receiver_expression = call.receiver.?;
     if (receiver.type == .str and std.mem.eql(u8, call.name, "count") and call.arguments.len == 0 and call.named_arguments.len == 0) {
         return try self.emitStringCount(builder, receiver.value);
     }
@@ -281,12 +331,20 @@ pub fn analyzeCall(self: anytype, builder: anytype, call: Ast.Expression.Call) !
         return if (call_result) |value| .{ .type = method.return_type, .value = value } else null;
     }
     if (method.return_type == .void) {
-        try writePlace(self, builder, place.?, call_result.?);
+        const replacement = if (safe_receiver_type) |optional_type|
+            (try Optionals.promote(self, builder, .{ .type = receiver.type, .value = call_result.? }, optional_type)).?.value
+        else
+            call_result.?;
+        try writePlace(self, builder, place.?, replacement);
         return null;
     }
     const updated_receiver = try self.newValue(builder, receiver.type);
     try self.emit(builder, .{ .field_load = .{ .result = updated_receiver, .base = call_result.?, .field = 0 } });
-    try writePlace(self, builder, place.?, updated_receiver);
+    const replacement = if (safe_receiver_type) |optional_type|
+        (try Optionals.promote(self, builder, .{ .type = receiver.type, .value = updated_receiver }, optional_type)).?.value
+    else
+        updated_receiver;
+    try writePlace(self, builder, place.?, replacement);
     const value = try self.newValue(builder, method.return_type);
     try self.emit(builder, .{ .field_load = .{ .result = value, .base = call_result.?, .field = 1 } });
     return .{ .type = method.return_type, .value = value };

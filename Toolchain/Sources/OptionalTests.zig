@@ -230,3 +230,71 @@ test "enforce conditional binding type mutability scope and collisions" {
         "unknown variable 'item'",
     );
 }
+
+test "flatten safe field chains and require every nullable step" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\struct Position { let x:int }
+        \\struct Profile { let position:Position? }
+        \\func main() {
+        \\    let profile:Profile? = Profile(position:Position(x:42))
+        \\    let missing:Profile?
+        \\    if x = profile?.position?.x { print(x) }
+        \\    if x = missing?.position?.x { print(x) }
+        \\}
+    );
+    const text = try Ir.writeText(allocator, compilation.ir);
+    try std.testing.expect(std.mem.count(u8, text, "optional.unwrap") >= 4);
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("42\n", result.stdout);
+    try expectCompileError(
+        "struct Position { let x:int } struct Profile { let position:Position? } func main() { let profile:Profile?; print(profile?.position.x) }",
+        "type 'Position?' has no fields",
+    );
+}
+
+test "skip safe method effects flatten results and mutate optional var places" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const source =
+        \\struct Position {
+        \\    var x:int
+        \\    func shifted(delta:int) int { return self.x + delta }
+        \\    func maybe() int? { return self.x }
+        \\    func show(label:str) { print(label); print(self.x) }
+        \\    func translate(delta:int) { self.x += delta }
+        \\}
+        \\func argument() int { print("argument"); return 2 }
+        \\func observed(value:Position?) Position? { print("receiver"); return value }
+        \\func main() {
+        \\    var position:Position? = Position(x:40)
+        \\    let absent:Position?
+        \\    if result = position?.shifted(argument()) { print(result) }
+        \\    absent?.shifted(argument())
+        \\    observed(absent)?.shifted(argument())
+        \\    if flat = position?.maybe() { print(flat) }
+        \\    position?.show("show")
+        \\    position?.translate(2)
+        \\    if updated = position { print(updated.x) }
+        \\}
+    ;
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(source);
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("argument\n42\nreceiver\n40\nshow\n40\n42\n", result.stdout);
+}
+
+test "diagnose invalid safe receivers and immutable mutating places" {
+    try expectCompileError(
+        "struct Position { let x:int } func main() { let value = Position(x:1); print(value?.x) }",
+        "safe access '?.' requires an optional receiver, found 'Position'",
+    );
+    try expectCompileError(
+        "struct Position { var x:int; func translate() { self.x += 1 } } func main() { let value:Position? = Position(x:1); value?.translate() }",
+        "mutating method 'translate' requires a var receiver",
+    );
+}

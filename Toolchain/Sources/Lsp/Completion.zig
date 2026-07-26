@@ -167,7 +167,7 @@ fn classifyContext(allocator: Allocator, source: []const u8, cursor: usize) !Con
         .prefix_start = prefix_start,
     };
 
-    if (tokens[tokens.len - 1].tag == .dot) return .{
+    if (tokens[tokens.len - 1].tag == .dot or tokens[tokens.len - 1].tag == .question_dot) return .{
         .kind = .member,
         .prefix = prefix,
         .prefix_start = prefix_start,
@@ -759,7 +759,7 @@ fn resolveReceiverType(
         const open = std.mem.lastIndexOfScalar(u8, trimmed, '(') orelse return null;
         const name = std.mem.trim(u8, trimmed[0..open], " \t");
         if (findStructure(program, name)) |_| return name;
-        for (program.functions) |function| if (std.mem.eql(u8, function.name, name)) return typeName(program, function.return_type);
+        for (program.functions) |function| if (std.mem.eql(u8, function.name, name)) return memberTypeName(program, function.return_type);
         return null;
     }
 
@@ -770,7 +770,7 @@ fn resolveReceiverType(
         if (containingCallable(source, program, cursor)) |callable| current_type = callable.structure_name;
     } else if (containingCallable(source, program, cursor)) |callable| {
         for (callable.parameters) |parameter| if (std.mem.eql(u8, parameter.name, first)) {
-            current_type = typeName(program, parameter.type);
+            current_type = memberTypeName(program, parameter.type);
             break;
         };
         if (current_type == null) {
@@ -790,7 +790,7 @@ fn resolveReceiverType(
         const owner = findStructure(program, current_type orelse return null) orelse return null;
         var next: ?[]const u8 = null;
         for (owner.fields) |field| if (std.mem.eql(u8, field.name, field_name)) {
-            next = typeName(program, field.type);
+            next = memberTypeName(program, field.type);
             break;
         };
         current_type = next orelse return null;
@@ -920,6 +920,10 @@ fn parameterDefaultText(source: []const u8, start: usize) ?[]const u8 {
 pub fn typeName(program: Ast.Program, type_value: Ast.Type) []const u8 {
     const index = type_value.structureIndex() orelse return type_value.name();
     return if (index < program.type_names.len) program.type_names[index] else "structure";
+}
+
+fn memberTypeName(program: Ast.Program, type_value: Ast.Type) []const u8 {
+    return typeName(program, type_value.optionalChild() orelse type_value);
 }
 
 fn findStructure(program: Ast.Program, name: []const u8) ?Ast.Structure {
@@ -1271,6 +1275,19 @@ test "return an empty list for an unresolved member receiver" {
     const cursor = std.mem.indexOf(u8, source, "member").? + 1;
     const items = try itemsAt(arena.allocator(), source, cursor, .trigger_character);
     try std.testing.expectEqual(@as(usize, 0), items.len);
+}
+
+test "complete members after safe optional access" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source =
+        \\struct Profile { let name:str; func rename(value:str) {} }
+        \\func inspect(profile:Profile?) { print(profile?.) }
+    ;
+    const cursor = std.mem.indexOf(u8, source, "?.").? + 2;
+    const items = try itemsAt(arena.allocator(), source, cursor, .trigger_character);
+    try std.testing.expect(contains(items, "name"));
+    try std.testing.expect(contains(items, "rename"));
 }
 
 test "do not complete ordinary string text or comments" {
