@@ -91,7 +91,7 @@ pub fn methodCandidates(self: anytype, allocator: std.mem.Allocator, structure_i
 pub fn validateOverrides(self: anytype) !void {
     for (self.program.structures, 0..) |structure, structure_index| {
         if (!structure.is_class) continue;
-        for (structure.methods) |method| {
+        for (structure.methods, 0..) |method, method_index| {
             if (method.extension != null) continue;
             if (method.is_static) continue;
             const inherited = inheritedMethod(self, structure_index, method);
@@ -111,9 +111,20 @@ pub fn validateOverrides(self: anytype) !void {
                 if (base.method.is_protected and !method.is_public and !method.is_protected) {
                     return self.fail(method.name_position, "an override cannot reduce protected visibility");
                 }
+                const method_flat = flatMethodIndex(self.program, structure_index, method_index);
+                const base_flat = flatMethodIndex(self.program, base.owner, base.index);
+                if (self.method_mutability[method_flat] and !self.method_mutability[base_flat]) {
+                    return self.fail(method.name_position, "an override cannot introduce receiver mutation");
+                }
             }
         }
     }
+}
+
+fn flatMethodIndex(program: Ast.Program, structure_index: usize, method_index: usize) usize {
+    var result: usize = 0;
+    for (program.structures[0..structure_index]) |structure| result += structure.methods.len;
+    return result + method_index;
 }
 
 pub fn implementations(

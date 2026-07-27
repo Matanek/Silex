@@ -364,7 +364,10 @@ Inside the function, the parameter may be read, indexed, used as a non-mutating
 method receiver, or forwarded to another `@T`. It cannot be mutated, moved,
 returned directly, stored in another binding or aggregate, or passed to a
 by-value parameter. A root cannot be moved or mutated by another argument while
-the same call holds a read reference. The mode is not an overload distinction:
+the same call holds a read reference. For a class identity, this also excludes
+passing the same visible root simultaneously as `@Class` and as an ordinary
+mutation-capable `Class` argument. A copied, class-free field value may still be
+returned by value; the read capability itself does not escape. The mode is not an overload distinction:
 declarations differing only by `T` and `@T` expose the same effective
 signature. `@T` is a controlled parameter mode, not a pointer or a generally
 storable type.
@@ -389,7 +392,11 @@ their writes then follow the execution order of the function body. The same
 root cannot be passed as both `@T` and `&T` in one call. A mutable-reference
 parameter cannot be moved, returned, stored in another binding or aggregate,
 or passed by value. Like `@T`, `&T` is a controlled parameter mode rather than
-a pointer or an overload distinction.
+a pointer or an overload distinction. With a class type, `&Class` borrows the
+caller's slot containing the shared reference. It can therefore both mutate the
+instance and replace that slot with another instance; ordinary `Class` can do
+the former but not the latter. `&Class?` applies the same rule and may also
+install or remove `null`.
 
 The same modes may qualify a return type. The return expression does not repeat
 the mode: its ordinary field or call expression must carry compatible
@@ -471,7 +478,17 @@ A binding or aggregate slot that can reach a class reference uses `var`, even
 when the reference itself is never replaced. This makes shared mutability
 visible at its storage boundary. Function parameters remain ordinary value
 parameters: transporting one preserves identity, and a mutating method changes
-the shared instance. A class field likewise uses `var`.
+the shared instance, but the parameter cannot be rebound. A class field likewise
+uses `var`.
+
+`@Class` provides a temporary read capability over the access path that starts
+at the parameter. Fields reached through that path remain read-only, including
+nested class identities, and mutating methods cannot be called on them. This is
+not a global freeze: an independent alias may still modify the same instance.
+`&Class` instead borrows the caller's mutable slot and may replace its class
+reference. Other aliases keep the old instance. An override cannot turn a
+non-mutating base method into a mutating method, so dynamic dispatch preserves
+the receiver capability promised by the visible method.
 
 A class without a custom constructor uses the named initializer of its visible
 fields and their defaults. It has no intrinsic instance, so `var player:Player`

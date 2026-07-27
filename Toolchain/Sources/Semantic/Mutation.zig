@@ -58,25 +58,15 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
         const message = try std.fmt.allocPrint(self.allocator, "value '{s}' was moved and is unavailable", .{target.name});
         return self.fail(target.name_position, message);
     }
-    if (!binding.mutable) {
-        const message = if (assignment.operator == .assign)
-            if (binding.parameter)
-                try std.fmt.allocPrint(self.allocator, "cannot assign to parameter '{s}'", .{target.name})
-            else
-                try std.fmt.allocPrint(self.allocator, "cannot assign to immutable variable '{s}'", .{target.name})
-        else if (binding.parameter)
-            try std.fmt.allocPrint(
-                self.allocator,
-                "cannot apply '{s}' to parameter '{s}'",
-                .{ operatorText(assignment.operator), target.name },
-            )
-        else
-            try std.fmt.allocPrint(
-                self.allocator,
-                "cannot apply '{s}' to immutable variable '{s}'",
-                .{ operatorText(assignment.operator), target.name },
-            );
-        return self.fail(target.name_position, message);
+    const has_path = target.fields.len != 0 or target.indices.len != 0;
+    if (!binding.mutable and !has_path) return failImmutableBinding(self, assignment, binding.parameter, target.name, target.name_position);
+    const read_only_path = binding.parameter_mode == .read or binding.borrowed_mode == .read;
+    if (has_path and read_only_path) {
+        if (binding.parameter_mode == .read) {
+            const message = try std.fmt.allocPrint(self.allocator, "cannot mutate through read-reference parameter '{s}'", .{target.name});
+            return self.fail(target.name_position, message);
+        }
+        return failImmutableBinding(self, assignment, binding.parameter, target.name, target.name_position);
     }
 
     if (target.fields.len == 0 and target.indices.len == 0) {
@@ -106,6 +96,7 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
     var steps: std.ArrayList(PathStep) = .empty;
     var current_type = binding.type;
     var current_value = root;
+    var mutable_path = binding.mutable;
     for (target.fields) |target_field| {
         const structure_index = current_type.structureIndex() orelse {
             const message = try std.fmt.allocPrint(self.allocator, "type '{s}' has no fields", .{self.typeName(current_type)});
@@ -119,6 +110,7 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
             return self.fail(target_field.name_position, message);
         }
         const structure = self.structures[structure_index];
+        if (structure.is_class) mutable_path = true;
         const source_structure = self.program.structures[structure_index];
         if (source_structure.drop != null and !self.ownerStorageVisible(structure_index, target_field.name_position)) {
             return self.fail(target_field.name_position, "owner structure storage is private to its declaring file and direct module users");
@@ -206,6 +198,8 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
         current_value = element;
     }
 
+    if (!mutable_path) return failImmutableBinding(self, assignment, binding.parameter, target.name, target.name_position);
+
     const final_name = if (target.indices.len != 0) "collection element" else target.fields[target.fields.len - 1].name;
     var replacement = try analyzeReplacement(self, builder, assignment, current_type, current_value, final_name, target.indices.len == 0);
     var index = steps.items.len;
@@ -251,7 +245,9 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
             },
         }
     }
-    try storeBinding(self, builder, binding, replacement);
+    if (binding.local != null or binding.reference != null) {
+        try storeBinding(self, builder, binding, replacement);
+    }
 }
 
 fn loadBinding(self: anytype, builder: anytype, binding: anytype) !Ir.ValueId {
@@ -261,6 +257,7 @@ fn loadBinding(self: anytype, builder: anytype, binding: anytype) !Ir.ValueId {
         try self.emit(builder, .{ .reference_load = .{ .result = result, .reference = reference } });
         return result;
     }
+    if (binding.value) |value| return value;
     return error.InvalidSource;
 }
 
@@ -378,6 +375,33 @@ fn emitOne(self: anytype, builder: anytype, type_value: Ast.Type) !Ir.ValueId {
         else => unreachable,
     });
     return result;
+}
+
+fn failImmutableBinding(
+    self: anytype,
+    assignment: Ast.AssignmentStatement,
+    parameter: bool,
+    name: []const u8,
+    position: @import("../Source.zig").Position,
+) !void {
+    const message = if (assignment.operator == .assign)
+        if (parameter)
+            try std.fmt.allocPrint(self.allocator, "cannot assign to parameter '{s}'", .{name})
+        else
+            try std.fmt.allocPrint(self.allocator, "cannot assign to immutable variable '{s}'", .{name})
+    else if (parameter)
+        try std.fmt.allocPrint(
+            self.allocator,
+            "cannot apply '{s}' to parameter '{s}'",
+            .{ operatorText(assignment.operator), name },
+        )
+    else
+        try std.fmt.allocPrint(
+            self.allocator,
+            "cannot apply '{s}' to immutable variable '{s}'",
+            .{ operatorText(assignment.operator), name },
+        );
+    return self.fail(position, message);
 }
 
 fn operatorText(operator: Ast.AssignmentOperator) []const u8 {
