@@ -142,6 +142,7 @@ pub const Specializer = struct {
         }
         for (self.structures.items) |*structure| {
             if (structure.base) |base| structure.base = Remap.concreteType(base, map);
+            for (@constCast(structure.conformances)) |*conformance| conformance.* = Remap.concreteType(conformance.*, map);
             if (structure.collection) |collection| structure.collection.?.element = Remap.concreteType(collection.element, map);
             for (@constCast(structure.fields)) |*field| {
                 field.type = Remap.concreteType(field.type, map);
@@ -199,6 +200,11 @@ pub const Specializer = struct {
         structure.type_parameters = &.{};
         const self_type = self.typeForName(structure.name) orelse return error.InvalidSource;
         if (structure.base) |base| structure.base = try self.rewriteType(base, arguments, structure.base_position);
+        const conformances = try self.allocator.alloc(Ast.Type, structure.conformances.len);
+        for (structure.conformances, 0..) |conformance, index| {
+            conformances[index] = try self.rewriteType(conformance, arguments, structure.name_position);
+        }
+        structure.conformances = conformances;
         const fields = try self.allocator.alloc(Ast.StructureField, structure.fields.len);
         for (structure.fields, 0..) |field, field_index| {
             fields[field_index] = field;

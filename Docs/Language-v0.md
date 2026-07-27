@@ -576,6 +576,40 @@ public static class Tasks {
 It is not an implicit singleton or namespace: it follows ordinary nominal
 visibility and the common static-storage initialization and teardown contract.
 
+## Protocols and nominal conformances
+
+`protocol` declares a nominal contract made only of public instance-method
+signatures without bodies:
+
+```sx
+protocol Drawable {
+    func draw()
+}
+
+struct Sprite : Drawable {
+    func draw() {}
+}
+```
+
+A structure lists only protocols after `:`. For a class, an optional base class
+occupies the first position and every following name is a protocol; a protocol
+may itself be first when the class has no base. Listing the protocol is
+mandatory: merely providing methods with compatible shapes does not create a
+conformance. Several protocols may be listed.
+
+Every declared conformance is checked whether or not any caller uses it. A
+requirement matches an instance method by name, ordered parameter types and
+`@`/`&` modes, return type and return mode. The implementation must be public;
+an inherited public class method may satisfy it. A derived class also inherits
+the valid conformances declared by its base.
+
+Protocols follow ordinary private, `internal`, `public use`, alias and reexport
+rules. They are not generic and do not inherit. Requirements cannot be static
+or generic and declare neither fields, constructors, defaults nor bodies. A
+protocol is only a compile-time nominal contract in this tranche: using its
+name as a stored, parameter or return value is rejected until dynamic protocol
+values are introduced.
+
 ## Nested nominal types
 
 A `struct`, `class`, or `static class` may declare nominal types of those same

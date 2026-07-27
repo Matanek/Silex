@@ -114,7 +114,9 @@ pub fn analyzeCall(self: anytype, builder: anytype, structure_index: usize, call
 fn methodFunctionId(program: Ast.Program, structure_index: usize, method_index: usize) Ir.FunctionId {
     var result = program.functions.len;
     for (program.structures) |structure| result += structure.constructors.len;
-    for (program.structures[0..structure_index]) |structure| result += structure.methods.len;
+    for (program.structures[0..structure_index]) |structure| {
+        if (!structure.is_protocol) result += structure.methods.len;
+    }
     return result + method_index;
 }
 

@@ -2,6 +2,7 @@ pub fn activate(self: anytype, module: usize) !void {
     const program = self.units[module].program.?;
     for (program.structures) |structure| {
         if (structure.base) |base| try self.activateType(module, base);
+        for (structure.conformances) |conformance| try self.activateType(module, conformance);
         for (structure.fields) |field| try self.activateType(module, field.type);
         for (structure.static_fields) |field| try self.activateType(module, field.type);
         for (structure.constructors) |constructor| {
