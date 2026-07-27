@@ -93,6 +93,8 @@ pub const Instruction = union(enum) {
     list_edit: ListEdit,
     collection_slice: CollectionSlice,
     collection_view: CollectionSlice,
+    string_address: StringProjection,
+    string_byte_count: StringProjection,
     local_load: LocalLoad,
     local_store: LocalStore,
     local_address: LocalAddress,
@@ -106,6 +108,7 @@ pub const Instruction = union(enum) {
     unary: Unary,
     binary: Binary,
     call: Call,
+    boundary_call: BoundaryCall,
     dynamic_call: DynamicCall,
     print: Print,
     assert: Assert,
@@ -283,6 +286,11 @@ pub const Instruction = union(enum) {
         reference: ?ValueId = null,
     };
 
+    pub const StringProjection = struct {
+        result: ValueId,
+        operand: ValueId,
+    };
+
     pub const LocalLoad = struct {
         result: ValueId,
         local: LocalId,
@@ -356,6 +364,12 @@ pub const Instruction = union(enum) {
     pub const Call = struct {
         result: ?ValueId,
         function: FunctionId,
+        arguments: []const ValueId,
+    };
+
+    pub const BoundaryCall = struct {
+        result: ValueId,
+        function: usize,
         arguments: []const ValueId,
     };
 
@@ -870,6 +884,18 @@ fn writeInstruction(
                 try appendValueChecked(output, allocator, function, reference);
             }
         },
+        .string_address => |address| {
+            try appendResult(output, allocator, program, function, address.result);
+            try output.appendSlice(allocator, "boundary.address ");
+            try appendValueChecked(output, allocator, function, address.operand);
+            if (function.value_types[address.result] != .address) return error.InvalidProgram;
+        },
+        .string_byte_count => |count| {
+            try appendResult(output, allocator, program, function, count.result);
+            try output.appendSlice(allocator, "str.byte_count ");
+            try appendValueChecked(output, allocator, function, count.operand);
+            if (function.value_types[count.result] != .uint) return error.InvalidProgram;
+        },
         .local_load => |load| {
             try appendResult(output, allocator, program, function, load.result);
             try output.appendSlice(allocator, "load ");
@@ -954,6 +980,17 @@ fn writeInstruction(
             if (call.result) |result| try appendResult(output, allocator, program, function, result);
             try output.appendSlice(allocator, "call @");
             try output.appendSlice(allocator, program.functions[call.function].name);
+            try output.append(allocator, '(');
+            for (call.arguments, 0..) |argument, index| {
+                if (index != 0) try output.appendSlice(allocator, ", ");
+                try appendValueChecked(output, allocator, function, argument);
+            }
+            try output.append(allocator, ')');
+        },
+        .boundary_call => |call| {
+            try appendResult(output, allocator, program, function, call.result);
+            try output.appendSlice(allocator, "boundary.call #");
+            try output.appendSlice(allocator, try std.fmt.allocPrint(allocator, "{d}", .{call.function}));
             try output.append(allocator, '(');
             for (call.arguments, 0..) |argument, index| {
                 if (index != 0) try output.appendSlice(allocator, ", ");

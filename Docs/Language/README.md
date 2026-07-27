@@ -33,6 +33,7 @@ syntax and overload behavior matter.
 - [Import modules](Modules/Modules.md)
 - [Use source packages](Modules/Packages.md)
 - [Expose or hide declarations](Modules/Visibility.md)
+- [Build a low-level macOS binding](Interop.md)
 
 ## Data types
 

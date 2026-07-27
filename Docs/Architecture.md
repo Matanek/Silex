@@ -181,11 +181,12 @@ open Silex document
 - The compiler writes the Mach-O headers, load commands, `__text`, entry
   wrapper, and ad-hoc SHA-256 code signature itself. It does not produce an
   object file or invoke an assembler, linker, or `codesign`.
-- The `macos-arm64` target can lower one verified machine-level C ABI contract,
-  `Darwin.lib_system.write`, after portable composition. It emits the
-  `libSystem` load command, `_write` symbol, binding stream and GOT directly.
-  This target mechanism is not exposed in Silex source and does not change the
-  language's internal calling convention.
+- The `macos-arm64` target can lower one verified C ABI contract declared in
+  Silex as `MacOS.lib_system.write`. After portable composition, the target maps
+  it to its internal Darwin provider and emits the `libSystem` load command,
+  `_write` symbol, binding stream and GOT directly. Only the typed `Interop`
+  declaration is exposed to binding authors; the target mechanism does not
+  change the language's internal calling convention.
 - The command `silex run <source.sx> [-n|--nocache]` uses the reference interpreter.
   `silex compile <source.sx> [-d|--debug|-r|--release]
   [-n|--nocache] -o|--output <executable>` selects the native path. Debug is the default;

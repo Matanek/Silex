@@ -449,6 +449,24 @@ pub const Function = struct {
     statements: []const Statement,
 };
 
+pub const ExternalType = union(enum) {
+    int32,
+    size,
+    signed_size,
+    read_pointer: Type,
+};
+
+pub const ExternalFunction = struct {
+    position: Source.Position,
+    name_position: Source.Position,
+    name: []const u8,
+    parameters: []const ExternalType,
+    return_type: ExternalType,
+    library: []const u8,
+    source_name: []const u8,
+    owner: usize = 0,
+};
+
 pub const ExtensionMethod = struct {
     provider: []const u8,
     visible_files: []const usize,
@@ -478,5 +496,6 @@ pub const Program = struct {
     structures: []const Structure = &.{},
     enums: []const Enum = &.{},
     extensions: []const Extension = &.{},
+    external_functions: []const ExternalFunction = &.{},
     functions: []const Function,
 };

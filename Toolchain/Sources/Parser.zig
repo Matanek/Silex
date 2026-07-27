@@ -13,6 +13,7 @@ const TypeSyntax = @import("Parser/TypeSyntax.zig");
 const Nominals = @import("Parser/Nominals.zig");
 const Protocols = @import("Parser/Protocols.zig");
 const Extensions = @import("Parser/Extensions.zig");
+const Interop = @import("Parser/Interop.zig");
 
 const Allocator = std.mem.Allocator;
 const Token = LexerModule.Token;
@@ -48,6 +49,7 @@ pub const Parser = struct {
         var structures: std.ArrayList(Ast.Structure) = .empty;
         var enums: std.ArrayList(Ast.Enum) = .empty;
         var functions: std.ArrayList(Ast.Function) = .empty;
+        var external_functions: std.ArrayList(Ast.ExternalFunction) = .empty;
         var extensions: std.ArrayList(Ast.Extension) = .empty;
         while (self.current.tag != .end) {
             switch (self.current.tag) {
@@ -58,6 +60,7 @@ pub const Parser = struct {
                 .keyword_protocol => try structures.append(self.allocator, try Protocols.parse(self, false, false)),
                 .keyword_enum => try enums.append(self.allocator, try EnumParser.parse(self, false, false)),
                 .keyword_func => try functions.append(self.allocator, try self.parseFunction(false, false)),
+                .keyword_let => try external_functions.append(self.allocator, try Interop.parseFunction(self)),
                 .keyword_extend => try extensions.append(self.allocator, try Extensions.parse(self)),
                 .keyword_public => {
                     try self.advance();
@@ -89,6 +92,16 @@ pub const Parser = struct {
         }
         try structures.appendSlice(self.allocator, self.nested_structures.items);
         try structures.appendSlice(self.allocator, self.collection_structures.items);
+        if (external_functions.items.len != 0) {
+            var has_c = false;
+            var has_macos = false;
+            for (uses.items) |use| {
+                has_c = has_c or std.mem.eql(u8, use.path, "Interop.C");
+                has_macos = has_macos or std.mem.eql(u8, use.path, "Interop.MacOS");
+            }
+            if (!has_c) return self.failAt(external_functions.items[0].position, "C.function requires 'use Interop.C'");
+            if (!has_macos) return self.failAt(external_functions.items[0].position, "MacOS library requires 'use Interop.MacOS'");
+        }
         var structure_index: usize = 1;
         while (structure_index < structures.items.len) : (structure_index += 1) {
             var insertion = structure_index;
@@ -104,6 +117,7 @@ pub const Parser = struct {
             .structures = try structures.toOwnedSlice(self.allocator),
             .enums = try enums.toOwnedSlice(self.allocator),
             .extensions = try extensions.toOwnedSlice(self.allocator),
+            .external_functions = try external_functions.toOwnedSlice(self.allocator),
             .functions = try functions.toOwnedSlice(self.allocator),
         };
     }

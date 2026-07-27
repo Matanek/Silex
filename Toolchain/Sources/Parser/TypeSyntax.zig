@@ -70,6 +70,8 @@ pub fn parseType(self: anytype) !Ast.Type {
                 name = try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ name, self.current.lexeme });
                 try self.advance();
             }
+            if (std.mem.eql(u8, name, "C.Size")) break :identifier .uint;
+            if (std.mem.eql(u8, name, "C.SignedSize")) break :identifier .int;
             const base = try self.internTypeName(try self.resolveTypeName(name));
             break :identifier if (arguments.items.len == 0)
                 base

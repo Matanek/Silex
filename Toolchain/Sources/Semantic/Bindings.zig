@@ -31,6 +31,9 @@ pub fn analyzeVariable(self: anytype, builder: anytype, declaration: Ast.Variabl
         const annotation = declaration.annotation.?;
         break :intrinsic try self.emitIntrinsic(builder, annotation, declaration.name_position);
     };
+    if (initializer.type == .address) {
+        return self.fail(declaration.name_position, "a C pointer can only be passed directly to a foreign function");
+    }
     const declared_type = declaration.annotation orelse initializer.type;
     if (initializer.borrowed_root != null or declaration.annotation_mode != .value) {
         if (initializer.borrowed_root == null) return self.fail(declaration.name_position, "borrowed alias requires a borrowed initializer");
