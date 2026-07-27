@@ -1,0 +1,84 @@
+const std = @import("std");
+const Machine = @import("Machine.zig");
+const A64 = @import("Instructions.zig");
+const Fixups = @import("Fixups.zig");
+
+const Allocator = std.mem.Allocator;
+pub const Error = Machine.Error || Allocator.Error || Fixups.Error;
+const macos_mmap = 197;
+const protection_read_write = 3;
+const map_private_anonymous = 0x1002;
+
+pub fn emitInit(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    epilogue: *std.ArrayList(Fixups.Local),
+    value: Machine.Instruction.ClassInit,
+) Error!void {
+    var width: usize = 0;
+    for (value.fields) |field| width += field.width;
+    try immediate(allocator, words, .x1, @max(Machine.slot_size, width * Machine.slot_size));
+    try allocate(allocator, words);
+    const failed = words.items.len;
+    try words.append(allocator, A64.conditionalBranch(.carry_set));
+    try words.append(allocator, A64.moveRegister(.x15, .x0));
+    var offset: usize = 0;
+    for (value.fields) |field| for (0..field.width) |leaf| {
+        try words.append(allocator, A64.loadStack(.x9, @intCast(@as(usize, field.start) + leaf)));
+        try words.append(allocator, A64.store64(.x9, .x15, @intCast(offset * Machine.slot_size)));
+        offset += 1;
+    };
+    try words.append(allocator, A64.storeStack(.x15, value.result));
+    const done = words.items.len;
+    try words.append(allocator, A64.branch());
+    try Fixups.patch19(words.items, failed, words.items.len);
+    try fail(allocator, words, epilogue);
+    try Fixups.patch26(words.items, done, words.items.len);
+}
+
+pub fn emitLoad(allocator: Allocator, words: *std.ArrayList(u32), value: Machine.Instruction.ClassLoad) Error!void {
+    try words.append(allocator, A64.loadStack(.x10, value.base));
+    if (value.byte_offset != 0) try addOffset(allocator, words, .x10, value.byte_offset);
+    for (0..value.result.width) |leaf| {
+        try words.append(allocator, A64.load64(.x9, .x10, @intCast(leaf * Machine.slot_size)));
+        try words.append(allocator, A64.storeStack(.x9, @intCast(@as(usize, value.result.start) + leaf)));
+    }
+}
+
+pub fn emitStore(allocator: Allocator, words: *std.ArrayList(u32), value: Machine.Instruction.ClassStore) Error!void {
+    try words.append(allocator, A64.loadStack(.x10, value.base));
+    try words.append(allocator, A64.storeStack(.x10, value.result));
+    if (value.byte_offset != 0) try addOffset(allocator, words, .x10, value.byte_offset);
+    for (0..value.replacement.width) |leaf| {
+        try words.append(allocator, A64.loadStack(.x9, @intCast(@as(usize, value.replacement.start) + leaf)));
+        try words.append(allocator, A64.store64(.x9, .x10, @intCast(leaf * Machine.slot_size)));
+    }
+}
+
+fn allocate(allocator: Allocator, words: *std.ArrayList(u32)) Error!void {
+    try words.append(allocator, A64.moveWideZero32(.x0, 0));
+    try words.append(allocator, A64.moveWideZero32(.x2, protection_read_write));
+    try words.append(allocator, A64.moveWideZero32(.x3, map_private_anonymous));
+    try immediate(allocator, words, .x4, std.math.maxInt(u64));
+    try words.append(allocator, A64.moveWideZero32(.x5, 0));
+    try words.append(allocator, A64.moveWideZero32(.x16, macos_mmap));
+    try words.append(allocator, A64.serviceCall());
+}
+
+fn fail(allocator: Allocator, words: *std.ArrayList(u32), epilogue: *std.ArrayList(Fixups.Local)) Error!void {
+    try words.append(allocator, A64.moveWideZero32(.x8, @intFromEnum(Machine.Status.runtime_failure)));
+    try Fixups.appendLocal(allocator, words, epilogue, A64.branch(), .imm26);
+}
+
+fn addOffset(allocator: Allocator, words: *std.ArrayList(u32), register: A64.Register, offset: u32) Error!void {
+    if (offset <= std.math.maxInt(u12)) return words.append(allocator, A64.addSubtractImmediate(register, register, @intCast(offset), true));
+    try immediate(allocator, words, .x11, offset);
+    try words.append(allocator, A64.addRegisters(register, register, .x11));
+}
+
+fn immediate(allocator: Allocator, words: *std.ArrayList(u32), register: A64.Register, value: u64) Error!void {
+    try words.append(allocator, A64.moveWideZero64(register, @truncate(value), 0));
+    if (value >> 16 != 0) try words.append(allocator, A64.moveWideKeep64(register, @truncate(value >> 16), 1));
+    if (value >> 32 != 0) try words.append(allocator, A64.moveWideKeep64(register, @truncate(value >> 32), 2));
+    if (value >> 48 != 0) try words.append(allocator, A64.moveWideKeep64(register, @truncate(value >> 48), 3));
+}

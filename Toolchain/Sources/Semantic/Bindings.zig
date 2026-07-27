@@ -70,6 +70,12 @@ pub fn analyzeVariable(self: anytype, builder: anytype, declaration: Ast.Variabl
         return;
     }
     if (declaration.initializer) |expression| try Resources.requireTransfer(self, expression, declared_type, "storing it");
+    if (!declaration.mutable and Resources.containsClass(self, declared_type)) {
+        return self.fail(declaration.name_position, "a binding that can reach a class reference must use 'var'");
+    }
+    if (declaration.initializer == null and Resources.isClassType(self, declared_type)) {
+        return self.fail(declaration.name_position, "a class binding requires an initializer; use an optional to start at null");
+    }
     try Borrowing.requireOwned(self, initializer, if (declaration.initializer) |value| value.position else declaration.name_position, "stored");
     if (initializer.type != declared_type and (Numeric.canWiden(initializer.type, declared_type) or Optionals.canConvert(initializer.type, declared_type))) {
         initializer = try self.coerce(builder, initializer, declared_type, declaration.initializer.?.position);

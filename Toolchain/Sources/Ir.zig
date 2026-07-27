@@ -77,6 +77,7 @@ pub const Instruction = union(enum) {
     enum_payload: EnumPayload,
     enum_raw: EnumRaw,
     field_load: FieldLoad,
+    field_store: FieldStore,
     collection_load: CollectionLoad,
     collection_replace: CollectionReplace,
     collection_count: CollectionCount,
@@ -186,6 +187,13 @@ pub const Instruction = union(enum) {
         result: ValueId,
         base: ValueId,
         field: usize,
+    };
+
+    pub const FieldStore = struct {
+        result: ValueId,
+        base: ValueId,
+        field: usize,
+        replacement: ValueId,
     };
 
     pub const CollectionLoad = struct {
@@ -357,6 +365,7 @@ pub const StructureField = struct {
 pub const Structure = struct {
     name: []const u8,
     fields: []const StructureField,
+    is_class: bool = false,
     collection: ?Types.Collection = null,
 };
 
@@ -640,6 +649,24 @@ fn writeInstruction(
             try appendValueChecked(output, allocator, function, load.base);
             try output.appendSlice(allocator, ", .");
             try output.appendSlice(allocator, program.structures[structure_index].fields[load.field].name);
+        },
+        .field_store => |store| {
+            if (store.base >= function.value_types.len) return error.InvalidProgram;
+            const structure_index = function.value_types[store.base].structureIndex() orelse return error.InvalidProgram;
+            if (structure_index >= program.structures.len or !program.structures[structure_index].is_class or
+                store.field >= program.structures[structure_index].fields.len or store.result >= function.value_types.len or
+                function.value_types[store.result] != function.value_types[store.base] or store.replacement >= function.value_types.len or
+                function.value_types[store.replacement] != program.structures[structure_index].fields[store.field].type)
+            {
+                return error.InvalidProgram;
+            }
+            try appendResult(output, allocator, program, function, store.result);
+            try output.appendSlice(allocator, "class.store ");
+            try appendValueChecked(output, allocator, function, store.base);
+            try output.appendSlice(allocator, ", .");
+            try output.appendSlice(allocator, program.structures[structure_index].fields[store.field].name);
+            try output.appendSlice(allocator, ", ");
+            try appendValueChecked(output, allocator, function, store.replacement);
         },
         .collection_load => |load| {
             try appendResult(output, allocator, program, function, load.result);

@@ -13,11 +13,42 @@ pub fn isNoncopyable(self: anytype, type_value: Ast.Type) bool {
     return isNoncopyableInner(self, type_value, 0);
 }
 
+pub fn isClassType(self: anytype, type_value: Ast.Type) bool {
+    const index = type_value.structureIndex() orelse return false;
+    return index < self.structures.len and self.structures[index].is_class;
+}
+
+pub fn containsClass(self: anytype, type_value: Ast.Type) bool {
+    return containsClassInner(self, type_value, 0);
+}
+
+fn containsClassInner(self: anytype, type_value: Ast.Type, depth: usize) bool {
+    if (depth > self.structures.len + self.enums.len + 1) return false;
+    if (type_value.optionalChild()) |child| return containsClassInner(self, child, depth + 1);
+    const index = type_value.structureIndex() orelse return false;
+    if (index >= self.structures.len) return false;
+    const structure = self.structures[index];
+    if (structure.is_class) return true;
+    if (structure.collection) |collection| {
+        if (collection.view) return false;
+        return containsClassInner(self, collection.element, depth + 1);
+    }
+    for (self.enums) |enumeration| if (enumeration.type_index == index) {
+        for (enumeration.variants) |variant| for (variant.associated_types) |associated| {
+            if (containsClassInner(self, associated, depth + 1)) return true;
+        };
+        return false;
+    };
+    for (structure.fields) |field| if (containsClassInner(self, field.type, depth + 1)) return true;
+    return false;
+}
+
 fn isNoncopyableInner(self: anytype, type_value: Ast.Type, depth: usize) bool {
     if (depth > self.structures.len + self.enums.len + 1) return false;
     if (type_value.optionalChild()) |child| return isNoncopyableInner(self, child, depth + 1);
     const index = type_value.structureIndex() orelse return false;
     if (index >= self.structures.len) return false;
+    if (self.structures[index].is_class) return false;
     if (self.structures[index].collection) |collection| {
         if (collection.view) return false;
         return isNoncopyableInner(self, collection.element, depth + 1);
@@ -147,6 +178,7 @@ pub fn emitDrop(self: anytype, builder: anytype, type_value: Ast.Type, value: Ir
     }
     const type_index = type_value.structureIndex() orelse return;
     if (type_index >= self.structures.len) return;
+    if (self.structures[type_index].is_class) return;
     if (enumIndex(self, type_index)) |enumeration_index| {
         try emitEnumDrop(self, builder, enumeration_index, value);
         return;

@@ -119,6 +119,10 @@ fn lowerInstruction(
         .structure_init => |initialization| aggregate: {
             const fields = try allocator.alloc(Machine.Span, initialization.fields.len);
             for (initialization.fields, 0..) |field, index| fields[index] = layout.values[field];
+            if (program.structures[initialization.structure].is_class) break :aggregate .{ .class_init = .{
+                .result = layout.values[initialization.result].start,
+                .fields = fields,
+            } };
             break :aggregate .{ .aggregate_init = .{
                 .result = layout.values[initialization.result],
                 .fields = fields,
@@ -256,11 +260,26 @@ fn lowerInstruction(
             const base_type = function.value_types[load.base];
             const structure_index = base_type.structureIndex() orelse return error.InvalidMachineProgram;
             const offset = try fieldOffset(program, structure_index, load.field);
+            if (program.structures[structure_index].is_class) break :field .{ .class_load = .{
+                .result = layout.values[load.result],
+                .base = layout.values[load.base].start,
+                .byte_offset = @intCast(offset * Machine.slot_size),
+            } };
             var operand = layout.values[load.base];
             operand.start = try Machine.checkedSlot(@as(usize, operand.start) + offset);
             operand.width = layout.values[load.result].width;
             operand.aggregate = layout.values[load.result].aggregate;
             break :field lowerCopy(layout.values[load.result], operand);
+        },
+        .field_store => |store| field_store: {
+            const structure_index = function.value_types[store.base].structureIndex() orelse return error.InvalidMachineProgram;
+            if (!program.structures[structure_index].is_class) return error.InvalidMachineProgram;
+            break :field_store .{ .class_store = .{
+                .result = layout.values[store.result].start,
+                .base = layout.values[store.base].start,
+                .byte_offset = @intCast((try fieldOffset(program, structure_index, store.field)) * Machine.slot_size),
+                .replacement = layout.values[store.replacement],
+            } };
         },
         .local_load => |load| lowerCopy(layout.values[load.result], layout.locals[load.local]),
         .local_store => |store| lowerCopy(layout.locals[store.local], layout.values[store.operand]),
@@ -474,6 +493,7 @@ fn leafCount(program: Ir.Program, type_value: Ir.Type) Machine.Error!usize {
     }
     const structure_index = type_value.structureIndex() orelse return 1;
     if (structure_index >= program.structures.len) return error.InvalidMachineProgram;
+    if (program.structures[structure_index].is_class) return 1;
     if (program.structures[structure_index].collection) |collection| if (collection.length == null) return if (collection.view) 2 else 1;
     var result: usize = 0;
     for (program.structures[structure_index].fields) |field| result += try leafCount(program, field.type);
@@ -517,6 +537,7 @@ fn appendFlattenedTypes(
     }
     const structure_index = type_value.structureIndex() orelse return result.append(allocator, type_value);
     if (structure_index >= program.structures.len) return error.InvalidMachineProgram;
+    if (program.structures[structure_index].is_class) return result.append(allocator, .uint);
     for (program.structures[structure_index].fields) |field| {
         try appendFlattenedTypes(allocator, program, field.type, result);
     }
@@ -543,8 +564,10 @@ fn flattenedTypesForList(allocator: Allocator, program: Ir.Program, types: []con
 fn isAggregate(program: Ir.Program, type_value: Ir.Type) bool {
     if (type_value.optionalChild() != null) return true;
     const index = type_value.structureIndex() orelse return false;
-    return index >= program.structures.len or program.structures[index].collection == null or
-        program.structures[index].collection.?.length != null or program.structures[index].collection.?.view;
+    if (index >= program.structures.len) return true;
+    if (program.structures[index].is_class) return false;
+    const collection = program.structures[index].collection orelse return true;
+    return collection.length != null or collection.view;
 }
 
 fn internString(
