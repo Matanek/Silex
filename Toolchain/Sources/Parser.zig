@@ -12,6 +12,7 @@ const Iterations = @import("Parser/Iterations.zig");
 const TypeSyntax = @import("Parser/TypeSyntax.zig");
 const Nominals = @import("Parser/Nominals.zig");
 const Protocols = @import("Parser/Protocols.zig");
+const Extensions = @import("Parser/Extensions.zig");
 
 const Allocator = std.mem.Allocator;
 const Token = LexerModule.Token;
@@ -47,6 +48,7 @@ pub const Parser = struct {
         var structures: std.ArrayList(Ast.Structure) = .empty;
         var enums: std.ArrayList(Ast.Enum) = .empty;
         var functions: std.ArrayList(Ast.Function) = .empty;
+        var extensions: std.ArrayList(Ast.Extension) = .empty;
         while (self.current.tag != .end) {
             switch (self.current.tag) {
                 .keyword_use => try uses.append(self.allocator, try Uses.parse(self, false)),
@@ -56,6 +58,7 @@ pub const Parser = struct {
                 .keyword_protocol => try structures.append(self.allocator, try Protocols.parse(self, false, false)),
                 .keyword_enum => try enums.append(self.allocator, try EnumParser.parse(self, false, false)),
                 .keyword_func => try functions.append(self.allocator, try self.parseFunction(false, false)),
+                .keyword_extend => try extensions.append(self.allocator, try Extensions.parse(self)),
                 .keyword_public => {
                     try self.advance();
                     switch (self.current.tag) {
@@ -100,6 +103,7 @@ pub const Parser = struct {
             .generic_types = try self.generic_types.toOwnedSlice(self.allocator),
             .structures = try structures.toOwnedSlice(self.allocator),
             .enums = try enums.toOwnedSlice(self.allocator),
+            .extensions = try extensions.toOwnedSlice(self.allocator),
             .functions = try functions.toOwnedSlice(self.allocator),
         };
     }

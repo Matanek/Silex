@@ -16,8 +16,10 @@ const Lookup = @import("Project/Lookup.zig");
 const Iterations = @import("Project/Iterations.zig");
 const Activation = @import("Project/Activation.zig");
 const Rewriting = @import("Project/Rewriting.zig");
+const ProjectExtensions = @import("Project/Extensions.zig");
 const Semantic = @import("Semantic/Analyzer.zig");
 const Source = @import("Source.zig");
+const Extensions = @import("Extensions.zig");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
 const canonicalName = Names.canonical;
@@ -101,7 +103,12 @@ pub const Compiler = struct {
         try self.validateTypeAliases();
         try self.validateReexports();
 
-        const composition = try self.composeAst();
+        var composition = try self.composeAst();
+        var extensions = Extensions.Merger.init(self.allocator);
+        composition.program = extensions.merge(composition.program, false, false) catch |err| {
+            self.diagnostic = extensions.diagnostic;
+            return err;
+        };
         var specializer = GenericSpecializer.init(self.allocator);
         const ast = specializer.specialize(composition.program) catch |err| {
             self.diagnostic = specializer.diagnostic;
@@ -901,11 +908,15 @@ pub const Compiler = struct {
         var structures: std.ArrayList(Ast.Structure) = .empty;
         var enums: std.ArrayList(Ast.Enum) = .empty;
         var functions: std.ArrayList(Ast.Function) = .empty;
+        var extensions: std.ArrayList(Ast.Extension) = .empty;
         for (self.index.providers, 0..) |provider, module| {
             if (self.units[module].state != .loaded) continue;
             const program = self.units[module].program.?;
             const type_map = type_maps[module];
             const generic_map = self.generic_type_maps[module];
+            for (program.extensions) |extension| {
+                try extensions.append(self.allocator, try ProjectExtensions.compose(self, module, provider, extension, type_map, generic_map));
+            }
             for (program.structures) |structure| {
                 const composed_name = if (structure.collection) |collection|
                     try self.collectionCanonicalName(module, collection)
@@ -1025,6 +1036,7 @@ pub const Compiler = struct {
             .generic_types = generic_composition.types,
             .structures = try structures.toOwnedSlice(self.allocator),
             .enums = try enums.toOwnedSlice(self.allocator),
+            .extensions = try extensions.toOwnedSlice(self.allocator),
             .functions = try functions.toOwnedSlice(self.allocator),
         }, .type_maps = type_maps };
     }

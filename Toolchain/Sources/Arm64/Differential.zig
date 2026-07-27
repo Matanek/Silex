@@ -417,6 +417,25 @@ test "native ARM64 agrees on dynamic protocol erasure and mutation" {
     try compare(allocator, compilation.ir, machine, "shared", &.{});
 }
 
+test "native ARM64 agrees on instance and static extension methods" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\struct Counter { var value:int }
+        \\extend Counter {
+        \\    func add(amount:int) int { self.value += amount; return self.value }
+        \\    static func seed() Counter { return Counter(value:40) }
+        \\}
+        \\func extended() int { var value = Counter.seed(); return value.add(2) }
+        \\func main() {}
+    );
+    const machine = try Lower.lower(allocator, compilation.ir);
+    try compare(allocator, compilation.ir, machine, "extended", &.{});
+}
+
 test "native ARM64 agrees on omitted function constructor and method arguments" {
     if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);

@@ -2,6 +2,7 @@ const std = @import("std");
 const Ast = @import("../Ast.zig");
 const LexerModule = @import("../Lexer.zig");
 const ParserModule = @import("../Parser.zig");
+const ExtensionMerger = @import("../Extensions.zig");
 const Types = @import("Types.zig");
 
 const Allocator = std.mem.Allocator;
@@ -257,7 +258,7 @@ fn scopeAt(tokens: []const Token) Scope {
     var pending_callable = false;
     var interpolation_depth: usize = 0;
     for (tokens) |token| switch (token.tag) {
-        .keyword_struct => pending = .structure,
+        .keyword_struct, .keyword_extend => pending = .structure,
         .keyword_func, .keyword_init => {
             pending = .callable;
             pending_callable = true;
@@ -867,7 +868,7 @@ fn parseForCompletion(
     context: Context,
 ) !?Ast.Program {
     var parser = ParserModule.Parser.init(allocator, source);
-    if (parser.parse()) |program| return program else |_| {}
+    if (parser.parse()) |program| return mergeExtensionsForCompletion(allocator, program) else |_| {}
 
     const placeholder: []const u8 = switch (context.kind) {
         .member => "__completion",
@@ -878,7 +879,13 @@ fn parseForCompletion(
     if (context.prefix.len != 0) return null;
     const recovered = try std.fmt.allocPrint(allocator, "{s}{s}{s}", .{ source[0..cursor], placeholder, source[cursor..] });
     parser = ParserModule.Parser.init(allocator, recovered);
-    return parser.parse() catch null;
+    const program = parser.parse() catch return null;
+    return mergeExtensionsForCompletion(allocator, program);
+}
+
+fn mergeExtensionsForCompletion(allocator: Allocator, program: Ast.Program) ?Ast.Program {
+    var merger = ExtensionMerger.Merger.init(allocator);
+    return merger.merge(program, false, false) catch program;
 }
 
 pub fn functionSignature(
@@ -1100,6 +1107,22 @@ test "complete a dynamic protocol value with only its requirements" {
     const items = try itemsAt(arena.allocator(), source, cursor, .trigger_character);
     try std.testing.expect(contains(items, "draw"));
     try std.testing.expect(!contains(items, "hidden"));
+}
+
+test "complete local extension methods on their exact target" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source =
+        \\struct Value {}
+        \\extend Value { func extra() int { return 1 } }
+        \\func main() {
+        \\    let value = Value()
+        \\    value.extra()
+        \\}
+    ;
+    const cursor = std.mem.indexOf(u8, source, "value.extra").? + "value.ex".len;
+    const items = try itemsAt(arena.allocator(), source, cursor, .trigger_character);
+    try std.testing.expect(contains(items, "extra"));
 }
 
 test "complete direct nested types from their declaring owner" {

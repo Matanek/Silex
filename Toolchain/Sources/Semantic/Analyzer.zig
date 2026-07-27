@@ -46,6 +46,7 @@ pub const Analyzer = struct {
     diagnostic: ?Source.Diagnostic = null,
     member_context: ?usize = null,
     constructor_context: ?usize = null,
+    extension_context: bool = false,
     pub fn init(allocator: Allocator) Analyzer {
         return .{ .allocator = allocator };
     }

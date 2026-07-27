@@ -432,6 +432,8 @@ pub const Function = struct {
     is_internal: bool = false,
     is_private: bool = false,
     is_protected: bool = false,
+    visibility_explicit: bool = false,
+    extension: ?ExtensionMethod = null,
     owner: usize = 0,
     position: Source.Position,
     name_position: Source.Position,
@@ -444,11 +446,27 @@ pub const Function = struct {
     statements: []const Statement,
 };
 
+pub const ExtensionMethod = struct {
+    provider: []const u8,
+    visible_files: []const usize,
+};
+
+pub const Extension = struct {
+    position: Source.Position,
+    target_position: Source.Position,
+    target: Type,
+    conformances: []const Type = &.{},
+    methods: []const Function,
+    provider: []const u8 = "<source>",
+    visible_files: []const usize = &.{},
+};
+
 pub const Program = struct {
     uses: []const Use = &.{},
     type_names: []const []const u8 = &.{},
     generic_types: []const GenericType = &.{},
     structures: []const Structure = &.{},
     enums: []const Enum = &.{},
+    extensions: []const Extension = &.{},
     functions: []const Function,
 };

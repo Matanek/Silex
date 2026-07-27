@@ -2,8 +2,20 @@ const Source = @import("../Source.zig");
 const Inheritance = @import("Inheritance.zig");
 
 pub fn memberVisible(self: anytype, structure_index: usize, member: anytype, position: Source.Position) bool {
+    if (comptime @hasField(@TypeOf(member), "extension")) {
+        if (member.extension) |extension| {
+            var active = false;
+            for (extension.visible_files) |file| if (file == position.file) {
+                active = true;
+                break;
+            };
+            if (!active) return false;
+            return member.is_public or position.file == member.position.file;
+        }
+    }
     if (member.is_public) return true;
     if (member.is_internal) return position.file == member.position.file;
+    if (self.extension_context) return false;
     const context = self.member_context orelse return false;
     if (sameFamily(self, context, structure_index)) return true;
     return member.is_protected and Inheritance.isDescendant(self, context, structure_index);

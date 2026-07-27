@@ -92,6 +92,9 @@ pub fn analyze(self: anytype, structure_index: usize, method_index: usize, sourc
     const previous_context = self.member_context;
     self.member_context = structure_index;
     defer self.member_context = previous_context;
+    const previous_extension_context = self.extension_context;
+    self.extension_context = source_method.extension != null;
+    defer self.extension_context = previous_extension_context;
     var method = source_method;
     if (method.return_mode != .value and method.return_provenance == null) method.return_provenance = "self";
     const structure = self.program.structures[structure_index];
@@ -192,6 +195,9 @@ fn analyzeStatic(self: anytype, structure_index: usize, method_index: usize, met
     const previous_context = self.member_context;
     self.member_context = structure_index;
     defer self.member_context = previous_context;
+    const previous_extension_context = self.extension_context;
+    self.extension_context = method.extension != null;
+    defer self.extension_context = previous_extension_context;
     var builder: Model.FunctionBuilder = .{};
     try builder.blocks.append(self.allocator, .{});
     const parameter_types = try self.allocator.alloc(Ast.Type, method.parameters.len);
@@ -446,7 +452,7 @@ fn analyzeCallWithReceiver(
     const ir_return_type = methodIrReturnType(self, structure_index, flat, method);
     const call_result: ?Ir.ValueId = if (ir_return_type == .void) null else try self.newValue(builder, ir_return_type);
     const arguments_slice = try argument_ids.toOwnedSlice(self.allocator);
-    const implementations = if (class_receiver and !super_call and
+    const implementations = if (method.extension == null and class_receiver and !super_call and
         !(self.constructor_context != null and receiver_expression.value == .identifier and std.mem.eql(u8, receiver_expression.value.identifier, "self")) and
         (method.is_public or method.is_protected))
         try Inheritance.implementations(self, self.allocator, structure_index, method_index)
