@@ -17,14 +17,14 @@ test "infer construct transport copy and index dynamic lists" {
     const allocator = arena.allocator();
     var frontend = Frontend.Frontend.init(allocator);
     const compilation = try frontend.compile(
-        \\func changed(values:int[]) int[] { var copy = values; copy[0] = 9; return copy }
+        \\func changed(values:int[]) int[] { var duplicate = values; duplicate[0] = 9; return duplicate }
         \\func main() {
         \\    let inferred = [1, 2, 3]
         \\    let empty:int[] = []
         \\    let nested:int[][] = [[10, 11], [20]]
-        \\    let copy = changed(inferred)
+        \\    let duplicate = changed(inferred)
         \\    print(inferred.count(), " ", inferred.is_empty(), " ", inferred[-1])
-        \\    print(empty.count(), " ", empty.is_empty(), " ", copy[0], " ", nested[0][1])
+        \\    print(empty.count(), " ", empty.is_empty(), " ", duplicate[0], " ", nested[0][1])
         \\}
     );
     const result = try Interpreter.runCapture(allocator, compilation.ir);

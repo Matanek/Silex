@@ -14,7 +14,7 @@ test "mutate fixed arrays and dynamic lists with value semantics" {
         \\    fixed.swap(0, -1)
         \\    fixed.reverse()
         \\    var values = [1, 2, 3]
-        \\    let copy = values
+        \\    let duplicate = values
         \\    let previous = values.replace(1, 8)
         \\    values.swap(0, -1)
         \\    values.reverse()
@@ -27,7 +27,7 @@ test "mutate fixed arrays and dynamic lists with value semantics" {
         \\    let last = values.take_last()
         \\    values.reverse()
         \\    print(old_fixed, fixed[0], fixed[1], fixed[2])
-        \\    print(previous, removed, first, last, " ", values.count(), " ", values[0], values[-1], " ", copy[1])
+        \\    print(previous, removed, first, last, " ", values.count(), " ", values[0], values[-1], " ", duplicate[1])
         \\    values.clear()
         \\    print(values.count(), values.is_empty())
         \\}

@@ -302,13 +302,13 @@ test "infer transitive method mutability and lower private receiver results" {
         \\    func forward() { self.increment() }
         \\    func add(amount:int) int { self.value += amount; return self.value }
         \\    func current() int { return self.value }
-        \\    func copy() Counter { return self }
+        \\    func duplicate() Counter { return self }
         \\}
         \\func main() {
         \\    var counter = Counter(value:1)
         \\    counter.forward()
         \\    let updated = counter.add(2)
-        \\    print(updated, counter.copy().current())
+        \\    print(updated, counter.duplicate().current())
         \\}
     );
     var analyzer = Analyzer.init(allocator);

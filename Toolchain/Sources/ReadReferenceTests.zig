@@ -77,7 +77,7 @@ test "reject moving or returning a read-reference parameter by value" {
     try std.testing.expectEqualStrings("read-reference parameter 'value' cannot be returned", frontend.diagnostic.?.message);
 
     frontend.diagnostic = null;
-    try std.testing.expectError(error.InvalidSource, frontend.compile("func consume(value:@int) { let copy = move value } func main() { consume(1) }"));
+    try std.testing.expectError(error.InvalidSource, frontend.compile("func consume(value:@int) { let duplicate = move value } func main() { consume(1) }"));
     try std.testing.expectEqualStrings("a read-reference parameter cannot be consumed with 'move'", frontend.diagnostic.?.message);
 }
 

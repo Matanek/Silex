@@ -9,6 +9,7 @@ const ClassRuntime = @import("ClassRuntime.zig");
 const ProtocolRuntime = @import("ProtocolRuntime.zig");
 const TextRuntime = @import("TextRuntime.zig");
 const FloatRuntime = @import("FloatRuntime.zig");
+const DeepCopyRuntime = @import("DeepCopyRuntime.zig");
 const Register = A64.Register;
 const Condition = A64.Condition;
 const saveFrame = A64.saveFrame;
@@ -61,7 +62,7 @@ const addRegisters = A64.addRegisters;
 
 const Allocator = std.mem.Allocator;
 
-pub const Error = Machine.Error || Allocator.Error || Fixups.Error || FloatRuntime.Error;
+pub const Error = Machine.Error || Allocator.Error || Fixups.Error || FloatRuntime.Error || DeepCopyRuntime.Error;
 
 pub const Entry = union(enum) {
     none,
@@ -93,18 +94,22 @@ const FunctionFixups = struct {
     epilogue: std.ArrayList(LocalFixup) = .empty,
 };
 
+const DeepCopyFixup = struct { call_at: usize, data_at: usize };
+
 pub fn encode(allocator: Allocator, program: Machine.Program, entry: Entry) Error!Image {
     _ = FloatRuntime.object_bytes;
+    _ = DeepCopyRuntime.object_bytes;
     try Machine.validate(program);
     var words: std.ArrayList(u32) = .empty;
     const offsets = try allocator.alloc(u32, program.functions.len);
     var calls: std.ArrayList(CallFixup) = .empty;
     var float_calls: std.ArrayList(usize) = .empty;
+    var deep_copy_calls: std.ArrayList(DeepCopyFixup) = .empty;
     var data_fixups: std.ArrayList(DataFixup) = .empty;
 
     for (program.functions, 0..) |function, function_id| {
         offsets[function_id] = @intCast(words.items.len * 4);
-        try encodeFunction(allocator, &words, &calls, &float_calls, &data_fixups, program, function);
+        try encodeFunction(allocator, &words, &calls, &float_calls, &deep_copy_calls, &data_fixups, program, function);
     }
 
     const entry_offset: ?u32 = switch (entry) {
@@ -164,16 +169,22 @@ pub fn encode(allocator: Allocator, program: Machine.Program, entry: Entry) Erro
         },
     };
 
-    var runtime_bytes: []const u8 = &.{};
+    var runtime_bytes: std.ArrayList(u8) = .empty;
     if (float_calls.items.len != 0) {
         const runtime = try FloatRuntime.payload();
-        while ((words.items.len * 4) % 4096 != runtime.page_offset) {
-            try words.append(allocator, 0xd503201f);
-        }
-        const runtime_start = words.items.len * 4;
+        while ((words.items.len * 4 + runtime_bytes.items.len) % 4096 != runtime.page_offset) try runtime_bytes.appendNTimes(allocator, 0, 4);
+        const runtime_start = words.items.len * 4 + runtime_bytes.items.len;
         const formatter_target = (runtime_start + runtime.entry_offset) / 4;
         for (float_calls.items) |at| try patch26(words.items, at, formatter_target);
-        runtime_bytes = runtime.bytes;
+        try runtime_bytes.appendSlice(allocator, runtime.bytes);
+    }
+    if (deep_copy_calls.items.len != 0) {
+        const runtime = try DeepCopyRuntime.payload();
+        while ((words.items.len * 4 + runtime_bytes.items.len) % 4096 != runtime.page_offset) try runtime_bytes.appendNTimes(allocator, 0, 4);
+        const runtime_start = words.items.len * 4 + runtime_bytes.items.len;
+        const target = (runtime_start + runtime.entry_offset) / 4;
+        for (deep_copy_calls.items) |fixup| try patch26(words.items, fixup.call_at, target);
+        try runtime_bytes.appendSlice(allocator, runtime.bytes);
     }
 
     for (calls.items) |call| {
@@ -182,7 +193,7 @@ pub fn encode(allocator: Allocator, program: Machine.Program, entry: Entry) Erro
     }
 
     const machine_code_size = words.items.len * 4;
-    const code_size = std.mem.alignForward(usize, machine_code_size + runtime_bytes.len, 4);
+    const code_size = std.mem.alignForward(usize, machine_code_size + runtime_bytes.items.len, 4);
     const string_offsets = try allocator.alloc(usize, program.strings.len);
     defer allocator.free(string_offsets);
     var image_size = code_size;
@@ -191,6 +202,8 @@ pub fn encode(allocator: Allocator, program: Machine.Program, entry: Entry) Erro
         string_offsets[index] = image_size;
         image_size += 8 + string.len;
     }
+    const copy_model_offset: ?usize = if (program.copy_model.len == 0) null else std.mem.alignForward(usize, image_size, 8);
+    if (copy_model_offset) |offset| image_size = offset + program.copy_model.len * @sizeOf(u64);
     const data_offset: ?u32 = if (program.globals.len == 0) null else @intCast(std.mem.alignForward(usize, image_size, 0x4000));
     if (data_offset) |offset| image_size = offset;
     const global_offsets = try allocator.alloc(usize, program.globals.len);
@@ -209,16 +222,23 @@ pub fn encode(allocator: Allocator, program: Machine.Program, entry: Entry) Erro
             return error.InvalidMachineProgram;
         try patchAdr(words.items, fixup.at, target + fixup.byte_offset);
     }
+    if (deep_copy_calls.items.len != 0) {
+        const target = copy_model_offset orelse return error.InvalidMachineProgram;
+        for (deep_copy_calls.items) |fixup| try patchAdr(words.items, fixup.data_at, target);
+    }
 
     const code = try allocator.alloc(u8, image_size);
     for (words.items, 0..) |word, index| std.mem.writeInt(u32, code[index * 4 ..][0..4], word, .little);
-    @memcpy(code[machine_code_size..][0..runtime_bytes.len], runtime_bytes);
-    @memset(code[machine_code_size + runtime_bytes.len ..], 0);
+    @memcpy(code[machine_code_size..][0..runtime_bytes.items.len], runtime_bytes.items);
+    @memset(code[machine_code_size + runtime_bytes.items.len ..], 0);
     for (program.strings, 0..) |string, index| {
         const descriptor = string_offsets[index];
         std.mem.writeInt(u64, code[descriptor..][0..8], string.len, .little);
         @memcpy(code[descriptor + 8 ..][0..string.len], string);
     }
+    if (copy_model_offset) |offset| for (program.copy_model, 0..) |word, index| {
+        std.mem.writeInt(u64, code[offset + index * 8 ..][0..8], word, .little);
+    };
     for (program.globals, 0..) |global, index| std.mem.writeInt(u64, code[global_offsets[index]..][0..8], global.bits, .little);
     return .{ .code = code, .function_offsets = offsets, .entry_offset = entry_offset, .data_offset = data_offset };
 }
@@ -235,6 +255,7 @@ fn encodeFunction(
     words: *std.ArrayList(u32),
     calls: *std.ArrayList(CallFixup),
     float_calls: *std.ArrayList(usize),
+    deep_copy_calls: *std.ArrayList(DeepCopyFixup),
     data_fixups: *std.ArrayList(DataFixup),
     program: Machine.Program,
     function: Machine.Function,
@@ -303,6 +324,18 @@ fn encodeFunction(
                 try words.append(allocator, storeStack(.x9, copy.result));
             },
             .copy_range => |copy| try emitSpanCopy(allocator, words, copy.result, copy.operand),
+            .deep_copy => |copy| {
+                try emitStackAddress(allocator, words, .x0, copy.operand.start);
+                try emitStackAddress(allocator, words, .x1, copy.result.start);
+                const data_at = words.items.len;
+                try words.append(allocator, addressRelative(.x2));
+                try emitImmediate64(allocator, words, .x3, @intFromEnum(copy.type));
+                const call_at = words.items.len;
+                try words.append(allocator, branchLink());
+                try deep_copy_calls.append(allocator, .{ .call_at = call_at, .data_at = data_at });
+                try words.append(allocator, moveRegister(.x8, .x0));
+                try appendFixup(allocator, words, &fixups.epilogue, compareBranchNonZero(.x8), .imm19);
+            },
             .global_load => |global| {
                 try data_fixups.append(allocator, .{ .at = words.items.len, .global = global.global });
                 try words.append(allocator, addressRelative(.x10));

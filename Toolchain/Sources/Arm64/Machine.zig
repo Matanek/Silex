@@ -63,6 +63,7 @@ pub const Instruction = union(enum) {
     optional_unwrap: OptionalUnwrap,
     copy: Copy,
     copy_range: CopyRange,
+    deep_copy: DeepCopy,
     global_load: GlobalLoad,
     global_store: GlobalStore,
     local_address: LocalAddress,
@@ -152,6 +153,12 @@ pub const Instruction = union(enum) {
     pub const CopyRange = struct {
         result: Span,
         operand: Span,
+    };
+
+    pub const DeepCopy = struct {
+        result: Span,
+        operand: Span,
+        type: Types.Type,
     };
 
     pub const LocalAddress = struct {
@@ -429,6 +436,7 @@ pub const Program = struct {
     functions: []const Function,
     globals: []const Global = &.{},
     strings: []const []const u8 = &.{},
+    copy_model: []const u64 = &.{},
 };
 
 pub const Global = struct { bits: u64, width: u12 = 1 };
@@ -490,6 +498,11 @@ pub fn validate(program: Program) Error!void {
                 try requireSpan(function, value.result);
                 try requireSpan(function, value.operand);
                 if (value.result.width != value.operand.width) return error.InvalidMachineProgram;
+            },
+            .deep_copy => |value| {
+                try requireSpan(function, value.result);
+                try requireSpan(function, value.operand);
+                if (value.result.width != value.operand.width or program.copy_model.len == 0) return error.InvalidMachineProgram;
             },
             .global_load => |value| {
                 try requireSpan(function, value.result);

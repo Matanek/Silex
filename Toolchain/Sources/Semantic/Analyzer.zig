@@ -6,6 +6,7 @@ const Numeric = @import("../Numeric.zig");
 const Source = @import("../Source.zig");
 const Mutation = @import("Mutation.zig");
 const Moves = @import("Moves.zig");
+const Copies = @import("Copies.zig");
 const Borrowing = @import("Borrowing.zig");
 const Bindings = @import("Bindings.zig");
 const MutableReferences = @import("MutableReferences.zig");
@@ -457,6 +458,7 @@ pub const Analyzer = struct {
     ) AnalyzeError!TypedValue {
         if (unary.operator == .propagate) return Try.analyzeValue(self, builder, unary);
         if (unary.operator == .move) return Moves.analyze(self, builder, unary);
+        if (unary.operator == .copy) return Copies.analyze(self, builder, unary);
         if (unary.operator == .borrow_read or unary.operator == .borrow_mutable) return Collections.analyzeView(self, builder, unary);
         if (unary.operator == .logical_not) {
             const operand = try self.analyzeExpressionExpected(builder, unary.operand, .bool);

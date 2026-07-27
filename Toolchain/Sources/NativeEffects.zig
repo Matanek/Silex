@@ -39,6 +39,43 @@ fn exitCode(result: std.process.RunResult) u8 {
     };
 }
 
+test "native recursive copy preserves detached graph topology" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const source =
+        \\class Node {
+        \\    private let secret:int
+        \\    public var next:Node? = null
+        \\    public init(secret:int) { self.secret = secret }
+        \\    public func value() int { return self.secret }
+        \\}
+        \\class Special : Node {
+        \\    public init(secret:int) : super(secret) {}
+        \\    override public func value() int { return super.value() + 100 }
+        \\}
+        \\struct Graph { var first:Node; var again:Node; var values:Node[] }
+        \\func main() {
+        \\    var first:Node = Special(7)
+        \\    var second = Node(8)
+        \\    first.next = second
+        \\    second.next = first
+        \\    var graph = Graph(first:first, again:first, values:[first, second])
+        \\    var detached = copy graph
+        \\    if var next = detached.first.next { next.next = null }
+        \\    print(detached.first == detached.again, " ", detached.first == detached.values[0])
+        \\    print(detached.first != first, " ", detached.first.value(), " ", second.next != null)
+        \\}
+    ;
+    var frontend = Frontend.Frontend.init(allocator);
+    const reference = try Interpreter.runCapture(allocator, (try frontend.compile(source)).ir);
+    const native = try compileAndRun(allocator, source);
+    try std.testing.expectEqual(reference.exit_code, exitCode(native));
+    try std.testing.expectEqualSlices(u8, reference.stdout, native.stdout);
+    try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
+}
+
 test "native effects match the reference output" {
     if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
@@ -427,8 +464,8 @@ test "native fixed arrays match reference reads writes copies and bounds" {
     defer arena.deinit();
     const allocator = arena.allocator();
     const sources = [_][]const u8{
-        \\func changed(values:int[3]) int[3] { var copy = values; copy[0] = 9; return copy }
-        \\func main() { var values:int[3] = [1, 2, 3]; let copy = changed(values); values[-1] += 4; print(values[0], values[-1], copy[0], copy[2]) }
+        \\func changed(values:int[3]) int[3] { var duplicate = values; duplicate[0] = 9; return duplicate }
+        \\func main() { var values:int[3] = [1, 2, 3]; let duplicate = changed(values); values[-1] += 4; print(values[0], values[-1], duplicate[0], duplicate[2]) }
         ,
         "func main() { let values:int[3] = [1, 2, 3]; print(values[-4]) }",
     };
@@ -450,7 +487,7 @@ test "native dynamic lists match reference construction copies and bounds" {
     defer arena.deinit();
     const allocator = arena.allocator();
     const sources = [_][]const u8{
-        "func changed(values:int[]) int[] { var copy = values; copy[0] = 9; return copy } func main() { let values = [1, 2, 3]; let copy = changed(values); print(values.count(), values[-1], copy[0]) }",
+        "func changed(values:int[]) int[] { var duplicate = values; duplicate[0] = 9; return duplicate } func main() { let values = [1, 2, 3]; let duplicate = changed(values); print(values.count(), values[-1], duplicate[0]) }",
         "func main() { let values = [1, 2]; print(values[-3]) }",
     };
     for (sources) |source| {
@@ -473,12 +510,12 @@ test "native collection mutations match the reference" {
     const source =
         \\func main() {
         \\    var fixed:int[3] = [1, 2, 3]; fixed.replace(1, 8); fixed.swap(0, -1); fixed.reverse()
-        \\    var values = [1, 2, 3]; let copy = values; values.replace(1, 8); values.swap(0, -1); values.reverse()
+        \\    var values = [1, 2, 3]; let duplicate = values; values.replace(1, 8); values.swap(0, -1); values.reverse()
         \\    print(values[0], values[1], values[2])
         \\    values.append(4); values.append([5, 6]); values.prepend(0); values.insert(2, 7)
         \\    print(values[0], values[1], values[2], values[3], values[-1])
         \\    let removed = values.take(3); let first = values.take_first(); let last = values.take_last(); values.reverse()
-        \\    print(fixed[0], fixed[1], fixed[2], " ", removed, first, last, " ", values.count(), values[0], values[-1], " ", copy[1])
+        \\    print(fixed[0], fixed[1], fixed[2], " ", removed, first, last, " ", values.count(), values[0], values[-1], " ", duplicate[1])
         \\    values.clear(); print(values.count(), values.is_empty())
         \\}
     ;
