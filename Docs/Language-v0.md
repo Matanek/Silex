@@ -566,6 +566,29 @@ public static class Tasks {
 It is not an implicit singleton or namespace: it follows ordinary nominal
 visibility and the common static-storage initialization and teardown contract.
 
+## Nested nominal types
+
+A `struct`, `class`, or `static class` may declare nominal types of those same
+kinds. A nested type is selected through its declaring owner and captures no
+owner instance:
+
+```sx
+public class Catalog {
+    public struct Entry { public let value:int }
+}
+
+var entry = Catalog.Entry(value:42)
+```
+
+Nesting may continue to arbitrary depth. Short names resolve inside the same
+nominal family, whose members share private access. Nested types are not
+inherited; code outside the family qualifies them through their declarer. The
+owner's visibility always caps a nested declaration's visibility.
+
+Generic arguments are written at the level that declares them and are flattened
+from the outermost owner to the innermost type for specialization, as in
+`Box<int>.Entry<str>`.
+
 ## Associated enum values
 
 `enum` declares a nominal closed set of variants. A variant may carry zero or
@@ -1169,8 +1192,9 @@ use             = "public"? "use"
                   (qualified_identifier ("as" identifier)? | type "as" identifier) ;
 visibility      = "public" | "internal" ;
 member_visibility = "public" | "internal" | "protected" | "private" ;
-structure       = visibility? "struct" identifier type_parameters? "{" (structure_field | constructor | method | drop_definition)* "}" ;
-class           = visibility? "static"? "class" identifier (":" type)? "{" (class_field | constructor | class_method)* "}" ;
+structure       = visibility? "struct" identifier type_parameters? "{" (structure_field | constructor | method | drop_definition | nested_type)* "}" ;
+class           = visibility? "static"? "class" identifier (":" type)? "{" (class_field | constructor | class_method | nested_type)* "}" ;
+nested_type     = member_visibility? (structure | class) ;
 class_field     = member_visibility? "static"? ("let" | "var") identifier ":" type ("=" field_default)? ;
 class_method    = "override"? member_visibility? "static"? "func" identifier type_parameters? "(" parameters? ")" return_type? block ;
 drop_definition = "drop" block ;
@@ -1189,7 +1213,7 @@ type            = type_atom ("[" (integer | "..")? "]")* "?"? ;
 type_atom       = "void" | "int8" | "int16" | "int32" | "int64" | "int"
                 | "uint8" | "uint16" | "uint32" | "uint64" | "uint"
                 | "float" | "float32" | "float64" | "bool" | "str"
-                | identifier type_arguments? ;
+                | identifier type_arguments? ("." identifier type_arguments?)* ;
 block           = "{" statement* "}" ;
 statement       = binding_statement | assignment_statement | return_statement
                 | call_expression | break_statement | continue_statement

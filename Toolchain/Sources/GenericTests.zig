@@ -415,6 +415,26 @@ test "specialize inferred explicit overloaded mutating and recursive generic met
     try std.testing.expectEqualStrings("42\nSilex\n100\ngeneric\n7\n1\n8\n", result.stdout);
 }
 
+test "specialize nested types with owner arguments before child arguments" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\struct Box<T> {
+        \\    struct Entry<U> { let owner:T; let value:U }
+        \\}
+        \\struct Catalog { struct Item<T> { let value:T } }
+        \\func main() {
+        \\    let entry:Box<int>.Entry<str> = Box<int>.Entry<str>(owner:42, value:"nested")
+        \\    let item = Catalog.Item<int>(value:7)
+        \\    print(entry.owner, " ", entry.value, " ", item.value)
+        \\}
+    );
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("42 nested 7\n", result.stdout);
+}
+
 test "compose public generic methods through modules" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

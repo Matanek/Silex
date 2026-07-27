@@ -436,6 +436,39 @@ test "compose and execute structures inside their declaring module" {
     try std.testing.expectEqualStrings("42\n", result.stdout);
 }
 
+test "compose public nested types while their owner caps visibility" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Api.sx",
+        .data =
+        \\public struct Catalog { public struct Entry { public let value:int } }
+        \\struct Hidden { public struct Leaked {} }
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data =
+        \\use Api
+        \\func main() { let entry = Api.Catalog.Entry(value:42); print(entry.value) }
+        ,
+    });
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(input);
+    const result = try @import("../Interpreter.zig").runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("42\n", result.stdout);
+    var leaked = false;
+    for (compilation.interfaces) |interface| for (interface.structures) |structure| {
+        if (std.mem.eql(u8, structure.export_name, "Hidden.Leaked")) leaked = true;
+    };
+    try std.testing.expect(!leaked);
+}
+
 test "compose public associated enums across modules" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

@@ -349,3 +349,69 @@ test "static classes reject instance features" {
         "a class can only inherit from another class",
     );
 }
+
+test "nested nominal types qualify without capturing an owner" {
+    const output = try run(
+        \\struct Api {
+        \\    struct Entry { let value:int }
+        \\    static class State {
+        \\        public static var count:int = 0
+        \\        public static func bump() { State.count++ }
+        \\    }
+        \\}
+        \\class Container {
+        \\    public class Item { public let label:str }
+        \\}
+        \\func main() {
+        \\    let entry:Api.Entry = Api.Entry(value:7)
+        \\    var item = Container.Item(label:"nested")
+        \\    Api.State.bump()
+        \\    print(entry.value, " ", item.label, " ", Api.State.count)
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("7 nested 1\n", output);
+}
+
+test "nested families share private access without leaking private types" {
+    const output = try run(
+        \\class Vault {
+        \\    private static var seed:int = 40
+        \\    class Key {
+        \\        private let value:int
+        \\        func shifted() int { return self.value + Vault.seed }
+        \\    }
+        \\    public static func key() Key { return Key(value:2) }
+        \\    public static func read(key:Key) int { return key.shifted() }
+        \\}
+        \\func main() { var key = Vault.key(); print(Vault.read(key)) }
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("42\n", output);
+
+    try expectCompileError(
+        "class Vault { class Key {} } func main() { var key = Vault.Key() }",
+        "nested type is unavailable in this context",
+    );
+    try expectCompileError(
+        "struct Api { static var Entry:int = 1; struct Entry {} } func main() {}",
+        "a nested type and static member cannot share a name",
+    );
+}
+
+test "protected nested classes require qualification and are not inherited" {
+    const output = try run(
+        \\class Base { protected class Token { public let value:int } }
+        \\class Child : Base {
+        \\    public static func token() Base.Token { return Base.Token(value:9) }
+        \\}
+        \\func main() { var token = Child.token(); print(token.value) }
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("9\n", output);
+
+    try expectCompileError(
+        "class Base { public class Token {} } class Child : Base { public static func token() Token { return Token() } } func main() {}",
+        "unknown function 'Token'",
+    );
+}

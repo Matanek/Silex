@@ -3,30 +3,51 @@ const Ast = @import("../Ast.zig");
 const Generics = @import("Generics.zig");
 
 pub fn parse(self: anytype, is_public: bool, is_internal: bool, is_class: bool) !Ast.Structure {
-    return parseType(self, is_public, is_internal, is_class, false);
+    return parseType(self, is_public, is_internal, false, false, is_class, false);
 }
 
 pub fn parseStaticClass(self: anytype, is_public: bool, is_internal: bool) !Ast.Structure {
     try self.advance();
     if (self.current.tag != .keyword_class) return self.fail("expected 'class' after 'static'");
-    return parseType(self, is_public, is_internal, true, true);
+    return parseType(self, is_public, is_internal, false, false, true, true);
 }
 
-fn parseType(self: anytype, is_public: bool, is_internal: bool, is_class: bool, is_static_class: bool) !Ast.Structure {
+fn parseType(
+    self: anytype,
+    is_public: bool,
+    is_internal: bool,
+    is_private: bool,
+    is_protected: bool,
+    is_class: bool,
+    is_static_class: bool,
+) !Ast.Structure {
     const position = self.current.position;
     try self.advance();
     if (self.current.tag != .identifier) return self.fail(if (is_class) "expected class name" else "expected structure name");
-    const name = self.current.lexeme;
+    const short_name = self.current.lexeme;
+    const enclosing = self.nominal_prefix;
+    const name = if (enclosing) |prefix| try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ prefix, short_name }) else short_name;
     const name_position = self.current.position;
-    if (std.mem.eql(u8, name, "Result")) return self.failAt(name_position, "'Result' is a reserved intrinsic type name");
+    if (std.mem.eql(u8, short_name, "Result")) return self.failAt(name_position, "'Result' is a reserved intrinsic type name");
     _ = try self.internTypeName(name);
     try self.advance();
-    const type_parameters = try Generics.parseTypeParameters(self);
-    if (is_class and !is_static_class and type_parameters.len != 0) return self.failAt(name_position, "generic classes are not supported yet");
-    if (is_static_class and type_parameters.len != 0) return self.failAt(name_position, "static classes cannot be generic");
+    const own_type_parameters = try Generics.parseTypeParameters(self);
+    if (is_class and !is_static_class and own_type_parameters.len != 0) return self.failAt(name_position, "generic classes are not supported yet");
+    if (is_static_class and own_type_parameters.len != 0) return self.failAt(name_position, "static classes cannot be generic");
     const enclosing_type_parameters = self.type_parameters;
-    self.type_parameters = if (type_parameters.len == 0) enclosing_type_parameters else type_parameters;
+    const type_parameters = try self.allocator.alloc(Ast.TypeParameter, enclosing_type_parameters.len + own_type_parameters.len);
+    @memcpy(type_parameters[0..enclosing_type_parameters.len], enclosing_type_parameters);
+    for (own_type_parameters, 0..) |parameter, index| {
+        for (enclosing_type_parameters) |outer| if (std.mem.eql(u8, outer.name, parameter.name)) {
+            return self.failAt(parameter.position, "type parameter is already declared by an enclosing type");
+        };
+        type_parameters[enclosing_type_parameters.len + index] = parameter;
+    }
+    self.type_parameters = type_parameters;
     defer self.type_parameters = enclosing_type_parameters;
+    const previous_prefix = self.nominal_prefix;
+    self.nominal_prefix = name;
+    defer self.nominal_prefix = previous_prefix;
     var base: ?Ast.Type = null;
     var base_position = name_position;
     if (self.current.tag == .colon) {
@@ -41,6 +62,7 @@ fn parseType(self: anytype, is_public: bool, is_internal: bool, is_class: bool, 
     var static_fields: std.ArrayList(Ast.StructureField) = .empty;
     var constructors: std.ArrayList(Ast.Constructor) = .empty;
     var methods: std.ArrayList(Ast.Function) = .empty;
+    var nested_names: std.ArrayList([]const u8) = .empty;
     var drop: ?Ast.Drop = null;
     while (self.current.tag != .right_brace and self.current.tag != .end) {
         var member_override = false;
@@ -71,6 +93,38 @@ fn parseType(self: anytype, is_public: bool, is_internal: bool, is_class: bool, 
             member_static = true;
             try self.advance();
         }
+        if (self.current.tag == .keyword_struct or self.current.tag == .keyword_class) {
+            if (member_override) return self.fail("nested types cannot declare override");
+            const nested_is_class = self.current.tag == .keyword_class;
+            const nested_is_static = member_static;
+            if (nested_is_static and !nested_is_class) return self.fail("'static' before a nested type requires 'class'");
+            if (member_protected and (!nested_is_class or nested_is_static)) {
+                return self.fail("protected nested types must be ordinary classes");
+            }
+            const nested_short_name = blk: {
+                var lexer = self.lexer;
+                const token = try lexer.next();
+                break :blk token.lexeme;
+            };
+            for (static_fields.items) |field| if (std.mem.eql(u8, field.name, nested_short_name)) {
+                return self.fail("a nested type and static member cannot share a name");
+            };
+            for (methods.items) |method| if (method.is_static and std.mem.eql(u8, method.name, nested_short_name)) {
+                return self.fail("a nested type and static member cannot share a name");
+            };
+            try nested_names.append(self.allocator, nested_short_name);
+            const nested = try parseType(
+                self,
+                member_public,
+                member_internal,
+                member_private,
+                member_protected,
+                nested_is_class,
+                nested_is_static,
+            );
+            try self.nested_structures.append(self.allocator, nested);
+            continue;
+        }
         if (self.current.tag == .keyword_init) {
             if (is_static_class) return self.fail("static classes cannot declare constructors");
             if (member_static) return self.fail("constructors cannot be static");
@@ -90,6 +144,9 @@ fn parseType(self: anytype, is_public: bool, is_internal: bool, is_class: bool, 
             method.is_override = member_override;
             method.is_private = member_private;
             method.is_protected = member_protected;
+            if (member_static) for (nested_names.items) |nested_name| if (std.mem.eql(u8, nested_name, method.name)) {
+                return self.failAt(method.name_position, "a nested type and static member cannot share a name");
+            };
             try methods.append(self.allocator, method);
             continue;
         }
@@ -119,6 +176,9 @@ fn parseType(self: anytype, is_public: bool, is_internal: bool, is_class: bool, 
         const field_name = self.current.lexeme;
         const field_name_position = self.current.position;
         try self.advance();
+        if (member_static) for (nested_names.items) |nested_name| if (std.mem.eql(u8, nested_name, field_name)) {
+            return self.failAt(field_name_position, "a nested type and static member cannot share a name");
+        };
         try self.expect(.colon, "expected ':' after field name");
         const field_type = try self.parseType();
         var default: ?*Ast.Expression = null;
@@ -146,8 +206,11 @@ fn parseType(self: anytype, is_public: bool, is_internal: bool, is_class: bool, 
     return .{
         .is_public = is_public,
         .is_internal = is_internal,
+        .is_private = is_private,
+        .is_protected = is_protected,
         .is_class = is_class,
         .is_static = is_static_class,
+        .enclosing = enclosing,
         .position = position,
         .name_position = name_position,
         .name = name,

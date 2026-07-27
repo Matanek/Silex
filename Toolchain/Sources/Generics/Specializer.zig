@@ -3,6 +3,7 @@ const Ast = @import("../Ast.zig");
 const Numeric = @import("../Numeric.zig");
 const Result = @import("../Intrinsics/Result.zig");
 const Source = @import("../Source.zig");
+const Nested = @import("Nested.zig");
 
 const Allocator = std.mem.Allocator;
 const SpecializeError = Source.Error || Allocator.Error;
@@ -404,6 +405,7 @@ pub const Specializer = struct {
         result.value = switch (expression.value) {
             .call => |call| value: {
                 var copy = call;
+                try Nested.specializeCall(self, &copy, arguments);
                 if (copy.receiver) |receiver| copy.receiver = try self.rewriteExpression(receiver, arguments, locals);
                 const positional = try self.allocator.alloc(*Ast.Expression, copy.arguments.len);
                 for (copy.arguments, 0..) |argument, index| positional[index] = try self.rewriteExpression(argument, arguments, locals);
@@ -820,7 +822,7 @@ pub const Specializer = struct {
         return name;
     }
 
-    fn rewriteType(
+    pub fn rewriteType(
         self: *Specializer,
         type_value: Ast.Type,
         arguments: []const Ast.Type,
@@ -919,7 +921,7 @@ pub const Specializer = struct {
         return type_value;
     }
 
-    fn instantiateStructure(
+    pub fn instantiateStructure(
         self: *Specializer,
         base: Ast.Type,
         arguments: []const Ast.Type,
@@ -965,6 +967,7 @@ pub const Specializer = struct {
         var concrete = template;
         concrete.name = name;
         concrete.type_parameters = &.{};
+        if (try Nested.concreteEnclosing(self, template, arguments, position)) |owner| concrete.enclosing = owner;
         const structure_index = self.structures.items.len;
         try self.structures.append(self.allocator, concrete);
         try self.rewriteStructureAt(structure_index, arguments);
@@ -1276,7 +1279,7 @@ pub const Specializer = struct {
         return method_index;
     }
 
-    fn structureTemplateForType(self: *Specializer, type_value: Ast.Type) ?Ast.Structure {
+    pub fn structureTemplateForType(self: *Specializer, type_value: Ast.Type) ?Ast.Structure {
         const index = type_value.structureIndex() orelse return null;
         if (index >= self.type_names.items.len) return null;
         const name = self.type_names.items[index];
@@ -1321,7 +1324,7 @@ pub const Specializer = struct {
         return null;
     }
 
-    fn typeForName(self: *Specializer, name: []const u8) ?Ast.Type {
+    pub fn typeForName(self: *Specializer, name: []const u8) ?Ast.Type {
         for (self.type_names.items, 0..) |candidate, index| if (std.mem.eql(u8, candidate, name)) return .structure(index);
         return null;
     }
@@ -1338,7 +1341,7 @@ pub const Specializer = struct {
         return std.fmt.allocPrint(self.allocator, "{s}>", .{result});
     }
 
-    fn typeName(self: *Specializer, type_value: Ast.Type) []const u8 {
+    pub fn typeName(self: *Specializer, type_value: Ast.Type) []const u8 {
         if (type_value.optionalChild()) |child| {
             return std.fmt.allocPrint(self.allocator, "{s}?", .{self.typeName(child)}) catch "optional";
         }
