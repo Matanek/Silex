@@ -10,6 +10,7 @@ const Borrowing = @import("Borrowing.zig");
 const MutableReferences = @import("MutableReferences.zig");
 const Resources = @import("Resources.zig");
 const Visibility = @import("Visibility.zig");
+const Inheritance = @import("Inheritance.zig");
 
 const AnalyzeError = error{ InvalidSource, OutOfMemory };
 
@@ -241,12 +242,13 @@ fn analyzeCallWithReceiver(
     if (receiver.type == .str and std.mem.eql(u8, call.name, "count") and call.arguments.len == 0 and call.named_arguments.len == 0) {
         return try self.emitStringCount(builder, receiver.value);
     }
-    const structure_index = receiver.type.structureIndex() orelse {
+    const receiver_structure_index = receiver.type.structureIndex() orelse {
         if (std.mem.eql(u8, call.name, "count")) return self.fail(call.name_position, "count() expects 'str'");
         const message = try std.fmt.allocPrint(self.allocator, "type '{s}' has no methods", .{self.typeName(receiver.type)});
         return self.fail(call.name_position, message);
     };
-    if (structure_index >= self.program.structures.len) return error.InvalidSource;
+    if (receiver_structure_index >= self.program.structures.len) return error.InvalidSource;
+    const structure_index = Inheritance.methodOwner(self, receiver_structure_index, call.name) orelse receiver_structure_index;
     const structure = self.program.structures[structure_index];
     if (structure.is_internal and call.name_position.file != structure.position.file) {
         const message = try std.fmt.allocPrint(
@@ -308,7 +310,7 @@ fn analyzeCallWithReceiver(
         var viable = true;
         for (method.parameters[0..arguments.items.len], arguments.items) |parameter, argument| {
             if (parameter.type == argument.type) continue;
-            if (!Numeric.canWiden(argument.type, parameter.type) and Optionals.conversionCost(argument.type, parameter.type) == null) {
+            if (!self.canImplicitlyConvert(argument.type, parameter.type)) {
                 viable = false;
                 break;
             }
@@ -333,7 +335,7 @@ fn analyzeCallWithReceiver(
     try Borrowing.validateReadArguments(self, method.parameters, call.arguments);
     const flat = flatMethodIndex(self.program, structure_index, method_index);
     const mutating = self.method_mutability[flat];
-    const class_receiver = self.structures[structure_index].is_class;
+    const class_receiver = self.structures[receiver_structure_index].is_class;
     const borrowed_mutable = method.return_mode == .mutable;
     const place = if (mutating and !borrowed_mutable and !class_receiver)
         try requireMutablePlace(self, builder, receiver_expression, call.name)
@@ -346,7 +348,11 @@ fn analyzeCallWithReceiver(
 
     var argument_ids: std.ArrayList(Ir.ValueId) = .empty;
     var mutable_arguments: std.ArrayList(MutableReferences.Prepared) = .empty;
-    try argument_ids.append(self.allocator, if (borrowed_receiver) |prepared| prepared.reference else receiver.value);
+    const method_receiver = if (receiver_structure_index != structure_index and borrowed_receiver == null)
+        try self.coerce(builder, receiver, .structure(structure_index), call.name_position)
+    else
+        receiver;
+    try argument_ids.append(self.allocator, if (borrowed_receiver) |prepared| prepared.reference else method_receiver.value);
     for (arguments.items, method.parameters[0..arguments.items.len], 0..) |argument, parameter, index| {
         if (parameter.mode == .mutable) {
             const prepared = try MutableReferences.prepare(self, builder, call.arguments[index], parameter.type);
@@ -531,7 +537,7 @@ fn analyzeMutatingStatements(
                         expression,
                         Optionals.expectedContext(method.return_type, expression),
                     );
-                    if (value.?.type != method.return_type and (Numeric.canWiden(value.?.type, method.return_type) or Optionals.canConvert(value.?.type, method.return_type))) {
+                    if (value.?.type != method.return_type and self.canImplicitlyConvert(value.?.type, method.return_type)) {
                         value = try self.coerce(builder, value.?, method.return_type, expression.position);
                     }
                     if (value.?.type != method.return_type) {

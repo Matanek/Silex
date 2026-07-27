@@ -16,7 +16,6 @@ const Lookup = @import("Project/Lookup.zig");
 const Iterations = @import("Project/Iterations.zig");
 const Semantic = @import("Semantic/Analyzer.zig");
 const Source = @import("Source.zig");
-
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
 const canonicalName = Names.canonical;
@@ -29,9 +28,7 @@ const lastSegment = Names.lastSegment;
 const parent = Names.parent;
 const sameParent = Names.sameParent;
 const structureCanonicalName = Names.nominal;
-
 pub const Error = anyerror;
-
 pub const Compilation = struct {
     ast: Ast.Program,
     ir: Ir.Program,
@@ -39,7 +36,6 @@ pub const Compilation = struct {
     packages: Packages.Graph,
     files: []const []const u8,
 };
-
 const Binding = Reexports.Binding;
 const Unit = Reexports.Unit;
 
@@ -483,9 +479,11 @@ pub const Compiler = struct {
     fn activateQualifiedReferences(self: *Compiler, module: usize) Error!void {
         const program = self.units[module].program.?;
         for (program.structures) |structure| {
+            if (structure.base) |base| try self.activateType(module, base);
             for (structure.fields) |field| try self.activateType(module, field.type);
             for (structure.constructors) |constructor| {
                 for (constructor.parameters) |parameter| try self.activateType(module, parameter.type);
+                for (constructor.super_arguments) |argument| try self.activateExpression(module, argument);
                 for (constructor.statements) |statement| try self.activateStatement(module, statement);
             }
             for (structure.methods) |method| {
@@ -953,6 +951,7 @@ pub const Compiler = struct {
                 var composed_structure = structure;
                 composed_structure.owner = provider.owner;
                 composed_structure.name = composed_name;
+                if (structure.base) |base| composed_structure.base = GenericTypes.remap(base, type_map, generic_map);
                 if (structure.collection) |collection| composed_structure.collection = .{
                     .element = GenericTypes.remap(collection.element, type_map, generic_map),
                     .length = collection.length,
@@ -974,6 +973,7 @@ pub const Compiler = struct {
                         if (parameter.default) |value| try self.rewriteExpression(module, value, type_map);
                     }
                     constructors[constructor_index].parameters = parameters;
+                    for (constructor.super_arguments) |argument| try self.rewriteExpression(module, argument, type_map);
                     constructors[constructor_index].statements = try self.rewriteStatements(module, constructor.statements, type_map);
                 }
                 composed_structure.constructors = constructors;
@@ -1195,6 +1195,7 @@ pub const Compiler = struct {
         const program = self.units[module].program.?;
         for (program.structures) |structure| {
             if (!structure.is_public) continue;
+            if (structure.base) |base| try self.requirePublicType(module, base, structure.base_position, "public class", structure.name);
             for (structure.fields) |field| {
                 if (field.is_internal) continue;
                 try self.requirePublicType(module, field.type, field.name_position, "public structure", structure.name);

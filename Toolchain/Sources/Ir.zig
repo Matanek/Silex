@@ -70,6 +70,7 @@ pub const Instruction = union(enum) {
     optional_some: OptionalSome,
     optional_unwrap: OptionalUnwrap,
     copy: Copy,
+    class_cast: Copy,
     structure_init: StructureInit,
     list_init: ListInit,
     enum_init: EnumInit,
@@ -366,6 +367,7 @@ pub const Structure = struct {
     name: []const u8,
     fields: []const StructureField,
     is_class: bool = false,
+    base: ?usize = null,
     collection: ?Types.Collection = null,
 };
 
@@ -530,7 +532,7 @@ fn writeInstruction(
             try output.appendSlice(allocator, "optional.unwrap ");
             try appendValueChecked(output, allocator, function, optional.operand);
         },
-        .copy => |copy| {
+        .copy, .class_cast => |copy| {
             try appendResult(output, allocator, program, function, copy.result);
             try output.appendSlice(allocator, "copy ");
             try appendValueChecked(output, allocator, function, copy.operand);

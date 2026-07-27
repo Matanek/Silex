@@ -10,6 +10,7 @@ const Borrowing = @import("Borrowing.zig");
 const MutableReferences = @import("MutableReferences.zig");
 const Resources = @import("Resources.zig");
 const Visibility = @import("Visibility.zig");
+const Inheritance = @import("Inheritance.zig");
 
 const AnalyzeError = error{ InvalidSource, OutOfMemory };
 
@@ -37,10 +38,10 @@ pub fn analyze(
     constructor: Ast.Constructor,
 ) !Ir.Function {
     const previous_context = self.member_context;
-    self.member_context = structure_index;
-    defer self.member_context = previous_context;
     const declaration = self.program.structures[structure_index];
     const nominal_index = self.structureIndex(declaration.name) orelse return error.InvalidSource;
+    self.member_context = nominal_index;
+    defer self.member_context = previous_context;
     const structure_type = Ast.Type.structure(nominal_index);
     var builder: Model.FunctionBuilder = .{};
     try builder.blocks.append(self.allocator, .{});
@@ -62,7 +63,23 @@ pub fn analyze(
     }
 
     const initialized = try self.allocator.alloc(bool, declaration.fields.len);
-    const initial_fields = try self.allocator.alloc(Ir.ValueId, declaration.fields.len);
+    var initial_fields: std.ArrayList(Ir.ValueId) = .empty;
+    if (self.structures[nominal_index].base) |base_index| {
+        const base_declaration = Inheritance.findDeclaration(self, base_index) orelse return error.InvalidSource;
+        const base_value = if (base_declaration.constructors.len == 0) implicit: {
+            if (constructor.super_arguments.len != 0) return self.fail(constructor.position, "base class has no positional constructor");
+            break :implicit try self.emitIntrinsic(&builder, .structure(base_index), constructor.position);
+        } else try analyzeCall(self, &builder, base_index, base_declaration, .{
+            .name = base_declaration.name,
+            .name_position = constructor.position,
+            .arguments = constructor.super_arguments,
+        });
+        for (self.structures[base_index].fields, 0..) |field, field_index| {
+            const value = try self.newValue(&builder, field.type);
+            try self.emit(&builder, .{ .field_load = .{ .result = value, .base = base_value.value, .field = field_index } });
+            try initial_fields.append(self.allocator, value);
+        }
+    }
     for (declaration.fields, 0..) |field, field_index| {
         var value = if (field.default) |expression|
             try self.analyzeExpressionExpected(
@@ -72,17 +89,17 @@ pub fn analyze(
             )
         else
             try self.emitIntrinsic(&builder, field.type, constructor.position);
-        if (value.type != field.type and (Numeric.canWiden(value.type, field.type) or Optionals.canConvert(value.type, field.type))) {
+        if (value.type != field.type and self.canImplicitlyConvert(value.type, field.type)) {
             value = try self.coerce(&builder, value, field.type, constructor.position);
         }
-        initial_fields[field_index] = value.value;
+        try initial_fields.append(self.allocator, value.value);
         initialized[field_index] = field.mutable or field.default != null;
     }
     const initial_self = try self.newValue(&builder, structure_type);
     try self.emit(&builder, .{ .structure_init = .{
         .result = initial_self,
         .structure = nominal_index,
-        .fields = initial_fields,
+        .fields = try initial_fields.toOwnedSlice(self.allocator),
     } });
     const self_local = builder.local_types.items.len;
     try builder.local_types.append(self.allocator, structure_type);
@@ -201,7 +218,7 @@ pub fn analyzeCall(
         var viable = true;
         for (constructor.parameters[0..arguments.items.len], arguments.items) |parameter, argument| {
             if (parameter.type == argument.type) continue;
-            if (!Numeric.canWiden(argument.type, parameter.type) and Optionals.conversionCost(argument.type, parameter.type) == null) {
+            if (!self.canImplicitlyConvert(argument.type, parameter.type)) {
                 viable = false;
                 break;
             }
@@ -392,6 +409,19 @@ fn analyzeSelfAssignment(
         }
     }
     const field_index = selected orelse {
+        const owner_index = fieldOwnerIndex(self, structure.name);
+        if (Inheritance.fieldByName(self, owner_index, target.name)) |inherited| if (inherited.owner != owner_index) {
+            const one = [_]Ast.Statement{.{ .assignment_statement = assignment }};
+            _ = try self.analyzeStatements(builder, .{
+                .position = assignment.position,
+                .name_position = assignment.position,
+                .name = structure.name,
+                .parameters = &.{},
+                .return_type = .void,
+                .statements = &one,
+            }, &one);
+            return;
+        };
         const message = try std.fmt.allocPrint(self.allocator, "structure '{s}' has no field named '{s}'", .{ structure.name, target.name });
         return self.fail(target.name_position, message);
     };
@@ -426,7 +456,7 @@ fn analyzeSelfAssignment(
         assignment.value.?,
         Optionals.expectedContext(field.type, assignment.value.?),
     );
-    if (value.type != field.type and (Numeric.canWiden(value.type, field.type) or Optionals.canConvert(value.type, field.type))) {
+    if (value.type != field.type and self.canImplicitlyConvert(value.type, field.type)) {
         value = try self.coerce(builder, value, field.type, assignment.value.?.position);
     }
     if (value.type != field.type) {
@@ -439,12 +469,15 @@ fn analyzeSelfAssignment(
     }
     try Resources.requireTransfer(self, assignment.value.?, field.type, "storing it in a structure");
 
-    const structure_type = Ast.Type.structure(fieldOwnerIndex(self, structure.name));
+    const structure_index = fieldOwnerIndex(self, structure.name);
+    const structure_type = Ast.Type.structure(structure_index);
     const base = try self.newValue(builder, structure_type);
     try self.emit(builder, .{ .local_load = .{ .result = base, .local = self_local } });
-    const fields = try self.allocator.alloc(Ir.ValueId, structure.fields.len);
-    for (structure.fields, 0..) |other, index| {
-        if (index == field_index) {
+    const fields = try self.allocator.alloc(Ir.ValueId, self.structures[structure_index].fields.len);
+    const inherited_count = if (self.structures[structure_index].base) |parent| self.structures[parent].fields.len else 0;
+    const flattened_target = inherited_count + field_index;
+    for (self.structures[structure_index].fields, 0..) |other, index| {
+        if (index == flattened_target) {
             fields[index] = value.value;
         } else {
             fields[index] = try self.newValue(builder, other.type);
@@ -452,7 +485,6 @@ fn analyzeSelfAssignment(
         }
     }
     const replacement = try self.newValue(builder, structure_type);
-    const structure_index = structure_type.structureIndex().?;
     try self.emit(builder, .{ .structure_init = .{
         .result = replacement,
         .structure = structure_index,

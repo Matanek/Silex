@@ -191,7 +191,7 @@ pub fn analyzeLiteral(
     const fields = try self.allocator.alloc(Ir.ValueId, literal.values.len);
     for (literal.values, 0..) |expression, index| {
         var value = try self.analyzeExpressionExpected(builder, expression, collection.element);
-        if (value.type != collection.element and (Numeric.canWiden(value.type, collection.element) or Optionals.canConvert(value.type, collection.element))) {
+        if (value.type != collection.element and self.canImplicitlyConvert(value.type, collection.element)) {
             value = try self.coerce(builder, value, collection.element, expression.position);
         }
         if (value.type != collection.element) {

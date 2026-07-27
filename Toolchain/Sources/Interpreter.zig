@@ -197,6 +197,14 @@ fn executeInstruction(
             try store(function, values, optional.result, try cloneValue(allocator, value.*));
         },
         .copy => |copy| try store(function, values, copy.result, try cloneValue(allocator, try load(values, copy.operand))),
+        .class_cast => |cast| {
+            var value = switch (try load(values, cast.operand)) {
+                .class => |class| class,
+                else => return error.InvalidProgram,
+            };
+            value.static_type = function.value_types[cast.result];
+            try store(function, values, cast.result, .{ .class = value });
+        },
         .structure_init => |initialization| {
             if (initialization.structure >= program.structures.len or
                 initialization.fields.len != program.structures[initialization.structure].fields.len)
@@ -217,7 +225,10 @@ fn executeInstruction(
             if (program.structures[initialization.structure].is_class) {
                 const instance = try allocator.create(Value.Structure);
                 instance.* = aggregate;
-                try store(function, values, initialization.result, .{ .class = instance });
+                try store(function, values, initialization.result, .{ .class = .{
+                    .static_type = .structure(initialization.structure),
+                    .instance = instance,
+                } });
             } else try store(function, values, initialization.result, .{ .structure = aggregate });
         },
         .list_init => |initialization| try executeListInit(allocator, function, values, initialization),
@@ -274,7 +285,7 @@ fn executeInstruction(
         .field_load => |field| {
             const aggregate = switch (try load(values, field.base)) {
                 .structure => |value| value,
-                .class => |value| value.*,
+                .class => |value| value.instance.*,
                 else => return error.InvalidProgram,
             };
             if (field.field >= aggregate.fields.len) return error.InvalidProgram;
@@ -285,8 +296,8 @@ fn executeInstruction(
                 .class => |value| value,
                 else => return error.InvalidProgram,
             };
-            if (field.field >= instance.fields.len) return error.InvalidProgram;
-            instance.fields[field.field] = try cloneValue(allocator, try load(values, field.replacement));
+            if (field.field >= instance.instance.fields.len) return error.InvalidProgram;
+            instance.instance.fields[field.field] = try cloneValue(allocator, try load(values, field.replacement));
             try store(function, values, field.result, .{ .class = instance });
         },
         .collection_load => |access| try executeCollectionLoad(allocator, program, function, values, access, session),

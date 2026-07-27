@@ -10,6 +10,7 @@ const Uses = @import("Parser/Uses.zig");
 const Collections = @import("Parser/Collections.zig");
 const Iterations = @import("Parser/Iterations.zig");
 const TypeSyntax = @import("Parser/TypeSyntax.zig");
+const Nominals = @import("Parser/Nominals.zig");
 
 const Allocator = std.mem.Allocator;
 const Token = LexerModule.Token;
@@ -46,16 +47,16 @@ pub const Parser = struct {
         while (self.current.tag != .end) {
             switch (self.current.tag) {
                 .keyword_use => try uses.append(self.allocator, try Uses.parse(self, false)),
-                .keyword_struct => try structures.append(self.allocator, try self.parseStructure(false, false, false)),
-                .keyword_class => try structures.append(self.allocator, try self.parseStructure(false, false, true)),
+                .keyword_struct => try structures.append(self.allocator, try Nominals.parse(self, false, false, false)),
+                .keyword_class => try structures.append(self.allocator, try Nominals.parse(self, false, false, true)),
                 .keyword_enum => try enums.append(self.allocator, try EnumParser.parse(self, false, false)),
                 .keyword_func => try functions.append(self.allocator, try self.parseFunction(false, false)),
                 .keyword_public => {
                     try self.advance();
                     switch (self.current.tag) {
                         .keyword_use => try uses.append(self.allocator, try Uses.parse(self, true)),
-                        .keyword_struct => try structures.append(self.allocator, try self.parseStructure(true, false, false)),
-                        .keyword_class => try structures.append(self.allocator, try self.parseStructure(true, false, true)),
+                        .keyword_struct => try structures.append(self.allocator, try Nominals.parse(self, true, false, false)),
+                        .keyword_class => try structures.append(self.allocator, try Nominals.parse(self, true, false, true)),
                         .keyword_enum => try enums.append(self.allocator, try EnumParser.parse(self, true, false)),
                         .keyword_func => try functions.append(self.allocator, try self.parseFunction(true, false)),
                         else => return self.fail("expected use, enum, struct, class, or function declaration after 'public'"),
@@ -64,8 +65,8 @@ pub const Parser = struct {
                 .keyword_internal => {
                     try self.advance();
                     switch (self.current.tag) {
-                        .keyword_struct => try structures.append(self.allocator, try self.parseStructure(false, true, false)),
-                        .keyword_class => try structures.append(self.allocator, try self.parseStructure(false, true, true)),
+                        .keyword_struct => try structures.append(self.allocator, try Nominals.parse(self, false, true, false)),
+                        .keyword_class => try structures.append(self.allocator, try Nominals.parse(self, false, true, true)),
                         .keyword_enum => try enums.append(self.allocator, try EnumParser.parse(self, false, true)),
                         .keyword_func => try functions.append(self.allocator, try self.parseFunction(false, true)),
                         else => return self.fail("expected enum, struct, class, or function declaration after 'internal'"),
@@ -85,146 +86,7 @@ pub const Parser = struct {
         };
     }
 
-    fn parseStructure(self: *Parser, is_public: bool, is_internal: bool, is_class: bool) ParseError!Ast.Structure {
-        const position = self.current.position;
-        try self.advance();
-        if (self.current.tag != .identifier) return self.fail(if (is_class) "expected class name" else "expected structure name");
-        const name = self.current.lexeme;
-        const name_position = self.current.position;
-        if (std.mem.eql(u8, name, "Result")) return self.failAt(name_position, "'Result' is a reserved intrinsic type name");
-        _ = try self.internTypeName(name);
-        try self.advance();
-        const type_parameters = try Generics.parseTypeParameters(self);
-        if (is_class and type_parameters.len != 0) return self.failAt(name_position, "generic classes are not supported yet");
-        const enclosing_type_parameters = self.type_parameters;
-        self.type_parameters = if (type_parameters.len == 0) enclosing_type_parameters else type_parameters;
-        defer self.type_parameters = enclosing_type_parameters;
-        try self.expect(.left_brace, "expected '{' after structure name");
-        var fields: std.ArrayList(Ast.StructureField) = .empty;
-        var constructors: std.ArrayList(Ast.Constructor) = .empty;
-        var methods: std.ArrayList(Ast.Function) = .empty;
-        var drop: ?Ast.Drop = null;
-        while (self.current.tag != .right_brace and self.current.tag != .end) {
-            var member_public = !is_class;
-            var member_internal = false;
-            var member_private = is_class;
-            var member_protected = false;
-            var member_visibility = false;
-            if (self.current.tag == .keyword_public or self.current.tag == .keyword_internal or
-                self.current.tag == .keyword_private or self.current.tag == .keyword_protected)
-            {
-                member_visibility = true;
-                member_public = self.current.tag == .keyword_public;
-                member_internal = self.current.tag == .keyword_internal;
-                member_private = self.current.tag == .keyword_private;
-                member_protected = self.current.tag == .keyword_protected;
-                if (!is_class and (member_private or member_protected)) return self.fail("structures only support public or internal members");
-                try self.advance();
-            }
-            if (self.current.tag == .keyword_init) {
-                var constructor = try self.parseConstructor(member_internal);
-                constructor.is_public = member_public;
-                constructor.is_private = member_private;
-                constructor.is_protected = member_protected;
-                try constructors.append(self.allocator, constructor);
-                continue;
-            }
-            if (self.current.tag == .keyword_func) {
-                var method = try self.parseFunction(member_public, member_internal);
-                method.is_private = member_private;
-                method.is_protected = member_protected;
-                try methods.append(self.allocator, method);
-                continue;
-            }
-            if (self.current.tag == .keyword_drop) {
-                if (is_class) return self.fail("class drop blocks are not supported yet");
-                if (member_visibility) return self.fail("drop cannot declare visibility");
-                if (drop != null) return self.fail("structure already declares drop");
-                const drop_position = self.current.position;
-                try self.advance();
-                if (self.current.tag != .left_brace) return self.fail("drop has no parameters or return type");
-                drop = .{ .position = drop_position, .statements = try self.parseBlock() };
-                continue;
-            }
-            const mutable = switch (self.current.tag) {
-                .keyword_let => false,
-                .keyword_var => true,
-                else => return self.fail("structure field must start with 'let' or 'var'"),
-            };
-            const field_position = self.current.position;
-            try self.advance();
-            if (self.current.tag != .identifier) return self.fail("expected field name");
-            const field_name = self.current.lexeme;
-            const field_name_position = self.current.position;
-            try self.advance();
-            try self.expect(.colon, "expected ':' after field name");
-            const field_type = try self.parseType();
-            var default: ?*Ast.Expression = null;
-            if (self.current.tag == .equal) {
-                try self.advance();
-                default = try self.parseExpression(false);
-            }
-            try self.expectStatementTerminator();
-            try fields.append(self.allocator, .{
-                .is_public = member_public,
-                .is_internal = member_internal,
-                .is_private = member_private,
-                .is_protected = member_protected,
-                .position = field_position,
-                .name_position = field_name_position,
-                .name = field_name,
-                .mutable = mutable,
-                .type = field_type,
-                .default = default,
-            });
-        }
-        try self.expect(.right_brace, "expected '}' after structure fields");
-        return .{
-            .is_public = is_public,
-            .is_internal = is_internal,
-            .is_class = is_class,
-            .position = position,
-            .name_position = name_position,
-            .name = name,
-            .type_parameters = type_parameters,
-            .fields = try fields.toOwnedSlice(self.allocator),
-            .constructors = try constructors.toOwnedSlice(self.allocator),
-            .methods = try methods.toOwnedSlice(self.allocator),
-            .drop = drop,
-        };
-    }
-
-    fn parseConstructor(self: *Parser, is_internal: bool) ParseError!Ast.Constructor {
-        const position = self.current.position;
-        try self.advance();
-        if (self.current.tag == .less) return self.fail("constructors cannot declare type parameters");
-        try self.expect(.left_parenthesis, "expected '(' after 'init'");
-        var parameters: std.ArrayList(Ast.Parameter) = .empty;
-        var has_default = false;
-        if (self.current.tag != .right_parenthesis) {
-            while (true) {
-                const parameter = try self.parseParameter();
-                if (has_default and parameter.default == null) {
-                    return self.failAt(parameter.position, "a required parameter cannot follow a parameter with a default value");
-                }
-                has_default = has_default or parameter.default != null;
-                try parameters.append(self.allocator, parameter);
-                if (self.current.tag != .comma) break;
-                try self.advance();
-                if (self.current.tag == .right_parenthesis) return self.fail("expected parameter after ','");
-            }
-        }
-        try self.expect(.right_parenthesis, "expected ')' after constructor parameters");
-        return .{
-            .is_public = !is_internal,
-            .is_internal = is_internal,
-            .position = position,
-            .parameters = try parameters.toOwnedSlice(self.allocator),
-            .statements = try self.parseBlock(),
-        };
-    }
-
-    fn parseFunction(self: *Parser, is_public: bool, is_internal: bool) ParseError!Ast.Function {
+    pub fn parseFunction(self: *Parser, is_public: bool, is_internal: bool) ParseError!Ast.Function {
         const position = self.current.position;
         try self.expect(.keyword_func, "expected 'func'");
         if (self.current.tag != .identifier) return self.fail("expected function name");
@@ -302,7 +164,7 @@ pub const Parser = struct {
         };
     }
 
-    fn parseParameter(self: *Parser) ParseError!Ast.Parameter {
+    pub fn parseParameter(self: *Parser) ParseError!Ast.Parameter {
         return TypeSyntax.parseParameter(self);
     }
 

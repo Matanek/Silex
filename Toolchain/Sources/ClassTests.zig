@@ -135,3 +135,51 @@ test "class visibility closes construction and private state" {
         "private field 'hidden' requires a default or a constructor",
     );
 }
+
+test "derived classes construct their base and preserve identity through upcasts" {
+    const output = try run(
+        \\class Entity {
+        \\    protected var position:int
+        \\    public init(position:int) { self.position = position }
+        \\    public func current() int { return self.position }
+        \\}
+        \\class Player : Entity {
+        \\    let name:str
+        \\    public init(name:str, position:int) : super(position) { self.name = name }
+        \\    public func shift() { self.position += 1 }
+        \\    public func label() str { return self.name }
+        \\}
+        \\func entity(player:Player) Entity { return player }
+        \\func position(value:Entity) int { return value.current() }
+        \\func main() {
+        \\    var player = Player("Ada", 4)
+        \\    var base:Entity = player
+        \\    player.shift()
+        \\    var optional:Entity? = player
+        \\    var values:Entity[] = [player]
+        \\    print(player.label(), " ", position(player), " ", base.current())
+        \\    print(base == entity(player), " ", optional != null, " ", values[0] == base)
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("Ada 5 5\ntrue true true\n", output);
+}
+
+test "class inheritance rejects invalid bases, cycles, and inherited field collisions" {
+    try expectCompileError(
+        "struct Value {} class Child : Value {} func main() {}",
+        "a class can only inherit from another class",
+    );
+    try expectCompileError(
+        "class First : Second {} class Second : First {} func main() {}",
+        "class inheritance forms a cycle",
+    );
+    try expectCompileError(
+        "class Base { protected var value:int = 1 } class Child : Base { var value:int = 2 } func main() {}",
+        "field 'value' is already inherited from a base class",
+    );
+    try expectCompileError(
+        "class Base { private var value:int = 1 } class Child : Base { func read() int { return self.value } } func main() {}",
+        "field 'value' is private and unavailable here",
+    );
+}
