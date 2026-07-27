@@ -2,6 +2,7 @@ const std = @import("std");
 const Ast = @import("../Ast.zig");
 const Model = @import("Model.zig");
 const Support = @import("Support.zig");
+const Resources = @import("Resources.zig");
 
 pub fn analyzeIdentifier(self: anytype, builder: anytype, position: @import("../Source.zig").Position, name: []const u8) !Model.TypedValue {
     const binding = Support.findBinding(builder.bindings.items, name) orelse {
@@ -56,6 +57,21 @@ pub fn validateReadArguments(self: anytype, parameters: []const Ast.Parameter, a
             if (index == other_index or other_parameter.mode == .value or parameter.mode == other_parameter.mode) continue;
             if (sameRoot(other, root)) {
                 const message = try std.fmt.allocPrint(self.allocator, "cannot borrow '{s}' as both '@' and '&' in the same call", .{root});
+                return self.fail(other.position, message);
+            }
+        }
+    }
+    for (parameters[0..arguments.len], arguments, 0..) |parameter, argument, index| {
+        if (parameter.mode != .read) continue;
+        const root = rootName(argument) orelse continue;
+        for (parameters[0..arguments.len], arguments, 0..) |other_parameter, other, other_index| {
+            if (index == other_index or other_parameter.mode != .value or !Resources.containsClass(self, other_parameter.type)) continue;
+            if (sameRoot(other, root)) {
+                const message = try std.fmt.allocPrint(
+                    self.allocator,
+                    "cannot pass '{s}' as both a read reference and a mutation-capable class value",
+                    .{root},
+                );
                 return self.fail(other.position, message);
             }
         }

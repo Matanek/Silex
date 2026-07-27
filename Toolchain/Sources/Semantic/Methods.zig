@@ -425,6 +425,10 @@ fn analyzeCallWithReceiver(
     const mutating = self.method_mutability[flat];
     const class_receiver = self.structures[receiver_structure_index].is_class;
     const borrowed_mutable = method.return_mode == .mutable;
+    if (mutating and receiver.borrowed_mode == .read) {
+        const message = try std.fmt.allocPrint(self.allocator, "mutating method '{s}' cannot be called through a read reference", .{call.name});
+        return self.fail(call.name_position, message);
+    }
     const place = if (mutating and !borrowed_mutable and !class_receiver)
         try requireMutablePlace(self, builder, receiver_expression, call.name)
     else

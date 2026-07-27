@@ -50,6 +50,60 @@ test "classes preserve shared identity through transport and containers" {
     try std.testing.expectEqualStrings("80 true true\ntrue 80 true\n", output);
 }
 
+test "class parameter modes separate instance mutation observation and reference replacement" {
+    const output = try run(
+        \\class Counter {
+        \\    public var value:int
+        \\    public func increment() { self.value++ }
+        \\}
+        \\struct Holder { var counter:Counter }
+        \\func inspect(counter:@Counter) int { return counter.value }
+        \\func inspect_holder(holder:@Holder) int { return holder.counter.value }
+        \\func modify(counter:Counter) { counter.value = 10; counter.increment() }
+        \\func modify_holder(holder:Holder) { holder.counter.value = 12 }
+        \\func replace(counter:&Counter) { counter = Counter(value:20) }
+        \\func replace_optional(counter:&Counter?) { counter = Counter(value:30) }
+        \\func main() {
+        \\    var first = Counter(value:1)
+        \\    var alias = first
+        \\    modify(first)
+        \\    var holder = Holder(counter:first)
+        \\    modify_holder(holder)
+        \\    replace(alias)
+        \\    var optional:Counter? = null
+        \\    replace_optional(optional)
+        \\    if var present = optional {
+        \\        print(inspect(first), " ", inspect_holder(holder), " ", alias.value, " ", present.value, " ", first == alias)
+        \\    }
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("12 12 20 30 false\n", output);
+}
+
+test "read-reference class parameters reject direct transitive and dynamic mutation" {
+    try expectCompileError(
+        "class Counter { public var value:int } func change(counter:@Counter) { counter.value = 1 } func main() {}",
+        "cannot mutate through read-reference parameter 'counter'",
+    );
+    try expectCompileError(
+        "class Counter { public var value:int; public func increment() { self.value++ } } func change(counter:@Counter) { counter.increment() } func main() {}",
+        "mutating method 'increment' cannot be called through a read reference",
+    );
+    try expectCompileError(
+        "class Counter { public var value:int; public func increment() { self.value++ } } struct Holder { var counter:Counter } func change(holder:@Holder) { holder.counter.increment() } func main() {}",
+        "mutating method 'increment' cannot be called through a read reference",
+    );
+    try expectCompileError(
+        "class Counter { public var value:int } func conflict(read:@Counter, write:Counter) { write.value = 1 } func main() { var value = Counter(value:0); conflict(value, value) }",
+        "cannot pass 'value' as both a read reference and a mutation-capable class value",
+    );
+    try expectCompileError(
+        "class Base { public func inspect() {} } class Child : Base { public var value:int = 0; override public func inspect() { self.value++ } } func main() {}",
+        "an override cannot introduce receiver mutation",
+    );
+}
+
 test "classes allow recursive optional links" {
     const output = try run(
         \\class Node { public var value:int; public var next:Node? = null }

@@ -147,7 +147,9 @@ pub fn analyzeReturn(self: anytype, builder: anytype, function: Ast.Function, st
             return;
         }
         try Resources.requireTransfer(self, expression, value.type, "returning it");
-        try Borrowing.requireOwned(self, value, expression.position, "returned");
+        const copied_projection = value.borrowed_root != null and expression.value == .field_access and
+            !Resources.isNoncopyable(self, value.type) and !Resources.containsClass(self, value.type);
+        if (!copied_projection) try Borrowing.requireOwned(self, value, expression.position, "returned");
         try Resources.emitActiveDrops(self, builder, 0);
         self.terminate(builder, .{ .return_value = value.value });
         return;

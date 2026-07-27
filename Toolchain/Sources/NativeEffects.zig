@@ -1098,6 +1098,32 @@ test "native class identity matches the reference interpreter" {
     try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
 }
 
+test "native class parameter modes match the reference interpreter" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const source =
+        \\class Counter { public var value:int }
+        \\func inspect(counter:@Counter) int { return counter.value }
+        \\func modify(counter:Counter) { counter.value = 10 }
+        \\func replace(counter:&Counter) { counter = Counter(value:20) }
+        \\func main() {
+        \\    var first = Counter(value:1)
+        \\    var alias = first
+        \\    modify(first)
+        \\    replace(alias)
+        \\    print(inspect(first), " ", inspect(alias), " ", first == alias)
+        \\}
+    ;
+    var frontend = Frontend.Frontend.init(allocator);
+    const reference = try Interpreter.runCapture(allocator, (try frontend.compile(source)).ir);
+    const native = try compileAndRun(allocator, source);
+    try std.testing.expectEqual(reference.exit_code, exitCode(native));
+    try std.testing.expectEqualSlices(u8, reference.stdout, native.stdout);
+    try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
+}
+
 test "native class inheritance matches the reference interpreter" {
     if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
