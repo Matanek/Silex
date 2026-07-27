@@ -323,14 +323,16 @@ test "member completion never leaks the global language catalogue" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     _ = try server.handleBody(arena.allocator(),
-        \\{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///Main.sx","version":1,"text":"struct Vec {\nvar x:float\nfunc to_str() str { return \"vec\" }\n}\nfunc main() {\nlet pos = Vec()\nprint(pos.t)\n}"}}}
+        \\{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///Main.sx","version":1,"text":"struct Vec {\nvar x:float\nfunc to_str() str { return \"vec\" }\n}\nfunc main() {\nlet pos = Vec()\npos.\nprint(pos.to_str())\n}"}}}
     );
-    const byte_cursor = "print(pos.t".len;
-    const response = (try server.handleBody(arena.allocator(), try std.fmt.allocPrint(arena.allocator(),
+    const byte_cursor = "pos.".len;
+    const response = (try server.handleBody(arena.allocator(), try std.fmt.allocPrint(
+        arena.allocator(),
         "{{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"textDocument/completion\",\"params\":{{\"textDocument\":{{\"uri\":\"file:///Main.sx\"}},\"position\":{{\"line\":6,\"character\":{d}}},\"context\":{{\"triggerKind\":2,\"triggerCharacter\":\".\"}}}}}}",
         .{byte_cursor},
     ))).?;
     try std.testing.expect(std.mem.indexOf(u8, response, "\"label\":\"to_str\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"label\":\"x\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"label\":\"true\"") == null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"label\":\"float\"") == null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"label\":\"if\"") == null);

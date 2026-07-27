@@ -871,12 +871,12 @@ fn parseForCompletion(
     if (parser.parse()) |program| return mergeExtensionsForCompletion(allocator, program) else |_| {}
 
     const placeholder: []const u8 = switch (context.kind) {
-        .member => "__completion",
+        .member => if (context.prefix.len == 0) "__completion()" else "()",
         .type_name => "int",
         .expression => "true",
         else => return null,
     };
-    if (context.prefix.len != 0) return null;
+    if (context.prefix.len != 0 and context.kind != .member) return null;
     const recovered = try std.fmt.allocPrint(allocator, "{s}{s}{s}", .{ source[0..cursor], placeholder, source[cursor..] });
     parser = ParserModule.Parser.init(allocator, recovered);
     const program = parser.parse() catch return null;
@@ -1086,6 +1086,52 @@ test "complete an instance with only its own members" {
     try std.testing.expect(!contains(items, "if"));
     try std.testing.expect(!contains(items, "float"));
     try std.testing.expect(!contains(items, "ignore"));
+}
+
+test "complete a terminal member expression from its static type" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const inferred_source =
+        \\protocol Printable { func to_str() str }
+        \\struct Vec3 : Printable {
+        \\    var x:float
+        \\    var y:float
+        \\    var z:float
+        \\    func to_str() str { return "vec" }
+        \\}
+        \\func main() {
+        \\    var pos = Vec3()
+        \\    pos.
+        \\    print(pos.to_str())
+        \\}
+    ;
+    const inferred_cursor = std.mem.indexOf(u8, inferred_source, "pos.\n").? + "pos.".len;
+    const inferred = try itemsAt(arena.allocator(), inferred_source, inferred_cursor, .trigger_character);
+    try std.testing.expectEqual(@as(usize, 4), inferred.len);
+    try std.testing.expect(contains(inferred, "x"));
+    try std.testing.expect(contains(inferred, "y"));
+    try std.testing.expect(contains(inferred, "z"));
+    try std.testing.expect(contains(inferred, "to_str"));
+
+    const protocol_source =
+        \\protocol Printable { func to_str() str }
+        \\struct Vec3 : Printable {
+        \\    var x:float
+        \\    var y:float
+        \\    var z:float
+        \\    func to_str() str { return "vec" }
+        \\}
+        \\func main() {
+        \\    var pos:Printable = Vec3()
+        \\    pos.
+        \\    print(pos.to_str())
+        \\}
+    ;
+    const protocol_cursor = std.mem.indexOf(u8, protocol_source, "pos.\n").? + "pos.".len;
+    const protocol_items = try itemsAt(arena.allocator(), protocol_source, protocol_cursor, .trigger_character);
+    try std.testing.expectEqual(@as(usize, 1), protocol_items.len);
+    try std.testing.expect(contains(protocol_items, "to_str"));
+    try std.testing.expect(!contains(protocol_items, "x"));
 }
 
 test "complete a dynamic protocol value with only its requirements" {
