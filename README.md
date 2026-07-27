@@ -42,9 +42,49 @@ zig build run -- run /path/to/Main.sx --emit-ir
 
 ```sh
 cd Toolchain
-zig build run -- compile /path/to/Main.sx -o /path/to/program
+zig build run -- compile /path/to/Main.sx -d -o /path/to/program
 /path/to/program
 ```
+
+Debug is the default and favors compilation speed and direct diagnostics.
+Release selects the optimized native pipeline. Every frequent option has a
+short and a descriptive form:
+
+```sh
+silex compile Main.sx -d -o Application
+silex compile Main.sx --debug --output Application
+silex compile Main.sx -r -o Application
+silex compile Main.sx --release --output Application
+```
+
+`run` always uses the reference interpreter. It shares parsing and typed IR
+construction with `compile`, but creates no native executable or hidden output.
+
+Both commands use a content-addressed compilation cache rooted in
+`<current-directory>/.silex/cache`. The root depends on the directory from
+which `silex` is invoked, not on the source file's parent. Disable every cache
+read and write for one invocation with `-n` or `--nocache`:
+
+```sh
+silex run Sandbox/Main.sx --nocache
+silex compile Sandbox/Main.sx -r -n -o Application
+```
+
+The cache persists per-module ASTs, the composed portable IR and native Mach-O
+outputs. Entries are keyed by exact source content and compilation mode,
+validated before use and published atomically. Removing `.silex/cache` is
+always safe.
+
+Run the reproducible Apple Silicon comparison against an equivalent C++23
+workload compiled by `clang++ -O2`:
+
+```sh
+zig build benchmark-native
+```
+
+The report checks observable output first, then records compiler versions,
+binary sizes, compilation times, and execution times under
+`.zig-cache/benchmark-native/`.
 
 The native path emits ARM64 instructions and the Mach-O executable container.
 It invokes no C/C++ generator, external assembler, or linker.

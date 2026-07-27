@@ -1,5 +1,6 @@
 const std = @import("std");
 const Ast = @import("Ast.zig");
+const CompilationCache = @import("CompilationCache.zig");
 const Interface = @import("Interface.zig");
 const GenericSpecializer = @import("Generics/Specializer.zig").Specializer;
 const Result = @import("Intrinsics/Result.zig");
@@ -54,6 +55,7 @@ pub const Compiler = struct {
     entry_module: usize = 0,
     diagnostic: ?Source.Diagnostic = null,
     generic_type_maps: []const []const Ast.Type = &.{},
+    cache_modules: bool = false,
 
     pub fn init(allocator: Allocator, io: Io) Compiler {
         return .{ .allocator = allocator, .io = io };
@@ -61,6 +63,20 @@ pub const Compiler = struct {
 
     pub fn initWithPackages(allocator: Allocator, io: Io, global_packages_root: ?[]const u8) Compiler {
         return .{ .allocator = allocator, .io = io, .global_packages_root = global_packages_root };
+    }
+
+    pub fn initWithPackagesAndCache(
+        allocator: Allocator,
+        io: Io,
+        global_packages_root: ?[]const u8,
+        cache_modules: bool,
+    ) Compiler {
+        return .{
+            .allocator = allocator,
+            .io = io,
+            .global_packages_root = global_packages_root,
+            .cache_modules = cache_modules,
+        };
     }
 
     pub fn compile(self: *Compiler, input_path: []const u8) Error!Compilation {
@@ -162,12 +178,17 @@ pub const Compiler = struct {
             self.allocator,
             .limited(1024 * 1024),
         );
-        var parser = ParserModule.Parser.initFile(self.allocator, source, provider.file);
-        const parsed = parser.parse() catch |err| {
-            self.diagnostic = parser.diagnostic;
-            return err;
+        const cached = if (self.cache_modules) CompilationCache.loadAst(self.allocator, self.io, provider.path, source) else null;
+        const program = cached orelse parsed: {
+            var parser = ParserModule.Parser.initFile(self.allocator, source, provider.file);
+            const parsed_program = parser.parse() catch |err| {
+                self.diagnostic = parser.diagnostic;
+                return err;
+            };
+            const installed = try Result.install(self.allocator, parsed_program);
+            if (self.cache_modules) CompilationCache.storeAst(self.allocator, self.io, provider.path, source, installed);
+            break :parsed installed;
         };
-        const program = try Result.install(self.allocator, parsed);
         self.units[module].program = program;
 
         var bindings: std.ArrayList(Binding) = .empty;
@@ -296,7 +317,14 @@ pub const Compiler = struct {
             };
         }
 
-        const message = try std.fmt.allocPrint(self.allocator, "unknown module or declaration '{s}'", .{use.path});
+        const message = if (self.packages.unavailableForTarget(owner, use.path))
+            try std.fmt.allocPrint(
+                self.allocator,
+                "module '{s}' is not available for {s}",
+                .{ use.path, Packages.target_name },
+            )
+        else
+            try std.fmt.allocPrint(self.allocator, "unknown module or declaration '{s}'", .{use.path});
         return self.fail(use.position, message);
     }
 

@@ -66,7 +66,8 @@ pub const Package = struct {
     name: ?[]const u8,
     version: ?Version,
     root: []const u8,
-    module_root: []const u8,
+    module_roots: []const []const u8,
+    inactive_modules: []const []const u8,
     dependencies: []const Dependency,
 };
 
@@ -92,7 +93,24 @@ pub const Graph = struct {
     pub fn label(self: Graph, package: usize) []const u8 {
         return self.packages[package].name orelse "application";
     }
+
+    pub fn unavailableForTarget(self: Graph, owner: usize, module_name: []const u8) bool {
+        for (self.packages, 0..) |package, provider| {
+            if (provider != owner and !self.canAccess(owner, provider, module_name)) continue;
+            for (package.inactive_modules) |inactive| {
+                if (package.name) |prefix| {
+                    if (module_name.len == prefix.len + 1 + inactive.len and
+                        std.mem.startsWith(u8, module_name, prefix) and
+                        module_name[prefix.len] == '.' and
+                        std.mem.eql(u8, module_name[prefix.len + 1 ..], inactive)) return true;
+                } else if (std.mem.eql(u8, inactive, module_name)) return true;
+            }
+        }
+        return false;
+    }
 };
+
+pub const target_name = "macos-arm64";
 
 pub const Result = struct {
     graph: Graph,
@@ -146,16 +164,15 @@ pub const Resolver = struct {
             std.fs.path.dirname(project_root) orelse project_root
         else
             project_root;
-        const root_module = if (root_manifest != null and root_manifest.?.name != null)
-            try std.fs.path.join(self.allocator, &.{ project_root, "Module" })
-        else
-            project_root;
+        const named_root = root_manifest != null and root_manifest.?.name != null;
+        const roots = try self.moduleRoots(project_root, named_root);
         try self.builders.append(self.allocator, .{
             .package = .{
                 .name = if (root_manifest) |manifest| manifest.name else null,
                 .version = if (root_manifest) |manifest| manifest.version else null,
                 .root = project_root,
-                .module_root = root_module,
+                .module_roots = roots.active,
+                .inactive_modules = roots.inactive,
                 .dependencies = &.{},
             },
             .state = .visiting,
@@ -279,14 +296,15 @@ pub const Resolver = struct {
         version: Version,
     ) anyerror!usize {
         if (self.find(name)) |existing| return existing;
-        const module_root = try std.fs.path.join(self.allocator, &.{ root, "Module" });
+        const roots = try self.moduleRoots(root, true);
         const index = self.builders.items.len;
         try self.builders.append(self.allocator, .{
             .package = .{
                 .name = name,
                 .version = version,
                 .root = root,
-                .module_root = module_root,
+                .module_roots = roots.active,
+                .inactive_modules = roots.inactive,
                 .dependencies = &.{},
             },
             .state = .visiting,
@@ -294,6 +312,53 @@ pub const Resolver = struct {
         try self.resolveDependencies(index, manifest.dependencies);
         self.builders.items[index].state = .done;
         return index;
+    }
+
+    const ModuleRoots = struct {
+        active: []const []const u8,
+        inactive: []const []const u8,
+    };
+
+    fn moduleRoots(self: *Resolver, root: []const u8, named: bool) !ModuleRoots {
+        if (!named) return .{
+            .active = try self.allocator.dupe([]const u8, &.{root}),
+            .inactive = &.{},
+        };
+
+        var active: std.ArrayList([]const u8) = .empty;
+        try active.append(self.allocator, try std.fs.path.join(self.allocator, &.{ root, "Module" }));
+        const selected = try std.fs.path.join(self.allocator, &.{ root, "Platform", target_name, "Module" });
+        if (try exists(self.io, selected)) try active.append(self.allocator, selected);
+        return .{
+            .active = try active.toOwnedSlice(self.allocator),
+            .inactive = try self.inactiveModuleNames(root),
+        };
+    }
+
+    fn inactiveModuleNames(self: *Resolver, root: []const u8) ![]const []const u8 {
+        const platform_path = try std.fs.path.join(self.allocator, &.{ root, "Platform" });
+        var platform = Io.Dir.cwd().openDir(self.io, platform_path, .{ .iterate = true }) catch |err| switch (err) {
+            error.FileNotFound, error.NotDir => return &.{},
+            else => return &.{},
+        };
+        defer platform.close(self.io);
+
+        var names: std.ArrayList([]const u8) = .empty;
+        var targets = platform.iterateAssumeFirstIteration();
+        while (targets.next(self.io) catch null) |entry| {
+            if (entry.kind != .directory or std.mem.eql(u8, entry.name, target_name)) continue;
+            const module_root = try std.fs.path.join(self.allocator, &.{ platform_path, entry.name, "Module" });
+            const discovered = Modules.discoverOwned(self.allocator, self.io, module_root, null, 0) catch continue;
+            for (discovered.providers) |provider| try names.append(self.allocator, provider.name);
+        }
+        std.mem.sort([]const u8, names.items, {}, stringLessThan);
+        var unique: std.ArrayList([]const u8) = .empty;
+        for (names.items) |name| {
+            if (unique.items.len == 0 or !std.mem.eql(u8, unique.items[unique.items.len - 1], name)) {
+                try unique.append(self.allocator, name);
+            }
+        }
+        return unique.toOwnedSlice(self.allocator);
     }
 
     fn validateSelected(

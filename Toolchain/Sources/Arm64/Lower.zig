@@ -1,7 +1,9 @@
 const std = @import("std");
 const Ir = @import("../Ir.zig");
+const CompilationCache = @import("../CompilationCache.zig");
 const MainBoundary = @import("../MainBoundary.zig");
 const Machine = @import("Machine.zig");
+const RegisterAllocation = @import("RegisterAllocation.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -16,6 +18,20 @@ const Layout = struct {
 };
 
 pub fn lower(allocator: Allocator, program: Ir.Program) Machine.Error!Machine.Program {
+    return lowerWithMode(allocator, program, .debug);
+}
+
+pub const Mode = enum { debug, release };
+
+pub fn lowerWithMode(allocator: Allocator, program: Ir.Program, mode: Mode) Machine.Error!Machine.Program {
+    return lowerInternal(allocator, null, program, mode);
+}
+
+pub fn lowerCached(allocator: Allocator, io: std.Io, program: Ir.Program, mode: Mode) Machine.Error!Machine.Program {
+    return lowerInternal(allocator, io, program, mode);
+}
+
+fn lowerInternal(allocator: Allocator, io: ?std.Io, program: Ir.Program, mode: Mode) Machine.Error!Machine.Program {
     var functions: std.ArrayList(Machine.Function) = .empty;
     var strings: std.ArrayList([]const u8) = .empty;
     try strings.append(allocator, "\n");
@@ -23,7 +39,27 @@ pub fn lower(allocator: Allocator, program: Ir.Program) Machine.Error!Machine.Pr
     try strings.append(allocator, "false");
     try strings.append(allocator, "error: ");
     for (program.functions) |function| {
-        try functions.append(allocator, try lowerFunction(allocator, program, &strings, function));
+        var lowered = cached: {
+            if (io) |cache_io| if (cacheSafe(function)) {
+                const encoded = std.json.Stringify.valueAlloc(allocator, function, .{}) catch break :cached try lowerFunction(allocator, program, &strings, function);
+                const digest = CompilationCache.artifactKey(@tagName(mode), &.{encoded});
+                if (CompilationCache.load(allocator, cache_io, digest, "machine-function")) |payload| {
+                    if (std.json.parseFromSliceLeaky(Machine.Function, allocator, payload, .{})) |value| {
+                        break :cached value;
+                    } else |_| {}
+                }
+                var value = try lowerFunction(allocator, program, &strings, function);
+                if (mode == .release) value = try allocateRegisters(allocator, value);
+                const payload = std.json.Stringify.valueAlloc(allocator, value, .{}) catch break :cached value;
+                CompilationCache.store(allocator, cache_io, digest, "machine-function", payload);
+                break :cached value;
+            };
+            var value = try lowerFunction(allocator, program, &strings, function);
+            if (mode == .release) value = try allocateRegisters(allocator, value);
+            break :cached value;
+        };
+        if (mode == .release and lowered.register_slots.len == 0) lowered = try allocateRegisters(allocator, lowered);
+        try functions.append(allocator, lowered);
     }
     const globals = try allocator.alloc(Machine.Global, program.globals.len);
     for (program.globals, 0..) |global, index| globals[index] = .{
@@ -38,6 +74,39 @@ pub fn lower(allocator: Allocator, program: Ir.Program) Machine.Error!Machine.Pr
     };
     try Machine.validate(result);
     return result;
+}
+
+fn allocateRegisters(allocator: Allocator, function: Machine.Function) Machine.Error!Machine.Function {
+    var result = function;
+    const allocation = try RegisterAllocation.allocate(allocator, result);
+    result.register_slots = allocation.residences;
+    result.frame_size = allocation.frame_size;
+    return result;
+}
+
+fn cacheSafe(function: Ir.Function) bool {
+    if (!scalarType(function.return_type)) return false;
+    for (function.parameter_types) |type_value| if (!scalarType(type_value)) return false;
+    for (function.value_types) |type_value| if (!scalarType(type_value)) return false;
+    for (function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
+        .constant_int,
+        .constant_bool,
+        .constant_float32,
+        .constant_float64,
+        .copy,
+        .local_load,
+        .local_store,
+        .unary,
+        .binary,
+        .call,
+        => {},
+        else => return false,
+    };
+    return true;
+}
+
+fn scalarType(type_value: Ir.Type) bool {
+    return type_value == .void or type_value == .bool or type_value.isInteger() or type_value.isFloat();
 }
 
 fn lowerFunction(

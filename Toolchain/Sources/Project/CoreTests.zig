@@ -312,6 +312,92 @@ test "compose simple modules with an adjacent local package" {
     try std.testing.expectEqualStrings("MonPackage.Class1", compilation.interfaces[2].name);
 }
 
+test "select named package module roots for macos-arm64" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.createDirPath(std.testing.io, "Bridge/Module");
+    try temporary.dir.createDirPath(std.testing.io, "Bridge/Platform/macos-arm64/Module");
+    try temporary.dir.createDirPath(std.testing.io, "Bridge/Platform/linux-x64-gnu/Module");
+    try temporary.dir.createDirPath(std.testing.io, "Bridge/Platform/windows-x64/Module");
+    try temporary.dir.createDirPath(std.testing.io, "Portable/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Bridge/Package.json",
+        .data = "{\"name\":\"Bridge\",\"version\":\"1.0.0\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Bridge/Module/Public.sx",
+        .data = "use Bridge.Implementation\npublic func value() int { return Implementation.value() }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Bridge/Platform/macos-arm64/Module/Implementation.sx",
+        .data = "public func value() int { return 40 }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Bridge/Platform/linux-x64-gnu/Module/LinuxOnly.sx",
+        .data = "this deliberately invalid Linux source must stay inactive",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Bridge/Platform/windows-x64/Module/Implementation.sx",
+        .data = "this deliberately invalid Windows source must stay inactive",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Portable/Package.json",
+        .data = "{\"name\":\"Portable\",\"version\":\"1.0.0\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Portable/Module/Api.sx",
+        .data = "public func value() int { return 2 }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "use Bridge.Public\nuse Portable.Api\nfunc answer() int { return Public.value() + Api.value() }\nfunc main() {}",
+    });
+
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(input);
+    const answer = try @import("../Interpreter.zig").invoke(allocator, compilation.ir, 0, &.{});
+    try std.testing.expectEqual(@as(i64, 42), answer.integer);
+    try std.testing.expect(compiler.index.find("Bridge.Implementation") != null);
+    try std.testing.expect(compiler.index.find("Bridge.Platform.macos_arm64.Implementation") == null);
+    try std.testing.expect(compiler.index.find("Bridge.LinuxOnly") == null);
+
+    var second = Compiler.init(allocator, std.testing.io);
+    const repeated = try second.compile(input);
+    try std.testing.expectEqual(compilation.files.len, repeated.files.len);
+    for (compilation.files, repeated.files) |left, right| try std.testing.expectEqualStrings(left, right);
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "use Bridge.LinuxOnly\nfunc main() {}",
+    });
+    compiler = Compiler.init(allocator, std.testing.io);
+    try std.testing.expectError(error.InvalidSource, compiler.compile(input));
+    try std.testing.expectEqualStrings(
+        "module 'Bridge.LinuxOnly' is not available for macos-arm64",
+        compiler.diagnostic.?.message,
+    );
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "use Bridge.Public\nfunc main() {}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Bridge/Module/Implementation.sx",
+        .data = "public func value() int { return 1 }",
+    });
+    compiler = Compiler.init(allocator, std.testing.io);
+    try std.testing.expectError(error.InvalidSource, compiler.compile(input));
+    try std.testing.expectEqualStrings(
+        "multiple source files provide the same module",
+        compiler.diagnostic.?.message,
+    );
+}
+
 test "qualified packages share namespaces without sharing ownership" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

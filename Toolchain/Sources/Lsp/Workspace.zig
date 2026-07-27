@@ -306,13 +306,15 @@ fn indexProject(
 ) !IndexedProject {
     var resolver = Packages.Resolver.init(allocator, io, global_packages_root);
     const graph = try resolver.resolve(root);
-    const indexes = try allocator.alloc(Modules.Index, graph.packages.len);
+    var indexes: std.ArrayList(Modules.Index) = .empty;
     for (graph.packages, 0..) |package, owner| {
-        var discovered = try Modules.discoverOwned(allocator, io, package.module_root, package.name, owner);
-        if (owner == 0) discovered = try excludePackageSources(allocator, discovered, graph.packages[1..]);
-        indexes[owner] = discovered;
+        for (package.module_roots) |module_root| {
+            var discovered = try Modules.discoverOwned(allocator, io, module_root, package.name, owner);
+            if (owner == 0) discovered = try excludePackageSources(allocator, discovered, graph.packages[1..]);
+            try indexes.append(allocator, discovered);
+        }
     }
-    const index = try Modules.combine(allocator, indexes);
+    const index = try Modules.combine(allocator, indexes.items);
     var current_owner: usize = 0;
     for (index.providers) |provider| if (samePath(provider.path, document_path)) {
         current_owner = provider.owner;
@@ -1404,6 +1406,51 @@ test "complete public package APIs module aliases members and overlays" {
 fn hasLabel(items: []const Types.CompletionItem, label: []const u8) bool {
     for (items) |item| if (std.mem.eql(u8, item.label, label)) return true;
     return false;
+}
+
+test "workspace indexes the selected package target root" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.createDirPath(std.testing.io, "Bridge/Module");
+    try temporary.dir.createDirPath(std.testing.io, "Bridge/Platform/macos-arm64/Module");
+    try temporary.dir.createDirPath(std.testing.io, "Bridge/Platform/linux-x64-gnu/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Bridge/Package.json",
+        .data = "{\"name\":\"Bridge\",\"version\":\"1.0.0\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Bridge/Module/Public.sx", .data = "" });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Bridge/Platform/macos-arm64/Module/Implementation.sx",
+        .data = "",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Bridge/Platform/linux-x64-gnu/Module/LinuxOnly.sx",
+        .data = "this source is deliberately invalid",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = "func main() {}" });
+
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const path = try std.fs.path.join(allocator, &.{ root, "Main.sx" });
+    const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
+    const uri = try std.fmt.allocPrint(allocator, "file://{s}", .{path});
+    const source = "use Bridge.";
+    const items = (try itemsAt(
+        allocator,
+        std.testing.io,
+        null,
+        root_uri,
+        uri,
+        &.{},
+        source,
+        source.len,
+    )).?;
+    try std.testing.expect(hasLabel(items, "Public"));
+    try std.testing.expect(hasLabel(items, "Implementation"));
+    try std.testing.expect(!hasLabel(items, "LinuxOnly"));
 }
 
 fn labelCount(items: []const Types.CompletionItem, label: []const u8) usize {

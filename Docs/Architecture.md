@@ -181,8 +181,30 @@ open Silex document
 - The compiler writes the Mach-O headers, load commands, `__text`, entry
   wrapper, and ad-hoc SHA-256 code signature itself. It does not produce an
   object file or invoke an assembler, linker, or `codesign`.
-- The command `silex run <source.sx>` uses the reference interpreter.
-  `silex compile <source.sx> -o <executable>` selects the native path.
+- The `macos-arm64` target can lower one verified machine-level C ABI contract,
+  `Darwin.lib_system.write`, after portable composition. It emits the
+  `libSystem` load command, `_write` symbol, binding stream and GOT directly.
+  This target mechanism is not exposed in Silex source and does not change the
+  language's internal calling convention.
+- The command `silex run <source.sx> [-n|--nocache]` uses the reference interpreter.
+  `silex compile <source.sx> [-d|--debug|-r|--release]
+  [-n|--nocache] -o|--output <executable>` selects the native path. Debug is the default;
+  Release selects semantics-preserving optimization. `run` shares the frontend
+  through typed IR but emits no native executable or implicit output file.
+- Release propagates constants and copies, folds checked scalar operations,
+  removes dead and unreachable IR, and inlines functions proven constant,
+  identity-only or scalar-binary. ARM64 lowering then performs deterministic
+  linear-scan allocation for safe scalar leaves; addressable values, aggregates
+  and values constrained by calls remain explicit spills. Fully resident leaf
+  functions allocate no value frame. Debug retains the direct stack-resident
+  lowering.
+- Source-compiling commands root their private cache at
+  `<invocation-cwd>/.silex/cache`. Content-addressed, versioned entries persist
+  module ASTs, portable typed IR, Release and machine functions that are safe
+  to reuse independently, and mode-specific Mach-O images. Exact source
+  contents are re-hashed before reuse; corrupt or unavailable entries are
+  misses, and atomic publication prevents readers from observing partial data.
+  `-n` and `--nocache` perform no cache access and do not create `.silex`.
 - The command `silex lsp` speaks framed JSON-RPC over standard input and
   output. Its public capabilities describe editor intentions; AST and IR
   structures remain private implementation details.
@@ -210,8 +232,10 @@ open Silex document
 - String concatenation currently retains its native storage until process exit;
   reclamation and a general allocation model remain future internal work.
 - No public system API or general native allocation API exists yet.
-- The native backend has no symbols, debugging information, dynamic imports,
-  library model, or ABI stability guarantee yet.
+- The native backend has no debugging information, general dynamic-library
+  model, source-level external declarations, or ABI stability guarantee yet.
+  Its sole external import is the internal `libSystem.write` validation
+  contract described above.
 - Native executable emission and native tests currently require an Apple
   Silicon macOS host.
 - Interfaces, IR and package graphs are in-memory structures and have no stable

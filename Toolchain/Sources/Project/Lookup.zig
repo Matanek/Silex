@@ -39,13 +39,15 @@ pub fn findLocalFunction(program: Ast.Program, name: []const u8) bool {
 }
 
 pub fn discoverProviders(self: anytype) !Modules.Index {
-    const indexes = try self.allocator.alloc(Modules.Index, self.packages.packages.len);
+    var indexes: std.ArrayList(Modules.Index) = .empty;
     for (self.packages.packages, 0..) |package, owner| {
-        var discovered = try Modules.discoverOwned(self.allocator, self.io, package.module_root, package.name, owner);
-        if (owner == 0) discovered = try excludePackageSources(self, discovered);
-        indexes[owner] = discovered;
+        for (package.module_roots) |module_root| {
+            var discovered = try Modules.discoverOwned(self.allocator, self.io, module_root, package.name, owner);
+            if (owner == 0) discovered = try excludePackageSources(self, discovered);
+            try indexes.append(self.allocator, discovered);
+        }
     }
-    return Modules.combine(self.allocator, indexes);
+    return Modules.combine(self.allocator, indexes.items);
 }
 
 fn excludePackageSources(self: anytype, index: Modules.Index) !Modules.Index {

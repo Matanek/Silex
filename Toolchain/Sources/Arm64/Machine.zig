@@ -96,6 +96,7 @@ pub const Instruction = union(enum) {
     unary: Unary,
     binary: Binary,
     call: Call,
+    external_call: ExternalCall,
     dynamic_call: DynamicCall,
     print: Print,
     assert: Assert,
@@ -381,6 +382,12 @@ pub const Instruction = union(enum) {
         arguments: []const Span,
     };
 
+    pub const ExternalCall = struct {
+        result: ?Slot,
+        function: usize,
+        arguments: []const Slot,
+    };
+
     pub const DynamicCall = struct {
         result: ?Span,
         function: FunctionId,
@@ -429,14 +436,31 @@ pub const Function = struct {
     hidden_return_slot: ?Slot = null,
     slot_count: u12,
     frame_size: u16,
+    /// Release-only residence map indexed by virtual slot. Null keeps the
+    /// value in its deterministic stack slot.
+    register_slots: []const ?u5 = &.{},
     instructions: []const Instruction,
 };
 
 pub const Program = struct {
     functions: []const Function,
+    external_functions: []const ExternalFunction = &.{},
     globals: []const Global = &.{},
     strings: []const []const u8 = &.{},
     copy_model: []const u64 = &.{},
+};
+
+pub const AbiValue = enum { int32, read_address, uint64, int64 };
+
+pub const ExternalFunction = struct {
+    provider: []const u8,
+    source_name: []const u8,
+    signature: Signature,
+
+    pub const Signature = struct {
+        arguments: []const AbiValue,
+        result: ?AbiValue,
+    };
 };
 
 pub const Global = struct { bits: u64, width: u12 = 1 };
@@ -464,7 +488,14 @@ pub fn slotOffset(slot: Slot) u16 {
 pub fn validate(program: Program) Error!void {
     for (program.functions) |function| {
         if (function.parameter_count > max_register_arguments) return error.TooManyArguments;
-        if (function.frame_size != try frameSize(function.slot_count)) return error.InvalidMachineProgram;
+        if (function.register_slots.len == 0) {
+            if (function.frame_size != try frameSize(function.slot_count)) return error.InvalidMachineProgram;
+        } else if (function.frame_size > try frameSize(function.slot_count) or function.frame_size % 16 != 0) {
+            return error.InvalidMachineProgram;
+        }
+        if (function.register_slots.len != 0 and function.register_slots.len != function.slot_count) {
+            return error.InvalidMachineProgram;
+        }
         for (function.instructions) |instruction| switch (instruction) {
             .constant_int => |value| try requireSlot(function, value.result),
             .constant_bool => |value| try requireSlot(function, value.result),
@@ -703,6 +734,21 @@ pub fn validate(program: Program) Error!void {
                     }
                 } else if (callee.return_type != .void) return error.InvalidMachineProgram;
             },
+            .external_call => |call| {
+                if (call.function >= program.external_functions.len or call.arguments.len > max_register_arguments) {
+                    return error.InvalidMachineProgram;
+                }
+                const external = program.external_functions[call.function];
+                if (!supportedExternal(external) or call.arguments.len != external.signature.arguments.len) {
+                    return error.InvalidMachineProgram;
+                }
+                for (call.arguments) |argument| try requireSlot(function, argument);
+                if (external.signature.result == null) {
+                    if (call.result != null) return error.InvalidMachineProgram;
+                } else {
+                    try requireSlot(function, call.result orelse return error.InvalidMachineProgram);
+                }
+            },
             .dynamic_call => |call| {
                 if (call.function >= program.functions.len or call.arguments.len > max_register_arguments) return error.InvalidMachineProgram;
                 try requireSlot(function, call.receiver);
@@ -745,6 +791,14 @@ pub fn validate(program: Program) Error!void {
         if (function.recoverable_entry_result and (!function.return_aggregate or function.return_width != 2)) return error.InvalidMachineProgram;
         if (function.hidden_return_slot) |slot| try requireSlot(function, slot);
     }
+}
+
+fn supportedExternal(function: ExternalFunction) bool {
+    const write_arguments = [_]AbiValue{ .int32, .read_address, .uint64 };
+    return std.mem.eql(u8, function.provider, "Darwin.lib_system") and
+        std.mem.eql(u8, function.source_name, "write") and
+        std.mem.eql(AbiValue, function.signature.arguments, &write_arguments) and
+        function.signature.result == .int64;
 }
 
 fn requireSlot(function: Function, slot: Slot) Error!void {

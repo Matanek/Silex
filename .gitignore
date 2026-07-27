@@ -3,3 +3,4 @@
 /Toolchain/.zig-cache/
 /Toolchain/.zig-global-cache/
 /Toolchain/zig-out/
+.silex/
