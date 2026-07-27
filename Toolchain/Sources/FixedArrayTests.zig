@@ -19,18 +19,18 @@ test "construct inspect index and mutate fixed arrays" {
     var frontend = Frontend.Frontend.init(allocator);
     const compilation = try frontend.compile(
         \\func changed(values:int[3]) int[3] {
-        \\    var copy = values
-        \\    copy[0] = 9
-        \\    return copy
+        \\    var duplicate = values
+        \\    duplicate[0] = 9
+        \\    return duplicate
         \\}
         \\func main() {
         \\    var axes:int[3] = [1, 2, 3]
-        \\    let copy = changed(axes)
+        \\    let duplicate = changed(axes)
         \\    axes[-1] += 4
         \\    let empty:int[0] = []
         \\    let nested:int[2][2] = [[10, 11], [20, 21]]
         \\    print(axes.count(), " ", axes.is_empty(), " ", axes[0], " ", axes[-1])
-        \\    print(copy[0], " ", copy[2], " ", empty.count(), " ", empty.is_empty())
+        \\    print(duplicate[0], " ", duplicate[2], " ", empty.count(), " ", empty.is_empty())
         \\    print(nested[1][-1])
         \\}
     );
@@ -77,11 +77,11 @@ test "compose fixed arrays through public module functions" {
     defer temporary.cleanup();
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Arrays.sx",
-        .data = "public func changed(values:int[2]) int[2] { var copy = values; copy[1] = 9; return copy }",
+        .data = "public func changed(values:int[2]) int[2] { var duplicate = values; duplicate[1] = 9; return duplicate }",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Main.sx",
-        .data = "use Arrays\nfunc main() { let source:int[2] = [1, 2]; let copy = Arrays.changed(source); print(source[1], copy[1]) }",
+        .data = "use Arrays\nfunc main() { let source:int[2] = [1, 2]; let duplicate = Arrays.changed(source); print(source[1], duplicate[1]) }",
     });
     const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
     var compiler = Project.Compiler.init(allocator, std.testing.io);

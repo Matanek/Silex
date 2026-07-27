@@ -289,9 +289,9 @@ test "native ARM64 transports and compares flattened structure values" {
         \\}
         \\func copiedDifferent() bool {
         \\    var value = Nested(left:sample(), right:sample())
-        \\    let copy = value
+        \\    let duplicate = value
         \\    value = Nested()
-        \\    return value != copy
+        \\    return value != duplicate
         \\}
         \\func main() {}
     );
@@ -324,9 +324,9 @@ test "native ARM64 agrees on nested field mutation and value copies" {
         \\}
         \\func copyIndependent() bool {
         \\    var player = Player(score:Score(value:1, other:2), reserve:3)
-        \\    let copy = player
+        \\    let duplicate = player
         \\    player.score.value = 9
-        \\    return copy == Player(score:Score(value:1, other:2), reserve:3)
+        \\    return duplicate == Player(score:Score(value:1, other:2), reserve:3)
         \\}
         \\func main() {}
     );
@@ -374,7 +374,7 @@ test "native ARM64 agrees on method receiver mutation returns and chaining" {
         \\    func forward() { self.increment() }
         \\    func add(amount:int) int { self.value += amount; return self.value }
         \\    func current() int { return self.value }
-        \\    func copy() Counter { return self }
+        \\    func duplicate() Counter { return self }
         \\}
         \\func mutate() int {
         \\    var counter = Counter(value:1)
@@ -382,7 +382,7 @@ test "native ARM64 agrees on method receiver mutation returns and chaining" {
         \\    let returned = counter.add(20)
         \\    return returned + counter.current()
         \\}
-        \\func chained() int { return Counter(value:42).copy().current() }
+        \\func chained() int { return Counter(value:42).duplicate().current() }
         \\func main() {}
     );
     const machine = try Lower.lower(allocator, compilation.ir);

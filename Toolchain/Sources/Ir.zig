@@ -70,6 +70,7 @@ pub const Instruction = union(enum) {
     optional_some: OptionalSome,
     optional_unwrap: OptionalUnwrap,
     copy: Copy,
+    deep_copy: Copy,
     class_cast: Copy,
     class_retain: ClassRetain,
     class_drop: ClassDrop,
@@ -605,6 +606,11 @@ fn writeInstruction(
         .copy, .class_cast => |copy| {
             try appendResult(output, allocator, program, function, copy.result);
             try output.appendSlice(allocator, "copy ");
+            try appendValueChecked(output, allocator, function, copy.operand);
+        },
+        .deep_copy => |copy| {
+            try appendResult(output, allocator, program, function, copy.result);
+            try output.appendSlice(allocator, "deep_copy ");
             try appendValueChecked(output, allocator, function, copy.operand);
         },
         .class_retain => |retain| {

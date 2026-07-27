@@ -34,6 +34,7 @@ pub fn lower(allocator: Allocator, program: Ir.Program) Machine.Error!Machine.Pr
         .functions = try functions.toOwnedSlice(allocator),
         .globals = globals,
         .strings = try strings.toOwnedSlice(allocator),
+        .copy_model = try buildCopyModel(allocator, program),
     };
     try Machine.validate(result);
     return result;
@@ -122,6 +123,11 @@ fn lowerInstruction(
             } };
         },
         .copy => |copy| lowerCopy(layout.values[copy.result], layout.values[copy.operand]),
+        .deep_copy => |copy| .{ .deep_copy = .{
+            .result = layout.values[copy.result],
+            .operand = layout.values[copy.operand],
+            .type = function.value_types[copy.result],
+        } },
         .class_cast => |cast| lowerCopy(layout.values[cast.result], layout.values[cast.operand]),
         .class_retain => |retain| .{ .class_retain = .{ .operand = layout.values[retain.operand].start } },
         .class_drop => |drop| finalize: {
@@ -575,6 +581,92 @@ fn fieldOffset(program: Ir.Program, structure_index: usize, field_index: usize) 
     var result: usize = 0;
     for (program.structures[structure_index].fields[0..field_index]) |field| result += try leafCount(program, field.type);
     return result;
+}
+
+const copy_kind_value = 0;
+const copy_kind_class = 1;
+const copy_kind_protocol = 2;
+const copy_kind_list = 3;
+const copy_kind_array = 4;
+const copy_kind_enumeration = 5;
+const copy_entry_words = 4;
+
+fn buildCopyModel(allocator: Allocator, program: Ir.Program) Machine.Error![]const u64 {
+    var model: std.ArrayList(u64) = .empty;
+    try model.append(allocator, program.structures.len);
+    try model.appendNTimes(allocator, 0, program.structures.len * copy_entry_words);
+
+    for (program.structures, 0..) |structure, structure_index| {
+        const entry = 1 + structure_index * copy_entry_words;
+        const data_offset = model.items.len;
+        var kind: u64 = copy_kind_value;
+
+        if (enumByType(program, .structure(structure_index))) |enumeration| {
+            kind = copy_kind_enumeration;
+            try model.append(allocator, enumeration.variants.len);
+            for (enumeration.variants) |variant| {
+                const raw_count: usize = @intFromBool(enumeration.raw_type != null);
+                try model.append(allocator, raw_count + variant.associated_types.len);
+                if (enumeration.raw_type) |raw_type| try model.append(allocator, @intFromEnum(raw_type));
+                for (variant.associated_types) |associated| try model.append(allocator, @intFromEnum(associated));
+            }
+        } else if (structure.is_protocol) {
+            kind = copy_kind_protocol;
+            var case_count: usize = 0;
+            for (program.structures, 0..) |candidate, candidate_index| {
+                if (!candidate.is_protocol and irConforms(program, candidate_index, structure_index)) case_count += 1;
+            }
+            try model.append(allocator, case_count);
+            for (program.structures, 0..) |candidate, candidate_index| {
+                if (candidate.is_protocol or !irConforms(program, candidate_index, structure_index)) continue;
+                try model.append(allocator, candidate_index);
+                try model.append(allocator, @intFromEnum(Ir.Type.structure(candidate_index)));
+            }
+        } else if (structure.is_class) {
+            kind = copy_kind_class;
+            var case_count: usize = 0;
+            for (program.structures, 0..) |candidate, candidate_index| {
+                if (candidate.is_class and classSubtype(program, candidate_index, structure_index)) case_count += 1;
+            }
+            try model.append(allocator, case_count);
+            for (program.structures, 0..) |candidate, candidate_index| {
+                if (!candidate.is_class or !classSubtype(program, candidate_index, structure_index)) continue;
+                var object_width: usize = 0;
+                for (candidate.fields) |field| object_width += try leafCount(program, field.type);
+                try model.append(allocator, candidate_index);
+                try model.append(allocator, object_width);
+                try model.append(allocator, candidate.fields.len);
+                for (candidate.fields) |field| try model.append(allocator, @intFromEnum(field.type));
+            }
+        } else if (structure.collection) |collection| {
+            if (collection.length) |length| {
+                kind = copy_kind_array;
+                try model.append(allocator, @intFromEnum(collection.element));
+                try model.append(allocator, length);
+            } else if (collection.view) {
+                kind = copy_kind_value;
+            } else {
+                kind = copy_kind_list;
+                try model.append(allocator, @intFromEnum(collection.element));
+            }
+        } else {
+            for (structure.fields) |field| try model.append(allocator, @intFromEnum(field.type));
+        }
+
+        model.items[entry] = kind;
+        model.items[entry + 1] = try leafCount(program, .structure(structure_index));
+        model.items[entry + 2] = data_offset;
+        model.items[entry + 3] = model.items.len - data_offset;
+    }
+    return model.toOwnedSlice(allocator);
+}
+
+fn classSubtype(program: Ir.Program, candidate: usize, expected: usize) bool {
+    var current: ?usize = candidate;
+    while (current) |index| : (current = program.structures[index].base) {
+        if (index == expected) return true;
+    }
+    return false;
 }
 
 fn flattenedTypes(allocator: Allocator, program: Ir.Program, type_value: Ir.Type) Machine.Error![]const Ir.Type {

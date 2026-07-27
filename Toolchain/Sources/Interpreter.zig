@@ -204,6 +204,11 @@ fn executeInstruction(
             try store(function, values, optional.result, try cloneValue(allocator, value.*));
         },
         .copy => |copy| try store(function, values, copy.result, try cloneValue(allocator, try load(values, copy.operand))),
+        .deep_copy => |copy| {
+            var classes = std.AutoHashMap(*Value.Structure, *Value.Structure).init(allocator);
+            defer classes.deinit();
+            try store(function, values, copy.result, try deepCloneValue(allocator, program, try load(values, copy.operand), session, &classes));
+        },
         .class_cast => |cast| {
             var value = switch (try load(values, cast.operand)) {
                 .class => |class| class,
@@ -472,6 +477,62 @@ fn load(values: []const ?Value, id: Ir.ValueId) Error!Value {
 }
 
 const cloneValue = RuntimeValue.clone;
+
+fn deepCloneValue(
+    allocator: Allocator,
+    program: Ir.Program,
+    value: Value,
+    session: *Session,
+    classes: *std.AutoHashMap(*Value.Structure, *Value.Structure),
+) Error!Value {
+    return switch (value) {
+        .structure => |aggregate| cloned: {
+            const fields = try allocator.alloc(Value, aggregate.fields.len);
+            for (aggregate.fields, 0..) |field, index| fields[index] = try deepCloneValue(allocator, program, field, session, classes);
+            break :cloned .{ .structure = .{ .type = aggregate.type, .fields = fields } };
+        },
+        .class => |class| cloned: {
+            const dynamic_type = class.instance.type.structureIndex() orelse return error.InvalidProgram;
+            if (dynamic_type >= program.structures.len or !program.structures[dynamic_type].is_class) return error.InvalidProgram;
+            if (classes.get(class.instance)) |existing| break :cloned .{ .class = .{ .static_type = class.static_type, .instance = existing } };
+            const instance = try allocator.create(Value.Structure);
+            instance.* = .{ .type = class.instance.type, .fields = &.{} };
+            try Classes.register(allocator, &session.classes, instance);
+            try classes.put(class.instance, instance);
+            const fields = try allocator.alloc(Value, class.instance.fields.len);
+            instance.fields = fields;
+            for (class.instance.fields, 0..) |field, index| fields[index] = try deepCloneValue(allocator, program, field, session, classes);
+            break :cloned .{ .class = .{ .static_type = class.static_type, .instance = instance } };
+        },
+        .protocol => |protocol| cloned: {
+            const concrete = try allocator.create(Value);
+            concrete.* = try deepCloneValue(allocator, program, protocol.concrete.*, session, classes);
+            break :cloned .{ .protocol = .{ .type = protocol.type, .concrete = concrete } };
+        },
+        .enumeration => |enumeration| cloned: {
+            const payload = try allocator.alloc(Value, enumeration.values.len);
+            for (enumeration.values, 0..) |item, index| payload[index] = try deepCloneValue(allocator, program, item, session, classes);
+            const copy = try allocator.create(Value.Enumeration);
+            copy.* = .{
+                .type = enumeration.type,
+                .enumeration = enumeration.enumeration,
+                .variant = enumeration.variant,
+                .values = payload,
+            };
+            break :cloned .{ .enumeration = copy };
+        },
+        .optional => |optional| cloned: {
+            const payload = if (optional.value) |present| payload: {
+                const copy = try allocator.create(Value);
+                copy.* = try deepCloneValue(allocator, program, present.*, session, classes);
+                break :payload copy;
+            } else null;
+            break :cloned .{ .optional = .{ .type = optional.type, .value = payload } };
+        },
+        .view => error.InvalidProgram,
+        else => value,
+    };
+}
 
 fn storeLocal(function: Ir.Function, locals: []?Value, id: Ir.LocalId, value: Value) Error!void {
     if (id >= locals.len or function.local_types[id] != value.typeOf()) return error.InvalidProgram;
@@ -1237,7 +1298,7 @@ test "mutate nested fields once while preserving independent copies" {
         \\func observed() int { print("observed"); return 2 }
         \\func main() {
         \\    var player = Player(score:Score(value:10, label:"A"), reserve:7)
-        \\    let copy = player
+        \\    let duplicate = player
         \\    player.score.value += observed()
         \\    player.score.value *= 3
         \\    player.score.value -= 6
@@ -1246,7 +1307,7 @@ test "mutate nested fields once while preserving independent copies" {
         \\    player.score.value--
         \\    player.score.label = "B"
         \\    print(player.score.value, " ", player.score.label, " ", player.reserve)
-        \\    print(copy.score.value, " ", copy.score.label, " ", copy.reserve)
+        \\    print(duplicate.score.value, " ", duplicate.score.label, " ", duplicate.reserve)
         \\}
     , allocator);
     const result = try runCapture(allocator, program);
@@ -1292,7 +1353,7 @@ test "execute mutating nonmutating overloaded and chained methods" {
         \\    func choose(amount:int) { self.value += amount }
         \\    func choose(enabled:bool) { if enabled { self.increment() } }
         \\    func current() int { return self.value }
-        \\    func copy() Counter { return self }
+        \\    func duplicate() Counter { return self }
         \\}
         \\func observed() int { print("observed"); return 2 }
         \\func make() Counter { print("make"); return Counter(value:40) }
@@ -1303,7 +1364,7 @@ test "execute mutating nonmutating overloaded and chained methods" {
         \\    counter.choose(true)
         \\    counter.choose(3)
         \\    let immutable = counter
-        \\    print(returned, " ", counter.current(), " ", immutable.copy().current())
+        \\    print(returned, " ", counter.current(), " ", immutable.duplicate().current())
         \\    print(make().current())
         \\}
     , allocator);

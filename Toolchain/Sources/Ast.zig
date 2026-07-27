@@ -8,6 +8,7 @@ pub const UnaryOperator = enum {
     logical_not,
     propagate,
     move,
+    copy,
     borrow_read,
     borrow_mutable,
 };

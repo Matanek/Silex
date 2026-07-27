@@ -348,6 +348,28 @@ is rejected. At a control-flow join, a binding is available only when every
 continuing path preserves it; terminal paths do not constrain the join. Every
 loop back edge must restore the same availability as its header.
 
+`copy expression` explicitly asks for a recursively detached value without
+consuming its source. Scalars and class-free values keep their ordinary value;
+structures, optionals, enums, arrays, lists and dynamic protocol values are
+traversed recursively. Every reached class instance is recreated with its
+actual dynamic type and all of its instance fields, including private and
+inherited fields. Constructors are not called and static members are not
+involved.
+
+```sx
+var shared = original
+var detached = copy original
+var transferred = move original
+```
+
+The detached graph preserves its topology: repeated references to one source
+instance refer to one shared clone, and cycles remain cycles. `copy` evaluates
+its operand once, leaves it available, returns the same static type, and may
+materialize an owned value from an ordinary, `@T`, or `&T` operand. This is a
+language operation rather than a `clone()` convention or a `Clonable`
+protocol. Ordinary unprefixed copies remain compositionally shallow with
+respect to class identities.
+
 A parameter written `name:@T` is a temporary read reference. Calls keep their
 ordinary syntax; a readable local, field, indexed element, literal, or
 temporary may provide the argument. The alias exists only for the synchronous
@@ -1134,7 +1156,7 @@ an escape.
 ## Expressions, calls, and returns
 
 The operators, in decreasing precedence, are postfix `as`; unary `-`, `!`,
-`try`, and `move`;
+`try`, `copy`, and `move`;
 multiplicative `*`, `/`, `%`; additive `+`, `-`; unsigned shifts `<<`, `>>`;
 unsigned `&`; unsigned `^`; ordering `<`, `<=`, `>`, `>=`; equality `==`,
 `!=`; logical `&&`; then logical `||`. Binary operators associate to the left.
@@ -1439,7 +1461,7 @@ bit_and         = shift ("&" shift)* ;
 shift           = additive (("<<" | ">>") additive)* ;
 additive        = multiplicative (("+" | "-") multiplicative)* ;
 multiplicative  = unary (("*" | "/" | "%") unary)* ;
-unary           = ("-" | "!" | "try" | "move" | "@" | "&") unary | conversion ;
+unary           = ("-" | "!" | "try" | "copy" | "move" | "@" | "&") unary | conversion ;
 conversion      = postfix ("as" type)* ;
 postfix         = primary (("(" arguments? ")")
                 | ("." identifier ("(" arguments? ")")?)
