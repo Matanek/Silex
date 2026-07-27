@@ -336,6 +336,8 @@ pub const GenericType = struct {
 pub const StructureField = struct {
     is_public: bool = true,
     is_internal: bool = false,
+    is_private: bool = false,
+    is_protected: bool = false,
     position: Source.Position,
     name_position: Source.Position,
     name: []const u8,
@@ -347,6 +349,8 @@ pub const StructureField = struct {
 pub const Constructor = struct {
     is_public: bool = true,
     is_internal: bool = false,
+    is_private: bool = false,
+    is_protected: bool = false,
     position: Source.Position,
     parameters: []const Parameter,
     statements: []const Statement,
@@ -411,6 +415,8 @@ pub const Use = struct {
 pub const Function = struct {
     is_public: bool = false,
     is_internal: bool = false,
+    is_private: bool = false,
+    is_protected: bool = false,
     owner: usize = 0,
     position: Source.Position,
     name_position: Source.Position,

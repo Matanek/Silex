@@ -85,3 +85,53 @@ test "class references require mutable initialized storage" {
         "a binding that can reach a class reference must use 'var'",
     );
 }
+
+test "class constructors establish private invariants and overloads" {
+    const output = try run(
+        \\class Session {
+        \\    let token:str
+        \\    private var uses:int = 0
+        \\    public init(token:str) { self.token = token }
+        \\    public init(code:int, suffix:str = "!") { self.token = "$(code)$(suffix)" }
+        \\    public func text() str { return self.token }
+        \\    internal func mark() { self.uses++ }
+        \\}
+        \\class Settings { var hidden:int = 1; public var visible:int }
+        \\func main() {
+        \\    var first = Session("abc")
+        \\    var second = Session(7)
+        \\    first.mark()
+        \\    var settings = Settings(visible:2)
+        \\    print(first.text(), " ", second.text(), " ", settings.visible)
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("abc 7! 2\n", output);
+}
+
+test "class visibility closes construction and private state" {
+    try expectCompileError(
+        "class Session { let token:str; public init(token:str) { self.token = token } } func main() { var value = Session(token:\"x\") }",
+        "structure 'Session' has constructors and does not accept named fields",
+    );
+    try expectCompileError(
+        "class Vault { init() {} } func main() { var value = Vault() }",
+        "constructor of 'Vault' is unavailable here",
+    );
+    try expectCompileError(
+        "class Vault { private var secret:int = 1 } func main() { var value = Vault(); print(value.secret) }",
+        "field 'secret' is private and unavailable here",
+    );
+    try expectCompileError(
+        "class Base { protected var value:int = 1 } func main() { var base = Base(); print(base.value) }",
+        "field 'value' is protected and unavailable here",
+    );
+    try expectCompileError(
+        "class Settings { private var hidden:int = 1; public var visible:int } func main() { var value = Settings(hidden:2, visible:3) }",
+        "field 'hidden' is private and unavailable here",
+    );
+    try expectCompileError(
+        "class Settings { private var hidden:int; public var visible:int } func main() { var value = Settings(visible:3) }",
+        "private field 'hidden' requires a default or a constructor",
+    );
+}

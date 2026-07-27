@@ -9,6 +9,7 @@ const Control = @import("Control.zig");
 const Borrowing = @import("Borrowing.zig");
 const MutableReferences = @import("MutableReferences.zig");
 const Resources = @import("Resources.zig");
+const Visibility = @import("Visibility.zig");
 
 const AnalyzeError = error{ InvalidSource, OutOfMemory };
 
@@ -35,6 +36,9 @@ pub fn analyze(
     constructor_index: usize,
     constructor: Ast.Constructor,
 ) !Ir.Function {
+    const previous_context = self.member_context;
+    self.member_context = structure_index;
+    defer self.member_context = previous_context;
     const declaration = self.program.structures[structure_index];
     const nominal_index = self.structureIndex(declaration.name) orelse return error.InvalidSource;
     const structure_type = Ast.Type.structure(nominal_index);
@@ -149,10 +153,12 @@ pub fn analyzeCall(
 
     var arity_count: usize = 0;
     var sole: ?usize = null;
+    var inaccessible = false;
     var inaccessible_internal = false;
     for (declaration.constructors, 0..) |constructor, constructor_index| {
-        if (!Support.memberVisible(call.name_position, constructor.position, constructor.is_internal)) {
-            inaccessible_internal = true;
+        if (!Visibility.memberVisible(self, structure_index, constructor, call.name_position)) {
+            inaccessible = true;
+            inaccessible_internal = inaccessible_internal or constructor.is_internal;
             continue;
         }
         if (Support.acceptsArity(constructor.parameters, call.arguments.len)) {
@@ -161,12 +167,11 @@ pub fn analyzeCall(
         }
     }
     if (arity_count == 0) {
-        if (inaccessible_internal) {
-            const message = try std.fmt.allocPrint(
-                self.allocator,
-                "constructor of '{s}' is internal to its source file",
-                .{declaration.name},
-            );
+        if (inaccessible) {
+            const message = if (inaccessible_internal)
+                try std.fmt.allocPrint(self.allocator, "constructor of '{s}' is internal to its source file", .{declaration.name})
+            else
+                try std.fmt.allocPrint(self.allocator, "constructor of '{s}' is unavailable here", .{declaration.name});
             return self.fail(call.name_position, message);
         }
         const message = try std.fmt.allocPrint(
@@ -191,7 +196,7 @@ pub fn analyzeCall(
     var ambiguous = false;
     for (declaration.constructors, 0..) |constructor, constructor_index| {
         if (!Support.acceptsArity(constructor.parameters, arguments.items.len)) continue;
-        if (!Support.memberVisible(call.name_position, constructor.position, constructor.is_internal)) continue;
+        if (!Visibility.memberVisible(self, structure_index, constructor, call.name_position)) continue;
         var cost: usize = 0;
         var viable = true;
         for (constructor.parameters[0..arguments.items.len], arguments.items) |parameter, argument| {

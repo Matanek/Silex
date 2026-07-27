@@ -21,13 +21,14 @@ const Matches = @import("Matches.zig");
 const MapError = @import("MapError.zig");
 const Support = @import("Support.zig");
 const Try = @import("Try.zig");
+const Visibility = @import("Visibility.zig");
+const Declarations = @import("Declarations.zig");
 const Types = @import("../Types.zig");
 const Allocator = std.mem.Allocator;
 const AnalyzeError = Source.Error || Allocator.Error;
 pub const Binding = Model.Binding;
 pub const TypedValue = Model.TypedValue;
 pub const BlockBuilder = Model.BlockBuilder;
-const StructureState = enum { unseen, visiting, complete };
 pub const FunctionBuilder = Model.FunctionBuilder;
 pub const Analyzer = struct {
     allocator: Allocator,
@@ -37,6 +38,7 @@ pub const Analyzer = struct {
     method_mutability: []const bool = &.{},
     default_expansions: std.ArrayList(*const Ast.Expression) = .empty,
     diagnostic: ?Source.Diagnostic = null,
+    member_context: ?usize = null,
     pub fn init(allocator: Allocator) Analyzer {
         return .{ .allocator = allocator };
     }
@@ -49,7 +51,7 @@ pub const Analyzer = struct {
     fn analyzeProgram(self: *Analyzer, program: Ast.Program, require_entry: bool) AnalyzeError!Ir.Program {
         self.program = program;
         self.diagnostic = null;
-        self.structures = try self.prepareStructures();
+        self.structures = try Declarations.prepareStructures(self);
         self.enums = try Enums.prepare(self);
         self.method_mutability = try Methods.inferMutability(self.allocator, self.program);
         self.structures = try Methods.extendStructures(self.allocator, self.program, self.structures, self.method_mutability);
@@ -627,125 +629,6 @@ pub const Analyzer = struct {
         return .{ .type = .bool, .value = result };
     }
 
-    fn prepareStructures(self: *Analyzer) AnalyzeError![]const Ir.Structure {
-        for (self.program.structures, 0..) |structure, index| {
-            for (self.program.structures[0..index]) |previous| {
-                if (std.mem.eql(u8, structure.name, previous.name)) {
-                    const message = try std.fmt.allocPrint(self.allocator, "structure '{s}' is already declared", .{structure.name});
-                    return self.fail(structure.name_position, message);
-                }
-            }
-            for (self.program.functions) |function| {
-                if (std.mem.eql(u8, structure.name, function.name)) {
-                    const message = try std.fmt.allocPrint(self.allocator, "declaration name '{s}' is already used by a function", .{structure.name});
-                    return self.fail(structure.name_position, message);
-                }
-            }
-            for (structure.fields, 0..) |field, field_index| {
-                if (field.type == .void) return self.fail(field.name_position, "a structure field cannot have type 'void'");
-                for (structure.fields[0..field_index]) |previous| {
-                    if (std.mem.eql(u8, field.name, previous.name)) {
-                        const message = try std.fmt.allocPrint(self.allocator, "field '{s}' is already declared in this structure", .{field.name});
-                        return self.fail(field.name_position, message);
-                    }
-                }
-            }
-        }
-
-        const structures = try self.allocator.alloc(Ir.Structure, self.program.type_names.len);
-        for (self.program.type_names, 0..) |name, type_index| {
-            const declaration = self.findAstStructure(name) orelse {
-                if (Enums.find(self, name) != null) {
-                    structures[type_index] = .{ .name = name, .fields = &.{} };
-                    continue;
-                }
-                const message = try std.fmt.allocPrint(self.allocator, "unknown nominal type '{s}'", .{name});
-                return self.fail(.{ .offset = 0, .line = 1, .column = 1 }, message);
-            };
-            const fields = try self.allocator.alloc(Ir.StructureField, declaration.fields.len);
-            for (declaration.fields, 0..) |field, field_index| fields[field_index] = .{
-                .name = field.name,
-                .type = field.type,
-                .mutable = field.mutable,
-            };
-            structures[type_index] = .{
-                .name = name,
-                .fields = fields,
-                .is_class = declaration.is_class,
-                .collection = declaration.collection,
-            };
-        }
-        self.structures = structures;
-
-        for (self.program.structures) |structure| for (structure.fields) |field| {
-            try Resources.validateStoredType(self, field.type, field.position, "in a structure field");
-            if (!field.mutable and Resources.containsClass(self, field.type)) {
-                return self.fail(field.name_position, "a field that can reach a class reference must use 'var'");
-            }
-        };
-
-        const states = try self.allocator.alloc(StructureState, structures.len);
-        @memset(states, .unseen);
-        for (structures, 0..) |_, index| try self.validateStructureCycle(index, states);
-
-        for (self.program.structures) |structure| {
-            for (structure.fields) |field| if (field.default) |default| {
-                if (!Constructors.restrictedFieldDefault(self, default)) {
-                    return self.fail(default.position, "field default must be a fundamental literal or structure aggregate");
-                }
-                var builder: FunctionBuilder = .{};
-                try builder.blocks.append(self.allocator, .{});
-                var value = try self.analyzeExpressionExpected(
-                    &builder,
-                    default,
-                    Optionals.expectedContext(field.type, default),
-                );
-                if (value.type != field.type and (Numeric.canWiden(value.type, field.type) or Optionals.canConvert(value.type, field.type))) {
-                    value = try self.coerce(&builder, value, field.type, default.position);
-                }
-                if (value.type != field.type) {
-                    const message = try std.fmt.allocPrint(
-                        self.allocator,
-                        "default for field '{s}' expects '{s}', found '{s}'",
-                        .{ field.name, self.typeName(field.type), self.typeName(value.type) },
-                    );
-                    return self.fail(default.position, message);
-                }
-            };
-        }
-        return structures;
-    }
-
-    fn validateStructureCycle(
-        self: *Analyzer,
-        index: usize,
-        states: []StructureState,
-    ) AnalyzeError!void {
-        if (self.structures[index].is_class) {
-            states[index] = .complete;
-            return;
-        }
-        switch (states[index]) {
-            .complete => return,
-            .visiting => {
-                const message = try std.fmt.allocPrint(
-                    self.allocator,
-                    "structure '{s}' has a recursive value representation",
-                    .{self.structures[index].name},
-                );
-                const declaration = self.findAstStructure(self.structures[index].name).?;
-                return self.fail(declaration.name_position, message);
-            },
-            .unseen => {},
-        }
-        states[index] = .visiting;
-        for (self.structures[index].fields) |field| {
-            const field_type = field.type.optionalChild() orelse field.type;
-            if (field_type.structureIndex()) |nested| try self.validateStructureCycle(nested, states);
-        }
-        states[index] = .complete;
-    }
-
     fn findAstStructure(self: *Analyzer, name: []const u8) ?Ast.Structure {
         for (self.program.structures) |structure| {
             if (std.mem.eql(u8, structure.name, name)) return structure;
@@ -855,12 +738,11 @@ pub const Analyzer = struct {
         for (structure.fields, 0..) |field, field_index| {
             if (!std.mem.eql(u8, field.name, access.name)) continue;
             const source_field = declaration.fields[field_index];
-            if (!Support.memberVisible(access.name_position, source_field.position, source_field.is_internal)) {
-                const message = try std.fmt.allocPrint(
-                    self.allocator,
-                    "field '{s}' is internal to its source file",
-                    .{field.name},
-                );
+            if (!Visibility.memberVisible(self, structure_index, source_field, access.name_position)) {
+                const message = if (source_field.is_internal)
+                    try std.fmt.allocPrint(self.allocator, "field '{s}' is internal to its source file", .{field.name})
+                else
+                    try std.fmt.allocPrint(self.allocator, "field '{s}' is {s} and unavailable here", .{ field.name, Visibility.name(source_field) });
                 return self.fail(access.name_position, message);
             }
             const result = try self.newValue(builder, field.type);
@@ -913,12 +795,11 @@ pub const Analyzer = struct {
             var known = false;
             for (structure.fields, 0..) |field, field_index| if (std.mem.eql(u8, field.name, argument.name)) {
                 const source_field = declaration.fields[field_index];
-                if (!Support.memberVisible(argument.position, source_field.position, source_field.is_internal)) {
-                    const message = try std.fmt.allocPrint(
-                        self.allocator,
-                        "field '{s}' is internal to its source file",
-                        .{field.name},
-                    );
+                if (!Visibility.memberVisible(self, structure_index, source_field, argument.position)) {
+                    const message = if (source_field.is_internal)
+                        try std.fmt.allocPrint(self.allocator, "field '{s}' is internal to its source file", .{field.name})
+                    else
+                        try std.fmt.allocPrint(self.allocator, "field '{s}' is {s} and unavailable here", .{ field.name, Visibility.name(source_field) });
                     return self.fail(argument.position, message);
                 }
                 known = true;
@@ -946,8 +827,13 @@ pub const Analyzer = struct {
                     expression,
                     Optionals.expectedContext(field.type, expression),
                 )
-            else
-                try self.emitIntrinsic(builder, field.type, call.name_position);
+            else missing: {
+                if (declaration.is_class and !Visibility.memberVisible(self, structure_index, field, call.name_position)) {
+                    const message = try std.fmt.allocPrint(self.allocator, "private field '{s}' requires a default or a constructor", .{field.name});
+                    return self.fail(call.name_position, message);
+                }
+                break :missing try self.emitIntrinsic(builder, field.type, call.name_position);
+            };
             if (value.type != field.type and (Numeric.canWiden(value.type, field.type) or Optionals.canConvert(value.type, field.type))) {
                 value = try self.coerce(builder, value, field.type, if (provided) |expression| expression.position else call.name_position);
             }
