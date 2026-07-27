@@ -18,6 +18,16 @@ pub fn activate(self: anytype, module: usize) !void {
             for (method.statements) |statement| try self.activateStatement(module, statement);
         }
     }
+    for (program.extensions) |extension| {
+        try self.activateType(module, extension.target);
+        for (extension.conformances) |conformance| try self.activateType(module, conformance);
+        for (extension.methods) |method| {
+            for (method.type_parameters) |parameter| if (parameter.constraint) |constraint| try self.activateType(module, constraint);
+            for (method.parameters) |parameter| try self.activateType(module, parameter.type);
+            try self.activateType(module, method.return_type);
+            for (method.statements) |statement| try self.activateStatement(module, statement);
+        }
+    }
     for (program.enums) |enumeration| {
         for (enumeration.type_parameters) |parameter| if (parameter.constraint) |constraint| try self.activateType(module, constraint);
         for (enumeration.variants) |variant| {

@@ -645,6 +645,42 @@ be erased into this copyable dynamic representation. Dynamic protocol values
 have no `any` marker or downcast, and cannot use general `@Protocol` or
 `&Protocol` references.
 
+## Type extensions
+
+`extend` adds instance or static methods to one existing, non-generic structure
+or class without changing its fields, construction, finalization or nominal
+identity:
+
+```sx
+extend Counter {
+    func increment(amount:int = 1) {
+        self.value += amount
+    }
+
+    static func zero() Counter {
+        return Counter(value:0)
+    }
+}
+```
+
+Extension methods follow ordinary overload, default-parameter, visibility and
+receiver-mutation rules. They are selected from the receiver's exact declared
+type: a class extension is neither virtual nor inherited. Extensions add no
+field, constructor, `drop`, `override` or protected member, and cannot target
+an enum, protocol, scalar, collection, static class, generic declaration or
+generic specialization.
+
+An extension has external-caller access to its target. It can additionally use
+an `internal` member when both declarations share a source file, but never a
+private or protected member. An unmarked structure extension method is public;
+an unmarked class extension method remains private to its declaring file.
+
+Using an extension module, directly or through a transitive `use` closure,
+activates its public methods in the consuming file. Merely placing a neighboring
+module in the project does not activate it. A signature already declared by the
+target, or supplied by two extension providers visible in the same file, is a
+coherence error rather than an order-dependent overload choice.
+
 ## Nested nominal types
 
 A `struct`, `class`, or `static class` may declare nominal types of those same

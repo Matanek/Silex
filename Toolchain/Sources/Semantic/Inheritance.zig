@@ -76,8 +76,9 @@ pub fn methodCandidates(self: anytype, allocator: std.mem.Allocator, structure_i
         const declaration = findDeclaration(self, owner) orelse break;
         for (declaration.methods, 0..) |method, method_index| {
             if (method.is_static or !std.mem.eql(u8, method.name, name)) continue;
+            if (method.extension != null and owner != structure_index) continue;
             var replaced = false;
-            for (result.items) |existing| if (sameSignature(existing.method, method)) {
+            for (result.items) |existing| if (existing.method.extension == null and method.extension == null and sameSignature(existing.method, method)) {
                 replaced = true;
                 break;
             };
@@ -91,6 +92,7 @@ pub fn validateOverrides(self: anytype) !void {
     for (self.program.structures, 0..) |structure, structure_index| {
         if (!structure.is_class) continue;
         for (structure.methods) |method| {
+            if (method.extension != null) continue;
             if (method.is_static) continue;
             const inherited = inheritedMethod(self, structure_index, method);
             if (method.is_override and inherited == null) {
@@ -121,6 +123,7 @@ pub fn implementations(
     method_index: usize,
 ) ![]const Ir.Instruction.DynamicCall.Implementation {
     const slot = self.program.structures[owner].methods[method_index];
+    if (slot.extension != null) return &.{};
     var result: std.ArrayList(Ir.Instruction.DynamicCall.Implementation) = .empty;
     for (self.program.structures, 0..) |_, candidate| {
         if (candidate == owner or !isDescendant(self, candidate, owner)) continue;
@@ -151,6 +154,7 @@ fn inheritedMethod(self: anytype, structure_index: usize, method: Ast.Function) 
     while (current) |index| : (current = self.structures[index].base) {
         const declaration = findDeclaration(self, index) orelse return null;
         for (declaration.methods, 0..) |candidate, method_index| {
+            if (candidate.extension != null) continue;
             if (!candidate.is_static and sameSignature(candidate, method)) return .{ .owner = index, .index = method_index, .method = candidate };
         }
     }

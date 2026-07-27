@@ -6,6 +6,7 @@ const Ir = @import("Ir.zig");
 const ParserModule = @import("Parser.zig");
 const Semantic = @import("Semantic/Analyzer.zig");
 const Source = @import("Source.zig");
+const Extensions = @import("Extensions.zig");
 
 const Allocator = std.mem.Allocator;
 const CompileError = Source.Error || Allocator.Error;
@@ -30,6 +31,11 @@ pub const Frontend = struct {
             return err;
         };
         ast = try Result.install(self.allocator, ast);
+        var extensions = Extensions.Merger.init(self.allocator);
+        ast = extensions.merge(ast, false, false) catch |err| {
+            self.diagnostic = extensions.diagnostic;
+            return err;
+        };
         var specializer = GenericSpecializer.init(self.allocator);
         ast = specializer.specialize(ast) catch |err| {
             self.diagnostic = specializer.diagnostic;
@@ -52,6 +58,11 @@ pub const Frontend = struct {
         };
         if (ast.uses.len != 0) return;
         ast = try Result.install(self.allocator, ast);
+        var extensions = Extensions.Merger.init(self.allocator);
+        ast = extensions.merge(ast, false, false) catch |err| {
+            self.diagnostic = extensions.diagnostic;
+            return err;
+        };
         var specializer = GenericSpecializer.init(self.allocator);
         ast = specializer.specialize(ast) catch |err| {
             self.diagnostic = specializer.diagnostic;

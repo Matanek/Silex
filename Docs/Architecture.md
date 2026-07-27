@@ -83,6 +83,11 @@ open Silex document
   concrete type's nominal or inherited conformance before rewriting the body;
   requirement calls then resolve as ordinary concrete method calls. Static
   generic constraints therefore add no runtime dispatch or representation.
+- Type extensions are composed as source-level method providers before generic
+  specialization and semantic lowering. Their activation set is derived from
+  each source file's transitive `use` closure. Once selected, an extension call
+  is an ordinary statically bound typed call; the portable IR and target backend
+  gain no extension object, registry, dispatch table or ABI concept.
 - Associated enums are portable nominal declarations whose variants carry
   typed positional values. Construction records the enum and variant by
   structured indices; module interfaces expose only the nominal identity and
