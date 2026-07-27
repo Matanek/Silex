@@ -25,8 +25,11 @@ pub fn lower(allocator: Allocator, program: Ir.Program) Machine.Error!Machine.Pr
     for (program.functions) |function| {
         try functions.append(allocator, try lowerFunction(allocator, program, &strings, function));
     }
+    const globals = try allocator.alloc(Machine.Global, program.globals.len);
+    for (program.globals, 0..) |global, index| globals[index] = .{ .bits = global.bits };
     const result: Machine.Program = .{
         .functions = try functions.toOwnedSlice(allocator),
+        .globals = globals,
         .strings = try strings.toOwnedSlice(allocator),
     };
     try Machine.validate(result);
@@ -117,6 +120,8 @@ fn lowerInstruction(
         },
         .copy => |copy| lowerCopy(layout.values[copy.result], layout.values[copy.operand]),
         .class_cast => |cast| lowerCopy(layout.values[cast.result], layout.values[cast.operand]),
+        .global_load => |load| .{ .global_load = .{ .result = layout.values[load.result].start, .global = load.global } },
+        .global_store => |store| .{ .global_store = .{ .operand = layout.values[store.operand].start, .global = store.global } },
         .structure_init => |initialization| aggregate: {
             const fields = try allocator.alloc(Machine.Span, initialization.fields.len);
             for (initialization.fields, 0..) |field, index| fields[index] = layout.values[field];

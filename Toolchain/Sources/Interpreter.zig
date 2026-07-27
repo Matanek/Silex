@@ -4,6 +4,7 @@ const MainBoundary = @import("MainBoundary.zig");
 const Numeric = @import("Numeric.zig");
 const RuntimeValue = @import("Interpreter/Value.zig");
 const Dispatch = @import("Interpreter/Dispatch.zig");
+const Globals = @import("Interpreter/Globals.zig");
 
 const Allocator = std.mem.Allocator;
 const max_call_depth = 768;
@@ -31,6 +32,7 @@ pub const Session = struct {
     stdout: std.ArrayList(u8) = .empty,
     stderr: std.ArrayList(u8) = .empty,
     terminated: bool = false,
+    globals: []Value = &.{},
 };
 
 pub fn run(allocator: Allocator, program: Ir.Program) Error!u8 {
@@ -48,7 +50,7 @@ pub fn runCapture(allocator: Allocator, program: Ir.Program) Error!RunResult {
     const function = program.functions[function_id];
     const recoverable = MainBoundary.accepts(program.enums, function.return_type);
     if (function.parameter_types.len != 0 or (function.return_type != .void and !recoverable)) return error.InvalidProgram;
-    var session: Session = .{ .allocator = allocator };
+    var session: Session = .{ .allocator = allocator, .globals = try Globals.initialize(allocator, program.globals) };
     const result = invokeDepth(allocator, program, function_id, &.{}, 0, &session) catch |err| switch (err) {
         error.RuntimeTerminated => return .{
             .exit_code = 1,
@@ -206,6 +208,8 @@ fn executeInstruction(
             value.static_type = function.value_types[cast.result];
             try store(function, values, cast.result, .{ .class = value });
         },
+        .global_load => |load_value| try store(function, values, load_value.result, try Globals.load(allocator, session.globals, load_value)),
+        .global_store => |store_value| try Globals.store(allocator, program, session.globals, store_value, try load(values, store_value.operand)),
         .structure_init => |initialization| {
             if (initialization.structure >= program.structures.len or
                 initialization.fields.len != program.structures[initialization.structure].fields.len)

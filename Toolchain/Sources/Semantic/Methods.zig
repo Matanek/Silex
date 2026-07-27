@@ -87,6 +87,7 @@ pub fn extendStructures(
 }
 
 pub fn analyze(self: anytype, structure_index: usize, method_index: usize, source_method: Ast.Function) !Ir.Function {
+    if (source_method.is_static) return analyzeStatic(self, structure_index, method_index, source_method);
     const previous_context = self.member_context;
     self.member_context = structure_index;
     defer self.member_context = previous_context;
@@ -180,6 +181,51 @@ pub fn analyze(self: anytype, structure_index: usize, method_index: usize, sourc
         .name = try std.fmt.allocPrint(self.allocator, "{s}.{s}#{d}", .{ structure.name, method.name, method_index }),
         .parameter_types = parameter_types,
         .return_type = methodIrReturnType(self, structure_index, flat, method),
+        .value_types = try builder.value_types.toOwnedSlice(self.allocator),
+        .local_types = try builder.local_types.toOwnedSlice(self.allocator),
+        .blocks = blocks,
+    };
+}
+
+fn analyzeStatic(self: anytype, structure_index: usize, method_index: usize, method: Ast.Function) !Ir.Function {
+    const previous_context = self.member_context;
+    self.member_context = structure_index;
+    defer self.member_context = previous_context;
+    var builder: Model.FunctionBuilder = .{};
+    try builder.blocks.append(self.allocator, .{});
+    const parameter_types = try self.allocator.alloc(Ast.Type, method.parameters.len);
+    for (method.parameters, 0..) |parameter, index| {
+        const lowered: Ast.Type = if (parameter.mode == .mutable) .address else parameter.type;
+        parameter_types[index] = lowered;
+        try builder.value_types.append(self.allocator, lowered);
+        try builder.bindings.append(self.allocator, .{
+            .name = parameter.name,
+            .type = parameter.type,
+            .value = if (parameter.mode == .mutable) null else index,
+            .reference = if (parameter.mode == .mutable) index else null,
+            .mutable = parameter.mode == .mutable,
+            .parameter = true,
+            .parameter_mode = parameter.mode,
+        });
+    }
+    const terminated = try self.analyzeStatements(&builder, method, method.statements);
+    if (!terminated) {
+        if (method.return_type != .void) {
+            const message = try std.fmt.allocPrint(self.allocator, "static method '{s}' must return '{s}' on every path", .{ method.name, self.typeName(method.return_type) });
+            return self.fail(method.name_position, message);
+        }
+        try Resources.emitActiveDrops(self, &builder, 0);
+        self.terminate(&builder, .return_void);
+    }
+    const blocks = try self.allocator.alloc(Ir.Block, builder.blocks.items.len);
+    for (builder.blocks.items, 0..) |*block, block_index| blocks[block_index] = .{
+        .instructions = try block.instructions.toOwnedSlice(self.allocator),
+        .terminator = block.terminator orelse return error.InvalidSource,
+    };
+    return .{
+        .name = try std.fmt.allocPrint(self.allocator, "{s}.{s}#static{d}", .{ self.program.structures[structure_index].name, method.name, method_index }),
+        .parameter_types = parameter_types,
+        .return_type = method.return_type,
         .value_types = try builder.value_types.toOwnedSlice(self.allocator),
         .local_types = try builder.local_types.toOwnedSlice(self.allocator),
         .blocks = blocks,

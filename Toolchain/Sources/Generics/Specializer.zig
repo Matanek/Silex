@@ -141,6 +141,7 @@ pub const Specializer = struct {
         for (self.structures.items) |*structure| {
             if (structure.collection) |collection| structure.collection.?.element = remapConcreteType(collection.element, map);
             for (@constCast(structure.fields)) |*field| field.type = remapConcreteType(field.type, map);
+            for (@constCast(structure.static_fields)) |*field| field.type = remapConcreteType(field.type, map);
             for (@constCast(structure.constructors)) |*constructor| {
                 for (@constCast(constructor.parameters)) |*parameter| parameter.type = remapConcreteType(parameter.type, map);
                 remapStatementTypes(constructor.statements, map);
@@ -196,6 +197,12 @@ pub const Specializer = struct {
             }
         }
         structure.fields = fields;
+        const static_fields = try self.allocator.alloc(Ast.StructureField, structure.static_fields.len);
+        for (structure.static_fields, 0..) |field, field_index| {
+            static_fields[field_index] = field;
+            static_fields[field_index].type = try self.rewriteType(field.type, arguments, field.name_position);
+        }
+        structure.static_fields = static_fields;
         if (structure.collection) |collection| structure.collection.?.element = try self.rewriteType(collection.element, arguments, structure.position);
         self.structures.items[structure_index] = structure;
 

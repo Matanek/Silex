@@ -63,6 +63,8 @@ pub const Instruction = union(enum) {
     optional_unwrap: OptionalUnwrap,
     copy: Copy,
     copy_range: CopyRange,
+    global_load: GlobalLoad,
+    global_store: GlobalStore,
     local_address: LocalAddress,
     reference_load: ReferenceLoad,
     reference_store: ReferenceStore,
@@ -167,6 +169,9 @@ pub const Instruction = union(enum) {
         reference: Slot,
         byte_offset: u32,
     };
+
+    pub const GlobalLoad = struct { result: Slot, global: usize };
+    pub const GlobalStore = struct { operand: Slot, global: usize };
 
     pub const AggregateInit = struct {
         result: Span,
@@ -387,8 +392,11 @@ pub const Function = struct {
 
 pub const Program = struct {
     functions: []const Function,
+    globals: []const Global = &.{},
     strings: []const []const u8 = &.{},
 };
+
+pub const Global = struct { bits: u64 };
 
 pub fn checkedSlot(value: usize) Error!Slot {
     if (value > max_slots) return error.FrameTooLarge;
@@ -447,6 +455,14 @@ pub fn validate(program: Program) Error!void {
                 try requireSpan(function, value.result);
                 try requireSpan(function, value.operand);
                 if (value.result.width != value.operand.width) return error.InvalidMachineProgram;
+            },
+            .global_load => |value| {
+                try requireSlot(function, value.result);
+                if (value.global >= program.globals.len) return error.InvalidMachineProgram;
+            },
+            .global_store => |value| {
+                try requireSlot(function, value.operand);
+                if (value.global >= program.globals.len) return error.InvalidMachineProgram;
             },
             .local_address => |value| {
                 try requireSlot(function, value.result);

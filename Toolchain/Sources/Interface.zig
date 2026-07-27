@@ -56,6 +56,7 @@ pub const TypeId = struct {
 };
 
 pub const StructureField = struct {
+    is_static: bool = false,
     name: []const u8,
     type: Types.Type,
     mutable: bool,
@@ -67,6 +68,7 @@ pub const Constructor = struct {
 };
 
 pub const Method = struct {
+    is_static: bool = false,
     name: []const u8,
     type_parameters: []const []const u8 = &.{},
     parameter_types: []const Types.Type,
@@ -157,6 +159,15 @@ pub fn buildMappedGenerics(
                 .mutable = field.mutable,
             });
         }
+        for (structure.static_fields) |field| {
+            if (!field.is_public or field.is_internal) continue;
+            try fields.append(allocator, .{
+                .is_static = true,
+                .name = field.name,
+                .type = mappedType(field.type, type_map, generic_map),
+                .mutable = field.mutable,
+            });
+        }
         var constructors: std.ArrayList(Constructor) = .empty;
         for (structure.constructors) |constructor| {
             if (!constructor.is_public or constructor.is_internal) continue;
@@ -179,6 +190,7 @@ pub fn buildMappedGenerics(
             const method_type_parameters = try allocator.alloc([]const u8, method.type_parameters.len);
             for (method.type_parameters, 0..) |parameter, index| method_type_parameters[index] = parameter.name;
             try methods.append(allocator, .{
+                .is_static = method.is_static,
                 .name = method.name,
                 .type_parameters = method_type_parameters,
                 .parameter_types = parameters,

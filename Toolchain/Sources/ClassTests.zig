@@ -258,3 +258,45 @@ test "mutating overrides and constructor calls bind at the required phase" {
     defer std.testing.allocator.free(output);
     try std.testing.expectEqualStrings("base init\nchild init\n2\n", output);
 }
+
+test "static members use type-qualified shared storage" {
+    const output = try run(
+        \\struct Counter {
+        \\    static var total:int = 2
+        \\    static let step:int = 3
+        \\    static func value() int { return Counter.total }
+        \\    func value() int { return 99 }
+        \\    static func add(value:int) int {
+        \\        Counter.total += value
+        \\        return Counter.total
+        \\    }
+        \\}
+        \\class Token {
+        \\    public var value:int
+        \\    private static func seed() int { return 7 }
+        \\    public static func create() Token { return Token(value:Token.seed()) }
+        \\}
+        \\func main() {
+        \\    print(Counter.value(), " ", Counter.add(Counter.step), " ", Counter().value())
+        \\    var token = Token.create()
+        \\    print(token.value)
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("2 5 99\n7\n", output);
+}
+
+test "static members reject instance selection and dynamic initializers" {
+    try expectCompileError(
+        "func seed() int { return 1 } struct Values { static var current:int = seed() } func main() {}",
+        "static initializer must be a deterministic intrinsic value",
+    );
+    try expectCompileError(
+        "struct Values { static let current:int = 1 } func main() { Values.current = 2 }",
+        "cannot assign to immutable static field",
+    );
+    try expectCompileError(
+        "struct Values { static func current() int { return 1 } } func main() { let value = Values(); print(value.current()) }",
+        "structure 'Values' has no method named 'current' accepting 0 arguments",
+    );
+}

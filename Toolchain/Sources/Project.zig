@@ -14,6 +14,7 @@ const GenericTypes = @import("Project/GenericTypes.zig");
 const Paths = @import("Project/Paths.zig");
 const Lookup = @import("Project/Lookup.zig");
 const Iterations = @import("Project/Iterations.zig");
+const Activation = @import("Project/Activation.zig");
 const Semantic = @import("Semantic/Analyzer.zig");
 const Source = @import("Source.zig");
 const Allocator = std.mem.Allocator;
@@ -477,42 +478,10 @@ pub const Compiler = struct {
     }
 
     fn activateQualifiedReferences(self: *Compiler, module: usize) Error!void {
-        const program = self.units[module].program.?;
-        for (program.structures) |structure| {
-            if (structure.base) |base| try self.activateType(module, base);
-            for (structure.fields) |field| try self.activateType(module, field.type);
-            for (structure.constructors) |constructor| {
-                for (constructor.parameters) |parameter| try self.activateType(module, parameter.type);
-                for (constructor.super_arguments) |argument| try self.activateExpression(module, argument);
-                for (constructor.statements) |statement| try self.activateStatement(module, statement);
-            }
-            for (structure.methods) |method| {
-                for (method.parameters) |parameter| try self.activateType(module, parameter.type);
-                try self.activateType(module, method.return_type);
-                for (method.statements) |statement| try self.activateStatement(module, statement);
-            }
-        }
-        for (program.enums) |enumeration| {
-            for (enumeration.variants) |variant| {
-                for (variant.associated_types) |associated_type| try self.activateType(module, associated_type);
-            }
-        }
-        for (program.enums) |enumeration| {
-            if (!enumeration.is_public) continue;
-            for (enumeration.variants) |variant| {
-                for (variant.associated_types) |associated_type| {
-                    try self.requirePublicType(module, associated_type, variant.position, "public enum", enumeration.name);
-                }
-            }
-        }
-        for (program.functions) |function| {
-            for (function.parameters) |parameter| try self.activateType(module, parameter.type);
-            try self.activateType(module, function.return_type);
-            for (function.statements) |statement| try self.activateStatement(module, statement);
-        }
+        return Activation.activate(self, module);
     }
 
-    fn activateType(self: *Compiler, module: usize, type_value: Ast.Type) Error!void {
+    pub fn activateType(self: *Compiler, module: usize, type_value: Ast.Type) Error!void {
         if (type_value.optionalChild()) |child| return self.activateType(module, child);
         const index = type_value.structureIndex() orelse return;
         const program = self.units[module].program.?;
@@ -963,6 +932,13 @@ pub const Compiler = struct {
                     if (field.default) |value| try self.rewriteExpression(module, value, type_map);
                 }
                 composed_structure.fields = fields;
+                const static_fields = try self.allocator.alloc(Ast.StructureField, structure.static_fields.len);
+                for (structure.static_fields, 0..) |field, index| {
+                    static_fields[index] = field;
+                    static_fields[index].type = GenericTypes.remap(field.type, type_map, generic_map);
+                    if (field.default) |value| try self.rewriteExpression(module, value, type_map);
+                }
+                composed_structure.static_fields = static_fields;
                 const constructors = try self.allocator.alloc(Ast.Constructor, structure.constructors.len);
                 for (structure.constructors, 0..) |constructor, constructor_index| {
                     constructors[constructor_index] = constructor;
@@ -1200,6 +1176,10 @@ pub const Compiler = struct {
                 if (field.is_internal) continue;
                 try self.requirePublicType(module, field.type, field.name_position, "public structure", structure.name);
             }
+            for (structure.static_fields) |field| {
+                if (field.is_internal) continue;
+                try self.requirePublicType(module, field.type, field.name_position, "public structure", structure.name);
+            }
             for (structure.constructors) |constructor| {
                 if (constructor.is_internal) continue;
                 for (constructor.parameters) |parameter| {
@@ -1245,7 +1225,7 @@ pub const Compiler = struct {
         return self.requirePublicType(module, type_value, position, declaration_kind, declaration_name);
     }
 
-    fn requirePublicType(
+    pub fn requirePublicType(
         self: *Compiler,
         module: usize,
         type_value: Ast.Type,
