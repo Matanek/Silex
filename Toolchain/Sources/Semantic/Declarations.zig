@@ -48,6 +48,7 @@ pub fn prepareStructures(self: anytype) ![]const Ir.Structure {
             .name = name,
             .fields = fields,
             .is_class = declaration.is_class,
+            .is_static = declaration.is_static,
             .base = if (declaration.base) |base| base.structureIndex() else null,
             .collection = declaration.collection,
         };
@@ -98,7 +99,7 @@ fn validateInheritance(self: anytype, index: usize, states: []StructureState) !v
         return self.fail(declaration.base_position, "a class base must be a non-optional class type");
     }
     if (self.structures[index].base) |base_index| {
-        if (base_index >= self.structures.len or !self.structures[base_index].is_class) {
+        if (base_index >= self.structures.len or !self.structures[base_index].is_class or self.structures[base_index].is_static) {
             return self.fail(declaration.base_position, "a class can only inherit from another class");
         }
         const base_declaration = findAstStructure(self, self.structures[base_index].name) orelse

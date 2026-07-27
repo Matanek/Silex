@@ -300,3 +300,52 @@ test "static members reject instance selection and dynamic initializers" {
         "structure 'Values' has no method named 'current' accepting 0 arguments",
     );
 }
+
+test "static classes group state without creating instances" {
+    const output = try run(
+        \\static class Tasks {
+        \\    public static var submitted:int = 0
+        \\    private static func next() int { return Tasks.submitted + 1 }
+        \\    public static func submit() { Tasks.submitted = Tasks.next() }
+        \\    public static func identity<T>(value:T) T { return value }
+        \\}
+        \\func main() {
+        \\    Tasks.submit()
+        \\    Tasks.submit()
+        \\    print(Tasks.submitted, " ", Tasks.identity("ready"))
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("2 ready\n", output);
+}
+
+test "static classes reject instance features" {
+    try expectCompileError(
+        "static class Tasks {} func main() { var tasks = Tasks() }",
+        "static classes cannot be constructed",
+    );
+    try expectCompileError(
+        "static class Tasks { var count:int } func main() {}",
+        "static class fields must start with 'static let' or 'static var'",
+    );
+    try expectCompileError(
+        "static class Tasks { func run() {} } func main() {}",
+        "static class methods must start with 'static func'",
+    );
+    try expectCompileError(
+        "static class Tasks { init() {} } func main() {}",
+        "static classes cannot declare constructors",
+    );
+    try expectCompileError(
+        "static class Tasks { drop {} } func main() {}",
+        "static classes cannot declare drop",
+    );
+    try expectCompileError(
+        "static class Tasks<T> {} func main() {}",
+        "static classes cannot be generic",
+    );
+    try expectCompileError(
+        "static class Tasks {} class Child : Tasks {} func main() {}",
+        "a class can only inherit from another class",
+    );
+}

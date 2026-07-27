@@ -670,7 +670,10 @@ pub const Specializer = struct {
     }
 
     fn specializeMethodCall(self: *Specializer, call: Ast.Expression.Call, locals: []const Binding) SpecializeError!?[]const u8 {
-        const receiver_type = self.inferExpressionType(call.receiver.?, locals) orelse return null;
+        const receiver_type = if (call.receiver.?.value == .identifier)
+            self.typeForName(call.receiver.?.value.identifier) orelse self.inferExpressionType(call.receiver.?, locals) orelse return null
+        else
+            self.inferExpressionType(call.receiver.?, locals) orelse return null;
         const concrete_receiver = receiver_type.optionalChild() orelse receiver_type;
         const structure = self.structureForType(concrete_receiver) orelse return null;
         const source_structure = self.sourceStructureForType(concrete_receiver) orelse return null;

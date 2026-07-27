@@ -3,6 +3,16 @@ const Ast = @import("../Ast.zig");
 const Generics = @import("Generics.zig");
 
 pub fn parse(self: anytype, is_public: bool, is_internal: bool, is_class: bool) !Ast.Structure {
+    return parseType(self, is_public, is_internal, is_class, false);
+}
+
+pub fn parseStaticClass(self: anytype, is_public: bool, is_internal: bool) !Ast.Structure {
+    try self.advance();
+    if (self.current.tag != .keyword_class) return self.fail("expected 'class' after 'static'");
+    return parseType(self, is_public, is_internal, true, true);
+}
+
+fn parseType(self: anytype, is_public: bool, is_internal: bool, is_class: bool, is_static_class: bool) !Ast.Structure {
     const position = self.current.position;
     try self.advance();
     if (self.current.tag != .identifier) return self.fail(if (is_class) "expected class name" else "expected structure name");
@@ -12,13 +22,15 @@ pub fn parse(self: anytype, is_public: bool, is_internal: bool, is_class: bool) 
     _ = try self.internTypeName(name);
     try self.advance();
     const type_parameters = try Generics.parseTypeParameters(self);
-    if (is_class and type_parameters.len != 0) return self.failAt(name_position, "generic classes are not supported yet");
+    if (is_class and !is_static_class and type_parameters.len != 0) return self.failAt(name_position, "generic classes are not supported yet");
+    if (is_static_class and type_parameters.len != 0) return self.failAt(name_position, "static classes cannot be generic");
     const enclosing_type_parameters = self.type_parameters;
     self.type_parameters = if (type_parameters.len == 0) enclosing_type_parameters else type_parameters;
     defer self.type_parameters = enclosing_type_parameters;
     var base: ?Ast.Type = null;
     var base_position = name_position;
     if (self.current.tag == .colon) {
+        if (is_static_class) return self.fail("static classes cannot declare a base");
         if (!is_class) return self.fail("only classes can declare a base class");
         try self.advance();
         base_position = self.current.position;
@@ -50,6 +62,7 @@ pub fn parse(self: anytype, is_public: bool, is_internal: bool, is_class: bool) 
             member_internal = self.current.tag == .keyword_internal;
             member_private = self.current.tag == .keyword_private;
             member_protected = self.current.tag == .keyword_protected;
+            if (is_static_class and member_protected) return self.fail("static classes do not support protected members");
             if (!is_class and (member_private or member_protected)) return self.fail("structures only support public or internal members");
             try self.advance();
         }
@@ -59,6 +72,7 @@ pub fn parse(self: anytype, is_public: bool, is_internal: bool, is_class: bool) 
             try self.advance();
         }
         if (self.current.tag == .keyword_init) {
+            if (is_static_class) return self.fail("static classes cannot declare constructors");
             if (member_static) return self.fail("constructors cannot be static");
             if (member_override) return self.fail("constructors cannot declare override");
             var constructor = try parseConstructor(self, member_internal, base != null);
@@ -69,6 +83,7 @@ pub fn parse(self: anytype, is_public: bool, is_internal: bool, is_class: bool) 
             continue;
         }
         if (self.current.tag == .keyword_func) {
+            if (is_static_class and !member_static) return self.fail("static class methods must start with 'static func'");
             if (member_override and member_static) return self.fail("static methods cannot declare override");
             var method = try self.parseFunction(member_public, member_internal);
             method.is_static = member_static;
@@ -79,6 +94,7 @@ pub fn parse(self: anytype, is_public: bool, is_internal: bool, is_class: bool) 
             continue;
         }
         if (self.current.tag == .keyword_drop) {
+            if (is_static_class) return self.fail("static classes cannot declare drop");
             if (member_static) return self.fail("drop cannot be static");
             if (member_override) return self.fail("drop cannot declare override");
             if (is_class) return self.fail("class drop blocks are not supported yet");
@@ -95,6 +111,7 @@ pub fn parse(self: anytype, is_public: bool, is_internal: bool, is_class: bool) 
             .keyword_var => true,
             else => return self.fail("structure field must start with 'let' or 'var'"),
         };
+        if (is_static_class and !member_static) return self.fail("static class fields must start with 'static let' or 'static var'");
         if (member_override) return self.fail("fields cannot declare override");
         const field_position = self.current.position;
         try self.advance();
@@ -130,6 +147,7 @@ pub fn parse(self: anytype, is_public: bool, is_internal: bool, is_class: bool) 
         .is_public = is_public,
         .is_internal = is_internal,
         .is_class = is_class,
+        .is_static = is_static_class,
         .position = position,
         .name_position = name_position,
         .name = name,

@@ -1170,9 +1170,9 @@ test "native static storage matches the reference interpreter" {
     defer arena.deinit();
     const allocator = arena.allocator();
     const source =
-        \\struct Counter {
-        \\    static var total:int = 4
-        \\    static func add(value:int) int { Counter.total += value; return Counter.total }
+        \\static class Counter {
+        \\    public static var total:int = 4
+        \\    public static func add(value:int) int { Counter.total += value; return Counter.total }
         \\}
         \\func main() { print(Counter.total, " ", Counter.add(3), " ", Counter.total) }
     ;
