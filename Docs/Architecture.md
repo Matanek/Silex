@@ -91,6 +91,12 @@ open Silex document
   extension specializations additionally retain their declaring provider in
   their compile-time identity, so equally named providers cannot alias through
   the specialization cache.
+- Protocol conformances introduced by extensions retain their provider and
+  activation files through composition and generic specialization. The
+  frontend uses that metadata for exact-target constraint checking and dynamic
+  erasure, while lowering receives only the closed set of concrete protocol
+  payloads needed by the portable IR. No runtime registry or externally visible
+  witness-table ABI is introduced.
 - Associated enums are portable nominal declarations whose variants carry
   typed positional values. Construction records the enum and variant by
   structured indices; module interfaces expose only the nominal identity and

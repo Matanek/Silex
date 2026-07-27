@@ -376,6 +376,7 @@ pub const Structure = struct {
     base: ?Type = null,
     base_position: Source.Position = .{ .offset = 0, .line = 1, .column = 1 },
     conformances: []const Type = &.{},
+    extension_conformances: []const ExtensionConformance = &.{},
     type_parameters: []const TypeParameter = &.{},
     fields: []const StructureField,
     static_fields: []const StructureField = &.{},
@@ -434,6 +435,7 @@ pub const Function = struct {
     is_protected: bool = false,
     visibility_explicit: bool = false,
     extension: ?ExtensionMethod = null,
+    specialization_file: ?usize = null,
     owner: usize = 0,
     position: Source.Position,
     name_position: Source.Position,
@@ -447,6 +449,13 @@ pub const Function = struct {
 };
 
 pub const ExtensionMethod = struct {
+    provider: []const u8,
+    visible_files: []const usize,
+};
+
+pub const ExtensionConformance = struct {
+    protocol: Type,
+    position: Source.Position,
     provider: []const u8,
     visible_files: []const usize,
 };

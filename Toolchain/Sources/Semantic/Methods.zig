@@ -88,6 +88,9 @@ pub fn extendStructures(
 }
 
 pub fn analyze(self: anytype, structure_index: usize, method_index: usize, source_method: Ast.Function) !Ir.Function {
+    const previous_specialization_file = self.specialization_file;
+    self.specialization_file = source_method.specialization_file;
+    defer self.specialization_file = previous_specialization_file;
     if (source_method.is_static) return analyzeStatic(self, structure_index, method_index, source_method);
     const previous_context = self.member_context;
     self.member_context = structure_index;
@@ -560,7 +563,8 @@ fn analyzeProtocolCall(
     const result = if (requirement.return_type == .void) null else try self.newValue(builder, requirement.return_type);
     const merge_block = try self.newBlock(builder);
     for (conformers) |structure_index| {
-        const implementation = ProtocolValues.implementation(self, structure_index, requirement) orelse return error.InvalidSource;
+        const witness_file = ProtocolValues.witnessFile(self, structure_index, protocol_index) orelse return error.InvalidSource;
+        const implementation = ProtocolValues.implementationAt(self, structure_index, requirement, witness_file) orelse return error.InvalidSource;
         const action_block = try self.newBlock(builder);
         const next_block = try self.newBlock(builder);
         const matches = try ProtocolValues.emitTest(self, builder, receiver.value, structure_index);

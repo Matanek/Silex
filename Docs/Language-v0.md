@@ -694,6 +694,30 @@ module in the project does not activate it. A signature already declared by the
 target, or supplied by two extension providers visible in the same file, is a
 coherence error rather than an order-dependent overload choice.
 
+An extension may also add one or more nominal protocol conformances:
+
+```sx
+extend Sprite : Drawable, Named {
+    func draw() {}
+    func name() str { return "sprite" }
+}
+```
+
+The type or another public method from the active extension closure must satisfy
+each requirement with its exact signature. Structure extension methods retain
+their public default; a class extension must mark every requirement witness
+`public`. Generic methods cannot serve as witnesses.
+
+An extension conformance is available to generic constraints and dynamic
+protocol conversion only in files that activate its provider through `use`,
+directly or transitively. A dynamic value already created there remains valid
+when transported through code that knows only the protocol. The conformance
+belongs to the exact target and is not inherited by class descendants. Across
+the complete compilation, only one declaration may connect a given target and
+protocol, even when the competing provider closures do not overlap. Extension
+conformance changes neither nominal identity, fields, construction, base class
+nor virtual slots.
+
 ## Nested nominal types
 
 A `struct`, `class`, or `static class` may declare nominal types of those same

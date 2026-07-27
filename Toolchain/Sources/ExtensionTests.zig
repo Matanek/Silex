@@ -101,11 +101,13 @@ test "activate public extensions through direct and transitive use closure" {
         \\use Bridge
         \\func main() { var value = Core.Value(value:7); print(value.label()) }
     });
-    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Core.sx", .data =
-        "public struct Value { public let value:int }",
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Core.sx",
+        .data = "public struct Value { public let value:int }",
     });
-    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Extensions.sx", .data =
-        "use Core; extend Core.Value { public func label() int { return self.value } }",
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Extensions.sx",
+        .data = "use Core; extend Core.Value { public func label() int { return self.value } }",
     });
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Bridge.sx", .data = "use Extensions" });
     const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
@@ -121,12 +123,14 @@ test "leave extensions inactive without a dependency" {
     const allocator = arena.allocator();
     var temporary = std.testing.tmpDir(.{});
     defer temporary.cleanup();
-    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data =
-        "use Core; func main() { let value = Core.Value(); value.extra() }",
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "use Core; func main() { let value = Core.Value(); value.extra() }",
     });
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Core.sx", .data = "public struct Value {}" });
-    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Unused.sx", .data =
-        "use Core; extend Core.Value { public func extra() {} }",
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Unused.sx",
+        .data = "use Core; extend Core.Value { public func extra() {} }",
     });
     const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
     var compiler = Project.Compiler.init(allocator, std.testing.io);
@@ -140,15 +144,18 @@ test "diagnose two extension providers visible in the same use closure" {
     const allocator = arena.allocator();
     var temporary = std.testing.tmpDir(.{});
     defer temporary.cleanup();
-    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data =
-        "use Core; use First; use Second; func main() { let value = Core.Value(); value.read() }",
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "use Core; use First; use Second; func main() { let value = Core.Value(); value.read() }",
     });
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Core.sx", .data = "public struct Value {}" });
-    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "First.sx", .data =
-        "use Core; extend Core.Value { public func read() int { return 1 } }",
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "First.sx",
+        .data = "use Core; extend Core.Value { public func read() int { return 1 } }",
     });
-    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Second.sx", .data =
-        "use Core; extend Core.Value { public func read() int { return 2 } }",
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Second.sx",
+        .data = "use Core; extend Core.Value { public func read() int { return 2 } }",
     });
     const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
     var compiler = Project.Compiler.init(allocator, std.testing.io);
@@ -238,16 +245,236 @@ test "activate generic extension specializations through use" {
     const allocator = arena.allocator();
     var temporary = std.testing.tmpDir(.{});
     defer temporary.cleanup();
-    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data =
-        "use Core; use Algorithms; func main() { let value = Core.Adapter(); print(value.identity(42), value.identity<int>(1)) }",
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "use Core; use Algorithms; func main() { let value = Core.Adapter(); print(value.identity(42), value.identity<int>(1)) }",
     });
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Core.sx", .data = "public struct Adapter {}" });
-    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Algorithms.sx", .data =
-        "use Core; extend Core.Adapter { public func identity<T>(value:T) T { return value } }",
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Algorithms.sx",
+        .data = "use Core; extend Core.Adapter { public func identity<T>(value:T) T { return value } }",
     });
     const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
     var compiler = Project.Compiler.init(allocator, std.testing.io);
     const compilation = try compiler.compile(input);
     const result = try Interpreter.runCapture(allocator, compilation.ir);
     try std.testing.expectEqualStrings("421\n", result.stdout);
+}
+
+test "add exact protocol conformances with structure and class extensions" {
+    const output = try run(
+        \\protocol Named { func name() str }
+        \\protocol Counted { func count() int }
+        \\struct Item { let value:int; func name() str { return "item" } }
+        \\extend Item : Named, Counted { func count() int { return self.value } }
+        \\class Box {}
+        \\extend Box : Named { public func name() str { return "box" } }
+        \\func describe<T:Named>(value:T) str { return value.name() }
+        \\func main() {
+        \\    let item = Item(value:7)
+        \\    var named:Named = item
+        \\    var box:Named = Box()
+        \\    print(describe(item), " ", item.count(), " ", named.name(), " ", box.name())
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("item 7 item box\n", output);
+}
+
+test "do not inherit a class extension conformance" {
+    try expectCompileError(
+        "protocol Named { func name() str } class Entity {} class Player : Entity {} extend Entity : Named { public func name() str { return \"entity\" } } func describe<T:Named>(value:T) str { return value.name() } func main() { describe(Player()) }",
+        "type 'Player' does not conform to protocol 'Named' required by 'T'",
+    );
+}
+
+test "diagnose invalid duplicate and incomplete extension conformances" {
+    try expectCompileError(
+        "struct Item {} struct Marker {} extend Item : Marker {} func main() {}",
+        "an extension conformance must name a protocol",
+    );
+    try expectCompileError(
+        "protocol Named { func name() str } struct Item : Named { func name() str { return \"item\" } } extend Item : Named {} func main() {}",
+        "type 'Item' already conforms to protocol 'Named'",
+    );
+    try expectCompileError(
+        "protocol Named { func name() str } struct Item {} extend Item : Named {} func main() {}",
+        "type 'Item' does not implement protocol requirement 'Named.name'",
+    );
+    try expectCompileError(
+        "protocol Named { func name() str } class Item {} extend Item : Named { func name() str { return \"item\" } } func main() {}",
+        "method 'name' satisfying protocol 'Named' must be public",
+    );
+    try expectCompileError(
+        "protocol Named { func name() str } struct Item {} extend Item : Named { func name() str { return \"first\" } } extend Item : Named { func other() {} } func main() {}",
+        "extension conformance of 'Item' to 'Named' from '<source>' conflicts with '<source>'",
+    );
+}
+
+test "activate extension conformances through direct and transitive use" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data =
+        \\use Api
+        \\use Model
+        \\use Bridge
+        \\use Algorithms
+        \\func main() {
+        \\    let item = Model.Item(value:9)
+        \\    var named:Api.Named = item
+        \\    print(Algorithms.describe(item), " ", named.name(), " ", Api.describe(named))
+        \\}
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Api.sx",
+        .data = "public protocol Named { func name() str } public func describe(value:Named) str { var current = value; return current.name() }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Model.sx",
+        .data = "public struct Item { public let value:int }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Adapt.sx",
+        .data = "use Api; use Model; extend Model.Item : Api.Named { public func name() str { return \"adapted\" } }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Bridge.sx", .data = "use Adapt" });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Algorithms.sx",
+        .data = "use Api; public func describe<T:Api.Named>(value:T) str { return value.name() }",
+    });
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(input);
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("adapted adapted adapted\n", result.stdout);
+}
+
+test "leave extension conformances inactive without a dependency" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "use Api; use Model; use Algorithms; func main() { Algorithms.describe(Model.Item()) }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Api.sx",
+        .data = "public protocol Named { func name() str }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Model.sx", .data = "public struct Item {}" });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Adapt.sx",
+        .data = "use Api; use Model; extend Model.Item : Api.Named { public func name() str { return \"adapted\" } }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Algorithms.sx",
+        .data = "use Api; public func describe<T:Api.Named>(value:T) str { return value.name() }",
+    });
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    try std.testing.expectError(error.InvalidSource, compiler.compile(input));
+    try std.testing.expectEqualStrings("type 'Model.Item' does not conform to protocol 'Api.Named' required by 'T'", compiler.diagnostic.?.message);
+}
+
+test "reject dynamic erasure in a loaded sibling without activation" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "use Helper; use Adapt; func main() {}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Api.sx",
+        .data = "public protocol Named { func name() str }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Model.sx", .data = "public struct Item {}" });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Adapt.sx",
+        .data = "use Api; use Model; extend Model.Item : Api.Named { public func name() str { return \"adapted\" } }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Helper.sx",
+        .data = "use Api; use Model; public func erase() { var value:Api.Named = Model.Item() }",
+    });
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    try std.testing.expectError(error.InvalidSource, compiler.compile(input));
+    try std.testing.expectEqualStrings("conformance of 'Model.Item' to 'Api.Named' is not active in this source file", compiler.diagnostic.?.message);
+}
+
+test "reject duplicate extension conformances across modules globally" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "use First; use Second; func main() {}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Api.sx",
+        .data = "public protocol Named { func name() str }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Model.sx", .data = "public struct Item {}" });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "First.sx",
+        .data = "use Api; use Model; extend Model.Item : Api.Named { public func name() str { return \"first\" } }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Second.sx",
+        .data = "use Api; use Model; extend Model.Item : Api.Named { public func other() {} }",
+    });
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    try std.testing.expectError(error.InvalidSource, compiler.compile(input));
+    try std.testing.expect(std.mem.indexOf(u8, compiler.diagnostic.?.message, "extension conformance of 'Model.Item' to 'Api.Named'") != null);
+    try std.testing.expect(std.mem.indexOf(u8, compiler.diagnostic.?.message, "First") != null);
+    try std.testing.expect(std.mem.indexOf(u8, compiler.diagnostic.?.message, "Second") != null);
+}
+
+test "reject inaccessible extension conformance targets" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = "use Adapt; func main() {}" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Api.sx", .data = "public protocol Named { func name() str }" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Model.sx", .data = "struct Hidden {}" });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Adapt.sx",
+        .data = "use Api; use Model; extend Model.Hidden : Api.Named { public func name() str { return \"hidden\" } }",
+    });
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    try std.testing.expectError(error.InvalidSource, compiler.compile(input));
+    try std.testing.expectEqualStrings("structure 'Hidden' is private outside its module", compiler.diagnostic.?.message);
+}
+
+test "reject inaccessible extension conformance protocols" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = "use Adapt; func main() {}" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Api.sx", .data = "protocol Hidden { func name() str }" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Model.sx", .data = "public struct Item {}" });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Adapt.sx",
+        .data = "use Api; use Model; extend Model.Item : Api.Hidden { public func name() str { return \"item\" } }",
+    });
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    try std.testing.expectError(error.InvalidSource, compiler.compile(input));
+    try std.testing.expectEqualStrings("structure 'Hidden' is private outside its module", compiler.diagnostic.?.message);
 }

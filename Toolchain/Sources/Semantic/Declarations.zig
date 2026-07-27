@@ -96,6 +96,9 @@ fn resolvedConformances(self: anytype, declaration: Ast.Structure) ![]const usiz
     for (declaration.conformances) |relation| if (isProtocolType(self, relation)) {
         try result.append(self.allocator, relation.structureIndex().?);
     };
+    for (declaration.extension_conformances) |relation| {
+        try result.append(self.allocator, relation.protocol.structureIndex().?);
+    }
     return result.toOwnedSlice(self.allocator);
 }
 

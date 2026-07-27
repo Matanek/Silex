@@ -4,8 +4,9 @@ const Inheritance = @import("Inheritance.zig");
 pub fn memberVisible(self: anytype, structure_index: usize, member: anytype, position: Source.Position) bool {
     if (comptime @hasField(@TypeOf(member), "extension")) {
         if (member.extension) |extension| {
+            const active_file = self.specialization_file orelse position.file;
             var active = false;
-            for (extension.visible_files) |file| if (file == position.file) {
+            for (extension.visible_files) |file| if (file == active_file) {
                 active = true;
                 break;
             };

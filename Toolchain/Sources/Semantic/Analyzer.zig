@@ -47,6 +47,7 @@ pub const Analyzer = struct {
     member_context: ?usize = null,
     constructor_context: ?usize = null,
     extension_context: bool = false,
+    specialization_file: ?usize = null,
     pub fn init(allocator: Allocator) Analyzer {
         return .{ .allocator = allocator };
     }
@@ -268,6 +269,9 @@ pub const Analyzer = struct {
 
     fn analyzeFunction(self: *Analyzer, function_id: Ir.FunctionId, function: Ast.Function) AnalyzeError!Ir.Function {
         _ = function_id;
+        const previous_specialization_file = self.specialization_file;
+        self.specialization_file = function.specialization_file;
+        defer self.specialization_file = previous_specialization_file;
         var builder: FunctionBuilder = .{ .return_type = function.return_type };
         try builder.blocks.append(self.allocator, .{});
         var parameter_types: std.ArrayList(Types.Type) = .empty;
