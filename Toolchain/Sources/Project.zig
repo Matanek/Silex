@@ -1,5 +1,6 @@
 const std = @import("std");
 const Ast = @import("Ast.zig");
+const Boundary = @import("Boundary.zig");
 const CompilationCache = @import("CompilationCache.zig");
 const Interface = @import("Interface.zig");
 const GenericSpecializer = @import("Generics/Specializer.zig").Specializer;
@@ -37,6 +38,7 @@ pub const Error = anyerror;
 pub const Compilation = struct {
     ast: Ast.Program,
     ir: Ir.Program,
+    boundaries: []const Boundary.Function,
     interfaces: []const Interface.Module,
     packages: Packages.Graph,
     files: []const []const u8,
@@ -141,6 +143,7 @@ pub const Compiler = struct {
         return .{
             .ast = ast,
             .ir = ir,
+            .boundaries = analyzer.external_functions,
             .interfaces = interfaces,
             .packages = self.packages,
             .files = self.files,
@@ -206,6 +209,17 @@ pub const Compiler = struct {
                     return self.fail(position, message);
                 }
             }
+            for (program.external_functions) |external| {
+                if (std.mem.eql(u8, external.name, binding.alias)) {
+                    const position = use.alias_position orelse use.position;
+                    const message = try std.fmt.allocPrint(
+                        self.allocator,
+                        "use alias '{s}' collides with a local declaration",
+                        .{binding.alias},
+                    );
+                    return self.fail(position, message);
+                }
+            }
             for (program.structures) |structure| {
                 if (std.mem.eql(u8, structure.name, binding.alias)) {
                     const position = use.alias_position orelse use.position;
@@ -260,6 +274,16 @@ pub const Compiler = struct {
     }
 
     fn resolveUse(self: *Compiler, source_module: usize, use: Ast.Use) Error!Binding {
+        if (std.mem.eql(u8, use.path, "Interop.C") or std.mem.eql(u8, use.path, "Interop.MacOS")) {
+            return .{
+                .alias = use.alias orelse lastSegment(use.path),
+                .path = use.path,
+                .module = null,
+                .declaration = null,
+                .is_public = use.is_public,
+                .position = use.position,
+            };
+        }
         if (use.type_target) |type_target| {
             return .{
                 .alias = use.alias.?,
@@ -660,6 +684,7 @@ pub const Compiler = struct {
             }
             const canonical = try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ binding.path, tail });
             if (self.longestModulePrefix(canonical, self.index.providers[module].owner)) |target| return target;
+            if (std.mem.startsWith(u8, binding.path, "Interop.")) return null;
             const message = try std.fmt.allocPrint(self.allocator, "unknown qualified path '{s}'", .{canonical});
             return self.fail(expressionPosition(module), message);
         }
@@ -974,6 +999,7 @@ pub const Compiler = struct {
         var structures: std.ArrayList(Ast.Structure) = .empty;
         var enums: std.ArrayList(Ast.Enum) = .empty;
         var functions: std.ArrayList(Ast.Function) = .empty;
+        var external_functions: std.ArrayList(Ast.ExternalFunction) = .empty;
         var extensions: std.ArrayList(Ast.Extension) = .empty;
         for (self.index.providers, 0..) |provider, module| {
             if (self.units[module].state != .loaded) continue;
@@ -1097,6 +1123,12 @@ pub const Compiler = struct {
                 composed.statements = try self.rewriteStatements(module, function.statements, type_map);
                 try functions.append(self.allocator, composed);
             }
+            for (program.external_functions) |external| {
+                var composed = external;
+                composed.owner = provider.owner;
+                composed.name = try canonicalName(self.allocator, provider.name, external.name);
+                try external_functions.append(self.allocator, composed);
+            }
         }
         return .{ .program = .{
             .type_names = try type_names.toOwnedSlice(self.allocator),
@@ -1104,6 +1136,7 @@ pub const Compiler = struct {
             .structures = try structures.toOwnedSlice(self.allocator),
             .enums = try enums.toOwnedSlice(self.allocator),
             .extensions = try extensions.toOwnedSlice(self.allocator),
+            .external_functions = try external_functions.toOwnedSlice(self.allocator),
             .functions = try functions.toOwnedSlice(self.allocator),
         }, .type_maps = type_maps };
     }

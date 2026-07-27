@@ -1,5 +1,6 @@
 const std = @import("std");
 const Ast = @import("../Ast.zig");
+const Boundary = @import("../Boundary.zig");
 const Ir = @import("../Ir.zig");
 const MainBoundary = @import("../MainBoundary.zig");
 const Numeric = @import("../Numeric.zig");
@@ -25,6 +26,7 @@ const Try = @import("Try.zig");
 const Visibility = @import("Visibility.zig");
 const Declarations = @import("Declarations.zig");
 const Inheritance = @import("Inheritance.zig");
+const Interop = @import("Interop.zig");
 const StaticMembers = @import("StaticMembers.zig");
 const Protocols = @import("Protocols.zig");
 const Conversions = @import("Conversions.zig");
@@ -41,6 +43,7 @@ pub const Analyzer = struct {
     program: Ast.Program = undefined,
     structures: []const Ir.Structure = &.{},
     globals: []const Ir.Global = &.{},
+    external_functions: []const Boundary.Function = &.{},
     enums: []const Ir.Enum = &.{},
     method_mutability: []const bool = &.{},
     default_expansions: std.ArrayList(*const Ast.Expression) = .empty,
@@ -63,6 +66,7 @@ pub const Analyzer = struct {
         self.diagnostic = null;
         self.structures = try Declarations.prepareStructures(self);
         self.globals = try StaticMembers.prepare(self);
+        self.external_functions = try Interop.prepare(self);
         self.enums = try Enums.prepare(self);
         self.method_mutability = try Methods.inferMutability(self.allocator, self.program);
         self.structures = try Methods.extendStructures(self.allocator, self.program, self.structures, self.method_mutability);
@@ -100,7 +104,12 @@ pub const Analyzer = struct {
             const nominal = self.structureIndex(structure.name) orelse return error.InvalidSource;
             try functions.append(self.allocator, try Resources.analyzeClassFields(self, nominal, structure));
         };
-        return .{ .globals = self.globals, .structures = self.structures, .enums = self.enums, .functions = try functions.toOwnedSlice(self.allocator) };
+        return .{
+            .globals = self.globals,
+            .structures = self.structures,
+            .enums = self.enums,
+            .functions = try functions.toOwnedSlice(self.allocator),
+        };
     }
 
     fn validateDeclarations(self: *Analyzer, require_entry: bool) AnalyzeError!void {
@@ -937,6 +946,7 @@ pub const Analyzer = struct {
 
     fn analyzeCall(self: *Analyzer, builder: *FunctionBuilder, call: Ast.Expression.Call) AnalyzeError!?TypedValue {
         if (call.receiver == null and std.mem.eql(u8, call.name, "map_error")) return try MapError.analyze(self, builder, call);
+        if (try Interop.analyzeIntrinsic(self, builder, call)) |value| return value;
         if (call.receiver) |receiver_expression| {
             if (Collections.isMutation(call.name) and Collections.receiverIsCollection(self.structures, builder, receiver_expression)) {
                 return try Collections.analyzeMutation(self, builder, call);
@@ -981,6 +991,7 @@ pub const Analyzer = struct {
                 return try self.emitStringCount(builder, value);
             }
         }
+        if (try Interop.analyzeCall(self, builder, call)) |value| return value;
         var total_named: usize = 0;
         var named_count: usize = 0;
         var arity_count: usize = 0;

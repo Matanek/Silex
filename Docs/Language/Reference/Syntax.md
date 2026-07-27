@@ -15,6 +15,7 @@ constraints.
 | Enum variant | `caseName(Type)` inside `enum` |
 | Constructor | `init(value:type) { ... }` |
 | Import | `use Module.Path` |
+| C function binding | `let name = C.function<func(...) Return>(...)` |
 | Alias | `use Existing.Type as LocalName` |
 | Public declaration | `public ...` |
 | File-local declaration | `internal ...` |
@@ -75,3 +76,7 @@ as
 
 Statements end at a line break, before `}`, or at `;`. Statements on the same
 line need `;`.
+
+A `C.function` binding is the only `let` currently accepted at module level.
+See [Interop](../Interop.md) for its exact supported signature and lifetime
+rules.

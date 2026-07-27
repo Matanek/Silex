@@ -1,4 +1,5 @@
 const std = @import("std");
+const Boundary = @import("../Boundary.zig");
 const Ir = @import("../Ir.zig");
 const CompilationCache = @import("../CompilationCache.zig");
 const MainBoundary = @import("../MainBoundary.zig");
@@ -21,17 +22,46 @@ pub fn lower(allocator: Allocator, program: Ir.Program) Machine.Error!Machine.Pr
     return lowerWithMode(allocator, program, .debug);
 }
 
+pub fn lowerBoundaries(allocator: Allocator, program: Ir.Program, boundaries: []const Boundary.Function) Machine.Error!Machine.Program {
+    return lowerWithModeAndBoundaries(allocator, program, boundaries, .debug);
+}
+
 pub const Mode = enum { debug, release };
 
 pub fn lowerWithMode(allocator: Allocator, program: Ir.Program, mode: Mode) Machine.Error!Machine.Program {
-    return lowerInternal(allocator, null, program, mode);
+    return lowerInternal(allocator, null, program, &.{}, mode);
 }
 
 pub fn lowerCached(allocator: Allocator, io: std.Io, program: Ir.Program, mode: Mode) Machine.Error!Machine.Program {
-    return lowerInternal(allocator, io, program, mode);
+    return lowerInternal(allocator, io, program, &.{}, mode);
 }
 
-fn lowerInternal(allocator: Allocator, io: ?std.Io, program: Ir.Program, mode: Mode) Machine.Error!Machine.Program {
+pub fn lowerWithModeAndBoundaries(
+    allocator: Allocator,
+    program: Ir.Program,
+    boundaries: []const Boundary.Function,
+    mode: Mode,
+) Machine.Error!Machine.Program {
+    return lowerInternal(allocator, null, program, boundaries, mode);
+}
+
+pub fn lowerCachedWithBoundaries(
+    allocator: Allocator,
+    io: std.Io,
+    program: Ir.Program,
+    boundaries: []const Boundary.Function,
+    mode: Mode,
+) Machine.Error!Machine.Program {
+    return lowerInternal(allocator, io, program, boundaries, mode);
+}
+
+fn lowerInternal(
+    allocator: Allocator,
+    io: ?std.Io,
+    program: Ir.Program,
+    boundaries: []const Boundary.Function,
+    mode: Mode,
+) Machine.Error!Machine.Program {
     var functions: std.ArrayList(Machine.Function) = .empty;
     var strings: std.ArrayList([]const u8) = .empty;
     try strings.append(allocator, "\n");
@@ -66,14 +96,35 @@ fn lowerInternal(allocator: Allocator, io: ?std.Io, program: Ir.Program, mode: M
         .bits = global.bits,
         .width = @intCast(try leafCount(program, global.type)),
     };
+    const external_functions = try allocator.alloc(Machine.ExternalFunction, boundaries.len);
+    for (boundaries, 0..) |external, index| {
+        const arguments = try allocator.alloc(Machine.AbiValue, external.parameters.len);
+        for (external.parameters, 0..) |parameter, parameter_index| arguments[parameter_index] = try lowerExternalType(parameter);
+        external_functions[index] = .{
+            .provider = if (std.mem.eql(u8, external.provider, "MacOS.lib_system")) "Darwin.lib_system" else external.provider,
+            .source_name = external.source_name,
+            .signature = .{ .arguments = arguments, .result = try lowerExternalType(external.return_type) },
+        };
+    }
     const result: Machine.Program = .{
         .functions = try functions.toOwnedSlice(allocator),
+        .external_functions = external_functions,
         .globals = globals,
         .strings = try strings.toOwnedSlice(allocator),
         .copy_model = try buildCopyModel(allocator, program),
     };
     try Machine.validate(result);
     return result;
+}
+
+fn lowerExternalType(type_value: Ir.Type) Machine.Error!Machine.AbiValue {
+    return switch (type_value) {
+        .int32 => .int32,
+        .address => .read_address,
+        .uint => .uint64,
+        .int => .int64,
+        else => error.UnsupportedType,
+    };
 }
 
 fn allocateRegisters(allocator: Allocator, function: Machine.Function) Machine.Error!Machine.Function {
@@ -344,6 +395,15 @@ fn lowerInstruction(
                 .element_width = @intCast(try leafCount(program, source.element)),
             } };
         },
+        .string_address => |address| .{ .reference_offset = .{
+            .result = layout.values[address.result].start,
+            .reference = layout.values[address.operand].start,
+            .byte_offset = 8,
+        } },
+        .string_byte_count => |count| .{ .reference_load = .{
+            .result = layout.values[count.result],
+            .reference = layout.values[count.operand].start,
+        } },
         .enum_payload => |payload| enum_payload: {
             if (payload.enumeration >= program.enums.len) return error.InvalidMachineProgram;
             const enumeration = program.enums[payload.enumeration];
@@ -485,6 +545,16 @@ fn lowerInstruction(
             for (call.arguments, 0..) |argument, index| arguments[index] = layout.values[argument];
             break :call .{ .call = .{
                 .result = if (call.result) |result| layout.values[result] else null,
+                .function = call.function,
+                .arguments = arguments,
+            } };
+        },
+        .boundary_call => |call| external_call: {
+            _ = try Machine.checkedArgumentCount(call.arguments.len);
+            const arguments = try allocator.alloc(Machine.Slot, call.arguments.len);
+            for (call.arguments, 0..) |argument, index| arguments[index] = layout.values[argument].start;
+            break :external_call .{ .external_call = .{
+                .result = layout.values[call.result].start,
                 .function = call.function,
                 .arguments = arguments,
             } };

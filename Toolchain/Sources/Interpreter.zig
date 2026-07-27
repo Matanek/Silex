@@ -173,6 +173,7 @@ fn executeInstruction(
     session: *Session,
 ) Error!?Value {
     switch (instruction.*) {
+        .string_address, .string_byte_count, .boundary_call => return error.InvalidProgram,
         .constant_int => |constant| {
             const type_value = function.value_types[constant.result];
             const value: Value = if (type_value == .int)

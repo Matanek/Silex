@@ -1,4 +1,5 @@
 const std = @import("std");
+const Boundary = @import("Boundary.zig");
 const Cli = @import("Cli.zig");
 const CompilationCache = @import("CompilationCache.zig");
 const Lower = @import("Arm64/Lower.zig");
@@ -112,6 +113,7 @@ fn compileNative(init: std.process.Init, allocator: std.mem.Allocator, args: []c
             return 1;
         },
     };
+    var boundaries: []const Boundary.Function = &.{};
     const portable_ir = if (options.cache) CompilationCache.loadIr(allocator, init.io, options.source_path) else null;
     const program = portable_ir orelse program: {
         var compiler = Project.Compiler.initWithPackagesAndCache(
@@ -127,7 +129,13 @@ fn compileNative(init: std.process.Init, allocator: std.mem.Allocator, args: []c
             },
             else => return err,
         };
-        if (options.cache) CompilationCache.storeIr(allocator, init.io, options.source_path, compilation.files, compilation.ir);
+        boundaries = compilation.boundaries;
+        // A portable-IR cache entry deliberately contains no target provider or ABI
+        // information. Boundary-bearing programs are therefore cached only after
+        // target lowering, where their complete native contract is represented.
+        if (options.cache and boundaries.len == 0) {
+            CompilationCache.storeIr(allocator, init.io, options.source_path, compilation.files, compilation.ir);
+        }
         break :program compilation.ir;
     };
 
@@ -155,9 +163,9 @@ fn compileNative(init: std.process.Init, allocator: std.mem.Allocator, args: []c
         .release => .release,
     };
     const machine = (if (options.cache)
-        Lower.lowerCached(allocator, init.io, native_ir, lower_mode)
+        Lower.lowerCachedWithBoundaries(allocator, init.io, native_ir, boundaries, lower_mode)
     else
-        Lower.lowerWithMode(allocator, native_ir, lower_mode)) catch |err| {
+        Lower.lowerWithModeAndBoundaries(allocator, native_ir, boundaries, lower_mode)) catch |err| {
         std.debug.print("silex: native backend cannot lower this program: {t}\n", .{err});
         return 1;
     };
@@ -289,5 +297,6 @@ test {
     _ = @import("Ir.zig");
     _ = @import("Interpreter.zig");
     _ = @import("Interface.zig");
+    _ = @import("InteropTests.zig");
     _ = @import("Frontend.zig");
 }

@@ -196,6 +196,14 @@ fn rewriteInstruction(allocator: Allocator, instruction: Ir.Instruction, aliases
         .global_load,
         .local_address,
         => instruction,
+        .string_address => |value| .{ .string_address = .{
+            .result = value.result,
+            .operand = canonical(aliases, value.operand),
+        } },
+        .string_byte_count => |value| .{ .string_byte_count = .{
+            .result = value.result,
+            .operand = canonical(aliases, value.operand),
+        } },
         .optional_some => |value| .{ .optional_some = .{ .result = value.result, .operand = canonical(aliases, value.operand) } },
         .optional_unwrap => |value| .{ .optional_unwrap = .{ .result = value.result, .operand = canonical(aliases, value.operand) } },
         .copy => |value| .{ .copy = .{ .result = value.result, .operand = canonical(aliases, value.operand) } },
@@ -331,6 +339,11 @@ fn rewriteInstruction(allocator: Allocator, instruction: Ir.Instruction, aliases
             .right = canonical(aliases, value.right),
         } },
         .call => |value| .{ .call = .{
+            .result = value.result,
+            .function = value.function,
+            .arguments = try rewriteValues(allocator, value.arguments, aliases),
+        } },
+        .boundary_call => |value| .{ .boundary_call = .{
             .result = value.result,
             .function = value.function,
             .arguments = try rewriteValues(allocator, value.arguments, aliases),
@@ -670,6 +683,7 @@ fn countUses(instruction: Ir.Instruction, uses: []usize) void {
             useValue(uses, value.end);
             useOptional(uses, value.reference);
         },
+        .string_address, .string_byte_count => |value| useValue(uses, value.operand),
         .local_store => |value| useValue(uses, value.operand),
         .reference_load => |value| useValue(uses, value.reference),
         .reference_store => |value| {
@@ -690,6 +704,7 @@ fn countUses(instruction: Ir.Instruction, uses: []usize) void {
             useValue(uses, value.right);
         },
         .call => |value| useValues(uses, value.arguments),
+        .boundary_call => |value| useValues(uses, value.arguments),
         .dynamic_call => |value| {
             useValue(uses, value.receiver);
             useValues(uses, value.arguments);
