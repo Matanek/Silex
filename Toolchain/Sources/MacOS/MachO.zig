@@ -258,10 +258,11 @@ test "emit builds an arm64 Mach-O executable with an LC_MAIN entry" {
 
     try std.testing.expectEqual(@as(u32, macho.MH_MAGIC_64), std.mem.readInt(u32, bytes[0..4], .little));
     try std.testing.expectEqual(@as(u32, @bitCast(macho.CPU_TYPE_ARM64)), std.mem.readInt(u32, bytes[4..8], .little));
-    try std.testing.expectEqual(@as(u32, 7), std.mem.readInt(u32, bytes[16..20], .little));
+    try std.testing.expectEqual(@as(u32, 8), std.mem.readInt(u32, bytes[16..20], .little));
 
     const main_command_offset = @sizeOf(macho.mach_header_64) +
         @sizeOf(macho.segment_command_64) +
+        @sizeOf(macho.segment_command_64) + @sizeOf(macho.section_64) +
         @sizeOf(macho.segment_command_64) + @sizeOf(macho.section_64) +
         @sizeOf(macho.segment_command_64) +
         std.mem.alignForward(usize, @sizeOf(macho.dylinker_command) + "/usr/lib/dyld\x00".len, @alignOf(u64)) +

@@ -106,6 +106,7 @@ pub fn encode(allocator: Allocator, program: Machine.Program, entry: Entry) Erro
     var float_calls: std.ArrayList(usize) = .empty;
     var deep_copy_calls: std.ArrayList(DeepCopyFixup) = .empty;
     var data_fixups: std.ArrayList(DataFixup) = .empty;
+    var snapshot_data_fixups: std.ArrayList(usize) = .empty;
 
     for (program.functions, 0..) |function, function_id| {
         offsets[function_id] = @intCast(words.items.len * 4);
@@ -119,8 +120,10 @@ pub fn encode(allocator: Allocator, program: Machine.Program, entry: Entry) Erro
             const offset: u32 = @intCast(words.items.len * 4);
             try words.append(allocator, saveFrame());
             try words.append(allocator, moveFramePointer());
+            try emitSnapshotAcquire(allocator, &words, &snapshot_data_fixups);
             try calls.append(allocator, .{ .at = words.items.len, .function = function });
             try words.append(allocator, branchLink());
+            try emitSnapshotRelease(allocator, &words, &snapshot_data_fixups);
             try words.append(allocator, moveRegister(.x1, .x8));
             try words.append(allocator, restoreFrame());
             try words.append(allocator, returnInstruction());
@@ -139,8 +142,10 @@ pub fn encode(allocator: Allocator, program: Machine.Program, entry: Entry) Erro
                 try emitStackAdjustment(allocator, &words, 16, false);
                 try words.append(allocator, addSubtractImmediate(.x15, .zero_or_sp, 0, true));
             }
+            try emitSnapshotAcquire(allocator, &words, &snapshot_data_fixups);
             try calls.append(allocator, .{ .at = words.items.len, .function = function });
             try words.append(allocator, branchLink());
+            try emitSnapshotRelease(allocator, &words, &snapshot_data_fixups);
             const runtime_success = words.items.len;
             try words.append(allocator, compareBranchZero(.x8));
             if (main.recoverable_entry_result) try emitStackAdjustment(allocator, &words, 16, true);
@@ -204,8 +209,14 @@ pub fn encode(allocator: Allocator, program: Machine.Program, entry: Entry) Erro
     }
     const copy_model_offset: ?usize = if (program.copy_model.len == 0) null else std.mem.alignForward(usize, image_size, 8);
     if (copy_model_offset) |offset| image_size = offset + program.copy_model.len * @sizeOf(u64);
-    const data_offset: ?u32 = if (program.globals.len == 0) null else @intCast(std.mem.alignForward(usize, image_size, 0x4000));
+    const has_snapshot_lock = switch (entry) {
+        .none => false,
+        else => true,
+    };
+    const data_offset: ?u32 = if (program.globals.len == 0 and !has_snapshot_lock) null else @intCast(std.mem.alignForward(usize, image_size, 0x4000));
     if (data_offset) |offset| image_size = offset;
+    const snapshot_lock_offset: ?usize = if (has_snapshot_lock) image_size else null;
+    if (has_snapshot_lock) image_size += @sizeOf(u64);
     const global_offsets = try allocator.alloc(usize, program.globals.len);
     defer allocator.free(global_offsets);
     for (program.globals, 0..) |global, index| {
@@ -226,6 +237,10 @@ pub fn encode(allocator: Allocator, program: Machine.Program, entry: Entry) Erro
         const target = copy_model_offset orelse return error.InvalidMachineProgram;
         for (deep_copy_calls.items) |fixup| try patchAdr(words.items, fixup.data_at, target);
     }
+    if (snapshot_data_fixups.items.len != 0) {
+        const target = snapshot_lock_offset orelse return error.InvalidMachineProgram;
+        for (snapshot_data_fixups.items) |at| try patchAdr(words.items, at, target);
+    }
 
     const code = try allocator.alloc(u8, image_size);
     for (words.items, 0..) |word, index| std.mem.writeInt(u32, code[index * 4 ..][0..4], word, .little);
@@ -239,8 +254,30 @@ pub fn encode(allocator: Allocator, program: Machine.Program, entry: Entry) Erro
     if (copy_model_offset) |offset| for (program.copy_model, 0..) |word, index| {
         std.mem.writeInt(u64, code[offset + index * 8 ..][0..8], word, .little);
     };
+    if (snapshot_lock_offset) |offset| std.mem.writeInt(u64, code[offset..][0..8], 0, .little);
     for (program.globals, 0..) |global, index| std.mem.writeInt(u64, code[global_offsets[index]..][0..8], global.bits, .little);
     return .{ .code = code, .function_offsets = offsets, .entry_offset = entry_offset, .data_offset = data_offset };
+}
+
+fn emitSnapshotAcquire(allocator: Allocator, words: *std.ArrayList(u32), data_fixups: *std.ArrayList(usize)) Error!void {
+    try data_fixups.append(allocator, words.items.len);
+    try words.append(allocator, addressRelative(.x14));
+    const retry = words.items.len;
+    try words.append(allocator, A64.loadAcquireExclusive64(.x9, .x14));
+    const occupied = words.items.len;
+    try words.append(allocator, compareBranchNonZero64(.x9));
+    try words.append(allocator, moveWideZero64(.x9, 1, 0));
+    try words.append(allocator, A64.storeReleaseExclusive64(.x10, .x9, .x14));
+    const conflicted = words.items.len;
+    try words.append(allocator, compareBranchNonZero(.x10));
+    try patch19(words.items, occupied, retry);
+    try patch19(words.items, conflicted, retry);
+}
+
+fn emitSnapshotRelease(allocator: Allocator, words: *std.ArrayList(u32), data_fixups: *std.ArrayList(usize)) Error!void {
+    try data_fixups.append(allocator, words.items.len);
+    try words.append(allocator, addressRelative(.x14));
+    try words.append(allocator, A64.storeRelease64(.zero_or_sp, .x14));
 }
 
 fn findString(program: Machine.Program, value: []const u8) ?usize {
@@ -1466,6 +1503,9 @@ test "encode known AArch64 instruction words" {
     try std.testing.expectEqual(@as(u32, 0xd2800540), moveWideZero64(.x0, 42, 0));
     try std.testing.expectEqual(@as(u32, 0xf90003e9), storeStack(.x9, 0));
     try std.testing.expectEqual(@as(u32, 0xf94003e9), loadStack(.x9, 0));
+    try std.testing.expectEqual(@as(u32, 0xc85ffdc9), A64.loadAcquireExclusive64(.x9, .x14));
+    try std.testing.expectEqual(@as(u32, 0xc80afdc9), A64.storeReleaseExclusive64(.x10, .x9, .x14));
+    try std.testing.expectEqual(@as(u32, 0xc89ffddf), A64.storeRelease64(.zero_or_sp, .x14));
     try std.testing.expectEqual(@as(u32, 0xd65f03c0), returnInstruction());
 }
 
@@ -1490,7 +1530,7 @@ test "resolve calls and append a native test entry" {
     try std.testing.expect(image.entry_offset.? > 0);
     try std.testing.expectEqual(@as(usize, 0), image.code.len % 4);
     const entry_word = std.mem.readInt(u32, image.code[image.entry_offset.?..][0..4], .little);
-    const call_word = image.entry_offset.? / 4 + 2;
+    const call_word = image.entry_offset.? / 4 + 8;
     const delta: i32 = -@as(i32, @intCast(call_word));
     const expected = @as(u32, 0x94000000) | (@as(u32, @bitCast(delta)) & 0x03ffffff);
     const encoded_call = std.mem.readInt(u32, image.code[call_word * 4 ..][0..4], .little);

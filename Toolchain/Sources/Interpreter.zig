@@ -8,6 +8,7 @@ const Globals = @import("Interpreter/Globals.zig");
 const Classes = @import("Interpreter/Classes.zig");
 const Protocols = @import("Interpreter/Protocols.zig");
 const Output = @import("Interpreter/Output.zig");
+const SnapshotGate = @import("Runtime/SnapshotGate.zig");
 
 const Allocator = std.mem.Allocator;
 const max_call_depth = 512;
@@ -37,6 +38,7 @@ pub const Session = struct {
     terminated: bool = false,
     globals: []Value = &.{},
     classes: std.ArrayList(Classes.Entry) = .empty,
+    snapshot_gate: SnapshotGate.Gate = .{},
 };
 
 pub fn run(allocator: Allocator, program: Ir.Program) Error!u8 {
@@ -205,6 +207,8 @@ fn executeInstruction(
         },
         .copy => |copy| try store(function, values, copy.result, try cloneValue(allocator, try load(values, copy.operand))),
         .deep_copy => |copy| {
+            const guard = session.snapshot_gate.capture();
+            defer guard.release();
             var classes = std.AutoHashMap(*Value.Structure, *Value.Structure).init(allocator);
             defer classes.deinit();
             try store(function, values, copy.result, try deepCloneValue(allocator, program, try load(values, copy.operand), session, &classes));
@@ -222,6 +226,8 @@ fn executeInstruction(
                 .class => |value| value,
                 else => return error.InvalidProgram,
             };
+            const guard = session.snapshot_gate.mutation();
+            defer guard.release();
             try Classes.retain(session.classes.items, class.instance);
         },
         .class_drop => |drop| {
@@ -229,7 +235,12 @@ fn executeInstruction(
                 .class => |value| value,
                 else => return error.InvalidProgram,
             };
-            if (try Classes.release(session.classes.items, class.instance)) {
+            const should_finalize = finalize: {
+                const guard = session.snapshot_gate.mutation();
+                defer guard.release();
+                break :finalize try Classes.release(session.classes.items, class.instance);
+            };
+            if (should_finalize) {
                 const dynamic_type = class.instance.type.structureIndex() orelse return error.InvalidProgram;
                 const plan = for (drop.plans) |candidate| {
                     if (candidate.structure == dynamic_type) break candidate;
@@ -244,7 +255,11 @@ fn executeInstruction(
             }
         },
         .global_load => |load_value| try store(function, values, load_value.result, try Globals.load(allocator, session.globals, load_value)),
-        .global_store => |store_value| try Globals.store(allocator, program, session.globals, store_value, try load(values, store_value.operand)),
+        .global_store => |store_value| {
+            const guard = session.snapshot_gate.mutation();
+            defer guard.release();
+            try Globals.store(allocator, program, session.globals, store_value, try load(values, store_value.operand));
+        },
         .structure_init => |initialization| {
             if (initialization.structure >= program.structures.len or
                 initialization.fields.len != program.structures[initialization.structure].fields.len)
@@ -265,6 +280,8 @@ fn executeInstruction(
             if (program.structures[initialization.structure].is_class) {
                 const instance = try allocator.create(Value.Structure);
                 instance.* = aggregate;
+                const guard = session.snapshot_gate.mutation();
+                defer guard.release();
                 try Classes.register(allocator, &session.classes, instance);
                 try store(function, values, initialization.result, .{ .class = .{
                     .static_type = .structure(initialization.structure),
@@ -336,6 +353,8 @@ fn executeInstruction(
             try store(function, values, field.result, try cloneValue(allocator, aggregate.fields[field.field]));
         },
         .field_store => |field| {
+            const guard = session.snapshot_gate.mutation();
+            defer guard.release();
             const instance = switch (try load(values, field.base)) {
                 .class => |value| value,
                 else => return error.InvalidProgram,
@@ -372,6 +391,8 @@ fn executeInstruction(
             try store(function, values, reference.result, try cloneValue(allocator, try pointer.load()));
         },
         .reference_store => |reference| {
+            const guard = session.snapshot_gate.mutation();
+            defer guard.release();
             const pointer = switch (try load(values, reference.reference)) {
                 .reference => |value| value,
                 else => return error.InvalidProgram,
