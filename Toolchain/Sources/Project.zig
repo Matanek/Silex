@@ -15,6 +15,7 @@ const Paths = @import("Project/Paths.zig");
 const Lookup = @import("Project/Lookup.zig");
 const Iterations = @import("Project/Iterations.zig");
 const Activation = @import("Project/Activation.zig");
+const Rewriting = @import("Project/Rewriting.zig");
 const Semantic = @import("Semantic/Analyzer.zig");
 const Source = @import("Source.zig");
 const Allocator = std.mem.Allocator;
@@ -921,6 +922,7 @@ pub const Compiler = struct {
                 var composed_structure = structure;
                 composed_structure.owner = provider.owner;
                 composed_structure.name = composed_name;
+                composed_structure.type_parameters = try GenericTypes.remapParameters(self.allocator, structure.type_parameters, type_map, generic_map);
                 if (structure.enclosing) |enclosing| {
                     composed_structure.enclosing = try structureCanonicalName(self.allocator, provider.name, enclosing);
                 }
@@ -966,6 +968,7 @@ pub const Compiler = struct {
                 for (structure.methods, 0..) |method, method_index| {
                     methods[method_index] = method;
                     methods[method_index].owner = provider.owner;
+                    methods[method_index].type_parameters = try GenericTypes.remapParameters(self.allocator, method.type_parameters, type_map, generic_map);
                     const parameters = try self.allocator.alloc(Ast.Parameter, method.parameters.len);
                     for (method.parameters, 0..) |parameter, parameter_index| {
                         parameters[parameter_index] = parameter;
@@ -984,6 +987,7 @@ pub const Compiler = struct {
                 var composed = enumeration;
                 composed.owner = provider.owner;
                 composed.name = try structureCanonicalName(self.allocator, provider.name, enumeration.name);
+                composed.type_parameters = try GenericTypes.remapParameters(self.allocator, enumeration.type_parameters, type_map, generic_map);
                 const variants = try self.allocator.alloc(Ast.EnumVariant, enumeration.variants.len);
                 for (enumeration.variants, 0..) |variant, variant_index| {
                     variants[variant_index] = variant;
@@ -999,6 +1003,7 @@ pub const Compiler = struct {
             for (program.functions) |function| {
                 var composed = function;
                 composed.owner = provider.owner;
+                composed.type_parameters = try GenericTypes.remapParameters(self.allocator, function.type_parameters, type_map, generic_map);
                 composed.name = if (module == self.entry_module and std.mem.eql(u8, function.name, "main"))
                     "main"
                 else
@@ -1180,6 +1185,9 @@ pub const Compiler = struct {
         const program = self.units[module].program.?;
         for (program.structures) |structure| {
             if (!structure.is_public) continue;
+            for (structure.type_parameters) |parameter| if (parameter.constraint) |constraint| {
+                try self.requirePublicType(module, constraint, parameter.position, "public structure", structure.name);
+            };
             if (structure.base) |base| try self.requirePublicType(module, base, structure.base_position, "public class", structure.name);
             for (structure.fields) |field| {
                 if (field.is_internal) continue;
@@ -1197,6 +1205,9 @@ pub const Compiler = struct {
             }
             for (structure.methods) |method| {
                 if (method.is_internal) continue;
+                for (method.type_parameters) |parameter| if (parameter.constraint) |constraint| {
+                    try self.requirePublicType(module, constraint, parameter.position, "method of", structure.name);
+                };
                 for (method.parameters) |parameter| {
                     try self.requirePublicType(module, parameter.type, parameter.position, "method of", structure.name);
                 }
@@ -1205,6 +1216,9 @@ pub const Compiler = struct {
         }
         for (program.functions) |function| {
             if (!function.is_public) continue;
+            for (function.type_parameters) |parameter| if (parameter.constraint) |constraint| {
+                try self.requirePublicType(module, constraint, parameter.position, "public function", function.name);
+            };
             for (function.parameters) |parameter| {
                 try self.requirePublicType(module, parameter.type, parameter.position, "public function", function.name);
             }
@@ -1294,66 +1308,7 @@ pub const Compiler = struct {
     }
 
     pub fn rewriteStatements(self: *Compiler, module: usize, statements: []const Ast.Statement, type_map: []const Ast.Type) Error![]const Ast.Statement {
-        const rewritten = try self.allocator.alloc(Ast.Statement, statements.len);
-        for (statements, 0..) |statement, index| rewritten[index] = switch (statement) {
-            .variable_declaration => |declaration| variable: {
-                var value = declaration;
-                if (value.annotation) |annotation| value.annotation = GenericTypes.remap(annotation, type_map, self.generic_type_maps[module]);
-                if (value.initializer) |initializer| try self.rewriteExpression(module, initializer, type_map);
-                break :variable .{ .variable_declaration = value };
-            },
-            .assignment_statement => |assignment| assignment_statement: {
-                for (@constCast(assignment.target.type_arguments)) |*argument| {
-                    argument.* = GenericTypes.remap(argument.*, type_map, self.generic_type_maps[module]);
-                }
-                if (assignment.value) |value| try self.rewriteExpression(module, value, type_map);
-                for (assignment.target.indices) |target_index| try self.rewriteExpression(module, target_index.value, type_map);
-                break :assignment_statement .{ .assignment_statement = assignment };
-            },
-            .return_statement => |value| return_statement: {
-                if (value.value) |expression| try self.rewriteExpression(module, expression, type_map);
-                break :return_statement .{ .return_statement = value };
-            },
-            .expression_statement => |expression| expression_statement: {
-                try self.rewriteExpression(module, expression, type_map);
-                break :expression_statement .{ .expression_statement = expression };
-            },
-            .print_statement => |print_statement| print: {
-                for (print_statement.values) |value| try self.rewriteExpression(module, value, type_map);
-                break :print .{ .print_statement = print_statement };
-            },
-            .panic_statement => |effect| panic: {
-                try self.rewriteExpression(module, effect.value, type_map);
-                break :panic .{ .panic_statement = effect };
-            },
-            .assert_statement => |assertion| assertion_statement: {
-                try self.rewriteExpression(module, assertion.condition, type_map);
-                try self.rewriteExpression(module, assertion.message, type_map);
-                break :assertion_statement .{ .assert_statement = assertion };
-            },
-            .if_statement => |conditional| conditional_statement: {
-                const branches = try self.allocator.alloc(Ast.ConditionalBranch, conditional.branches.len);
-                for (conditional.branches, 0..) |branch, branch_index| {
-                    try self.rewriteExpression(module, branch.condition.source(), type_map);
-                    branches[branch_index] = branch;
-                    branches[branch_index].statements = try self.rewriteStatements(module, branch.statements, type_map);
-                }
-                var value = conditional;
-                value.branches = branches;
-                if (conditional.else_statements) |nested| value.else_statements = try self.rewriteStatements(module, nested, type_map);
-                break :conditional_statement .{ .if_statement = value };
-            },
-            .while_statement => |loop| loop_statement: {
-                try self.rewriteExpression(module, loop.condition.source(), type_map);
-                var value = loop;
-                value.statements = try self.rewriteStatements(module, loop.statements, type_map);
-                break :loop_statement .{ .while_statement = value };
-            },
-            .for_statement => |loop| .{ .for_statement = try Iterations.rewrite(self, module, loop, type_map) },
-            .break_statement => |position| .{ .break_statement = position },
-            .continue_statement => |position| .{ .continue_statement = position },
-        };
-        return rewritten;
+        return Rewriting.statements(self, module, statements, type_map);
     }
 
     pub fn rewriteExpression(self: *Compiler, module: usize, expression: *Ast.Expression, type_map: []const Ast.Type) Error!void {

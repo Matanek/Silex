@@ -78,6 +78,7 @@ pub const Specializer = struct {
             if (function.type_parameters.len != 0) return self.fail(function.name_position, "'main' cannot be generic");
         }
         try self.type_names.appendSlice(self.allocator, program.type_names);
+        try self.validateConstraintDeclarations();
         for (program.enums) |enumeration| {
             if (enumeration.type_parameters.len == 0) try self.enums.append(self.allocator, enumeration);
         }
@@ -126,19 +127,19 @@ pub const Specializer = struct {
         const map = try self.allocator.alloc(?Ast.Type, self.type_names.items.len);
         @memset(map, null);
         var names: std.ArrayList([]const u8) = .empty;
-        for (self.type_names.items, 0..) |name, index| {
-            var keep = false;
-            for (self.structures.items) |structure| if (std.mem.eql(u8, structure.name, name)) {
-                keep = true;
+        for (self.structures.items) |structure| {
+            for (self.type_names.items, 0..) |name, index| if (std.mem.eql(u8, structure.name, name)) {
+                map[index] = .structure(names.items.len);
+                try names.append(self.allocator, name);
                 break;
             };
-            if (!keep) for (self.enums.items) |enumeration| if (std.mem.eql(u8, enumeration.name, name)) {
-                keep = true;
+        }
+        for (self.enums.items) |enumeration| {
+            for (self.type_names.items, 0..) |name, index| if (std.mem.eql(u8, enumeration.name, name)) {
+                map[index] = .structure(names.items.len);
+                try names.append(self.allocator, name);
                 break;
             };
-            if (!keep) continue;
-            map[index] = .structure(names.items.len);
-            try names.append(self.allocator, name);
         }
         for (self.structures.items) |*structure| {
             if (structure.base) |base| structure.base = Remap.concreteType(base, map);
@@ -782,6 +783,7 @@ pub const Specializer = struct {
         position: Source.Position,
     ) SpecializeError![]const u8 {
         for (arguments) |argument| if (argument == .void) return self.fail(position, "'void' is not a generic type argument");
+        try self.validateArguments(template.type_parameters, arguments, position);
         for (self.method_specializations.items) |specialization| {
             if (specialization.structure != structure_type or !samePosition(specialization.template_position, template.name_position)) continue;
             if (std.mem.eql(Ast.Type, specialization.arguments, arguments)) return specialization.name;
@@ -824,6 +826,7 @@ pub const Specializer = struct {
         position: Source.Position,
     ) SpecializeError![]const u8 {
         for (arguments) |argument| if (argument == .void) return self.fail(position, "'void' is not a generic type argument");
+        try self.validateArguments(template.type_parameters, arguments, position);
         for (self.specializations.items) |specialization| {
             if (!samePosition(specialization.template_position, template.name_position)) continue;
             if (std.mem.eql(Ast.Type, specialization.arguments, arguments)) return specialization.name;
@@ -982,6 +985,7 @@ pub const Specializer = struct {
             return self.fail(position, message);
         }
         for (arguments) |argument| if (argument == .void) return self.fail(position, "'void' is not a generic type argument");
+        try self.validateArguments(template.type_parameters, arguments, position);
         for (self.structure_specializations.items) |specialization| {
             if (!samePosition(specialization.template_position, template.name_position)) continue;
             if (std.mem.eql(Ast.Type, specialization.arguments, arguments)) return specialization.type;
@@ -1037,6 +1041,7 @@ pub const Specializer = struct {
         if (std.mem.eql(u8, template.name, Result.name)) {
             if (!Result.acceptsArguments(template, arguments)) return self.fail(position, "the error type of 'Result' cannot be 'void'");
         } else for (arguments) |argument| if (argument == .void) return self.fail(position, "'void' is not a generic type argument");
+        try self.validateArguments(template.type_parameters, arguments, position);
         for (self.enum_specializations.items) |specialization| {
             if (!samePosition(specialization.template_position, template.name_position)) continue;
             if (std.mem.eql(Ast.Type, specialization.arguments, arguments)) return specialization.type;
@@ -1368,6 +1373,56 @@ pub const Specializer = struct {
     pub fn typeForName(self: *Specializer, name: []const u8) ?Ast.Type {
         for (self.type_names.items, 0..) |candidate, index| if (std.mem.eql(u8, candidate, name)) return .structure(index);
         return null;
+    }
+
+    fn validateConstraintDeclarations(self: *Specializer) SpecializeError!void {
+        for (self.source.functions) |function| try self.validateConstraints(function.type_parameters);
+        for (self.source.structures) |structure| {
+            try self.validateConstraints(structure.type_parameters);
+            for (structure.methods) |method| try self.validateConstraints(method.type_parameters);
+        }
+        for (self.source.enums) |enumeration| try self.validateConstraints(enumeration.type_parameters);
+    }
+
+    fn validateConstraints(self: *Specializer, parameters: []const Ast.TypeParameter) SpecializeError!void {
+        for (parameters) |parameter| if (parameter.constraint) |constraint| {
+            const protocol = self.sourceStructureForType(constraint) orelse {
+                const message = try std.fmt.allocPrint(self.allocator, "generic constraint on '{s}' must name a protocol", .{parameter.name});
+                return self.fail(parameter.position, message);
+            };
+            if (!protocol.is_protocol) {
+                const message = try std.fmt.allocPrint(self.allocator, "generic constraint on '{s}' must name a protocol", .{parameter.name});
+                return self.fail(parameter.position, message);
+            }
+        };
+    }
+
+    fn validateArguments(
+        self: *Specializer,
+        parameters: []const Ast.TypeParameter,
+        arguments: []const Ast.Type,
+        position: Source.Position,
+    ) SpecializeError!void {
+        for (parameters, arguments) |parameter, argument| if (parameter.constraint) |protocol| {
+            if (self.conforms(argument, protocol, 0)) continue;
+            const message = try std.fmt.allocPrint(
+                self.allocator,
+                "type '{s}' does not conform to protocol '{s}' required by '{s}'",
+                .{ self.typeName(argument), self.typeName(protocol), parameter.name },
+            );
+            return self.fail(position, message);
+        };
+    }
+
+    fn conforms(self: *Specializer, type_value: Ast.Type, protocol: Ast.Type, depth: usize) bool {
+        if (depth > self.structures.items.len + 1) return false;
+        const structure = self.structureForType(type_value) orelse self.sourceStructureForType(type_value) orelse return false;
+        if (structure.base) |base| {
+            if (base == protocol) return true;
+            if (self.conforms(base, protocol, depth + 1)) return true;
+        }
+        for (structure.conformances) |conformance| if (conformance == protocol) return true;
+        return false;
     }
 
     fn specializationName(self: *Specializer, name: []const u8, arguments: []const Ast.Type) Allocator.Error![]const u8 {

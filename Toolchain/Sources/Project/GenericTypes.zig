@@ -60,3 +60,16 @@ pub fn remap(type_value: Ast.Type, type_map: []const Ast.Type, generic_map: []co
     }
     return mapped;
 }
+
+pub fn remapParameters(
+    allocator: std.mem.Allocator,
+    parameters: []const Ast.TypeParameter,
+    type_map: []const Ast.Type,
+    generic_map: []const Ast.Type,
+) std.mem.Allocator.Error![]const Ast.TypeParameter {
+    const result = try allocator.dupe(Ast.TypeParameter, parameters);
+    for (result) |*parameter| if (parameter.constraint) |constraint| {
+        parameter.constraint = remap(constraint, type_map, generic_map);
+    };
+    return result;
+}
