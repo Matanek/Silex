@@ -4,8 +4,9 @@ const macho = std.macho;
 const Encoder = @import("../Arm64/Encoder.zig");
 const Machine = @import("../Arm64/Machine.zig");
 const CodeSignature = @import("CodeSignature.zig");
+const DynamicLink = @import("DynamicLink.zig");
 
-pub const Error = Encoder.Error || std.mem.Allocator.Error || error{
+pub const Error = Encoder.Error || DynamicLink.Error || std.mem.Allocator.Error || error{
     InvalidMain,
 };
 
@@ -19,6 +20,7 @@ pub fn emit(allocator: std.mem.Allocator, program: Machine.Program) Error![]u8 {
 
     var encoded = try Encoder.encode(allocator, program, .{ .executable_main = main_id });
     defer encoded.deinit(allocator);
+    const dynamic = program.external_functions.len != 0;
 
     const dylinker_path = "/usr/lib/dyld\x00";
     const dylinker_command_size = std.mem.alignForward(
@@ -34,17 +36,38 @@ pub fn emit(allocator: std.mem.Allocator, program: Machine.Program) Error![]u8 {
     const build_version_command_size = @sizeOf(macho.build_version_command);
     const entry_command_size = @sizeOf(macho.entry_point_command);
     const signature_command_size = @sizeOf(macho.linkedit_data_command);
+    const got_command_size: usize = if (dynamic) @sizeOf(macho.segment_command_64) + @sizeOf(macho.section_64) else 0;
+    const dyld_info_command_size: usize = if (dynamic) @sizeOf(macho.dyld_info_command) else 0;
+    const symtab_command_size: usize = if (dynamic) @sizeOf(macho.symtab_command) else 0;
+    const dysymtab_command_size: usize = if (dynamic) @sizeOf(macho.dysymtab_command) else 0;
+    const dylib_command_size = if (dynamic)
+        std.mem.alignForward(usize, @sizeOf(macho.dylib_command) + DynamicLink.library_path.len, @alignOf(u64))
+    else
+        0;
     const load_commands_size = pagezero_command_size + text_command_size + data_command_size + linkedit_command_size +
-        dylinker_command_size + build_version_command_size + entry_command_size + signature_command_size;
+        got_command_size + dylinker_command_size + build_version_command_size + entry_command_size +
+        dyld_info_command_size + symtab_command_size + dysymtab_command_size + dylib_command_size + signature_command_size;
 
     const encoded_text_size = if (encoded.data_offset) |offset| offset else encoded.code.len;
     const unaligned_text_size = text_offset + encoded_text_size;
     const text_size = std.mem.alignForward(usize, unaligned_text_size, page_size);
     const data_content_size = if (encoded.data_offset) |offset| encoded.code.len - offset else 0;
     const data_size = if (encoded.data_offset != null) std.mem.alignForward(usize, data_content_size, page_size) else 0;
-    const signed_size = text_size + data_size;
-    const signature_size = CodeSignature.size(signed_size);
-    const file_size = signed_size + signature_size;
+    const got_offset = text_size + data_size;
+    const got_size: usize = if (dynamic) page_size else 0;
+    const linkedit_offset = got_offset + got_size;
+    const got_segment_index: u4 = 2 + @as(u4, @intFromBool(encoded.data_offset != null));
+    const bind_info = if (dynamic) try DynamicLink.bindInfo(allocator, program.external_functions, got_segment_index) else &.{};
+    const string_table = if (dynamic) try DynamicLink.stringTable(allocator, program.external_functions) else &.{};
+    const bind_offset = linkedit_offset;
+    const symbol_offset = std.mem.alignForward(usize, bind_offset + bind_info.len, @alignOf(macho.nlist_64));
+    const string_offset = symbol_offset + program.external_functions.len * @sizeOf(macho.nlist_64);
+    const signature_offset = if (dynamic)
+        std.mem.alignForward(usize, string_offset + string_table.len, 16)
+    else
+        linkedit_offset;
+    const signature_size = CodeSignature.size(signature_offset);
+    const file_size = signature_offset + signature_size;
 
     var bytes: std.ArrayList(u8) = .empty;
     errdefer bytes.deinit(allocator);
@@ -55,7 +78,7 @@ pub fn emit(allocator: std.mem.Allocator, program: Machine.Program) Error![]u8 {
         .cputype = macho.CPU_TYPE_ARM64,
         .cpusubtype = 0,
         .filetype = macho.MH_EXECUTE,
-        .ncmds = if (encoded.data_offset != null) 8 else 7,
+        .ncmds = @intCast((if (encoded.data_offset != null) @as(usize, 8) else 7) + (if (dynamic) @as(usize, 5) else 0)),
         .sizeofcmds = @intCast(load_commands_size),
         .flags = macho.MH_NOUNDEFS | macho.MH_DYLDLINK | macho.MH_TWOLEVEL | macho.MH_PIE,
         .reserved = 0,
@@ -140,14 +163,46 @@ pub fn emit(allocator: std.mem.Allocator, program: Machine.Program) Error![]u8 {
         try appendStruct(allocator, &bytes, &data_section);
     }
 
+    if (dynamic) {
+        var got: macho.segment_command_64 = .{
+            .cmd = .SEGMENT_64,
+            .cmdsize = @intCast(got_command_size),
+            .segname = name("__DATA_CONST"),
+            .vmaddr = image_base + got_offset,
+            .vmsize = got_size,
+            .fileoff = got_offset,
+            .filesize = got_size,
+            .maxprot = .{ .READ = true, .WRITE = true },
+            .initprot = .{ .READ = true, .WRITE = true },
+            .nsects = 1,
+            .flags = 0,
+        };
+        try appendStruct(allocator, &bytes, &got);
+        var got_section: macho.section_64 = .{
+            .sectname = name("__got"),
+            .segname = name("__DATA_CONST"),
+            .addr = image_base + got_offset,
+            .size = program.external_functions.len * @sizeOf(u64),
+            .offset = @intCast(got_offset),
+            .@"align" = 3,
+            .reloff = 0,
+            .nreloc = 0,
+            .flags = macho.S_REGULAR,
+            .reserved1 = 0,
+            .reserved2 = 0,
+            .reserved3 = 0,
+        };
+        try appendStruct(allocator, &bytes, &got_section);
+    }
+
     var linkedit: macho.segment_command_64 = .{
         .cmd = .SEGMENT_64,
         .cmdsize = @sizeOf(macho.segment_command_64),
         .segname = name("__LINKEDIT"),
-        .vmaddr = image_base + signed_size,
-        .vmsize = @intCast(std.mem.alignForward(usize, signature_size, page_size)),
-        .fileoff = signed_size,
-        .filesize = signature_size,
+        .vmaddr = image_base + linkedit_offset,
+        .vmsize = @intCast(std.mem.alignForward(usize, file_size - linkedit_offset, page_size)),
+        .fileoff = linkedit_offset,
+        .filesize = file_size - linkedit_offset,
         .maxprot = .{ .READ = true },
         .initprot = .{ .READ = true },
         .nsects = 0,
@@ -174,6 +229,39 @@ pub fn emit(allocator: std.mem.Allocator, program: Machine.Program) Error![]u8 {
     };
     try appendStruct(allocator, &bytes, &build_version);
 
+    if (dynamic) {
+        var dyld_info: macho.dyld_info_command = .{
+            .bind_off = @intCast(bind_offset),
+            .bind_size = @intCast(bind_info.len),
+        };
+        try appendStruct(allocator, &bytes, &dyld_info);
+        var symtab: macho.symtab_command = .{
+            .symoff = @intCast(symbol_offset),
+            .nsyms = @intCast(program.external_functions.len),
+            .stroff = @intCast(string_offset),
+            .strsize = @intCast(string_table.len),
+        };
+        try appendStruct(allocator, &bytes, &symtab);
+        var dysymtab: macho.dysymtab_command = .{
+            .iundefsym = 0,
+            .nundefsym = @intCast(program.external_functions.len),
+        };
+        try appendStruct(allocator, &bytes, &dysymtab);
+        var dylib: macho.dylib_command = .{
+            .cmd = .LOAD_DYLIB,
+            .cmdsize = @intCast(dylib_command_size),
+            .dylib = .{
+                .name = @sizeOf(macho.dylib_command),
+                .timestamp = 2,
+                .current_version = 0,
+                .compatibility_version = 0x10000,
+            },
+        };
+        try appendStruct(allocator, &bytes, &dylib);
+        try bytes.appendSlice(allocator, DynamicLink.library_path);
+        try appendZeroes(allocator, &bytes, dylib_command_size - @sizeOf(macho.dylib_command) - DynamicLink.library_path.len);
+    }
+
     var entry: macho.entry_point_command = .{
         .cmd = .MAIN,
         .cmdsize = @sizeOf(macho.entry_point_command),
@@ -185,17 +273,31 @@ pub fn emit(allocator: std.mem.Allocator, program: Machine.Program) Error![]u8 {
     var code_signature: macho.linkedit_data_command = .{
         .cmd = .CODE_SIGNATURE,
         .cmdsize = @sizeOf(macho.linkedit_data_command),
-        .dataoff = @intCast(signed_size),
+        .dataoff = @intCast(signature_offset),
         .datasize = @intCast(signature_size),
     };
     try appendStruct(allocator, &bytes, &code_signature);
 
     if (bytes.items.len > text_offset) return error.InvalidMain;
     try appendZeroes(allocator, &bytes, text_offset - bytes.items.len);
+    if (dynamic) try DynamicLink.patchCalls(
+        encoded.code,
+        encoded.external_call_sites,
+        program.external_functions.len,
+        image_base + text_offset,
+        image_base + got_offset,
+    );
     try bytes.appendSlice(allocator, encoded.code);
-    try appendZeroes(allocator, &bytes, signed_size - bytes.items.len);
+    try appendZeroes(allocator, &bytes, linkedit_offset - bytes.items.len);
+    if (dynamic) {
+        try bytes.appendSlice(allocator, bind_info);
+        try appendZeroes(allocator, &bytes, symbol_offset - bytes.items.len);
+        try DynamicLink.appendSymbols(allocator, &bytes, program.external_functions);
+        try bytes.appendSlice(allocator, string_table);
+        try appendZeroes(allocator, &bytes, signature_offset - bytes.items.len);
+    }
 
-    const signature = try CodeSignature.emit(allocator, bytes.items, signed_size);
+    const signature = try CodeSignature.emit(allocator, bytes.items, signature_offset);
     defer allocator.free(signature);
     try bytes.appendSlice(allocator, signature);
 

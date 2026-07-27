@@ -63,6 +63,13 @@ pub fn build(b: *std.Build) void {
     const run_step = b.step("run", "Interpret a Silex source file");
     run_step.dependOn(&run_command.step);
 
+    const benchmark_command = b.addSystemCommand(&.{"sh"});
+    benchmark_command.addFileArg(b.path("Benchmarks/Native/run.sh"));
+    benchmark_command.addArtifactArg(executable);
+    benchmark_command.addDirectoryArg(b.path("Benchmarks/Native"));
+    const benchmark_step = b.step("benchmark-native", "Compare Debug and Release native code with clang++ -O2");
+    benchmark_step.dependOn(&benchmark_command.step);
+
     const tests = b.addTest(.{ .root_module = module });
     const test_command = b.addRunArtifact(tests);
     const test_step = b.step("test", "Run compiler tests");

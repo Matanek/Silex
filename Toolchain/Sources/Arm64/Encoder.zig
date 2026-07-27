@@ -10,6 +10,7 @@ const ProtocolRuntime = @import("ProtocolRuntime.zig");
 const TextRuntime = @import("TextRuntime.zig");
 const FloatRuntime = @import("FloatRuntime.zig");
 const DeepCopyRuntime = @import("DeepCopyRuntime.zig");
+const ExternalCalls = @import("ExternalCalls.zig");
 const Register = A64.Register;
 const Condition = A64.Condition;
 const saveFrame = A64.saveFrame;
@@ -71,14 +72,16 @@ pub const Entry = union(enum) {
 };
 
 pub const Image = struct {
-    code: []const u8,
+    code: []u8,
     function_offsets: []const u32,
     entry_offset: ?u32,
     data_offset: ?u32 = null,
+    external_call_sites: []const ExternalCalls.Site = &.{},
 
     pub fn deinit(self: Image, allocator: Allocator) void {
         allocator.free(self.code);
         allocator.free(self.function_offsets);
+        allocator.free(self.external_call_sites);
     }
 };
 
@@ -107,10 +110,11 @@ pub fn encode(allocator: Allocator, program: Machine.Program, entry: Entry) Erro
     var deep_copy_calls: std.ArrayList(DeepCopyFixup) = .empty;
     var data_fixups: std.ArrayList(DataFixup) = .empty;
     var snapshot_data_fixups: std.ArrayList(usize) = .empty;
+    var external_call_sites: std.ArrayList(ExternalCalls.Site) = .empty;
 
     for (program.functions, 0..) |function, function_id| {
         offsets[function_id] = @intCast(words.items.len * 4);
-        try encodeFunction(allocator, &words, &calls, &float_calls, &deep_copy_calls, &data_fixups, program, function);
+        try encodeFunction(allocator, &words, &calls, &float_calls, &deep_copy_calls, &data_fixups, &external_call_sites, program, function);
     }
 
     const entry_offset: ?u32 = switch (entry) {
@@ -256,7 +260,13 @@ pub fn encode(allocator: Allocator, program: Machine.Program, entry: Entry) Erro
     };
     if (snapshot_lock_offset) |offset| std.mem.writeInt(u64, code[offset..][0..8], 0, .little);
     for (program.globals, 0..) |global, index| std.mem.writeInt(u64, code[global_offsets[index]..][0..8], global.bits, .little);
-    return .{ .code = code, .function_offsets = offsets, .entry_offset = entry_offset, .data_offset = data_offset };
+    return .{
+        .code = code,
+        .function_offsets = offsets,
+        .entry_offset = entry_offset,
+        .data_offset = data_offset,
+        .external_call_sites = try external_call_sites.toOwnedSlice(allocator),
+    };
 }
 
 fn emitSnapshotAcquire(allocator: Allocator, words: *std.ArrayList(u32), data_fixups: *std.ArrayList(usize)) Error!void {
@@ -294,6 +304,7 @@ fn encodeFunction(
     float_calls: *std.ArrayList(usize),
     deep_copy_calls: *std.ArrayList(DeepCopyFixup),
     data_fixups: *std.ArrayList(DataFixup),
+    external_call_sites: *std.ArrayList(ExternalCalls.Site),
     program: Machine.Program,
     function: Machine.Function,
 ) Error!void {
@@ -308,7 +319,7 @@ fn encodeFunction(
     for (function.parameters, 0..) |parameter, index| {
         const incoming: Register = @enumFromInt(index);
         if (!parameter.aggregate) {
-            try words.append(allocator, storeStack(incoming, parameter.start));
+            try storeValue(allocator, words, function, incoming, parameter.start);
         } else for (0..parameter.width) |leaf| {
             try emitLoadAtOffset(allocator, words, .x9, incoming, leaf * Machine.slot_size);
             try words.append(allocator, storeStack(.x9, @intCast(@as(usize, parameter.start) + leaf)));
@@ -324,22 +335,22 @@ fn encodeFunction(
                 else
                     constant.bits;
                 try emitImmediate64(allocator, words, .x9, bits);
-                try words.append(allocator, storeStack(.x9, constant.result));
+                try storeValue(allocator, words, function, .x9, constant.result);
             },
             .constant_bool => |constant| {
                 try words.append(allocator, moveWideZero32(.x9, @intFromBool(constant.value)));
-                try words.append(allocator, storeStack(.x9, constant.result));
+                try storeValue(allocator, words, function, .x9, constant.result);
             },
             .constant_str => |constant| {
                 try StringRuntime.emitLiteral(allocator, words, data_fixups, constant.string, constant.result);
             },
             .constant_float32 => |constant| {
                 try emitImmediate64(allocator, words, .x9, constant.bits);
-                try words.append(allocator, storeStack(.x9, constant.result));
+                try storeValue(allocator, words, function, .x9, constant.result);
             },
             .constant_float64 => |constant| {
                 try emitImmediate64(allocator, words, .x9, constant.bits);
-                try words.append(allocator, storeStack(.x9, constant.result));
+                try storeValue(allocator, words, function, .x9, constant.result);
             },
             .optional_null => |optional| {
                 try words.append(allocator, moveWideZero32(.x9, 0));
@@ -357,8 +368,8 @@ fn encodeFunction(
             },
             .optional_unwrap => |optional| try emitSpanCopy(allocator, words, optional.result, optional.operand),
             .copy => |copy| {
-                try words.append(allocator, loadStack(.x9, copy.operand));
-                try words.append(allocator, storeStack(.x9, copy.result));
+                try loadValue(allocator, words, function, .x9, copy.operand);
+                try storeValue(allocator, words, function, .x9, copy.result);
             },
             .copy_range => |copy| try emitSpanCopy(allocator, words, copy.result, copy.operand),
             .deep_copy => |copy| {
@@ -537,14 +548,14 @@ fn encodeFunction(
             .string_count => |count| try StringRuntime.emitCount(allocator, words, count),
             .unary => |unary| {
                 if (unary.type.isFloat()) {
-                    try words.append(allocator, loadStack(.x9, unary.operand));
+                    try loadValue(allocator, words, function, .x9, unary.operand);
                     try words.append(allocator, moveGeneralToFloat(.x9, .x9, unary.type == .float64));
                     try words.append(allocator, floatNegate(.x10, .x9, unary.type == .float64));
                     try words.append(allocator, moveFloatToGeneral(.x10, .x10, unary.type == .float64));
-                    try words.append(allocator, storeStack(.x10, unary.result));
+                    try storeValue(allocator, words, function, .x10, unary.result);
                     continue;
                 }
-                try words.append(allocator, loadStack(.x9, unary.operand));
+                try loadValue(allocator, words, function, .x9, unary.operand);
                 if (unary.type.isSignedInteger()) {
                     try emitImmediate64(allocator, words, .x10, @bitCast(Numeric.integerMin(unary.type)));
                     try words.append(allocator, compareRegisters(.x9, .x10));
@@ -553,9 +564,9 @@ fn encodeFunction(
                     try appendFixup(allocator, words, &fixups.overflow, compareBranchNonZero64(.x9), .imm19);
                 }
                 try words.append(allocator, subtractSetFlags(.x11, .zero_or_sp, .x9));
-                try words.append(allocator, storeStack(.x11, unary.result));
+                try storeValue(allocator, words, function, .x11, unary.result);
             },
-            .binary => |binary| try encodeBinary(allocator, words, &fixups, binary),
+            .binary => |binary| try encodeBinary(allocator, words, &fixups, function, binary),
             .call => |call| {
                 for (call.arguments, 0..) |argument, index| {
                     const outgoing: Register = @enumFromInt(index);
@@ -575,6 +586,7 @@ fn encodeFunction(
                 try appendFixup(allocator, words, &fixups.epilogue, compareBranchNonZero(.x8), .imm19);
                 if (call.result) |result| if (!result.aggregate) try words.append(allocator, storeStack(.x0, result.start));
             },
+            .external_call => |call| try ExternalCalls.emit(allocator, words, external_call_sites, function, call),
             .dynamic_call => |call| try encodeDynamicCall(allocator, words, calls, &fixups, call),
             .print => |value| switch (value.kind) {
                 .signed_integer => try emitPrintInteger(allocator, words, value.value, 1, value.newline),
@@ -617,7 +629,7 @@ fn encodeFunction(
                         try emitStoreAtOffset(allocator, words, .x9, .x14, leaf * Machine.slot_size);
                     }
                     try words.append(allocator, moveWideZero64(.x0, 0, 0));
-                } else try words.append(allocator, loadStack(.x0, value.start));
+                } else try loadValue(allocator, words, function, .x0, value.start);
                 try words.append(allocator, moveWideZero32(.x8, @intFromEnum(Machine.Status.success)));
                 try appendFixup(allocator, words, &fixups.epilogue, branch(), .imm26);
             },
@@ -631,7 +643,7 @@ fn encodeFunction(
                 try words.append(allocator, branch());
             },
             .branch => |branch_value| {
-                try words.append(allocator, loadStack(.x9, branch_value.condition));
+                try loadValue(allocator, words, function, .x9, branch_value.condition);
                 try control_fixups.append(allocator, .{
                     .at = words.items.len,
                     .target = branch_value.then_instruction,
@@ -796,7 +808,7 @@ fn encodeAggregateEqual(
 ) Error!void {
     var unequal_branches: std.ArrayList(usize) = .empty;
     for (comparison.leaf_types, 0..) |type_value, index| {
-        try encodeBinary(allocator, words, fixups, .{
+        try encodeBinary(allocator, words, fixups, null, .{
             .result = comparison.result,
             .operator = .equal,
             .left = @intCast(@as(usize, comparison.left.start) + index),
@@ -910,12 +922,13 @@ fn encodeBinary(
     allocator: Allocator,
     words: *std.ArrayList(u32),
     fixups: *FunctionFixups,
+    function: ?Machine.Function,
     binary: Machine.Instruction.Binary,
 ) Error!void {
     if (binary.type == .str) return StringRuntime.emitComparison(allocator, words, binary);
-    try words.append(allocator, loadStack(.x9, binary.left));
-    try words.append(allocator, loadStack(.x10, binary.right));
-    if (binary.type.isFloat()) return encodeFloatBinary(allocator, words, binary);
+    try loadOptionalValue(allocator, words, function, .x9, binary.left);
+    try loadOptionalValue(allocator, words, function, .x10, binary.right);
+    if (binary.type.isFloat()) return encodeFloatBinary(allocator, words, function, binary);
     const signed = binary.type.isSignedInteger();
     switch (binary.operator) {
         .add => {
@@ -928,7 +941,7 @@ fn encodeBinary(
                 .imm19,
             );
             try emitIntegerRangeCheck(allocator, words, fixups, binary.type, .x11);
-            try words.append(allocator, storeStack(.x11, binary.result));
+            try storeOptionalValue(allocator, words, function, .x11, binary.result);
         },
         .subtract => {
             try words.append(allocator, subtractSetFlags(.x11, .x9, .x10));
@@ -940,7 +953,7 @@ fn encodeBinary(
                 .imm19,
             );
             try emitIntegerRangeCheck(allocator, words, fixups, binary.type, .x11);
-            try words.append(allocator, storeStack(.x11, binary.result));
+            try storeOptionalValue(allocator, words, function, .x11, binary.result);
         },
         .multiply => {
             try words.append(allocator, multiply(.x11, .x9, .x10));
@@ -954,7 +967,7 @@ fn encodeBinary(
                 try appendFixup(allocator, words, &fixups.overflow, compareBranchNonZero64(.x12), .imm19);
             }
             try emitIntegerRangeCheck(allocator, words, fixups, binary.type, .x11);
-            try words.append(allocator, storeStack(.x11, binary.result));
+            try storeOptionalValue(allocator, words, function, .x11, binary.result);
         },
         .divide => {
             try appendFixup(allocator, words, &fixups.division_by_zero, compareBranchZero64(.x10), .imm19);
@@ -969,7 +982,7 @@ fn encodeBinary(
                 try patch19(words.items, not_minimum, words.items.len);
             }
             try words.append(allocator, if (signed) signedDivide(.x11, .x9, .x10) else unsignedDivide(.x11, .x9, .x10));
-            try words.append(allocator, storeStack(.x11, binary.result));
+            try storeOptionalValue(allocator, words, function, .x11, binary.result);
         },
         .remainder => {
             try appendFixup(allocator, words, &fixups.division_by_zero, compareBranchZero64(.x10), .imm19);
@@ -985,7 +998,7 @@ fn encodeBinary(
             }
             try words.append(allocator, if (signed) signedDivide(.x11, .x9, .x10) else unsignedDivide(.x11, .x9, .x10));
             try words.append(allocator, multiplySubtract(.x12, .x11, .x10, .x9));
-            try words.append(allocator, storeStack(.x12, binary.result));
+            try storeOptionalValue(allocator, words, function, .x12, binary.result);
         },
         .less, .less_equal, .greater, .greater_equal, .equal, .not_equal => {
             try words.append(allocator, compareRegisters(.x9, .x10));
@@ -994,15 +1007,15 @@ fn encodeBinary(
             try words.append(allocator, conditionalBranch(inverseComparison(binary.operator, signed)));
             try words.append(allocator, moveWideZero32(.x11, 1));
             try patch19(words.items, skip_true, words.items.len);
-            try words.append(allocator, storeStack(.x11, binary.result));
+            try storeOptionalValue(allocator, words, function, .x11, binary.result);
         },
         .bit_and => {
             try words.append(allocator, andRegisters(.x11, .x9, .x10));
-            try words.append(allocator, storeStack(.x11, binary.result));
+            try storeOptionalValue(allocator, words, function, .x11, binary.result);
         },
         .bit_xor => {
             try words.append(allocator, exclusiveOrRegisters(.x11, .x9, .x10));
-            try words.append(allocator, storeStack(.x11, binary.result));
+            try storeOptionalValue(allocator, words, function, .x11, binary.result);
         },
         .shift_left, .shift_right => {
             try emitImmediate64(allocator, words, .x11, binary.type.bitWidth());
@@ -1014,7 +1027,7 @@ fn encodeBinary(
                 logicalShiftRightVariable(.x11, .x9, .x10));
             try emitImmediate64(allocator, words, .x12, Numeric.mask(binary.type.bitWidth()));
             try words.append(allocator, andRegisters(.x11, .x11, .x12));
-            try words.append(allocator, storeStack(.x11, binary.result));
+            try storeOptionalValue(allocator, words, function, .x11, binary.result);
         },
     }
 }
@@ -1022,6 +1035,7 @@ fn encodeBinary(
 fn encodeFloatBinary(
     allocator: Allocator,
     words: *std.ArrayList(u32),
+    function: ?Machine.Function,
     binary: Machine.Instruction.Binary,
 ) Error!void {
     const double = binary.type == .float64;
@@ -1031,7 +1045,7 @@ fn encodeFloatBinary(
         .add, .subtract, .multiply, .divide => {
             try words.append(allocator, floatArithmetic(.x11, .x9, .x10, binary.operator, double));
             try words.append(allocator, moveFloatToGeneral(.x11, .x11, double));
-            try words.append(allocator, storeStack(.x11, binary.result));
+            try storeOptionalValue(allocator, words, function, .x11, binary.result);
         },
         .less, .less_equal, .greater, .greater_equal, .equal, .not_equal => {
             try words.append(allocator, floatCompare(.x9, .x10, double));
@@ -1040,7 +1054,7 @@ fn encodeFloatBinary(
             try words.append(allocator, conditionalBranch(inverseFloatComparison(binary.operator)));
             try words.append(allocator, moveWideZero32(.x11, 1));
             try patch19(words.items, skip_true, words.items.len);
-            try words.append(allocator, storeStack(.x11, binary.result));
+            try storeOptionalValue(allocator, words, function, .x11, binary.result);
         },
         else => return error.InvalidMachineProgram,
     }
@@ -1441,6 +1455,58 @@ fn emitImmediate64(allocator: Allocator, words: *std.ArrayList(u32), register: R
     try words.append(allocator, moveWideKeep64(register, @truncate(value >> 16), 1));
     try words.append(allocator, moveWideKeep64(register, @truncate(value >> 32), 2));
     try words.append(allocator, moveWideKeep64(register, @truncate(value >> 48), 3));
+}
+
+fn loadValue(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    function: Machine.Function,
+    destination: Register,
+    slot: Machine.Slot,
+) Allocator.Error!void {
+    return loadOptionalValue(allocator, words, function, destination, slot);
+}
+
+fn loadOptionalValue(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    function: ?Machine.Function,
+    destination: Register,
+    slot: Machine.Slot,
+) Allocator.Error!void {
+    if (function) |value| if (value.register_slots.len != 0) {
+        if (value.register_slots[slot]) |number| {
+            const source: Register = @enumFromInt(number);
+            if (source != destination) try words.append(allocator, moveRegister(destination, source));
+            return;
+        }
+    };
+    try words.append(allocator, loadStack(destination, slot));
+}
+
+fn storeValue(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    function: Machine.Function,
+    source: Register,
+    slot: Machine.Slot,
+) Allocator.Error!void {
+    return storeOptionalValue(allocator, words, function, source, slot);
+}
+
+fn storeOptionalValue(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    function: ?Machine.Function,
+    source: Register,
+    slot: Machine.Slot,
+) Allocator.Error!void {
+    if (function) |value| if (value.register_slots.len != 0) if (value.register_slots[slot]) |number| {
+        const destination: Register = @enumFromInt(number);
+        if (source != destination) try words.append(allocator, moveRegister(destination, source));
+        return;
+    };
+    try words.append(allocator, storeStack(source, slot));
 }
 
 fn emitStackAdjustment(

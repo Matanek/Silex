@@ -9,6 +9,16 @@ Math/
     Vec3.sx
 ```
 
+A named package may also provide modules selected for the current target under
+`Platform/macos-arm64/Module/`. This directory is a second logical module root:
+`Platform/macos-arm64` never appears in module names. For example,
+`Platform/macos-arm64/Module/System/Write.sx` provides
+`PackageName.System.Write`.
+
+Only `Module/` and the exact `macos-arm64` root are indexed. Sources stored
+under another target are ignored. The common and selected roots must not both
+provide the same logical module.
+
 Its directory name and manifest identity match:
 
 ```json

@@ -1,16 +1,19 @@
 const std = @import("std");
+const Cli = @import("Cli.zig");
+const CompilationCache = @import("CompilationCache.zig");
 const Lower = @import("Arm64/Lower.zig");
 const Interpreter = @import("Interpreter.zig");
 const Ir = @import("Ir.zig");
 const Lsp = @import("Lsp/Server.zig");
 const MachO = @import("MacOS/MachO.zig");
+const ReleaseOptimizer = @import("Optimize/Release.zig");
 const Project = @import("Project.zig");
 
 const Io = std.Io;
 
 const usage =
-    \\Usage: silex run <source.sx> [--emit-ir]
-    \\       silex compile <source.sx> -o <executable>
+    \\Usage: silex run <source.sx> [-n|--nocache] [--emit-ir]
+    \\       silex compile <source.sx> [-d|--debug|-r|--release] [-n|--nocache] -o|--output <executable>
     \\       silex lsp
     \\
     \\Runs a Silex source file, emits a native macos-arm64 executable,
@@ -55,41 +58,44 @@ fn runLanguageServer(init: std.process.Init, args: []const []const u8) !u8 {
 }
 
 fn runSource(init: std.process.Init, allocator: std.mem.Allocator, args: []const []const u8) !u8 {
-    if (args.len < 1 or args.len > 2) {
-        std.debug.print("silex: expected 'run <source.sx> [--emit-ir]'\n\n{s}", .{usage});
-        return 1;
-    }
-
-    const emit_ir = args.len == 2 and std.mem.eql(u8, args[1], "--emit-ir");
-    if (args.len == 2 and !emit_ir) {
-        std.debug.print("silex: unknown option '{s}'\n", .{args[1]});
-        return 1;
-    }
-
-    var compiler = Project.Compiler.initWithPackages(
-        allocator,
-        init.io,
-        try globalPackagesRoot(allocator, init.environ_map),
-    );
-    const compilation = compiler.compile(args[0]) catch |err| switch (err) {
-        error.InvalidSource => {
-            const diagnostic = compiler.diagnostic.?;
-            std.debug.print("{s}:{d}:{d}: error: {s}\n", .{
-                compiler.diagnosticPath(args[0]),
-                diagnostic.position.line,
-                diagnostic.position.column,
-                diagnostic.message,
-            });
+    const options = switch (Cli.parseRun(args)) {
+        .options => |options| options,
+        .diagnostic => |diagnostic| {
+            printCliDiagnostic("run", diagnostic);
             return 1;
         },
-        else => return err,
     };
 
-    if (emit_ir) {
-        const text = try Ir.writeText(allocator, compilation.ir);
+    const portable_ir = if (options.cache) CompilationCache.loadIr(allocator, init.io, options.source_path) else null;
+    const program = portable_ir orelse program: {
+        var compiler = Project.Compiler.initWithPackagesAndCache(
+            allocator,
+            init.io,
+            try globalPackagesRoot(allocator, init.environ_map),
+            options.cache,
+        );
+        const compilation = compiler.compile(options.source_path) catch |err| switch (err) {
+            error.InvalidSource => {
+                printSourceDiagnostic(compiler, options.source_path);
+                return 1;
+            },
+            else => return err,
+        };
+        if (options.cache) CompilationCache.storeIr(
+            allocator,
+            init.io,
+            options.source_path,
+            compilation.files,
+            compilation.ir,
+        );
+        break :program compilation.ir;
+    };
+
+    if (options.emit_ir) {
+        const text = try Ir.writeText(allocator, program);
         try Io.File.stdout().writeStreamingAll(init.io, text);
     }
-    const result = Interpreter.runCapture(allocator, compilation.ir) catch |err| {
+    const result = Interpreter.runCapture(allocator, program) catch |err| {
         std.debug.print("silex: runtime error: {t}\n", .{err});
         return 1;
     };
@@ -99,33 +105,59 @@ fn runSource(init: std.process.Init, allocator: std.mem.Allocator, args: []const
 }
 
 fn compileNative(init: std.process.Init, allocator: std.mem.Allocator, args: []const []const u8) !u8 {
-    if (args.len != 3 or !std.mem.eql(u8, args[1], "-o")) {
-        std.debug.print("silex: expected 'compile <source.sx> -o <executable>'\n\n{s}", .{usage});
-        return 1;
-    }
-
-    const source_path = args[0];
-    const output_path = args[2];
-    var compiler = Project.Compiler.initWithPackages(
-        allocator,
-        init.io,
-        try globalPackagesRoot(allocator, init.environ_map),
-    );
-    const compilation = compiler.compile(source_path) catch |err| switch (err) {
-        error.InvalidSource => {
-            const diagnostic = compiler.diagnostic.?;
-            std.debug.print("{s}:{d}:{d}: error: {s}\n", .{
-                compiler.diagnosticPath(source_path),
-                diagnostic.position.line,
-                diagnostic.position.column,
-                diagnostic.message,
-            });
+    const options = switch (Cli.parseCompile(args)) {
+        .options => |options| options,
+        .diagnostic => |diagnostic| {
+            printCliDiagnostic("compile", diagnostic);
             return 1;
         },
-        else => return err,
+    };
+    const portable_ir = if (options.cache) CompilationCache.loadIr(allocator, init.io, options.source_path) else null;
+    const program = portable_ir orelse program: {
+        var compiler = Project.Compiler.initWithPackagesAndCache(
+            allocator,
+            init.io,
+            try globalPackagesRoot(allocator, init.environ_map),
+            options.cache,
+        );
+        const compilation = compiler.compile(options.source_path) catch |err| switch (err) {
+            error.InvalidSource => {
+                printSourceDiagnostic(compiler, options.source_path);
+                return 1;
+            },
+            else => return err,
+        };
+        if (options.cache) CompilationCache.storeIr(allocator, init.io, options.source_path, compilation.files, compilation.ir);
+        break :program compilation.ir;
     };
 
-    const machine = Lower.lower(allocator, compilation.ir) catch |err| {
+    const native_variant = try std.fmt.allocPrint(allocator, "{s}:{s}", .{ @tagName(options.mode), options.source_path });
+    const cache_key = if (options.cache)
+        CompilationCache.key(allocator, init.io, program.files, "compile", native_variant) catch null
+    else
+        null;
+    if (cache_key) |digest| if (CompilationCache.load(allocator, init.io, digest, "macho")) |cached| {
+        return writeExecutable(init, options.output_path, cached);
+    };
+
+    const native_ir = switch (options.mode) {
+        .debug => program,
+        .release => (if (options.cache)
+            ReleaseOptimizer.optimizeCached(allocator, init.io, program)
+        else
+            ReleaseOptimizer.optimize(allocator, program)) catch |err| {
+            std.debug.print("silex: optimizer rejected the portable IR: {t}\n", .{err});
+            return 1;
+        },
+    };
+    const lower_mode: Lower.Mode = switch (options.mode) {
+        .debug => .debug,
+        .release => .release,
+    };
+    const machine = (if (options.cache)
+        Lower.lowerCached(allocator, init.io, native_ir, lower_mode)
+    else
+        Lower.lowerWithMode(allocator, native_ir, lower_mode)) catch |err| {
         std.debug.print("silex: native backend cannot lower this program: {t}\n", .{err});
         return 1;
     };
@@ -134,6 +166,21 @@ fn compileNative(init: std.process.Init, allocator: std.mem.Allocator, args: []c
         return 1;
     };
 
+    if (cache_key) |digest| CompilationCache.store(allocator, init.io, digest, "macho", executable);
+    return writeExecutable(init, options.output_path, executable);
+}
+
+fn printSourceDiagnostic(compiler: Project.Compiler, source_path: []const u8) void {
+    const diagnostic = compiler.diagnostic.?;
+    std.debug.print("{s}:{d}:{d}: error: {s}\n", .{
+        compiler.diagnosticPath(source_path),
+        diagnostic.position.line,
+        diagnostic.position.column,
+        diagnostic.message,
+    });
+}
+
+fn writeExecutable(init: std.process.Init, output_path: []const u8, executable: []const u8) u8 {
     const file = Io.Dir.cwd().createFile(init.io, output_path, .{
         .permissions = .executable_file,
     }) catch |err| {
@@ -152,6 +199,21 @@ fn compileNative(init: std.process.Init, allocator: std.mem.Allocator, args: []c
     return 0;
 }
 
+fn printCliDiagnostic(command: []const u8, diagnostic: Cli.Diagnostic) void {
+    switch (diagnostic.kind) {
+        .missing_source => std.debug.print("silex: '{s}' expects one source file\n", .{command}),
+        .multiple_sources => std.debug.print("silex: '{s}' accepts only one source file, found '{s}'\n", .{ command, diagnostic.argument.? }),
+        .missing_output => if (diagnostic.argument) |argument|
+            std.debug.print("silex: option '{s}' expects an output path\n", .{argument})
+        else
+            std.debug.print("silex: 'compile' expects -o or --output followed by an executable path\n", .{}),
+        .duplicate_output => std.debug.print("silex: output is specified more than once by '{s}'\n", .{diagnostic.argument.?}),
+        .conflicting_modes => std.debug.print("silex: Debug and Release modes are mutually exclusive near '{s}'\n", .{diagnostic.argument.?}),
+        .option_unavailable => std.debug.print("silex: option '{s}' is unavailable for '{s}'\n", .{ diagnostic.argument.?, command }),
+        .unknown_option => std.debug.print("silex: unknown option '{s}'\n", .{diagnostic.argument.?}),
+    }
+}
+
 fn isHelp(argument: []const u8) bool {
     return std.mem.eql(u8, argument, "--help") or std.mem.eql(u8, argument, "-h");
 }
@@ -165,6 +227,7 @@ fn globalPackagesRoot(
 }
 
 test {
+    _ = @import("Cli.zig");
     _ = @import("Arm64/Differential.zig");
     _ = @import("Arm64/Encoder.zig");
     _ = @import("Arm64/Instructions.zig");
@@ -174,6 +237,9 @@ test {
     _ = @import("BorrowedReturnTests.zig");
     _ = @import("MacOS/CodeSignature.zig");
     _ = @import("MacOS/MachO.zig");
+    _ = @import("Optimize/Release.zig");
+    _ = @import("Arm64/RegisterAllocation.zig");
+    _ = @import("CompilationCache.zig");
     _ = @import("Composition.zig");
     _ = @import("CopyTests.zig");
     _ = @import("SnapshotTests.zig");
@@ -212,6 +278,7 @@ test {
     _ = @import("Lsp/Protocol.zig");
     _ = @import("Lsp/Server.zig");
     _ = @import("Lsp/Workspace.zig");
+    _ = @import("MacOS/ExternalCallTests.zig");
     _ = @import("Parser.zig");
     _ = @import("Project.zig");
     _ = @import("Project/CoreTests.zig");

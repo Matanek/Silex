@@ -18,6 +18,7 @@ pub const Register = enum(u5) {
     x14 = 14,
     x15 = 15,
     x16 = 16,
+    x17 = 17,
     x29 = 29,
     x30 = 30,
     zero_or_sp = 31,
@@ -102,6 +103,10 @@ pub fn addRegisters(destination: Register, left: Register, right: Register) u32 
 
 pub fn addressRelative(destination: Register) u32 {
     return 0x10000000 | registerBits(destination);
+}
+
+pub fn addressPage(destination: Register) u32 {
+    return 0x90000000 | registerBits(destination);
 }
 
 pub fn serviceCall() u32 {
@@ -286,4 +291,8 @@ pub fn branch() u32 {
 
 pub fn branchLink() u32 {
     return 0x94000000;
+}
+
+pub fn branchLinkRegister(register: Register) u32 {
+    return 0xd63f0000 | (registerBits(register) << 5);
 }

@@ -1,0 +1,13 @@
+func calculate(limit:int) int {
+    var total = 0
+    var index = 0
+    while index < limit {
+        total += (index % 97) * 3
+        index += 1
+    }
+    return total
+}
+
+func main() {
+    print(calculate(1000000))
+}
