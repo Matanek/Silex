@@ -105,7 +105,7 @@ pub const Compiler = struct {
 
         var composition = try self.composeAst();
         var extensions = Extensions.Merger.init(self.allocator);
-        composition.program = extensions.merge(composition.program, true, false) catch |err| {
+        composition.program = extensions.merge(composition.program, true, true) catch |err| {
             self.diagnostic = extensions.diagnostic;
             return err;
         };

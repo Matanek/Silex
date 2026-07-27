@@ -455,6 +455,28 @@ test "native ARM64 agrees on generic extension specializations" {
     try compare(allocator, compilation.ir, machine, "genericExtended", &.{});
 }
 
+test "native ARM64 agrees on extension protocol conformances" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\protocol Readable { func read() int }
+        \\struct Item { let value:int }
+        \\extend Item : Readable { func read() int { return self.value } }
+        \\func accept<T:Readable>(value:T) int { return value.read() }
+        \\func extendedConformance() int {
+        \\    let item = Item(value:21)
+        \\    var erased:Readable = item
+        \\    return accept(item) + erased.read()
+        \\}
+        \\func main() {}
+    );
+    const machine = try Lower.lower(allocator, compilation.ir);
+    try compare(allocator, compilation.ir, machine, "extendedConformance", &.{});
+}
+
 test "native ARM64 agrees on omitted function constructor and method arguments" {
     if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);

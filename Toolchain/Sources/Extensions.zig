@@ -35,6 +35,46 @@ pub const Merger = struct {
             if (target.type_parameters.len != 0) {
                 return self.fail(extension.target_position, "generic extension targets and specializations are not supported");
             }
+            const visible_files = if (extension.visible_files.len != 0)
+                extension.visible_files
+            else
+                try self.allocator.dupe(usize, &.{extension.position.file});
+            var conformances: std.ArrayList(Ast.ExtensionConformance) = .empty;
+            try conformances.appendSlice(self.allocator, target.extension_conformances);
+            for (extension.conformances) |relation| {
+                const protocol_index = relation.structureIndex() orelse {
+                    return self.fail(extension.target_position, "an extension conformance must name a protocol");
+                };
+                const protocol_name = if (protocol_index < source.type_names.len) source.type_names[protocol_index] else {
+                    return self.fail(extension.target_position, "an extension conformance must name a protocol");
+                };
+                const protocol_structure_index = findStructure(structures, protocol_name) orelse {
+                    return self.fail(extension.target_position, "an extension conformance must name a protocol");
+                };
+                if (!structures[protocol_structure_index].is_protocol) {
+                    return self.fail(extension.target_position, "an extension conformance must name a protocol");
+                }
+                if (declaresConformance(target, relation)) {
+                    const message = try std.fmt.allocPrint(self.allocator, "type '{s}' already conforms to protocol '{s}'", .{ target.name, protocol_name });
+                    return self.fail(extension.target_position, message);
+                }
+                for (conformances.items) |existing| if (existing.protocol == relation) {
+                    const message = try std.fmt.allocPrint(self.allocator, "extension conformance of '{s}' to '{s}' from '{s}' conflicts with '{s}'", .{
+                        target.name,
+                        protocol_name,
+                        extension.provider,
+                        existing.provider,
+                    });
+                    return self.fail(extension.target_position, message);
+                };
+                try conformances.append(self.allocator, .{
+                    .protocol = relation,
+                    .position = extension.target_position,
+                    .provider = extension.provider,
+                    .visible_files = visible_files,
+                });
+            }
+            structures[structure_index].extension_conformances = try conformances.toOwnedSlice(self.allocator);
             var methods: std.ArrayList(Ast.Function) = .empty;
             try methods.appendSlice(self.allocator, target.methods);
             for (extension.methods) |source_method| {
@@ -48,10 +88,6 @@ pub const Merger = struct {
                 } else if (!target.is_class and method.is_private) {
                     return self.fail(method.name_position, "structure extension methods only support public or internal visibility");
                 }
-                const visible_files = if (extension.visible_files.len != 0)
-                    extension.visible_files
-                else
-                    try self.allocator.dupe(usize, &.{extension.position.file});
                 method.extension = .{ .provider = extension.provider, .visible_files = visible_files };
                 for (methods.items) |existing| {
                     if (!sameSignature(existing, method)) continue;
@@ -82,6 +118,12 @@ pub const Merger = struct {
         return error.InvalidSource;
     }
 };
+
+fn declaresConformance(target: Ast.Structure, protocol: Ast.Type) bool {
+    if (target.base == protocol) return true;
+    for (target.conformances) |relation| if (relation == protocol) return true;
+    return false;
+}
 
 fn findStructure(structures: []const Ast.Structure, name: []const u8) ?usize {
     for (structures, 0..) |structure, index| if (std.mem.eql(u8, structure.name, name)) return index;

@@ -5,6 +5,7 @@ const Result = @import("../Intrinsics/Result.zig");
 const Source = @import("../Source.zig");
 const Nested = @import("Nested.zig");
 const Remap = @import("Remap.zig");
+const Conformances = @import("Conformances.zig");
 
 const Allocator = std.mem.Allocator;
 const SpecializeError = Source.Error || Allocator.Error;
@@ -144,6 +145,7 @@ pub const Specializer = struct {
         for (self.structures.items) |*structure| {
             if (structure.base) |base| structure.base = Remap.concreteType(base, map);
             for (@constCast(structure.conformances)) |*conformance| conformance.* = Remap.concreteType(conformance.*, map);
+            for (@constCast(structure.extension_conformances)) |*conformance| conformance.protocol = Remap.concreteType(conformance.protocol, map);
             if (structure.collection) |collection| structure.collection.?.element = Remap.concreteType(collection.element, map);
             for (@constCast(structure.fields)) |*field| {
                 field.type = Remap.concreteType(field.type, map);
@@ -807,6 +809,7 @@ pub const Specializer = struct {
         var concrete = template;
         concrete.name = name;
         concrete.type_parameters = &.{};
+        concrete.specialization_file = position.file;
         var locals: std.ArrayList(Binding) = .empty;
         try locals.append(self.allocator, .{ .name = "self", .type = structure_type });
         concrete.parameters = try self.rewriteParameters(template.parameters, arguments, &locals);
@@ -851,6 +854,7 @@ pub const Specializer = struct {
         var concrete = template;
         concrete.name = name;
         concrete.type_parameters = &.{};
+        concrete.specialization_file = position.file;
         var locals: std.ArrayList(Binding) = .empty;
         concrete.parameters = try self.rewriteParameters(template.parameters, arguments, &locals);
         concrete.return_type = try self.rewriteType(template.return_type, arguments, template.name_position);
@@ -1256,7 +1260,7 @@ pub const Specializer = struct {
         };
     }
 
-    fn structureForType(self: *Specializer, type_value: Ast.Type) ?Ast.Structure {
+    pub fn structureForType(self: *Specializer, type_value: Ast.Type) ?Ast.Structure {
         const index = type_value.structureIndex() orelse return null;
         if (index >= self.type_names.items.len) return null;
         const name = self.type_names.items[index];
@@ -1270,7 +1274,7 @@ pub const Specializer = struct {
         return Result.successType(enumeration);
     }
 
-    fn sourceStructureForType(self: *Specializer, type_value: Ast.Type) ?Ast.Structure {
+    pub fn sourceStructureForType(self: *Specializer, type_value: Ast.Type) ?Ast.Structure {
         const index = type_value.structureIndex() orelse return null;
         if (index >= self.type_names.items.len) return null;
         const name = self.type_names.items[index];
@@ -1406,7 +1410,7 @@ pub const Specializer = struct {
         position: Source.Position,
     ) SpecializeError!void {
         for (parameters, arguments) |parameter, argument| if (parameter.constraint) |protocol| {
-            if (self.conforms(argument, protocol, 0)) continue;
+            if (Conformances.conforms(self, argument, protocol, position, 0)) continue;
             const message = try std.fmt.allocPrint(
                 self.allocator,
                 "type '{s}' does not conform to protocol '{s}' required by '{s}'",
@@ -1414,17 +1418,6 @@ pub const Specializer = struct {
             );
             return self.fail(position, message);
         };
-    }
-
-    fn conforms(self: *Specializer, type_value: Ast.Type, protocol: Ast.Type, depth: usize) bool {
-        if (depth > self.structures.items.len + 1) return false;
-        const structure = self.structureForType(type_value) orelse self.sourceStructureForType(type_value) orelse return false;
-        if (structure.base) |base| {
-            if (base == protocol) return true;
-            if (self.conforms(base, protocol, depth + 1)) return true;
-        }
-        for (structure.conformances) |conformance| if (conformance == protocol) return true;
-        return false;
     }
 
     fn specializationName(self: *Specializer, name: []const u8, arguments: []const Ast.Type) Allocator.Error![]const u8 {

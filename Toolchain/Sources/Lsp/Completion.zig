@@ -885,7 +885,7 @@ fn parseForCompletion(
 
 fn mergeExtensionsForCompletion(allocator: Allocator, program: Ast.Program) ?Ast.Program {
     var merger = ExtensionMerger.Merger.init(allocator);
-    return merger.merge(program, true, false) catch program;
+    return merger.merge(program, true, true) catch program;
 }
 
 pub fn functionSignature(
@@ -1123,6 +1123,23 @@ test "complete local extension methods on their exact target" {
     const cursor = std.mem.indexOf(u8, source, "value.extra").? + "value.ex".len;
     const items = try itemsAt(arena.allocator(), source, cursor, .trigger_character);
     try std.testing.expect(contains(items, "extra"));
+}
+
+test "complete methods supplied by a protocol conformance extension" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source =
+        \\protocol Drawable { func draw() str }
+        \\struct Sprite {}
+        \\extend Sprite : Drawable { func draw() str { return "sprite" } }
+        \\func main() {
+        \\    let sprite = Sprite()
+        \\    sprite.draw()
+        \\}
+    ;
+    const cursor = std.mem.indexOf(u8, source, "sprite.draw").? + "sprite.dr".len;
+    const items = try itemsAt(arena.allocator(), source, cursor, .trigger_character);
+    try std.testing.expect(contains(items, "draw"));
 }
 
 test "complete direct nested types from their declaring owner" {
