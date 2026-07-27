@@ -68,6 +68,9 @@ pub const Instruction = union(enum) {
     reference_store: ReferenceStore,
     reference_offset: ReferenceOffset,
     aggregate_init: AggregateInit,
+    class_init: ClassInit,
+    class_load: ClassLoad,
+    class_store: ClassStore,
     list_init: ListInit,
     enum_init: EnumInit,
     enum_test: EnumTest,
@@ -167,6 +170,24 @@ pub const Instruction = union(enum) {
     pub const AggregateInit = struct {
         result: Span,
         fields: []const Span,
+    };
+
+    pub const ClassInit = struct {
+        result: Slot,
+        fields: []const Span,
+    };
+
+    pub const ClassLoad = struct {
+        result: Span,
+        base: Slot,
+        byte_offset: u32,
+    };
+
+    pub const ClassStore = struct {
+        result: Slot,
+        base: Slot,
+        byte_offset: u32,
+        replacement: Span,
     };
 
     pub const ListInit = struct {
@@ -436,6 +457,19 @@ pub fn validate(program: Program) Error!void {
                     width += field.width;
                 }
                 if (width != value.result.width or !value.result.aggregate) return error.InvalidMachineProgram;
+            },
+            .class_init => |value| {
+                try requireSlot(function, value.result);
+                for (value.fields) |field| try requireSpan(function, field);
+            },
+            .class_load => |value| {
+                try requireSpan(function, value.result);
+                try requireSlot(function, value.base);
+            },
+            .class_store => |value| {
+                try requireSlot(function, value.result);
+                try requireSlot(function, value.base);
+                try requireSpan(function, value.replacement);
             },
             .list_init => |value| {
                 try requireSlot(function, value.result);

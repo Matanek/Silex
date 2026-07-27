@@ -329,8 +329,9 @@ fn analyzeCallWithReceiver(
     try Borrowing.validateReadArguments(self, method.parameters, call.arguments);
     const flat = flatMethodIndex(self.program, structure_index, method_index);
     const mutating = self.method_mutability[flat];
+    const class_receiver = self.structures[structure_index].is_class;
     const borrowed_mutable = method.return_mode == .mutable;
-    const place = if (mutating and !borrowed_mutable)
+    const place = if (mutating and !borrowed_mutable and !class_receiver)
         try requireMutablePlace(self, builder, receiver_expression, call.name)
     else
         null;
@@ -387,12 +388,18 @@ fn analyzeCallWithReceiver(
         return null;
     }
     if (method.return_type == .void) {
+        if (class_receiver) return null;
         const replacement = if (safe_receiver_type) |optional_type|
             (try Optionals.promote(self, builder, .{ .type = receiver.type, .value = call_result.? }, optional_type)).?.value
         else
             call_result.?;
         try writePlace(self, builder, place.?, replacement);
         return null;
+    }
+    if (class_receiver) {
+        const value = try self.newValue(builder, method.return_type);
+        try self.emit(builder, .{ .field_load = .{ .result = value, .base = call_result.?, .field = 1 } });
+        return .{ .type = method.return_type, .value = value };
     }
     const updated_receiver = try self.newValue(builder, receiver.type);
     try self.emit(builder, .{ .field_load = .{ .result = updated_receiver, .base = call_result.?, .field = 0 } });

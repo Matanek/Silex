@@ -2,6 +2,7 @@ const std = @import("std");
 const Ir = @import("Ir.zig");
 const MainBoundary = @import("MainBoundary.zig");
 const Numeric = @import("Numeric.zig");
+const RuntimeValue = @import("Interpreter/Value.zig");
 
 const Allocator = std.mem.Allocator;
 const max_call_depth = 768;
@@ -16,78 +17,7 @@ pub const Error = Allocator.Error || error{
     InvalidShift,
 };
 
-pub const Value = union(enum) {
-    void,
-    integer: i64,
-    typed_integer: Numeric.Integer,
-    float32: f32,
-    float64: f64,
-    boolean: bool,
-    string: []const u8,
-    structure: Structure,
-    view: View,
-    enumeration: *const Enumeration,
-    optional: Optional,
-    reference: Reference,
-
-    pub const Reference = union(enum) {
-        optional: *?Value,
-        value: *Value,
-
-        fn load(self: Reference) Error!Value {
-            return switch (self) {
-                .optional => |pointer| pointer.* orelse error.InvalidProgram,
-                .value => |pointer| pointer.*,
-            };
-        }
-
-        fn store(self: Reference, value: Value) void {
-            switch (self) {
-                .optional => |pointer| pointer.* = value,
-                .value => |pointer| pointer.* = value,
-            }
-        }
-    };
-
-    pub const Structure = struct {
-        type: Ir.Type,
-        fields: []Value,
-    };
-
-    pub const View = struct {
-        type: Ir.Type,
-        fields: []Value,
-    };
-
-    pub const Optional = struct {
-        type: Ir.Type,
-        value: ?*const Value,
-    };
-
-    pub const Enumeration = struct {
-        type: Ir.Type,
-        enumeration: usize,
-        variant: usize,
-        values: []const Value,
-    };
-
-    pub fn typeOf(self: Value) Ir.Type {
-        return switch (self) {
-            .void => .void,
-            .integer => .int,
-            .typed_integer => |value| value.type,
-            .float32 => .float32,
-            .float64 => .float64,
-            .boolean => .bool,
-            .string => .str,
-            .structure => |value| value.type,
-            .view => |value| value.type,
-            .enumeration => |value| value.type,
-            .optional => |value| value.type,
-            .reference => .address,
-        };
-    }
-};
+pub const Value = RuntimeValue.Value;
 
 pub const RunResult = struct {
     exit_code: u8,
@@ -280,10 +210,15 @@ fn executeInstruction(
                     return error.InvalidProgram;
                 }
             }
-            try store(function, values, initialization.result, .{ .structure = .{
+            const aggregate = Value.Structure{
                 .type = .structure(initialization.structure),
                 .fields = fields,
-            } });
+            };
+            if (program.structures[initialization.structure].is_class) {
+                const instance = try allocator.create(Value.Structure);
+                instance.* = aggregate;
+                try store(function, values, initialization.result, .{ .class = instance });
+            } else try store(function, values, initialization.result, .{ .structure = aggregate });
         },
         .list_init => |initialization| try executeListInit(allocator, function, values, initialization),
         .enum_init => |initialization| {
@@ -339,10 +274,20 @@ fn executeInstruction(
         .field_load => |field| {
             const aggregate = switch (try load(values, field.base)) {
                 .structure => |value| value,
+                .class => |value| value.*,
                 else => return error.InvalidProgram,
             };
             if (field.field >= aggregate.fields.len) return error.InvalidProgram;
             try store(function, values, field.result, try cloneValue(allocator, aggregate.fields[field.field]));
+        },
+        .field_store => |field| {
+            const instance = switch (try load(values, field.base)) {
+                .class => |value| value,
+                else => return error.InvalidProgram,
+            };
+            if (field.field >= instance.fields.len) return error.InvalidProgram;
+            instance.fields[field.field] = try cloneValue(allocator, try load(values, field.replacement));
+            try store(function, values, field.result, .{ .class = instance });
         },
         .collection_load => |access| try executeCollectionLoad(allocator, program, function, values, access, session),
         .collection_replace => |replacement| try executeCollectionReplace(allocator, program, function, values, replacement, session),
@@ -475,37 +420,7 @@ fn load(values: []const ?Value, id: Ir.ValueId) Error!Value {
     return values[id] orelse error.InvalidProgram;
 }
 
-fn cloneValue(allocator: Allocator, value: Value) Error!Value {
-    return switch (value) {
-        .structure => |aggregate| cloned: {
-            const fields = try allocator.alloc(Value, aggregate.fields.len);
-            for (aggregate.fields, 0..) |field, index| fields[index] = try cloneValue(allocator, field);
-            break :cloned .{ .structure = .{ .type = aggregate.type, .fields = fields } };
-        },
-        .view => value,
-        .enumeration => |enumeration| cloned: {
-            const values = try allocator.alloc(Value, enumeration.values.len);
-            for (enumeration.values, 0..) |item, index| values[index] = try cloneValue(allocator, item);
-            const copy = try allocator.create(Value.Enumeration);
-            copy.* = .{
-                .type = enumeration.type,
-                .enumeration = enumeration.enumeration,
-                .variant = enumeration.variant,
-                .values = values,
-            };
-            break :cloned .{ .enumeration = copy };
-        },
-        .optional => |optional| cloned: {
-            const payload = if (optional.value) |present| payload: {
-                const copy = try allocator.create(Value);
-                copy.* = try cloneValue(allocator, present.*);
-                break :payload copy;
-            } else null;
-            break :cloned .{ .optional = .{ .type = optional.type, .value = payload } };
-        },
-        else => value,
-    };
-}
+const cloneValue = RuntimeValue.clone;
 
 fn storeLocal(function: Ir.Function, locals: []?Value, id: Ir.LocalId, value: Value) Error!void {
     if (id >= locals.len or function.local_types[id] != value.typeOf()) return error.InvalidProgram;
@@ -937,33 +852,7 @@ fn string(value: Value) Error![]const u8 {
     };
 }
 
-fn equal(left: Value, right: Value) Error!bool {
-    if (left.typeOf() != right.typeOf()) return error.InvalidProgram;
-    return switch (left) {
-        .integer => |value| value == right.integer,
-        .typed_integer => |value| value.bits == right.typed_integer.bits and value.type == right.typed_integer.type,
-        .float32 => |value| value == right.float32,
-        .float64 => |value| value == right.float64,
-        .string => |value| std.mem.eql(u8, value, right.string),
-        .boolean => |value| value == right.boolean,
-        .structure => |aggregate| structure: {
-            if (aggregate.fields.len != right.structure.fields.len) return error.InvalidProgram;
-            for (aggregate.fields, right.structure.fields) |left_field, right_field| {
-                if (!try equal(left_field, right_field)) break :structure false;
-            }
-            break :structure true;
-        },
-        .view => error.InvalidProgram,
-        .enumeration => return error.InvalidProgram,
-        .optional => |optional| optional_value: {
-            if ((optional.value == null) != (right.optional.value == null)) break :optional_value false;
-            if (optional.value) |payload| break :optional_value try equal(payload.*, right.optional.value.?.*);
-            break :optional_value true;
-        },
-        .reference => error.InvalidProgram,
-        .void => error.InvalidProgram,
-    };
-}
+const equal = RuntimeValue.equal;
 
 fn appendValueText(output: *std.ArrayList(u8), allocator: Allocator, value: Value) Error!void {
     switch (value) {
@@ -990,6 +879,7 @@ fn appendValueText(output: *std.ArrayList(u8), allocator: Allocator, value: Valu
             try output.appendSlice(allocator, "null"),
         .reference => return error.InvalidProgram,
         .structure => return error.InvalidProgram,
+        .class => return error.InvalidProgram,
         .view => return error.InvalidProgram,
         .enumeration => return error.InvalidProgram,
         .void => return error.InvalidProgram,

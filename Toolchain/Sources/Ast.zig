@@ -355,6 +355,7 @@ pub const Constructor = struct {
 pub const Structure = struct {
     is_public: bool = false,
     is_internal: bool = false,
+    is_class: bool = false,
     owner: usize = 0,
     position: Source.Position,
     name_position: Source.Position,

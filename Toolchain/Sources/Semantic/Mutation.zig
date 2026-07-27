@@ -187,6 +187,17 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
         switch (steps.items[index]) {
             .field => |step| {
                 const structure = self.structures[step.structure];
+                if (structure.is_class) {
+                    const result = try self.newValue(builder, .structure(step.structure));
+                    try self.emit(builder, .{ .field_store = .{
+                        .result = result,
+                        .base = step.base,
+                        .field = step.field,
+                        .replacement = replacement,
+                    } });
+                    replacement = result;
+                    continue;
+                }
                 const fields = try self.allocator.alloc(Ir.ValueId, structure.fields.len);
                 for (structure.fields, 0..) |field, field_index| {
                     if (field_index == step.field) {

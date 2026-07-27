@@ -429,6 +429,44 @@ active payloads in reverse order, and a collection its elements from last to
 first. Fatal `panic`, failed `assert`, and forced process termination do not
 promise cleanup.
 
+## Classes with shared identity
+
+`class` declares a nominal reference type. Assigning, passing, returning, or
+storing a class value preserves the same instance; it never copies the fields.
+Consequently, `==` and `!=` compare identity rather than field contents.
+
+```sx
+class Player {
+    public var health:int = 100
+
+    public func damage(amount:int) {
+        self.health -= amount
+    }
+}
+
+var first = Player()
+var second = first
+second.damage(10)
+print(first.health) // 90
+```
+
+A binding or aggregate slot that can reach a class reference uses `var`, even
+when the reference itself is never replaced. This makes shared mutability
+visible at its storage boundary. Function parameters remain ordinary value
+parameters: transporting one preserves identity, and a mutating method changes
+the shared instance. A class field likewise uses `var`.
+
+A class without a custom constructor uses the named initializer of its visible
+fields and their defaults. It has no intrinsic instance, so `var player:Player`
+is invalid; `var player:Player?` starts at `null`. Optionals, structures, enums,
+arrays, and lists may retain class identity. Safe optional access follows the
+usual `?.` contract. Recursive optional class links are valid because a class
+value has reference representation rather than recursive value storage.
+
+Class instances have automatic lifetime. The toolchain owns their runtime
+representation and exposes no pointer, handle, retain count, allocation, or
+manual release operation.
+
 ## Associated enum values
 
 `enum` declares a nominal closed set of variants. A variant may carry zero or
@@ -1027,11 +1065,12 @@ normative reference for these semantics.
 ## Grammar
 
 ```ebnf
-program         = (use | enum | structure | function)* EOF ;
+program         = (use | enum | structure | class | function)* EOF ;
 use             = "public"? "use"
                   (qualified_identifier ("as" identifier)? | type "as" identifier) ;
 visibility      = "public" | "internal" ;
 structure       = visibility? "struct" identifier type_parameters? "{" (structure_field | constructor | method | drop_definition)* "}" ;
+class           = visibility? "class" identifier "{" (structure_field | method)* "}" ;
 drop_definition = "drop" block ;
 enum            = visibility? "enum" identifier type_parameters? "{" enum_variant+ "}" ;
 enum_variant    = identifier ("(" type ("," type)* ")")? ;

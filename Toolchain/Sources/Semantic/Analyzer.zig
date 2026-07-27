@@ -668,12 +668,20 @@ pub const Analyzer = struct {
                 .type = field.type,
                 .mutable = field.mutable,
             };
-            structures[type_index] = .{ .name = name, .fields = fields, .collection = declaration.collection };
+            structures[type_index] = .{
+                .name = name,
+                .fields = fields,
+                .is_class = declaration.is_class,
+                .collection = declaration.collection,
+            };
         }
         self.structures = structures;
 
         for (self.program.structures) |structure| for (structure.fields) |field| {
             try Resources.validateStoredType(self, field.type, field.position, "in a structure field");
+            if (!field.mutable and Resources.containsClass(self, field.type)) {
+                return self.fail(field.name_position, "a field that can reach a class reference must use 'var'");
+            }
         };
 
         const states = try self.allocator.alloc(StructureState, structures.len);
@@ -713,6 +721,10 @@ pub const Analyzer = struct {
         index: usize,
         states: []StructureState,
     ) AnalyzeError!void {
+        if (self.structures[index].is_class) {
+            states[index] = .complete;
+            return;
+        }
         switch (states[index]) {
             .complete => return,
             .visiting => {

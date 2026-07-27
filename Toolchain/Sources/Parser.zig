@@ -46,29 +46,32 @@ pub const Parser = struct {
         while (self.current.tag != .end) {
             switch (self.current.tag) {
                 .keyword_use => try uses.append(self.allocator, try Uses.parse(self, false)),
-                .keyword_struct => try structures.append(self.allocator, try self.parseStructure(false, false)),
+                .keyword_struct => try structures.append(self.allocator, try self.parseStructure(false, false, false)),
+                .keyword_class => try structures.append(self.allocator, try self.parseStructure(false, false, true)),
                 .keyword_enum => try enums.append(self.allocator, try EnumParser.parse(self, false, false)),
                 .keyword_func => try functions.append(self.allocator, try self.parseFunction(false, false)),
                 .keyword_public => {
                     try self.advance();
                     switch (self.current.tag) {
                         .keyword_use => try uses.append(self.allocator, try Uses.parse(self, true)),
-                        .keyword_struct => try structures.append(self.allocator, try self.parseStructure(true, false)),
+                        .keyword_struct => try structures.append(self.allocator, try self.parseStructure(true, false, false)),
+                        .keyword_class => try structures.append(self.allocator, try self.parseStructure(true, false, true)),
                         .keyword_enum => try enums.append(self.allocator, try EnumParser.parse(self, true, false)),
                         .keyword_func => try functions.append(self.allocator, try self.parseFunction(true, false)),
-                        else => return self.fail("expected use, enum, struct, or function declaration after 'public'"),
+                        else => return self.fail("expected use, enum, struct, class, or function declaration after 'public'"),
                     }
                 },
                 .keyword_internal => {
                     try self.advance();
                     switch (self.current.tag) {
-                        .keyword_struct => try structures.append(self.allocator, try self.parseStructure(false, true)),
+                        .keyword_struct => try structures.append(self.allocator, try self.parseStructure(false, true, false)),
+                        .keyword_class => try structures.append(self.allocator, try self.parseStructure(false, true, true)),
                         .keyword_enum => try enums.append(self.allocator, try EnumParser.parse(self, false, true)),
                         .keyword_func => try functions.append(self.allocator, try self.parseFunction(false, true)),
-                        else => return self.fail("expected enum, struct, or function declaration after 'internal'"),
+                        else => return self.fail("expected enum, struct, class, or function declaration after 'internal'"),
                     }
                 },
-                else => return self.fail("expected use, enum, struct, or function declaration"),
+                else => return self.fail("expected use, enum, struct, class, or function declaration"),
             }
         }
         try structures.appendSlice(self.allocator, self.collection_structures.items);
@@ -82,16 +85,17 @@ pub const Parser = struct {
         };
     }
 
-    fn parseStructure(self: *Parser, is_public: bool, is_internal: bool) ParseError!Ast.Structure {
+    fn parseStructure(self: *Parser, is_public: bool, is_internal: bool, is_class: bool) ParseError!Ast.Structure {
         const position = self.current.position;
         try self.advance();
-        if (self.current.tag != .identifier) return self.fail("expected structure name");
+        if (self.current.tag != .identifier) return self.fail(if (is_class) "expected class name" else "expected structure name");
         const name = self.current.lexeme;
         const name_position = self.current.position;
         if (std.mem.eql(u8, name, "Result")) return self.failAt(name_position, "'Result' is a reserved intrinsic type name");
         _ = try self.internTypeName(name);
         try self.advance();
         const type_parameters = try Generics.parseTypeParameters(self);
+        if (is_class and type_parameters.len != 0) return self.failAt(name_position, "generic classes are not supported yet");
         const enclosing_type_parameters = self.type_parameters;
         self.type_parameters = if (type_parameters.len == 0) enclosing_type_parameters else type_parameters;
         defer self.type_parameters = enclosing_type_parameters;
@@ -109,6 +113,7 @@ pub const Parser = struct {
                 try self.advance();
             }
             if (self.current.tag == .keyword_init) {
+                if (is_class) return self.fail("custom class constructors are not supported yet");
                 try constructors.append(self.allocator, try self.parseConstructor(member_internal));
                 continue;
             }
@@ -117,6 +122,7 @@ pub const Parser = struct {
                 continue;
             }
             if (self.current.tag == .keyword_drop) {
+                if (is_class) return self.fail("class drop blocks are not supported yet");
                 if (member_visibility) return self.fail("drop cannot declare visibility");
                 if (drop != null) return self.fail("structure already declares drop");
                 const drop_position = self.current.position;
@@ -159,6 +165,7 @@ pub const Parser = struct {
         return .{
             .is_public = is_public,
             .is_internal = is_internal,
+            .is_class = is_class,
             .position = position,
             .name_position = name_position,
             .name = name,
