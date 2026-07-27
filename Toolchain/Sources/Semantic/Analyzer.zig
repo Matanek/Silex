@@ -76,11 +76,6 @@ pub const Analyzer = struct {
                 );
             }
         }
-        for (program.structures, 0..) |structure, structure_index| if (structure.drop) |drop| {
-            const nominal = self.structureIndex(structure.name) orelse return error.InvalidSource;
-            try functions.append(self.allocator, try Resources.analyzeDrop(self, nominal, structure, drop));
-            _ = structure_index;
-        };
         for (program.structures, 0..) |structure, structure_index| {
             for (structure.methods, 0..) |method, method_index| {
                 try functions.append(
@@ -89,6 +84,14 @@ pub const Analyzer = struct {
                 );
             }
         }
+        for (program.structures) |structure| if (structure.drop) |drop| {
+            const nominal = self.structureIndex(structure.name) orelse return error.InvalidSource;
+            try functions.append(self.allocator, try Resources.analyzeDrop(self, nominal, structure, drop));
+        };
+        for (program.structures) |structure| if (structure.is_class and !structure.is_static) {
+            const nominal = self.structureIndex(structure.name) orelse return error.InvalidSource;
+            try functions.append(self.allocator, try Resources.analyzeClassFields(self, nominal, structure));
+        };
         return .{ .globals = self.globals, .structures = self.structures, .enums = self.enums, .functions = try functions.toOwnedSlice(self.allocator) };
     }
 

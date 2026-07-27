@@ -73,6 +73,8 @@ pub const Instruction = union(enum) {
     class_init: ClassInit,
     class_load: ClassLoad,
     class_store: ClassStore,
+    class_retain: ClassRetain,
+    class_drop: ClassDrop,
     list_init: ListInit,
     enum_init: EnumInit,
     enum_test: EnumTest,
@@ -170,8 +172,8 @@ pub const Instruction = union(enum) {
         byte_offset: u32,
     };
 
-    pub const GlobalLoad = struct { result: Slot, global: usize };
-    pub const GlobalStore = struct { operand: Slot, global: usize };
+    pub const GlobalLoad = struct { result: Span, global: usize };
+    pub const GlobalStore = struct { operand: Span, global: usize };
 
     pub const AggregateInit = struct {
         result: Span,
@@ -195,6 +197,18 @@ pub const Instruction = union(enum) {
         base: Slot,
         byte_offset: u32,
         replacement: Span,
+    };
+
+    pub const ClassRetain = struct { operand: Slot };
+
+    pub const ClassDrop = struct {
+        operand: Slot,
+        plans: []const Plan,
+
+        pub const Plan = struct {
+            structure: usize,
+            functions: []const usize,
+        };
     };
 
     pub const ListInit = struct {
@@ -396,7 +410,7 @@ pub const Program = struct {
     strings: []const []const u8 = &.{},
 };
 
-pub const Global = struct { bits: u64 };
+pub const Global = struct { bits: u64, width: u12 = 1 };
 
 pub fn checkedSlot(value: usize) Error!Slot {
     if (value > max_slots) return error.FrameTooLarge;
@@ -457,11 +471,11 @@ pub fn validate(program: Program) Error!void {
                 if (value.result.width != value.operand.width) return error.InvalidMachineProgram;
             },
             .global_load => |value| {
-                try requireSlot(function, value.result);
+                try requireSpan(function, value.result);
                 if (value.global >= program.globals.len) return error.InvalidMachineProgram;
             },
             .global_store => |value| {
-                try requireSlot(function, value.operand);
+                try requireSpan(function, value.operand);
                 if (value.global >= program.globals.len) return error.InvalidMachineProgram;
             },
             .local_address => |value| {
@@ -501,6 +515,13 @@ pub fn validate(program: Program) Error!void {
                 try requireSlot(function, value.result);
                 try requireSlot(function, value.base);
                 try requireSpan(function, value.replacement);
+            },
+            .class_retain => |value| try requireSlot(function, value.operand),
+            .class_drop => |value| {
+                try requireSlot(function, value.operand);
+                for (value.plans) |plan| {
+                    for (plan.functions) |finalizer| if (finalizer >= program.functions.len) return error.InvalidMachineProgram;
+                }
             },
             .list_init => |value| {
                 try requireSlot(function, value.result);

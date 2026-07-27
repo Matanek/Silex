@@ -131,6 +131,7 @@ pub fn isComparable(self: anytype, type_value: Ast.Type) bool {
     if (type_value.optionalChild()) |child| return isComparable(self, child);
     if (type_value.structureIndex()) |index| {
         for (self.enums) |enumeration| if (enumeration.type_index == index) return false;
+        if (index < self.structures.len and self.structures[index].is_class) return true;
         for (self.structures[index].fields) |field| {
             if (!isComparable(self, field.type)) return false;
         }

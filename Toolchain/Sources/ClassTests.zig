@@ -415,3 +415,90 @@ test "protected nested classes require qualification and are not inherited" {
         "unknown function 'Token'",
     );
 }
+
+test "class drop waits for the last scoped alias and runs once" {
+    const output = try run(
+        \\class Tracer {
+        \\    public let label:str
+        \\    drop { print("drop ", self.label) }
+        \\}
+        \\func main() {
+        \\    var first = Tracer(label:"one")
+        \\    if true { var alias = first; print("alias ", alias.label) }
+        \\    print("alive ", first.label)
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("alias one\nalive one\ndrop one\n", output);
+}
+
+test "replacing the last class root drops the old instance immediately" {
+    const output = try run(
+        \\class Tracer { public let label:str; drop { print("drop ", self.label) } }
+        \\func main() {
+        \\    var value = Tracer(label:"old")
+        \\    value = Tracer(label:"new")
+        \\    print("current ", value.label)
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("drop old\ncurrent new\ndrop new\n", output);
+}
+
+test "resetting a static optional root releases its class graph" {
+    const output = try run(
+        \\class Tracer { public let label:str; drop { print("drop ", self.label) } }
+        \\static class Roots { public static var current:Tracer? = null }
+        \\func main() {
+        \\    Roots.current = Tracer(label:"shared")
+        \\    print("held")
+        \\    Roots.current = null
+        \\    print("reset")
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("held\ndrop shared\nreset\n", output);
+}
+
+test "class drop follows derived base and owned field order" {
+    const output = try run(
+        \\struct Resource { let name:str; drop { print("resource ", self.name) } }
+        \\class Base { drop { print("base") } }
+        \\class Owner : Base {
+        \\    let resource:Resource
+        \\    public init(name:str) : super() { self.resource = Resource(name:name) }
+        \\    drop { print("owner") }
+        \\}
+        \\func main() { var owner = Owner("file") }
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("owner\nbase\nresource file\n", output);
+}
+
+test "class drop follows the dynamic type after an upcast" {
+    const output = try run(
+        \\class Base { drop { print("base") } }
+        \\class Child : Base { drop { print("child") } }
+        \\func main() { var value:Base = Child() }
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("child\nbase\n", output);
+}
+
+test "class cycles finalize once while their graph is readable" {
+    const output = try run(
+        \\class Node {
+        \\    public let name:str
+        \\    public var next:Node? = null
+        \\    drop { print("drop ", self.name, " linked=", self.next != null) }
+        \\}
+        \\func main() {
+        \\    var first = Node(name:"first")
+        \\    var second = Node(name:"second")
+        \\    first.next = second
+        \\    second.next = first
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("drop second linked=true\ndrop first linked=true\n", output);
+}

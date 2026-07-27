@@ -88,6 +88,7 @@ pub fn analyzeVariable(self: anytype, builder: anytype, declaration: Ast.Variabl
         );
         return self.fail(if (declaration.initializer) |value| value.position else declaration.name_position, message);
     }
+    if (Resources.containsClass(self, declared_type)) try Resources.retainValue(self, builder, declared_type, initializer.value);
     if (declaration.mutable) {
         const local = builder.local_types.items.len;
         try builder.local_types.append(self.allocator, declared_type);

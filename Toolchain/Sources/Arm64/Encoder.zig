@@ -194,10 +194,10 @@ pub fn encode(allocator: Allocator, program: Machine.Program, entry: Entry) Erro
     if (data_offset) |offset| image_size = offset;
     const global_offsets = try allocator.alloc(usize, program.globals.len);
     defer allocator.free(global_offsets);
-    for (program.globals, 0..) |_, index| {
+    for (program.globals, 0..) |global, index| {
         image_size = std.mem.alignForward(usize, image_size, 8);
         global_offsets[index] = image_size;
-        image_size += 8;
+        image_size += @as(usize, global.width) * Machine.slot_size;
     }
     for (data_fixups.items) |fixup| {
         const target = if (fixup.global) |global|
@@ -305,14 +305,18 @@ fn encodeFunction(
             .global_load => |global| {
                 try data_fixups.append(allocator, .{ .at = words.items.len, .global = global.global });
                 try words.append(allocator, addressRelative(.x10));
-                try words.append(allocator, load64(.x9, .x10, 0));
-                try words.append(allocator, storeStack(.x9, global.result));
+                for (0..global.result.width) |leaf| {
+                    try words.append(allocator, load64(.x9, .x10, @intCast(leaf * Machine.slot_size)));
+                    try words.append(allocator, storeStack(.x9, @intCast(@as(usize, global.result.start) + leaf)));
+                }
             },
             .global_store => |global| {
                 try data_fixups.append(allocator, .{ .at = words.items.len, .global = global.global });
                 try words.append(allocator, addressRelative(.x10));
-                try words.append(allocator, loadStack(.x9, global.operand));
-                try words.append(allocator, store64(.x9, .x10, 0));
+                for (0..global.operand.width) |leaf| {
+                    try words.append(allocator, loadStack(.x9, @intCast(@as(usize, global.operand.start) + leaf)));
+                    try words.append(allocator, store64(.x9, .x10, @intCast(leaf * Machine.slot_size)));
+                }
             },
             .local_address => |address| {
                 try emitStackAddress(allocator, words, .x9, address.local);
@@ -343,6 +347,48 @@ fn encodeFunction(
             .class_init => |initialization| try ClassRuntime.emitInit(allocator, words, &fixups.epilogue, initialization),
             .class_load => |load| try ClassRuntime.emitLoad(allocator, words, load),
             .class_store => |store| try ClassRuntime.emitStore(allocator, words, store),
+            .class_retain => |retain| {
+                try words.append(allocator, loadStack(.x10, retain.operand));
+                try words.append(allocator, load64(.x9, .x10, Machine.slot_size));
+                try words.append(allocator, addSubtractImmediate(.x9, .x9, 1, true));
+                try words.append(allocator, store64(.x9, .x10, Machine.slot_size));
+            },
+            .class_drop => |drop| {
+                try words.append(allocator, loadStack(.x10, drop.operand));
+                try words.append(allocator, load64(.x9, .x10, Machine.slot_size));
+                const unrooted = words.items.len;
+                try words.append(allocator, compareBranchZero(.x9));
+                try words.append(allocator, addSubtractImmediate(.x9, .x9, 1, false));
+                try words.append(allocator, store64(.x9, .x10, Machine.slot_size));
+                const still_referenced = words.items.len;
+                try words.append(allocator, compareBranchNonZero64(.x9));
+                try Fixups.patch19(words.items, unrooted, words.items.len);
+                try words.append(allocator, load64(.x9, .x10, 2 * Machine.slot_size));
+                const already_dropped = words.items.len;
+                try words.append(allocator, compareBranchNonZero64(.x9));
+                try words.append(allocator, moveWideZero64(.x9, 1, 0));
+                try words.append(allocator, store64(.x9, .x10, 2 * Machine.slot_size));
+                try words.append(allocator, load64(.x9, .x10, 0));
+                var finalized: std.ArrayList(usize) = .empty;
+                for (drop.plans) |plan| {
+                    try emitImmediate64(allocator, words, .x11, plan.structure);
+                    try words.append(allocator, compareRegisters(.x9, .x11));
+                    const skip = words.items.len;
+                    try words.append(allocator, conditionalBranch(.not_equal));
+                    for (plan.functions) |finalizer| {
+                        try words.append(allocator, loadStack(.x0, drop.operand));
+                        try calls.append(allocator, .{ .at = words.items.len, .function = finalizer });
+                        try words.append(allocator, branchLink());
+                        try appendFixup(allocator, words, &fixups.epilogue, compareBranchNonZero(.x8), .imm19);
+                    }
+                    try finalized.append(allocator, words.items.len);
+                    try words.append(allocator, branch());
+                    try Fixups.patch19(words.items, skip, words.items.len);
+                }
+                for (finalized.items) |at| try Fixups.patch26(words.items, at, words.items.len);
+                try Fixups.patch19(words.items, still_referenced, words.items.len);
+                try Fixups.patch19(words.items, already_dropped, words.items.len);
+            },
             .list_init => |initialization| try ListRuntime.emitInit(allocator, words, &fixups.epilogue, initialization),
             .enum_init => |initialization| {
                 try emitImmediate64(allocator, words, .x9, initialization.tag);

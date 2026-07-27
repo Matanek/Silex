@@ -26,7 +26,7 @@ pub fn ownerIndex(self: anytype, name: []const u8) ?usize {
 pub fn prepare(self: anytype) ![]const Ir.Global {
     var globals: std.ArrayList(Ir.Global) = .empty;
     for (self.program.structures, 0..) |structure, owner| for (structure.static_fields) |field| {
-        if (!supportedType(field.type)) return self.fail(field.name_position, "static field type is not supported by the bootstrap runtime yet");
+        if (!supportedType(self, field.type)) return self.fail(field.name_position, "static field type is not supported by the bootstrap runtime yet");
         try globals.append(self.allocator, .{
             .name = try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ structure.name, field.name }),
             .type = field.type,
@@ -118,8 +118,15 @@ fn methodFunctionId(program: Ast.Program, structure_index: usize, method_index: 
     return result + method_index;
 }
 
-fn supportedType(type_value: Ast.Type) bool {
-    return type_value.isNumeric() or type_value == .bool;
+fn supportedType(self: anytype, type_value: Ast.Type) bool {
+    if (type_value.isNumeric() or type_value == .bool) return true;
+    const child = type_value.optionalChild() orelse return false;
+    return isClassType(self, child);
+}
+
+fn isClassType(self: anytype, type_value: Ast.Type) bool {
+    const index = type_value.structureIndex() orelse return false;
+    return index < self.structures.len and self.structures[index].is_class;
 }
 
 fn initializerBits(self: anytype, field: Ast.StructureField) !u64 {
@@ -146,6 +153,7 @@ fn initializerBits(self: anytype, field: Ast.StructureField) !u64 {
             if (!Numeric.fitsMagnitude(magnitude, true, field.type)) return self.fail(expression.position, "static initializer does not fit its field type");
             break :negative Numeric.fromMagnitude(magnitude, true, field.type).bits;
         },
+        .null_value => if (field.type.optionalChild() != null) 0 else self.fail(expression.position, "static initializer type does not match its field"),
         else => self.fail(expression.position, "static initializer must be a deterministic intrinsic value"),
     };
 }

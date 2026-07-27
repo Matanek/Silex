@@ -30,6 +30,12 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
                 break :current value;
             };
             const replacement = try analyzeReplacement(self, builder, assignment, field.declaration.type, current, target.fields[0].name, false);
+            if (Resources.containsClass(self, field.declaration.type)) {
+                try Resources.retainValue(self, builder, field.declaration.type, replacement);
+                const previous = try self.newValue(builder, field.declaration.type);
+                try self.emit(builder, .{ .global_load = .{ .result = previous, .global = field.global } });
+                try Resources.emitDrop(self, builder, field.declaration.type, previous);
+            }
             try self.emit(builder, .{ .global_store = .{ .global = field.global, .operand = replacement } });
             return;
         }
@@ -80,12 +86,16 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
         };
         if (assignment.operator == .assign and assignment.value != null) {
             try Resources.requireTransfer(self, assignment.value.?, binding.type, "assigning it");
-            if (binding.available and Resources.isNoncopyable(self, binding.type)) {
+            if (binding.available and Resources.isNoncopyable(self, binding.type) and !Resources.containsClass(self, binding.type)) {
                 try Resources.emitDrop(self, builder, binding.type, try loadBinding(self, builder, binding));
             }
         }
         const current = if (assignment.operator == .assign) null else try loadBinding(self, builder, binding);
         const replacement = try analyzeReplacement(self, builder, assignment, binding.type, current, target.name, false);
+        if (assignment.operator == .assign and Resources.containsClass(self, binding.type)) {
+            try Resources.retainValue(self, builder, binding.type, replacement);
+            if (binding.available) try Resources.emitDrop(self, builder, binding.type, try loadBinding(self, builder, binding));
+        }
         try storeBinding(self, builder, binding, replacement);
         builder.bindings.items[binding_index].available = true;
         Optionals.invalidateRefinement(builder, target.name);
