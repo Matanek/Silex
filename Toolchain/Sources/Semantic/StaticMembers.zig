@@ -15,7 +15,7 @@ pub const Field = struct {
 
 pub fn ownerIndex(self: anytype, name: []const u8) ?usize {
     for (self.program.structures, 0..) |structure, index| if (std.mem.eql(u8, structure.name, name)) return index;
-    const nominal = self.structureIndex(name) orelse return null;
+    const nominal = self.resolveStructureIndex(name) orelse return null;
     if (nominal >= self.structures.len) return null;
     for (self.program.structures, 0..) |structure, index| {
         if (std.mem.eql(u8, structure.name, self.structures[nominal].name)) return index;

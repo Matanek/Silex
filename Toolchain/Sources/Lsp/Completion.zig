@@ -443,6 +443,32 @@ fn appendMembers(
         return;
     }
     const structure = findStructure(program, type_name) orelse return;
+    if (std.mem.eql(u8, std.mem.trim(u8, receiver, " \t\r\n"), structure.name)) {
+        for (program.structures) |nested| {
+            const enclosing = nested.enclosing orelse continue;
+            if (!std.mem.eql(u8, enclosing, structure.name)) continue;
+            const label = if (std.mem.lastIndexOfScalar(u8, nested.name, '.')) |dot| nested.name[dot + 1 ..] else nested.name;
+            try appendCandidate(allocator, candidates, context, .{
+                .label = label,
+                .kind = CompletionKind.structure,
+                .detail = try std.fmt.allocPrint(allocator, "nested type {s}", .{nested.name}),
+            }, 0, true);
+        }
+        for (structure.static_fields) |field| try appendCandidate(allocator, candidates, context, .{
+            .label = field.name,
+            .kind = CompletionKind.field,
+            .detail = try std.fmt.allocPrint(allocator, "static {s}:{s}", .{ field.name, typeName(program, field.type) }),
+        }, 0, false);
+        for (structure.methods) |method| {
+            if (!method.is_static or !callAcceptsParameters(source, cursor, program, method.parameters)) continue;
+            try appendCandidate(allocator, candidates, context, .{
+                .label = method.name,
+                .kind = CompletionKind.method,
+                .detail = try functionSignature(allocator, source, program, method),
+            }, 0, true);
+        }
+        return;
+    }
     for (structure.fields) |field| try appendCandidate(allocator, candidates, context, .{
         .label = field.name,
         .kind = CompletionKind.field,
@@ -755,6 +781,7 @@ fn resolveReceiverType(
     _ = allocator;
     const trimmed = std.mem.trim(u8, receiver, " \t\r\n");
     if (trimmed.len == 0) return null;
+    if (findStructure(program, trimmed) != null) return trimmed;
     if (trimmed[trimmed.len - 1] == ')') {
         const open = std.mem.lastIndexOfScalar(u8, trimmed, '(') orelse return null;
         const name = std.mem.trim(u8, trimmed[0..open], " \t");
@@ -1046,6 +1073,22 @@ test "complete an instance with only its own members" {
     try std.testing.expect(!contains(items, "if"));
     try std.testing.expect(!contains(items, "float"));
     try std.testing.expect(!contains(items, "ignore"));
+}
+
+test "complete direct nested types from their declaring owner" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source =
+        \\struct Api {
+        \\    struct Entry {}
+        \\    static class State { public static var count:int = 0 }
+        \\}
+        \\func main() { print(Api.) }
+    ;
+    const cursor = std.mem.indexOf(u8, source, "Api.)").? + "Api.".len;
+    const items = try itemsAt(arena.allocator(), source, cursor, .trigger_character);
+    try std.testing.expect(contains(items, "Entry"));
+    try std.testing.expect(contains(items, "State"));
 }
 
 test "prioritize visible symbols before a valid statement keyword" {

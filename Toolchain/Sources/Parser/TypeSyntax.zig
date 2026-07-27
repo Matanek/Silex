@@ -31,6 +31,7 @@ pub fn parseParameter(self: anytype) !Ast.Parameter {
 
 pub fn parseType(self: anytype) !Ast.Type {
     const type_position = self.current.position;
+    var consumed = false;
     var result: Ast.Type = switch (self.current.tag) {
         .keyword_void => .void,
         .keyword_int => .int,
@@ -49,24 +50,35 @@ pub fn parseType(self: anytype) !Ast.Type {
         .keyword_str => .str,
         .identifier => identifier: {
             for (self.type_parameters, 0..) |parameter, index| {
-                if (std.mem.eql(u8, parameter.name, self.current.lexeme)) break :identifier .genericParameter(index);
+                if (std.mem.eql(u8, parameter.name, self.current.lexeme)) {
+                    try self.advance();
+                    consumed = true;
+                    break :identifier .genericParameter(index);
+                }
             }
             var name = self.current.lexeme;
+            var arguments: std.ArrayList(Ast.Type) = .empty;
+            try self.advance();
+            consumed = true;
             while (true) {
-                var lexer = self.lexer;
-                const dot = lexer.next() catch break;
-                if (dot.tag != .dot) break;
-                const part = lexer.next() catch break;
-                if (part.tag != .identifier) break;
+                if (self.current.tag == .less) {
+                    try arguments.appendSlice(self.allocator, try Generics.parseTypeArguments(self));
+                }
+                if (self.current.tag != .dot) break;
                 try self.advance();
-                try self.advance();
+                if (self.current.tag != .identifier) return self.fail("expected nested type name after '.'");
                 name = try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ name, self.current.lexeme });
+                try self.advance();
             }
-            break :identifier try self.internTypeName(name);
+            const base = try self.internTypeName(try self.resolveTypeName(name));
+            break :identifier if (arguments.items.len == 0)
+                base
+            else
+                try self.internGenericType(type_position, base, try arguments.toOwnedSlice(self.allocator));
         },
         else => return self.fail("expected type name"),
     };
-    try self.advance();
+    if (!consumed) try self.advance();
     if (self.current.tag == .less) {
         const arguments = try Generics.parseTypeArguments(self);
         result = try self.internGenericType(type_position, result, arguments);

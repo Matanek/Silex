@@ -25,6 +25,7 @@ const Visibility = @import("Visibility.zig");
 const Declarations = @import("Declarations.zig");
 const Inheritance = @import("Inheritance.zig");
 const StaticMembers = @import("StaticMembers.zig");
+const GenericSyntax = @import("../Parser/Generics.zig");
 const Types = @import("../Types.zig");
 const Allocator = std.mem.Allocator;
 const AnalyzeError = Source.Error || Allocator.Error;
@@ -650,6 +651,18 @@ pub const Analyzer = struct {
         return null;
     }
 
+    pub fn resolveStructureIndex(self: *Analyzer, name: []const u8) ?usize {
+        if (std.mem.indexOfScalar(u8, name, '.') == null) if (self.member_context) |context| {
+            var prefix = self.structures[context].name;
+            while (true) {
+                const candidate = std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ prefix, name }) catch return null;
+                if (self.structureIndex(candidate)) |index| return index;
+                prefix = if (std.mem.lastIndexOfScalar(u8, prefix, '.')) |dot| prefix[0..dot] else break;
+            }
+        };
+        return self.structureIndex(name);
+    }
+
     pub fn ownerStorageVisible(self: *Analyzer, structure_index: usize, position: Source.Position) bool {
         const declaration = self.findAstStructure(self.structures[structure_index].name) orelse return false;
         if (position.file == declaration.position.file) return true;
@@ -670,10 +683,15 @@ pub const Analyzer = struct {
     }
 
     fn analyzeFieldAccess(self: *Analyzer, builder: *FunctionBuilder, access: Ast.Expression.FieldAccess) AnalyzeError!TypedValue {
-        if (access.base.value == .identifier) if (StaticMembers.ownerIndex(self, access.base.value.identifier)) |structure_index| {
-            if (try StaticMembers.analyzeLoad(self, builder, structure_index, access.name, access.name_position)) |value| return value;
-            return self.fail(access.name_position, "type has no static field with this name");
-        };
+        if (try GenericSyntax.qualifiedName(self.allocator, access.base)) |owner_name| {
+            if (StaticMembers.ownerIndex(self, owner_name)) |structure_index| {
+                if (!Visibility.typeVisible(self, structure_index, access.name_position)) {
+                    return self.fail(access.name_position, "nested type is unavailable in this context");
+                }
+                if (try StaticMembers.analyzeLoad(self, builder, structure_index, access.name, access.name_position)) |value| return value;
+                return self.fail(access.name_position, "type has no static field with this name");
+            }
+        }
         const base = try self.analyzeExpression(builder, access.base);
         if (access.safe) return self.analyzeSafeFieldAccess(builder, access, base);
         return self.analyzeFieldValue(builder, access, base);
@@ -787,6 +805,9 @@ pub const Analyzer = struct {
     ) AnalyzeError!TypedValue {
         const structure = self.structures[structure_index];
         const declaration = self.findAstStructure(structure.name).?;
+        if (!Visibility.typeVisible(self, structure_index, call.name_position)) {
+            return self.fail(call.name_position, "nested type is unavailable in this context");
+        }
         if (declaration.is_static) return self.fail(call.name_position, "static classes cannot be constructed");
         if (declaration.drop != null and !self.ownerStorageVisible(structure_index, call.name_position)) {
             return self.fail(call.name_position, "owner structure aggregate initializer is private to its declaring file and direct module users");
@@ -909,11 +930,18 @@ pub const Analyzer = struct {
                 return try Collections.analyzeMutation(self, builder, call);
             }
             if (try Collections.analyzeCall(self, builder, call)) |value| return value;
-            if (receiver_expression.value == .identifier) {
-                if (StaticMembers.ownerIndex(self, receiver_expression.value.identifier)) |structure_index| {
+            if (try GenericSyntax.qualifiedName(self.allocator, receiver_expression)) |receiver_name| {
+                const nested_name = try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ receiver_name, call.name });
+                if (self.resolveStructureIndex(nested_name)) |structure_index| {
+                    return try self.analyzeStructureInitializer(builder, call, structure_index);
+                }
+                if (StaticMembers.ownerIndex(self, receiver_name)) |structure_index| {
+                    if (!Visibility.typeVisible(self, structure_index, call.name_position)) {
+                        return self.fail(call.name_position, "nested type is unavailable in this context");
+                    }
                     return try StaticMembers.analyzeCall(self, builder, structure_index, call);
                 }
-                if (Enums.find(self, receiver_expression.value.identifier)) |enum_index| {
+                if (Enums.find(self, receiver_name)) |enum_index| {
                     return try Enums.analyzeInitializer(self, builder, call, enum_index);
                 }
             }
@@ -923,7 +951,7 @@ pub const Analyzer = struct {
             const message = try std.fmt.allocPrint(self.allocator, "enum '{s}' must be constructed through one of its variants", .{call.name});
             return self.fail(call.name_position, message);
         }
-        if (self.structureIndex(call.name)) |structure_index| {
+        if (self.resolveStructureIndex(call.name)) |structure_index| {
             return try self.analyzeStructureInitializer(builder, call, structure_index);
         }
         if (call.named_arguments.len != 0) {

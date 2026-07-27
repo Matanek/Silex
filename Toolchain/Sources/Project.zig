@@ -432,7 +432,7 @@ pub const Compiler = struct {
         };
         const program = self.units[nominal_target.module].program.?;
         if (findStructure(program, nominal_target.declaration)) |structure| {
-            if (structure.is_public) return;
+            if (Reexports.structureExported(program, structure)) return;
             const message = if (structure.is_internal)
                 try std.fmt.allocPrint(
                     self.allocator,
@@ -736,8 +736,9 @@ pub const Compiler = struct {
 
     fn requirePublicStructure(self: *Compiler, source_module: usize, target: CallTarget, position: Source.Position) Error!void {
         if (source_module == target.module) return;
-        const structure = findStructure(self.units[target.module].program.?, target.declaration).?;
-        if (structure.is_public) return;
+        const target_program = self.units[target.module].program.?;
+        const structure = findStructure(target_program, target.declaration).?;
+        if (Reexports.structureExported(target_program, structure)) return;
         const message = if (structure.is_internal)
             try std.fmt.allocPrint(self.allocator, "structure '{s}' is internal to its source file", .{target.declaration})
         else
@@ -920,6 +921,9 @@ pub const Compiler = struct {
                 var composed_structure = structure;
                 composed_structure.owner = provider.owner;
                 composed_structure.name = composed_name;
+                if (structure.enclosing) |enclosing| {
+                    composed_structure.enclosing = try structureCanonicalName(self.allocator, provider.name, enclosing);
+                }
                 if (structure.base) |base| composed_structure.base = GenericTypes.remap(base, type_map, generic_map);
                 if (structure.collection) |collection| composed_structure.collection = .{
                     .element = GenericTypes.remap(collection.element, type_map, generic_map),
@@ -1252,7 +1256,7 @@ pub const Compiler = struct {
             if (structure.collection) |collection| {
                 return self.requirePublicType(module, collection.element, position, declaration_kind, declaration_name);
             }
-            if (structure.is_public) return;
+            if (Reexports.structureExported(target_program, structure)) return;
             const message = if (structure.is_internal)
                 try std.fmt.allocPrint(
                     self.allocator,

@@ -150,7 +150,7 @@ pub fn buildMappedGenerics(
 ) Allocator.Error!Module {
     var structures: std.ArrayList(Structure) = .empty;
     for (program.structures) |structure| {
-        if (!structure.is_public) continue;
+        if (!structure.is_public or !publicOwners(program, structure)) continue;
         var fields: std.ArrayList(StructureField) = .empty;
         for (structure.fields) |field| {
             if (!field.is_public or field.is_internal) continue;
@@ -265,6 +265,21 @@ pub fn buildMappedGenerics(
         .functions = try functions.toOwnedSlice(allocator),
         .type_aliases = &.{},
     };
+}
+
+fn publicOwners(program: Ast.Program, structure: Ast.Structure) bool {
+    var enclosing = structure.enclosing;
+    var depth: usize = 0;
+    while (enclosing) |name| : (depth += 1) {
+        if (depth > program.structures.len) return false;
+        for (program.structures) |owner| {
+            if (!std.mem.eql(u8, owner.name, name)) continue;
+            if (!owner.is_public) return false;
+            enclosing = owner.enclosing;
+            break;
+        } else return false;
+    }
+    return true;
 }
 
 fn requiredParameterCount(parameters: []const Ast.Parameter) usize {

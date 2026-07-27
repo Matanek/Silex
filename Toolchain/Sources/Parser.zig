@@ -27,7 +27,9 @@ pub const Parser = struct {
     type_names: std.ArrayList([]const u8) = .empty,
     generic_types: std.ArrayList(Ast.GenericType) = .empty,
     collection_structures: std.ArrayList(Ast.Structure) = .empty,
+    nested_structures: std.ArrayList(Ast.Structure) = .empty,
     type_parameters: []const Ast.TypeParameter = &.{},
+    nominal_prefix: ?[]const u8 = null,
     match_depth: usize = 0,
 
     pub fn init(allocator: Allocator, source: []const u8) Parser {
@@ -78,7 +80,16 @@ pub const Parser = struct {
                 else => return self.fail("expected use, enum, struct, class, or function declaration"),
             }
         }
+        try structures.appendSlice(self.allocator, self.nested_structures.items);
         try structures.appendSlice(self.allocator, self.collection_structures.items);
+        var structure_index: usize = 1;
+        while (structure_index < structures.items.len) : (structure_index += 1) {
+            var insertion = structure_index;
+            while (insertion != 0 and self.typeOrder(structures.items[insertion].name) < self.typeOrder(structures.items[insertion - 1].name)) {
+                std.mem.swap(Ast.Structure, &structures.items[insertion], &structures.items[insertion - 1]);
+                insertion -= 1;
+            }
+        }
         return .{
             .uses = try uses.toOwnedSlice(self.allocator),
             .type_names = try self.type_names.toOwnedSlice(self.allocator),
@@ -177,6 +188,26 @@ pub const Parser = struct {
 
     pub fn internTypeName(self: *Parser, name: []const u8) Allocator.Error!Ast.Type {
         return Collections.internNamedType(self, name);
+    }
+
+    pub fn resolveTypeName(self: *Parser, name: []const u8) Allocator.Error![]const u8 {
+        if (std.mem.indexOfScalar(u8, name, '.') != null) return name;
+        var prefix = self.nominal_prefix;
+        while (prefix) |candidate_prefix| {
+            const candidate = try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ candidate_prefix, name });
+            for (self.type_names.items) |known| if (std.mem.eql(u8, known, candidate)) return candidate;
+            prefix = if (std.mem.lastIndexOfScalar(u8, candidate_prefix, '.')) |dot| candidate_prefix[0..dot] else null;
+        }
+        if (self.nominal_prefix) |candidate_prefix| {
+            const leaf = if (std.mem.lastIndexOfScalar(u8, candidate_prefix, '.')) |dot| candidate_prefix[dot + 1 ..] else candidate_prefix;
+            if (std.mem.eql(u8, leaf, name)) return candidate_prefix;
+        }
+        return name;
+    }
+
+    fn typeOrder(self: *Parser, name: []const u8) usize {
+        for (self.type_names.items, 0..) |candidate, index| if (std.mem.eql(u8, candidate, name)) return index;
+        return std.math.maxInt(usize);
     }
 
     pub fn internGenericType(self: *Parser, position: Source.Position, base: Ast.Type, arguments: []const Ast.Type) Allocator.Error!Ast.Type {

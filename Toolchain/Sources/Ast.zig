@@ -361,8 +361,11 @@ pub const Constructor = struct {
 pub const Structure = struct {
     is_public: bool = false,
     is_internal: bool = false,
+    is_private: bool = false,
+    is_protected: bool = false,
     is_class: bool = false,
     is_static: bool = false,
+    enclosing: ?[]const u8 = null,
     owner: usize = 0,
     position: Source.Position,
     name_position: Source.Position,

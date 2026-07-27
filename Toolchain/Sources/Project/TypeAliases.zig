@@ -44,7 +44,7 @@ fn resolveInner(
 
     const program = units[module].program orelse return null;
     for (program.structures) |structure| {
-        if (std.mem.eql(u8, structure.name, name) and (!exported_only or structure.is_public)) {
+        if (std.mem.eql(u8, structure.name, name) and (!exported_only or Reexports.structureExported(program, structure))) {
             return .{ .structure = .{ .module = module, .declaration = name } };
         }
     }

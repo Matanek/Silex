@@ -60,7 +60,7 @@ fn resolveInner(
             }
         },
         .structure => for (program.structures) |structure| {
-            if (std.mem.eql(u8, structure.name, name) and structure.is_public) {
+            if (std.mem.eql(u8, structure.name, name) and structureExported(program, structure)) {
                 return .{ .module = module, .declaration = name };
             }
         },
@@ -76,4 +76,20 @@ fn resolveInner(
         return resolveInner(units, binding.module.?, binding.declaration.?, kind, visiting);
     }
     return null;
+}
+
+pub fn structureExported(program: Ast.Program, structure: Ast.Structure) bool {
+    if (!structure.is_public) return false;
+    var enclosing = structure.enclosing;
+    var depth: usize = 0;
+    while (enclosing) |owner_name| : (depth += 1) {
+        if (depth > program.structures.len) return false;
+        for (program.structures) |owner| {
+            if (!std.mem.eql(u8, owner.name, owner_name)) continue;
+            if (!owner.is_public) return false;
+            enclosing = owner.enclosing;
+            break;
+        } else return false;
+    }
+    return true;
 }
