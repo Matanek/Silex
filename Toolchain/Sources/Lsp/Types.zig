@@ -47,6 +47,7 @@ pub const CompletionItem = struct {
     sortText: ?[]const u8 = null,
     filterText: ?[]const u8 = null,
     insertText: ?[]const u8 = null,
+    insertTextFormat: ?u8 = null,
 };
 
 pub const CompletionOptions = struct {

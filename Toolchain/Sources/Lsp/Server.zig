@@ -367,7 +367,8 @@ test "project completion exposes module children before accessible declarations"
     server.workspace_root_uri = try std.testing.allocator.dupe(u8, root_uri);
     const source = "use Module1.";
     try server.setDocument(.{ .uri = main_uri, .text = source, .version = 1 });
-    const request = try std.fmt.allocPrint(allocator,
+    const request = try std.fmt.allocPrint(
+        allocator,
         "{{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"textDocument/completion\",\"params\":{{\"textDocument\":{{\"uri\":\"{s}\"}},\"position\":{{\"line\":0,\"character\":{d}}},\"context\":{{\"triggerKind\":2,\"triggerCharacter\":\".\"}}}}}}",
         .{ main_uri, source.len },
     );
@@ -375,5 +376,56 @@ test "project completion exposes module children before accessible declarations"
     const child = std.mem.indexOf(u8, response, "\"label\":\"SubModule\"") orelse return error.TestUnexpectedResult;
     const declaration = std.mem.indexOf(u8, response, "\"label\":\"inside\"") orelse return error.TestUnexpectedResult;
     try std.testing.expect(child < declaration);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"label\":\"if\"") == null);
+}
+
+test "use completion is strictly limited to accessible modules and packages" {
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "Sandbox/Math");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Sandbox/Main.sx",
+        .data = "func main() {}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Sandbox/Math/Vec3.sx",
+        .data = "public struct Vec3 {}",
+    });
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const main_path = try std.fs.path.join(allocator, &.{ root, "Sandbox", "Main.sx" });
+    const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
+    const main_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{main_path});
+
+    var server = Server.init(std.testing.allocator, std.testing.io);
+    defer server.deinit();
+    server.workspace_root_uri = try std.testing.allocator.dupe(u8, root_uri);
+
+    for ([_][]const u8{ "use ", "use M" }, 0..) |source, index| {
+        try server.setDocument(.{ .uri = main_uri, .text = source, .version = @intCast(index + 1) });
+        const request = try std.fmt.allocPrint(
+            allocator,
+            "{{\"jsonrpc\":\"2.0\",\"id\":{d},\"method\":\"textDocument/completion\",\"params\":{{\"textDocument\":{{\"uri\":\"{s}\"}},\"position\":{{\"line\":0,\"character\":{d}}}}}}}",
+            .{ index + 10, main_uri, source.len },
+        );
+        const response = (try server.handleBody(allocator, request)).?;
+        try std.testing.expect(std.mem.indexOf(u8, response, "\"label\":\"Math\"") != null);
+        try std.testing.expect(std.mem.indexOf(u8, response, "\"label\":\"main\"") == null);
+        try std.testing.expect(std.mem.indexOf(u8, response, "\"label\":\"match\"") == null);
+        try std.testing.expect(std.mem.indexOf(u8, response, "\"label\":\"move\"") == null);
+    }
+
+    const qualified_source = "use Math\nfunc main() {\n    var value = Math.\n}";
+    try server.setDocument(.{ .uri = main_uri, .text = qualified_source, .version = 3 });
+    const request = try std.fmt.allocPrint(
+        allocator,
+        "{{\"jsonrpc\":\"2.0\",\"id\":12,\"method\":\"textDocument/completion\",\"params\":{{\"textDocument\":{{\"uri\":\"{s}\"}},\"position\":{{\"line\":2,\"character\":{d}}},\"context\":{{\"triggerKind\":2,\"triggerCharacter\":\".\"}}}}}}",
+        .{ main_uri, "    var value = Math.".len },
+    );
+    const response = (try server.handleBody(allocator, request)).?;
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"label\":\"Vec3\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"label\":\"if\"") == null);
 }

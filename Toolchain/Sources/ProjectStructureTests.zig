@@ -68,6 +68,53 @@ test "compose principal secondary qualified and aliased public structures" {
     try std.testing.expect(found_interface);
 }
 
+test "resolve a principal structure through its parent namespace" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.createDirPath(std.testing.io, "Math");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data =
+        \\use Math
+        \\func main() {
+        \\    var value:Math.Vec3 = Math.Vec3(x:40, y:2)
+        \\    var state:Math.State = Math.State(1)
+        \\    print(value.x + value.y + state.value)
+        \\}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Math/Vec3.sx",
+        .data = "public struct Vec3 { var x:int; var y:int }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Math/State.sx",
+        .data =
+        \\public class State {
+        \\    public var value:int
+        \\    public init(value:int) { self.value = value }
+        \\}
+        ,
+    });
+
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(input);
+    const result = try @import("Interpreter.zig").runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("43\n", result.stdout);
+    var found_vec3 = false;
+    var found_state = false;
+    for (compilation.ir.structures) |structure| {
+        found_vec3 = found_vec3 or std.mem.eql(u8, structure.name, "Math.Vec3");
+        found_state = found_state or std.mem.eql(u8, structure.name, "Math.State");
+    }
+    try std.testing.expect(found_vec3 and found_state);
+}
+
 test "reject private structure access and public signature leaks" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

@@ -770,7 +770,10 @@ pub const Compiler = struct {
         while (true) {
             const prefix = path[0..end];
             if (Lookup.findAccessibleModule(self, prefix, owner)) |module| {
-                if (end == path.len) return null;
+                if (end == path.len) return .{
+                    .module = module,
+                    .declaration = lastSegment(prefix),
+                };
                 return .{ .module = module, .declaration = path[end + 1 ..] };
             }
             end = std.mem.lastIndexOfScalar(u8, prefix, '.') orelse return null;

@@ -1,3 +1,0 @@
-func value() int {
-    return 11
-}
