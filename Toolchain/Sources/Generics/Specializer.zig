@@ -4,6 +4,7 @@ const Numeric = @import("../Numeric.zig");
 const Result = @import("../Intrinsics/Result.zig");
 const Source = @import("../Source.zig");
 const Nested = @import("Nested.zig");
+const Remap = @import("Remap.zig");
 
 const Allocator = std.mem.Allocator;
 const SpecializeError = Source.Error || Allocator.Error;
@@ -140,28 +141,37 @@ pub const Specializer = struct {
             try names.append(self.allocator, name);
         }
         for (self.structures.items) |*structure| {
-            if (structure.collection) |collection| structure.collection.?.element = remapConcreteType(collection.element, map);
-            for (@constCast(structure.fields)) |*field| field.type = remapConcreteType(field.type, map);
-            for (@constCast(structure.static_fields)) |*field| field.type = remapConcreteType(field.type, map);
+            if (structure.base) |base| structure.base = Remap.concreteType(base, map);
+            if (structure.collection) |collection| structure.collection.?.element = Remap.concreteType(collection.element, map);
+            for (@constCast(structure.fields)) |*field| {
+                field.type = Remap.concreteType(field.type, map);
+                if (field.default) |value| Remap.expressionTypes(value, map);
+            }
+            for (@constCast(structure.static_fields)) |*field| {
+                field.type = Remap.concreteType(field.type, map);
+                if (field.default) |value| Remap.expressionTypes(value, map);
+            }
             for (@constCast(structure.constructors)) |*constructor| {
-                for (@constCast(constructor.parameters)) |*parameter| parameter.type = remapConcreteType(parameter.type, map);
-                remapStatementTypes(constructor.statements, map);
+                for (@constCast(constructor.parameters)) |*parameter| parameter.type = Remap.concreteType(parameter.type, map);
+                for (constructor.super_arguments) |argument| Remap.expressionTypes(argument, map);
+                Remap.statementTypes(constructor.statements, map);
             }
             for (@constCast(structure.methods)) |*method| {
-                for (@constCast(method.parameters)) |*parameter| parameter.type = remapConcreteType(parameter.type, map);
-                method.return_type = remapConcreteType(method.return_type, map);
-                remapStatementTypes(method.statements, map);
+                for (@constCast(method.parameters)) |*parameter| parameter.type = Remap.concreteType(parameter.type, map);
+                method.return_type = Remap.concreteType(method.return_type, map);
+                Remap.statementTypes(method.statements, map);
             }
+            if (structure.drop) |drop| Remap.statementTypes(drop.statements, map);
         }
         for (self.functions.items) |*function| {
-            for (@constCast(function.parameters)) |*parameter| parameter.type = remapConcreteType(parameter.type, map);
-            function.return_type = remapConcreteType(function.return_type, map);
-            remapStatementTypes(function.statements, map);
+            for (@constCast(function.parameters)) |*parameter| parameter.type = Remap.concreteType(parameter.type, map);
+            function.return_type = Remap.concreteType(function.return_type, map);
+            Remap.statementTypes(function.statements, map);
         }
         for (self.enums.items) |*enumeration| {
             for (@constCast(enumeration.variants)) |*variant| {
                 for (@constCast(variant.associated_types)) |*associated_type| {
-                    associated_type.* = remapConcreteType(associated_type.*, map);
+                    associated_type.* = Remap.concreteType(associated_type.*, map);
                 }
             }
         }
@@ -188,6 +198,7 @@ pub const Specializer = struct {
         var structure = self.structures.items[structure_index];
         structure.type_parameters = &.{};
         const self_type = self.typeForName(structure.name) orelse return error.InvalidSource;
+        if (structure.base) |base| structure.base = try self.rewriteType(base, arguments, structure.base_position);
         const fields = try self.allocator.alloc(Ast.StructureField, structure.fields.len);
         for (structure.fields, 0..) |field, field_index| {
             fields[field_index] = field;
@@ -202,6 +213,10 @@ pub const Specializer = struct {
         for (structure.static_fields, 0..) |field, field_index| {
             static_fields[field_index] = field;
             static_fields[field_index].type = try self.rewriteType(field.type, arguments, field.name_position);
+            if (field.default) |value| {
+                var locals: std.ArrayList(Binding) = .empty;
+                static_fields[field_index].default = try self.rewriteExpression(value, arguments, &locals);
+            }
         }
         structure.static_fields = static_fields;
         if (structure.collection) |collection| structure.collection.?.element = try self.rewriteType(collection.element, arguments, structure.position);
@@ -213,6 +228,11 @@ pub const Specializer = struct {
             var locals: std.ArrayList(Binding) = .empty;
             try locals.append(self.allocator, .{ .name = "self", .type = self_type });
             constructors[constructor_index].parameters = try self.rewriteParameters(constructor.parameters, arguments, &locals);
+            const super_arguments = try self.allocator.alloc(*Ast.Expression, constructor.super_arguments.len);
+            for (constructor.super_arguments, 0..) |argument, index| {
+                super_arguments[index] = try self.rewriteExpression(argument, arguments, &locals);
+            }
+            constructors[constructor_index].super_arguments = super_arguments;
             constructors[constructor_index].statements = try self.rewriteStatements(constructor.statements, arguments, &locals);
         }
         structure.constructors = constructors;
@@ -284,6 +304,15 @@ pub const Specializer = struct {
                 var copy = assignment;
                 if (copy.value) |expression| copy.value = try self.rewriteExpression(expression, arguments, locals);
                 for (@constCast(copy.target.indices)) |*target_index| target_index.value = try self.rewriteExpression(target_index.value, arguments, locals);
+                if (copy.target.type_arguments.len != 0) {
+                    const type_arguments = try self.allocator.alloc(Ast.Type, copy.target.type_arguments.len);
+                    for (copy.target.type_arguments, 0..) |type_argument, type_index| {
+                        type_arguments[type_index] = try self.rewriteType(type_argument, arguments, copy.target.name_position);
+                    }
+                    const base = self.typeForName(copy.target.name) orelse return self.fail(copy.target.name_position, "unknown generic type");
+                    copy.target.name = self.typeName(try self.instantiateStructure(base, type_arguments, copy.target.name_position));
+                    copy.target.type_arguments = &.{};
+                }
                 break :value .{ .assignment_statement = copy };
             },
             .return_statement => |statement_value| value: {
@@ -851,10 +880,11 @@ pub const Specializer = struct {
             if (self.collectionNeedsSpecialization(structure)) return self.instantiateCollection(structure, arguments, position);
         }
         if (self.structureTemplateForType(type_value)) |template| {
+            const kind = if (template.is_class) "class" else "struct";
             const message = try std.fmt.allocPrint(
                 self.allocator,
-                "generic struct '{s}' requires {d} type argument{s}",
-                .{ template.name, template.type_parameters.len, if (template.type_parameters.len == 1) "" else "s" },
+                "generic {s} '{s}' requires {d} type argument{s}",
+                .{ kind, template.name, template.type_parameters.len, if (template.type_parameters.len == 1) "" else "s" },
             );
             return self.fail(position, message);
         }
@@ -873,10 +903,11 @@ pub const Specializer = struct {
         const base = self.typeForName(call.name) orelse return null;
         if (self.structureTemplateForType(base)) |template| {
             if (call.type_arguments.len == 0) {
+                const kind = if (template.is_class) "class" else "struct";
                 const message = try std.fmt.allocPrint(
                     self.allocator,
-                    "generic struct '{s}' requires {d} type argument{s}",
-                    .{ template.name, template.type_parameters.len, if (template.type_parameters.len == 1) "" else "s" },
+                    "generic {s} '{s}' requires {d} type argument{s}",
+                    .{ kind, template.name, template.type_parameters.len, if (template.type_parameters.len == 1) "" else "s" },
                 );
                 return self.fail(call.name_position, message);
             }
@@ -884,7 +915,8 @@ pub const Specializer = struct {
             return self.typeName(specialized);
         }
         if (call.type_arguments.len != 0 and self.structureForType(base) != null) {
-            const message = try std.fmt.allocPrint(self.allocator, "struct '{s}' does not accept type arguments", .{call.name});
+            const kind = if (self.structureForType(base).?.is_class) "class" else "struct";
+            const message = try std.fmt.allocPrint(self.allocator, "{s} '{s}' does not accept type arguments", .{ kind, call.name });
             return self.fail(call.name_position, message);
         }
         return null;
@@ -929,14 +961,17 @@ pub const Specializer = struct {
     ) SpecializeError!Ast.Type {
         const template = self.structureTemplateForType(base) orelse {
             const name = self.typeName(base);
-            const message = try std.fmt.allocPrint(self.allocator, "struct '{s}' does not accept type arguments", .{name});
+            const declaration = self.structureForType(base);
+            const kind = if (declaration != null and declaration.?.is_class) "class" else "struct";
+            const message = try std.fmt.allocPrint(self.allocator, "{s} '{s}' does not accept type arguments", .{ kind, name });
             return self.fail(position, message);
         };
         if (arguments.len != template.type_parameters.len) {
+            const kind = if (template.is_class) "class" else "struct";
             const message = try std.fmt.allocPrint(
                 self.allocator,
-                "generic struct '{s}' expects {d} type argument{s}, found {d}",
-                .{ template.name, template.type_parameters.len, if (template.type_parameters.len == 1) "" else "s", arguments.len },
+                "generic {s} '{s}' expects {d} type argument{s}, found {d}",
+                .{ kind, template.name, template.type_parameters.len, if (template.type_parameters.len == 1) "" else "s", arguments.len },
             );
             return self.fail(position, message);
         }
@@ -947,8 +982,8 @@ pub const Specializer = struct {
             if (specialization.visiting) {
                 const message = try std.fmt.allocPrint(
                     self.allocator,
-                    "generic struct '{s}' recursively expands with different type arguments",
-                    .{template.name},
+                    "generic {s} '{s}' recursively expands with different type arguments",
+                    .{ if (template.is_class) "class" else "struct", template.name },
                 );
                 return self.fail(position, message);
             }
@@ -1392,104 +1427,4 @@ fn methodVisible(call: Ast.Expression.Call, method: Ast.Function) bool {
 
 fn samePosition(left: Source.Position, right: Source.Position) bool {
     return left.offset == right.offset and left.file == right.file;
-}
-
-fn remapConcreteType(type_value: Ast.Type, map: []const ?Ast.Type) Ast.Type {
-    if (type_value.optionalChild()) |child| return .optional(remapConcreteType(child, map));
-    const index = type_value.structureIndex() orelse return type_value;
-    return if (index < map.len) map[index] orelse type_value else type_value;
-}
-
-fn remapStatementTypes(statements: []const Ast.Statement, map: []const ?Ast.Type) void {
-    for (@constCast(statements)) |*statement| switch (statement.*) {
-        .variable_declaration => |*declaration| {
-            if (declaration.annotation) |annotation| declaration.annotation = remapConcreteType(annotation, map);
-            if (declaration.initializer) |initializer| remapExpressionTypes(initializer, map);
-        },
-        .assignment_statement => |assignment| {
-            if (assignment.value) |value| remapExpressionTypes(value, map);
-            for (assignment.target.indices) |target_index| remapExpressionTypes(target_index.value, map);
-        },
-        .return_statement => |return_statement| if (return_statement.value) |value| remapExpressionTypes(value, map),
-        .expression_statement => |expression| remapExpressionTypes(expression, map),
-        .print_statement => |print_statement| for (print_statement.values) |value| remapExpressionTypes(value, map),
-        .assert_statement => |assertion| {
-            remapExpressionTypes(assertion.condition, map);
-            remapExpressionTypes(assertion.message, map);
-        },
-        .panic_statement => |effect| remapExpressionTypes(effect.value, map),
-        .if_statement => |conditional| {
-            for (conditional.branches) |branch| {
-                remapExpressionTypes(branch.condition.source(), map);
-                remapStatementTypes(branch.statements, map);
-            }
-            if (conditional.else_statements) |nested| remapStatementTypes(nested, map);
-        },
-        .while_statement => |loop| {
-            remapExpressionTypes(loop.condition.source(), map);
-            remapStatementTypes(loop.statements, map);
-        },
-        .for_statement => |loop| {
-            switch (loop.source) {
-                .collection => |source| remapExpressionTypes(source, map),
-                .range => |range| {
-                    remapExpressionTypes(range.start, map);
-                    remapExpressionTypes(range.end, map);
-                },
-            }
-            remapStatementTypes(loop.statements, map);
-        },
-        .break_statement, .continue_statement => {},
-    };
-}
-
-fn remapExpressionTypes(expression: *Ast.Expression, map: []const ?Ast.Type) void {
-    switch (expression.value) {
-        .call => |*call| {
-            if (call.result_type) |result_type| call.result_type = remapConcreteType(result_type, map);
-            for (@constCast(call.type_arguments)) |*argument| argument.* = remapConcreteType(argument.*, map);
-            for (call.arguments) |argument| remapExpressionTypes(argument, map);
-            for (call.named_arguments) |argument| remapExpressionTypes(argument.value, map);
-            if (call.receiver) |receiver| remapExpressionTypes(receiver, map);
-        },
-        .field_access => |access| remapExpressionTypes(access.base, map),
-        .generic_reference => |reference| for (@constCast(reference.type_arguments)) |*argument| {
-            argument.* = remapConcreteType(argument.*, map);
-        },
-        .unary => |unary| remapExpressionTypes(unary.operand, map),
-        .binary => |binary| {
-            remapExpressionTypes(binary.left, map);
-            remapExpressionTypes(binary.right, map);
-        },
-        .conversion => |*conversion| {
-            conversion.target = remapConcreteType(conversion.target, map);
-            remapExpressionTypes(conversion.operand, map);
-        },
-        .string_count => |operand| remapExpressionTypes(operand, map),
-        .sequence_literal => |*literal| {
-            if (literal.inferred_type) |type_value| literal.inferred_type = remapConcreteType(type_value, map);
-            for (literal.values) |value| remapExpressionTypes(value, map);
-        },
-        .index_access => |access| {
-            remapExpressionTypes(access.base, map);
-            remapExpressionTypes(access.index, map);
-        },
-        .slice_access => |access| {
-            remapExpressionTypes(access.base, map);
-            remapExpressionTypes(access.start, map);
-            remapExpressionTypes(access.end, map);
-        },
-        .interpolated_string => |interpolated| for (interpolated.parts) |part| switch (part) {
-            .text => {},
-            .expression => |nested| remapExpressionTypes(nested, map),
-        },
-        .match_expression => |match_value| {
-            remapExpressionTypes(match_value.subject, map);
-            for (match_value.branches) |branch| {
-                if (branch.value) |value| remapExpressionTypes(value, map);
-                if (branch.statements) |statements| remapStatementTypes(statements, map);
-            }
-        },
-        else => {},
-    }
 }

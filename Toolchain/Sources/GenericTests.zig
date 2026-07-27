@@ -508,3 +508,124 @@ test "diagnose invalid generic method declarations and calls" {
         "constructors cannot declare type parameters",
     );
 }
+
+test "generic classes specialize storage methods identity and lifetime" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\class Box<T> {
+        \\    public let value:T
+        \\    public init(value:T) { self.value = value }
+        \\    public func get() T { return self.value }
+        \\    drop { print("drop") }
+        \\}
+        \\func main() {
+        \\    var integer = Box<int>(42)
+        \\    var alias = integer
+        \\    var text = Box<str>("Silex")
+        \\    print(integer.get(), " ", text.get(), " ", integer == alias)
+        \\}
+    );
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("42 Silex true\ndrop\ndrop\n", result.stdout);
+}
+
+test "generic classes specialize generic bases overrides and static storage" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\class Base<T> {
+        \\    public let value:T
+        \\    public static var count:int = 0
+        \\    public static func set_count(value:int) { Base<T>.count = value }
+        \\    public init(value:T) { self.value = value }
+        \\    public func get() T { return self.value }
+        \\}
+        \\class Child<T> : Base<T> {
+        \\    public init(value:T) : super(value) {}
+        \\    override public func get() T { return self.value }
+        \\}
+        \\func read(value:Base<int>) int { return value.get() }
+        \\func main() {
+        \\    Base<int>.set_count(3)
+        \\    Base<str>.set_count(8)
+        \\    var value:Base<int> = Child<int>(42)
+        \\    print(read(value), " ", Base<int>.count, " ", Base<str>.count)
+        \\}
+    );
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("42 3 8\n", result.stdout);
+}
+
+test "compose generic classes through aliases and reexports" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data =
+        \\use Facade
+        \\use Api.Box as LocalBox
+        \\use Api.Box<int> as IntBox
+        \\func main() {
+        \\    var left:Facade.Box<int> = Facade.Box<int>(20)
+        \\    var right:IntBox = LocalBox<int>(left.value + 22)
+        \\    print(right.value)
+        \\}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Api.sx",
+        .data =
+        \\public class Box<T> {
+        \\    public let value:T
+        \\    public init(value:T) { self.value = value }
+        \\}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Facade.sx",
+        .data = "public use Api.Box as Box",
+    });
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(input);
+    try std.testing.expectEqual(@as(usize, 1), compilation.ir.structures.len);
+    try std.testing.expect(compilation.ir.structures[0].is_class);
+    var found_reexport = false;
+    for (compilation.interfaces) |interface| {
+        if (!std.mem.eql(u8, interface.name, "Facade")) continue;
+        for (interface.structures) |structure| if (std.mem.eql(u8, structure.export_name, "Box")) {
+            try std.testing.expectEqual(@as(usize, 1), structure.type_parameters.len);
+            found_reexport = true;
+        };
+    }
+    try std.testing.expect(found_reexport);
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("42\n", result.stdout);
+}
+
+test "diagnose incomplete and invalid generic class arguments" {
+    try expectCompileError(
+        "class Box<T> {} func main() { var value = Box() }",
+        "generic class 'Box' requires 1 type argument",
+    );
+    try expectCompileError(
+        "class Box<T> {} func main() { var value = Box<int, str>() }",
+        "generic class 'Box' expects 1 type argument, found 2",
+    );
+    try expectCompileError(
+        "class Plain {} func main() { var value = Plain<int>() }",
+        "class 'Plain' does not accept type arguments",
+    );
+    try expectCompileError(
+        "class Box<T> { func identity<U>(value:U) U { return value } } func main() {}",
+        "generic methods in generic structures are not supported",
+    );
+}

@@ -857,8 +857,8 @@ is a `var` and every field on the path is also declared `var`; an intervening
 `+=`, `-=`, `*=`, `/=`, `++`, and `--` evaluate the target and operand once,
 retain every unaffected field, and behave identically in both execution paths.
 
-A structure may declare unconstrained type parameters after its name and use
-them in fields, constructors and methods:
+A structure or ordinary class may declare unconstrained type parameters after
+its name and use them in fields, constructors and methods:
 
 ```sx
 struct Pair<T> {
@@ -869,16 +869,39 @@ struct Pair<T> {
 let pair = Pair<int>(first:1, second:2)
 ```
 
-Every use supplies the complete argument list; structure arguments are never
-inferred from fields or annotations. Each list creates one concrete nominal
-type shared across the composed program, so `Pair<int>` and `Pair<str>` are
-distinct while repeated `Pair<int>` uses have one identity. Nested
-specializations, transparent aliases and public reexports preserve that
+Every use supplies the complete argument list; nominal arguments are never
+inferred from fields, constructors or annotations. Each list creates one
+concrete nominal type shared across the composed program, so `Pair<int>` and
+`Pair<str>` are distinct while repeated `Pair<int>` uses have one identity.
+Nested specializations, transparent aliases and public reexports preserve that
 identity. The concrete field layout, copy, mutability, comparison,
-initialization, constructors and methods follow the ordinary structure rules.
-An incomplete template name, wrong arity, `void` argument, arguments on a
-non-generic structure, recursive value layout and endlessly changing recursive
-specialization are rejected.
+initialization, constructors and methods of a structure follow its ordinary
+value rules. An incomplete template name, wrong arity, `void` argument,
+arguments on a non-generic nominal type, recursive value layout and endlessly
+changing recursive specialization are rejected.
+
+A generic class keeps ordinary shared-reference semantics independently for
+each specialization:
+
+```sx
+class Box<T> {
+    let value:T
+
+    public init(value:T) {
+        self.value = value
+    }
+}
+
+var box = Box<int>(42)
+```
+
+Its instance and static methods use the class parameters without redeclaring
+them. Each specialization has separate static fields and participates in
+aliases, reexports, identity comparison and automatic lifetime management as a
+concrete class. A generic class may derive from a concrete specialization of a
+generic base; upcasts and overriding dispatch preserve that specialization.
+Methods of a generic class cannot add their own type parameter list, and
+constructors are never generic. `static class` remains non-generic.
 
 `init` declares a positional constructor inside a structure. `self` is
 implicit; assigning `self.field` initializes that field, and the completed
@@ -918,8 +941,8 @@ the ordinary method rules after specialization. Failure to infer every type
 argument, a wrong explicit arity, `void`, ambiguous specialization and
 recursion that continually changes its arguments are rejected. Methods of a
 generic structure may use the structure parameters but cannot declare another
-parameter list in this version. Constructors cannot be generic; static
-methods, protocol requirements and overrides are not part of this subset.
+parameter list in this version. Constructors cannot be generic; protocol
+requirements are not part of this subset.
 
 `internal` applies with the same exact file boundary to structures, fields,
 constructors and methods. All declarations in that file may use them. Their

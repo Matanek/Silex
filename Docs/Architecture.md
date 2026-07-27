@@ -64,6 +64,12 @@ open Silex document
   representation, unique-finalization guard, cycle handling and target layout
   remain private to the interpreter and target lowering; source code observes
   only shared identity and the specified `drop` order.
+- Generic nominal declarations are specialized before semantic lowering. One
+  deterministic concrete declaration represents each complete argument list
+  across modules, aliases and reexports; generic classes therefore reach the
+  IR as ordinary distinct class identities with concrete bases, fields,
+  methods, static storage and finalizers. Template bookkeeping and generated
+  names remain compiler details rather than runtime or source APIs.
 - Associated enums are portable nominal declarations whose variants carry
   typed positional values. Construction records the enum and variant by
   structured indices; module interfaces expose only the nominal identity and
