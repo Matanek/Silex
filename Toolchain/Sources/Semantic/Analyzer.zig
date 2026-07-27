@@ -24,6 +24,7 @@ const Try = @import("Try.zig");
 const Visibility = @import("Visibility.zig");
 const Declarations = @import("Declarations.zig");
 const Inheritance = @import("Inheritance.zig");
+const StaticMembers = @import("StaticMembers.zig");
 const Types = @import("../Types.zig");
 const Allocator = std.mem.Allocator;
 const AnalyzeError = Source.Error || Allocator.Error;
@@ -35,6 +36,7 @@ pub const Analyzer = struct {
     allocator: Allocator,
     program: Ast.Program = undefined,
     structures: []const Ir.Structure = &.{},
+    globals: []const Ir.Global = &.{},
     enums: []const Ir.Enum = &.{},
     method_mutability: []const bool = &.{},
     default_expansions: std.ArrayList(*const Ast.Expression) = .empty,
@@ -54,6 +56,7 @@ pub const Analyzer = struct {
         self.program = program;
         self.diagnostic = null;
         self.structures = try Declarations.prepareStructures(self);
+        self.globals = try StaticMembers.prepare(self);
         self.enums = try Enums.prepare(self);
         self.method_mutability = try Methods.inferMutability(self.allocator, self.program);
         self.structures = try Methods.extendStructures(self.allocator, self.program, self.structures, self.method_mutability);
@@ -85,7 +88,7 @@ pub const Analyzer = struct {
                 );
             }
         }
-        return .{ .structures = self.structures, .enums = self.enums, .functions = try functions.toOwnedSlice(self.allocator) };
+        return .{ .globals = self.globals, .structures = self.structures, .enums = self.enums, .functions = try functions.toOwnedSlice(self.allocator) };
     }
 
     fn validateDeclarations(self: *Analyzer, require_entry: bool) AnalyzeError!void {
@@ -184,6 +187,7 @@ pub const Analyzer = struct {
                     }
                 }
                 for (structure.methods[0..index]) |previous| {
+                    if (method.is_static != previous.is_static) continue;
                     if (!std.mem.eql(u8, method.name, previous.name)) continue;
                     const arity = Support.effectiveSignatureCollision(method.parameters, previous.parameters) orelse continue;
                     if (Support.sameParameterTypes(method.parameters, previous.parameters) and
@@ -666,6 +670,10 @@ pub const Analyzer = struct {
     }
 
     fn analyzeFieldAccess(self: *Analyzer, builder: *FunctionBuilder, access: Ast.Expression.FieldAccess) AnalyzeError!TypedValue {
+        if (access.base.value == .identifier) if (StaticMembers.ownerIndex(self, access.base.value.identifier)) |structure_index| {
+            if (try StaticMembers.analyzeLoad(self, builder, structure_index, access.name, access.name_position)) |value| return value;
+            return self.fail(access.name_position, "type has no static field with this name");
+        };
         const base = try self.analyzeExpression(builder, access.base);
         if (access.safe) return self.analyzeSafeFieldAccess(builder, access, base);
         return self.analyzeFieldValue(builder, access, base);
@@ -901,6 +909,9 @@ pub const Analyzer = struct {
             }
             if (try Collections.analyzeCall(self, builder, call)) |value| return value;
             if (receiver_expression.value == .identifier) {
+                if (StaticMembers.ownerIndex(self, receiver_expression.value.identifier)) |structure_index| {
+                    return try StaticMembers.analyzeCall(self, builder, structure_index, call);
+                }
                 if (Enums.find(self, receiver_expression.value.identifier)) |enum_index| {
                     return try Enums.analyzeInitializer(self, builder, call, enum_index);
                 }

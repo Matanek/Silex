@@ -72,6 +72,7 @@ pub const Image = struct {
     code: []const u8,
     function_offsets: []const u32,
     entry_offset: ?u32,
+    data_offset: ?u32 = null,
 
     pub fn deinit(self: Image, allocator: Allocator) void {
         allocator.free(self.code);
@@ -189,9 +190,23 @@ pub fn encode(allocator: Allocator, program: Machine.Program, entry: Entry) Erro
         string_offsets[index] = image_size;
         image_size += 8 + string.len;
     }
+    const data_offset: ?u32 = if (program.globals.len == 0) null else @intCast(std.mem.alignForward(usize, image_size, 0x4000));
+    if (data_offset) |offset| image_size = offset;
+    const global_offsets = try allocator.alloc(usize, program.globals.len);
+    defer allocator.free(global_offsets);
+    for (program.globals, 0..) |_, index| {
+        image_size = std.mem.alignForward(usize, image_size, 8);
+        global_offsets[index] = image_size;
+        image_size += 8;
+    }
     for (data_fixups.items) |fixup| {
-        if (fixup.string >= string_offsets.len) return error.InvalidMachineProgram;
-        try patchAdr(words.items, fixup.at, string_offsets[fixup.string] + fixup.byte_offset);
+        const target = if (fixup.global) |global|
+            if (global < global_offsets.len) global_offsets[global] else return error.InvalidMachineProgram
+        else if (fixup.string < string_offsets.len)
+            string_offsets[fixup.string]
+        else
+            return error.InvalidMachineProgram;
+        try patchAdr(words.items, fixup.at, target + fixup.byte_offset);
     }
 
     const code = try allocator.alloc(u8, image_size);
@@ -203,7 +218,8 @@ pub fn encode(allocator: Allocator, program: Machine.Program, entry: Entry) Erro
         std.mem.writeInt(u64, code[descriptor..][0..8], string.len, .little);
         @memcpy(code[descriptor + 8 ..][0..string.len], string);
     }
-    return .{ .code = code, .function_offsets = offsets, .entry_offset = entry_offset };
+    for (program.globals, 0..) |global, index| std.mem.writeInt(u64, code[global_offsets[index]..][0..8], global.bits, .little);
+    return .{ .code = code, .function_offsets = offsets, .entry_offset = entry_offset, .data_offset = data_offset };
 }
 
 fn findString(program: Machine.Program, value: []const u8) ?usize {
@@ -286,6 +302,18 @@ fn encodeFunction(
                 try words.append(allocator, storeStack(.x9, copy.result));
             },
             .copy_range => |copy| try emitSpanCopy(allocator, words, copy.result, copy.operand),
+            .global_load => |global| {
+                try data_fixups.append(allocator, .{ .at = words.items.len, .global = global.global });
+                try words.append(allocator, addressRelative(.x10));
+                try words.append(allocator, load64(.x9, .x10, 0));
+                try words.append(allocator, storeStack(.x9, global.result));
+            },
+            .global_store => |global| {
+                try data_fixups.append(allocator, .{ .at = words.items.len, .global = global.global });
+                try words.append(allocator, addressRelative(.x10));
+                try words.append(allocator, loadStack(.x9, global.operand));
+                try words.append(allocator, store64(.x9, .x10, 0));
+            },
             .local_address => |address| {
                 try emitStackAddress(allocator, words, .x9, address.local);
                 try words.append(allocator, storeStack(.x9, address.result));

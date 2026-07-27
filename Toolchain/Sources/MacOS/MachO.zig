@@ -29,17 +29,22 @@ pub fn emit(allocator: std.mem.Allocator, program: Machine.Program) Error![]u8 {
 
     const pagezero_command_size = @sizeOf(macho.segment_command_64);
     const text_command_size = @sizeOf(macho.segment_command_64) + @sizeOf(macho.section_64);
+    const data_command_size: usize = if (encoded.data_offset != null) @sizeOf(macho.segment_command_64) + @sizeOf(macho.section_64) else 0;
     const linkedit_command_size = @sizeOf(macho.segment_command_64);
     const build_version_command_size = @sizeOf(macho.build_version_command);
     const entry_command_size = @sizeOf(macho.entry_point_command);
     const signature_command_size = @sizeOf(macho.linkedit_data_command);
-    const load_commands_size = pagezero_command_size + text_command_size + linkedit_command_size +
+    const load_commands_size = pagezero_command_size + text_command_size + data_command_size + linkedit_command_size +
         dylinker_command_size + build_version_command_size + entry_command_size + signature_command_size;
 
-    const unaligned_text_size = text_offset + encoded.code.len;
+    const encoded_text_size = if (encoded.data_offset) |offset| offset else encoded.code.len;
+    const unaligned_text_size = text_offset + encoded_text_size;
     const text_size = std.mem.alignForward(usize, unaligned_text_size, page_size);
-    const signature_size = CodeSignature.size(text_size);
-    const file_size = text_size + signature_size;
+    const data_content_size = if (encoded.data_offset) |offset| encoded.code.len - offset else 0;
+    const data_size = if (encoded.data_offset != null) std.mem.alignForward(usize, data_content_size, page_size) else 0;
+    const signed_size = text_size + data_size;
+    const signature_size = CodeSignature.size(signed_size);
+    const file_size = signed_size + signature_size;
 
     var bytes: std.ArrayList(u8) = .empty;
     errdefer bytes.deinit(allocator);
@@ -50,7 +55,7 @@ pub fn emit(allocator: std.mem.Allocator, program: Machine.Program) Error![]u8 {
         .cputype = macho.CPU_TYPE_ARM64,
         .cpusubtype = 0,
         .filetype = macho.MH_EXECUTE,
-        .ncmds = 7,
+        .ncmds = if (encoded.data_offset != null) 8 else 7,
         .sizeofcmds = @intCast(load_commands_size),
         .flags = macho.MH_NOUNDEFS | macho.MH_DYLDLINK | macho.MH_TWOLEVEL | macho.MH_PIE,
         .reserved = 0,
@@ -91,7 +96,7 @@ pub fn emit(allocator: std.mem.Allocator, program: Machine.Program) Error![]u8 {
         .sectname = name("__text"),
         .segname = name("__TEXT"),
         .addr = image_base + text_offset,
-        .size = encoded.code.len,
+        .size = encoded_text_size,
         .offset = text_offset,
         .@"align" = 2,
         .reloff = 0,
@@ -103,13 +108,45 @@ pub fn emit(allocator: std.mem.Allocator, program: Machine.Program) Error![]u8 {
     };
     try appendStruct(allocator, &bytes, &text_section);
 
+    if (encoded.data_offset != null) {
+        var data: macho.segment_command_64 = .{
+            .cmd = .SEGMENT_64,
+            .cmdsize = @intCast(data_command_size),
+            .segname = name("__DATA"),
+            .vmaddr = image_base + text_size,
+            .vmsize = @intCast(data_size),
+            .fileoff = text_size,
+            .filesize = @intCast(data_size),
+            .maxprot = .{ .READ = true, .WRITE = true },
+            .initprot = .{ .READ = true, .WRITE = true },
+            .nsects = 1,
+            .flags = 0,
+        };
+        try appendStruct(allocator, &bytes, &data);
+        var data_section: macho.section_64 = .{
+            .sectname = name("__data"),
+            .segname = name("__DATA"),
+            .addr = image_base + text_size,
+            .size = data_content_size,
+            .offset = @intCast(text_size),
+            .@"align" = 3,
+            .reloff = 0,
+            .nreloc = 0,
+            .flags = macho.S_REGULAR,
+            .reserved1 = 0,
+            .reserved2 = 0,
+            .reserved3 = 0,
+        };
+        try appendStruct(allocator, &bytes, &data_section);
+    }
+
     var linkedit: macho.segment_command_64 = .{
         .cmd = .SEGMENT_64,
         .cmdsize = @sizeOf(macho.segment_command_64),
         .segname = name("__LINKEDIT"),
-        .vmaddr = image_base + text_size,
+        .vmaddr = image_base + signed_size,
         .vmsize = @intCast(std.mem.alignForward(usize, signature_size, page_size)),
-        .fileoff = text_size,
+        .fileoff = signed_size,
         .filesize = signature_size,
         .maxprot = .{ .READ = true },
         .initprot = .{ .READ = true },
@@ -148,7 +185,7 @@ pub fn emit(allocator: std.mem.Allocator, program: Machine.Program) Error![]u8 {
     var code_signature: macho.linkedit_data_command = .{
         .cmd = .CODE_SIGNATURE,
         .cmdsize = @sizeOf(macho.linkedit_data_command),
-        .dataoff = @intCast(text_size),
+        .dataoff = @intCast(signed_size),
         .datasize = @intCast(signature_size),
     };
     try appendStruct(allocator, &bytes, &code_signature);
@@ -156,9 +193,9 @@ pub fn emit(allocator: std.mem.Allocator, program: Machine.Program) Error![]u8 {
     if (bytes.items.len > text_offset) return error.InvalidMain;
     try appendZeroes(allocator, &bytes, text_offset - bytes.items.len);
     try bytes.appendSlice(allocator, encoded.code);
-    try appendZeroes(allocator, &bytes, text_size - bytes.items.len);
+    try appendZeroes(allocator, &bytes, signed_size - bytes.items.len);
 
-    const signature = try CodeSignature.emit(allocator, bytes.items, text_size);
+    const signature = try CodeSignature.emit(allocator, bytes.items, signed_size);
     defer allocator.free(signature);
     try bytes.appendSlice(allocator, signature);
 

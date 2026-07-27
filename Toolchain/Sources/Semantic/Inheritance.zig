@@ -61,7 +61,7 @@ pub fn methodOwner(self: anytype, structure_index: usize, name: []const u8) ?usi
     var current: ?usize = structure_index;
     while (current) |index| {
         const declaration = findDeclaration(self, index) orelse return null;
-        for (declaration.methods) |method| if (std.mem.eql(u8, method.name, name)) return index;
+        for (declaration.methods) |method| if (!method.is_static and std.mem.eql(u8, method.name, name)) return index;
         current = self.structures[index].base;
     }
     return null;
@@ -75,7 +75,7 @@ pub fn methodCandidates(self: anytype, allocator: std.mem.Allocator, structure_i
     while (current) |owner| : (current = self.structures[owner].base) {
         const declaration = findDeclaration(self, owner) orelse break;
         for (declaration.methods, 0..) |method, method_index| {
-            if (!std.mem.eql(u8, method.name, name)) continue;
+            if (method.is_static or !std.mem.eql(u8, method.name, name)) continue;
             var replaced = false;
             for (result.items) |existing| if (sameSignature(existing.method, method)) {
                 replaced = true;
@@ -91,6 +91,7 @@ pub fn validateOverrides(self: anytype) !void {
     for (self.program.structures, 0..) |structure, structure_index| {
         if (!structure.is_class) continue;
         for (structure.methods) |method| {
+            if (method.is_static) continue;
             const inherited = inheritedMethod(self, structure_index, method);
             if (method.is_override and inherited == null) {
                 return self.fail(method.name_position, "override does not match an inherited method signature");
@@ -150,7 +151,7 @@ fn inheritedMethod(self: anytype, structure_index: usize, method: Ast.Function) 
     while (current) |index| : (current = self.structures[index].base) {
         const declaration = findDeclaration(self, index) orelse return null;
         for (declaration.methods, 0..) |candidate, method_index| {
-            if (sameSignature(candidate, method)) return .{ .owner = index, .index = method_index, .method = candidate };
+            if (!candidate.is_static and sameSignature(candidate, method)) return .{ .owner = index, .index = method_index, .method = candidate };
         }
     }
     return null;

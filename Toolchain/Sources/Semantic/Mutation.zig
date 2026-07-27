@@ -11,6 +11,7 @@ const Borrowing = @import("Borrowing.zig");
 const Resources = @import("Resources.zig");
 const Visibility = @import("Visibility.zig");
 const Inheritance = @import("Inheritance.zig");
+const StaticMembers = @import("StaticMembers.zig");
 
 const PathStep = union(enum) {
     field: struct { base: Ir.ValueId, structure: usize, field: usize },
@@ -19,6 +20,20 @@ const PathStep = union(enum) {
 
 pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.AssignmentStatement) !void {
     const target = assignment.target;
+    if (StaticMembers.ownerIndex(self, target.name)) |structure_index| if (target.fields.len == 1 and target.indices.len == 0) {
+        if (StaticMembers.find(self, structure_index, target.fields[0].name)) |field| {
+            if (!Visibility.memberVisible(self, field.owner, field.declaration, target.fields[0].name_position)) return self.fail(target.fields[0].name_position, "static field is unavailable here");
+            if (!field.declaration.mutable) return self.fail(target.fields[0].name_position, "cannot assign to immutable static field");
+            const current = if (assignment.operator == .assign) null else current: {
+                const value = try self.newValue(builder, field.declaration.type);
+                try self.emit(builder, .{ .global_load = .{ .result = value, .global = field.global } });
+                break :current value;
+            };
+            const replacement = try analyzeReplacement(self, builder, assignment, field.declaration.type, current, target.fields[0].name, false);
+            try self.emit(builder, .{ .global_store = .{ .global = field.global, .operand = replacement } });
+            return;
+        }
+    };
     const binding = Support.findBinding(builder.bindings.items, target.name) orelse {
         const message = try std.fmt.allocPrint(self.allocator, "unknown variable '{s}'", .{target.name});
         return self.fail(target.name_position, message);

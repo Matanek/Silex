@@ -23,8 +23,9 @@ pub const Call = struct {
 
 pub const Data = struct {
     at: usize,
-    string: usize,
-    byte_offset: u8 = 0,
+    string: usize = 0,
+    global: ?usize = null,
+    byte_offset: u32 = 0,
 };
 
 pub fn appendLocal(

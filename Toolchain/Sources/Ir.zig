@@ -71,6 +71,8 @@ pub const Instruction = union(enum) {
     optional_unwrap: OptionalUnwrap,
     copy: Copy,
     class_cast: Copy,
+    global_load: GlobalLoad,
+    global_store: GlobalStore,
     structure_init: StructureInit,
     list_init: ListInit,
     enum_init: EnumInit,
@@ -145,6 +147,9 @@ pub const Instruction = union(enum) {
         result: ValueId,
         operand: ValueId,
     };
+
+    pub const GlobalLoad = struct { result: ValueId, global: usize };
+    pub const GlobalStore = struct { global: usize, operand: ValueId };
 
     pub const StructureInit = struct {
         result: ValueId,
@@ -404,10 +409,18 @@ pub const Enum = struct {
 };
 
 pub const Program = struct {
+    globals: []const Global = &.{},
     structures: []const Structure = &.{},
     enums: []const Enum = &.{},
     functions: []const Function,
     files: []const []const u8 = &.{"<source>"},
+};
+
+pub const Global = struct {
+    name: []const u8,
+    type: Type,
+    mutable: bool,
+    bits: u64 = 0,
 };
 
 pub fn writeText(allocator: Allocator, program: Program) Error![]u8 {
@@ -550,6 +563,17 @@ fn writeInstruction(
             try appendResult(output, allocator, program, function, copy.result);
             try output.appendSlice(allocator, "copy ");
             try appendValueChecked(output, allocator, function, copy.operand);
+        },
+        .global_load => |load| {
+            try appendResult(output, allocator, program, function, load.result);
+            try output.appendSlice(allocator, "global.load @");
+            try output.appendSlice(allocator, program.globals[load.global].name);
+        },
+        .global_store => |store| {
+            try output.appendSlice(allocator, "global.store @");
+            try output.appendSlice(allocator, program.globals[store.global].name);
+            try output.appendSlice(allocator, ", ");
+            try appendValueChecked(output, allocator, function, store.operand);
         },
         .structure_init => |initialization| {
             if (initialization.structure >= program.structures.len or

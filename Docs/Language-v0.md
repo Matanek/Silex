@@ -534,6 +534,24 @@ to the class whose constructor is executing; child overrides only participate
 after the child is fully constructed. Private methods never form override
 slots, and static or extension methods do not participate in class dispatch.
 
+Structures and classes may attach shared fields and operations to the nominal
+type with `static let`, `static var`, and `static func`. They are selected only
+through the complete type name; instance and static overload spaces are
+distinct.
+
+```sx
+struct Position {
+    static let origin_x:int = 0
+    static func origin() Position { return Position() }
+}
+```
+
+Static storage is initialized before `main` from an intrinsic deterministic
+initializer and reset after execution. A mutable field is shared by every use
+of the same nominal type. Transparent aliases select that same storage, while
+each concrete generic specialization owns separate storage. Static methods are
+never inherited or dynamically dispatched.
+
 ## Associated enum values
 
 `enum` declares a nominal closed set of variants. A variant may carry zero or
@@ -1139,14 +1157,14 @@ visibility      = "public" | "internal" ;
 member_visibility = "public" | "internal" | "protected" | "private" ;
 structure       = visibility? "struct" identifier type_parameters? "{" (structure_field | constructor | method | drop_definition)* "}" ;
 class           = visibility? "class" identifier (":" type)? "{" (class_field | constructor | class_method)* "}" ;
-class_field     = member_visibility? ("let" | "var") identifier ":" type ("=" field_default)? ;
-class_method    = "override"? member_visibility? "func" identifier type_parameters? "(" parameters? ")" return_type? block ;
+class_field     = member_visibility? "static"? ("let" | "var") identifier ":" type ("=" field_default)? ;
+class_method    = "override"? member_visibility? "static"? "func" identifier type_parameters? "(" parameters? ")" return_type? block ;
 drop_definition = "drop" block ;
 enum            = visibility? "enum" identifier type_parameters? "{" enum_variant+ "}" ;
 enum_variant    = identifier ("(" type ("," type)* ")")? ;
-structure_field = visibility? ("let" | "var") identifier ":" type ("=" field_default)? ;
+structure_field = visibility? "static"? ("let" | "var") identifier ":" type ("=" field_default)? ;
 constructor     = visibility? "init" "(" parameters? ")" (":" "super" "(" arguments? ")")? block ;
-method          = visibility? "func" identifier type_parameters? "(" parameters? ")" return_type? block ;
+method          = visibility? "static"? "func" identifier type_parameters? "(" parameters? ")" return_type? block ;
 field_default   = fundamental_literal | structure_initializer ;
 function        = visibility? "func" identifier type_parameters? "(" parameters? ")" return_type? block ;
 type_parameters = "<" identifier ("," identifier)* ">" ;

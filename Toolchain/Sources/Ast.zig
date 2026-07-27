@@ -334,6 +334,7 @@ pub const GenericType = struct {
 };
 
 pub const StructureField = struct {
+    is_static: bool = false,
     is_public: bool = true,
     is_internal: bool = false,
     is_private: bool = false,
@@ -369,6 +370,7 @@ pub const Structure = struct {
     base_position: Source.Position = .{ .offset = 0, .line = 1, .column = 1 },
     type_parameters: []const TypeParameter = &.{},
     fields: []const StructureField,
+    static_fields: []const StructureField = &.{},
     constructors: []const Constructor = &.{},
     methods: []const Function = &.{},
     drop: ?Drop = null,
@@ -416,6 +418,7 @@ pub const Use = struct {
 };
 
 pub const Function = struct {
+    is_static: bool = false,
     is_override: bool = false,
     is_public: bool = false,
     is_internal: bool = false,

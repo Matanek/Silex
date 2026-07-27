@@ -26,6 +26,7 @@ pub fn parse(self: anytype, is_public: bool, is_internal: bool, is_class: bool) 
     }
     try self.expect(.left_brace, "expected '{' after type declaration");
     var fields: std.ArrayList(Ast.StructureField) = .empty;
+    var static_fields: std.ArrayList(Ast.StructureField) = .empty;
     var constructors: std.ArrayList(Ast.Constructor) = .empty;
     var methods: std.ArrayList(Ast.Function) = .empty;
     var drop: ?Ast.Drop = null;
@@ -52,7 +53,13 @@ pub fn parse(self: anytype, is_public: bool, is_internal: bool, is_class: bool) 
             if (!is_class and (member_private or member_protected)) return self.fail("structures only support public or internal members");
             try self.advance();
         }
+        var member_static = false;
+        if (self.current.tag == .keyword_static) {
+            member_static = true;
+            try self.advance();
+        }
         if (self.current.tag == .keyword_init) {
+            if (member_static) return self.fail("constructors cannot be static");
             if (member_override) return self.fail("constructors cannot declare override");
             var constructor = try parseConstructor(self, member_internal, base != null);
             constructor.is_public = member_public;
@@ -62,7 +69,9 @@ pub fn parse(self: anytype, is_public: bool, is_internal: bool, is_class: bool) 
             continue;
         }
         if (self.current.tag == .keyword_func) {
+            if (member_override and member_static) return self.fail("static methods cannot declare override");
             var method = try self.parseFunction(member_public, member_internal);
+            method.is_static = member_static;
             method.is_override = member_override;
             method.is_private = member_private;
             method.is_protected = member_protected;
@@ -70,6 +79,7 @@ pub fn parse(self: anytype, is_public: bool, is_internal: bool, is_class: bool) 
             continue;
         }
         if (self.current.tag == .keyword_drop) {
+            if (member_static) return self.fail("drop cannot be static");
             if (member_override) return self.fail("drop cannot declare override");
             if (is_class) return self.fail("class drop blocks are not supported yet");
             if (member_visibility) return self.fail("drop cannot declare visibility");
@@ -100,7 +110,8 @@ pub fn parse(self: anytype, is_public: bool, is_internal: bool, is_class: bool) 
             default = try self.parseExpression(false);
         }
         try self.expectStatementTerminator();
-        try fields.append(self.allocator, .{
+        const parsed_field = Ast.StructureField{
+            .is_static = member_static,
             .is_public = member_public,
             .is_internal = member_internal,
             .is_private = member_private,
@@ -111,7 +122,8 @@ pub fn parse(self: anytype, is_public: bool, is_internal: bool, is_class: bool) 
             .mutable = mutable,
             .type = field_type,
             .default = default,
-        });
+        };
+        if (member_static) try static_fields.append(self.allocator, parsed_field) else try fields.append(self.allocator, parsed_field);
     }
     try self.expect(.right_brace, "expected '}' after type members");
     return .{
@@ -125,6 +137,7 @@ pub fn parse(self: anytype, is_public: bool, is_internal: bool, is_class: bool) 
         .base_position = base_position,
         .type_parameters = type_parameters,
         .fields = try fields.toOwnedSlice(self.allocator),
+        .static_fields = try static_fields.toOwnedSlice(self.allocator),
         .constructors = try constructors.toOwnedSlice(self.allocator),
         .methods = try methods.toOwnedSlice(self.allocator),
         .drop = drop,
