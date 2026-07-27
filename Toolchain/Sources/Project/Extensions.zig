@@ -54,5 +54,8 @@ fn dependsOn(units: anytype, source: usize, target: usize, visited: []bool) bool
     for (units[source].bindings) |binding| if (binding.module) |dependency| {
         if (dependsOn(units, dependency, target, visited)) return true;
     };
+    for (units[source].activated_modules) |dependency| {
+        if (dependsOn(units, dependency, target, visited)) return true;
+    }
     return false;
 }

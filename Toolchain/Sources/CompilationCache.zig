@@ -6,7 +6,7 @@ const Blake3 = std.crypto.hash.Blake3;
 const Ir = @import("Ir.zig");
 const Ast = @import("Ast.zig");
 
-pub const format = "silex-cache-v2-release-cache";
+pub const format = "silex-cache-v3-control-flow-safety";
 const State = struct { files: []const []const u8 };
 
 pub fn loadIr(allocator: Allocator, io: Io, source_path: []const u8) ?Ir.Program {
@@ -135,7 +135,7 @@ pub fn store(
     kind: []const u8,
     payload: []const u8,
 ) void {
-    const directory = ".silex/cache/v2";
+    const directory = ".silex/cache/v3";
     Io.Dir.cwd().createDirPath(io, directory) catch return;
     const path = entryPath(allocator, digest, kind) catch return;
     var atomic = Io.Dir.cwd().createFileAtomic(io, path, .{ .make_path = true, .replace = true }) catch return;
@@ -147,7 +147,7 @@ pub fn store(
 
 fn entryPath(allocator: Allocator, digest: [Blake3.digest_length]u8, kind: []const u8) ![]const u8 {
     const hex = std.fmt.bytesToHex(digest, .lower);
-    return std.fmt.allocPrint(allocator, ".silex/cache/v2/{s}.{s}", .{ hex, kind });
+    return std.fmt.allocPrint(allocator, ".silex/cache/v3/{s}.{s}", .{ hex, kind });
 }
 
 fn lessThan(_: void, left: []const u8, right: []const u8) bool {

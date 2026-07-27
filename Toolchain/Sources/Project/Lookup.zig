@@ -1,7 +1,6 @@
 const std = @import("std");
 const Ast = @import("../Ast.zig");
 const Modules = @import("../Modules.zig");
-const pathInside = @import("Names.zig").pathInside;
 
 pub fn findModule(self: anytype, name: []const u8) ?usize {
     for (self.index.providers, 0..) |provider, module| {
@@ -38,27 +37,35 @@ pub fn findLocalFunction(program: Ast.Program, name: []const u8) bool {
     return false;
 }
 
-pub fn discoverProviders(self: anytype) !Modules.Index {
+pub fn discoverProviders(self: anytype, input_path: []const u8) !Modules.Index {
     var indexes: std.ArrayList(Modules.Index) = .empty;
+    const excluded_roots = try self.allocator.alloc([]const u8, self.packages.packages.len - 1);
+    for (self.packages.packages[1..], excluded_roots) |package, *root| root.* = package.root;
     for (self.packages.packages, 0..) |package, owner| {
         for (package.module_roots) |module_root| {
-            var discovered = try Modules.discoverOwned(self.allocator, self.io, module_root, package.name, owner);
-            if (owner == 0) discovered = try excludePackageSources(self, discovered);
+            const discovered = if (owner == 0)
+                try Modules.discoverOwnedExcluding(self.allocator, self.io, module_root, package.name, owner, excluded_roots)
+            else
+                try Modules.discoverOwned(self.allocator, self.io, module_root, package.name, owner);
             try indexes.append(self.allocator, discovered);
         }
     }
-    return Modules.combine(self.allocator, indexes.items);
-}
+    const discovered = try Modules.combine(self.allocator, indexes.items);
+    if (findProviderPath(.{ .index = discovered }, input_path) != null) return discovered;
 
-fn excludePackageSources(self: anytype, index: Modules.Index) !Modules.Index {
-    var providers: std.ArrayList(Modules.Provider) = .empty;
-    for (index.providers) |provider| {
-        var excluded = false;
-        for (self.packages.packages[1..]) |package| if (pathInside(provider.path, package.root)) {
-            excluded = true;
-            break;
-        };
-        if (!excluded) try providers.append(self.allocator, provider);
-    }
-    return .{ .providers = try providers.toOwnedSlice(self.allocator) };
+    const package = self.packages.packages[0];
+    const relative_path = try std.fs.path.relative(self.allocator, ".", null, package.root, input_path);
+    const relative_name = try Modules.moduleName(self.allocator, relative_path);
+    const module_name = if (package.name) |name|
+        try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ name, relative_name })
+    else
+        relative_name;
+    const entry_provider = [_]Modules.Provider{.{
+        .name = module_name,
+        .path = try self.allocator.dupe(u8, input_path),
+        .file = 0,
+        .owner = 0,
+    }};
+    const entry_index: Modules.Index = .{ .providers = &entry_provider };
+    return Modules.combine(self.allocator, &.{ discovered, entry_index });
 }

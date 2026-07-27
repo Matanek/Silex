@@ -44,6 +44,28 @@ let position:Math.Vec3 = Math.Vec3(x:2, y:10, z:5)
 
 You do not write `Math.Vec3.Vec3()`.
 
+## Combine a module with its child namespace
+
+A module file and modules below the same path form one qualified namespace:
+
+```text
+STD/Module/Math.sx       -> STD.Math
+STD/Module/Math/Vec3.sx  -> STD.Math.Vec3
+```
+
+One import exposes both parts on demand:
+
+```sx
+use STD.Math
+
+let angle = Math.cos(0.0)
+let position = Math.Vec3(x:1.0, y:2.0, z:3.0)
+```
+
+A public declaration or public reexport explicitly named in `Math.sx` takes
+precedence over a child module with the same name. Private declarations do not
+hide public child modules from callers.
+
 ## Reexport a declaration
 
 ```sx

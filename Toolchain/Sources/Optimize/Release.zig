@@ -76,6 +76,10 @@ pub fn optimizeCached(allocator: Allocator, io: std.Io, program: Ir.Program) !Ir
 }
 
 fn optimizeFunction(allocator: Allocator, function: Ir.Function, summaries: []const GlobalSummary) !Ir.Function {
+    // Alias and constant propagation is intentionally local to straight-line
+    // functions until the optimizer models dominance and control-flow joins.
+    if (function.blocks.len != 1) return function;
+
     const aliases = try allocator.alloc(Ir.ValueId, function.value_types.len);
     for (aliases, 0..) |*alias, index| alias.* = index;
     const constants = try allocator.alloc(Constant, function.value_types.len);
@@ -747,23 +751,18 @@ fn integerBits(value: i128, width: u7) u64 {
     return masked(@bitCast(@as(i64, @intCast(value))), width);
 }
 
-test "release folds constants propagates copies and removes unreachable blocks" {
+test "release folds constants and propagates copies in straight-line code" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
-    const value_types = [_]Ir.Type{ .int, .int, .int, .bool, .int };
+    const value_types = [_]Ir.Type{ .int, .int, .int, .int };
     const instructions = [_]Ir.Instruction{
         .{ .constant_int = .{ .result = 0, .bits = 20 } },
         .{ .copy = .{ .result = 1, .operand = 0 } },
         .{ .constant_int = .{ .result = 2, .bits = 22 } },
-        .{ .binary = .{ .result = 4, .operator = .add, .left = 1, .right = 2 } },
-        .{ .constant_bool = .{ .result = 3, .value = true } },
+        .{ .binary = .{ .result = 3, .operator = .add, .left = 1, .right = 2 } },
     };
-    const blocks = [_]Ir.Block{
-        .{ .instructions = &instructions, .terminator = .{ .branch = .{ .condition = 3, .then_block = 1, .else_block = 2 } } },
-        .{ .instructions = &.{}, .terminator = .{ .return_value = 4 } },
-        .{ .instructions = &.{}, .terminator = .{ .return_value = 2 } },
-    };
+    const blocks = [_]Ir.Block{.{ .instructions = &instructions, .terminator = .{ .return_value = 3 } }};
     const program: Ir.Program = .{ .functions = &.{.{
         .name = "answer",
         .parameter_types = &.{},
@@ -772,8 +771,7 @@ test "release folds constants propagates copies and removes unreachable blocks" 
         .blocks = &blocks,
     }} };
     const optimized = try optimize(allocator, program);
-    try std.testing.expectEqual(@as(usize, 2), optimized.functions[0].blocks.len);
-    try std.testing.expectEqual(Ir.Terminator{ .jump = 1 }, optimized.functions[0].blocks[0].terminator);
+    try std.testing.expectEqual(@as(usize, 1), optimized.functions[0].blocks.len);
     const text = try Ir.writeText(allocator, optimized);
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "const 42"));
     try std.testing.expect(!std.mem.containsAtLeast(u8, text, 1, "copy"));
@@ -813,6 +811,47 @@ test "release preserves effects and observable execution" {
     try std.testing.expectEqual(reference.exit_code, release.exit_code);
     try std.testing.expectEqualStrings(reference.stdout, release.stdout);
     try std.testing.expectEqualStrings(reference.stderr, release.stderr);
+}
+
+test "release preserves floating branches and loops" {
+    const Frontend = @import("../Frontend.zig");
+    const Interpreter = @import("../Interpreter.zig");
+    const Lower = @import("../Arm64/Lower.zig");
+    const Runner = @import("../Arm64/Runner.zig");
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\func root(value:float) float {
+        \\    if value < 0.0 { return invalid(value) }
+        \\    if value == 0.0 || value + value == value { return value }
+        \\    var estimate = 1.0
+        \\    if value > 1.0 { estimate = value }
+        \\    var previous = 0.0
+        \\    var iteration = 0
+        \\    while iteration < 128 {
+        \\        let next = (estimate + value / estimate) * 0.5
+        \\        if next == estimate || next == previous { return next }
+        \\        previous = estimate
+        \\        estimate = next
+        \\        iteration += 1
+        \\    }
+        \\    return estimate
+        \\}
+        \\func invalid(value:float) float {
+        \\    let zero = value - value
+        \\    return zero / zero
+        \\}
+        \\func main() { assert(root(0.0) == 0.0, "root zero") }
+    );
+    const optimized = try optimize(allocator, compilation.ir);
+    const release = try Interpreter.runCapture(allocator, optimized);
+    try std.testing.expectEqual(@as(u8, 0), release.exit_code);
+    try std.testing.expectEqualStrings("", release.stderr);
+    const machine = try Lower.lowerWithMode(allocator, optimized, .release);
+    const native = try Runner.invoke(allocator, machine, 0, &.{0});
+    try std.testing.expectEqual(@as(i64, 0), native.value);
 }
 
 test "release removes calls to proven constant functions" {

@@ -57,6 +57,17 @@ pub fn discoverOwned(
     prefix: ?[]const u8,
     owner: usize,
 ) Error!Index {
+    return discoverOwnedExcluding(allocator, io, root_path, prefix, owner, &.{});
+}
+
+pub fn discoverOwnedExcluding(
+    allocator: Allocator,
+    io: Io,
+    root_path: []const u8,
+    prefix: ?[]const u8,
+    owner: usize,
+    excluded_roots: []const []const u8,
+) Error!Index {
     var root = try Io.Dir.cwd().openDir(io, root_path, .{ .iterate = true });
     defer root.close(io);
 
@@ -72,15 +83,17 @@ pub fn discoverOwned(
         if (entry.kind != .file or !std.mem.endsWith(u8, entry.basename, ".sx")) continue;
 
         const relative_path = try allocator.dupe(u8, entry.path);
+        const full_path = if (root_path.len == 0 or std.mem.eql(u8, root_path, "."))
+            relative_path
+        else
+            try std.fs.path.join(allocator, &.{ root_path, relative_path });
+        if (insideAny(full_path, excluded_roots)) continue;
+
         const relative_name = try moduleName(allocator, relative_path);
         const module_name = if (prefix) |name|
             try std.fmt.allocPrint(allocator, "{s}.{s}", .{ name, relative_name })
         else
             relative_name;
-        const full_path = if (root_path.len == 0 or std.mem.eql(u8, root_path, "."))
-            relative_path
-        else
-            try std.fs.path.join(allocator, &.{ root_path, relative_path });
         try providers.append(allocator, .{
             .name = module_name,
             .path = full_path,
@@ -97,6 +110,14 @@ pub fn discoverOwned(
         }
     }
     return .{ .providers = try providers.toOwnedSlice(allocator) };
+}
+
+fn insideAny(path: []const u8, roots: []const []const u8) bool {
+    for (roots) |root| {
+        if (std.mem.eql(u8, path, root)) return true;
+        if (path.len > root.len and std.mem.startsWith(u8, path, root) and path[root.len] == std.fs.path.sep) return true;
+    }
+    return false;
 }
 
 pub fn combine(allocator: Allocator, indexes: []const Index) (Allocator.Error || error{DuplicateModule})!Index {

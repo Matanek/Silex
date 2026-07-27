@@ -360,7 +360,16 @@ test "select named package module roots for macos-arm64" {
     const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
     var compiler = Compiler.init(allocator, std.testing.io);
     const compilation = try compiler.compile(input);
-    const answer = try @import("../Interpreter.zig").invoke(allocator, compilation.ir, 0, &.{});
+    var answer_id: ?usize = null;
+    for (compilation.ir.functions, 0..) |function, id| {
+        if (std.mem.eql(u8, function.name, "Main.answer")) answer_id = id;
+    }
+    const answer = try @import("../Interpreter.zig").invoke(
+        allocator,
+        compilation.ir,
+        answer_id orelse return error.TestUnexpectedResult,
+        &.{},
+    );
     try std.testing.expectEqual(@as(i64, 42), answer.integer);
     try std.testing.expect(compiler.index.find("Bridge.Implementation") != null);
     try std.testing.expect(compiler.index.find("Bridge.Platform.macos_arm64.Implementation") == null);
@@ -396,6 +405,44 @@ test "select named package module roots for macos-arm64" {
         "multiple source files provide the same module",
         compiler.diagnostic.?.message,
     );
+}
+
+test "compile an explicit package test entry outside public module roots" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.createDirPath(std.testing.io, "Toolkit/Module");
+    try temporary.dir.createDirPath(std.testing.io, "Toolkit/Tests");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Toolkit/Package.json",
+        .data = "{\"name\":\"Toolkit\",\"version\":\"1.0.0\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Toolkit/Module/Value.sx",
+        .data = "public func answer() int { return 42 }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Toolkit/Tests/Main.sx",
+        .data = "use Toolkit.Value\nfunc main() { print(Value.answer()) }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Toolkit/Tests/Unloaded.sx",
+        .data = "this test must remain undiscovered",
+    });
+
+    const input = try std.fs.path.join(
+        allocator,
+        &.{ ".zig-cache", "tmp", &temporary.sub_path, "Toolkit", "Tests", "Main.sx" },
+    );
+    var compiler = Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(input);
+    const result = try @import("../Interpreter.zig").runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("42\n", result.stdout);
+    try std.testing.expect(compiler.index.find("Toolkit.Tests.Main") != null);
+    try std.testing.expect(compiler.index.find("Toolkit.Tests.Unloaded") == null);
 }
 
 test "qualified packages share namespaces without sharing ownership" {

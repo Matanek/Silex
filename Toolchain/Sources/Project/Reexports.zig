@@ -19,6 +19,7 @@ pub const Unit = struct {
     state: State = .fresh,
     program: ?Ast.Program = null,
     bindings: []const Binding = &.{},
+    activated_modules: []const usize = &.{},
 };
 
 pub const DeclarationKind = enum { function, structure, enumeration };

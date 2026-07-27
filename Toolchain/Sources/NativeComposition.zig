@@ -82,6 +82,68 @@ test "emit and execute a composed local-package Mach-O" {
     });
 }
 
+test "compose a module facade with its child namespace" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.createDirPath(std.testing.io, "STD/Module/Math");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Package.json",
+        .data = "{\"dependencies\":{\"STD\":\"=0.1.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "STD/Package.json",
+        .data = "{\"name\":\"STD\",\"version\":\"0.1.0\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data =
+        \\use STD.Math
+        \\func calculate() int {
+        \\    let point = Math.Point.seed()
+        \\    return Math.answer() + point.x + point.y + Math.Vec3()
+        \\}
+        \\func main() {}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "STD/Module/Math.sx",
+        .data =
+        \\public func answer() int { return 1 }
+        \\public func Vec3() int { return 0 }
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "STD/Module/Math/Point.sx",
+        .data =
+        \\public struct Point { var x:int; var y:int }
+        \\extend Point { static func seed() Point { return Point(x:20, y:21) } }
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "STD/Module/Math/Vec3.sx",
+        .data = "public struct Vec3 { var value:int }",
+    });
+
+    const base = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const input = try std.fs.path.join(allocator, &.{ base, "Main.sx" });
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(input);
+    const calculate = findFunction(compilation.ir, "Main.calculate") orelse return error.TestUnexpectedResult;
+
+    const interpreted = try Interpreter.invoke(allocator, compilation.ir, calculate, &.{});
+    try std.testing.expectEqual(@as(i64, 42), interpreted.integer);
+
+    const machine = try Lower.lower(allocator, compilation.ir);
+    const native = try Runner.invoke(allocator, machine, calculate, &.{});
+    try std.testing.expectEqual(Machine.Status.success, native.status);
+    try std.testing.expectEqual(@as(i64, 42), native.value);
+}
+
 fn findFunction(program: Ir.Program, name: []const u8) ?Ir.FunctionId {
     for (program.functions, 0..) |function, id| {
         if (std.mem.eql(u8, function.name, name)) return id;
