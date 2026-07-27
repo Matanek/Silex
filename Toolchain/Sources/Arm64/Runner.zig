@@ -58,7 +58,11 @@ pub fn invoke(
     );
     defer std.posix.munmap(memory);
     @memcpy(memory[0..image.code.len], image.code);
-    try std.process.protectMemory(memory, .{ .read = true, .execute = true });
+    if (image.data_offset) |data_offset| {
+        try std.process.protectMemory(memory[0..data_offset], .{ .read = true, .execute = true });
+    } else {
+        try std.process.protectMemory(memory, .{ .read = true, .execute = true });
+    }
     sys_icache_invalidate(memory.ptr, image.code.len);
 
     const entry_address = @intFromPtr(memory.ptr) + entry_offset;

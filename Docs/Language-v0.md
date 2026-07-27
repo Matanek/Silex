@@ -370,6 +370,21 @@ language operation rather than a `clone()` convention or a `Clonable`
 protocol. Ordinary unprefixed copies remain compositionally shallow with
 respect to class identities.
 
+Each `copy` observes one coherent logical instant of the complete reachable
+graph. A concurrent Silex mutation is ordered wholly before or wholly after
+that snapshot, so the clone cannot combine fields or relations from two source
+states. The root and every instance reached at the snapshot remain alive until
+their duplication completes; any resulting `drop` is delayed and still runs
+exactly once. Two concurrent copies may observe different instants while each
+remains internally coherent. This coordination is a compiler and runtime
+guarantee: locks, versions, barriers, addresses, and the exact linearization
+point are not exposed by the language. Static fields and external system state
+are outside the snapshot.
+
+`@T` continues to express read intent for one borrowed path. It does not freeze
+a graph; the stronger temporary stability above belongs specifically to
+`copy`.
+
 A parameter written `name:@T` is a temporary read reference. Calls keep their
 ordinary syntax; a readable local, field, indexed element, literal, or
 temporary may provide the argument. The alias exists only for the synchronous

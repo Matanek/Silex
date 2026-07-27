@@ -176,6 +176,7 @@ test {
     _ = @import("MacOS/MachO.zig");
     _ = @import("Composition.zig");
     _ = @import("CopyTests.zig");
+    _ = @import("SnapshotTests.zig");
     _ = @import("EnumTests.zig");
     _ = @import("FixedArrayTests.zig");
     _ = @import("DynamicListTests.zig");

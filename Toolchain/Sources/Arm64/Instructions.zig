@@ -108,6 +108,18 @@ pub fn serviceCall() u32 {
     return 0xd4001001;
 }
 
+pub fn loadAcquireExclusive64(destination: Register, base: Register) u32 {
+    return 0xc85ffc00 | (registerBits(base) << 5) | registerBits(destination);
+}
+
+pub fn storeReleaseExclusive64(status: Register, source: Register, base: Register) u32 {
+    return 0xc800fc00 | (registerBits(status) << 16) | (registerBits(base) << 5) | registerBits(source);
+}
+
+pub fn storeRelease64(source: Register, base: Register) u32 {
+    return 0xc89ffc00 | (registerBits(base) << 5) | registerBits(source);
+}
+
 pub fn addSetFlags(destination: Register, left: Register, right: Register) u32 {
     return 0xab000000 | (registerBits(right) << 16) | (registerBits(left) << 5) | registerBits(destination);
 }
