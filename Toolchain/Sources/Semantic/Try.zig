@@ -15,7 +15,6 @@ pub fn analyzeStatement(self: anytype, builder: anytype, unary: Ast.Expression.U
 
 fn analyze(self: anytype, builder: anytype, unary: Ast.Expression.Unary, require_value: bool) !?Model.TypedValue {
     const operand = try self.analyzeExpression(builder, unary.operand);
-    try Resources.requireTransfer(self, unary.operand, operand.type, "propagating it with 'try'");
     const source_index = findResult(self.enums, operand.type) orelse {
         const message = try std.fmt.allocPrint(self.allocator, "'try' expects 'Result<T,E>', found '{s}'", .{self.typeName(operand.type)});
         return self.fail(unary.operator_position, message);

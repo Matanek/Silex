@@ -47,7 +47,7 @@ pub fn analyzeMutation(self: anytype, builder: anytype, call: Ast.Expression.Cal
         try requireArity(self, call, 2);
         const index = try requireIndex(self, builder, call.arguments[0]);
         const replacement = try self.analyzeExpressionExpected(builder, call.arguments[1], collection.element);
-        try Resources.requireTransfer(self, call.arguments[1], collection.element, "replacing a collection element");
+        if (Resources.containsClass(self, collection.element)) try Resources.retainValue(self, builder, collection.element, replacement.value);
         const previous = try self.newValue(builder, collection.element);
         try self.emit(builder, .{ .collection_load = .{ .result = previous, .collection = source.value, .index = index.value, .position = call.name_position } });
         const updated = try self.newValue(builder, binding.type);
@@ -95,6 +95,7 @@ pub fn analyzeMutation(self: anytype, builder: anytype, call: Ast.Expression.Cal
     var kind: Ir.Instruction.ListEditKind = undefined;
     var index: ?Ir.ValueId = null;
     var argument: ?Ir.ValueId = null;
+    var argument_type: ?Ast.Type = null;
     var removed: ?Ir.ValueId = null;
     var return_type = binding.type;
     if (std.mem.eql(u8, call.name, "reverse")) {
@@ -102,32 +103,34 @@ pub fn analyzeMutation(self: anytype, builder: anytype, call: Ast.Expression.Cal
         kind = .reverse;
     } else if (std.mem.eql(u8, call.name, "clear")) {
         try requireArity(self, call, 0);
-        if (Resources.isNoncopyable(self, binding.type)) try Resources.emitDrop(self, builder, binding.type, source.value);
+        if (Resources.needsDrop(self, binding.type) or Resources.containsClass(self, binding.type)) {
+            try Resources.emitDrop(self, builder, binding.type, source.value);
+        }
         kind = .clear;
     } else if (std.mem.eql(u8, call.name, "append")) {
         try requireArity(self, call, 1);
         const value = try self.analyzeExpression(builder, call.arguments[0]);
         if (value.type == collection.element) {
-            try Resources.requireTransfer(self, call.arguments[0], collection.element, "appending it to a collection");
             kind = .append;
             argument = value.value;
+            argument_type = collection.element;
         } else if (collectionForType(self.structures, value.type)) |other| {
             if (other.element != collection.element) return self.fail(call.arguments[0].position, "append sequence element type is incompatible");
-            try Resources.requireTransfer(self, call.arguments[0], value.type, "appending its elements to another collection");
             kind = .append_sequence;
             argument = value.value;
+            argument_type = value.type;
         } else return self.fail(call.arguments[0].position, "append expects an element or compatible sequence");
     } else if (std.mem.eql(u8, call.name, "prepend")) {
         try requireArity(self, call, 1);
         kind = .prepend;
         argument = (try self.analyzeExpressionExpected(builder, call.arguments[0], collection.element)).value;
-        try Resources.requireTransfer(self, call.arguments[0], collection.element, "prepending it to a collection");
+        argument_type = collection.element;
     } else if (std.mem.eql(u8, call.name, "insert")) {
         try requireArity(self, call, 2);
         kind = .insert;
         index = (try requireIndex(self, builder, call.arguments[0])).value;
         argument = (try self.analyzeExpressionExpected(builder, call.arguments[1], collection.element)).value;
-        try Resources.requireTransfer(self, call.arguments[1], collection.element, "inserting it into a collection");
+        argument_type = collection.element;
     } else {
         return_type = collection.element;
         removed = try self.newValue(builder, collection.element);
@@ -143,6 +146,9 @@ pub fn analyzeMutation(self: anytype, builder: anytype, call: Ast.Expression.Cal
             kind = .take_last;
         }
     }
+    if (argument) |value| if (Resources.containsClass(self, argument_type.?)) {
+        try Resources.retainValue(self, builder, argument_type.?, value);
+    };
     const updated = try self.newValue(builder, binding.type);
     try self.emit(builder, .{ .list_edit = .{ .result = updated, .collection = source.value, .kind = kind, .index = index, .argument = argument, .removed = removed, .position = call.name_position } });
     try storeBinding(self, builder, binding, updated);
@@ -202,7 +208,6 @@ pub fn analyzeLiteral(
             );
             return self.fail(expression.position, message);
         }
-        try Resources.requireTransfer(self, expression, collection.element, "storing it in a collection");
         try Borrowing.requireOwned(self, value, expression.position, "stored in a collection");
         fields[index] = value.value;
     }
@@ -238,9 +243,6 @@ pub fn analyzeIndex(self: anytype, builder: anytype, access: Ast.Expression.Inde
 pub fn analyzeSlice(self: anytype, builder: anytype, access: Ast.Expression.SliceAccess, expected: ?Ast.Type) !Model.TypedValue {
     const source = try self.analyzeExpression(builder, access.base);
     const collection = collectionForType(self.structures, source.type) orelse return self.fail(access.bracket_position, "slicing requires an array or list");
-    if (Resources.isNoncopyable(self, collection.element)) {
-        return self.fail(access.bracket_position, "a copied slice cannot contain noncopyable elements; use a borrowed view");
-    }
     const start = try requireIndex(self, builder, access.start);
     const end = try requireIndex(self, builder, access.end);
     var result_type: ?Ast.Type = null;

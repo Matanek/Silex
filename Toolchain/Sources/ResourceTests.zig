@@ -1,6 +1,7 @@
 const std = @import("std");
 const Frontend = @import("Frontend.zig");
 const Interpreter = @import("Interpreter.zig");
+const Ir = @import("Ir.zig");
 
 fn run(source: []const u8) ![]const u8 {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
@@ -11,7 +12,7 @@ fn run(source: []const u8) ![]const u8 {
     return std.testing.allocator.dupe(u8, result.stdout);
 }
 
-test "owner structures drop once after move and before replacement" {
+test "drop structures run once after move and before replacement" {
     const output = try run(
         \\struct File {
         \\    let descriptor:int
@@ -33,7 +34,7 @@ test "owner structures drop once after move and before replacement" {
     try std.testing.expectEqualStrings("drop 1\nheld\ndrop 2\nmoved\ndrop 3\n", output);
 }
 
-test "owner temporaries transfer through calls and named values require move" {
+test "drop structure temporaries transfer explicitly with move" {
     const output = try run(
         \\struct File { let descriptor:int; drop { print(self.descriptor) } }
         \\func consume(file:File) { print("consume") }
@@ -49,33 +50,29 @@ test "owner temporaries transfer through calls and named values require move" {
     try std.testing.expectEqualStrings("consume\n4\ndone\n5\n", output);
 }
 
-test "owner structures reject copies comparison and mutable references" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    var frontend = Frontend.Frontend.init(arena.allocator());
-    try std.testing.expectError(error.InvalidSource, frontend.compile(
-        \\struct File { let descriptor:int; drop {} }
-        \\func main() { let first = File(descriptor:1); let second = first }
-    ));
-    try std.testing.expect(std.mem.containsAtLeast(u8, frontend.diagnostic.?.message, 1, "requires 'move'"));
-
-    frontend.diagnostic = null;
-    try std.testing.expectError(error.InvalidSource, frontend.compile(
-        \\struct File { let descriptor:int; drop {} }
-        \\func main() { let first = File(descriptor:1); let second = File(descriptor:1); print(first == second) }
-    ));
-    try std.testing.expectEqualStrings("noncopyable values cannot be compared", frontend.diagnostic.?.message);
-
-    frontend.diagnostic = null;
-    try std.testing.expectError(error.InvalidSource, frontend.compile(
-        \\struct File { let descriptor:int; drop {} }
-        \\func edit(file:&File) {}
-        \\func main() {}
-    ));
-    try std.testing.expect(std.mem.containsAtLeast(u8, frontend.diagnostic.?.message, 1, "cannot be passed through '&T'"));
+test "drop structures copy compare and use ordinary borrows" {
+    const output = try run(
+        \\struct Item { var value:int; drop { print("drop ", self.value) } }
+        \\func duplicate(value:Item) Item { return value }
+        \\func inspect(value:@Item) int { return value.value }
+        \\func edit(value:&Item) { value.value += 1 }
+        \\func main() {
+        \\    var first = Item(value:1)
+        \\    var second = first
+        \\    second = second
+        \\    edit(second)
+        \\    let returned = duplicate(first)
+        \\    print(inspect(first), " ", second.value, " ", first == returned)
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings(
+        "drop 1\ndrop 1\n1 2 true\ndrop 1\ndrop 2\ndrop 1\n",
+        output,
+    );
 }
 
-test "owner structures remain inspectable through read references" {
+test "drop structures remain inspectable through read references" {
     const output = try run(
         \\struct File { let descriptor:int; drop { print("closed") } }
         \\func inspect(file:@File) { print(file.descriptor) }
@@ -83,6 +80,45 @@ test "owner structures remain inspectable through read references" {
     );
     defer std.testing.allocator.free(output);
     try std.testing.expectEqualStrings("9\nclosed\n", output);
+}
+
+test "copies with drop preserve shared class fields" {
+    const output = try run(
+        \\class State {
+        \\    public var value:int
+        \\    drop { print("state ", self.value) }
+        \\}
+        \\struct Box {
+        \\    var state:State
+        \\    drop { print("box ", self.state.value) }
+        \\}
+        \\func main() {
+        \\    var state = State(value:1)
+        \\    var first = Box(state:state)
+        \\    var second = first
+        \\    second.state.value = 7
+        \\    print(first.state == second.state, " ", first.state.value)
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("true 7\nbox 7\nbox 7\nstate 7\n", output);
+}
+
+test "drop copies lower to deterministic portable IR" {
+    const source =
+        \\struct Item { let value:int; drop { print(self.value) } }
+        \\func main() { let first = Item(value:1); let second = first }
+    ;
+    var first_arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer first_arena.deinit();
+    var second_arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer second_arena.deinit();
+    var first = Frontend.Frontend.init(first_arena.allocator());
+    var second = Frontend.Frontend.init(second_arena.allocator());
+    const first_text = try Ir.writeText(first_arena.allocator(), (try first.compile(source)).ir);
+    const second_text = try Ir.writeText(second_arena.allocator(), (try second.compile(source)).ir);
+    try std.testing.expectEqualStrings(first_text, second_text);
+    try std.testing.expect(std.mem.indexOf(u8, first_text, "Item.$drop") != null);
 }
 
 test "drop rejects return and try" {

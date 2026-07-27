@@ -118,6 +118,7 @@ pub fn analyzeWhile(self: anytype, builder: anytype, function: Ast.Function, loo
         .continue_block = condition_block,
         .break_block = exit_block,
         .availability_count = availability_count,
+        .drop_binding_count = availability_count,
         .header_availability = header_availability,
     });
     const loop_index = builder.loops.items.len - 1;
@@ -158,7 +159,6 @@ fn analyzeCollectionFor(self: anytype, builder: anytype, function: Ast.Function,
         .identifier => |name| name,
         else => null,
     };
-    const element_noncopyable = Resources.isNoncopyable(self, collection.element);
     const outer_binding_count = builder.bindings.items.len;
     const collection_local: Ir.LocalId = if (loop.mode == .mutable) mutable: {
         const name = switch (source_expression.value) {
@@ -174,7 +174,7 @@ fn analyzeCollectionFor(self: anytype, builder: anytype, function: Ast.Function,
         try self.emit(builder, .{ .local_store = .{ .local = value, .operand = source.value } });
         break :local value;
     };
-    const owns_source = source_root == null and Resources.isNoncopyable(self, source.type);
+    const owns_source = source_root == null and (Resources.needsDrop(self, source.type) or Resources.containsClass(self, source.type));
     if (owns_source) try builder.bindings.append(self.allocator, .{
         .name = "$for-source",
         .type = source.type,
@@ -219,27 +219,24 @@ fn analyzeCollectionFor(self: anytype, builder: anytype, function: Ast.Function,
             .type = collection.element,
             .local = element_local,
             .mutable = true,
-            .borrowed_root = if (element_noncopyable) source_root orelse "$for-source" else null,
-            .borrowed_mode = if (element_noncopyable) .mutable else .value,
         });
     } else try builder.bindings.append(self.allocator, .{
         .name = loop.name,
         .type = collection.element,
         .value = element,
-        .borrowed_root = if (element_noncopyable) source_root orelse "$for-source" else null,
-        .borrowed_mode = if (element_noncopyable) .read else .value,
     });
     try builder.loops.append(self.allocator, .{
         .continue_block = update_block,
         .break_block = if (loop.mode == .mutable) break_update_block else exit_block,
         .availability_count = availability_count,
+        .drop_binding_count = if (loop.mode == .mutable) binding_count + 1 else binding_count,
         .header_availability = header_availability,
     });
     const loop_index = builder.loops.items.len - 1;
     const terminated = try self.analyzeStatements(builder, function, loop.statements);
     const loop_context = builder.loops.items[loop_index];
     builder.loops.items.len -= 1;
-    if (!terminated) try Resources.emitActiveDrops(self, builder, binding_count);
+    if (!terminated) try Resources.emitActiveDrops(self, builder, if (loop.mode == .mutable) binding_count + 1 else binding_count);
     builder.bindings.shrinkRetainingCapacity(binding_count);
     if (!terminated) {
         try Availability.requireHeader(self, builder.bindings.items, header_availability, loop.position);
@@ -318,6 +315,7 @@ fn analyzeRangeFor(self: anytype, builder: anytype, function: Ast.Function, loop
         .continue_block = update_block,
         .break_block = exit_block,
         .availability_count = availability_count,
+        .drop_binding_count = availability_count,
         .header_availability = header_availability,
     });
     const loop_index = builder.loops.items.len - 1;
@@ -345,9 +343,18 @@ fn writeCollectionElement(self: anytype, builder: anytype, collection_local: Ir.
     const collection = try loadLocalValue(self, builder, collection_local, collection_type);
     const index = try loadLocalValue(self, builder, index_local, .int);
     const element = try loadLocalValue(self, builder, element_local, element_type);
+    if (Resources.containsClass(self, element_type)) try Resources.retainValue(self, builder, element_type, element);
+    if (Resources.needsDrop(self, element_type) or Resources.containsClass(self, element_type)) {
+        const previous = try self.newValue(builder, element_type);
+        try self.emit(builder, .{ .collection_load = .{ .result = previous, .collection = collection, .index = index, .position = position } });
+        try Resources.emitDrop(self, builder, element_type, previous);
+    }
     const updated = try self.newValue(builder, collection_type);
     try self.emit(builder, .{ .collection_replace = .{ .result = updated, .collection = collection, .index = index, .replacement = element, .position = position } });
     try self.emit(builder, .{ .local_store = .{ .local = collection_local, .operand = updated } });
+    if (Resources.needsDrop(self, element_type) or Resources.containsClass(self, element_type)) {
+        try Resources.emitDrop(self, builder, element_type, element);
+    }
 }
 
 fn emitInt(self: anytype, builder: anytype, bits: u64) !Ir.ValueId {
@@ -392,9 +399,6 @@ pub fn analyzeCondition(self: anytype, builder: anytype, condition: Ast.Conditio
                 );
                 return self.fail(binding.source.position, message);
             };
-            if (Resources.isNoncopyable(self, child)) {
-                try Resources.requireTransfer(self, binding.source, source.type, "opening it in a conditional binding");
-            }
             const absent = (try Optionals.intrinsic(self, builder, source.type)).?;
             const result = try self.newValue(builder, .bool);
             try self.emit(builder, .{ .binary = .{
@@ -452,7 +456,7 @@ pub fn analyzeLoopControl(
             try Availability.snapshot(self.allocator, builder.bindings.items, loop.availability_count),
         );
     }
-    try Resources.emitActiveDrops(self, builder, loop.availability_count);
+    try Resources.emitActiveDrops(self, builder, loop.drop_binding_count);
     self.terminate(builder, .{ .jump = if (is_continue) loop.continue_block else loop.break_block });
     return true;
 }

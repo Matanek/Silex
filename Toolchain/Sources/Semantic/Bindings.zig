@@ -72,7 +72,6 @@ pub fn analyzeVariable(self: anytype, builder: anytype, declaration: Ast.Variabl
         });
         return;
     }
-    if (declaration.initializer) |expression| try Resources.requireTransfer(self, expression, declared_type, "storing it");
     const immutable_protocol_collection = if (Collections.collectionForType(self.structures, declared_type)) |collection|
         Resources.isProtocolValue(self, collection.element)
     else
@@ -146,9 +145,8 @@ pub fn analyzeReturn(self: anytype, builder: anytype, function: Ast.Function, st
             self.terminate(builder, .{ .return_value = if (function.return_mode == .mutable and !view_return) value.reference.? else value.value });
             return;
         }
-        try Resources.requireTransfer(self, expression, value.type, "returning it");
         const copied_projection = value.borrowed_root != null and expression.value == .field_access and
-            !Resources.isNoncopyable(self, value.type) and !Resources.containsClass(self, value.type);
+            !Resources.containsClass(self, value.type);
         if (!copied_projection) try Borrowing.requireOwned(self, value, expression.position, "returned");
         try Resources.emitActiveDrops(self, builder, 0);
         self.terminate(builder, .{ .return_value = value.value });

@@ -36,6 +36,7 @@ pub const LoopContext = struct {
     continue_block: Ir.BlockId,
     break_block: Ir.BlockId,
     availability_count: usize = 0,
+    drop_binding_count: usize = 0,
     header_availability: []const bool = &.{},
     break_availabilities: std.ArrayList([]const bool) = .empty,
 };

@@ -330,10 +330,11 @@ cannot reuse a parameter or another local name visible in its lexical scope;
 sibling branches may reuse a name.
 
 `move name` explicitly transfers a complete local or ordinary parameter and
-makes that source binding unavailable. It is optional for the currently
-copyable values, but already records the ownership intention used by resource
-types. A consumed `var` becomes available again after a complete assignment;
-a consumed `let` cannot be reinitialized.
+makes that source binding unavailable. It is optional for all current value
+types and avoids creating another independently finalized value. A future
+non-copyability contract would remain distinct from `drop`. A consumed `var`
+becomes available again after a complete assignment; a consumed `let` cannot
+be reinitialized.
 
 ```sx
 var original = 40
@@ -419,12 +420,10 @@ be retained in a lexical local: `let` keeps a shared alias, while `var` keeps a
 mutable result. Such aliases cannot escape into aggregates or outlive their
 root, and a stored mutable alias is exclusive until its lexical scope ends.
 
-## Owner structures and `drop`
+## Deterministic destruction with `drop`
 
-A structure that declares `drop` owns a unique resource and is nominally
-non-copyable. Non-copyability propagates through containing structures, enums,
-`Result`, optionals, fixed arrays, and lists. The block receives `self`
-implicitly and has no parameters,
+A structure may declare `drop` to observe the deterministic end of each value
+instance. The block receives `self` implicitly and has no parameters,
 parentheses, return type, visibility, `return`, or `try`.
 
 ```sx
@@ -437,12 +436,17 @@ struct File {
 }
 ```
 
-A newly constructed owner transfers directly into its destination. A named
-non-copyable value requires `move` when stored again, assigned, passed by value,
-returned, or consumed by a pattern. It may still be inspected through `@T`, but
-cannot be compared or passed through `&T`. Replacing an available non-copyable
-`var` destroys its old value before installing the new one; a moved source no
-longer participates in destruction.
+A `drop` block does not make the structure non-copyable. Ordinary storage,
+assignment, parameters, returns, patterns and aggregates copy its fields
+compositionally. Each destination is a distinct live value and runs its own
+`drop` exactly once. A copied class field keeps the same shared class identity.
+Comparison and `@T` or `&T` borrowing follow the ordinary recursive capabilities
+of the fields.
+
+Assignment first obtains the replacement while the source remains alive, then
+destroys the old destination, and finally installs the new value. `move` remains
+an explicit transfer: the consumed source no longer participates in
+destruction.
 
 Every completely constructed, untransferred value is destroyed exactly once on
 ordinary scope exit, including a block end, `return`, `break`, `continue`, and
@@ -568,15 +572,15 @@ to the class whose constructor is executing; child overrides only participate
 after the child is fully constructed. Private methods never form override
 slots, and static or extension methods do not participate in class dispatch.
 
-A class may declare the same parameterless `drop` block as an owner structure,
+A class may declare the same parameterless `drop` block as a value structure,
 but its reference remains freely copyable. The block runs exactly once when
 the last reachable root disappears. Unreachable cycles are finalized too;
 every block observes the graph before owned fields begin destruction.
 
 For inheritance, finalization runs from the dynamic class toward its bases,
-then destroys owned fields. `drop` is neither virtual nor callable and never
-requires an explicit `super` call. A class reference can therefore contain an
-owner structure without making the reference itself non-copyable.
+then destroys its fields. `drop` is neither virtual nor callable and never
+requires an explicit `super` call. A structure stored in a class field retains
+its own ordinary deterministic destruction.
 
 Structures and classes may attach shared fields and operations to the nominal
 type with `static let`, `static var`, and `static func`. They are selected only
@@ -657,10 +661,10 @@ inside an ordinary aggregate. An immutable local collection may nevertheless
 store protocol values. Parameters and returns transport protocol values by
 value, as do fields, optionals and collections.
 
-A noncopyable structure may satisfy a generic protocol constraint but cannot
-be erased into this copyable dynamic representation. Dynamic protocol values
-have no `any` marker or downcast, and cannot use general `@Protocol` or
-`&Protocol` references.
+A structure with `drop` may be erased into the dynamic representation; each
+copied protocol value owns an independent structure copy and finalizes it.
+Dynamic protocol values have no `any` marker or downcast, and cannot use general
+`@Protocol` or `&Protocol` references.
 
 ## Type extensions
 
@@ -780,9 +784,9 @@ argument types are checked at the construction site; named arguments, an
 implicit integer value, raw conversion, fields, methods, equality and printing
 of a complete enum value are not part of this contract.
 
-Associated enums are ordinary copied values when all their payload types are
-copyable; otherwise they inherit non-copyability. Their nominal type, selected
-variant and associated values survive local storage, structure fields,
+Associated enums are ordinary copied values whose payloads are copied
+compositionally. Their nominal type, selected variant and associated values
+survive local storage, structure fields,
 parameters, returns, module composition, the reference interpreter and the
 macOS ARM64 backend. `public enum` exposes the enum and all its variants as one
 public contract. A private enum remains local to its module; `internal enum`
@@ -828,9 +832,8 @@ func parse(text:str) Result<int, ParseError> {
 
 Construction is explicit and ordinary exhaustive `match` handles both
 variants. There is no implicit conversion from `T` or `E`, default success,
-field or intrinsic method. `Result` retains the composition and nominal identity
-rules of a specialized enum, and is non-copyable whenever its success or failure
-payload is.
+field or intrinsic method. `Result` retains the composition, copying and nominal
+identity rules of a specialized enum.
 
 `Result<void,E>` is the sole generic specialization that accepts `void`. Its
 success is constructed with `success()` and matched with `success` without a
@@ -1234,11 +1237,11 @@ for (var i in 0...3) { i += 10 }
 ```
 
 The collection source is likewise evaluated once. `continue` advances to the
-next element or range value; `break` leaves the nearest loop. For a mutable
-collection binding, mutations made before either control statement remain
-visible in the source collection. When an element is non-copyable, `for` and
-`for let` expose a temporary read borrow and `for var` mutates that element in
-place; none of these loop bindings creates a second owner.
+next element or range value; `break` leaves the nearest loop. `for` and
+`for let` expose an immutable element copy. `for var` creates a mutable copy and
+writes its final value back before advancing or leaving with `break`; mutations
+made before `continue` are likewise preserved. A copied element with `drop`
+therefore has its own deterministic destruction.
 
 ## Fixed arrays
 
@@ -1260,12 +1263,11 @@ so `-1` is the last element. An index outside `[-count(), count())` terminates
 execution with a bounds diagnostic. Indexing evaluates the array and the index
 exactly once, from left to right.
 
-Fixed arrays have value semantics across bindings, parameters, and return
-values while their element type is copyable. An array containing a non-copyable
-element owns its elements and is itself non-copyable. Assigning through an index
-therefore changes only the mutable root binding being addressed; immutable roots
-are rejected. Storage layout and index normalization are implementation details,
-not public collection API.
+Fixed arrays have compositional value semantics across bindings, parameters,
+and return values. Assigning through an index changes only the mutable root
+binding being addressed; immutable roots are rejected. Elements with `drop`
+are finalized independently in every array copy. Storage layout and index
+normalization are implementation details, not public collection API.
 
 `T[]` is the dynamic-list counterpart. Its length is stored at runtime, while
 assignment, parameters, and returns preserve the same conditional value
@@ -1290,12 +1292,11 @@ also provide `append(value_or_sequence)`, `prepend(value)`,
 `insert(index, value)`, `take(index)`, `take_first()`, `take_last()`, and
 `clear()`. The three `take` forms return the removed element.
 
-Insertion or replacement of a named non-copyable element requires `move`.
-`take` and `replace` transfer the removed element to their caller; `clear`
-destroys its elements from the last index to the first. A named non-copyable
-collection likewise requires `move` across assignment, argument, or return.
-Direct indexed access may inspect such an element through `@T`, but cannot copy
-it; extraction must use `take` or `replace`.
+Insertion and sequence append copy named values compositionally; `move` may
+still transfer a complete named source explicitly. `take` and `replace`
+transfer the removed element to their caller, while `clear` destroys its
+elements from the last index to the first. Direct indexed access and copied
+slices likewise create independent value copies.
 
 All receiver, index, and value expressions run exactly once in source order.
 An invalid index terminates before the root `var` is changed. Every operation
@@ -1306,9 +1307,8 @@ array or a list. Both bounds are mandatory; the start is included and the end
 excluded. Negative bounds are first made relative to `count()`, then each bound
 is clamped to `[0, count()]`. An empty list results whenever the normalized
 start is greater than or equal to the normalized end. Source, start, and end
-are evaluated once from left to right; the result is a copy, never a view. A
-copied slice is rejected when the element type is non-copyable; borrowed slices
-are defined separately as views.
+are evaluated once from left to right; the result is a copy, never a view.
+Borrowed slices are defined separately as views.
 
 `@collection[start:end]` creates a shared contiguous view `@T[..]`, while
 `&collection[start:end]` creates a mutable view `&T[..]`. A view borrows the
@@ -1334,7 +1334,7 @@ view additionally permits indexed writes, `for var`, and `swap`. A subview
 retains the original root and borrow mode.
 
 Views cannot resize or globally reorder their source, remove or transfer an
-element, or become owners. They are accepted only as lexical bindings and as
+element, or own storage. They are accepted only as lexical bindings and as
 provenance-qualified borrowed parameters or returns. They cannot be stored in
 structure or enum payloads, optionals, collections, statics, or captures. While
 a view is live, the usual shared-versus-exclusive borrowing rules protect its

@@ -101,7 +101,7 @@ test "transport dynamic protocol values through language containers" {
     try std.testing.expectEqualStrings("4 5\n7\n", output);
 }
 
-test "dynamic protocol values expose only requirements and require mutable copyable storage" {
+test "dynamic protocol values expose only requirements and require mutable storage" {
     try expectCompileError(
         "protocol Readable { func read() int } struct Number : Readable { func read() int { return 1 } func hidden() {} } func main() { var value:Readable = Number(); value.hidden() }",
         "structure 'Readable' has no method named 'hidden' accepting 0 arguments",
@@ -111,13 +111,27 @@ test "dynamic protocol values expose only requirements and require mutable copya
         "a binding that can reach a class reference must use 'var'",
     );
     try expectCompileError(
-        "protocol Readable { func read() int } struct Owner : Readable { drop {} func read() int { return 1 } } func main() { var value:Readable = Owner() }",
-        "a noncopyable structure cannot be erased into a dynamic protocol value",
-    );
-    try expectCompileError(
         "protocol Readable { func read() int } struct Number : Readable { func read() int { return 1 } } func inspect(value:@Readable) {} func main() {}",
         "dynamic protocol values cannot use '@' or '&'",
     );
+}
+
+test "dynamic protocol values copy structures with drop" {
+    const output = try run(
+        \\protocol Readable { func read() int }
+        \\struct Item : Readable {
+        \\    let value:int
+        \\    func read() int { return self.value }
+        \\    drop { print("drop ", self.value) }
+        \\}
+        \\func main() {
+        \\    var first:Readable = Item(value:3)
+        \\    var second = first
+        \\    print(first.read(), " ", second.read())
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("3 3\ndrop 3\ndrop 3\n", output);
 }
 
 test "dynamic protocol values retain one shared class identity until final drop" {
@@ -162,11 +176,13 @@ test "compose dynamic protocol values across module boundaries" {
         \\use Model
         \\func main() { var value:Api.Readable = Model.Number(value:9); print(value.read()) }
     });
-    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Api.sx", .data =
-        "public protocol Readable { func read() int }",
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Api.sx",
+        .data = "public protocol Readable { func read() int }",
     });
-    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Model.sx", .data =
-        "use Api; public struct Number : Api.Readable { public let value:int; public func read() int { return self.value } }",
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Model.sx",
+        .data = "use Api; public struct Number : Api.Readable { public let value:int; public func read() int { return self.value } }",
     });
     const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
     var compiler = Project.Compiler.init(allocator, std.testing.io);

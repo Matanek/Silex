@@ -78,7 +78,6 @@ pub fn analyzeInitializer(self: anytype, builder: anytype, call: Ast.Expression.
             });
             return self.fail(argument.position, message);
         }
-        try Resources.requireTransfer(self, argument, expected, "storing it in an enum");
         try Borrowing.requireOwned(self, value, argument.position, "stored in an enum");
         try values.append(self.allocator, value.value);
     }
