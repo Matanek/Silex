@@ -467,6 +467,33 @@ Class instances have automatic lifetime. The toolchain owns their runtime
 representation and exposes no pointer, handle, retain count, allocation, or
 manual release operation.
 
+Class fields, methods, and constructors are private by default. `public` makes
+a member available through the class API, `internal` limits it to its source
+file, and `protected` reserves it for the class and its descendants without
+making it public. Explicit `private` states the default. The enclosing class
+visibility always caps that of its members.
+
+```sx
+class Session {
+    let token:str
+
+    public init(token:str) {
+        self.token = token
+    }
+
+    public func text() str {
+        return self.token
+    }
+}
+```
+
+Declaring any `init` closes the named initializer completely. Class
+constructors use positional arguments, overloads, and trailing parameter
+defaults like structure constructors, have no return type, and return the
+completed `self` implicitly. Every immutable field must be initialized on all
+paths before `self` can escape. Without a custom constructor, callers may name
+only public fields; every hidden field they cannot provide must have a default.
+
 ## Associated enum values
 
 `enum` declares a nominal closed set of variants. A variant may carry zero or
@@ -1069,8 +1096,11 @@ program         = (use | enum | structure | class | function)* EOF ;
 use             = "public"? "use"
                   (qualified_identifier ("as" identifier)? | type "as" identifier) ;
 visibility      = "public" | "internal" ;
+member_visibility = "public" | "internal" | "protected" | "private" ;
 structure       = visibility? "struct" identifier type_parameters? "{" (structure_field | constructor | method | drop_definition)* "}" ;
-class           = visibility? "class" identifier "{" (structure_field | method)* "}" ;
+class           = visibility? "class" identifier "{" (class_field | constructor | class_method)* "}" ;
+class_field     = member_visibility? ("let" | "var") identifier ":" type ("=" field_default)? ;
+class_method    = member_visibility? "func" identifier type_parameters? "(" parameters? ")" return_type? block ;
 drop_definition = "drop" block ;
 enum            = visibility? "enum" identifier type_parameters? "{" enum_variant+ "}" ;
 enum_variant    = identifier ("(" type ("," type)* ")")? ;

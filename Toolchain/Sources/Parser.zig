@@ -105,20 +105,35 @@ pub const Parser = struct {
         var methods: std.ArrayList(Ast.Function) = .empty;
         var drop: ?Ast.Drop = null;
         while (self.current.tag != .right_brace and self.current.tag != .end) {
+            var member_public = !is_class;
             var member_internal = false;
+            var member_private = is_class;
+            var member_protected = false;
             var member_visibility = false;
-            if (self.current.tag == .keyword_public or self.current.tag == .keyword_internal) {
+            if (self.current.tag == .keyword_public or self.current.tag == .keyword_internal or
+                self.current.tag == .keyword_private or self.current.tag == .keyword_protected)
+            {
                 member_visibility = true;
+                member_public = self.current.tag == .keyword_public;
                 member_internal = self.current.tag == .keyword_internal;
+                member_private = self.current.tag == .keyword_private;
+                member_protected = self.current.tag == .keyword_protected;
+                if (!is_class and (member_private or member_protected)) return self.fail("structures only support public or internal members");
                 try self.advance();
             }
             if (self.current.tag == .keyword_init) {
-                if (is_class) return self.fail("custom class constructors are not supported yet");
-                try constructors.append(self.allocator, try self.parseConstructor(member_internal));
+                var constructor = try self.parseConstructor(member_internal);
+                constructor.is_public = member_public;
+                constructor.is_private = member_private;
+                constructor.is_protected = member_protected;
+                try constructors.append(self.allocator, constructor);
                 continue;
             }
             if (self.current.tag == .keyword_func) {
-                try methods.append(self.allocator, try self.parseFunction(!member_internal, member_internal));
+                var method = try self.parseFunction(member_public, member_internal);
+                method.is_private = member_private;
+                method.is_protected = member_protected;
+                try methods.append(self.allocator, method);
                 continue;
             }
             if (self.current.tag == .keyword_drop) {
@@ -151,8 +166,10 @@ pub const Parser = struct {
             }
             try self.expectStatementTerminator();
             try fields.append(self.allocator, .{
-                .is_public = !member_internal,
+                .is_public = member_public,
                 .is_internal = member_internal,
+                .is_private = member_private,
+                .is_protected = member_protected,
                 .position = field_position,
                 .name_position = field_name_position,
                 .name = field_name,

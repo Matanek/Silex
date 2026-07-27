@@ -9,6 +9,7 @@ const Collections = @import("Collections.zig");
 const Moves = @import("Moves.zig");
 const Borrowing = @import("Borrowing.zig");
 const Resources = @import("Resources.zig");
+const Visibility = @import("Visibility.zig");
 
 const PathStep = union(enum) {
     field: struct { base: Ir.ValueId, structure: usize, field: usize },
@@ -121,12 +122,11 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
         };
         const field = structure.fields[field_index];
         const source_field = source_structure.fields[field_index];
-        if (!Support.memberVisible(target_field.name_position, source_field.position, source_field.is_internal)) {
-            const message = try std.fmt.allocPrint(
-                self.allocator,
-                "field '{s}' is internal to its source file",
-                .{field.name},
-            );
+        if (!Visibility.memberVisible(self, structure_index, source_field, target_field.name_position)) {
+            const message = if (source_field.is_internal)
+                try std.fmt.allocPrint(self.allocator, "field '{s}' is internal to its source file", .{field.name})
+            else
+                try std.fmt.allocPrint(self.allocator, "field '{s}' is {s} and unavailable here", .{ field.name, Visibility.name(source_field) });
             return self.fail(target_field.name_position, message);
         }
         if (!field.mutable) {

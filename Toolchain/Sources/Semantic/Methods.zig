@@ -9,6 +9,7 @@ const Control = @import("Control.zig");
 const Borrowing = @import("Borrowing.zig");
 const MutableReferences = @import("MutableReferences.zig");
 const Resources = @import("Resources.zig");
+const Visibility = @import("Visibility.zig");
 
 const AnalyzeError = error{ InvalidSource, OutOfMemory };
 
@@ -85,6 +86,9 @@ pub fn extendStructures(
 }
 
 pub fn analyze(self: anytype, structure_index: usize, method_index: usize, source_method: Ast.Function) !Ir.Function {
+    const previous_context = self.member_context;
+    self.member_context = structure_index;
+    defer self.member_context = previous_context;
     var method = source_method;
     if (method.return_mode != .value and method.return_provenance == null) method.return_provenance = "self";
     const structure = self.program.structures[structure_index];
@@ -259,7 +263,7 @@ fn analyzeCallWithReceiver(
     var inaccessible_internal = false;
     for (structure.methods, 0..) |method, method_index| {
         if (!std.mem.eql(u8, method.name, call.name)) continue;
-        if (!Support.memberVisible(call.name_position, method.position, method.is_internal)) {
+        if (!Visibility.memberVisible(self, structure_index, method, call.name_position)) {
             inaccessible_internal = true;
             continue;
         }
@@ -299,7 +303,7 @@ fn analyzeCallWithReceiver(
     var ambiguous = false;
     for (structure.methods, 0..) |method, method_index| {
         if (!std.mem.eql(u8, method.name, call.name) or !Support.acceptsArity(method.parameters, arguments.items.len)) continue;
-        if (!Support.memberVisible(call.name_position, method.position, method.is_internal)) continue;
+        if (!Visibility.memberVisible(self, structure_index, method, call.name_position)) continue;
         var cost: usize = 0;
         var viable = true;
         for (method.parameters[0..arguments.items.len], arguments.items) |parameter, argument| {

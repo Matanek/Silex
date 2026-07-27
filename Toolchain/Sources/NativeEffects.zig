@@ -1071,8 +1071,10 @@ test "native class identity matches the reference interpreter" {
     const allocator = arena.allocator();
     const source =
         \\class Counter {
-        \\    public var value:int = 0
+        \\    private var value:int
+        \\    public init(start:int = 0) { self.value = start }
         \\    public func increment() { self.value++ }
+        \\    public func current() int { return self.value }
         \\}
         \\struct Holder { public var counter:Counter }
         \\func update(counter:Counter) Counter { counter.increment(); return counter }
@@ -1085,7 +1087,7 @@ test "native class identity matches the reference interpreter" {
         \\    holder.counter.increment()
         \\    var values:Counter[] = [first]
         \\    values[0].increment()
-        \\    print(first.value, " ", first == alias, " ", returned == holder.counter, " ", first != Counter())
+        \\    print(first.current(), " ", first == alias, " ", returned == holder.counter, " ", first != Counter())
         \\}
     ;
     var frontend = Frontend.Frontend.init(allocator);
