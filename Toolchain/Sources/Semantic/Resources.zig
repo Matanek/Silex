@@ -89,6 +89,7 @@ pub fn requireTransfer(self: anytype, expression: *const Ast.Expression, type_va
 }
 
 pub fn validateParameter(self: anytype, parameter: Ast.Parameter) !void {
+    if (isProtocolValue(self, parameter.type)) return self.fail(parameter.position, "dynamic protocol values are not supported yet");
     const direct_view = @import("Collections.zig").isViewType(self.structures, parameter.type);
     if (containsView(self, parameter.type) and (!direct_view or parameter.mode == .value)) {
         return self.fail(parameter.position, "a view parameter must use '@T[..]' or '&T[..]'");
@@ -99,6 +100,7 @@ pub fn validateParameter(self: anytype, parameter: Ast.Parameter) !void {
 }
 
 pub fn validateReturn(self: anytype, function: Ast.Function) !void {
+    if (isProtocolValue(self, function.return_type)) return self.fail(function.name_position, "dynamic protocol values are not supported yet");
     const direct_view = @import("Collections.zig").isViewType(self.structures, function.return_type);
     if (containsView(self, function.return_type) and (!direct_view or function.return_mode == .value)) {
         return self.fail(function.name_position, "a view return must use '@T[..]' or '&T[..]' and name compatible provenance");
@@ -106,9 +108,16 @@ pub fn validateReturn(self: anytype, function: Ast.Function) !void {
 }
 
 pub fn validateStoredType(self: anytype, type_value: Ast.Type, position: @import("../Source.zig").Position, context: []const u8) !void {
+    if (isProtocolValue(self, type_value)) return self.fail(position, "dynamic protocol values are not supported yet");
     if (!containsView(self, type_value)) return;
     const message = try std.fmt.allocPrint(self.allocator, "a borrowed view cannot be stored {s}", .{context});
     return self.fail(position, message);
+}
+
+fn isProtocolValue(self: anytype, type_value: Ast.Type) bool {
+    const child = type_value.optionalChild() orelse type_value;
+    const index = child.structureIndex() orelse return false;
+    return index < self.structures.len and self.structures[index].is_protocol;
 }
 
 fn containsView(self: anytype, type_value: Ast.Type) bool {
@@ -321,7 +330,10 @@ fn classDropFunctions(self: anytype, dynamic_type: usize) ![]const Ir.Instructio
 
 fn classFieldDropFunctionId(self: anytype, type_index: usize) Ir.FunctionId {
     var result = self.program.functions.len;
-    for (self.program.structures) |structure| result += structure.constructors.len + structure.methods.len;
+    for (self.program.structures) |structure| {
+        result += structure.constructors.len;
+        if (!structure.is_protocol) result += structure.methods.len;
+    }
     for (self.program.structures) |structure| {
         if (structure.drop != null) result += 1;
     }
@@ -428,7 +440,9 @@ fn dropFunctionId(self: anytype, type_value: Ast.Type) ?Ir.FunctionId {
     const name = self.structures[type_index].name;
     var result = self.program.functions.len;
     for (self.program.structures) |structure| result += structure.constructors.len;
-    for (self.program.structures) |structure| result += structure.methods.len;
+    for (self.program.structures) |structure| {
+        if (!structure.is_protocol) result += structure.methods.len;
+    }
     for (self.program.structures) |structure| {
         if (structure.drop != null) {
             if (std.mem.eql(u8, structure.name, name)) return result;

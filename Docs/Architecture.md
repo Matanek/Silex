@@ -70,6 +70,11 @@ open Silex document
   IR as ordinary distinct class identities with concrete bases, fields,
   methods, static storage and finalizers. Template bookkeeping and generated
   names remain compiler details rather than runtime or source APIs.
+- Protocol declarations keep a nominal identity through module composition,
+  aliases and reexports. Semantic analysis validates each explicitly declared
+  conformance against exact public instance signatures, including inherited
+  class methods and conformances. In this static-contract tranche protocols
+  add no runtime object, table, symbol or calling convention to portable IR.
 - Associated enums are portable nominal declarations whose variants carry
   typed positional values. Construction records the enum and variant by
   structured indices; module interfaces expose only the nominal identity and

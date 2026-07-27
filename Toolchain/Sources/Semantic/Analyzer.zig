@@ -25,6 +25,7 @@ const Visibility = @import("Visibility.zig");
 const Declarations = @import("Declarations.zig");
 const Inheritance = @import("Inheritance.zig");
 const StaticMembers = @import("StaticMembers.zig");
+const Protocols = @import("Protocols.zig");
 const GenericSyntax = @import("../Parser/Generics.zig");
 const Types = @import("../Types.zig");
 const Allocator = std.mem.Allocator;
@@ -62,6 +63,7 @@ pub const Analyzer = struct {
         self.method_mutability = try Methods.inferMutability(self.allocator, self.program);
         self.structures = try Methods.extendStructures(self.allocator, self.program, self.structures, self.method_mutability);
         try Inheritance.validateOverrides(self);
+        try Protocols.validate(self);
         try self.validateDeclarations(require_entry);
         try self.validateParameterDefaults();
         var functions: std.ArrayList(Ir.Function) = .empty;
@@ -69,6 +71,7 @@ pub const Analyzer = struct {
             try functions.append(self.allocator, try self.analyzeFunction(function_id, function));
         }
         for (program.structures, 0..) |structure, structure_index| {
+            if (structure.is_protocol) continue;
             for (structure.constructors, 0..) |constructor, constructor_index| {
                 try functions.append(
                     self.allocator,
@@ -77,6 +80,7 @@ pub const Analyzer = struct {
             }
         }
         for (program.structures, 0..) |structure, structure_index| {
+            if (structure.is_protocol) continue;
             for (structure.methods, 0..) |method, method_index| {
                 try functions.append(
                     self.allocator,
@@ -808,6 +812,7 @@ pub const Analyzer = struct {
     ) AnalyzeError!TypedValue {
         const structure = self.structures[structure_index];
         const declaration = self.findAstStructure(structure.name).?;
+        if (declaration.is_protocol) return self.fail(call.name_position, "protocols cannot be constructed");
         if (!Visibility.typeVisible(self, structure_index, call.name_position)) {
             return self.fail(call.name_position, "nested type is unavailable in this context");
         }

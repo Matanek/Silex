@@ -49,17 +49,18 @@ pub fn prepareStructures(self: anytype) ![]const Ir.Structure {
             .fields = fields,
             .is_class = declaration.is_class,
             .is_static = declaration.is_static,
-            .base = if (declaration.base) |base| base.structureIndex() else null,
+            .is_protocol = declaration.is_protocol,
+            .base = if (declaration.base) |base| if (isProtocolType(self, base)) null else base.structureIndex() else null,
             .collection = declaration.collection,
         };
     }
     self.structures = structures;
     const inheritance_states = try self.allocator.alloc(StructureState, structures.len);
     @memset(inheritance_states, .unseen);
-    for (structures, 0..) |structure, index| if (structure.is_class) {
+    for (structures, 0..) |structure, index| if (structure.is_class and !structure.is_protocol) {
         try validateInheritance(self, index, inheritance_states);
     };
-    for (self.program.structures) |structure| for (structure.fields) |field| {
+    for (self.program.structures) |structure| if (!structure.is_protocol) for (structure.fields) |field| {
         try Resources.validateStoredType(self, field.type, field.position, "in a structure field");
         if (!field.mutable and Resources.containsClass(self, field.type)) {
             return self.fail(field.name_position, "a field that can reach a class reference must use 'var'");
@@ -67,7 +68,7 @@ pub fn prepareStructures(self: anytype) ![]const Ir.Structure {
     };
     const states = try self.allocator.alloc(StructureState, structures.len);
     @memset(states, .unseen);
-    for (structures, 0..) |_, index| try validateStructureCycle(self, index, states);
+    for (structures, 0..) |structure, index| if (!structure.is_protocol) try validateStructureCycle(self, index, states);
 
     for (self.program.structures) |structure| for (structure.fields) |field| if (field.default) |default| {
         if (!Constructors.restrictedFieldDefault(self, default)) return self.fail(default.position, "field default must be a fundamental literal or structure aggregate");
@@ -95,7 +96,7 @@ fn validateInheritance(self: anytype, index: usize, states: []StructureState) !v
         .unseen => states[index] = .visiting,
     }
     const declaration = findAstStructure(self, self.structures[index].name) orelse return error.InvalidSource;
-    if (declaration.base != null and self.structures[index].base == null) {
+    if (declaration.base != null and self.structures[index].base == null and !isProtocolType(self, declaration.base.?)) {
         return self.fail(declaration.base_position, "a class base must be a non-optional class type");
     }
     if (self.structures[index].base) |base_index| {
@@ -147,4 +148,11 @@ fn validateStructureCycle(self: anytype, index: usize, states: []StructureState)
 fn findAstStructure(self: anytype, name: []const u8) ?@import("../Ast.zig").Structure {
     for (self.program.structures) |structure| if (std.mem.eql(u8, structure.name, name)) return structure;
     return null;
+}
+
+fn isProtocolType(self: anytype, type_value: @import("../Ast.zig").Type) bool {
+    const index = type_value.structureIndex() orelse return false;
+    if (index >= self.program.type_names.len) return false;
+    const declaration = findAstStructure(self, self.program.type_names[index]) orelse return false;
+    return declaration.is_protocol;
 }

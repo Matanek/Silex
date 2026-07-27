@@ -756,7 +756,10 @@ fn methodResultType(program: Ast.Program, mutating: []const bool, base_count: us
 fn methodFunctionId(program: Ast.Program, structure_index: usize, method_index: usize) Ir.FunctionId {
     var result = program.functions.len;
     for (program.structures) |structure| result += structure.constructors.len;
-    return result + flatMethodIndex(program, structure_index, method_index);
+    for (program.structures[0..structure_index]) |structure| if (!structure.is_protocol) {
+        result += structure.methods.len;
+    };
+    return result + method_index;
 }
 
 fn flatMethodIndex(program: Ast.Program, structure_index: usize, method_index: usize) usize {

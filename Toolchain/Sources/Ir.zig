@@ -406,6 +406,7 @@ pub const Structure = struct {
     fields: []const StructureField,
     is_class: bool = false,
     is_static: bool = false,
+    is_protocol: bool = false,
     base: ?usize = null,
     collection: ?Types.Collection = null,
 };
@@ -447,7 +448,7 @@ pub fn writeText(allocator: Allocator, program: Program) Error![]u8 {
     var output: std.ArrayList(u8) = .empty;
     for (program.structures, 0..) |structure, structure_index| {
         if (structure_index != 0) try output.append(allocator, '\n');
-        try output.appendSlice(allocator, "struct @");
+        try output.appendSlice(allocator, if (structure.is_protocol) "protocol @" else "struct @");
         try output.appendSlice(allocator, structure.name);
         try output.appendSlice(allocator, " {\n");
         for (structure.fields) |field| {

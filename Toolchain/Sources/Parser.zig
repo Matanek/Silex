@@ -11,6 +11,7 @@ const Collections = @import("Parser/Collections.zig");
 const Iterations = @import("Parser/Iterations.zig");
 const TypeSyntax = @import("Parser/TypeSyntax.zig");
 const Nominals = @import("Parser/Nominals.zig");
+const Protocols = @import("Parser/Protocols.zig");
 
 const Allocator = std.mem.Allocator;
 const Token = LexerModule.Token;
@@ -52,6 +53,7 @@ pub const Parser = struct {
                 .keyword_struct => try structures.append(self.allocator, try Nominals.parse(self, false, false, false)),
                 .keyword_class => try structures.append(self.allocator, try Nominals.parse(self, false, false, true)),
                 .keyword_static => try structures.append(self.allocator, try Nominals.parseStaticClass(self, false, false)),
+                .keyword_protocol => try structures.append(self.allocator, try Protocols.parse(self, false, false)),
                 .keyword_enum => try enums.append(self.allocator, try EnumParser.parse(self, false, false)),
                 .keyword_func => try functions.append(self.allocator, try self.parseFunction(false, false)),
                 .keyword_public => {
@@ -62,8 +64,9 @@ pub const Parser = struct {
                         .keyword_class => try structures.append(self.allocator, try Nominals.parse(self, true, false, true)),
                         .keyword_static => try structures.append(self.allocator, try Nominals.parseStaticClass(self, true, false)),
                         .keyword_enum => try enums.append(self.allocator, try EnumParser.parse(self, true, false)),
+                        .keyword_protocol => try structures.append(self.allocator, try Protocols.parse(self, true, false)),
                         .keyword_func => try functions.append(self.allocator, try self.parseFunction(true, false)),
-                        else => return self.fail("expected use, enum, struct, class, or function declaration after 'public'"),
+                        else => return self.fail("expected use, enum, struct, class, protocol, or function declaration after 'public'"),
                     }
                 },
                 .keyword_internal => {
@@ -73,11 +76,12 @@ pub const Parser = struct {
                         .keyword_class => try structures.append(self.allocator, try Nominals.parse(self, false, true, true)),
                         .keyword_static => try structures.append(self.allocator, try Nominals.parseStaticClass(self, false, true)),
                         .keyword_enum => try enums.append(self.allocator, try EnumParser.parse(self, false, true)),
+                        .keyword_protocol => try structures.append(self.allocator, try Protocols.parse(self, false, true)),
                         .keyword_func => try functions.append(self.allocator, try self.parseFunction(false, true)),
-                        else => return self.fail("expected enum, struct, class, or function declaration after 'internal'"),
+                        else => return self.fail("expected enum, struct, class, protocol, or function declaration after 'internal'"),
                     }
                 },
-                else => return self.fail("expected use, enum, struct, class, or function declaration"),
+                else => return self.fail("expected use, enum, struct, class, protocol, or function declaration"),
             }
         }
         try structures.appendSlice(self.allocator, self.nested_structures.items);

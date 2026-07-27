@@ -48,13 +48,21 @@ fn parseType(
     self.nominal_prefix = name;
     defer self.nominal_prefix = previous_prefix;
     var base: ?Ast.Type = null;
+    var conformances: std.ArrayList(Ast.Type) = .empty;
     var base_position = name_position;
     if (self.current.tag == .colon) {
         if (is_static_class) return self.fail("static classes cannot declare a base");
-        if (!is_class) return self.fail("only classes can declare a base class");
         try self.advance();
-        base_position = self.current.position;
-        base = try self.parseType();
+        while (true) {
+            const relation_position = self.current.position;
+            const relation = try self.parseType();
+            if (is_class and base == null) {
+                base = relation;
+                base_position = relation_position;
+            } else try conformances.append(self.allocator, relation);
+            if (self.current.tag != .comma) break;
+            try self.advance();
+        }
     }
     try self.expect(.left_brace, "expected '{' after type declaration");
     var fields: std.ArrayList(Ast.StructureField) = .empty;
@@ -214,6 +222,7 @@ fn parseType(
         .name = name,
         .base = base,
         .base_position = base_position,
+        .conformances = try conformances.toOwnedSlice(self.allocator),
         .type_parameters = type_parameters,
         .fields = try fields.toOwnedSlice(self.allocator),
         .static_fields = try static_fields.toOwnedSlice(self.allocator),

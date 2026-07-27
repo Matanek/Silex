@@ -925,6 +925,11 @@ pub const Compiler = struct {
                     composed_structure.enclosing = try structureCanonicalName(self.allocator, provider.name, enclosing);
                 }
                 if (structure.base) |base| composed_structure.base = GenericTypes.remap(base, type_map, generic_map);
+                const conformances = try self.allocator.alloc(Ast.Type, structure.conformances.len);
+                for (structure.conformances, 0..) |conformance, index| {
+                    conformances[index] = GenericTypes.remap(conformance, type_map, generic_map);
+                }
+                composed_structure.conformances = conformances;
                 if (structure.collection) |collection| composed_structure.collection = .{
                     .element = GenericTypes.remap(collection.element, type_map, generic_map),
                     .length = collection.length,

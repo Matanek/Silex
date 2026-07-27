@@ -90,7 +90,11 @@ pub fn itemsAt(
                 allocator,
                 &candidates,
                 context,
-                .{ .label = structure.name, .kind = CompletionKind.structure, .detail = "Silex structure" },
+                .{
+                    .label = structure.name,
+                    .kind = CompletionKind.structure,
+                    .detail = if (structure.is_protocol) "Silex protocol" else "Silex structure",
+                },
                 8,
                 false,
             );
@@ -111,6 +115,7 @@ pub fn itemsAt(
             .{ "public", "Silex visibility" },
             .{ "internal", "Silex file visibility" },
             .{ "struct", "Silex value type declaration" },
+            .{ "protocol", "Silex nominal contract declaration" },
             .{ "func", "Silex function declaration" },
         }, 70),
         .structure_declaration => try appendKeywords(allocator, &candidates, context, &.{
@@ -531,6 +536,7 @@ fn appendExpressionSymbols(
         }, typedPriority(25, expected_type, typeName(program, function.return_type)), true);
     }
     for (program.structures) |structure| {
+        if (structure.is_protocol) continue;
         if (structure.constructors.len == 0) {
             try appendCandidate(allocator, candidates, context, .{
                 .label = structure.name,
