@@ -157,3 +157,97 @@ test "diagnose two extension providers visible in the same use closure" {
     try std.testing.expect(std.mem.indexOf(u8, compiler.diagnostic.?.message, "First") != null);
     try std.testing.expect(std.mem.indexOf(u8, compiler.diagnostic.?.message, "Second") != null);
 }
+
+test "specialize inferred explicit constrained and nested generic extension methods" {
+    const output = try run(
+        \\protocol Named { func name() str }
+        \\struct Item : Named { func name() str { return "item" } }
+        \\struct Adapter {}
+        \\extend Adapter {
+        \\    func identity<T>(value:T) T { return value }
+        \\    func nested<T>(value:T) T { return self.identity<T>(value) }
+        \\    func label<T:Named>(value:T) str { return value.name() }
+        \\    static func make<T>(value:T) T { return value }
+        \\}
+        \\func main() {
+        \\    let adapter = Adapter()
+        \\    print(adapter.identity(20), " ", adapter.identity<int>(22))
+        \\    print(adapter.nested("nested"), " ", adapter.label(Item()))
+        \\    print(Adapter.make(42))
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("20 22\nnested item\n42\n", output);
+}
+
+test "generic extension methods preserve borrowed view and self provenance" {
+    const output = try run(
+        \\struct Adapter {}
+        \\extend Adapter {
+        \\    func identity<T>(values:@T[..]) @values:T[..] { return values }
+        \\    func keep<T>(marker:T) @Adapter { return self }
+        \\}
+        \\func main() {
+        \\    let adapter = Adapter()
+        \\    let values = [4, 5]
+        \\    let view = adapter.identity(@values[0:2])
+        \\    let same = adapter.keep(1)
+        \\    print(view[1], " ", same == adapter)
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("5 true\n", output);
+}
+
+test "prefer a concrete extension overload and diagnose generic extension failures" {
+    const output = try run(
+        \\struct Adapter {}
+        \\extend Adapter {
+        \\    func select(value:int) int { return 100 }
+        \\    func select<T>(value:T) T { return value }
+        \\}
+        \\func main() { let adapter = Adapter(); print(adapter.select(1), " ", adapter.select("generic")) }
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("100 generic\n", output);
+    try expectCompileError(
+        "struct Adapter {} extend Adapter { func create<T>() int { return 1 } } func main() { Adapter().create() }",
+        "generic method 'create' cannot infer all type arguments; use explicit '<...>'",
+    );
+    try expectCompileError(
+        "struct Adapter {} extend Adapter { func choose<T>(left:@T, right:@T) @T { return left } } func main() { let value = 1; Adapter().choose(value, value) }",
+        "borrowed method return provenance is ambiguous; qualify it with 'self' or a parameter name",
+    );
+    try expectCompileError(
+        "protocol Named { func name() str } struct Item : Named {} extend Item { func name<T>() str { return \"item\" } } func main() {}",
+        "type 'Item' does not implement protocol requirement 'Named.name'",
+    );
+    try expectCompileError(
+        "protocol Named { func name() str } struct Item {} struct Adapter {} extend Adapter { func label<T:Named>(value:T) str { return value.name() } } func main() { Adapter().label(Item()) }",
+        "type 'Item' does not conform to protocol 'Named' required by 'T'",
+    );
+    try expectCompileError(
+        "struct Adapter {} extend Adapter { func identity<T>(value:T) T { return value } } extend Adapter { func identity<U>(value:U) U { return value } } func main() {}",
+        "extension method 'identity' from '<source>' conflicts with '<source>' on type 'Adapter'",
+    );
+}
+
+test "activate generic extension specializations through use" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data =
+        "use Core; use Algorithms; func main() { let value = Core.Adapter(); print(value.identity(42), value.identity<int>(1)) }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Core.sx", .data = "public struct Adapter {}" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Algorithms.sx", .data =
+        "use Core; extend Core.Adapter { public func identity<T>(value:T) T { return value } }",
+    });
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(input);
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("421\n", result.stdout);
+}

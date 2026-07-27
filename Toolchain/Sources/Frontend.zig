@@ -32,7 +32,7 @@ pub const Frontend = struct {
         };
         ast = try Result.install(self.allocator, ast);
         var extensions = Extensions.Merger.init(self.allocator);
-        ast = extensions.merge(ast, false, false) catch |err| {
+        ast = extensions.merge(ast, true, false) catch |err| {
             self.diagnostic = extensions.diagnostic;
             return err;
         };
@@ -59,7 +59,7 @@ pub const Frontend = struct {
         if (ast.uses.len != 0) return;
         ast = try Result.install(self.allocator, ast);
         var extensions = Extensions.Merger.init(self.allocator);
-        ast = extensions.merge(ast, false, false) catch |err| {
+        ast = extensions.merge(ast, true, false) catch |err| {
             self.diagnostic = extensions.diagnostic;
             return err;
         };

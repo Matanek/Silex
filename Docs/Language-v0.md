@@ -670,6 +670,19 @@ field, constructor, `drop`, `override` or protected member, and cannot target
 an enum, protocol, scalar, collection, static class, generic declaration or
 generic specialization.
 
+An extension method may declare type parameters when its target is
+non-generic. Inference, explicit type arguments, protocol constraints and the
+priority of an applicable concrete overload follow ordinary generic-method
+rules. Each specialization is identified by its target, method, declaring
+module and concrete arguments; two extension providers therefore never share
+an accidental specialization. A generic extension method cannot implement a
+protocol requirement.
+
+For a borrowed return without an explicit provenance name, the compiler uses
+the sole compatible ordinary parameter, or `self` when none exists. More than
+one compatible parameter is ambiguous and must be qualified in the return
+annotation.
+
 An extension has external-caller access to its target. It can additionally use
 an `internal` member when both declarations share a source file, but never a
 private or protected member. An unmarked structure extension method is public;

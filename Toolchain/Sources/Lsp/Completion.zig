@@ -885,7 +885,7 @@ fn parseForCompletion(
 
 fn mergeExtensionsForCompletion(allocator: Allocator, program: Ast.Program) ?Ast.Program {
     var merger = ExtensionMerger.Merger.init(allocator);
-    return merger.merge(program, false, false) catch program;
+    return merger.merge(program, true, false) catch program;
 }
 
 pub fn functionSignature(
