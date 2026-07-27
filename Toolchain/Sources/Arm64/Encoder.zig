@@ -6,6 +6,7 @@ const Fixups = @import("Fixups.zig");
 const StringRuntime = @import("StringRuntime.zig");
 const ListRuntime = @import("ListRuntime.zig");
 const ClassRuntime = @import("ClassRuntime.zig");
+const ProtocolRuntime = @import("ProtocolRuntime.zig");
 const TextRuntime = @import("TextRuntime.zig");
 const FloatRuntime = @import("FloatRuntime.zig");
 const Register = A64.Register;
@@ -344,6 +345,9 @@ fn encodeFunction(
                     destination_offset += field.width;
                 }
             },
+            .protocol_init => |value| try ProtocolRuntime.emitInit(allocator, words, value),
+            .protocol_test => |value| try ProtocolRuntime.emitTest(allocator, words, value),
+            .protocol_extract => |value| try ProtocolRuntime.emitExtract(allocator, words, value),
             .class_init => |initialization| try ClassRuntime.emitInit(allocator, words, &fixups.epilogue, initialization),
             .class_load => |load| try ClassRuntime.emitLoad(allocator, words, load),
             .class_store => |store| try ClassRuntime.emitStore(allocator, words, store),

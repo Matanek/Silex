@@ -1081,6 +1081,27 @@ test "complete an instance with only its own members" {
     try std.testing.expect(!contains(items, "ignore"));
 }
 
+test "complete a dynamic protocol value with only its requirements" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source =
+        \\protocol Drawable { func draw(); func label() str }
+        \\struct Sprite : Drawable {
+        \\    func draw() {}
+        \\    func label() str { return "sprite" }
+        \\    func hidden() {}
+        \\}
+        \\func main() {
+        \\    var value:Drawable = Sprite()
+        \\    value.draw()
+        \\}
+    ;
+    const cursor = std.mem.indexOf(u8, source, "value.draw").? + "value.dr".len;
+    const items = try itemsAt(arena.allocator(), source, cursor, .trigger_character);
+    try std.testing.expect(contains(items, "draw"));
+    try std.testing.expect(!contains(items, "hidden"));
+}
+
 test "complete direct nested types from their declaring owner" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

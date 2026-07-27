@@ -622,10 +622,28 @@ the valid conformances declared by its base.
 
 Protocols follow ordinary private, `internal`, `public use`, alias and reexport
 rules. They are not generic and do not inherit. Requirements cannot be static
-or generic and declare neither fields, constructors, defaults nor bodies. A
-protocol is only a compile-time nominal contract in this tranche: using its
-name as a stored, parameter or return value is rejected until dynamic protocol
-values are introduced.
+or generic and declare neither fields, constructors, defaults nor bodies.
+
+The protocol name is also a dynamic value type. A conforming value converts to
+it implicitly and exposes only the declared requirements:
+
+```sx
+var drawable:Drawable = Sprite()
+drawable.draw()
+```
+
+Erasing a structure stores an independent copy; erasing a class preserves its
+shared identity. Calls through a protocol value are conservatively mutating,
+so the receiver must be writable even when the currently stored implementation
+does not change its state. A protocol value therefore uses `var`, directly or
+inside an ordinary aggregate. An immutable local collection may nevertheless
+store protocol values. Parameters and returns transport protocol values by
+value, as do fields, optionals and collections.
+
+A noncopyable structure may satisfy a generic protocol constraint but cannot
+be erased into this copyable dynamic representation. Dynamic protocol values
+have no `any` marker or downcast, and cannot use general `@Protocol` or
+`&Protocol` references.
 
 ## Nested nominal types
 

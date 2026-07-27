@@ -15,6 +15,7 @@ pub const Value = union(enum) {
     string: []const u8,
     structure: Structure,
     class: Class,
+    protocol: Protocol,
     view: View,
     enumeration: *const Enumeration,
     optional: Optional,
@@ -49,6 +50,11 @@ pub const Value = union(enum) {
         instance: *Structure,
     };
 
+    pub const Protocol = struct {
+        type: Ir.Type,
+        concrete: *const Value,
+    };
+
     pub const View = struct {
         type: Ir.Type,
         fields: []Value,
@@ -77,6 +83,7 @@ pub const Value = union(enum) {
             .string => .str,
             .structure => |value| value.type,
             .class => |value| value.static_type,
+            .protocol => |value| value.type,
             .view => |value| value.type,
             .enumeration => |value| value.type,
             .optional => |value| value.type,
@@ -93,6 +100,11 @@ pub fn clone(allocator: Allocator, value: Value) Error!Value {
             break :cloned .{ .structure = .{ .type = aggregate.type, .fields = fields } };
         },
         .class, .view => value,
+        .protocol => |protocol| cloned: {
+            const concrete = try allocator.create(Value);
+            concrete.* = try clone(allocator, protocol.concrete.*);
+            break :cloned .{ .protocol = .{ .type = protocol.type, .concrete = concrete } };
+        },
         .enumeration => |enumeration| cloned: {
             const values = try allocator.alloc(Value, enumeration.values.len);
             for (enumeration.values, 0..) |item, index| values[index] = try clone(allocator, item);
@@ -134,6 +146,7 @@ pub fn equal(left: Value, right: Value) Error!bool {
             break :structure true;
         },
         .class => |instance| instance.instance == right.class.instance,
+        .protocol => error.InvalidProgram,
         .optional => |optional| optional_value: {
             if ((optional.value == null) != (right.optional.value == null)) break :optional_value false;
             if (optional.value) |payload| break :optional_value try equal(payload.*, right.optional.value.?.*);

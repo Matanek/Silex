@@ -70,6 +70,9 @@ pub const Instruction = union(enum) {
     reference_store: ReferenceStore,
     reference_offset: ReferenceOffset,
     aggregate_init: AggregateInit,
+    protocol_init: ProtocolInit,
+    protocol_test: ProtocolTest,
+    protocol_extract: ProtocolExtract,
     class_init: ClassInit,
     class_load: ClassLoad,
     class_store: ClassStore,
@@ -178,6 +181,24 @@ pub const Instruction = union(enum) {
     pub const AggregateInit = struct {
         result: Span,
         fields: []const Span,
+    };
+
+    pub const ProtocolInit = struct {
+        result: Span,
+        operand: Span,
+        structure: u64,
+        class_operand: bool,
+    };
+
+    pub const ProtocolTest = struct {
+        result: Slot,
+        operand: Slot,
+        structure: u64,
+    };
+
+    pub const ProtocolExtract = struct {
+        result: Span,
+        operand: Span,
     };
 
     pub const ClassInit = struct {
@@ -502,6 +523,24 @@ pub fn validate(program: Program) Error!void {
                     width += field.width;
                 }
                 if (width != value.result.width or !value.result.aggregate) return error.InvalidMachineProgram;
+            },
+            .protocol_init => |value| {
+                try requireSpan(function, value.result);
+                try requireSpan(function, value.operand);
+                if (!value.result.aggregate or value.result.width == 0 or value.operand.width + 1 > value.result.width) {
+                    return error.InvalidMachineProgram;
+                }
+            },
+            .protocol_test => |value| {
+                try requireSlot(function, value.result);
+                try requireSlot(function, value.operand);
+            },
+            .protocol_extract => |value| {
+                try requireSpan(function, value.result);
+                try requireSpan(function, value.operand);
+                if (!value.operand.aggregate or value.operand.width == 0 or value.result.width + 1 > value.operand.width) {
+                    return error.InvalidMachineProgram;
+                }
             },
             .class_init => |value| {
                 try requireSlot(function, value.result);

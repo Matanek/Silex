@@ -1,4 +1,5 @@
 const std = @import("std");
+const Ast = @import("../Ast.zig");
 const Ir = @import("../Ir.zig");
 const Model = @import("Model.zig");
 const Enums = @import("Enums.zig");
@@ -50,6 +51,7 @@ pub fn prepareStructures(self: anytype) ![]const Ir.Structure {
             .is_class = declaration.is_class,
             .is_static = declaration.is_static,
             .is_protocol = declaration.is_protocol,
+            .conformances = try resolvedConformances(self, declaration),
             .base = if (declaration.base) |base| if (isProtocolType(self, base)) null else base.structureIndex() else null,
             .collection = declaration.collection,
         };
@@ -84,6 +86,17 @@ pub fn prepareStructures(self: anytype) ![]const Ir.Structure {
         }
     };
     return structures;
+}
+
+fn resolvedConformances(self: anytype, declaration: Ast.Structure) ![]const usize {
+    var result: std.ArrayList(usize) = .empty;
+    if (declaration.base) |relation| if (isProtocolType(self, relation)) {
+        try result.append(self.allocator, relation.structureIndex().?);
+    };
+    for (declaration.conformances) |relation| if (isProtocolType(self, relation)) {
+        try result.append(self.allocator, relation.structureIndex().?);
+    };
+    return result.toOwnedSlice(self.allocator);
 }
 
 fn validateInheritance(self: anytype, index: usize, states: []StructureState) !void {

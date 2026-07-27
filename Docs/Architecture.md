@@ -73,13 +73,16 @@ open Silex document
 - Protocol declarations keep a nominal identity through module composition,
   aliases and reexports. Semantic analysis validates each explicitly declared
   conformance against exact public instance signatures, including inherited
-  class methods and conformances. In this static-contract tranche protocols
-  add no runtime object, table, symbol or calling convention to portable IR.
+  class methods and conformances. Dynamic protocol values lower to explicit
+  typed erasure, discriminant tests and payload extraction in portable IR.
+  Their closed-program discriminant and inline payload layout remain private to
+  target lowering; no witness table, machine address or calling convention is
+  exposed in source.
 - A generic parameter may carry one protocol identity through parsing, module
   activation and public interfaces. Specialization validates the selected
   concrete type's nominal or inherited conformance before rewriting the body;
-  requirement calls then resolve as ordinary concrete method calls. No
-  constraint metadata or protocol dispatch survives into runtime lowering.
+  requirement calls then resolve as ordinary concrete method calls. Static
+  generic constraints therefore add no runtime dispatch or representation.
 - Associated enums are portable nominal declarations whose variants carry
   typed positional values. Construction records the enum and variant by
   structured indices; module interfaces expose only the nominal identity and

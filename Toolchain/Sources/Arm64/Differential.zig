@@ -31,6 +31,7 @@ fn compare(
             .string => return error.UnsupportedType,
             .structure => return error.UnsupportedType,
             .class => return error.UnsupportedType,
+            .protocol => return error.UnsupportedType,
             .view => return error.UnsupportedType,
             .enumeration => return error.UnsupportedType,
             .optional => return error.UnsupportedType,
@@ -70,6 +71,7 @@ fn compare(
         .string => return error.UnsupportedType,
         .structure => return error.UnsupportedType,
         .class => return error.UnsupportedType,
+        .protocol => return error.UnsupportedType,
         .view => return error.UnsupportedType,
         .enumeration => return error.UnsupportedType,
         .optional => return error.UnsupportedType,
@@ -386,6 +388,33 @@ test "native ARM64 agrees on method receiver mutation returns and chaining" {
     const machine = try Lower.lower(allocator, compilation.ir);
     try compare(allocator, compilation.ir, machine, "mutate", &.{});
     try compare(allocator, compilation.ir, machine, "chained", &.{});
+}
+
+test "native ARM64 agrees on dynamic protocol erasure and mutation" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\protocol Counter { func advance() int }
+        \\struct Step : Counter { var value:int; func advance() int { self.value++; return self.value } }
+        \\class Shared : Counter {
+        \\    public var value:int = 10
+        \\    public func advance() int { self.value++; return self.value }
+        \\}
+        \\func structural() int { var value:Counter = Step(value:4); return value.advance() }
+        \\func shared() int {
+        \\    var concrete = Shared()
+        \\    var value:Counter = concrete
+        \\    value.advance()
+        \\    return concrete.value
+        \\}
+        \\func main() {}
+    );
+    const machine = try Lower.lower(allocator, compilation.ir);
+    try compare(allocator, compilation.ir, machine, "structural", &.{});
+    try compare(allocator, compilation.ir, machine, "shared", &.{});
 }
 
 test "native ARM64 agrees on omitted function constructor and method arguments" {
