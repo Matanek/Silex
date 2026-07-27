@@ -158,9 +158,39 @@ pub fn analyzeDrop(self: anytype, structure_index: usize, declaration: Ast.Struc
     };
 }
 
+pub fn analyzeClassFields(self: anytype, structure_index: usize, declaration: Ast.Structure) !Ir.Function {
+    const structure_type = Ast.Type.structure(structure_index);
+    var builder: Model.FunctionBuilder = .{ .return_type = .void };
+    try builder.blocks.append(self.allocator, .{});
+    try builder.value_types.append(self.allocator, structure_type);
+    var field_index = self.structures[structure_index].fields.len;
+    while (field_index > 0) {
+        field_index -= 1;
+        const field = self.structures[structure_index].fields[field_index];
+        if (!isNoncopyable(self, field.type) and !containsClass(self, field.type)) continue;
+        const field_value = try self.newValue(&builder, field.type);
+        try self.emit(&builder, .{ .field_load = .{ .result = field_value, .base = 0, .field = field_index } });
+        try emitDrop(self, &builder, field.type, field_value);
+    }
+    self.terminate(&builder, .return_void);
+    const blocks = try self.allocator.alloc(Ir.Block, builder.blocks.items.len);
+    for (builder.blocks.items, 0..) |*block, block_index| blocks[block_index] = .{
+        .instructions = try block.instructions.toOwnedSlice(self.allocator),
+        .terminator = block.terminator orelse return error.InvalidSource,
+    };
+    return .{
+        .name = try std.fmt.allocPrint(self.allocator, "{s}.$fields", .{declaration.name}),
+        .parameter_types = try self.allocator.dupe(Ast.Type, &.{structure_type}),
+        .return_type = .void,
+        .value_types = try builder.value_types.toOwnedSlice(self.allocator),
+        .local_types = try builder.local_types.toOwnedSlice(self.allocator),
+        .blocks = blocks,
+    };
+}
+
 pub fn emitDrop(self: anytype, builder: anytype, type_value: Ast.Type, value: Ir.ValueId) AnalyzeError!void {
     if (type_value.optionalChild()) |child| {
-        if (!isNoncopyable(self, child)) return;
+        if (!isNoncopyable(self, child) and !containsClass(self, child)) return;
         const absent = try self.newValue(builder, type_value);
         try self.emit(builder, .{ .optional_null = .{ .result = absent } });
         const present = try self.newValue(builder, .bool);
@@ -178,7 +208,13 @@ pub fn emitDrop(self: anytype, builder: anytype, type_value: Ast.Type, value: Ir
     }
     const type_index = type_value.structureIndex() orelse return;
     if (type_index >= self.structures.len) return;
-    if (self.structures[type_index].is_class) return;
+    if (self.structures[type_index].is_class) {
+        try self.emit(builder, .{ .class_drop = .{
+            .operand = value,
+            .plans = try classDropPlans(self, type_index),
+        } });
+        return;
+    }
     if (enumIndex(self, type_index)) |enumeration_index| {
         try emitEnumDrop(self, builder, enumeration_index, value);
         return;
@@ -197,7 +233,7 @@ pub fn emitDrop(self: anytype, builder: anytype, type_value: Ast.Type, value: Ir
     while (field_index > 0) {
         field_index -= 1;
         const field = self.structures[type_index].fields[field_index];
-        if (!isNoncopyable(self, field.type)) continue;
+        if (!isNoncopyable(self, field.type) and !containsClass(self, field.type)) continue;
         const field_value = try self.newValue(builder, field.type);
         try self.emit(builder, .{ .field_load = .{ .result = field_value, .base = value, .field = field_index } });
         try emitDrop(self, builder, field.type, field_value);
@@ -210,7 +246,8 @@ pub fn emitActiveDrops(self: anytype, builder: anytype, first_binding: usize) !v
         index -= 1;
         const binding = builder.bindings.items[index];
         if (!binding.available or binding.borrowed_root != null or binding.parameter_mode != .value or
-            std.mem.eql(u8, binding.name, "self") or !isNoncopyable(self, binding.type)) continue;
+            std.mem.eql(u8, binding.name, "self") or
+            (!isNoncopyable(self, binding.type) and !containsClass(self, binding.type))) continue;
         const value = if (binding.local) |local| value: {
             const loaded = try self.newValue(builder, binding.type);
             try self.emit(builder, .{ .local_load = .{ .result = loaded, .local = local } });
@@ -220,12 +257,88 @@ pub fn emitActiveDrops(self: anytype, builder: anytype, first_binding: usize) !v
     }
 }
 
+pub fn retainValue(self: anytype, builder: anytype, type_value: Ast.Type, value: Ir.ValueId) AnalyzeError!void {
+    if (type_value.optionalChild()) |child| {
+        if (!containsClass(self, child)) return;
+        const absent = try self.newValue(builder, type_value);
+        try self.emit(builder, .{ .optional_null = .{ .result = absent } });
+        const present = try self.newValue(builder, .bool);
+        try self.emit(builder, .{ .binary = .{ .result = present, .operator = .not_equal, .left = value, .right = absent } });
+        const retain_block = try self.newBlock(builder);
+        const merge_block = try self.newBlock(builder);
+        self.terminate(builder, .{ .branch = .{ .condition = present, .then_block = retain_block, .else_block = merge_block } });
+        builder.current_block = retain_block;
+        const payload = try self.newValue(builder, child);
+        try self.emit(builder, .{ .optional_unwrap = .{ .result = payload, .operand = value } });
+        try retainValue(self, builder, child, payload);
+        self.terminate(builder, .{ .jump = merge_block });
+        builder.current_block = merge_block;
+        return;
+    }
+    const type_index = type_value.structureIndex() orelse return;
+    if (type_index >= self.structures.len) return;
+    if (self.structures[type_index].is_class) {
+        try self.emit(builder, .{ .class_retain = .{ .operand = value } });
+        return;
+    }
+    if (self.structures[type_index].collection != null) return;
+    for (self.structures[type_index].fields, 0..) |field, field_index| {
+        if (!containsClass(self, field.type)) continue;
+        const field_value = try self.newValue(builder, field.type);
+        try self.emit(builder, .{ .field_load = .{ .result = field_value, .base = value, .field = field_index } });
+        try retainValue(self, builder, field.type, field_value);
+    }
+}
+
+fn classDropPlans(self: anytype, static_type: usize) ![]const Ir.Instruction.ClassDrop.Plan {
+    var plans: std.ArrayList(Ir.Instruction.ClassDrop.Plan) = .empty;
+    for (self.structures, 0..) |structure, candidate| {
+        if (!structure.is_class or structure.is_static or
+            (candidate != static_type and !@import("Inheritance.zig").isDescendant(self, candidate, static_type))) continue;
+        try plans.append(self.allocator, .{
+            .structure = candidate,
+            .functions = try classDropFunctions(self, candidate),
+        });
+    }
+    return plans.toOwnedSlice(self.allocator);
+}
+
+fn classDropFunctions(self: anytype, dynamic_type: usize) ![]const Ir.Instruction.ClassDrop.Finalizer {
+    var functions: std.ArrayList(Ir.Instruction.ClassDrop.Finalizer) = .empty;
+    var current: ?usize = dynamic_type;
+    while (current) |structure_index| : (current = self.structures[structure_index].base) {
+        if (dropFunctionId(self, .structure(structure_index))) |function| try functions.append(self.allocator, .{
+            .structure = structure_index,
+            .function = function,
+        });
+    }
+    try functions.append(self.allocator, .{
+        .structure = dynamic_type,
+        .function = classFieldDropFunctionId(self, dynamic_type),
+    });
+    return functions.toOwnedSlice(self.allocator);
+}
+
+fn classFieldDropFunctionId(self: anytype, type_index: usize) Ir.FunctionId {
+    var result = self.program.functions.len;
+    for (self.program.structures) |structure| result += structure.constructors.len + structure.methods.len;
+    for (self.program.structures) |structure| {
+        if (structure.drop != null) result += 1;
+    }
+    for (self.program.structures) |structure| {
+        if (!structure.is_class or structure.is_static) continue;
+        if (std.mem.eql(u8, structure.name, self.structures[type_index].name)) return result;
+        result += 1;
+    }
+    unreachable;
+}
+
 fn emitEnumDrop(self: anytype, builder: anytype, enumeration_index: usize, value: Ir.ValueId) AnalyzeError!void {
     const enumeration = self.enums[enumeration_index];
     const merge_block = try self.newBlock(builder);
     for (enumeration.variants, 0..) |variant, variant_index| {
         var needs_drop = false;
-        for (variant.associated_types) |payload_type| if (isNoncopyable(self, payload_type)) {
+        for (variant.associated_types) |payload_type| if (isNoncopyable(self, payload_type) or containsClass(self, payload_type)) {
             needs_drop = true;
             break;
         };
@@ -245,7 +358,7 @@ fn emitEnumDrop(self: anytype, builder: anytype, enumeration_index: usize, value
         while (payload_index > 0) {
             payload_index -= 1;
             const payload_type = variant.associated_types[payload_index];
-            if (!isNoncopyable(self, payload_type)) continue;
+            if (!isNoncopyable(self, payload_type) and !containsClass(self, payload_type)) continue;
             const payload = try self.newValue(builder, payload_type);
             try self.emit(builder, .{ .enum_payload = .{
                 .result = payload,
@@ -264,7 +377,7 @@ fn emitEnumDrop(self: anytype, builder: anytype, enumeration_index: usize, value
 }
 
 fn emitCollectionDrop(self: anytype, builder: anytype, collection_type: Ast.Type, collection: Ast.Collection, value: Ir.ValueId) AnalyzeError!void {
-    if (!isNoncopyable(self, collection.element)) return;
+    if (!isNoncopyable(self, collection.element) and !containsClass(self, collection.element)) return;
     const index_local = builder.local_types.items.len;
     try builder.local_types.append(self.allocator, .int);
     const count = try self.newValue(builder, .int);

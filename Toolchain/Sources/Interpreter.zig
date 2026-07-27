@@ -5,6 +5,8 @@ const Numeric = @import("Numeric.zig");
 const RuntimeValue = @import("Interpreter/Value.zig");
 const Dispatch = @import("Interpreter/Dispatch.zig");
 const Globals = @import("Interpreter/Globals.zig");
+const Classes = @import("Interpreter/Classes.zig");
+const Output = @import("Interpreter/Output.zig");
 
 const Allocator = std.mem.Allocator;
 const max_call_depth = 768;
@@ -33,6 +35,7 @@ pub const Session = struct {
     stderr: std.ArrayList(u8) = .empty,
     terminated: bool = false,
     globals: []Value = &.{},
+    classes: std.ArrayList(Classes.Entry) = .empty,
 };
 
 pub fn run(allocator: Allocator, program: Ir.Program) Error!u8 {
@@ -148,7 +151,7 @@ pub fn invokeDepth(
             },
             .panic => |panic_value| {
                 const message = try string(try load(values, panic_value.message));
-                try appendRuntimeError(session, program, panic_value.position, "", message);
+                try Output.appendRuntimeError(session, program, panic_value.position, "", message);
                 session.terminated = true;
                 return error.RuntimeTerminated;
             },
@@ -208,6 +211,32 @@ fn executeInstruction(
             value.static_type = function.value_types[cast.result];
             try store(function, values, cast.result, .{ .class = value });
         },
+        .class_retain => |retain| {
+            const class = switch (try load(values, retain.operand)) {
+                .class => |value| value,
+                else => return error.InvalidProgram,
+            };
+            try Classes.retain(session.classes.items, class.instance);
+        },
+        .class_drop => |drop| {
+            const class = switch (try load(values, drop.operand)) {
+                .class => |value| value,
+                else => return error.InvalidProgram,
+            };
+            if (try Classes.release(session.classes.items, class.instance)) {
+                const dynamic_type = class.instance.type.structureIndex() orelse return error.InvalidProgram;
+                const plan = for (drop.plans) |candidate| {
+                    if (candidate.structure == dynamic_type) break candidate;
+                } else return error.InvalidProgram;
+                for (plan.functions) |finalizer| {
+                    const result = try invokeDepth(allocator, program, finalizer.function, &.{.{ .class = .{
+                        .static_type = .structure(finalizer.structure),
+                        .instance = class.instance,
+                    } }}, depth + 1, session);
+                    if (result != .void) return error.InvalidProgram;
+                }
+            }
+        },
         .global_load => |load_value| try store(function, values, load_value.result, try Globals.load(allocator, session.globals, load_value)),
         .global_store => |store_value| try Globals.store(allocator, program, session.globals, store_value, try load(values, store_value.operand)),
         .structure_init => |initialization| {
@@ -230,6 +259,7 @@ fn executeInstruction(
             if (program.structures[initialization.structure].is_class) {
                 const instance = try allocator.create(Value.Structure);
                 instance.* = aggregate;
+                try Classes.register(allocator, &session.classes, instance);
                 try store(function, values, initialization.result, .{ .class = .{
                     .static_type = .structure(initialization.structure),
                     .instance = instance,
@@ -357,7 +387,7 @@ fn executeInstruction(
             const operand = try load(values, conversion.operand);
             const converted = convert(operand, conversion.target, conversion.checked) catch |err| switch (err) {
                 error.InvalidConversion => {
-                    try appendRuntimeError(session, program, conversion.position, "", "invalid numeric conversion");
+                    try Output.appendRuntimeError(session, program, conversion.position, "", "invalid numeric conversion");
                     session.terminated = true;
                     return error.RuntimeTerminated;
                 },
@@ -367,7 +397,7 @@ fn executeInstruction(
         },
         .format_value => |format| {
             var text: std.ArrayList(u8) = .empty;
-            try appendValueText(&text, allocator, try load(values, format.operand));
+            try Output.appendValueText(&text, allocator, try load(values, format.operand));
             try store(function, values, format.result, .{ .string = try text.toOwnedSlice(allocator) });
         },
         .string_concat => |concat| {
@@ -411,14 +441,14 @@ fn executeInstruction(
         },
         .dynamic_call => |call| try Dispatch.execute(allocator, program, function, values, call, depth, session, invokeDepth),
         .print => |print_value| {
-            try appendValueText(&session.stdout, session.allocator, try load(values, print_value.value));
+            try Output.appendValueText(&session.stdout, session.allocator, try load(values, print_value.value));
             if (print_value.newline) try session.stdout.append(session.allocator, '\n');
         },
         .assert => |assertion| {
             const condition = try boolean(try load(values, assertion.condition));
             if (!condition) {
                 const message = try string(try load(values, assertion.message));
-                try appendRuntimeError(session, program, assertion.position, "assertion failed: ", message);
+                try Output.appendRuntimeError(session, program, assertion.position, "assertion failed: ", message);
                 session.terminated = true;
                 return error.RuntimeTerminated;
             }
@@ -499,13 +529,13 @@ fn executeListEdit(
         const raw = try integer(try load(values, edit.index.?));
         index = normalizedCollectionIndex(raw, source.fields.len) orelse {
             const message = try std.fmt.allocPrint(allocator, "collection index {d} is out of bounds for count {d}", .{ raw, source.fields.len });
-            try appendRuntimeError(session, program, edit.position, "", message);
+            try Output.appendRuntimeError(session, program, edit.position, "", message);
             session.terminated = true;
             return error.RuntimeTerminated;
         };
     } else if (edit.kind == .take_first or edit.kind == .take_last) {
         if (source.fields.len == 0) {
-            try appendRuntimeError(session, program, edit.position, "", "cannot take an element from an empty list");
+            try Output.appendRuntimeError(session, program, edit.position, "", "cannot take an element from an empty list");
             session.terminated = true;
             return error.RuntimeTerminated;
         }
@@ -614,7 +644,7 @@ fn executeCollectionLoad(
     const source_index = try integer(try load(values, access.index));
     const offset = normalizedCollectionIndex(source_index, aggregate.fields.len) orelse {
         const message = try std.fmt.allocPrint(allocator, "collection index {d} is out of bounds for count {d}", .{ source_index, aggregate.fields.len });
-        try appendRuntimeError(session, program, access.position, "", message);
+        try Output.appendRuntimeError(session, program, access.position, "", message);
         session.terminated = true;
         return error.RuntimeTerminated;
     };
@@ -638,7 +668,7 @@ fn executeCollectionReplace(
     const source_index = try integer(try load(values, replacement.index));
     const offset = normalizedCollectionIndex(source_index, aggregate.fields.len) orelse {
         const message = try std.fmt.allocPrint(allocator, "collection index {d} is out of bounds for count {d}", .{ source_index, aggregate.fields.len });
-        try appendRuntimeError(session, program, replacement.position, "", message);
+        try Output.appendRuntimeError(session, program, replacement.position, "", message);
         session.terminated = true;
         return error.RuntimeTerminated;
     };
@@ -870,69 +900,6 @@ fn string(value: Value) Error![]const u8 {
 }
 
 const equal = RuntimeValue.equal;
-
-fn appendValueText(output: *std.ArrayList(u8), allocator: Allocator, value: Value) Error!void {
-    switch (value) {
-        .integer => |number| {
-            var buffer: [32]u8 = undefined;
-            const text = std.fmt.bufPrint(&buffer, "{d}", .{number}) catch unreachable;
-            try output.appendSlice(allocator, text);
-        },
-        .typed_integer => |number| {
-            var buffer: [32]u8 = undefined;
-            const text = if (number.type.isSignedInteger())
-                std.fmt.bufPrint(&buffer, "{d}", .{number.signed()}) catch unreachable
-            else
-                std.fmt.bufPrint(&buffer, "{d}", .{number.bits}) catch unreachable;
-            try output.appendSlice(allocator, text);
-        },
-        .float32 => |number| try appendFloat(output, allocator, number),
-        .float64 => |number| try appendFloat(output, allocator, number),
-        .boolean => |flag| try output.appendSlice(allocator, if (flag) "true" else "false"),
-        .string => |text| try output.appendSlice(allocator, text),
-        .optional => |optional| if (optional.value) |payload|
-            try appendValueText(output, allocator, payload.*)
-        else
-            try output.appendSlice(allocator, "null"),
-        .reference => return error.InvalidProgram,
-        .structure => return error.InvalidProgram,
-        .class => return error.InvalidProgram,
-        .view => return error.InvalidProgram,
-        .enumeration => return error.InvalidProgram,
-        .void => return error.InvalidProgram,
-    }
-}
-
-fn appendFloat(output: *std.ArrayList(u8), allocator: Allocator, number: anytype) Error!void {
-    if (std.math.isNan(number)) return output.appendSlice(allocator, "nan");
-    if (std.math.isPositiveInf(number)) return output.appendSlice(allocator, "inf");
-    if (std.math.isNegativeInf(number)) return output.appendSlice(allocator, "-inf");
-    if (number == 0) {
-        return output.appendSlice(allocator, if (std.math.signbit(number)) "-0.0" else "0.0");
-    }
-    var buffer: [std.fmt.float.bufferSize(.decimal, f64)]u8 = undefined;
-    const text = std.fmt.bufPrint(&buffer, "{d}", .{number}) catch unreachable;
-    try output.appendSlice(allocator, text);
-    if (std.mem.indexOfAny(u8, text, ".eE") == null) try output.appendSlice(allocator, ".0");
-}
-
-fn appendRuntimeError(
-    session: *Session,
-    program: Ir.Program,
-    position: @import("Source.zig").Position,
-    prefix: []const u8,
-    message: []const u8,
-) Error!void {
-    const path = if (position.file < program.files.len) program.files[position.file] else "<source>";
-    const header = try std.fmt.allocPrint(
-        session.allocator,
-        "{s}:{d}:{d}: runtime error: {s}",
-        .{ path, position.line, position.column, prefix },
-    );
-    try session.stderr.appendSlice(session.allocator, header);
-    try session.stderr.appendSlice(session.allocator, message);
-    try session.stderr.append(session.allocator, '\n');
-}
 
 fn checkedAdd(left: i64, right: i64) Error!i64 {
     const result = @addWithOverflow(left, right);

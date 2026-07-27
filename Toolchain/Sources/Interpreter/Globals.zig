@@ -11,7 +11,10 @@ pub fn initialize(allocator: std.mem.Allocator, globals: []const Ir.Global) ![]V
         .bool => .{ .boolean = global.bits != 0 },
         .float32 => .{ .float32 = @bitCast(@as(u32, @truncate(global.bits))) },
         .float64 => .{ .float64 = @bitCast(global.bits) },
-        else => return error.InvalidProgram,
+        else => if (global.type.optionalChild() != null)
+            .{ .optional = .{ .type = global.type, .value = null } }
+        else
+            return error.InvalidProgram,
     };
     return values;
 }

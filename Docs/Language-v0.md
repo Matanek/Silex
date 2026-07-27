@@ -534,6 +534,16 @@ to the class whose constructor is executing; child overrides only participate
 after the child is fully constructed. Private methods never form override
 slots, and static or extension methods do not participate in class dispatch.
 
+A class may declare the same parameterless `drop` block as an owner structure,
+but its reference remains freely copyable. The block runs exactly once when
+the last reachable root disappears. Unreachable cycles are finalized too;
+every block observes the graph before owned fields begin destruction.
+
+For inheritance, finalization runs from the dynamic class toward its bases,
+then destroys owned fields. `drop` is neither virtual nor callable and never
+requires an explicit `super` call. A class reference can therefore contain an
+owner structure without making the reference itself non-copyable.
+
 Structures and classes may attach shared fields and operations to the nominal
 type with `static let`, `static var`, and `static func`. They are selected only
 through the complete type name; instance and static overload spaces are
@@ -1193,7 +1203,7 @@ use             = "public"? "use"
 visibility      = "public" | "internal" ;
 member_visibility = "public" | "internal" | "protected" | "private" ;
 structure       = visibility? "struct" identifier type_parameters? "{" (structure_field | constructor | method | drop_definition | nested_type)* "}" ;
-class           = visibility? "static"? "class" identifier (":" type)? "{" (class_field | constructor | class_method | nested_type)* "}" ;
+class           = visibility? "static"? "class" identifier (":" type)? "{" (class_field | constructor | class_method | drop_definition | nested_type)* "}" ;
 nested_type     = member_visibility? (structure | class) ;
 class_field     = member_visibility? "static"? ("let" | "var") identifier ":" type ("=" field_default)? ;
 class_method    = "override"? member_visibility? "static"? "func" identifier type_parameters? "(" parameters? ")" return_type? block ;

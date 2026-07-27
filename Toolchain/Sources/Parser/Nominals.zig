@@ -154,7 +154,6 @@ fn parseType(
             if (is_static_class) return self.fail("static classes cannot declare drop");
             if (member_static) return self.fail("drop cannot be static");
             if (member_override) return self.fail("drop cannot declare override");
-            if (is_class) return self.fail("class drop blocks are not supported yet");
             if (member_visibility) return self.fail("drop cannot declare visibility");
             if (drop != null) return self.fail("structure already declares drop");
             const drop_position = self.current.position;

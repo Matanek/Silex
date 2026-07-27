@@ -26,7 +26,10 @@ pub fn lower(allocator: Allocator, program: Ir.Program) Machine.Error!Machine.Pr
         try functions.append(allocator, try lowerFunction(allocator, program, &strings, function));
     }
     const globals = try allocator.alloc(Machine.Global, program.globals.len);
-    for (program.globals, 0..) |global, index| globals[index] = .{ .bits = global.bits };
+    for (program.globals, 0..) |global, index| globals[index] = .{
+        .bits = global.bits,
+        .width = @intCast(try leafCount(program, global.type)),
+    };
     const result: Machine.Program = .{
         .functions = try functions.toOwnedSlice(allocator),
         .globals = globals,
@@ -120,8 +123,18 @@ fn lowerInstruction(
         },
         .copy => |copy| lowerCopy(layout.values[copy.result], layout.values[copy.operand]),
         .class_cast => |cast| lowerCopy(layout.values[cast.result], layout.values[cast.operand]),
-        .global_load => |load| .{ .global_load = .{ .result = layout.values[load.result].start, .global = load.global } },
-        .global_store => |store| .{ .global_store = .{ .operand = layout.values[store.operand].start, .global = store.global } },
+        .class_retain => |retain| .{ .class_retain = .{ .operand = layout.values[retain.operand].start } },
+        .class_drop => |drop| finalize: {
+            const plans = try allocator.alloc(Machine.Instruction.ClassDrop.Plan, drop.plans.len);
+            for (drop.plans, 0..) |plan, plan_index| {
+                const functions = try allocator.alloc(usize, plan.functions.len);
+                for (plan.functions, 0..) |finalizer, index| functions[index] = finalizer.function;
+                plans[plan_index] = .{ .structure = plan.structure, .functions = functions };
+            }
+            break :finalize .{ .class_drop = .{ .operand = layout.values[drop.operand].start, .plans = plans } };
+        },
+        .global_load => |load| .{ .global_load = .{ .result = layout.values[load.result], .global = load.global } },
+        .global_store => |store| .{ .global_store = .{ .operand = layout.values[store.operand], .global = store.global } },
         .structure_init => |initialization| aggregate: {
             const fields = try allocator.alloc(Machine.Span, initialization.fields.len);
             for (initialization.fields, 0..) |field, index| fields[index] = layout.values[field];

@@ -71,6 +71,8 @@ pub const Instruction = union(enum) {
     optional_unwrap: OptionalUnwrap,
     copy: Copy,
     class_cast: Copy,
+    class_retain: ClassRetain,
+    class_drop: ClassDrop,
     global_load: GlobalLoad,
     global_store: GlobalStore,
     structure_init: StructureInit,
@@ -146,6 +148,23 @@ pub const Instruction = union(enum) {
     pub const Copy = struct {
         result: ValueId,
         operand: ValueId,
+    };
+
+    pub const ClassRetain = struct { operand: ValueId };
+
+    pub const ClassDrop = struct {
+        operand: ValueId,
+        plans: []const Plan,
+
+        pub const Plan = struct {
+            structure: usize,
+            functions: []const Finalizer,
+        };
+
+        pub const Finalizer = struct {
+            structure: usize,
+            function: FunctionId,
+        };
     };
 
     pub const GlobalLoad = struct { result: ValueId, global: usize };
@@ -564,6 +583,27 @@ fn writeInstruction(
             try appendResult(output, allocator, program, function, copy.result);
             try output.appendSlice(allocator, "copy ");
             try appendValueChecked(output, allocator, function, copy.operand);
+        },
+        .class_retain => |retain| {
+            try output.appendSlice(allocator, "class.retain ");
+            try appendValueChecked(output, allocator, function, retain.operand);
+        },
+        .class_drop => |drop| {
+            try output.appendSlice(allocator, "class.drop ");
+            try appendValueChecked(output, allocator, function, drop.operand);
+            for (drop.plans) |plan| {
+                if (plan.structure >= program.structures.len) return error.InvalidProgram;
+                try output.appendSlice(allocator, ", ");
+                try output.appendSlice(allocator, program.structures[plan.structure].name);
+                try output.appendSlice(allocator, " => [");
+                for (plan.functions, 0..) |finalizer, index| {
+                    if (index != 0) try output.appendSlice(allocator, ", ");
+                    try output.append(allocator, '@');
+                    if (finalizer.function >= program.functions.len) return error.InvalidProgram;
+                    try output.appendSlice(allocator, program.functions[finalizer.function].name);
+                }
+                try output.append(allocator, ']');
+            }
         },
         .global_load => |load| {
             try appendResult(output, allocator, program, function, load.result);

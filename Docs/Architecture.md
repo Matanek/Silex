@@ -60,6 +60,10 @@ open Silex document
   source code never observes a tuple, address, offset, layout or copy machine
   operation. Calls, returns, local storage and recursive equality preserve
   value semantics in the reference interpreter and native backend.
+- Class roots lower to typed retain and finalization operations. Their runtime
+  representation, unique-finalization guard, cycle handling and target layout
+  remain private to the interpreter and target lowering; source code observes
+  only shared identity and the specified `drop` order.
 - Associated enums are portable nominal declarations whose variants carry
   typed positional values. Construction records the enum and variant by
   structured indices; module interfaces expose only the nominal identity and
