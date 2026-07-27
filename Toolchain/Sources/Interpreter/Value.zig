@@ -14,7 +14,7 @@ pub const Value = union(enum) {
     boolean: bool,
     string: []const u8,
     structure: Structure,
-    class: *Structure,
+    class: Class,
     view: View,
     enumeration: *const Enumeration,
     optional: Optional,
@@ -44,6 +44,11 @@ pub const Value = union(enum) {
         fields: []Value,
     };
 
+    pub const Class = struct {
+        static_type: Ir.Type,
+        instance: *Structure,
+    };
+
     pub const View = struct {
         type: Ir.Type,
         fields: []Value,
@@ -71,7 +76,7 @@ pub const Value = union(enum) {
             .boolean => .bool,
             .string => .str,
             .structure => |value| value.type,
-            .class => |value| value.type,
+            .class => |value| value.static_type,
             .view => |value| value.type,
             .enumeration => |value| value.type,
             .optional => |value| value.type,
@@ -128,7 +133,7 @@ pub fn equal(left: Value, right: Value) Error!bool {
             }
             break :structure true;
         },
-        .class => |instance| instance == right.class,
+        .class => |instance| instance.instance == right.class.instance,
         .optional => |optional| optional_value: {
             if ((optional.value == null) != (right.optional.value == null)) break :optional_value false;
             if (optional.value) |payload| break :optional_value try equal(payload.*, right.optional.value.?.*);

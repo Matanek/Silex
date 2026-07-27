@@ -48,10 +48,16 @@ pub fn prepareStructures(self: anytype) ![]const Ir.Structure {
             .name = name,
             .fields = fields,
             .is_class = declaration.is_class,
+            .base = if (declaration.base) |base| base.structureIndex() else null,
             .collection = declaration.collection,
         };
     }
     self.structures = structures;
+    const inheritance_states = try self.allocator.alloc(StructureState, structures.len);
+    @memset(inheritance_states, .unseen);
+    for (structures, 0..) |structure, index| if (structure.is_class) {
+        try validateInheritance(self, index, inheritance_states);
+    };
     for (self.program.structures) |structure| for (structure.fields) |field| {
         try Resources.validateStoredType(self, field.type, field.position, "in a structure field");
         if (!field.mutable and Resources.containsClass(self, field.type)) {
@@ -67,7 +73,7 @@ pub fn prepareStructures(self: anytype) ![]const Ir.Structure {
         var builder: Model.FunctionBuilder = .{};
         try builder.blocks.append(self.allocator, .{});
         var value = try self.analyzeExpressionExpected(&builder, default, Optionals.expectedContext(field.type, default));
-        if (value.type != field.type and (Numeric.canWiden(value.type, field.type) or Optionals.canConvert(value.type, field.type))) {
+        if (value.type != field.type and self.canImplicitlyConvert(value.type, field.type)) {
             value = try self.coerce(&builder, value, field.type, default.position);
         }
         if (value.type != field.type) {
@@ -76,6 +82,44 @@ pub fn prepareStructures(self: anytype) ![]const Ir.Structure {
         }
     };
     return structures;
+}
+
+fn validateInheritance(self: anytype, index: usize, states: []StructureState) !void {
+    switch (states[index]) {
+        .complete => return,
+        .visiting => {
+            const declaration = findAstStructure(self, self.structures[index].name).?;
+            return self.fail(declaration.base_position, "class inheritance forms a cycle");
+        },
+        .unseen => states[index] = .visiting,
+    }
+    const declaration = findAstStructure(self, self.structures[index].name) orelse return error.InvalidSource;
+    if (declaration.base != null and self.structures[index].base == null) {
+        return self.fail(declaration.base_position, "a class base must be a non-optional class type");
+    }
+    if (self.structures[index].base) |base_index| {
+        if (base_index >= self.structures.len or !self.structures[base_index].is_class) {
+            return self.fail(declaration.base_position, "a class can only inherit from another class");
+        }
+        const base_declaration = findAstStructure(self, self.structures[base_index].name) orelse
+            return self.fail(declaration.base_position, "base class is unavailable");
+        if (base_declaration.is_internal and base_declaration.position.file != declaration.position.file) {
+            return self.fail(declaration.base_position, "internal base class is unavailable outside its source file");
+        }
+        try validateInheritance(self, base_index, states);
+        const inherited = self.structures[base_index].fields;
+        for (declaration.fields) |field| for (inherited) |base_field| {
+            if (std.mem.eql(u8, field.name, base_field.name)) {
+                const message = try std.fmt.allocPrint(self.allocator, "field '{s}' is already inherited from a base class", .{field.name});
+                return self.fail(field.name_position, message);
+            }
+        };
+        const flattened = try self.allocator.alloc(Ir.StructureField, inherited.len + declaration.fields.len);
+        @memcpy(flattened[0..inherited.len], inherited);
+        @memcpy(flattened[inherited.len..], self.structures[index].fields);
+        @constCast(&self.structures[index]).fields = flattened;
+    }
+    states[index] = .complete;
 }
 
 fn validateStructureCycle(self: anytype, index: usize, states: []StructureState) !void {

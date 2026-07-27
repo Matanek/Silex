@@ -23,6 +23,7 @@ const Support = @import("Support.zig");
 const Try = @import("Try.zig");
 const Visibility = @import("Visibility.zig");
 const Declarations = @import("Declarations.zig");
+const Inheritance = @import("Inheritance.zig");
 const Types = @import("../Types.zig");
 const Allocator = std.mem.Allocator;
 const AnalyzeError = Source.Error || Allocator.Error;
@@ -324,7 +325,7 @@ pub const Analyzer = struct {
             expression,
             Optionals.expectedContext(parameter.type, expression),
         );
-        if (value.type != parameter.type and (Numeric.canWiden(value.type, parameter.type) or Optionals.canConvert(value.type, parameter.type))) {
+        if (value.type != parameter.type and self.canImplicitlyConvert(value.type, parameter.type)) {
             value = try self.coerce(builder, value, parameter.type, expression.position);
         }
         if (value.type != parameter.type) {
@@ -737,8 +738,9 @@ pub const Analyzer = struct {
         }
         for (structure.fields, 0..) |field, field_index| {
             if (!std.mem.eql(u8, field.name, access.name)) continue;
-            const source_field = declaration.fields[field_index];
-            if (!Visibility.memberVisible(self, structure_index, source_field, access.name_position)) {
+            const inherited = Inheritance.fieldByIndex(self, structure_index, field_index) orelse return error.InvalidSource;
+            const source_field = inherited.declaration;
+            if (!Visibility.memberVisible(self, inherited.owner, source_field, access.name_position)) {
                 const message = if (source_field.is_internal)
                     try std.fmt.allocPrint(self.allocator, "field '{s}' is internal to its source file", .{field.name})
                 else
@@ -793,13 +795,12 @@ pub const Analyzer = struct {
                 }
             }
             var known = false;
-            for (structure.fields, 0..) |field, field_index| if (std.mem.eql(u8, field.name, argument.name)) {
-                const source_field = declaration.fields[field_index];
+            for (declaration.fields) |source_field| if (std.mem.eql(u8, source_field.name, argument.name)) {
                 if (!Visibility.memberVisible(self, structure_index, source_field, argument.position)) {
                     const message = if (source_field.is_internal)
-                        try std.fmt.allocPrint(self.allocator, "field '{s}' is internal to its source file", .{field.name})
+                        try std.fmt.allocPrint(self.allocator, "field '{s}' is internal to its source file", .{source_field.name})
                     else
-                        try std.fmt.allocPrint(self.allocator, "field '{s}' is {s} and unavailable here", .{ field.name, Visibility.name(source_field) });
+                        try std.fmt.allocPrint(self.allocator, "field '{s}' is {s} and unavailable here", .{ source_field.name, Visibility.name(source_field) });
                     return self.fail(argument.position, message);
                 }
                 known = true;
@@ -816,6 +817,18 @@ pub const Analyzer = struct {
         }
 
         var field_values: std.ArrayList(Ir.ValueId) = .empty;
+        if (structure.base) |base_index| {
+            const base = try self.analyzeStructureInitializer(builder, .{
+                .name = self.structures[base_index].name,
+                .name_position = call.name_position,
+                .arguments = &.{},
+            }, base_index);
+            for (self.structures[base_index].fields, 0..) |field, field_index| {
+                const value = try self.newValue(builder, field.type);
+                try self.emit(builder, .{ .field_load = .{ .result = value, .base = base.value, .field = field_index } });
+                try field_values.append(self.allocator, value);
+            }
+        }
         for (declaration.fields) |field| {
             var provided: ?*Ast.Expression = null;
             for (call.named_arguments) |argument| {
@@ -834,7 +847,7 @@ pub const Analyzer = struct {
                 }
                 break :missing try self.emitIntrinsic(builder, field.type, call.name_position);
             };
-            if (value.type != field.type and (Numeric.canWiden(value.type, field.type) or Optionals.canConvert(value.type, field.type))) {
+            if (value.type != field.type and self.canImplicitlyConvert(value.type, field.type)) {
                 value = try self.coerce(builder, value, field.type, if (provided) |expression| expression.position else call.name_position);
             }
             if (value.type != field.type) {
@@ -993,7 +1006,7 @@ pub const Analyzer = struct {
                 if (!Support.functionVisible(call, function)) continue;
                 var matches = true;
                 for (function.parameters[0..arguments.items.len], arguments.items) |parameter, argument| {
-                    if (conversionCost(argument.type, parameter.type) == null) {
+                    if (conversionCost(self, argument.type, parameter.type) == null) {
                         matches = false;
                         break;
                     }
@@ -1007,6 +1020,7 @@ pub const Analyzer = struct {
                 for (viable.items) |other_id| {
                     if (candidate_id == other_id) continue;
                     if (dominates(
+                        self,
                         self.program.functions[other_id].parameters[0..arguments.items.len],
                         self.program.functions[candidate_id].parameters[0..arguments.items.len],
                         arguments.items,
@@ -1057,7 +1071,7 @@ pub const Analyzer = struct {
         const MutableArgument = struct { source: *const Ast.Expression, prepared: MutableReferences.Prepared };
         var mutable_arguments: std.ArrayList(MutableArgument) = .empty;
         for (arguments.items, function.parameters[0..arguments.items.len], 0..) |argument, parameter, index| {
-            if (argument.type != parameter.type and !Numeric.canWiden(argument.type, parameter.type) and !Optionals.canConvert(argument.type, parameter.type)) {
+            if (!self.canImplicitlyConvert(argument.type, parameter.type)) {
                 const message = try std.fmt.allocPrint(
                     self.allocator,
                     "argument {d} of '{s}' expects '{s}', found '{s}'",
@@ -1322,6 +1336,15 @@ pub const Analyzer = struct {
     ) AnalyzeError!TypedValue {
         if (value.type == target) return value;
         if (try Optionals.promote(self, builder, value, target)) |promoted| return promoted;
+        if (target.optionalChild()) |child| if (Inheritance.canUpcast(self, value.type, child)) {
+            const cast = try self.coerce(builder, value, child, position);
+            return (try Optionals.promote(self, builder, cast, target)).?;
+        };
+        if (Inheritance.canUpcast(self, value.type, target)) {
+            const result = try self.newValue(builder, target);
+            try self.emit(builder, .{ .class_cast = .{ .result = result, .operand = value.value } });
+            return .{ .type = target, .value = result };
+        }
         if (!Numeric.canWiden(value.type, target)) {
             const message = try std.fmt.allocPrint(
                 self.allocator,
@@ -1331,6 +1354,12 @@ pub const Analyzer = struct {
             return self.fail(position, message);
         }
         return self.emitConversion(builder, value, target, position, false);
+    }
+
+    pub fn canImplicitlyConvert(self: *Analyzer, source: Types.Type, target: Types.Type) bool {
+        if (source == target or Numeric.canWiden(source, target) or Optionals.canConvert(source, target)) return true;
+        if (Inheritance.canUpcast(self, source, target)) return true;
+        return if (target.optionalChild()) |child| Inheritance.canUpcast(self, source, child) else false;
     }
 
     fn emitConversion(
@@ -1366,18 +1395,20 @@ pub const Analyzer = struct {
     }
 };
 
-fn conversionCost(source: Types.Type, target: Types.Type) ?u8 {
+fn conversionCost(self: *Analyzer, source: Types.Type, target: Types.Type) ?u8 {
     if (source == target) return 0;
     if (Optionals.conversionCost(source, target)) |cost| return cost;
+    if (Inheritance.canUpcast(self, source, target)) return 1;
+    if (target.optionalChild()) |child| if (Inheritance.canUpcast(self, source, child)) return 2;
     if (!Numeric.canWiden(source, target)) return null;
     return if (source.isInteger() and target.isFloat()) 2 else 1;
 }
 
-fn dominates(better: []const Ast.Parameter, worse: []const Ast.Parameter, arguments: []const TypedValue) bool {
+fn dominates(self: *Analyzer, better: []const Ast.Parameter, worse: []const Ast.Parameter, arguments: []const TypedValue) bool {
     var strictly_better = false;
     for (better, worse, arguments) |better_parameter, worse_parameter, argument| {
-        const better_cost = conversionCost(argument.type, better_parameter.type) orelse return false;
-        const worse_cost = conversionCost(argument.type, worse_parameter.type) orelse return false;
+        const better_cost = conversionCost(self, argument.type, better_parameter.type) orelse return false;
+        const worse_cost = conversionCost(self, argument.type, worse_parameter.type) orelse return false;
         if (better_cost > worse_cost) return false;
         if (better_cost < worse_cost) strictly_better = true;
     }

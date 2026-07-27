@@ -10,6 +10,7 @@ const Moves = @import("Moves.zig");
 const Borrowing = @import("Borrowing.zig");
 const Resources = @import("Resources.zig");
 const Visibility = @import("Visibility.zig");
+const Inheritance = @import("Inheritance.zig");
 
 const PathStep = union(enum) {
     field: struct { base: Ir.ValueId, structure: usize, field: usize },
@@ -121,8 +122,9 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
             return self.fail(target_field.name_position, message);
         };
         const field = structure.fields[field_index];
-        const source_field = source_structure.fields[field_index];
-        if (!Visibility.memberVisible(self, structure_index, source_field, target_field.name_position)) {
+        const inherited = Inheritance.fieldByIndex(self, structure_index, field_index) orelse return error.InvalidSource;
+        const source_field = inherited.declaration;
+        if (!Visibility.memberVisible(self, inherited.owner, source_field, target_field.name_position)) {
             const message = if (source_field.is_internal)
                 try std.fmt.allocPrint(self.allocator, "field '{s}' is internal to its source file", .{field.name})
             else
@@ -264,7 +266,7 @@ fn analyzeReplacement(
             assignment.value.?,
             Optionals.expectedContext(target_type, assignment.value.?),
         );
-        if (value.type != target_type and (Numeric.canWiden(value.type, target_type) or Optionals.canConvert(value.type, target_type))) {
+        if (value.type != target_type and self.canImplicitlyConvert(value.type, target_type)) {
             value = try self.coerce(builder, value, target_type, assignment.value.?.position);
         }
         if (value.type != target_type) {

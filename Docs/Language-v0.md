@@ -494,6 +494,25 @@ completed `self` implicitly. Every immutable field must be initialized on all
 paths before `self` can escape. Without a custom constructor, callers may name
 only public fields; every hidden field they cannot provide must have a default.
 
+A class may inherit from one visible class. Its constructor initializes the
+immediate base with `: super(...)`; omitting the clause is equivalent to
+`: super()`. Base construction finishes before child field initialization and
+the child constructor body. Inherited `protected` state is available to the
+descendant, while `private` state remains confined to its declaring class.
+
+```sx
+class Player : Entity {
+    public init(name:str, position:int) : super(position) {
+        self.name = name
+    }
+}
+```
+
+An implicit conversion from a child class to any base in its chain keeps the
+same object identity. It applies to bindings, arguments, returns, optionals and
+elements of a newly constructed collection. Existing mutable collections are
+invariant. Constructors are not inherited.
+
 ## Associated enum values
 
 `enum` declares a nominal closed set of variants. A variant may carry zero or
@@ -1098,14 +1117,14 @@ use             = "public"? "use"
 visibility      = "public" | "internal" ;
 member_visibility = "public" | "internal" | "protected" | "private" ;
 structure       = visibility? "struct" identifier type_parameters? "{" (structure_field | constructor | method | drop_definition)* "}" ;
-class           = visibility? "class" identifier "{" (class_field | constructor | class_method)* "}" ;
+class           = visibility? "class" identifier (":" type)? "{" (class_field | constructor | class_method)* "}" ;
 class_field     = member_visibility? ("let" | "var") identifier ":" type ("=" field_default)? ;
 class_method    = member_visibility? "func" identifier type_parameters? "(" parameters? ")" return_type? block ;
 drop_definition = "drop" block ;
 enum            = visibility? "enum" identifier type_parameters? "{" enum_variant+ "}" ;
 enum_variant    = identifier ("(" type ("," type)* ")")? ;
 structure_field = visibility? ("let" | "var") identifier ":" type ("=" field_default)? ;
-constructor     = visibility? "init" "(" parameters? ")" block ;
+constructor     = visibility? "init" "(" parameters? ")" (":" "super" "(" arguments? ")")? block ;
 method          = visibility? "func" identifier type_parameters? "(" parameters? ")" return_type? block ;
 field_default   = fundamental_literal | structure_initializer ;
 function        = visibility? "func" identifier type_parameters? "(" parameters? ")" return_type? block ;

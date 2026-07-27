@@ -77,7 +77,7 @@ pub fn analyzeVariable(self: anytype, builder: anytype, declaration: Ast.Variabl
         return self.fail(declaration.name_position, "a class binding requires an initializer; use an optional to start at null");
     }
     try Borrowing.requireOwned(self, initializer, if (declaration.initializer) |value| value.position else declaration.name_position, "stored");
-    if (initializer.type != declared_type and (Numeric.canWiden(initializer.type, declared_type) or Optionals.canConvert(initializer.type, declared_type))) {
+    if (initializer.type != declared_type and self.canImplicitlyConvert(initializer.type, declared_type)) {
         initializer = try self.coerce(builder, initializer, declared_type, declaration.initializer.?.position);
     }
     if (initializer.type != declared_type) {
@@ -113,7 +113,7 @@ pub fn analyzeReturn(self: anytype, builder: anytype, function: Ast.Function, st
             expression,
             Optionals.expectedContext(function.return_type, expression),
         );
-        if (value.type != function.return_type and (Numeric.canWiden(value.type, function.return_type) or Optionals.canConvert(value.type, function.return_type))) {
+        if (value.type != function.return_type and self.canImplicitlyConvert(value.type, function.return_type)) {
             value = try self.coerce(builder, value, function.return_type, expression.position);
         }
         if (value.type != function.return_type) {

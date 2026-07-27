@@ -116,6 +116,7 @@ fn lowerInstruction(
             } };
         },
         .copy => |copy| lowerCopy(layout.values[copy.result], layout.values[copy.operand]),
+        .class_cast => |cast| lowerCopy(layout.values[cast.result], layout.values[cast.operand]),
         .structure_init => |initialization| aggregate: {
             const fields = try allocator.alloc(Machine.Span, initialization.fields.len);
             for (initialization.fields, 0..) |field, index| fields[index] = layout.values[field];

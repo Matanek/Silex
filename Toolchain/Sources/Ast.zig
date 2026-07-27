@@ -353,6 +353,7 @@ pub const Constructor = struct {
     is_protected: bool = false,
     position: Source.Position,
     parameters: []const Parameter,
+    super_arguments: []const *Expression = &.{},
     statements: []const Statement,
 };
 
@@ -364,6 +365,8 @@ pub const Structure = struct {
     position: Source.Position,
     name_position: Source.Position,
     name: []const u8,
+    base: ?Type = null,
+    base_position: Source.Position = .{ .offset = 0, .line = 1, .column = 1 },
     type_parameters: []const TypeParameter = &.{},
     fields: []const StructureField,
     constructors: []const Constructor = &.{},

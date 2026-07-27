@@ -1098,6 +1098,37 @@ test "native class identity matches the reference interpreter" {
     try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
 }
 
+test "native class inheritance matches the reference interpreter" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const source =
+        \\class Entity {
+        \\    protected var value:int
+        \\    public init(value:int) { self.value = value }
+        \\    public func current() int { return self.value }
+        \\}
+        \\class Counter : Entity {
+        \\    public init(value:int) : super(value) {}
+        \\    public func increment() { self.value++ }
+        \\}
+        \\func base(value:Counter) Entity { return value }
+        \\func main() {
+        \\    var counter = Counter(8)
+        \\    var alias:Entity = counter
+        \\    counter.increment()
+        \\    print(alias.current(), " ", alias == base(counter))
+        \\}
+    ;
+    var frontend = Frontend.Frontend.init(allocator);
+    const reference = try Interpreter.runCapture(allocator, (try frontend.compile(source)).ir);
+    const native = try compileAndRun(allocator, source);
+    try std.testing.expectEqual(reference.exit_code, exitCode(native));
+    try std.testing.expectEqualSlices(u8, reference.stdout, native.stdout);
+    try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
+}
+
 test "native checked float conversion returns an exact integer" {
     if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
