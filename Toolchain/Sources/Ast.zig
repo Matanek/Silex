@@ -185,6 +185,7 @@ pub const AssignmentStatement = struct {
 pub const AssignmentTarget = struct {
     name_position: Source.Position,
     name: []const u8,
+    type_arguments: []const Type = &.{},
     fields: []const Field = &.{},
     indices: []const Index = &.{},
 

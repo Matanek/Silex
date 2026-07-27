@@ -32,7 +32,6 @@ fn parseType(
     _ = try self.internTypeName(name);
     try self.advance();
     const own_type_parameters = try Generics.parseTypeParameters(self);
-    if (is_class and !is_static_class and own_type_parameters.len != 0) return self.failAt(name_position, "generic classes are not supported yet");
     if (is_static_class and own_type_parameters.len != 0) return self.failAt(name_position, "static classes cannot be generic");
     const enclosing_type_parameters = self.type_parameters;
     const type_parameters = try self.allocator.alloc(Ast.TypeParameter, enclosing_type_parameters.len + own_type_parameters.len);

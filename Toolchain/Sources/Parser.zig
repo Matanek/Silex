@@ -511,6 +511,17 @@ pub const Parser = struct {
                     .indices = try indices.toOwnedSlice(self.allocator),
                 };
             },
+            .generic_reference => |reference| {
+                std.mem.reverse(Ast.AssignmentTarget.Field, fields.items);
+                std.mem.reverse(Ast.AssignmentTarget.Index, indices.items);
+                return .{
+                    .name_position = current.position,
+                    .name = reference.name,
+                    .type_arguments = reference.type_arguments,
+                    .fields = try fields.toOwnedSlice(self.allocator),
+                    .indices = try indices.toOwnedSlice(self.allocator),
+                };
+            },
             .field_access => |access| {
                 try fields.append(self.allocator, .{
                     .name_position = access.name_position,

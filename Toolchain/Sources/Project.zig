@@ -1298,6 +1298,9 @@ pub const Compiler = struct {
                 break :variable .{ .variable_declaration = value };
             },
             .assignment_statement => |assignment| assignment_statement: {
+                for (@constCast(assignment.target.type_arguments)) |*argument| {
+                    argument.* = GenericTypes.remap(argument.*, type_map, self.generic_type_maps[module]);
+                }
                 if (assignment.value) |value| try self.rewriteExpression(module, value, type_map);
                 for (assignment.target.indices) |target_index| try self.rewriteExpression(module, target_index.value, type_map);
                 break :assignment_statement .{ .assignment_statement = assignment };
