@@ -326,6 +326,7 @@ pub const Parameter = struct {
 pub const TypeParameter = struct {
     position: Source.Position,
     name: []const u8,
+    constraint: ?Type = null,
 };
 
 pub const GenericType = struct {

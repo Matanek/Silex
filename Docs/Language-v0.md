@@ -132,7 +132,7 @@ distinct signatures. The return type alone never distinguishes an overload.
 All signatures are collected before bodies, so a call may target a function
 declared later in the source.
 
-A function may declare unconstrained type parameters after its name. Calls may
+A function may declare type parameters after its name. Calls may
 provide every type argument explicitly or let the compiler infer all of them
 from ordinary arguments:
 
@@ -153,6 +153,23 @@ type arity. Identical arguments share one program-wide specialization, stable
 recursion reuses it, and recursion that continually changes its type arguments
 is rejected. Visibility, reexports, aliases and trailing value defaults retain
 their ordinary meaning after specialization.
+
+One nominal protocol may constrain each type parameter:
+
+```sx
+func render<T : Drawable>(value:T) {
+    value.draw()
+}
+```
+
+The argument remains its concrete type and the complete body is specialized
+statically. The constraint only makes the protocol requirements available in
+that body; it creates no erased container or dynamic dispatch. Inferred and
+explicit arguments must declare the conformance directly or inherit it from a
+base class. A matching method without nominal conformance is insufficient.
+Constraints are also accepted on generic structures, associated enums,
+ordinary classes and generic methods. Each parameter has at most one protocol;
+constraint lists, `where` clauses and structural inference do not exist.
 
 ## Default parameters and effective signatures
 
@@ -664,7 +681,7 @@ public contract. A private enum remains local to its module; `internal enum`
 is restricted to its exact source file. The tag and payload layout remain
 compiler details and are not a source ABI.
 
-An associated enum may declare unconstrained type parameters and use them in
+An associated enum may declare type parameters and use them in
 its payloads:
 
 ```sx
@@ -891,7 +908,7 @@ is a `var` and every field on the path is also declared `var`; an intervening
 `+=`, `-=`, `*=`, `/=`, `++`, and `--` evaluate the target and operand once,
 retain every unaffected field, and behave identically in both execution paths.
 
-A structure or ordinary class may declare unconstrained type parameters after
+A structure or ordinary class may declare type parameters after
 its name and use them in fields, constructors and methods:
 
 ```sx
@@ -955,7 +972,7 @@ receiver and write the returned value state back to that receiver; nonmutating
 calls accept `let`, `var`, and temporary receivers. Receiver and arguments are
 evaluated once in source order, and calls may chain through returned values.
 
-A method of a non-generic structure may declare its own unconstrained type
+A method of a non-generic structure may declare its own type
 parameters. Calls infer the complete argument list from positional arguments,
 or provide it explicitly after the method name:
 

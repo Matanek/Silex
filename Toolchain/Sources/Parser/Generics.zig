@@ -7,12 +7,17 @@ pub fn parseTypeParameters(parser: anytype) ![]const Ast.TypeParameter {
     var parameters: std.ArrayList(Ast.TypeParameter) = .empty;
     while (true) {
         if (parser.current.tag != .identifier) return parser.fail("expected type parameter name");
-        const parameter: Ast.TypeParameter = .{ .position = parser.current.position, .name = parser.current.lexeme };
+        var parameter: Ast.TypeParameter = .{ .position = parser.current.position, .name = parser.current.lexeme };
         for (parameters.items) |previous| if (std.mem.eql(u8, previous.name, parameter.name)) {
             return parser.failAt(parameter.position, "type parameter is already declared");
         };
         try parameters.append(parser.allocator, parameter);
         try parser.advance();
+        if (parser.current.tag == .colon) {
+            try parser.advance();
+            parameter.constraint = try parser.parseType();
+            parameters.items[parameters.items.len - 1] = parameter;
+        }
         if (parser.current.tag != .comma) break;
         try parser.advance();
         if (parser.current.tag == .greater or parser.current.tag == .shift_right) {

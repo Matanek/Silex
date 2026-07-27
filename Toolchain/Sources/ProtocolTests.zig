@@ -127,3 +127,99 @@ test "compose protocol aliases reexports and dependent conformances" {
     const result = try Interpreter.runCapture(allocator, compilation.ir);
     try std.testing.expectEqualStrings("sprite\n", result.stdout);
 }
+
+test "generic constraints specialize requirements for every supported family" {
+    const output = try run(
+        \\protocol Describable { func describe() str }
+        \\struct User : Describable { func describe() str { return "user" } }
+        \\class Entity : Describable { public func describe() str { return "entity" } }
+        \\class Child : Entity {}
+        \\func describe<T : Describable>(value:T) str { return value.describe() }
+        \\struct Wrapper<T : Describable> {
+        \\    let value:T
+        \\    func text() str { return self.value.describe() }
+        \\}
+        \\enum Choice<T : Describable> { some(T); none }
+        \\class Box<T : Describable> {
+        \\    public let value:T
+        \\    public init(value:T) { self.value = value }
+        \\    public func text() str { return self.value.describe() }
+        \\}
+        \\struct Helper { func text<T : Describable>(value:T) str { return value.describe() } }
+        \\func choice_text(value:Choice<User>) str {
+        \\    return match value { some(item) => item.describe(); none => "none" }
+        \\}
+        \\func main() {
+        \\    let user = User()
+        \\    var child = Child()
+        \\    var box = Box<User>(user)
+        \\    print(describe(user), " ", describe<Child>(child))
+        \\    print(Wrapper<User>(value:user).text(), " ", box.text())
+        \\    print(Helper().text(user), " ", choice_text(Choice<User>.some(user)))
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("user entity\nuser user\nuser user\n", output);
+}
+
+test "generic constraints reject absent conformance and non-protocol contracts" {
+    try expectCompileError(
+        "struct Marker {} func read<T : Marker>(value:T) {} func main() {}",
+        "generic constraint on 'T' must name a protocol",
+    );
+    try expectCompileError(
+        "protocol Named { func name() str } struct Rock {} func read<T : Named>(value:T) {} func main() { read(Rock()) }",
+        "type 'Rock' does not conform to protocol 'Named' required by 'T'",
+    );
+    try expectCompileError(
+        "protocol Named { func name() str } struct Rock {} struct Box<T : Named> { let value:T } func main() { let box = Box<Rock>(value:Rock()) }",
+        "type 'Rock' does not conform to protocol 'Named' required by 'T'",
+    );
+}
+
+test "compose a constrained generic through a protocol reexport" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data =
+        \\use Model
+        \\use Render
+        \\func main() { print(Render.label(Model.Item())) }
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Api.sx",
+        .data = "public protocol Named { func name() str }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Facade.sx",
+        .data = "public use Api.Named as Named",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Model.sx",
+        .data = "use Facade.Named; public struct Item : Named { public func name() str { return \"item\" } }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Render.sx",
+        .data = "use Facade.Named; public func label<T : Named>(value:T) str { return value.name() }",
+    });
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(input);
+    var found_constraint = false;
+    for (compilation.interfaces) |interface| {
+        if (!std.mem.eql(u8, interface.name, "Render")) continue;
+        for (interface.functions) |function| if (std.mem.eql(u8, function.export_name, "label")) {
+            try std.testing.expectEqual(@as(usize, 1), function.type_parameter_constraints.len);
+            try std.testing.expect(function.type_parameter_constraints[0] != null);
+            found_constraint = true;
+        };
+    }
+    try std.testing.expect(found_constraint);
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("item\n", result.stdout);
+}

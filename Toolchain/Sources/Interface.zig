@@ -38,6 +38,7 @@ pub const Function = struct {
     export_name: []const u8,
     id: DeclarationId,
     type_parameters: []const []const u8 = &.{},
+    type_parameter_constraints: []const ?Types.Type = &.{},
     return_type: Types.Type,
     position: Source.Position,
     required_parameters: usize = 0,
@@ -71,6 +72,7 @@ pub const Method = struct {
     is_static: bool = false,
     name: []const u8,
     type_parameters: []const []const u8 = &.{},
+    type_parameter_constraints: []const ?Types.Type = &.{},
     parameter_types: []const Types.Type,
     return_type: Types.Type,
     required_parameters: usize = 0,
@@ -80,6 +82,7 @@ pub const Structure = struct {
     export_name: []const u8,
     id: TypeId,
     type_parameters: []const []const u8 = &.{},
+    type_parameter_constraints: []const ?Types.Type = &.{},
     is_class: bool = false,
     is_static: bool = false,
     is_protocol: bool = false,
@@ -100,6 +103,7 @@ pub const Enum = struct {
     export_name: []const u8,
     id: TypeId,
     type_parameters: []const []const u8 = &.{},
+    type_parameter_constraints: []const ?Types.Type = &.{},
     variants: []const EnumVariant,
     raw_type: ?Types.Type = null,
     position: Source.Position,
@@ -190,22 +194,32 @@ pub fn buildMappedGenerics(
                 parameters[parameter_index] = mappedType(parameter.type, type_map, generic_map);
             }
             const method_type_parameters = try allocator.alloc([]const u8, method.type_parameters.len);
+            const method_constraints = try allocator.alloc(?Types.Type, method.type_parameters.len);
             for (method.type_parameters, 0..) |parameter, index| method_type_parameters[index] = parameter.name;
+            for (method.type_parameters, 0..) |parameter, index| {
+                method_constraints[index] = if (parameter.constraint) |constraint| mappedType(constraint, type_map, generic_map) else null;
+            }
             try methods.append(allocator, .{
                 .is_static = method.is_static,
                 .name = method.name,
                 .type_parameters = method_type_parameters,
+                .type_parameter_constraints = method_constraints,
                 .parameter_types = parameters,
                 .return_type = mappedType(method.return_type, type_map, generic_map),
                 .required_parameters = requiredParameterCount(method.parameters),
             });
         }
         const type_parameters = try allocator.alloc([]const u8, structure.type_parameters.len);
+        const type_parameter_constraints = try allocator.alloc(?Types.Type, structure.type_parameters.len);
         for (structure.type_parameters, 0..) |parameter, index| type_parameters[index] = parameter.name;
+        for (structure.type_parameters, 0..) |parameter, index| {
+            type_parameter_constraints[index] = if (parameter.constraint) |constraint| mappedType(constraint, type_map, generic_map) else null;
+        }
         try structures.append(allocator, .{
             .export_name = structure.name,
             .id = .{ .owner = owner, .module = module_name, .name = structure.name },
             .type_parameters = type_parameters,
+            .type_parameter_constraints = type_parameter_constraints,
             .is_class = structure.is_class,
             .is_static = structure.is_static,
             .is_protocol = structure.is_protocol,
@@ -229,11 +243,16 @@ pub fn buildMappedGenerics(
             variants[variant_index] = .{ .name = variant.name, .associated_types = associated_types, .raw_value = variant.raw_value };
         }
         const type_parameters = try allocator.alloc([]const u8, enumeration.type_parameters.len);
+        const type_parameter_constraints = try allocator.alloc(?Types.Type, enumeration.type_parameters.len);
         for (enumeration.type_parameters, 0..) |parameter, index| type_parameters[index] = parameter.name;
+        for (enumeration.type_parameters, 0..) |parameter, index| {
+            type_parameter_constraints[index] = if (parameter.constraint) |constraint| mappedType(constraint, type_map, generic_map) else null;
+        }
         try enums.append(allocator, .{
             .export_name = enumeration.name,
             .id = .{ .owner = owner, .module = module_name, .name = enumeration.name },
             .type_parameters = type_parameters,
+            .type_parameter_constraints = type_parameter_constraints,
             .variants = variants,
             .raw_type = enumeration.raw_type,
             .position = enumeration.position,
@@ -244,7 +263,11 @@ pub fn buildMappedGenerics(
         const parameter_types = try allocator.alloc(Types.Type, function.parameters.len);
         for (function.parameters, 0..) |parameter, index| parameter_types[index] = mappedType(parameter.type, type_map, generic_map);
         const type_parameters = try allocator.alloc([]const u8, function.type_parameters.len);
+        const type_parameter_constraints = try allocator.alloc(?Types.Type, function.type_parameters.len);
         for (function.type_parameters, 0..) |parameter, index| type_parameters[index] = parameter.name;
+        for (function.type_parameters, 0..) |parameter, index| {
+            type_parameter_constraints[index] = if (parameter.constraint) |constraint| mappedType(constraint, type_map, generic_map) else null;
+        }
         try functions.append(allocator, .{
             .export_name = function.name,
             .id = .{
@@ -254,6 +277,7 @@ pub fn buildMappedGenerics(
                 .parameter_types = parameter_types,
             },
             .type_parameters = type_parameters,
+            .type_parameter_constraints = type_parameter_constraints,
             .return_type = mappedType(function.return_type, type_map, generic_map),
             .position = function.position,
             .required_parameters = requiredParameterCount(function.parameters),
