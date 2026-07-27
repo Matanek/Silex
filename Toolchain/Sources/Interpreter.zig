@@ -6,10 +6,11 @@ const RuntimeValue = @import("Interpreter/Value.zig");
 const Dispatch = @import("Interpreter/Dispatch.zig");
 const Globals = @import("Interpreter/Globals.zig");
 const Classes = @import("Interpreter/Classes.zig");
+const Protocols = @import("Interpreter/Protocols.zig");
 const Output = @import("Interpreter/Output.zig");
 
 const Allocator = std.mem.Allocator;
-const max_call_depth = 768;
+const max_call_depth = 512;
 
 pub const Error = Allocator.Error || error{
     InvalidProgram,
@@ -266,6 +267,9 @@ fn executeInstruction(
                 } });
             } else try store(function, values, initialization.result, .{ .structure = aggregate });
         },
+        .protocol_init => |initialization| try Protocols.initialize(allocator, function, values, initialization),
+        .protocol_test => |test_value| try Protocols.testValue(function, values, test_value),
+        .protocol_extract => |extraction| try Protocols.extract(allocator, function, values, extraction),
         .list_init => |initialization| try executeListInit(allocator, function, values, initialization),
         .enum_init => |initialization| {
             if (initialization.enumeration >= program.enums.len) return error.InvalidProgram;

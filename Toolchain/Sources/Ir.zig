@@ -76,6 +76,9 @@ pub const Instruction = union(enum) {
     global_load: GlobalLoad,
     global_store: GlobalStore,
     structure_init: StructureInit,
+    protocol_init: ProtocolInit,
+    protocol_test: ProtocolTest,
+    protocol_extract: ProtocolExtract,
     list_init: ListInit,
     enum_init: EnumInit,
     enum_test: EnumTest,
@@ -174,6 +177,24 @@ pub const Instruction = union(enum) {
         result: ValueId,
         structure: usize,
         fields: []const ValueId,
+    };
+
+    pub const ProtocolInit = struct {
+        result: ValueId,
+        operand: ValueId,
+        structure: usize,
+    };
+
+    pub const ProtocolTest = struct {
+        result: ValueId,
+        operand: ValueId,
+        structure: usize,
+    };
+
+    pub const ProtocolExtract = struct {
+        result: ValueId,
+        operand: ValueId,
+        structure: usize,
     };
 
     pub const ListInit = struct {
@@ -407,6 +428,7 @@ pub const Structure = struct {
     is_class: bool = false,
     is_static: bool = false,
     is_protocol: bool = false,
+    conformances: []const usize = &.{},
     base: ?usize = null,
     collection: ?Types.Collection = null,
 };
@@ -642,6 +664,40 @@ fn writeInstruction(
                 try appendValueChecked(output, allocator, function, field);
             }
             try output.append(allocator, ')');
+        },
+        .protocol_init => |initialization| {
+            if (initialization.result >= function.value_types.len or initialization.operand >= function.value_types.len or
+                initialization.structure >= program.structures.len)
+            {
+                return error.InvalidProgram;
+            }
+            const protocol_index = function.value_types[initialization.result].structureIndex() orelse return error.InvalidProgram;
+            if (protocol_index >= program.structures.len or !program.structures[protocol_index].is_protocol or
+                function.value_types[initialization.operand] != Type.structure(initialization.structure)) return error.InvalidProgram;
+            try appendResult(output, allocator, program, function, initialization.result);
+            try output.appendSlice(allocator, "protocol.init @");
+            try output.appendSlice(allocator, program.structures[protocol_index].name);
+            try output.appendSlice(allocator, " from ");
+            try appendValueChecked(output, allocator, function, initialization.operand);
+        },
+        .protocol_test => |test_value| {
+            if (test_value.result >= function.value_types.len or function.value_types[test_value.result] != .bool or
+                test_value.structure >= program.structures.len) return error.InvalidProgram;
+            try appendResult(output, allocator, program, function, test_value.result);
+            try output.appendSlice(allocator, "protocol.test ");
+            try appendValueChecked(output, allocator, function, test_value.operand);
+            try output.appendSlice(allocator, ", @");
+            try output.appendSlice(allocator, program.structures[test_value.structure].name);
+        },
+        .protocol_extract => |extraction| {
+            if (extraction.result >= function.value_types.len or extraction.operand >= function.value_types.len or
+                extraction.structure >= program.structures.len or
+                function.value_types[extraction.result] != Type.structure(extraction.structure)) return error.InvalidProgram;
+            try appendResult(output, allocator, program, function, extraction.result);
+            try output.appendSlice(allocator, "protocol.extract ");
+            try appendValueChecked(output, allocator, function, extraction.operand);
+            try output.appendSlice(allocator, " as @");
+            try output.appendSlice(allocator, program.structures[extraction.structure].name);
         },
         .list_init => |initialization| {
             try appendResult(output, allocator, program, function, initialization.result);

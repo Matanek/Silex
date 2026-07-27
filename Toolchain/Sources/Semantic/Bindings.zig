@@ -17,6 +17,9 @@ pub fn analyzeVariable(self: anytype, builder: anytype, declaration: Ast.Variabl
         if (Collections.isViewType(self.structures, annotation)) {
             if (declaration.annotation_mode == .value) return self.fail(declaration.name_position, "a view annotation must retain its '@T[..]' or '&T[..]' mode");
         } else try Resources.validateStoredType(self, annotation, declaration.name_position, "inside another local type");
+        if (declaration.initializer == null and Resources.isProtocolValue(self, annotation)) {
+            return self.fail(declaration.name_position, "a dynamic protocol value requires an initializer");
+        }
     }
     var initializer = if (declaration.initializer) |expression|
         try self.analyzeExpressionExpected(
@@ -70,7 +73,11 @@ pub fn analyzeVariable(self: anytype, builder: anytype, declaration: Ast.Variabl
         return;
     }
     if (declaration.initializer) |expression| try Resources.requireTransfer(self, expression, declared_type, "storing it");
-    if (!declaration.mutable and Resources.containsClass(self, declared_type)) {
+    const immutable_protocol_collection = if (Collections.collectionForType(self.structures, declared_type)) |collection|
+        Resources.isProtocolValue(self, collection.element)
+    else
+        false;
+    if (!declaration.mutable and Resources.containsClass(self, declared_type) and !immutable_protocol_collection) {
         return self.fail(declaration.name_position, "a binding that can reach a class reference must use 'var'");
     }
     if (declaration.initializer == null and Resources.isClassType(self, declared_type)) {

@@ -28,6 +28,7 @@ fn containsClassInner(self: anytype, type_value: Ast.Type, depth: usize) bool {
     const index = type_value.structureIndex() orelse return false;
     if (index >= self.structures.len) return false;
     const structure = self.structures[index];
+    if (structure.is_protocol) return true;
     if (structure.is_class) return true;
     if (structure.collection) |collection| {
         if (collection.view) return false;
@@ -48,6 +49,7 @@ fn isNoncopyableInner(self: anytype, type_value: Ast.Type, depth: usize) bool {
     if (type_value.optionalChild()) |child| return isNoncopyableInner(self, child, depth + 1);
     const index = type_value.structureIndex() orelse return false;
     if (index >= self.structures.len) return false;
+    if (self.structures[index].is_protocol) return false;
     if (self.structures[index].is_class) return false;
     if (self.structures[index].collection) |collection| {
         if (collection.view) return false;
@@ -89,7 +91,7 @@ pub fn requireTransfer(self: anytype, expression: *const Ast.Expression, type_va
 }
 
 pub fn validateParameter(self: anytype, parameter: Ast.Parameter) !void {
-    if (isProtocolValue(self, parameter.type)) return self.fail(parameter.position, "dynamic protocol values are not supported yet");
+    if (isProtocolValue(self, parameter.type) and parameter.mode != .value) return self.fail(parameter.position, "dynamic protocol values cannot use '@' or '&'");
     const direct_view = @import("Collections.zig").isViewType(self.structures, parameter.type);
     if (containsView(self, parameter.type) and (!direct_view or parameter.mode == .value)) {
         return self.fail(parameter.position, "a view parameter must use '@T[..]' or '&T[..]'");
@@ -100,7 +102,7 @@ pub fn validateParameter(self: anytype, parameter: Ast.Parameter) !void {
 }
 
 pub fn validateReturn(self: anytype, function: Ast.Function) !void {
-    if (isProtocolValue(self, function.return_type)) return self.fail(function.name_position, "dynamic protocol values are not supported yet");
+    if (isProtocolValue(self, function.return_type) and function.return_mode != .value) return self.fail(function.name_position, "dynamic protocol values cannot use '@' or '&'");
     const direct_view = @import("Collections.zig").isViewType(self.structures, function.return_type);
     if (containsView(self, function.return_type) and (!direct_view or function.return_mode == .value)) {
         return self.fail(function.name_position, "a view return must use '@T[..]' or '&T[..]' and name compatible provenance");
@@ -108,13 +110,12 @@ pub fn validateReturn(self: anytype, function: Ast.Function) !void {
 }
 
 pub fn validateStoredType(self: anytype, type_value: Ast.Type, position: @import("../Source.zig").Position, context: []const u8) !void {
-    if (isProtocolValue(self, type_value)) return self.fail(position, "dynamic protocol values are not supported yet");
     if (!containsView(self, type_value)) return;
     const message = try std.fmt.allocPrint(self.allocator, "a borrowed view cannot be stored {s}", .{context});
     return self.fail(position, message);
 }
 
-fn isProtocolValue(self: anytype, type_value: Ast.Type) bool {
+pub fn isProtocolValue(self: anytype, type_value: Ast.Type) bool {
     const child = type_value.optionalChild() orelse type_value;
     const index = child.structureIndex() orelse return false;
     return index < self.structures.len and self.structures[index].is_protocol;
@@ -217,6 +218,7 @@ pub fn emitDrop(self: anytype, builder: anytype, type_value: Ast.Type, value: Ir
     }
     const type_index = type_value.structureIndex() orelse return;
     if (type_index >= self.structures.len) return;
+    if (self.structures[type_index].is_protocol) return emitProtocolResource(self, builder, type_index, value, false);
     if (self.structures[type_index].is_class) {
         try self.emit(builder, .{ .class_drop = .{
             .operand = value,
@@ -286,6 +288,7 @@ pub fn retainValue(self: anytype, builder: anytype, type_value: Ast.Type, value:
     }
     const type_index = type_value.structureIndex() orelse return;
     if (type_index >= self.structures.len) return;
+    if (self.structures[type_index].is_protocol) return emitProtocolResource(self, builder, type_index, value, true);
     if (self.structures[type_index].is_class) {
         try self.emit(builder, .{ .class_retain = .{ .operand = value } });
         return;
@@ -297,6 +300,29 @@ pub fn retainValue(self: anytype, builder: anytype, type_value: Ast.Type, value:
         try self.emit(builder, .{ .field_load = .{ .result = field_value, .base = value, .field = field_index } });
         try retainValue(self, builder, field.type, field_value);
     }
+}
+
+fn emitProtocolResource(self: anytype, builder: anytype, protocol_index: usize, value: Ir.ValueId, retain: bool) AnalyzeError!void {
+    const ProtocolValues = @import("ProtocolValues.zig");
+    const conformers = try ProtocolValues.conformers(self, protocol_index);
+    if (conformers.len == 0) return;
+    const merge_block = try self.newBlock(builder);
+    for (conformers) |structure_index| {
+        const action_block = try self.newBlock(builder);
+        const next_block = try self.newBlock(builder);
+        const matches = try ProtocolValues.emitTest(self, builder, value, structure_index);
+        self.terminate(builder, .{ .branch = .{ .condition = matches, .then_block = action_block, .else_block = next_block } });
+        builder.current_block = action_block;
+        const concrete = try ProtocolValues.emitExtract(self, builder, value, structure_index);
+        if (retain)
+            try retainValue(self, builder, Ast.Type.structure(structure_index), concrete)
+        else
+            try emitDrop(self, builder, Ast.Type.structure(structure_index), concrete);
+        self.terminate(builder, .{ .jump = merge_block });
+        builder.current_block = next_block;
+    }
+    self.terminate(builder, .{ .jump = merge_block });
+    builder.current_block = merge_block;
 }
 
 fn classDropPlans(self: anytype, static_type: usize) ![]const Ir.Instruction.ClassDrop.Plan {

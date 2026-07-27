@@ -11,6 +11,7 @@ const MutableReferences = @import("MutableReferences.zig");
 const Resources = @import("Resources.zig");
 const Visibility = @import("Visibility.zig");
 const Inheritance = @import("Inheritance.zig");
+const ProtocolValues = @import("ProtocolValues.zig");
 
 const AnalyzeError = error{ InvalidSource, OutOfMemory };
 
@@ -393,6 +394,15 @@ fn analyzeCallWithReceiver(
     const structure_index = selected_candidate.owner;
     const method_index = selected_candidate.index;
     const method = selected_candidate.method;
+    if (receiver_structure.is_protocol) return analyzeProtocolCall(
+        self,
+        builder,
+        call,
+        resolved_receiver,
+        safe_receiver_type,
+        method,
+        arguments.items,
+    );
     try Borrowing.validateReadArguments(self, method.parameters, call.arguments);
     const flat = flatMethodIndex(self.program, structure_index, method_index);
     const mutating = self.method_mutability[flat];
@@ -497,6 +507,100 @@ fn analyzeCallWithReceiver(
     const value = try self.newValue(builder, method.return_type);
     try self.emit(builder, .{ .field_load = .{ .result = value, .base = call_result.?, .field = 1 } });
     return .{ .type = method.return_type, .value = value };
+}
+
+fn analyzeProtocolCall(
+    self: anytype,
+    builder: anytype,
+    call: Ast.Expression.Call,
+    receiver: Model.TypedValue,
+    safe_receiver_type: ?Ast.Type,
+    requirement: Ast.Function,
+    arguments: []const Model.TypedValue,
+) !?Model.TypedValue {
+    if (requirement.return_mode != .value) return self.fail(call.name_position, "dynamic protocol methods cannot return '@T' or '&T'");
+    try Borrowing.validateReadArguments(self, requirement.parameters, call.arguments);
+    const place = try requireMutablePlace(self, builder, call.receiver.?, call.name);
+    var argument_ids: std.ArrayList(Ir.ValueId) = .empty;
+    var mutable_arguments: std.ArrayList(MutableReferences.Prepared) = .empty;
+    for (arguments, requirement.parameters[0..arguments.len], 0..) |argument, parameter, index| {
+        if (parameter.mode == .mutable) {
+            const prepared = try MutableReferences.prepare(self, builder, call.arguments[index], parameter.type);
+            try mutable_arguments.append(self.allocator, prepared);
+            try argument_ids.append(self.allocator, prepared.reference);
+        } else {
+            if (parameter.mode == .value) try Resources.requireTransfer(self, call.arguments[index], argument.type, "passing it by value");
+            if (parameter.mode != .read) try Borrowing.requireOwned(self, argument, call.arguments[index].position, "passed by value");
+            try argument_ids.append(self.allocator, (try self.coerce(builder, argument, parameter.type, call.arguments[index].position)).value);
+        }
+    }
+    for (requirement.parameters[arguments.len..]) |parameter| {
+        const value = try self.analyzeParameterDefault(builder, parameter);
+        try argument_ids.append(self.allocator, value.value);
+    }
+
+    const protocol_index = ProtocolValues.index(self, receiver.type) orelse return error.InvalidSource;
+    const conformers = try ProtocolValues.conformers(self, protocol_index);
+    if (conformers.len == 0) return self.fail(call.name_position, "dynamic protocol has no concrete conforming type in this program");
+    const updated = try self.newValue(builder, receiver.type);
+    const result = if (requirement.return_type == .void) null else try self.newValue(builder, requirement.return_type);
+    const merge_block = try self.newBlock(builder);
+    for (conformers) |structure_index| {
+        const implementation = ProtocolValues.implementation(self, structure_index, requirement) orelse return error.InvalidSource;
+        const action_block = try self.newBlock(builder);
+        const next_block = try self.newBlock(builder);
+        const matches = try ProtocolValues.emitTest(self, builder, receiver.value, structure_index);
+        self.terminate(builder, .{ .branch = .{ .condition = matches, .then_block = action_block, .else_block = next_block } });
+        builder.current_block = action_block;
+        const concrete = try ProtocolValues.emitExtract(self, builder, receiver.value, structure_index);
+        const method_receiver = if (structure_index != implementation.owner)
+            (try self.coerce(builder, .{ .type = Ast.Type.structure(structure_index), .value = concrete }, Ast.Type.structure(implementation.owner), call.name_position)).value
+        else
+            concrete;
+        var call_arguments: std.ArrayList(Ir.ValueId) = .empty;
+        try call_arguments.append(self.allocator, method_receiver);
+        try call_arguments.appendSlice(self.allocator, argument_ids.items);
+        const flat = flatMethodIndex(self.program, implementation.owner, implementation.index);
+        const mutating = self.method_mutability[flat];
+        const ir_return_type = methodIrReturnType(self, implementation.owner, flat, implementation.method);
+        const concrete_result: ?Ir.ValueId = if (ir_return_type == .void) null else try self.newValue(builder, ir_return_type);
+        try self.emit(builder, .{ .call = .{
+            .result = concrete_result,
+            .function = methodFunctionId(self.program, implementation.owner, implementation.index),
+            .arguments = try call_arguments.toOwnedSlice(self.allocator),
+        } });
+        const returned_receiver = if (mutating) replacement: {
+            if (implementation.method.return_type == .void) break :replacement concrete_result.?;
+            const value = try self.newValue(builder, Ast.Type.structure(implementation.owner));
+            try self.emit(builder, .{ .field_load = .{ .result = value, .base = concrete_result.?, .field = 0 } });
+            break :replacement value;
+        } else concrete;
+        const replacement = if (mutating and structure_index != implementation.owner) replacement: {
+            const value = try self.newValue(builder, Ast.Type.structure(structure_index));
+            try self.emit(builder, .{ .class_cast = .{ .result = value, .operand = returned_receiver } });
+            break :replacement value;
+        } else returned_receiver;
+        try self.emit(builder, .{ .protocol_init = .{ .result = updated, .operand = replacement, .structure = structure_index } });
+        if (result) |target| {
+            const source = if (mutating) source: {
+                const value = try self.newValue(builder, requirement.return_type);
+                try self.emit(builder, .{ .field_load = .{ .result = value, .base = concrete_result.?, .field = 1 } });
+                break :source value;
+            } else concrete_result.?;
+            try self.emit(builder, .{ .copy = .{ .result = target, .operand = source } });
+        }
+        self.terminate(builder, .{ .jump = merge_block });
+        builder.current_block = next_block;
+    }
+    self.terminate(builder, .{ .jump = merge_block });
+    builder.current_block = merge_block;
+    for (mutable_arguments.items) |prepared| try MutableReferences.writeBack(self, builder, prepared);
+    const replacement = if (safe_receiver_type) |optional_type|
+        (try Optionals.promote(self, builder, .{ .type = receiver.type, .value = updated }, optional_type)).?.value
+    else
+        updated;
+    try writePlace(self, builder, place, replacement);
+    return if (result) |value| .{ .type = requirement.return_type, .value = value } else null;
 }
 
 fn requireMutablePlace(self: anytype, builder: anytype, expression: *const Ast.Expression, method_name: []const u8) !Place {

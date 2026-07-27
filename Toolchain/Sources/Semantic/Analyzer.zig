@@ -26,6 +26,7 @@ const Declarations = @import("Declarations.zig");
 const Inheritance = @import("Inheritance.zig");
 const StaticMembers = @import("StaticMembers.zig");
 const Protocols = @import("Protocols.zig");
+const Conversions = @import("Conversions.zig");
 const GenericSyntax = @import("../Parser/Generics.zig");
 const Types = @import("../Types.zig");
 const Allocator = std.mem.Allocator;
@@ -1384,32 +1385,11 @@ pub const Analyzer = struct {
         target: Types.Type,
         position: Source.Position,
     ) AnalyzeError!TypedValue {
-        if (value.type == target) return value;
-        if (try Optionals.promote(self, builder, value, target)) |promoted| return promoted;
-        if (target.optionalChild()) |child| if (Inheritance.canUpcast(self, value.type, child)) {
-            const cast = try self.coerce(builder, value, child, position);
-            return (try Optionals.promote(self, builder, cast, target)).?;
-        };
-        if (Inheritance.canUpcast(self, value.type, target)) {
-            const result = try self.newValue(builder, target);
-            try self.emit(builder, .{ .class_cast = .{ .result = result, .operand = value.value } });
-            return .{ .type = target, .value = result };
-        }
-        if (!Numeric.canWiden(value.type, target)) {
-            const message = try std.fmt.allocPrint(
-                self.allocator,
-                "cannot implicitly convert '{s}' to '{s}'",
-                .{ self.typeName(value.type), self.typeName(target) },
-            );
-            return self.fail(position, message);
-        }
-        return self.emitConversion(builder, value, target, position, false);
+        return Conversions.coerce(self, builder, value, target, position);
     }
 
     pub fn canImplicitlyConvert(self: *Analyzer, source: Types.Type, target: Types.Type) bool {
-        if (source == target or Numeric.canWiden(source, target) or Optionals.canConvert(source, target)) return true;
-        if (Inheritance.canUpcast(self, source, target)) return true;
-        return if (target.optionalChild()) |child| Inheritance.canUpcast(self, source, child) else false;
+        return Conversions.canImplicitlyConvert(self, source, target);
     }
 
     fn emitConversion(
@@ -1420,17 +1400,7 @@ pub const Analyzer = struct {
         position: Source.Position,
         checked: bool,
     ) AnalyzeError!TypedValue {
-        if (value.type == target) return value;
-        const result = try self.newValue(builder, target);
-        try self.emit(builder, .{ .convert = .{
-            .result = result,
-            .operand = value.value,
-            .source = value.type,
-            .target = target,
-            .position = position,
-            .checked = checked,
-        } });
-        return .{ .type = target, .value = result };
+        return Conversions.emitNumeric(self, builder, value, target, position, checked);
     }
 
     pub fn newValue(self: *Analyzer, builder: *FunctionBuilder, type_value: Types.Type) Allocator.Error!Ir.ValueId {
@@ -1446,12 +1416,7 @@ pub const Analyzer = struct {
 };
 
 fn conversionCost(self: *Analyzer, source: Types.Type, target: Types.Type) ?u8 {
-    if (source == target) return 0;
-    if (Optionals.conversionCost(source, target)) |cost| return cost;
-    if (Inheritance.canUpcast(self, source, target)) return 1;
-    if (target.optionalChild()) |child| if (Inheritance.canUpcast(self, source, child)) return 2;
-    if (!Numeric.canWiden(source, target)) return null;
-    return if (source.isInteger() and target.isFloat()) 2 else 1;
+    return Conversions.cost(self, source, target);
 }
 
 fn dominates(self: *Analyzer, better: []const Ast.Parameter, worse: []const Ast.Parameter, arguments: []const TypedValue) bool {

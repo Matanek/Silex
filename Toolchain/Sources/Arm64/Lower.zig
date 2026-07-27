@@ -148,6 +148,21 @@ fn lowerInstruction(
                 .fields = fields,
             } };
         },
+        .protocol_init => |initialization| .{ .protocol_init = .{
+            .result = layout.values[initialization.result],
+            .operand = layout.values[initialization.operand],
+            .structure = initialization.structure,
+            .class_operand = program.structures[initialization.structure].is_class,
+        } },
+        .protocol_test => |test_value| .{ .protocol_test = .{
+            .result = layout.values[test_value.result].start,
+            .operand = layout.values[test_value.operand].start,
+            .structure = test_value.structure,
+        } },
+        .protocol_extract => |extraction| .{ .protocol_extract = .{
+            .result = layout.values[extraction.result],
+            .operand = layout.values[extraction.operand],
+        } },
         .list_init => |initialization| list: {
             const values = try allocator.alloc(Machine.Span, initialization.values.len);
             for (initialization.values, 0..) |value, index| values[index] = layout.values[value];
@@ -530,11 +545,27 @@ fn leafCount(program: Ir.Program, type_value: Ir.Type) Machine.Error!usize {
     }
     const structure_index = type_value.structureIndex() orelse return 1;
     if (structure_index >= program.structures.len) return error.InvalidMachineProgram;
+    if (program.structures[structure_index].is_protocol) {
+        var maximum: usize = 0;
+        for (program.structures, 0..) |structure, candidate| {
+            if (structure.is_protocol or !irConforms(program, candidate, structure_index)) continue;
+            maximum = @max(maximum, try leafCount(program, .structure(candidate)));
+        }
+        return 1 + maximum;
+    }
     if (program.structures[structure_index].is_class) return 1;
     if (program.structures[structure_index].collection) |collection| if (collection.length == null) return if (collection.view) 2 else 1;
     var result: usize = 0;
     for (program.structures[structure_index].fields) |field| result += try leafCount(program, field.type);
     return result;
+}
+
+fn irConforms(program: Ir.Program, structure_index: usize, protocol_index: usize) bool {
+    var current: ?usize = structure_index;
+    while (current) |candidate| : (current = program.structures[candidate].base) {
+        for (program.structures[candidate].conformances) |conformance| if (conformance == protocol_index) return true;
+    }
+    return false;
 }
 
 fn fieldOffset(program: Ir.Program, structure_index: usize, field_index: usize) Machine.Error!usize {
@@ -574,6 +605,16 @@ fn appendFlattenedTypes(
     }
     const structure_index = type_value.structureIndex() orelse return result.append(allocator, type_value);
     if (structure_index >= program.structures.len) return error.InvalidMachineProgram;
+    if (program.structures[structure_index].is_protocol) {
+        try result.append(allocator, .uint);
+        var widest: []const Ir.Type = &.{};
+        for (program.structures, 0..) |structure, candidate| {
+            if (structure.is_protocol or !irConforms(program, candidate, structure_index)) continue;
+            const flat = try flattenedTypes(allocator, program, .structure(candidate));
+            if (flat.len > widest.len) widest = flat;
+        }
+        return result.appendSlice(allocator, widest);
+    }
     if (program.structures[structure_index].is_class) return result.append(allocator, .uint);
     for (program.structures[structure_index].fields) |field| {
         try appendFlattenedTypes(allocator, program, field.type, result);

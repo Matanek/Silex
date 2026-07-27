@@ -2,6 +2,7 @@ const std = @import("std");
 const Frontend = @import("Frontend.zig");
 const Interpreter = @import("Interpreter.zig");
 const Project = @import("Project.zig");
+const Ir = @import("Ir.zig");
 
 fn run(source: []const u8) ![]const u8 {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
@@ -55,6 +56,125 @@ test "classes conform with or without a base and inherit conformances" {
     try std.testing.expectEqualStrings("entity icon\n", output);
 }
 
+test "dynamic protocol values copy structures and preserve class identity" {
+    const output = try run(
+        \\protocol Counter { func advance() int }
+        \\struct Step : Counter {
+        \\    var value:int
+        \\    func advance() int { self.value += 1; return self.value }
+        \\}
+        \\class Shared : Counter {
+        \\    public var value:int = 10
+        \\    public func advance() int { self.value += 1; return self.value }
+        \\}
+        \\func main() {
+        \\    let source = Step(value:1)
+        \\    var erased:Counter = source
+        \\    print(erased.advance(), " ", source.value)
+        \\    var shared = Shared()
+        \\    erased = shared
+        \\    print(erased.advance(), " ", shared.value)
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("2 1\n11 11\n", output);
+}
+
+test "transport dynamic protocol values through language containers" {
+    const output = try run(
+        \\protocol Readable { func read() int }
+        \\struct Number : Readable { let value:int; func read() int { return self.value } }
+        \\struct Holder { var value:Readable }
+        \\func relay(value:Readable) Readable { return value }
+        \\func main() {
+        \\    var direct:Readable = Number(value:4)
+        \\    var holder = Holder(value:direct)
+        \\    var optional:Readable? = Number(value:5)
+        \\    let values:Readable[] = [Number(value:6), Number(value:7)]
+        \\    var returned = relay(holder.value)
+        \\    if var present = optional { print(returned.read(), " ", present.read()) }
+        \\    var selected:Readable = values[1]
+        \\    print(selected.read())
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("4 5\n7\n", output);
+}
+
+test "dynamic protocol values expose only requirements and require mutable copyable storage" {
+    try expectCompileError(
+        "protocol Readable { func read() int } struct Number : Readable { func read() int { return 1 } func hidden() {} } func main() { var value:Readable = Number(); value.hidden() }",
+        "structure 'Readable' has no method named 'hidden' accepting 0 arguments",
+    );
+    try expectCompileError(
+        "protocol Readable { func read() int } struct Number : Readable { func read() int { return 1 } } func main() { let value:Readable = Number(); value.read() }",
+        "a binding that can reach a class reference must use 'var'",
+    );
+    try expectCompileError(
+        "protocol Readable { func read() int } struct Owner : Readable { drop {} func read() int { return 1 } } func main() { var value:Readable = Owner() }",
+        "a noncopyable structure cannot be erased into a dynamic protocol value",
+    );
+    try expectCompileError(
+        "protocol Readable { func read() int } struct Number : Readable { func read() int { return 1 } } func inspect(value:@Readable) {} func main() {}",
+        "dynamic protocol values cannot use '@' or '&'",
+    );
+}
+
+test "dynamic protocol values retain one shared class identity until final drop" {
+    const output = try run(
+        \\protocol Live { func touch() }
+        \\class Resource : Live {
+        \\    public func touch() { print("alive") }
+        \\    drop { print("drop") }
+        \\}
+        \\func main() {
+        \\    var resource = Resource()
+        \\    var erased:Live = resource
+        \\    erased.touch()
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("alive\ndrop\n", output);
+}
+
+test "protocol erasure has deterministic explicit portable IR" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        "protocol Readable { func read() int } struct Number : Readable { func read() int { return 4 } } func main() { var value:Readable = Number(); print(value.read()) }",
+    );
+    const text = try Ir.writeText(allocator, compilation.ir);
+    try std.testing.expect(std.mem.indexOf(u8, text, "protocol.init @Readable") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "protocol.test") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "protocol.extract") != null);
+}
+
+test "compose dynamic protocol values across module boundaries" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data =
+        \\use Api
+        \\use Model
+        \\func main() { var value:Api.Readable = Model.Number(value:9); print(value.read()) }
+    });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Api.sx", .data =
+        "public protocol Readable { func read() int }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Model.sx", .data =
+        "use Api; public struct Number : Api.Readable { public let value:int; public func read() int { return self.value } }",
+    });
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(input);
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("9\n", result.stdout);
+}
+
 test "diagnose missing private and mismatched protocol requirements" {
     try expectCompileError(
         "protocol Drawable { func draw() } struct Sprite : Drawable {} func main() {}",
@@ -89,7 +209,7 @@ test "reject unsupported protocol declaration forms and dynamic values" {
     );
     try expectCompileError(
         "protocol Drawable { func draw() } func main() { let value:Drawable }",
-        "dynamic protocol values are not supported yet",
+        "a dynamic protocol value requires an initializer",
     );
 }
 
