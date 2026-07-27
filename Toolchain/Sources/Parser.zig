@@ -205,7 +205,7 @@ pub const Parser = struct {
             .keyword_continue => self.parseLoopControl(true),
             .keyword_match => self.parseMatchStatement(),
             .keyword_try => self.parseMatchStatement(),
-            .identifier, .keyword_self => self.parseIdentifierStatement(),
+            .identifier, .keyword_self, .keyword_super => self.parseIdentifierStatement(),
             else => self.fail("expected statement"),
         };
     }
@@ -748,7 +748,7 @@ pub const Parser = struct {
                 });
             },
             .string_start => return self.parseInterpolatedString(token),
-            .identifier, .keyword_self => {
+            .identifier, .keyword_self, .keyword_super => {
                 try self.advance();
                 return self.newExpression(.{
                     .position = token.position,

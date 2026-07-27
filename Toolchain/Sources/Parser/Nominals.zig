@@ -30,6 +30,12 @@ pub fn parse(self: anytype, is_public: bool, is_internal: bool, is_class: bool) 
     var methods: std.ArrayList(Ast.Function) = .empty;
     var drop: ?Ast.Drop = null;
     while (self.current.tag != .right_brace and self.current.tag != .end) {
+        var member_override = false;
+        if (self.current.tag == .keyword_override) {
+            if (!is_class) return self.fail("only class methods can declare override");
+            member_override = true;
+            try self.advance();
+        }
         var member_public = !is_class;
         var member_internal = false;
         var member_private = is_class;
@@ -47,6 +53,7 @@ pub fn parse(self: anytype, is_public: bool, is_internal: bool, is_class: bool) 
             try self.advance();
         }
         if (self.current.tag == .keyword_init) {
+            if (member_override) return self.fail("constructors cannot declare override");
             var constructor = try parseConstructor(self, member_internal, base != null);
             constructor.is_public = member_public;
             constructor.is_private = member_private;
@@ -56,12 +63,14 @@ pub fn parse(self: anytype, is_public: bool, is_internal: bool, is_class: bool) 
         }
         if (self.current.tag == .keyword_func) {
             var method = try self.parseFunction(member_public, member_internal);
+            method.is_override = member_override;
             method.is_private = member_private;
             method.is_protected = member_protected;
             try methods.append(self.allocator, method);
             continue;
         }
         if (self.current.tag == .keyword_drop) {
+            if (member_override) return self.fail("drop cannot declare override");
             if (is_class) return self.fail("class drop blocks are not supported yet");
             if (member_visibility) return self.fail("drop cannot declare visibility");
             if (drop != null) return self.fail("structure already declares drop");
@@ -76,6 +85,7 @@ pub fn parse(self: anytype, is_public: bool, is_internal: bool, is_class: bool) 
             .keyword_var => true,
             else => return self.fail("structure field must start with 'let' or 'var'"),
         };
+        if (member_override) return self.fail("fields cannot declare override");
         const field_position = self.current.position;
         try self.advance();
         if (self.current.tag != .identifier) return self.fail("expected field name");

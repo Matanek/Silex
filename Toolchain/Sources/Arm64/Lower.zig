@@ -122,6 +122,7 @@ fn lowerInstruction(
             for (initialization.fields, 0..) |field, index| fields[index] = layout.values[field];
             if (program.structures[initialization.structure].is_class) break :aggregate .{ .class_init = .{
                 .result = layout.values[initialization.result].start,
+                .structure = initialization.structure,
                 .fields = fields,
             } };
             break :aggregate .{ .aggregate_init = .{
@@ -378,6 +379,23 @@ fn lowerInstruction(
                 .result = if (call.result) |result| layout.values[result] else null,
                 .function = call.function,
                 .arguments = arguments,
+            } };
+        },
+        .dynamic_call => |call| dispatch: {
+            _ = try Machine.checkedArgumentCount(call.arguments.len);
+            const arguments = try allocator.alloc(Machine.Span, call.arguments.len);
+            for (call.arguments, 0..) |argument, index| arguments[index] = layout.values[argument];
+            const implementations = try allocator.alloc(Machine.Instruction.DynamicCall.Implementation, call.implementations.len);
+            for (call.implementations, 0..) |implementation, index| implementations[index] = .{
+                .structure = implementation.structure,
+                .function = implementation.function,
+            };
+            break :dispatch .{ .dynamic_call = .{
+                .result = if (call.result) |result| layout.values[result] else null,
+                .function = call.function,
+                .receiver = layout.values[call.receiver].start,
+                .arguments = arguments,
+                .implementations = implementations,
             } };
         },
         .print => |value| .{ .print = .{

@@ -1129,6 +1129,41 @@ test "native class inheritance matches the reference interpreter" {
     try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
 }
 
+test "native class overrides match the reference interpreter" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const source =
+        \\class Entity {
+        \\    protected var count:int = 0
+        \\    public func label() str { return "entity" }
+        \\    public func bump() { self.count++ }
+        \\    public func current() int { return self.count }
+        \\}
+        \\class Player : Entity {
+        \\    override public func label() str { return "$(super.label()) player" }
+        \\    override public func bump() { super.bump(); super.bump() }
+        \\}
+        \\class Captain : Player { override public func label() str { return "captain" } }
+        \\func label(value:Entity) str { return value.label() }
+        \\func bump(value:Entity) { value.bump() }
+        \\func main() {
+        \\    var player = Player()
+        \\    var captain = Captain()
+        \\    bump(player)
+        \\    print(label(player), " ", label(captain))
+        \\    print(player.current())
+        \\}
+    ;
+    var frontend = Frontend.Frontend.init(allocator);
+    const reference = try Interpreter.runCapture(allocator, (try frontend.compile(source)).ir);
+    const native = try compileAndRun(allocator, source);
+    try std.testing.expectEqual(reference.exit_code, exitCode(native));
+    try std.testing.expectEqualSlices(u8, reference.stdout, native.stdout);
+    try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
+}
+
 test "native checked float conversion returns an exact integer" {
     if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);

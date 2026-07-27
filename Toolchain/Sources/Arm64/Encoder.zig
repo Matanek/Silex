@@ -427,6 +427,7 @@ fn encodeFunction(
                 try appendFixup(allocator, words, &fixups.epilogue, compareBranchNonZero(.x8), .imm19);
                 if (call.result) |result| if (!result.aggregate) try words.append(allocator, storeStack(.x0, result.start));
             },
+            .dynamic_call => |call| try encodeDynamicCall(allocator, words, calls, &fixups, call),
             .print => |value| switch (value.kind) {
                 .signed_integer => try emitPrintInteger(allocator, words, value.value, 1, value.newline),
                 .unsigned_integer => try emitPrintUnsigned(allocator, words, value.value, value.newline),
@@ -527,6 +528,44 @@ fn encodeFunction(
     for (fixups.epilogue.items) |fixup| try patchLocal(words.items, fixup, epilogue_label);
     try patch26(words.items, overflow_to_epilogue, epilogue_label);
     try patch26(words.items, division_to_epilogue, epilogue_label);
+}
+
+fn encodeDynamicCall(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    calls: *std.ArrayList(CallFixup),
+    fixups: *FunctionFixups,
+    call: Machine.Instruction.DynamicCall,
+) Error!void {
+    try words.append(allocator, loadStack(.x9, call.receiver));
+    try words.append(allocator, load64(.x9, .x9, 0));
+    for (call.arguments, 0..) |argument, index| {
+        const outgoing: Register = @enumFromInt(index);
+        if (argument.aggregate) {
+            if (argument.width == 0) try words.append(allocator, moveWideZero64(outgoing, 0, 0)) else try emitStackAddress(allocator, words, outgoing, argument.start);
+        } else try words.append(allocator, loadStack(outgoing, argument.start));
+    }
+    if (call.result) |result| if (result.aggregate) {
+        if (result.width == 0) try words.append(allocator, moveWideZero64(.x15, 0, 0)) else try emitStackAddress(allocator, words, .x15, result.start);
+    };
+    var done: std.ArrayList(usize) = .empty;
+    for (call.implementations) |implementation| {
+        try emitImmediate64(allocator, words, .x10, implementation.structure);
+        try words.append(allocator, compareRegisters(.x9, .x10));
+        const skip = words.items.len;
+        try words.append(allocator, conditionalBranch(.not_equal));
+        try calls.append(allocator, .{ .at = words.items.len, .function = implementation.function });
+        try words.append(allocator, branchLink());
+        try appendFixup(allocator, words, &fixups.epilogue, compareBranchNonZero(.x8), .imm19);
+        try done.append(allocator, words.items.len);
+        try words.append(allocator, branch());
+        try patch19(words.items, skip, words.items.len);
+    }
+    try calls.append(allocator, .{ .at = words.items.len, .function = call.function });
+    try words.append(allocator, branchLink());
+    try appendFixup(allocator, words, &fixups.epilogue, compareBranchNonZero(.x8), .imm19);
+    for (done.items) |at| try patch26(words.items, at, words.items.len);
+    if (call.result) |result| if (!result.aggregate) try words.append(allocator, storeStack(.x0, result.start));
 }
 
 fn emitSpanCopy(

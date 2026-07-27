@@ -98,6 +98,7 @@ pub const Instruction = union(enum) {
     unary: Unary,
     binary: Binary,
     call: Call,
+    dynamic_call: DynamicCall,
     print: Print,
     assert: Assert,
 
@@ -310,6 +311,19 @@ pub const Instruction = union(enum) {
         result: ?ValueId,
         function: FunctionId,
         arguments: []const ValueId,
+    };
+
+    pub const DynamicCall = struct {
+        result: ?ValueId,
+        function: FunctionId,
+        receiver: ValueId,
+        arguments: []const ValueId,
+        implementations: []const Implementation,
+
+        pub const Implementation = struct {
+            structure: usize,
+            function: FunctionId,
+        };
     };
 
     pub const Assert = struct {
@@ -818,6 +832,12 @@ fn writeInstruction(
                 try appendValueChecked(output, allocator, function, argument);
             }
             try output.append(allocator, ')');
+        },
+        .dynamic_call => |call| {
+            if (call.result) |result| try appendResult(output, allocator, program, function, result);
+            try output.appendSlice(allocator, try std.fmt.allocPrint(allocator, "dispatch @{s} via ", .{program.functions[call.function].name}));
+            try appendValueChecked(output, allocator, function, call.receiver);
+            try output.appendSlice(allocator, try std.fmt.allocPrint(allocator, " [{d} implementations]", .{call.implementations.len}));
         },
         .print => |print_value| {
             try output.appendSlice(allocator, "print ");

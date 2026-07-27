@@ -513,6 +513,27 @@ same object identity. It applies to bindings, arguments, returns, optionals and
 elements of a newly constructed collection. Existing mutable collections are
 invariant. Constructors are not inherited.
 
+Public and protected instance methods are dynamically substitutable. A child
+uses `override` to replace one inherited signature; the ordered parameter
+types and borrowing modes, return contract, and visibility must remain
+compatible. Overload selection still uses the receiver's static type, then the
+selected signature dispatches on the instance's real class.
+
+```sx
+class Player : Entity {
+    override public func update() {
+        super.update()
+        print("player")
+    }
+}
+```
+
+`super.method(...)` directly invokes the immediate base implementation and is
+not a first-class value. Calls made by a constructor on `self` remain attached
+to the class whose constructor is executing; child overrides only participate
+after the child is fully constructed. Private methods never form override
+slots, and static or extension methods do not participate in class dispatch.
+
 ## Associated enum values
 
 `enum` declares a nominal closed set of variants. A variant may carry zero or
@@ -1119,7 +1140,7 @@ member_visibility = "public" | "internal" | "protected" | "private" ;
 structure       = visibility? "struct" identifier type_parameters? "{" (structure_field | constructor | method | drop_definition)* "}" ;
 class           = visibility? "class" identifier (":" type)? "{" (class_field | constructor | class_method)* "}" ;
 class_field     = member_visibility? ("let" | "var") identifier ":" type ("=" field_default)? ;
-class_method    = member_visibility? "func" identifier type_parameters? "(" parameters? ")" return_type? block ;
+class_method    = "override"? member_visibility? "func" identifier type_parameters? "(" parameters? ")" return_type? block ;
 drop_definition = "drop" block ;
 enum            = visibility? "enum" identifier type_parameters? "{" enum_variant+ "}" ;
 enum_variant    = identifier ("(" type ("," type)* ")")? ;

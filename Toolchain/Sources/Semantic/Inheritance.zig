@@ -1,5 +1,6 @@
 const std = @import("std");
 const Ast = @import("../Ast.zig");
+const Ir = @import("../Ir.zig");
 
 pub const Field = struct {
     owner: usize,
@@ -64,6 +65,111 @@ pub fn methodOwner(self: anytype, structure_index: usize, name: []const u8) ?usi
         current = self.structures[index].base;
     }
     return null;
+}
+
+pub const MethodCandidate = struct { owner: usize, index: usize, method: Ast.Function };
+
+pub fn methodCandidates(self: anytype, allocator: std.mem.Allocator, structure_index: usize, name: []const u8) ![]const MethodCandidate {
+    var result: std.ArrayList(MethodCandidate) = .empty;
+    var current: ?usize = structure_index;
+    while (current) |owner| : (current = self.structures[owner].base) {
+        const declaration = findDeclaration(self, owner) orelse break;
+        for (declaration.methods, 0..) |method, method_index| {
+            if (!std.mem.eql(u8, method.name, name)) continue;
+            var replaced = false;
+            for (result.items) |existing| if (sameSignature(existing.method, method)) {
+                replaced = true;
+                break;
+            };
+            if (!replaced) try result.append(allocator, .{ .owner = owner, .index = method_index, .method = method });
+        }
+    }
+    return result.toOwnedSlice(allocator);
+}
+
+pub fn validateOverrides(self: anytype) !void {
+    for (self.program.structures, 0..) |structure, structure_index| {
+        if (!structure.is_class) continue;
+        for (structure.methods) |method| {
+            const inherited = inheritedMethod(self, structure_index, method);
+            if (method.is_override and inherited == null) {
+                return self.fail(method.name_position, "override does not match an inherited method signature");
+            }
+            if (!method.is_override and inherited != null and (inherited.?.method.is_public or inherited.?.method.is_protected)) {
+                return self.fail(method.name_position, "an overriding method must declare 'override'");
+            }
+            if (inherited) |base| {
+                if (!base.method.is_public and !base.method.is_protected) {
+                    return self.fail(method.name_position, "only public or protected methods can be overridden");
+                }
+                if (base.method.is_public and !method.is_public) {
+                    return self.fail(method.name_position, "an override cannot reduce public visibility");
+                }
+                if (base.method.is_protected and !method.is_public and !method.is_protected) {
+                    return self.fail(method.name_position, "an override cannot reduce protected visibility");
+                }
+            }
+        }
+    }
+}
+
+pub fn implementations(
+    self: anytype,
+    allocator: std.mem.Allocator,
+    owner: usize,
+    method_index: usize,
+) ![]const Ir.Instruction.DynamicCall.Implementation {
+    const slot = self.program.structures[owner].methods[method_index];
+    var result: std.ArrayList(Ir.Instruction.DynamicCall.Implementation) = .empty;
+    for (self.program.structures, 0..) |_, candidate| {
+        if (candidate == owner or !isDescendant(self, candidate, owner)) continue;
+        if (effectiveOverride(self, candidate, owner, slot)) |function| try result.append(allocator, .{
+            .structure = candidate,
+            .function = function,
+        });
+    }
+    return result.toOwnedSlice(allocator);
+}
+
+fn effectiveOverride(self: anytype, candidate: usize, owner: usize, slot: Ast.Function) ?Ir.FunctionId {
+    var current: ?usize = candidate;
+    while (current) |index| : (current = self.structures[index].base) {
+        if (index == owner) return null;
+        const declaration = findDeclaration(self, index) orelse return null;
+        for (declaration.methods, 0..) |method, method_index| {
+            if (method.is_override and sameSignature(method, slot)) return methodFunctionId(self.program, index, method_index);
+        }
+    }
+    return null;
+}
+
+const InheritedMethod = struct { owner: usize, index: usize, method: Ast.Function };
+
+fn inheritedMethod(self: anytype, structure_index: usize, method: Ast.Function) ?InheritedMethod {
+    var current = self.structures[structure_index].base;
+    while (current) |index| : (current = self.structures[index].base) {
+        const declaration = findDeclaration(self, index) orelse return null;
+        for (declaration.methods, 0..) |candidate, method_index| {
+            if (sameSignature(candidate, method)) return .{ .owner = index, .index = method_index, .method = candidate };
+        }
+    }
+    return null;
+}
+
+pub fn sameSignature(left: Ast.Function, right: Ast.Function) bool {
+    if (!std.mem.eql(u8, left.name, right.name) or left.parameters.len != right.parameters.len or
+        left.return_type != right.return_type or left.return_mode != right.return_mode) return false;
+    for (left.parameters, right.parameters) |left_parameter, right_parameter| {
+        if (left_parameter.type != right_parameter.type or left_parameter.mode != right_parameter.mode) return false;
+    }
+    return true;
+}
+
+fn methodFunctionId(program: Ast.Program, structure_index: usize, method_index: usize) Ir.FunctionId {
+    var result = program.functions.len;
+    for (program.structures) |structure| result += structure.constructors.len;
+    for (program.structures[0..structure_index]) |structure| result += structure.methods.len;
+    return result + method_index;
 }
 
 pub fn findDeclaration(self: anytype, structure_index: usize) ?Ast.Structure {

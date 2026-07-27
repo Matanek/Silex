@@ -3,6 +3,7 @@ const Ir = @import("Ir.zig");
 const MainBoundary = @import("MainBoundary.zig");
 const Numeric = @import("Numeric.zig");
 const RuntimeValue = @import("Interpreter/Value.zig");
+const Dispatch = @import("Interpreter/Dispatch.zig");
 
 const Allocator = std.mem.Allocator;
 const max_call_depth = 768;
@@ -25,7 +26,7 @@ pub const RunResult = struct {
     stderr: []const u8,
 };
 
-const Session = struct {
+pub const Session = struct {
     allocator: Allocator,
     stdout: std.ArrayList(u8) = .empty,
     stderr: std.ArrayList(u8) = .empty,
@@ -98,7 +99,7 @@ pub fn invoke(
     return invokeDepth(allocator, program, function, arguments, 0, &session);
 }
 
-fn invokeDepth(
+pub fn invokeDepth(
     allocator: Allocator,
     program: Ir.Program,
     function_id: Ir.FunctionId,
@@ -404,6 +405,7 @@ fn executeInstruction(
                 return error.InvalidProgram;
             }
         },
+        .dynamic_call => |call| try Dispatch.execute(allocator, program, function, values, call, depth, session, invokeDepth),
         .print => |print_value| {
             try appendValueText(&session.stdout, session.allocator, try load(values, print_value.value));
             if (print_value.newline) try session.stdout.append(session.allocator, '\n');

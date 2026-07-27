@@ -40,6 +40,7 @@ pub const Analyzer = struct {
     default_expansions: std.ArrayList(*const Ast.Expression) = .empty,
     diagnostic: ?Source.Diagnostic = null,
     member_context: ?usize = null,
+    constructor_context: ?usize = null,
     pub fn init(allocator: Allocator) Analyzer {
         return .{ .allocator = allocator };
     }
@@ -56,6 +57,7 @@ pub const Analyzer = struct {
         self.enums = try Enums.prepare(self);
         self.method_mutability = try Methods.inferMutability(self.allocator, self.program);
         self.structures = try Methods.extendStructures(self.allocator, self.program, self.structures, self.method_mutability);
+        try Inheritance.validateOverrides(self);
         try self.validateDeclarations(require_entry);
         try self.validateParameterDefaults();
         var functions: std.ArrayList(Ir.Function) = .empty;
