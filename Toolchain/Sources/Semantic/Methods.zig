@@ -452,7 +452,6 @@ fn analyzeCallWithReceiver(
             try argument_ids.append(self.allocator, prepared.reference);
             continue;
         }
-        if (parameter.mode == .value) try Resources.requireTransfer(self, call.arguments[index], argument.type, "passing it by value");
         if (parameter.mode != .read) try Borrowing.requireOwned(self, argument, call.arguments[index].position, "passed by value");
         try argument_ids.append(
             self.allocator,
@@ -550,7 +549,6 @@ fn analyzeProtocolCall(
             try mutable_arguments.append(self.allocator, prepared);
             try argument_ids.append(self.allocator, prepared.reference);
         } else {
-            if (parameter.mode == .value) try Resources.requireTransfer(self, call.arguments[index], argument.type, "passing it by value");
             if (parameter.mode != .read) try Borrowing.requireOwned(self, argument, call.arguments[index].position, "passed by value");
             try argument_ids.append(self.allocator, (try self.coerce(builder, argument, parameter.type, call.arguments[index].position)).value);
         }

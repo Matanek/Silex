@@ -11,15 +11,7 @@ fn run(source: []const u8) ![]const u8 {
     return std.testing.allocator.dupe(u8, result.stdout);
 }
 
-fn expectCompileError(source: []const u8, message: []const u8) !void {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    var frontend = Frontend.Frontend.init(arena.allocator());
-    try std.testing.expectError(error.InvalidSource, frontend.compile(source));
-    try std.testing.expectEqualStrings(message, frontend.diagnostic.?.message);
-}
-
-test "collection insertion extraction replacement and clear transfer unique elements" {
+test "collection insertion extraction replacement and clear preserve exact drops" {
     const output = try run(
         \\struct File { let id:int; drop { print("drop ", self.id) } }
         \\func main() {
@@ -42,7 +34,7 @@ test "collection insertion extraction replacement and clear transfer unique elem
     );
 }
 
-test "collection loops inspect and mutate noncopyable elements without copying" {
+test "collection loops copy drop elements and write mutable copies back" {
     const output = try run(
         \\struct File { var id:int; drop { print("drop ", self.id) } }
         \\func inspect(file:@File) { print("see ", file.id) }
@@ -56,12 +48,12 @@ test "collection loops inspect and mutate noncopyable elements without copying" 
     );
     defer std.testing.allocator.free(output);
     try std.testing.expectEqualStrings(
-        "see 1\nsee 2\nlet 1\nlet 2\n11 12\ndrop 12\ndrop 11\n",
+        "see 1\ndrop 1\nsee 2\ndrop 2\nlet 1\ndrop 1\nlet 2\ndrop 2\ndrop 1\ndrop 11\ndrop 2\ndrop 12\n11 12\ndrop 12\ndrop 11\n",
         output,
     );
 }
 
-test "indexed read references fixed replacement and sequence append preserve one owner" {
+test "indexed reads fixed replacement and sequence append preserve exact drops" {
     const output = try run(
         \\struct File { let id:int; drop { print("drop ", self.id) } }
         \\func inspect(file:@File) { print("see ", file.id) }
@@ -82,35 +74,30 @@ test "indexed read references fixed replacement and sequence append preserve one
     );
 }
 
-test "noncopyable collection operations reject implicit copies" {
-    const prefix = "struct File { drop {} } ";
-    try expectCompileError(
-        prefix ++ "func main() { var files:File[] = []; let file = File(); files.append(file) }",
-        "named noncopyable value requires 'move' when appending it to a collection",
+test "collection indexing slicing appending and whole storage copy drop values" {
+    const output = try run(
+        \\struct File { let id:int; drop { print("drop ", self.id) } }
+        \\func main() {
+        \\    let file = File(id:1)
+        \\    var values:File[] = []
+        \\    values.append(file)
+        \\    let indexed = values[0]
+        \\    let slice = values[0:1]
+        \\    let copied = values
+        \\    var left:File[] = []
+        \\    let right:File[] = [File(id:2)]
+        \\    left.append(right)
+        \\    print(indexed.id, " ", copied[0].id, " ", left[0].id)
+        \\}
     );
-    try expectCompileError(
-        prefix ++ "func main() { let file = File(); let files:File[] = [file] }",
-        "named noncopyable value requires 'move' when storing it in a collection",
-    );
-    try expectCompileError(
-        prefix ++ "func main() { let files:File[] = [File()]; let file = files[0] }",
-        "indexed access cannot copy a noncopyable element; use '@T' inspection or an extracting collection operation",
-    );
-    try expectCompileError(
-        prefix ++ "func main() { let files:File[] = [File()]; let part = files[0:1] }",
-        "a copied slice cannot contain noncopyable elements; use a borrowed view",
-    );
-    try expectCompileError(
-        prefix ++ "func main() { let files:File[] = [File()]; let copy = files }",
-        "named noncopyable value requires 'move' when storing it",
-    );
-    try expectCompileError(
-        prefix ++ "func main() { var left:File[] = []; let right:File[] = [File()]; left.append(right) }",
-        "named noncopyable value requires 'move' when appending its elements to another collection",
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings(
+        "1 1 2\ndrop 2\ndrop 2\ndrop 1\ndrop 1\ndrop 1\ndrop 1\ndrop 1\n",
+        output,
     );
 }
 
-test "whole noncopyable collections transfer through calls and returns" {
+test "whole drop collections transfer explicitly through calls and returns" {
     const output = try run(
         \\struct File { let id:int; drop { print(self.id) } }
         \\func forward(files:File[]) File[] { return move files }

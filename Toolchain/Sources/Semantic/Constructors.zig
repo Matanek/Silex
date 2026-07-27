@@ -257,7 +257,6 @@ pub fn analyzeCall(
             try argument_ids.append(self.allocator, prepared.reference);
             continue;
         }
-        if (parameter.mode == .value) try Resources.requireTransfer(self, call.arguments[index], argument.type, "passing it by value");
         if (parameter.mode != .read) try Borrowing.requireOwned(self, argument, call.arguments[index].position, "passed by value");
         try argument_ids.append(
             self.allocator,
@@ -470,7 +469,6 @@ fn analyzeSelfAssignment(
         );
         return self.fail(assignment.value.?.position, message);
     }
-    try Resources.requireTransfer(self, assignment.value.?, field.type, "storing it in a structure");
 
     const structure_index = fieldOwnerIndex(self, structure.name);
     const structure_type = Ast.Type.structure(structure_index);

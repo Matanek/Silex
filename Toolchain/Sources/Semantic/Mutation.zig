@@ -30,8 +30,8 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
                 break :current value;
             };
             const replacement = try analyzeReplacement(self, builder, assignment, field.declaration.type, current, target.fields[0].name, false);
-            if (Resources.containsClass(self, field.declaration.type)) {
-                try Resources.retainValue(self, builder, field.declaration.type, replacement);
+            if (Resources.containsClass(self, field.declaration.type)) try Resources.retainValue(self, builder, field.declaration.type, replacement);
+            if (Resources.needsDrop(self, field.declaration.type) or Resources.containsClass(self, field.declaration.type)) {
                 const previous = try self.newValue(builder, field.declaration.type);
                 try self.emit(builder, .{ .global_load = .{ .result = previous, .global = field.global } });
                 try Resources.emitDrop(self, builder, field.declaration.type, previous);
@@ -47,10 +47,6 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
     const binding_index = Support.findBindingIndex(builder.bindings.items, target.name).?;
     if (Collections.isViewType(self.structures, binding.type) and target.fields.len == 0 and target.indices.len == 0) {
         return self.fail(target.name_position, "a view binding cannot be replaced as a whole");
-    }
-    if (Collections.isViewType(self.structures, binding.type) and target.indices.len != 0) {
-        const element = Collections.collectionForType(self.structures, binding.type).?.element;
-        if (Resources.isNoncopyable(self, element)) return self.fail(target.name_position, "a view cannot replace or transfer a noncopyable element");
     }
     if (binding.borrowed_root == null) try Borrowing.ensureRootUnborrowed(self, builder, target.name, target.name_position);
     const complete_assignment = target.fields.len == 0 and target.indices.len == 0 and assignment.operator == .assign;
@@ -74,17 +70,13 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
             const message = try std.fmt.allocPrint(self.allocator, "cannot move value '{s}' into itself", .{target.name});
             return self.fail(value.position, message);
         };
-        if (assignment.operator == .assign and assignment.value != null) {
-            try Resources.requireTransfer(self, assignment.value.?, binding.type, "assigning it");
-            if (binding.available and Resources.isNoncopyable(self, binding.type) and !Resources.containsClass(self, binding.type)) {
-                try Resources.emitDrop(self, builder, binding.type, try loadBinding(self, builder, binding));
-            }
-        }
         const current = if (assignment.operator == .assign) null else try loadBinding(self, builder, binding);
         const replacement = try analyzeReplacement(self, builder, assignment, binding.type, current, target.name, false);
-        if (assignment.operator == .assign and Resources.containsClass(self, binding.type)) {
-            try Resources.retainValue(self, builder, binding.type, replacement);
-            if (binding.available) try Resources.emitDrop(self, builder, binding.type, try loadBinding(self, builder, binding));
+        if (assignment.operator == .assign) {
+            if (Resources.containsClass(self, binding.type)) try Resources.retainValue(self, builder, binding.type, replacement);
+            if (binding.available and (Resources.needsDrop(self, binding.type) or Resources.containsClass(self, binding.type))) {
+                try Resources.emitDrop(self, builder, binding.type, try loadBinding(self, builder, binding));
+            }
         }
         try storeBinding(self, builder, binding, replacement);
         builder.bindings.items[binding_index].available = true;
@@ -202,6 +194,16 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
 
     const final_name = if (target.indices.len != 0) "collection element" else target.fields[target.fields.len - 1].name;
     var replacement = try analyzeReplacement(self, builder, assignment, current_type, current_value, final_name, target.indices.len == 0);
+    if (assignment.operator == .assign) {
+        const class_owned_field = if (steps.items.len != 0) switch (steps.items[steps.items.len - 1]) {
+            .field => |step| self.structures[step.structure].is_class,
+            .collection => false,
+        } else false;
+        if (!class_owned_field and Resources.containsClass(self, current_type)) try Resources.retainValue(self, builder, current_type, replacement);
+        if (Resources.needsDrop(self, current_type) or (!class_owned_field and Resources.containsClass(self, current_type))) {
+            try Resources.emitDrop(self, builder, current_type, current_value);
+        }
+    }
     var index = steps.items.len;
     while (index != 0) {
         index -= 1;

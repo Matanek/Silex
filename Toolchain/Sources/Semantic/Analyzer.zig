@@ -375,7 +375,7 @@ pub const Analyzer = struct {
             },
             .expression_statement => |expression| switch (expression.value) {
                 .call => |call| {
-                    if (try self.analyzeCall(builder, call)) |value| if (Resources.isNoncopyable(self, value.type))
+                    if (try self.analyzeCall(builder, call)) |value| if (Resources.needsDrop(self, value.type) or Resources.containsClass(self, value.type))
                         try Resources.emitDrop(self, builder, value.type, value.value);
                     return false;
                 },
@@ -548,9 +548,6 @@ pub const Analyzer = struct {
             }
         }
         const same_numeric = left.type == right.type and left.type.isNumeric();
-        if (equality and left.type == right.type and Resources.isNoncopyable(self, left.type)) {
-            return self.fail(binary.operator_position, "noncopyable values cannot be compared");
-        }
         const valid = if (bitwise)
             same_numeric and left.type.isInteger() and !left.type.isSignedInteger()
         else if (shift)
@@ -904,7 +901,6 @@ pub const Analyzer = struct {
                 );
                 return self.fail(if (provided) |expression| expression.position else call.name_position, message);
             }
-            if (provided) |expression| try Resources.requireTransfer(self, expression, field.type, "storing it in a structure");
             try Borrowing.requireOwned(self, value, if (provided) |expression| expression.position else call.name_position, "stored");
             try field_values.append(self.allocator, value.value);
         }
@@ -1155,7 +1151,6 @@ pub const Analyzer = struct {
                 }
                 continue;
             }
-            if (parameter.mode == .value) try Resources.requireTransfer(self, call.arguments[index], argument.type, "passing it by value");
             if (parameter.mode != .read) try Borrowing.requireOwned(self, argument, call.arguments[index].position, "passed by value");
             const converted = try self.coerce(builder, argument, parameter.type, call.name_position);
             try argument_ids.append(self.allocator, converted.value);

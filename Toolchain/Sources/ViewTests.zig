@@ -95,7 +95,7 @@ test "view parameters and provenance-qualified returns preserve the root" {
     try std.testing.expectEqualStrings("6\n1\n124\n1230\n", output);
 }
 
-test "views inspect noncopyable elements without acquiring destruction" {
+test "views inspect drop elements and iteration copies them" {
     const output = try run(
         \\struct File { let id:int; drop { print("drop ", self.id) } }
         \\func inspect(file:@File) { print("see ", file.id) }
@@ -109,7 +109,23 @@ test "views inspect noncopyable elements without acquiring destruction" {
         \\}
     );
     defer std.testing.allocator.free(output);
-    try std.testing.expectEqualStrings("see 1\nsee 1\nsee 2\ndrop 2\ndrop 1\n", output);
+    try std.testing.expectEqualStrings("see 1\nsee 1\ndrop 1\nsee 2\ndrop 2\ndrop 2\ndrop 1\n", output);
+}
+
+test "mutable views replace drop elements" {
+    const output = try run(
+        \\struct File { let id:int; drop { print("drop ", self.id) } }
+        \\func main() {
+        \\    var files:File[] = [File(id:1)]
+        \\    if true {
+        \\        var view = &files[0:1]
+        \\        view[0] = File(id:2)
+        \\        print(view[0].id)
+        \\    }
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("drop 1\n2\ndrop 2\n", output);
 }
 
 test "views enforce lexical conflicts and unavailable operations" {
@@ -136,10 +152,6 @@ test "views enforce lexical conflicts and unavailable operations" {
     try expectCompileError(
         "func main() { let values = [1, 2]; var view = &values[0:2] }",
         "a mutable view requires a var collection root",
-    );
-    try expectCompileError(
-        "struct File { drop {} } func main() { var files:File[] = [File()]; var view = &files[0:1]; view[0] = File() }",
-        "a view cannot replace or transfer a noncopyable element",
     );
     try expectCompileError(
         "func main() { var values = [1, 2]; let view = @values[0:2]; view[0] = 3 }",

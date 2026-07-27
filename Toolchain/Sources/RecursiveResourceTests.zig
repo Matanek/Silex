@@ -59,7 +59,7 @@ test "ordinary block return break continue and try exits clean completed owners"
     );
 }
 
-test "fixed arrays and lists destroy noncopyable elements from last to first" {
+test "fixed arrays and lists destroy elements from last to first" {
     const output = try run(
         \\struct Leaf { let id:int; drop { print(self.id) } }
         \\func main() {
@@ -72,7 +72,7 @@ test "fixed arrays and lists destroy noncopyable elements from last to first" {
     try std.testing.expectEqualStrings("done\n5\n4\n3\n2\n1\n", output);
 }
 
-test "discarded owner temporaries are destroyed immediately" {
+test "discarded drop temporaries are destroyed immediately" {
     const output = try run(
         \\struct Leaf { drop { print("drop") } }
         \\func make() Leaf { return Leaf() }
@@ -82,19 +82,29 @@ test "discarded owner temporaries are destroyed immediately" {
     try std.testing.expectEqualStrings("drop\nafter\n", output);
 }
 
-test "noncopyability propagates through structures optionals and enums" {
-    const cases = [_][]const u8{
-        "struct Leaf { drop {} } struct Box { let leaf:Leaf } func main() { let first = Box(leaf:Leaf()); let second = first }",
-        "struct Leaf { drop {} } func main() { let first:Leaf? = Leaf(); let second = first }",
-        "struct Leaf { drop {} } enum Box { value(Leaf) } func main() { let first = Box.value(Leaf()); let second = first }",
-        "struct Leaf { drop {} } func main() { let first:Leaf[1] = [Leaf()]; let second = first }",
-        "struct Leaf { drop {} } func main() { let first:Leaf[] = [Leaf()]; let second = first }",
-    };
-    for (cases) |source| {
-        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-        defer arena.deinit();
-        var frontend = Frontend.Frontend.init(arena.allocator());
-        try std.testing.expectError(error.InvalidSource, frontend.compile(source));
-        try std.testing.expect(std.mem.containsAtLeast(u8, frontend.diagnostic.?.message, 1, "requires 'move'"));
-    }
+test "drop values copy through structures optionals enums and collections" {
+    const output = try run(
+        \\struct Leaf { let id:int; drop { print(self.id) } }
+        \\struct Box { let leaf:Leaf }
+        \\enum Choice { value(Leaf) }
+        \\func main() {
+        \\    let leaf = Leaf(id:1)
+        \\    let box1 = Box(leaf:leaf)
+        \\    let box2 = box1
+        \\    let optional1:Leaf? = leaf
+        \\    let optional2 = optional1
+        \\    let choice1 = Choice.value(leaf)
+        \\    let choice2 = choice1
+        \\    let fixed1:Leaf[1] = [Leaf(id:8)]
+        \\    let fixed2 = fixed1
+        \\    let list1:Leaf[] = [Leaf(id:9)]
+        \\    let list2 = list1
+        \\    print("alive")
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings(
+        "alive\n9\n9\n8\n8\n1\n1\n1\n1\n1\n1\n1\n",
+        output,
+    );
 }

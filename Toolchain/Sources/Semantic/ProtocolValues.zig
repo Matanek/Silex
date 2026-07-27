@@ -64,9 +64,6 @@ pub fn erase(
         });
         return self.fail(position, message);
     }
-    if (!self.structures[structure_index].is_class and @import("Resources.zig").isNoncopyable(self, value.type)) {
-        return self.fail(position, "a noncopyable structure cannot be erased into a dynamic protocol value");
-    }
     const result = try self.newValue(builder, target);
     try self.emit(builder, .{ .protocol_init = .{
         .result = result,
