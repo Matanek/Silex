@@ -787,6 +787,7 @@ pub const Analyzer = struct {
     ) AnalyzeError!TypedValue {
         const structure = self.structures[structure_index];
         const declaration = self.findAstStructure(structure.name).?;
+        if (declaration.is_static) return self.fail(call.name_position, "static classes cannot be constructed");
         if (declaration.drop != null and !self.ownerStorageVisible(structure_index, call.name_position)) {
             return self.fail(call.name_position, "owner structure aggregate initializer is private to its declaring file and direct module users");
         }

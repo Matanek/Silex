@@ -552,6 +552,20 @@ of the same nominal type. Transparent aliases select that same storage, while
 each concrete generic specialization owns separate storage. Static methods are
 never inherited or dynamically dispatched.
 
+`static class` declares a non-instantiable nominal qualifier containing only
+static fields and static methods. It has no `self`, constructor, `drop`, base,
+protected member, protocol conformance, or instance API.
+
+```sx
+public static class Tasks {
+    static var submitted:int
+    public static func submit() { Tasks.submitted++ }
+}
+```
+
+It is not an implicit singleton or namespace: it follows ordinary nominal
+visibility and the common static-storage initialization and teardown contract.
+
 ## Associated enum values
 
 `enum` declares a nominal closed set of variants. A variant may carry zero or
@@ -1156,7 +1170,7 @@ use             = "public"? "use"
 visibility      = "public" | "internal" ;
 member_visibility = "public" | "internal" | "protected" | "private" ;
 structure       = visibility? "struct" identifier type_parameters? "{" (structure_field | constructor | method | drop_definition)* "}" ;
-class           = visibility? "class" identifier (":" type)? "{" (class_field | constructor | class_method)* "}" ;
+class           = visibility? "static"? "class" identifier (":" type)? "{" (class_field | constructor | class_method)* "}" ;
 class_field     = member_visibility? "static"? ("let" | "var") identifier ":" type ("=" field_default)? ;
 class_method    = "override"? member_visibility? "static"? "func" identifier type_parameters? "(" parameters? ")" return_type? block ;
 drop_definition = "drop" block ;

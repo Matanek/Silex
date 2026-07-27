@@ -386,6 +386,7 @@ pub const Structure = struct {
     name: []const u8,
     fields: []const StructureField,
     is_class: bool = false,
+    is_static: bool = false,
     base: ?usize = null,
     collection: ?Types.Collection = null,
 };
