@@ -940,11 +940,13 @@ pub const Specializer = struct {
         const source_collection = template.collection.?;
         const element = try self.rewriteType(source_collection.element, arguments, position);
         for (self.structures.items) |structure| if (structure.collection) |collection| {
-            if (collection.element == element and collection.length == source_collection.length) {
+            if (collection.element == element and collection.length == source_collection.length and collection.view == source_collection.view) {
                 return self.typeForName(structure.name) orelse error.InvalidSource;
             }
         };
-        const name = if (source_collection.length) |length|
+        const name = if (source_collection.view)
+            try std.fmt.allocPrint(self.allocator, "{s}[..]", .{self.typeName(element)})
+        else if (source_collection.length) |length|
             try std.fmt.allocPrint(self.allocator, "{s}[{d}]", .{ self.typeName(element), length })
         else
             try std.fmt.allocPrint(self.allocator, "{s}[]", .{self.typeName(element)});
@@ -955,7 +957,7 @@ pub const Specializer = struct {
         };
         var concrete = template;
         concrete.name = name;
-        concrete.collection = .{ .element = element, .length = source_collection.length };
+        concrete.collection = .{ .element = element, .length = source_collection.length, .view = source_collection.view };
         const structure_index = self.structures.items.len;
         try self.structures.append(self.allocator, concrete);
         try self.rewriteStructureAt(structure_index, arguments);
@@ -1122,7 +1124,7 @@ pub const Specializer = struct {
         }
         if (self.collectionForSourceType(pattern)) |pattern_collection| {
             const actual_collection = self.collectionForSourceType(actual) orelse return false;
-            return pattern_collection.length == actual_collection.length and
+            return (pattern_collection.view or pattern_collection.length == actual_collection.length) and
                 self.unifyType(pattern_collection.element, actual_collection.element, inferred);
         }
         return compatible(actual, pattern);
@@ -1163,7 +1165,7 @@ pub const Specializer = struct {
         }
         if (self.collectionForSourceType(pattern)) |pattern_collection| {
             const actual_collection = self.collectionForSourceType(actual) orelse return false;
-            return pattern_collection.length == actual_collection.length and
+            return (pattern_collection.view or pattern_collection.length == actual_collection.length) and
                 self.matchesPattern(pattern_collection.element, actual_collection.element, arguments);
         }
         return compatible(actual, pattern);

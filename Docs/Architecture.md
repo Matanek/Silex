@@ -87,7 +87,10 @@ open Silex document
   specialization and semantic lowering. Their activation set is derived from
   each source file's transitive `use` closure. Once selected, an extension call
   is an ordinary statically bound typed call; the portable IR and target backend
-  gain no extension object, registry, dispatch table or ABI concept.
+  gain no extension object, registry, dispatch table or ABI concept. Generic
+  extension specializations additionally retain their declaring provider in
+  their compile-time identity, so equally named providers cannot alias through
+  the specialization cache.
 - Associated enums are portable nominal declarations whose variants carry
   typed positional values. Construction records the enum and variant by
   structured indices; module interfaces expose only the nominal identity and

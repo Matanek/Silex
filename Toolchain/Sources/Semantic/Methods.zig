@@ -96,7 +96,15 @@ pub fn analyze(self: anytype, structure_index: usize, method_index: usize, sourc
     self.extension_context = source_method.extension != null;
     defer self.extension_context = previous_extension_context;
     var method = source_method;
-    if (method.return_mode != .value and method.return_provenance == null) method.return_provenance = "self";
+    if (method.return_mode != .value and method.return_provenance == null) {
+        var compatible: usize = 0;
+        for (method.parameters) |parameter| {
+            const accepts = if (method.return_mode == .read) parameter.mode != .value else parameter.mode == .mutable;
+            if (accepts) compatible += 1;
+        }
+        if (compatible != 0) return self.fail(method.name_position, "borrowed method return provenance is ambiguous; qualify it with 'self' or a parameter name");
+        method.return_provenance = "self";
+    }
     const structure = self.program.structures[structure_index];
     const flat = flatMethodIndex(self.program, structure_index, method_index);
     const mutating = self.method_mutability[flat];

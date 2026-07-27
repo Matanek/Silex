@@ -436,6 +436,25 @@ test "native ARM64 agrees on instance and static extension methods" {
     try compare(allocator, compilation.ir, machine, "extended", &.{});
 }
 
+test "native ARM64 agrees on generic extension specializations" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\struct Adapter {}
+        \\extend Adapter {
+        \\    func identity<T>(value:T) T { return value }
+        \\    static func make<T>(value:T) T { return value }
+        \\}
+        \\func genericExtended() int { return Adapter().identity(40) + Adapter.make<int>(2) }
+        \\func main() {}
+    );
+    const machine = try Lower.lower(allocator, compilation.ir);
+    try compare(allocator, compilation.ir, machine, "genericExtended", &.{});
+}
+
 test "native ARM64 agrees on omitted function constructor and method arguments" {
     if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);

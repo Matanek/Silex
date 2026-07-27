@@ -105,7 +105,7 @@ pub const Compiler = struct {
 
         var composition = try self.composeAst();
         var extensions = Extensions.Merger.init(self.allocator);
-        composition.program = extensions.merge(composition.program, false, false) catch |err| {
+        composition.program = extensions.merge(composition.program, true, false) catch |err| {
             self.diagnostic = extensions.diagnostic;
             return err;
         };
@@ -784,7 +784,9 @@ pub const Compiler = struct {
 
     fn collectionCanonicalName(self: *Compiler, module: usize, collection: Ast.Collection) Error![]const u8 {
         const element = try self.canonicalTypeSpelling(module, collection.element);
-        return if (collection.length) |length|
+        return if (collection.view)
+            std.fmt.allocPrint(self.allocator, "{s}[..]", .{element})
+        else if (collection.length) |length|
             std.fmt.allocPrint(self.allocator, "{s}[{d}]", .{ element, length })
         else
             std.fmt.allocPrint(self.allocator, "{s}[]", .{element});
@@ -946,6 +948,7 @@ pub const Compiler = struct {
                 if (structure.collection) |collection| composed_structure.collection = .{
                     .element = GenericTypes.remap(collection.element, type_map, generic_map),
                     .length = collection.length,
+                    .view = collection.view,
                 };
                 const fields = try self.allocator.alloc(Ast.StructureField, structure.fields.len);
                 for (structure.fields, 0..) |field, index| {
