@@ -94,7 +94,7 @@ pub const Compiler = struct {
             ),
             else => |other| return other,
         };
-        self.index = Lookup.discoverProviders(self) catch |err| switch (err) {
+        self.index = Lookup.discoverProviders(self, input_path) catch |err| switch (err) {
             error.DuplicateModule => return self.fail(
                 .{ .offset = 0, .line = 1, .column = 1 },
                 "multiple source files provide the same module",
@@ -154,6 +154,7 @@ pub const Compiler = struct {
     }
 
     fn loadModule(self: *Compiler, module: usize, from: ?usize) Error!void {
+        if (from) |source| try self.recordActivation(source, module);
         switch (self.units[module].state) {
             .loaded => return,
             .loading => {
@@ -244,6 +245,18 @@ pub const Compiler = struct {
         self.units[module].bindings = try bindings.toOwnedSlice(self.allocator);
         try self.activateQualifiedReferences(module);
         self.units[module].state = .loaded;
+    }
+
+    fn recordActivation(self: *Compiler, source: usize, dependency: usize) Error!void {
+        if (source == dependency) return;
+        for (self.units[source].activated_modules) |existing| {
+            if (existing == dependency) return;
+        }
+        const previous = self.units[source].activated_modules;
+        const expanded = try self.allocator.alloc(usize, previous.len + 1);
+        @memcpy(expanded[0..previous.len], previous);
+        expanded[previous.len] = dependency;
+        self.units[source].activated_modules = expanded;
     }
 
     fn resolveUse(self: *Compiler, source_module: usize, use: Ast.Use) Error!Binding {
@@ -637,6 +650,12 @@ pub const Compiler = struct {
         for (self.units[module].bindings) |binding| {
             if (!std.mem.eql(u8, binding.alias, head) or binding.declaration != null) continue;
             if (binding.module) |target_module| {
+                if (!self.hasPublicDeclaration(target_module, tail)) {
+                    const canonical = try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ binding.path, tail });
+                    if (self.longestModulePrefix(canonical, self.index.providers[module].owner)) |target| {
+                        if (target.module != target_module) return target;
+                    }
+                }
                 return .{ .module = target_module, .declaration = tail };
             }
             const canonical = try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ binding.path, tail });
@@ -645,6 +664,23 @@ pub const Compiler = struct {
             return self.fail(expressionPosition(module), message);
         }
         return null;
+    }
+
+    fn hasPublicDeclaration(self: *Compiler, module: usize, name: []const u8) bool {
+        const program = self.units[module].program orelse return false;
+        for (program.functions) |function| {
+            if (function.is_public and std.mem.eql(u8, function.name, name)) return true;
+        }
+        for (program.structures) |structure| {
+            if (Reexports.structureExported(program, structure) and std.mem.eql(u8, structure.name, name)) return true;
+        }
+        for (program.enums) |enumeration| {
+            if (enumeration.is_public and std.mem.eql(u8, enumeration.name, name)) return true;
+        }
+        for (self.units[module].bindings) |binding| {
+            if (binding.is_public and binding.declaration != null and std.mem.eql(u8, binding.alias, name)) return true;
+        }
+        return false;
     }
 
     fn structureCandidate(self: *Compiler, module: usize, name: []const u8) Error!?CallTarget {
@@ -723,11 +759,8 @@ pub const Compiler = struct {
     fn enumReceiverTarget(self: *Compiler, module: usize, name: []const u8) Error!?CallTarget {
         const separator = std.mem.indexOfScalar(u8, name, '.');
         if (separator == null) return self.enumTarget(module, name);
-        const head = name[0..separator.?];
-        const tail = name[separator.? + 1 ..];
-        for (self.units[module].bindings) |binding| {
-            if (!std.mem.eql(u8, binding.alias, head) or binding.declaration != null) continue;
-            if (binding.module) |target_module| return self.enumTarget(target_module, tail);
+        if (try self.targetForCall(module, name)) |target| {
+            if (try self.enumTarget(target.module, target.declaration)) |enumeration| return enumeration;
         }
         for (self.index.providers, 0..) |provider, target_module| {
             if (self.units[target_module].state != .loaded) continue;
@@ -1390,7 +1423,21 @@ pub const Compiler = struct {
                             ) };
                         } else {
                             const qualified = try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ prefix, call.name });
-                            if (try self.structureTarget(module, qualified) != null or try self.targetForCall(module, qualified) != null) {
+                            const qualified_function = if (try self.targetForCall(module, qualified)) |candidate|
+                                try self.functionTarget(candidate)
+                            else
+                                null;
+                            if (qualified_function != null) {
+                                call.name = qualified;
+                                call.receiver = null;
+                            } else if (try self.structureTarget(module, prefix)) |target| {
+                                try self.requirePublicStructure(module, target, call.name_position);
+                                receiver.value = .{ .identifier = try structureCanonicalName(
+                                    self.allocator,
+                                    self.index.providers[target.module].name,
+                                    target.declaration,
+                                ) };
+                            } else if (try self.structureTarget(module, qualified) != null or try self.targetForCall(module, qualified) != null) {
                                 call.name = qualified;
                                 call.receiver = null;
                             } else if (prefix.len != 0 and std.ascii.isUpper(prefix[0])) {

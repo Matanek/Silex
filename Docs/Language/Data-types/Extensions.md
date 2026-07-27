@@ -20,6 +20,11 @@ members.
 Importing an extension module activates its public methods. Merely placing the
 file next to the target does not.
 
+A qualified reference may load a child module on demand. For example, after
+`use STD.Math`, referring to `Math.Vec3` loads that child and activates the
+extensions it declares. Unused children are not loaded eagerly merely because
+their parent namespace is available.
+
 ## Add a conformance
 
 ```sx

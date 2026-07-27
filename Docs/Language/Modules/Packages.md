@@ -19,6 +19,11 @@ Only `Module/` and the exact `macos-arm64` root are indexed. Sources stored
 under another target are ignored. The common and selected roots must not both
 provide the same logical module.
 
+A local source outside these public roots may nevertheless be compiled as the
+explicit program entry. For example, compiling `Math/Tests/Main.sx` makes that
+file available as `Math.Tests.Main` for this compilation only. It does not
+index the rest of `Tests/` and does not expose test modules to package users.
+
 Its directory name and manifest identity match:
 
 ```json

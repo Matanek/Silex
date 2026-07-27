@@ -307,10 +307,14 @@ fn indexProject(
     var resolver = Packages.Resolver.init(allocator, io, global_packages_root);
     const graph = try resolver.resolve(root);
     var indexes: std.ArrayList(Modules.Index) = .empty;
+    const excluded_roots = try allocator.alloc([]const u8, graph.packages.len - 1);
+    for (graph.packages[1..], excluded_roots) |package, *package_root| package_root.* = package.root;
     for (graph.packages, 0..) |package, owner| {
         for (package.module_roots) |module_root| {
-            var discovered = try Modules.discoverOwned(allocator, io, module_root, package.name, owner);
-            if (owner == 0) discovered = try excludePackageSources(allocator, discovered, graph.packages[1..]);
+            const discovered = if (owner == 0)
+                try Modules.discoverOwnedExcluding(allocator, io, module_root, package.name, owner, excluded_roots)
+            else
+                try Modules.discoverOwned(allocator, io, module_root, package.name, owner);
             try indexes.append(allocator, discovered);
         }
     }
@@ -323,23 +327,6 @@ fn indexProject(
     return .{ .graph = graph, .index = index, .current_owner = current_owner, .current_path = document_path };
 }
 
-fn excludePackageSources(
-    allocator: Allocator,
-    index: Modules.Index,
-    packages: []const Packages.Package,
-) !Modules.Index {
-    var providers: std.ArrayList(Modules.Provider) = .empty;
-    for (index.providers) |provider| {
-        var excluded = false;
-        for (packages) |package| if (pathInside(provider.path, package.root)) {
-            excluded = true;
-            break;
-        };
-        if (!excluded) try providers.append(allocator, provider);
-    }
-    return .{ .providers = try providers.toOwnedSlice(allocator) };
-}
-
 fn appendPathItems(
     allocator: Allocator,
     io: Io,
@@ -350,10 +337,20 @@ fn appendPathItems(
     call_cursor: usize,
     ranked: *std.ArrayList(RankedItem),
 ) !void {
+    const type_priority: u8 = 5;
     const child_prefix = if (query.qualifier.len == 0)
         ""
     else
         try std.fmt.allocPrint(allocator, "{s}.", .{query.qualifier});
+    const exact_provider = findProvider(project.index, query.qualifier);
+    const exact_loaded = if (exact_provider) |provider|
+        if (project.graph.canAccess(project.current_owner, provider.owner, provider.name))
+            try loadProgram(allocator, io, documents, provider)
+        else
+            null
+    else
+        null;
+    const child_priority: u8 = if (call_source != null and exact_provider != null) 30 else 0;
 
     for (project.index.providers) |provider| {
         if (samePath(provider.path, project.current_path)) continue;
@@ -364,16 +361,28 @@ fn appendPathItems(
         const end = std.mem.indexOfScalar(u8, remainder, '.') orelse remainder.len;
         const child = remainder[0..end];
         if (!matchesPrefix(child, query.prefix)) continue;
+        if (call_source != null and end == remainder.len and
+            (exact_loaded == null or !hasPublicDeclaration(exact_loaded.?.program, child)) and
+            try appendPrincipalType(
+                allocator,
+                io,
+                documents,
+                provider,
+                child,
+                call_source.?,
+                call_cursor,
+                ranked,
+                type_priority,
+            )) continue;
         try appendRanked(allocator, ranked, .{
             .label = child,
             .kind = 9,
             .detail = if (end == remainder.len) "Silex module" else "Silex module namespace",
-        }, 0, false);
+        }, child_priority, false);
     }
 
-    const provider = findProvider(project.index, query.qualifier) orelse return;
-    if (!project.graph.canAccess(project.current_owner, provider.owner, provider.name)) return;
-    const loaded = try loadProgram(allocator, io, documents, provider) orelse return;
+    const provider = exact_provider orelse return;
+    const loaded = exact_loaded orelse return;
     for (loaded.program.structures) |structure| {
         if (!structure.is_public) continue;
         if (!matchesPrefix(structure.name, query.prefix)) continue;
@@ -385,13 +394,13 @@ fn appendPathItems(
                     if (structure.is_class) "class" else "struct",
                     structure.name,
                 }),
-            }, 10, false);
+            }, type_priority, false);
         } else if (structure.constructors.len == 0) {
             try appendRanked(allocator, ranked, .{
                 .label = structure.name,
                 .kind = 22,
                 .detail = try std.fmt.allocPrint(allocator, "{s}() {s}", .{ structure.name, structure.name }),
-            }, 10, false);
+            }, type_priority, false);
         } else for (structure.constructors) |constructor| {
             if (!Completion.callAcceptsParameters(
                 call_source.?,
@@ -409,7 +418,7 @@ fn appendPathItems(
                     structure.name,
                     constructor,
                 ),
-            }, 10, true);
+            }, type_priority, true);
         }
     }
     for (loaded.program.enums) |enumeration| {
@@ -418,7 +427,7 @@ fn appendPathItems(
             .label = enumeration.name,
             .kind = 13,
             .detail = try std.fmt.allocPrint(allocator, "enum {s}", .{enumeration.name}),
-        }, 10, false);
+        }, type_priority, false);
     }
     if (!query.type_only) {
         for (loaded.program.functions) |function| {
@@ -449,7 +458,7 @@ fn appendPathItems(
                     exported.alias.?,
                     type_target.name(),
                 }),
-            }, 10, false);
+            }, type_priority, false);
             continue;
         }
         try appendReexportTarget(
@@ -467,6 +476,70 @@ fn appendPathItems(
             query.type_only,
         );
     }
+}
+
+fn hasPublicDeclaration(program: Ast.Program, name: []const u8) bool {
+    for (program.structures) |structure| {
+        if (structure.is_public and std.mem.eql(u8, structure.name, name)) return true;
+    }
+    for (program.enums) |enumeration| {
+        if (enumeration.is_public and std.mem.eql(u8, enumeration.name, name)) return true;
+    }
+    for (program.functions) |function| {
+        if (function.is_public and std.mem.eql(u8, function.name, name)) return true;
+    }
+    for (program.uses) |use| {
+        if (use.is_public and use.alias != null and std.mem.eql(u8, use.alias.?, name)) return true;
+    }
+    return false;
+}
+
+fn appendPrincipalType(
+    allocator: Allocator,
+    io: Io,
+    documents: []const Types.Document,
+    provider: Modules.Provider,
+    name: []const u8,
+    call_source: []const u8,
+    call_cursor: usize,
+    ranked: *std.ArrayList(RankedItem),
+    priority: u8,
+) !bool {
+    const loaded = try loadProgram(allocator, io, documents, provider) orelse return false;
+    for (loaded.program.structures) |structure| {
+        if (!structure.is_public or !std.mem.eql(u8, structure.name, name)) continue;
+        if (structure.constructors.len == 0) {
+            try appendRanked(allocator, ranked, .{
+                .label = name,
+                .kind = 22,
+                .detail = try std.fmt.allocPrint(allocator, "{s}() {s}", .{ name, name }),
+            }, priority, false);
+        } else for (structure.constructors) |constructor| {
+            if (!Completion.callAcceptsParameters(call_source, call_cursor, loaded.program, constructor.parameters)) continue;
+            try appendRanked(allocator, ranked, .{
+                .label = name,
+                .kind = 22,
+                .detail = try Completion.constructorSignature(
+                    allocator,
+                    loaded.source,
+                    loaded.program,
+                    name,
+                    constructor,
+                ),
+            }, priority, true);
+        }
+        return true;
+    }
+    for (loaded.program.enums) |enumeration| {
+        if (!enumeration.is_public or !std.mem.eql(u8, enumeration.name, name)) continue;
+        try appendRanked(allocator, ranked, .{
+            .label = name,
+            .kind = 13,
+            .detail = try std.fmt.allocPrint(allocator, "enum {s}", .{name}),
+        }, priority, false);
+        return true;
+    }
+    return false;
 }
 
 fn appendReexportTarget(
@@ -495,13 +568,13 @@ fn appendReexportTarget(
                 .label = label,
                 .kind = 22,
                 .detail = try std.fmt.allocPrint(allocator, "struct {s}", .{structure.name}),
-            }, 10, false);
+            }, 5, false);
         } else if (structure.constructors.len == 0) {
             try appendRanked(allocator, ranked, .{
                 .label = label,
                 .kind = 22,
                 .detail = try std.fmt.allocPrint(allocator, "{s}() {s}", .{ label, label }),
-            }, 10, false);
+            }, 5, false);
         } else for (structure.constructors) |constructor| {
             if (!Completion.callAcceptsParameters(call_source.?, call_cursor, loaded.program, constructor.parameters)) continue;
             try appendRanked(allocator, ranked, .{
@@ -514,7 +587,7 @@ fn appendReexportTarget(
                     label,
                     constructor,
                 ),
-            }, 10, true);
+            }, 5, true);
         }
         return;
     }
@@ -524,7 +597,7 @@ fn appendReexportTarget(
             .label = label,
             .kind = 13,
             .detail = try std.fmt.allocPrint(allocator, "enum {s}", .{enumeration.name}),
-        }, 10, false);
+        }, 5, false);
         return;
     }
     var found_function = false;
@@ -554,7 +627,7 @@ fn appendReexportTarget(
                 .label = label,
                 .kind = 22,
                 .detail = try std.fmt.allocPrint(allocator, "type {s} = {s}", .{ label, type_target.name() }),
-            }, 10, false);
+            }, 5, false);
             return;
         }
         return appendReexportTarget(
@@ -627,6 +700,16 @@ fn appendImportedMembers(
                 .detail = try Completion.functionSignature(allocator, loaded.source, loaded.program, method),
             }, 0, true);
         }
+        try appendProviderExtensionMethods(
+            allocator,
+            project,
+            current_source,
+            query,
+            loaded,
+            structure,
+            provider.owner,
+            ranked,
+        );
         try appendCurrentExtensionMethods(
             allocator,
             project,
@@ -636,6 +719,42 @@ fn appendImportedMembers(
             ranked,
         );
         return;
+    }
+}
+
+fn appendProviderExtensionMethods(
+    allocator: Allocator,
+    project: IndexedProject,
+    source: []const u8,
+    query: ImportedMemberQuery,
+    loaded: LoadedProgram,
+    target: Ast.Structure,
+    provider_owner: usize,
+    ranked: *std.ArrayList(RankedItem),
+) !void {
+    for (loaded.program.extensions) |extension| {
+        const local_target = Completion.typeName(loaded.program, extension.target);
+        const matches_local_target = std.mem.indexOfScalar(u8, local_target, '.') == null and
+            std.mem.eql(u8, local_target, target.name);
+        const matches_imported_target = if (matches_local_target)
+            true
+        else if (try importedTypePath(allocator, loaded.program, project, local_target)) |resolved|
+            std.mem.eql(u8, resolved, query.type_path)
+        else
+            false;
+        if (!matches_imported_target) continue;
+        for (extension.methods) |method| {
+            if (method.is_static or method.is_private or method.is_protected) continue;
+            if (method.is_internal and provider_owner != project.current_owner) continue;
+            if (target.is_class and !method.visibility_explicit) continue;
+            if (!std.mem.startsWith(u8, method.name, query.prefix)) continue;
+            if (!Completion.callAcceptsParameters(source, query.cursor, loaded.program, method.parameters)) continue;
+            try appendRanked(allocator, ranked, .{
+                .label = method.name,
+                .kind = 2,
+                .detail = try Completion.functionSignature(allocator, loaded.source, loaded.program, method),
+            }, 0, true);
+        }
     }
 }
 
@@ -1401,6 +1520,62 @@ test "complete public package APIs module aliases members and overlays" {
         imported_alias_cursor,
     );
     try std.testing.expect(hasLabel(imported_aliases, "Number"));
+}
+
+test "complete a module facade together with its child namespace" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.createDirPath(std.testing.io, "STD/Module/Math");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Package.json",
+        .data = "{\"dependencies\":{\"STD\":\"=0.1.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "STD/Package.json",
+        .data = "{\"name\":\"STD\",\"version\":\"0.1.0\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = "func main() {}" });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "STD/Module/Math.sx",
+        .data = "public func answer() int { return 42 }\npublic func Vec3() int { return 0 }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "STD/Module/Math/Point.sx",
+        .data = "public struct Point { var x:int; var y:int }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "STD/Module/Math/Vec3.sx",
+        .data = "public struct Vec3 { var value:int }",
+    });
+
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const main_path = try std.fs.path.join(allocator, &.{ root, "Main.sx" });
+    const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
+    const uri = try std.fmt.allocPrint(allocator, "file://{s}", .{main_path});
+    const source = "use STD.Math\nfunc main() { Math. }";
+    const cursor = std.mem.indexOf(u8, source, "Math. }").? + "Math.".len;
+    const items = (try itemsAt(
+        allocator,
+        std.testing.io,
+        null,
+        root_uri,
+        uri,
+        &.{},
+        source,
+        cursor,
+    )).?;
+
+    try std.testing.expect(hasLabel(items, "answer"));
+    try std.testing.expect(hasLabel(items, "Point"));
+    try std.testing.expectEqualStrings("Point", items[0].label);
+    try std.testing.expectEqual(@as(u8, 22), items[0].kind);
+    try std.testing.expectEqual(@as(usize, 1), labelCount(items, "Vec3"));
+    const vec3 = items[labelIndex(items, "Vec3").?];
+    try std.testing.expectEqual(@as(u8, 3), vec3.kind);
 }
 
 fn hasLabel(items: []const Types.CompletionItem, label: []const u8) bool {

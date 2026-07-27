@@ -771,7 +771,8 @@ fn emitStackAddress(
         return words.append(allocator, addSubtractImmediate(destination, .zero_or_sp, @intCast(byte_offset), true));
     }
     try emitImmediate64(allocator, words, .x14, byte_offset);
-    try words.append(allocator, addRegisters(destination, .zero_or_sp, .x14));
+    try words.append(allocator, addSubtractImmediate(destination, .zero_or_sp, 0, true));
+    try words.append(allocator, addRegisters(destination, destination, .x14));
 }
 
 fn emitLoadAtOffset(
@@ -1573,6 +1574,23 @@ test "encode known AArch64 instruction words" {
     try std.testing.expectEqual(@as(u32, 0xc80afdc9), A64.storeReleaseExclusive64(.x10, .x9, .x14));
     try std.testing.expectEqual(@as(u32, 0xc89ffddf), A64.storeRelease64(.zero_or_sp, .x14));
     try std.testing.expectEqual(@as(u32, 0xd65f03c0), returnInstruction());
+}
+
+test "form large stack addresses from sp" {
+    var words: std.ArrayList(u32) = .empty;
+    defer words.deinit(std.testing.allocator);
+
+    try emitStackAddress(std.testing.allocator, &words, .x10, 512);
+
+    try std.testing.expect(words.items.len >= 2);
+    try std.testing.expectEqual(
+        addSubtractImmediate(.x10, .zero_or_sp, 0, true),
+        words.items[words.items.len - 2],
+    );
+    try std.testing.expectEqual(
+        addRegisters(.x10, .x10, .x14),
+        words.items[words.items.len - 1],
+    );
 }
 
 test "resolve calls and append a native test entry" {

@@ -191,8 +191,8 @@ open Silex document
   [-n|--nocache] -o|--output <executable>` selects the native path. Debug is the default;
   Release selects semantics-preserving optimization. `run` shares the frontend
   through typed IR but emits no native executable or implicit output file.
-- Release propagates constants and copies, folds checked scalar operations,
-  removes dead and unreachable IR, and inlines functions proven constant,
+- Release propagates constants and copies through straight-line functions,
+  folds checked scalar operations, removes dead constants, and inlines functions proven constant,
   identity-only or scalar-binary. ARM64 lowering then performs deterministic
   linear-scan allocation for safe scalar leaves; addressable values, aggregates
   and values constrained by calls remain explicit spills. Fully resident leaf

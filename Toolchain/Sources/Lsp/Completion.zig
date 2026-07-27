@@ -195,7 +195,8 @@ pub fn insertTextFormatFor(item: CompletionItem) ?u8 {
 }
 
 fn callableSignature(item: CompletionItem) ?[]const u8 {
-    if (item.kind != CompletionKind.method and item.kind != CompletionKind.function) return null;
+    if (item.kind != CompletionKind.method and item.kind != CompletionKind.function and
+        item.kind != CompletionKind.structure) return null;
     if (!std.mem.startsWith(u8, item.detail, item.label)) return null;
     const signature = item.detail[item.label.len..];
     return if (std.mem.startsWith(u8, signature, "(")) signature else null;
