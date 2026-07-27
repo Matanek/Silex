@@ -183,3 +183,78 @@ test "class inheritance rejects invalid bases, cycles, and inherited field colli
         "field 'value' is private and unavailable here",
     );
 }
+
+test "overrides dispatch on the dynamic class and super stays direct" {
+    const output = try run(
+        \\class Entity {
+        \\    public func label() str { return "entity" }
+        \\    public func code(value:int) str { return "base $(value)" }
+        \\    public func code(value:str) str { return "text $(value)" }
+        \\}
+        \\class Player : Entity {
+        \\    override public func label() str { return "$(super.label()) player" }
+        \\    override public func code(value:int) str { return "player $(value)" }
+        \\}
+        \\class Captain : Player {
+        \\    override public func label() str { return "captain" }
+        \\}
+        \\func label(value:Entity) str { return value.label() }
+        \\func code(value:Entity) str { return value.code(7) }
+        \\func text(value:Player) str { return value.code("ok") }
+        \\func main() {
+        \\    var entity = Entity()
+        \\    var player = Player()
+        \\    var captain = Captain()
+        \\    print(label(entity), " | ", label(player), " | ", label(captain))
+        \\    print(code(player), " | ", code(captain))
+        \\    print(text(player))
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("entity | entity player | captain\nplayer 7 | player 7\ntext ok\n", output);
+}
+
+test "override declarations preserve inherited signatures and visibility" {
+    try expectCompileError(
+        "class Base { public func value() int { return 1 } } class Child : Base { public func value() int { return 2 } } func main() {}",
+        "an overriding method must declare 'override'",
+    );
+    try expectCompileError(
+        "class Base {} class Child : Base { override public func value() int { return 2 } } func main() {}",
+        "override does not match an inherited method signature",
+    );
+    try expectCompileError(
+        "class Base { public func value() int { return 1 } } class Child : Base { override protected func value() int { return 2 } } func main() {}",
+        "an override cannot reduce public visibility",
+    );
+    try expectCompileError(
+        "class Base { public func value() int { return 1 } } class Child : Base { override public func value() str { return \"x\" } } func main() {}",
+        "override does not match an inherited method signature",
+    );
+}
+
+test "mutating overrides and constructor calls bind at the required phase" {
+    const output = try run(
+        \\class Base {
+        \\    protected var value:int = 0
+        \\    public init() { self.trace() }
+        \\    public func trace() { print("base init") }
+        \\    public func bump() { self.value++ }
+        \\    public func current() int { return self.value }
+        \\}
+        \\class Child : Base {
+        \\    public init() : super() { self.trace() }
+        \\    override public func trace() { print("child init") }
+        \\    override public func bump() { super.bump(); super.bump() }
+        \\}
+        \\func bump(value:Base) { value.bump() }
+        \\func main() {
+        \\    var child = Child()
+        \\    var base:Base = child
+        \\    bump(base)
+        \\    print(base.current())
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("base init\nchild init\n2\n", output);
+}

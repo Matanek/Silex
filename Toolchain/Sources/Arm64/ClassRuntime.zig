@@ -17,12 +17,14 @@ pub fn emitInit(
 ) Error!void {
     var width: usize = 0;
     for (value.fields) |field| width += field.width;
-    try immediate(allocator, words, .x1, @max(Machine.slot_size, width * Machine.slot_size));
+    try immediate(allocator, words, .x1, (width + 1) * Machine.slot_size);
     try allocate(allocator, words);
     const failed = words.items.len;
     try words.append(allocator, A64.conditionalBranch(.carry_set));
     try words.append(allocator, A64.moveRegister(.x15, .x0));
-    var offset: usize = 0;
+    try immediate(allocator, words, .x9, value.structure);
+    try words.append(allocator, A64.store64(.x9, .x15, 0));
+    var offset: usize = 1;
     for (value.fields) |field| for (0..field.width) |leaf| {
         try words.append(allocator, A64.loadStack(.x9, @intCast(@as(usize, field.start) + leaf)));
         try words.append(allocator, A64.store64(.x9, .x15, @intCast(offset * Machine.slot_size)));
@@ -38,6 +40,7 @@ pub fn emitInit(
 
 pub fn emitLoad(allocator: Allocator, words: *std.ArrayList(u32), value: Machine.Instruction.ClassLoad) Error!void {
     try words.append(allocator, A64.loadStack(.x10, value.base));
+    try addOffset(allocator, words, .x10, Machine.slot_size);
     if (value.byte_offset != 0) try addOffset(allocator, words, .x10, value.byte_offset);
     for (0..value.result.width) |leaf| {
         try words.append(allocator, A64.load64(.x9, .x10, @intCast(leaf * Machine.slot_size)));
@@ -48,6 +51,7 @@ pub fn emitLoad(allocator: Allocator, words: *std.ArrayList(u32), value: Machine
 pub fn emitStore(allocator: Allocator, words: *std.ArrayList(u32), value: Machine.Instruction.ClassStore) Error!void {
     try words.append(allocator, A64.loadStack(.x10, value.base));
     try words.append(allocator, A64.storeStack(.x10, value.result));
+    try addOffset(allocator, words, .x10, Machine.slot_size);
     if (value.byte_offset != 0) try addOffset(allocator, words, .x10, value.byte_offset);
     for (0..value.replacement.width) |leaf| {
         try words.append(allocator, A64.loadStack(.x9, @intCast(@as(usize, value.replacement.start) + leaf)));

@@ -188,7 +188,11 @@ pub fn analyze(self: anytype, structure_index: usize, method_index: usize, sourc
 
 pub fn analyzeCall(self: anytype, builder: anytype, call: Ast.Expression.Call) !?Model.TypedValue {
     const receiver_expression = call.receiver.?;
-    const receiver = try self.analyzeExpression(builder, receiver_expression);
+    const receiver = if (receiver_expression.value == .identifier and std.mem.eql(u8, receiver_expression.value.identifier, "super")) receiver: {
+        var self_expression = receiver_expression.*;
+        self_expression.value = .{ .identifier = "self" };
+        break :receiver try self.analyzeExpression(builder, &self_expression);
+    } else try self.analyzeExpression(builder, receiver_expression);
     if (call.safe) return analyzeSafeCall(self, builder, call, receiver);
     return analyzeCallWithReceiver(self, builder, call, receiver, null);
 }
@@ -239,39 +243,45 @@ fn analyzeCallWithReceiver(
     safe_receiver_type: ?Ast.Type,
 ) !?Model.TypedValue {
     const receiver_expression = call.receiver.?;
-    if (receiver.type == .str and std.mem.eql(u8, call.name, "count") and call.arguments.len == 0 and call.named_arguments.len == 0) {
+    const super_call = receiver_expression.value == .identifier and std.mem.eql(u8, receiver_expression.value.identifier, "super");
+    var resolved_receiver = receiver;
+    if (super_call) {
+        const context = self.member_context orelse return self.fail(receiver_expression.position, "'super' is only available in a class method");
+        const base_index = self.structures[context].base orelse return self.fail(receiver_expression.position, "class has no base implementation");
+        resolved_receiver = try self.coerce(builder, receiver, .structure(base_index), receiver_expression.position);
+    }
+    if (resolved_receiver.type == .str and std.mem.eql(u8, call.name, "count") and call.arguments.len == 0 and call.named_arguments.len == 0) {
         return try self.emitStringCount(builder, receiver.value);
     }
-    const receiver_structure_index = receiver.type.structureIndex() orelse {
+    const receiver_structure_index = resolved_receiver.type.structureIndex() orelse {
         if (std.mem.eql(u8, call.name, "count")) return self.fail(call.name_position, "count() expects 'str'");
         const message = try std.fmt.allocPrint(self.allocator, "type '{s}' has no methods", .{self.typeName(receiver.type)});
         return self.fail(call.name_position, message);
     };
     if (receiver_structure_index >= self.program.structures.len) return error.InvalidSource;
-    const structure_index = Inheritance.methodOwner(self, receiver_structure_index, call.name) orelse receiver_structure_index;
-    const structure = self.program.structures[structure_index];
-    if (structure.is_internal and call.name_position.file != structure.position.file) {
+    const receiver_structure = self.program.structures[receiver_structure_index];
+    if (receiver_structure.is_internal and call.name_position.file != receiver_structure.position.file) {
         const message = try std.fmt.allocPrint(
             self.allocator,
             "members of internal structure '{s}' are unavailable outside its source file",
-            .{structure.name},
+            .{receiver_structure.name},
         );
         return self.fail(call.name_position, message);
     }
     if (call.named_arguments.len != 0) return self.fail(call.name_position, "methods use positional arguments");
+    const candidates = try Inheritance.methodCandidates(self, self.allocator, receiver_structure_index, call.name);
 
     var arity_count: usize = 0;
     var sole: ?usize = null;
     var inaccessible_internal = false;
-    for (structure.methods, 0..) |method, method_index| {
-        if (!std.mem.eql(u8, method.name, call.name)) continue;
-        if (!Visibility.memberVisible(self, structure_index, method, call.name_position)) {
+    for (candidates, 0..) |candidate, candidate_index| {
+        if (!Visibility.memberVisible(self, candidate.owner, candidate.method, call.name_position)) {
             inaccessible_internal = true;
             continue;
         }
-        if (Support.acceptsArity(method.parameters, call.arguments.len)) {
+        if (Support.acceptsArity(candidate.method.parameters, call.arguments.len)) {
             arity_count += 1;
-            sole = method_index;
+            sole = candidate_index;
         }
     }
     if (arity_count == 0) {
@@ -286,7 +296,7 @@ fn analyzeCallWithReceiver(
         const message = try std.fmt.allocPrint(
             self.allocator,
             "structure '{s}' has no method named '{s}' accepting {d} arguments",
-            .{ structure.name, call.name, call.arguments.len },
+            .{ receiver_structure.name, call.name, call.arguments.len },
         );
         return self.fail(call.name_position, message);
     }
@@ -294,7 +304,7 @@ fn analyzeCallWithReceiver(
     var arguments: std.ArrayList(Model.TypedValue) = .empty;
     for (call.arguments, 0..) |argument, argument_index| {
         const expected = if (arity_count == 1) expected: {
-            const parameter_type = structure.methods[sole.?].parameters[argument_index].type;
+            const parameter_type = candidates[sole.?].method.parameters[argument_index].type;
             break :expected Optionals.expectedContext(parameter_type, argument);
         } else null;
         try arguments.append(self.allocator, try self.analyzeExpressionExpected(builder, argument, expected));
@@ -303,9 +313,10 @@ fn analyzeCallWithReceiver(
     var selected: ?usize = null;
     var selected_cost: usize = std.math.maxInt(usize);
     var ambiguous = false;
-    for (structure.methods, 0..) |method, method_index| {
-        if (!std.mem.eql(u8, method.name, call.name) or !Support.acceptsArity(method.parameters, arguments.items.len)) continue;
-        if (!Visibility.memberVisible(self, structure_index, method, call.name_position)) continue;
+    for (candidates, 0..) |candidate, candidate_index| {
+        const method = candidate.method;
+        if (!Support.acceptsArity(method.parameters, arguments.items.len)) continue;
+        if (!Visibility.memberVisible(self, candidate.owner, method, call.name_position)) continue;
         var cost: usize = 0;
         var viable = true;
         for (method.parameters[0..arguments.items.len], arguments.items) |parameter, argument| {
@@ -318,7 +329,7 @@ fn analyzeCallWithReceiver(
         }
         if (!viable) continue;
         if (cost < selected_cost) {
-            selected = method_index;
+            selected = candidate_index;
             selected_cost = cost;
             ambiguous = false;
         } else if (cost == selected_cost) ambiguous = true;
@@ -327,11 +338,15 @@ fn analyzeCallWithReceiver(
         const message = try std.fmt.allocPrint(self.allocator, "call to method '{s}' is ambiguous", .{call.name});
         return self.fail(call.name_position, message);
     }
-    const method_index = selected orelse {
-        const message = try std.fmt.allocPrint(self.allocator, "no overload of method '{s}' matches the argument types", .{call.name});
-        return self.fail(call.name_position, message);
-    };
-    const method = structure.methods[method_index];
+    const selected_candidate = candidates[
+        selected orelse {
+            const message = try std.fmt.allocPrint(self.allocator, "no overload of method '{s}' matches the argument types", .{call.name});
+            return self.fail(call.name_position, message);
+        }
+    ];
+    const structure_index = selected_candidate.owner;
+    const method_index = selected_candidate.index;
+    const method = selected_candidate.method;
     try Borrowing.validateReadArguments(self, method.parameters, call.arguments);
     const flat = flatMethodIndex(self.program, structure_index, method_index);
     const mutating = self.method_mutability[flat];
@@ -349,9 +364,9 @@ fn analyzeCallWithReceiver(
     var argument_ids: std.ArrayList(Ir.ValueId) = .empty;
     var mutable_arguments: std.ArrayList(MutableReferences.Prepared) = .empty;
     const method_receiver = if (receiver_structure_index != structure_index and borrowed_receiver == null)
-        try self.coerce(builder, receiver, .structure(structure_index), call.name_position)
+        try self.coerce(builder, resolved_receiver, .structure(structure_index), call.name_position)
     else
-        receiver;
+        resolved_receiver;
     try argument_ids.append(self.allocator, if (borrowed_receiver) |prepared| prepared.reference else method_receiver.value);
     for (arguments.items, method.parameters[0..arguments.items.len], 0..) |argument, parameter, index| {
         if (parameter.mode == .mutable) {
@@ -374,10 +389,25 @@ fn analyzeCallWithReceiver(
 
     const ir_return_type = methodIrReturnType(self, structure_index, flat, method);
     const call_result: ?Ir.ValueId = if (ir_return_type == .void) null else try self.newValue(builder, ir_return_type);
-    try self.emit(builder, .{ .call = .{
+    const arguments_slice = try argument_ids.toOwnedSlice(self.allocator);
+    const implementations = if (class_receiver and !super_call and
+        !(self.constructor_context != null and receiver_expression.value == .identifier and std.mem.eql(u8, receiver_expression.value.identifier, "self")) and
+        (method.is_public or method.is_protected))
+        try Inheritance.implementations(self, self.allocator, structure_index, method_index)
+    else
+        &.{};
+    if (implementations.len == 0) {
+        try self.emit(builder, .{ .call = .{
+            .result = call_result,
+            .function = methodFunctionId(self.program, structure_index, method_index),
+            .arguments = arguments_slice,
+        } });
+    } else try self.emit(builder, .{ .dynamic_call = .{
         .result = call_result,
         .function = methodFunctionId(self.program, structure_index, method_index),
-        .arguments = try argument_ids.toOwnedSlice(self.allocator),
+        .receiver = method_receiver.value,
+        .arguments = arguments_slice,
+        .implementations = implementations,
     } });
     for (mutable_arguments.items) |prepared| try MutableReferences.writeBack(self, builder, prepared);
 
@@ -768,7 +798,12 @@ fn expressionCallsMutatingSelf(program: Ast.Program, structure_index: usize, exp
 
 fn receiverStructure(program: Ast.Program, root_structure: usize, expression: *const Ast.Expression) ?usize {
     return switch (expression.value) {
-        .identifier => |name| if (std.mem.eql(u8, name, "self")) root_structure else null,
+        .identifier => |name| if (std.mem.eql(u8, name, "self"))
+            root_structure
+        else if (std.mem.eql(u8, name, "super") and root_structure < program.structures.len)
+            if (program.structures[root_structure].base) |base| base.structureIndex() else null
+        else
+            null,
         .field_access => |access| if (receiverStructure(program, root_structure, access.base)) |base| field: {
             if (base >= program.structures.len) break :field null;
             for (program.structures[base].fields) |field_value| {

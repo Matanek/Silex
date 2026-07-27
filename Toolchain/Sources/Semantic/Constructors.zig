@@ -42,6 +42,9 @@ pub fn analyze(
     const nominal_index = self.structureIndex(declaration.name) orelse return error.InvalidSource;
     self.member_context = nominal_index;
     defer self.member_context = previous_context;
+    const previous_constructor = self.constructor_context;
+    self.constructor_context = nominal_index;
+    defer self.constructor_context = previous_constructor;
     const structure_type = Ast.Type.structure(nominal_index);
     var builder: Model.FunctionBuilder = .{};
     try builder.blocks.append(self.allocator, .{});

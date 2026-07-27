@@ -88,6 +88,7 @@ pub const Instruction = union(enum) {
     unary: Unary,
     binary: Binary,
     call: Call,
+    dynamic_call: DynamicCall,
     print: Print,
     assert: Assert,
     panic: Panic,
@@ -174,6 +175,7 @@ pub const Instruction = union(enum) {
 
     pub const ClassInit = struct {
         result: Slot,
+        structure: u64,
         fields: []const Span,
     };
 
@@ -330,6 +332,19 @@ pub const Instruction = union(enum) {
         result: ?Span,
         function: FunctionId,
         arguments: []const Span,
+    };
+
+    pub const DynamicCall = struct {
+        result: ?Span,
+        function: FunctionId,
+        receiver: Slot,
+        arguments: []const Span,
+        implementations: []const Implementation,
+
+        pub const Implementation = struct {
+            structure: u64,
+            function: FunctionId,
+        };
     };
 
     pub const Print = struct {
@@ -598,6 +613,14 @@ pub fn validate(program: Program) Error!void {
                         return error.InvalidMachineProgram;
                     }
                 } else if (callee.return_type != .void) return error.InvalidMachineProgram;
+            },
+            .dynamic_call => |call| {
+                if (call.function >= program.functions.len or call.arguments.len > max_register_arguments) return error.InvalidMachineProgram;
+                try requireSlot(function, call.receiver);
+                const fallback = program.functions[call.function];
+                if (call.arguments.len != fallback.parameter_count) return error.InvalidMachineProgram;
+                if (call.result) |result| try requireSpan(function, result);
+                for (call.implementations) |implementation| if (implementation.function >= program.functions.len) return error.InvalidMachineProgram;
             },
             .print => |value| try requireSlot(function, value.value),
             .assert => |value| {

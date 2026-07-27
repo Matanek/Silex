@@ -416,6 +416,7 @@ pub const Use = struct {
 };
 
 pub const Function = struct {
+    is_override: bool = false,
     is_public: bool = false,
     is_internal: bool = false,
     is_private: bool = false,
