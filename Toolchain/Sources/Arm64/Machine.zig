@@ -1289,6 +1289,12 @@ fn supportedExternal(function: ExternalFunction) bool {
         const arguments = [_]AbiValue{.read_address};
         return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
     }
+    if (std.mem.eql(u8, function.provider, "Windows.kernel32") and
+        std.mem.eql(u8, function.source_name, "GetSystemTimeAsFileTime"))
+    {
+        const arguments = [_]AbiValue{.read_address};
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == null;
+    }
     if (std.mem.eql(u8, function.provider, "Windows.ucrtbase") and
         (std.mem.eql(u8, function.source_name, "_write") or std.mem.eql(u8, function.source_name, "_read")))
     {

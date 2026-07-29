@@ -105,11 +105,27 @@ pub fn itemsAtForTarget(
     var ranked: std.ArrayList(RankedItem) = .empty;
     switch (query.?) {
         .use_path => |path| try appendPathItems(allocator, io, documents, project, path, null, cursor, &ranked),
-        .qualifier => |qualified| try appendPathItems(allocator, io, documents, project, .{
-            .qualifier = qualified.path,
-            .prefix = qualified.prefix,
-            .type_only = qualified.type_only,
-        }, source, qualified.cursor, &ranked),
+        .qualifier => |qualified| {
+            try appendPathItems(allocator, io, documents, project, .{
+                .qualifier = qualified.path,
+                .prefix = qualified.prefix,
+                .type_only = qualified.type_only,
+            }, source, qualified.cursor, &ranked);
+            if (!qualified.type_only) try appendImportedMembers(
+                allocator,
+                io,
+                documents,
+                project,
+                source,
+                .{
+                    .type_path = qualified.path,
+                    .prefix = qualified.prefix,
+                    .cursor = qualified.cursor,
+                    .static_receiver = true,
+                },
+                &ranked,
+            );
+        },
         .imported_member => |member| try appendImportedMembers(
             allocator,
             io,
@@ -126,8 +142,8 @@ pub fn itemsAtForTarget(
         result[index] = entry.item;
         result[index].sortText = try std.fmt.allocPrint(allocator, "{d:0>3}-{d:0>6}", .{ entry.priority, index });
         result[index].filterText = entry.item.label;
-        result[index].insertText = try Completion.insertTextFor(allocator, entry.item);
-        result[index].insertTextFormat = Completion.insertTextFormatFor(entry.item);
+        result[index].insertText = try Completion.insertTextForAt(allocator, entry.item, source, cursor);
+        result[index].insertTextFormat = Completion.insertTextFormatForAt(entry.item, source, cursor);
     }
     return result;
 }
@@ -343,8 +359,8 @@ pub fn scopeItemsAtForTarget(
         result[index] = entry.item;
         result[index].sortText = try std.fmt.allocPrint(allocator, "{d:0>3}-{d:0>6}", .{ entry.priority, index });
         result[index].filterText = entry.item.label;
-        result[index].insertText = try Completion.insertTextFor(allocator, entry.item);
-        result[index].insertTextFormat = Completion.insertTextFormatFor(entry.item);
+        result[index].insertText = try Completion.insertTextForAt(allocator, entry.item, source, cursor);
+        result[index].insertTextFormat = Completion.insertTextFormatForAt(entry.item, source, cursor);
     }
     return result;
 }
@@ -405,7 +421,7 @@ fn queryAt(
     } };
 
     if (prefix_start == 0 or source[prefix_start - 1] != '.') return null;
-    const receiver = simpleReceiver(source, prefix_start - 1) orelse return null;
+    const receiver = Completion.memberReceiver(source, prefix_start - 1) orelse return null;
     const current_program = try parseCurrentAtCompletion(
         allocator,
         source,
@@ -438,6 +454,20 @@ fn queryAt(
                 .prefix = prefix,
                 .cursor = cursor,
                 .type_only = isQualifiedTypePrefix(source, prefix_start),
+            } };
+        }
+        if (Completion.qualifiedCall(receiver)) |call| {
+            if (try importedQualifiedCallReturnTypePath(
+                allocator,
+                io,
+                documents,
+                project,
+                program,
+                call,
+            )) |type_path| return .{ .imported_member = .{
+                .type_path = type_path,
+                .prefix = prefix,
+                .cursor = cursor,
             } };
         }
         if (try declaredCallReturnTypePath(
@@ -1138,6 +1168,8 @@ fn parseCurrentAtCompletion(
     if (try parseCurrent(allocator, source)) |program| return program;
     const placeholder = if (type_position)
         if (prefix.len == 0) "__Completion" else ""
+    else if (Completion.callFollows(source, cursor))
+        if (prefix.len == 0) "__completion" else ""
     else if (prefix.len == 0)
         "__completion()"
     else
@@ -1283,28 +1315,56 @@ fn declaredCallReturnTypePath(
         if (depth != 0) continue;
         if (has_argument) arguments += 1;
 
-        const use = findUseByAlias(current, owner_alias) orelse continue;
-        const target = declarationTarget(project.index, use.path) orelse continue;
-        const provider = project.index.providers[target.provider];
-        if (!project.graph.canAccess(project.current_owner, provider.owner, provider.name)) continue;
-        const loaded = try loadProgram(allocator, io, documents, provider) orelse continue;
-        var return_name: ?[]const u8 = null;
-        for (loaded.program.structures) |structure| {
-            if (!std.mem.eql(u8, structure.name, target.declaration) or !structure.is_public) continue;
-            for (structure.methods) |method| {
-                if (!method.is_static or !std.mem.eql(u8, method.name, method_name) or
-                    !parametersAcceptArity(method.parameters, arguments)) continue;
-                const candidate = returnTypeName(loaded.program, method.return_type) orelse continue;
-                if (return_name != null and !std.mem.eql(u8, return_name.?, candidate)) return null;
-                return_name = candidate;
-            }
-        }
-        const name = return_name orelse return null;
-        if (std.mem.indexOfScalar(u8, name, '.') != null) return name;
-        const qualified: []const u8 = try std.fmt.allocPrint(allocator, "{s}.{s}", .{ provider.name, name });
-        return qualified;
+        return importedQualifiedCallReturnTypePath(
+            allocator,
+            io,
+            documents,
+            project,
+            current,
+            .{ .owner = owner_alias, .name = method_name, .arity = arguments },
+        );
     }
     return null;
+}
+
+fn importedQualifiedCallReturnTypePath(
+    allocator: Allocator,
+    io: Io,
+    documents: []const Types.Document,
+    project: IndexedProject,
+    current: Ast.Program,
+    call: Completion.QualifiedCall,
+) !?[]const u8 {
+    const use = findUseByAlias(current, call.owner) orelse return null;
+    const target = declarationTarget(project.index, use.path) orelse return null;
+    const provider = project.index.providers[target.provider];
+    if (!project.graph.canAccess(project.current_owner, provider.owner, provider.name)) return null;
+    const loaded = try loadProgram(allocator, io, documents, provider) orelse return null;
+    var return_name: ?[]const u8 = null;
+
+    for (loaded.program.functions) |function| {
+        if (function.is_internal or !std.mem.eql(u8, function.name, call.name) or
+            !parametersAcceptArity(function.parameters, call.arity)) continue;
+        if (provider.owner != project.current_owner and !function.is_public) continue;
+        const candidate = returnTypeName(loaded.program, function.return_type) orelse continue;
+        if (return_name != null and !std.mem.eql(u8, return_name.?, candidate)) return null;
+        return_name = candidate;
+    }
+    for (loaded.program.structures) |structure| {
+        if (!std.mem.eql(u8, structure.name, target.declaration) or !structure.is_public) continue;
+        for (structure.methods) |method| {
+            if (!method.is_static or method.is_internal or method.is_private or method.is_protected or
+                !std.mem.eql(u8, method.name, call.name) or
+                !parametersAcceptArity(method.parameters, call.arity)) continue;
+            const candidate = returnTypeName(loaded.program, method.return_type) orelse continue;
+            if (return_name != null and !std.mem.eql(u8, return_name.?, candidate)) return null;
+            return_name = candidate;
+        }
+    }
+    const name = return_name orelse return null;
+    if (std.mem.indexOfScalar(u8, name, '.') != null) return name;
+    const qualified: []const u8 = try std.fmt.allocPrint(allocator, "{s}.{s}", .{ provider.name, name });
+    return qualified;
 }
 
 fn returnTypeName(program: Ast.Program, source_type: Ast.Type) ?[]const u8 {
@@ -1440,12 +1500,6 @@ fn joinQualified(allocator: Allocator, tokens: []const LexerModule.Token) ![]con
 
 fn trimPathQualifier(path: []const u8) []const u8 {
     return std.mem.trimEnd(u8, path, " \t.");
-}
-
-fn simpleReceiver(source: []const u8, dot: usize) ?[]const u8 {
-    var start = dot;
-    while (start != 0 and (std.ascii.isAlphanumeric(source[start - 1]) or source[start - 1] == '_')) start -= 1;
-    return if (start == dot) null else source[start..dot];
 }
 
 fn prefixStart(source: []const u8, cursor: usize) usize {

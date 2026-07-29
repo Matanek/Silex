@@ -436,6 +436,12 @@ pub fn prepare(self: anytype) ![]const Boundary.Function {
             if (parameters.len != 1 or parameters[0] != .address or return_type != .int32) {
                 return self.fail(external.position, "performance counter functions expect func(C.MutablePointer<int>) int32");
             }
+        } else if (std.mem.eql(u8, external.library, "Windows.kernel32") and
+            std.mem.eql(u8, external.source_name, "GetSystemTimeAsFileTime"))
+        {
+            if (parameters.len != 1 or parameters[0] != .address or return_type != .void) {
+                return self.fail(external.position, "GetSystemTimeAsFileTime expects func(C.MutablePointer<int>) void");
+            }
         } else if (std.mem.eql(u8, external.library, "Windows.ucrtbase") and std.mem.eql(u8, external.source_name, "_write")) {
             if (parameters.len != 3 or parameters[0] != .int32 or parameters[1] != .address or
                 parameters[2] != .uint32 or return_type != .int32)

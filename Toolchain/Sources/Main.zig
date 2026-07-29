@@ -342,6 +342,11 @@ fn compileNativeOptions(
                     {
                         break :symbol WindowsImports.Symbol.query_performance_frequency;
                     }
+                    if (std.mem.eql(u8, external.provider, "Windows.kernel32") and
+                        std.mem.eql(u8, external.source_name, "GetSystemTimeAsFileTime"))
+                    {
+                        break :symbol WindowsImports.Symbol.get_system_time_as_file_time;
+                    }
                     if (std.mem.eql(u8, external.provider, "Windows.ucrtbase") and std.mem.eql(u8, external.source_name, "_write")) break :symbol .crt_write;
                     if (std.mem.eql(u8, external.provider, "Windows.ucrtbase") and std.mem.eql(u8, external.source_name, "_read")) break :symbol .crt_read;
                     if (std.mem.eql(u8, external.provider, "Windows.ucrtbase") and std.mem.eql(u8, external.source_name, "_isatty")) break :symbol .crt_isatty;
