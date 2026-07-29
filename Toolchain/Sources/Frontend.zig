@@ -30,6 +30,7 @@ pub const Frontend = struct {
             self.diagnostic = parser.diagnostic;
             return err;
         };
+        ast = try withoutTests(self.allocator, ast);
         ast = try Result.install(self.allocator, ast);
         var extensions = Extensions.Merger.init(self.allocator);
         ast = extensions.merge(ast, true, true) catch |err| {
@@ -43,6 +44,32 @@ pub const Frontend = struct {
         };
         var analyzer = Semantic.Analyzer.init(self.allocator);
         var ir = analyzer.analyze(ast) catch |err| {
+            self.diagnostic = analyzer.diagnostic;
+            return err;
+        };
+        ir.files = &.{"<source>"};
+        return .{ .ast = ast, .ir = ir };
+    }
+
+    pub fn compileTests(self: *Frontend, source: []const u8) CompileError!Compilation {
+        var parser = ParserModule.Parser.init(self.allocator, source);
+        var ast = parser.parse() catch |err| {
+            self.diagnostic = parser.diagnostic;
+            return err;
+        };
+        ast = try Result.install(self.allocator, ast);
+        var extensions = Extensions.Merger.init(self.allocator);
+        ast = extensions.merge(ast, true, true) catch |err| {
+            self.diagnostic = extensions.diagnostic;
+            return err;
+        };
+        var specializer = GenericSpecializer.init(self.allocator);
+        ast = specializer.specialize(ast) catch |err| {
+            self.diagnostic = specializer.diagnostic;
+            return err;
+        };
+        var analyzer = Semantic.Analyzer.init(self.allocator);
+        var ir = analyzer.analyzeUnit(ast) catch |err| {
             self.diagnostic = analyzer.diagnostic;
             return err;
         };
@@ -83,6 +110,21 @@ pub const Frontend = struct {
         };
     }
 };
+
+fn withoutTests(allocator: Allocator, program: Ast.Program) Allocator.Error!Ast.Program {
+    var filtered = program;
+    var structures: std.ArrayList(Ast.Structure) = .empty;
+    for (program.structures) |structure| {
+        if (!structure.is_test) try structures.append(allocator, structure);
+    }
+    filtered.structures = try structures.toOwnedSlice(allocator);
+    var functions: std.ArrayList(Ast.Function) = .empty;
+    for (program.functions) |function| {
+        if (!function.is_test) try functions.append(allocator, function);
+    }
+    filtered.functions = try functions.toOwnedSlice(allocator);
+    return filtered;
+}
 
 test "compile the first Silex program through typed IR" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);

@@ -6,6 +6,7 @@ const expressionName = @import("Names.zig").expression;
 pub fn activate(self: anytype, module: usize) !void {
     const program = self.units[module].program.?;
     for (program.structures) |structure| {
+        if (structure.is_test and (!self.include_tests or module != self.entry_module)) continue;
         for (structure.type_parameters) |parameter| if (parameter.constraint) |constraint| try self.activateType(module, constraint);
         if (structure.base) |base| try self.activateType(module, base);
         for (structure.conformances) |conformance| try self.activateType(module, conformance);
@@ -49,6 +50,8 @@ pub fn activate(self: anytype, module: usize) !void {
         };
     }
     for (program.functions) |function| {
+        if (function.is_test and (!self.include_tests or module != self.entry_module)) continue;
+        if (module != self.entry_module and std.mem.eql(u8, function.name, "main")) continue;
         for (function.type_parameters) |parameter| if (parameter.constraint) |constraint| try self.activateType(module, constraint);
         for (function.parameters) |parameter| try self.activateType(module, parameter.type);
         try self.activateType(module, function.return_type);

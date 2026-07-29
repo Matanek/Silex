@@ -45,6 +45,12 @@ pub const Compilation = struct {
     interfaces: []const Interface.Module,
     packages: Packages.Graph,
     files: []const []const u8,
+    tests: []const TestCase = &.{},
+};
+pub const TestCase = struct {
+    name: ?[]const u8,
+    function: Ir.FunctionId,
+    position: Source.Position,
 };
 const Binding = Reexports.Binding;
 const Unit = Reexports.Unit;
@@ -62,6 +68,7 @@ pub const Compiler = struct {
     generic_type_maps: []const []const Ast.Type = &.{},
     function_type_maps: []const []const Ast.Type = &.{},
     cache_modules: bool = false,
+    include_tests: bool = false,
     target: TargetModule.Target,
 
     pub fn init(allocator: Allocator, io: Io) Compiler {
@@ -93,6 +100,16 @@ pub const Compiler = struct {
     }
 
     pub fn compile(self: *Compiler, input_path: []const u8) Error!Compilation {
+        self.include_tests = false;
+        return self.compileConfigured(input_path);
+    }
+
+    pub fn compileTests(self: *Compiler, input_path: []const u8) Error!Compilation {
+        self.include_tests = true;
+        return self.compileConfigured(input_path);
+    }
+
+    fn compileConfigured(self: *Compiler, input_path: []const u8) Error!Compilation {
         self.diagnostic = null;
         if (!std.mem.endsWith(u8, input_path, ".sx")) {
             return self.fail(.{ .offset = 0, .line = 1, .column = 1 }, "input must be a .sx source file");
@@ -147,11 +164,21 @@ pub const Compiler = struct {
         const interfaces = try self.buildInterfaces(composition.type_maps);
         var analyzer = Semantic.Analyzer.init(self.allocator);
         analyzer.target = self.target;
-        var ir = analyzer.analyze(ast) catch |err| {
+        var ir = (if (self.include_tests) analyzer.analyzeUnit(ast) else analyzer.analyze(ast)) catch |err| {
             self.diagnostic = analyzer.diagnostic;
             return err;
         };
         ir.files = self.files;
+
+        var tests: std.ArrayList(TestCase) = .empty;
+        for (ast.functions, 0..) |function, function_id| {
+            if (!function.is_test_entry) continue;
+            try tests.append(self.allocator, .{
+                .name = function.test_name,
+                .function = function_id,
+                .position = function.position,
+            });
+        }
 
         return .{
             .ast = ast,
@@ -160,6 +187,7 @@ pub const Compiler = struct {
             .interfaces = interfaces,
             .packages = self.packages,
             .files = self.files,
+            .tests = try tests.toOwnedSlice(self.allocator),
         };
     }
 
@@ -630,6 +658,7 @@ pub const Compiler = struct {
             const provider_name = try self.canonicalModule(module);
             const program = self.units[module].program.?;
             for (program.structures) |structure| {
+                if (structure.is_test and (!self.include_tests or module != self.entry_module)) continue;
                 const declaration_module = if (Reexports.structureExported(program, structure)) provider.name else provider_name;
                 const name = if (structure.collection) |collection|
                     try self.collectionCanonicalName(module, collection)
@@ -667,6 +696,12 @@ pub const Compiler = struct {
             const program = self.units[module].program.?;
             const map = try self.allocator.alloc(Ast.Type, program.type_names.len);
             for (program.type_names, 0..) |name, index| {
+                if (index < program.test_only_type_names.len and program.test_only_type_names[index] and
+                    (!self.include_tests or module != self.entry_module))
+                {
+                    map[index] = .void;
+                    continue;
+                }
                 if (findStructure(program, name)) |structure| if (structure.collection) |collection| {
                     map[index] = .structure(findName(type_names.items, try self.collectionCanonicalName(module, collection)) orelse return error.InvalidSource);
                     continue;
@@ -739,6 +774,7 @@ pub const Compiler = struct {
                 try extensions.append(self.allocator, try ProjectExtensions.compose(self, module, provider, extension, type_map, generic_map));
             }
             for (program.structures) |structure| {
+                if (structure.is_test and (!self.include_tests or module != self.entry_module)) continue;
                 const declaration_module = if (Reexports.structureExported(program, structure)) provider.name else provider_name;
                 const composed_name = if (structure.collection) |collection|
                     try self.collectionCanonicalName(module, collection)
@@ -844,10 +880,12 @@ pub const Compiler = struct {
                 try enums.append(self.allocator, composed);
             }
             for (program.functions) |function| {
+                if (function.is_test and (!self.include_tests or module != self.entry_module)) continue;
+                if (module != self.entry_module and std.mem.eql(u8, function.name, "main")) continue;
                 var composed = function;
                 composed.owner = provider.owner;
                 composed.type_parameters = try GenericTypes.remapParameters(self.allocator, function.type_parameters, type_map, generic_map);
-                composed.name = if (module == self.entry_module and std.mem.eql(u8, function.name, "main"))
+                composed.name = if (std.mem.eql(u8, function.name, "main"))
                     "main"
                 else
                     try canonicalName(
@@ -1074,6 +1112,7 @@ pub const Compiler = struct {
     fn validatePublicTypeExposure(self: *Compiler, module: usize) Error!void {
         const program = self.units[module].program.?;
         for (program.structures) |structure| {
+            if (structure.is_test and (!self.include_tests or module != self.entry_module)) continue;
             if (!structure.is_public) continue;
             for (structure.type_parameters) |parameter| if (parameter.constraint) |constraint| {
                 try self.requirePublicType(module, constraint, parameter.position, "public structure", structure.name);

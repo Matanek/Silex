@@ -127,6 +127,38 @@ pub fn invoke(
     return invokeDepth(allocator, program, function, arguments, 0, &session);
 }
 
+pub fn runFunctionCaptureWithBoundaries(
+    allocator: Allocator,
+    io: ?std.Io,
+    program: Ir.Program,
+    function_id: Ir.FunctionId,
+    boundaries: []const Boundary.Function,
+) Error!RunResult {
+    if (function_id >= program.functions.len) return error.InvalidProgram;
+    const function = program.functions[function_id];
+    if (function.parameter_types.len != 0 or function.return_type != .void) return error.InvalidProgram;
+    var session: Session = .{
+        .allocator = allocator,
+        .io = io,
+        .boundaries = boundaries,
+        .globals = try Globals.initialize(allocator, program.globals),
+    };
+    _ = invokeDepth(allocator, program, function_id, &.{}, 0, &session) catch |err| switch (err) {
+        error.RuntimeTerminated => return .{
+            .exit_code = 1,
+            .stdout = try session.stdout.toOwnedSlice(allocator),
+            .stderr = try session.stderr.toOwnedSlice(allocator),
+        },
+        else => |other| return other,
+    };
+    if (session.mutex_depth != 0) return error.InvalidProgram;
+    return .{
+        .exit_code = 0,
+        .stdout = try session.stdout.toOwnedSlice(allocator),
+        .stderr = try session.stderr.toOwnedSlice(allocator),
+    };
+}
+
 pub fn invokeDepth(
     allocator: Allocator,
     program: Ir.Program,

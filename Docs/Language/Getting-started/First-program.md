@@ -8,17 +8,17 @@ func main() {
 }
 ```
 
-Run it from `Toolchain/`:
+Run it:
 
 ```sh
-zig build run -- run ../Main.sx
+silex run Main.sx
 ```
 
 Compile it on Apple Silicon macOS:
 
 ```sh
-zig build run -- compile ../Main.sx -o ../hello
-../hello
+silex compile Main.sx -o hello
+./hello
 ```
 
 ## Return a recoverable failure
@@ -40,3 +40,26 @@ Success exits with status `0`. Failure writes `error: not ready` to standard
 error and exits with status `1`.
 
 `main` is unique, non-generic, and takes no parameters.
+
+## Test one source locally
+
+Any `.sx` source may contain a local `main` beside its reusable declarations:
+
+```sx
+public func parse(value:str) int {
+    return 42
+}
+
+func main() {
+    print(parse("example"))
+}
+```
+
+When this exact file is passed to `run`, `interpret`, or `compile`, its `main`
+is the program entry point. When another source loads the file as a module,
+that `main` is ignored: it is not part of the module interface and is not
+compiled. The rest of the source remains available normally.
+
+Because `main` is always local to its source, `public func main()` is invalid.
+Use project tests instead when a scenario needs fixtures or a durable test
+suite.

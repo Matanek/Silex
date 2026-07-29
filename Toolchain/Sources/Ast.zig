@@ -381,6 +381,7 @@ pub const Constructor = struct {
 };
 
 pub const Structure = struct {
+    is_test: bool = false,
     is_public: bool = false,
     is_internal: bool = false,
     is_private: bool = false,
@@ -448,6 +449,11 @@ pub const Use = struct {
 
 pub const Function = struct {
     is_anonymous: bool = false,
+    is_test: bool = false,
+    is_test_entry: bool = false,
+    test_name: ?[]const u8 = null,
+    test_owner: ?[]const u8 = null,
+    test_source_name: ?[]const u8 = null,
     is_static: bool = false,
     is_override: bool = false,
     is_public: bool = false,
@@ -517,6 +523,7 @@ pub const Extension = struct {
 pub const Program = struct {
     uses: []const Use = &.{},
     type_names: []const []const u8 = &.{},
+    test_only_type_names: []const bool = &.{},
     generic_types: []const GenericType = &.{},
     function_types: []const FunctionType = &.{},
     structures: []const Structure = &.{},

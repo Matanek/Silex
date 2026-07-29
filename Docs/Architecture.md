@@ -172,8 +172,18 @@ open Silex document
   the Zig bootstrap and bundled into the compiler. Native emission copies it
   only when a program prints a float, patches a direct internal call, and never
   resolves a C library or user symbol.
-- `main` is the only source name with entry-point semantics. Other function
-  names are chosen freely by the user.
+- `main` is the only source name with entry-point semantics. It remains local
+  to its physical source: the composer retains it only when that exact file is
+  the explicit entry and excludes every other `main` before semantic analysis
+  and portable IR construction. It is never a public module declaration.
+  Other function names are chosen freely by the user.
+- Test blocks are source-local root declarations activated only by `silex test`
+  for each exact physical source selected directly or through directory
+  discovery. Their entries and lexical helper functions are removed before
+  ordinary semantic analysis and portable IR construction; they never enter a
+  module interface or ordinary executable. On a macos-arm64 host, test
+  compilation lowers each selected source once and emits an isolated native
+  process entry for every block, including the active system boundaries.
 - Package composition recognizes `macos-arm64`, `linux-x64`, `windows-x64`,
   and `windows-arm64`. It combines common modules with an OS-level
   `Platform/<OS>/Module/` root and an optional exact `Target/<target>/Module/`

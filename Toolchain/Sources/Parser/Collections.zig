@@ -65,12 +65,16 @@ fn syntacticType(expression: *const Ast.Expression) ?Ast.Type {
 }
 
 pub fn internDynamicType(self: anytype, position: Source.Position, element: Ast.Type) !Ast.Type {
-    for (self.collection_structures.items) |structure| if (structure.collection) |collection| {
-        if (collection.element == element and collection.length == null and !collection.view) return self.internTypeName(structure.name);
+    for (self.collection_structures.items) |*structure| if (structure.collection) |collection| {
+        if (collection.element == element and collection.length == null and !collection.view) {
+            if (self.test_prefix == null) structure.is_test = false;
+            return self.internTypeName(structure.name);
+        }
     };
     const name = try std.fmt.allocPrint(self.allocator, "{s}[]", .{try typeSpelling(self, element)});
     const type_value = try self.internTypeName(name);
     try self.collection_structures.append(self.allocator, .{
+        .is_test = self.test_prefix != null,
         .is_public = true,
         .position = position,
         .name_position = position,
@@ -83,12 +87,16 @@ pub fn internDynamicType(self: anytype, position: Source.Position, element: Ast.
 }
 
 pub fn internViewType(self: anytype, position: Source.Position, element: Ast.Type) !Ast.Type {
-    for (self.collection_structures.items) |structure| if (structure.collection) |collection| {
-        if (collection.element == element and collection.view) return self.internTypeName(structure.name);
+    for (self.collection_structures.items) |*structure| if (structure.collection) |collection| {
+        if (collection.element == element and collection.view) {
+            if (self.test_prefix == null) structure.is_test = false;
+            return self.internTypeName(structure.name);
+        }
     };
     const name = try std.fmt.allocPrint(self.allocator, "{s}[..]", .{try typeSpelling(self, element)});
     const type_value = try self.internTypeName(name);
     try self.collection_structures.append(self.allocator, .{
+        .is_test = self.test_prefix != null,
         .is_public = true,
         .position = position,
         .name_position = position,
@@ -100,8 +108,11 @@ pub fn internViewType(self: anytype, position: Source.Position, element: Ast.Typ
 }
 
 pub fn internFixedType(self: anytype, position: Source.Position, element: Ast.Type, length: usize) !Ast.Type {
-    for (self.collection_structures.items) |structure| if (structure.collection) |collection| {
-        if (collection.element == element and collection.length == length) return self.internTypeName(structure.name);
+    for (self.collection_structures.items) |*structure| if (structure.collection) |collection| {
+        if (collection.element == element and collection.length == length) {
+            if (self.test_prefix == null) structure.is_test = false;
+            return self.internTypeName(structure.name);
+        }
     };
     const name = try std.fmt.allocPrint(self.allocator, "{s}[{d}]", .{ try typeSpelling(self, element), length });
     const type_value = try self.internTypeName(name);
@@ -115,6 +126,7 @@ pub fn internFixedType(self: anytype, position: Source.Position, element: Ast.Ty
         .default = null,
     };
     try self.collection_structures.append(self.allocator, .{
+        .is_test = self.test_prefix != null,
         .is_public = true,
         .position = position,
         .name_position = position,

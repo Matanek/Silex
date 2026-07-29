@@ -14,6 +14,8 @@ const Nominals = @import("Parser/Nominals.zig");
 const Protocols = @import("Parser/Protocols.zig");
 const Extensions = @import("Parser/Extensions.zig");
 const Interop = @import("Parser/Interop.zig");
+const TestBlocks = @import("Parser/TestBlocks.zig");
+const ControlFlow = @import("Parser/ControlFlow.zig");
 
 const Allocator = std.mem.Allocator;
 const Token = LexerModule.Token;
@@ -28,14 +30,23 @@ pub const Parser = struct {
     started: bool = false,
     diagnostic: ?Source.Diagnostic = null,
     type_names: std.ArrayList([]const u8) = .empty,
+    test_only_type_names: std.ArrayList(bool) = .empty,
     generic_types: std.ArrayList(Ast.GenericType) = .empty,
     function_types: std.ArrayList(Ast.FunctionType) = .empty,
     collection_structures: std.ArrayList(Ast.Structure) = .empty,
     nested_structures: std.ArrayList(Ast.Structure) = .empty,
     anonymous_functions: std.ArrayList(Ast.Function) = .empty,
+    test_local_functions: std.ArrayList(TestLocalFunction) = .empty,
+    test_prefix: ?[]const u8 = null,
     type_parameters: []const Ast.TypeParameter = &.{},
     nominal_prefix: ?[]const u8 = null,
     match_depth: usize = 0,
+
+    pub const TestLocalFunction = struct {
+        source: []const u8,
+        generated: []const u8,
+        position: Source.Position,
+    };
 
     pub fn init(allocator: Allocator, source: []const u8) Parser {
         return .{ .allocator = allocator, .lexer = .init(source) };
@@ -62,6 +73,10 @@ pub const Parser = struct {
                 .keyword_protocol => try structures.append(self.allocator, try Protocols.parse(self, false, false)),
                 .keyword_enum => try enums.append(self.allocator, try EnumParser.parse(self, false, false)),
                 .keyword_func => try functions.append(self.allocator, try self.parseFunction(false, false)),
+                .identifier => if (std.mem.eql(u8, self.current.lexeme, "test"))
+                    try functions.appendSlice(self.allocator, try TestBlocks.parse(self))
+                else
+                    return self.fail("expected use, enum, struct, class, protocol, function, or test declaration"),
                 .keyword_let => try external_functions.append(self.allocator, try Interop.parseFunction(self)),
                 .keyword_extend => try extensions.append(self.allocator, try Extensions.parse(self)),
                 .keyword_public => {
@@ -89,7 +104,7 @@ pub const Parser = struct {
                         else => return self.fail("expected enum, struct, class, protocol, or function declaration after 'internal'"),
                     }
                 },
-                else => return self.fail("expected use, enum, struct, class, protocol, or function declaration"),
+                else => return self.fail("expected use, enum, struct, class, protocol, function, or test declaration"),
             }
         }
         try structures.appendSlice(self.allocator, self.nested_structures.items);
@@ -131,6 +146,7 @@ pub const Parser = struct {
         return .{
             .uses = try uses.toOwnedSlice(self.allocator),
             .type_names = try self.type_names.toOwnedSlice(self.allocator),
+            .test_only_type_names = try self.test_only_type_names.toOwnedSlice(self.allocator),
             .generic_types = try self.generic_types.toOwnedSlice(self.allocator),
             .function_types = try self.function_types.toOwnedSlice(self.allocator),
             .structures = try structures.toOwnedSlice(self.allocator),
@@ -169,10 +185,11 @@ pub const Parser = struct {
         const position = self.current.position;
         try self.expect(.keyword_func, "expected 'func'");
         if (self.current.tag != .identifier and self.current.tag != .keyword_copy) return self.fail("expected function name");
-        const name = self.current.lexeme;
+        const source_name = self.current.lexeme;
+        const name = self.testLocalFunctionName(source_name) orelse source_name;
         const name_position = self.current.position;
-        if (std.mem.eql(u8, name, "Result")) return self.failAt(name_position, "'Result' is a reserved intrinsic type name");
-        if (std.mem.eql(u8, name, "map_error")) return self.failAt(name_position, "'map_error' is a reserved intrinsic function name");
+        if (std.mem.eql(u8, source_name, "Result")) return self.failAt(name_position, "'Result' is a reserved intrinsic type name");
+        if (std.mem.eql(u8, source_name, "map_error")) return self.failAt(name_position, "'map_error' is a reserved intrinsic function name");
         try self.advance();
         const type_parameters = try Generics.parseTypeParameters(self);
         const enclosing_type_parameters = self.type_parameters;
@@ -229,6 +246,9 @@ pub const Parser = struct {
             if (count == 1) return_provenance = compatible;
         }
         return .{
+            .is_test = self.test_prefix != null,
+            .test_owner = self.test_prefix,
+            .test_source_name = if (self.test_prefix != null) source_name else null,
             .is_public = is_public,
             .is_internal = is_internal,
             .position = position,
@@ -267,6 +287,8 @@ pub const Parser = struct {
         const name = try std.fmt.allocPrint(self.allocator, "__silex_anonymous_{d}", .{position.offset});
         try self.anonymous_functions.append(self.allocator, .{
             .is_anonymous = true,
+            .is_test = self.test_prefix != null,
+            .test_owner = self.test_prefix,
             .is_internal = true,
             .position = position,
             .name_position = position,
@@ -290,7 +312,15 @@ pub const Parser = struct {
     }
 
     pub fn internTypeName(self: *Parser, name: []const u8) Allocator.Error!Ast.Type {
-        return Collections.internNamedType(self, name);
+        for (self.type_names.items, 0..) |existing, index| {
+            if (!std.mem.eql(u8, existing, name)) continue;
+            if (self.test_prefix == null) self.test_only_type_names.items[index] = false;
+            return .structure(index);
+        }
+        const index = self.type_names.items.len;
+        try self.type_names.append(self.allocator, name);
+        try self.test_only_type_names.append(self.allocator, self.test_prefix != null);
+        return .structure(index);
     }
 
     pub fn resolveTypeName(self: *Parser, name: []const u8) Allocator.Error![]const u8 {
@@ -327,7 +357,7 @@ pub const Parser = struct {
         return statements.toOwnedSlice(self.allocator);
     }
 
-    fn parseStatement(self: *Parser) ParseError!Ast.Statement {
+    pub fn parseStatement(self: *Parser) ParseError!Ast.Statement {
         return switch (self.current.tag) {
             .keyword_let => self.parseVariableDeclaration(false),
             .keyword_var => self.parseVariableDeclaration(true),
@@ -335,12 +365,12 @@ pub const Parser = struct {
             .keyword_print => self.parsePrint(),
             .keyword_assert => self.parseAssert(),
             .keyword_panic => self.parseEffectStatement(.panic),
-            .keyword_if => self.parseIf(),
-            .keyword_while => self.parseWhile(),
+            .keyword_if => ControlFlow.parseIf(self),
+            .keyword_while => ControlFlow.parseWhile(self),
             .keyword_for => Iterations.parseFor(self),
-            .keyword_mutex => self.parseMutex(),
-            .keyword_break => self.parseLoopControl(false),
-            .keyword_continue => self.parseLoopControl(true),
+            .keyword_mutex => ControlFlow.parseMutex(self),
+            .keyword_break => ControlFlow.parseLoopControl(self, false),
+            .keyword_continue => ControlFlow.parseLoopControl(self, true),
             .keyword_match => self.parseMatchStatement(),
             .keyword_try => self.parseMatchStatement(),
             .identifier, .keyword_self, .keyword_super => self.parseIdentifierStatement(),
@@ -352,132 +382,6 @@ pub const Parser = struct {
         const expression = try self.parseExpression(false);
         try self.expectStatementTerminator();
         return .{ .expression_statement = expression };
-    }
-
-    fn parseWhile(self: *Parser) ParseError!Ast.Statement {
-        const position = self.current.position;
-        try self.advance();
-        const condition = try self.parseCondition();
-        return .{ .while_statement = .{
-            .position = position,
-            .condition = condition,
-            .statements = try self.parseBlock(),
-        } };
-    }
-
-    fn parseMutex(self: *Parser) ParseError!Ast.Statement {
-        const position = self.current.position;
-        try self.advance();
-        return .{ .mutex_statement = .{
-            .position = position,
-            .statements = try self.parseBlock(),
-        } };
-    }
-
-    fn parseLoopControl(self: *Parser, is_continue: bool) ParseError!Ast.Statement {
-        const position = self.current.position;
-        try self.advance();
-        try self.expectStatementTerminator();
-        return if (is_continue)
-            .{ .continue_statement = position }
-        else
-            .{ .break_statement = position };
-    }
-
-    fn parseIf(self: *Parser) ParseError!Ast.Statement {
-        const position = self.current.position;
-        var branches: std.ArrayList(Ast.ConditionalBranch) = .empty;
-
-        while (self.current.tag == .keyword_if or self.current.tag == .keyword_elif) {
-            const branch_position = self.current.position;
-            try self.advance();
-            const condition = try self.parseCondition();
-            const statements = try self.parseBlock();
-            try branches.append(self.allocator, .{
-                .position = branch_position,
-                .condition = condition,
-                .statements = statements,
-            });
-            if (self.current.tag != .keyword_elif) break;
-        }
-
-        var else_statements: ?[]const Ast.Statement = null;
-        if (self.current.tag == .keyword_else) {
-            try self.advance();
-            if (self.current.tag == .keyword_if) {
-                while (true) {
-                    const branch_position = self.current.position;
-                    try self.advance();
-                    const condition = try self.parseCondition();
-                    const statements = try self.parseBlock();
-                    try branches.append(self.allocator, .{
-                        .position = branch_position,
-                        .condition = condition,
-                        .statements = statements,
-                    });
-                    if (self.current.tag == .keyword_elif) continue;
-                    if (self.current.tag == .keyword_else) {
-                        try self.advance();
-                        else_statements = try self.parseBlock();
-                    }
-                    break;
-                }
-            } else {
-                else_statements = try self.parseBlock();
-            }
-        }
-
-        return .{ .if_statement = .{
-            .position = position,
-            .branches = try branches.toOwnedSlice(self.allocator),
-            .else_statements = else_statements,
-        } };
-    }
-
-    fn parseCondition(self: *Parser) ParseError!Ast.Condition {
-        const parenthesized_binding = self.current.tag == .left_parenthesis and try self.parenthesizedConditionStartsBinding();
-        const unparenthesized_binding = self.current.tag == .keyword_let or self.current.tag == .keyword_var or
-            (self.current.tag == .identifier and try self.nextTag() == .equal);
-        if (!parenthesized_binding and !unparenthesized_binding) {
-            return .{ .expression = try self.parseExpression(false) };
-        }
-
-        if (parenthesized_binding) try self.advance();
-        const position = self.current.position;
-        const explicit = self.current.tag == .keyword_let or self.current.tag == .keyword_var;
-        const mutable = self.current.tag == .keyword_var;
-        if (explicit) try self.advance();
-        if (self.current.tag != .identifier) return self.fail(if (explicit)
-            "expected binding name after 'let' or 'var'"
-        else
-            "expected conditional binding name");
-        const name = self.current.lexeme;
-        const name_position = self.current.position;
-        if (std.mem.eql(u8, name, "map_error")) return self.failAt(name_position, "'map_error' is a reserved intrinsic function name");
-        try self.advance();
-        try self.expect(.equal, "expected '=' after conditional binding name");
-        const source = try self.parseExpression(parenthesized_binding);
-        if (parenthesized_binding) try self.expect(.right_parenthesis, "expected ')' after conditional binding");
-        return .{ .binding = .{
-            .position = position,
-            .name_position = name_position,
-            .name = name,
-            .mutable = mutable,
-            .source = source,
-        } };
-    }
-
-    fn parenthesizedConditionStartsBinding(self: *const Parser) ParseError!bool {
-        var lexer = self.lexer;
-        const first = try lexer.next();
-        if (first.tag == .keyword_let or first.tag == .keyword_var) return true;
-        if (first.tag != .identifier) return false;
-        return (try lexer.next()).tag == .equal;
-    }
-
-    fn nextTag(self: *const Parser) ParseError!TokenTag {
-        var lexer = self.lexer;
-        return (try lexer.next()).tag;
     }
 
     fn parsePrint(self: *Parser) ParseError!Ast.Statement {
@@ -514,8 +418,13 @@ pub const Parser = struct {
         try self.advance();
         try self.expect(.left_parenthesis, "expected '(' after 'assert'");
         const condition = try self.parseExpression(true);
-        try self.expect(.comma, "expected ',' after assert condition");
-        const message = try self.parseExpression(true);
+        const message = if (self.current.tag == .comma) message: {
+            try self.advance();
+            break :message try self.parseExpression(true);
+        } else try self.newExpression(.{
+            .position = position,
+            .value = .{ .string = "condition is false" },
+        });
         try self.expect(.right_parenthesis, "expected ')' after assert message");
         try self.expectStatementTerminator();
         return .{ .assert_statement = .{ .position = position, .condition = condition, .message = message } };
@@ -878,7 +787,8 @@ pub const Parser = struct {
     }
 
     fn parsePrimary(self: *Parser) ParseError!*Ast.Expression {
-        const token = self.current;
+        var token = self.current;
+        if (token.tag == .identifier) token.lexeme = self.testLocalFunctionName(token.lexeme) orelse token.lexeme;
         switch (token.tag) {
             .integer => {
                 try self.advance();
@@ -1045,6 +955,16 @@ pub const Parser = struct {
         const result = try self.allocator.create(Ast.Expression);
         result.* = expression;
         return result;
+    }
+
+    pub fn testLocalFunctionName(self: *const Parser, source: []const u8) ?[]const u8 {
+        var index = self.test_local_functions.items.len;
+        while (index != 0) {
+            index -= 1;
+            const candidate = self.test_local_functions.items[index];
+            if (std.mem.eql(u8, candidate.source, source)) return candidate.generated;
+        }
+        return null;
     }
 
     pub fn expectStatementTerminator(self: *Parser) ParseError!void {
@@ -1567,7 +1487,7 @@ test "report malformed fundamental statements and expressions" {
         "func main() { let message = \"$()\" }",
         "expected expression inside string interpolation",
     );
-    try expectParseError("func main() { assert(true) }", "expected ',' after assert condition");
+    try expectParseError("func main() { assert(true,) }", "expected expression");
     try expectParseError("func main() { assert(true, \"message\" }", "expected ')' after assert message");
     try expectParseError("func main() { panic(\"message\", \"extra\") }", "expected ')' after effect value");
     try expectParseError("func main() { value = }", "expected expression");

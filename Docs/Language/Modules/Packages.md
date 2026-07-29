@@ -42,6 +42,11 @@ unqualified name never crosses this physical boundary. Equivalent paths inside
 one root and the same logical module supplied by different packages remain
 errors.
 
+Each physical fragment may contain a local `main` for direct experimentation.
+Only the `main` in the exact source passed as the program entry is selected;
+the `main` declarations in every other fragment are ignored and never become
+members of the logical module.
+
 Fragments are optional. A package may continue to use explicit child modules
 such as `Randomizer.Seed.sx` or `File.Platform.sx` whenever that boundary is
 intentional.

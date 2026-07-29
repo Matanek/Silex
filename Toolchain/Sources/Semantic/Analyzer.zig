@@ -123,6 +123,7 @@ pub const Analyzer = struct {
         var main: ?Ast.Function = null;
         for (self.program.functions) |function| {
             if (std.mem.eql(u8, function.name, "main")) {
+                if (function.is_public) return self.fail(function.name_position, "'main' cannot be public");
                 if (main != null) return self.fail(function.name_position, "'main' cannot be overloaded");
                 main = function;
             }

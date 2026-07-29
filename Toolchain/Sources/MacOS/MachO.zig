@@ -17,9 +17,24 @@ const minimum_macos_version: u32 = 13 << 16;
 
 pub fn emit(allocator: std.mem.Allocator, program: Machine.Program) Error![]u8 {
     const main_id = try findMain(program);
+    return emitFunction(allocator, program, main_id);
+}
 
-    var encoded = try Encoder.encode(allocator, program, .{ .executable_main = main_id });
+pub fn emitFunction(
+    allocator: std.mem.Allocator,
+    program: Machine.Program,
+    function: Machine.FunctionId,
+) Error![]u8 {
+    var encoded = try Encoder.encode(allocator, program, .{ .executable_main = function });
     defer encoded.deinit(allocator);
+    return emitEncoded(allocator, program, &encoded);
+}
+
+fn emitEncoded(
+    allocator: std.mem.Allocator,
+    program: Machine.Program,
+    encoded: *Encoder.Image,
+) Error![]u8 {
     const dynamic = program.external_functions.len != 0;
 
     const dylinker_path = "/usr/lib/dyld\x00";

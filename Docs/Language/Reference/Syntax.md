@@ -62,6 +62,7 @@ mutex {
 
 return value
 print(value)
+assert(condition)
 assert(condition, "message")
 panic("message")
 ```
