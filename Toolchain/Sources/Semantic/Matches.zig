@@ -59,6 +59,27 @@ pub fn analyzeStatement(
     function: Ast.Function,
     match_value: Ast.Expression.Match,
 ) !bool {
+    return analyzeStatementUsing(self, builder, function, match_value, {}, analyzeOrdinaryBranch);
+}
+
+fn analyzeOrdinaryBranch(
+    _: void,
+    self: anytype,
+    builder: anytype,
+    function: Ast.Function,
+    statements: []const Ast.Statement,
+) !bool {
+    return self.analyzeStatements(builder, function, statements);
+}
+
+pub fn analyzeStatementUsing(
+    self: anytype,
+    builder: anytype,
+    function: Ast.Function,
+    match_value: Ast.Expression.Match,
+    context: anytype,
+    comptime analyze_branch: anytype,
+) !bool {
     if (!match_value.imperative) return self.fail(match_value.subject.position, "match statement requires block branches");
     const prepared = try prepare(self, builder, match_value);
     const availability_count = builder.bindings.items.len;
@@ -71,7 +92,7 @@ pub fn analyzeStatement(
         const binding_count = builder.bindings.items.len;
         defer builder.bindings.shrinkRetainingCapacity(binding_count);
         try bindBranch(self, builder, prepared, branch, variant_index);
-        const terminated = try self.analyzeStatements(builder, function, branch.statements.?);
+        const terminated = try analyze_branch(context, self, builder, function, branch.statements.?);
         if (!terminated) {
             try Resources.emitActiveDrops(self, builder, binding_count);
             all_terminated = false;
@@ -80,8 +101,14 @@ pub fn analyzeStatement(
         }
     }
     if (all_terminated) {
-        std.debug.assert(prepared.merge_block + 1 == builder.blocks.items.len);
-        builder.blocks.items.len -= 1;
+        if (prepared.merge_block + 1 == builder.blocks.items.len) {
+            builder.blocks.items.len -= 1;
+        } else {
+            // A nested control-flow construct may have appended blocks after
+            // the match merge. Keep the now-unreachable merge structurally
+            // valid without renumbering every later block.
+            builder.blocks.items[prepared.merge_block].terminator = .{ .jump = prepared.branch_blocks[0] };
+        }
         return true;
     }
     const merged_availability = try self.allocator.dupe(bool, exit_availabilities.items[0]);

@@ -9,9 +9,11 @@ const Control = @import("Control.zig");
 const Borrowing = @import("Borrowing.zig");
 const MutableReferences = @import("MutableReferences.zig");
 const Resources = @import("Resources.zig");
+const Collections = @import("Collections.zig");
 const Visibility = @import("Visibility.zig");
 const Inheritance = @import("Inheritance.zig");
 const ProtocolValues = @import("ProtocolValues.zig");
+const Matches = @import("Matches.zig");
 
 const AnalyzeError = error{ InvalidSource, OutOfMemory };
 
@@ -337,10 +339,12 @@ fn analyzeCallWithReceiver(
 
     var arity_count: usize = 0;
     var sole: ?usize = null;
+    var inaccessible = false;
     var inaccessible_internal = false;
     for (candidates, 0..) |candidate, candidate_index| {
         if (!Visibility.memberVisible(self, candidate.owner, candidate.method, call.name_position)) {
-            inaccessible_internal = true;
+            inaccessible = true;
+            inaccessible_internal = inaccessible_internal or candidate.method.is_internal;
             continue;
         }
         if (Support.acceptsArity(candidate.method.parameters, call.arguments.len)) {
@@ -349,12 +353,11 @@ fn analyzeCallWithReceiver(
         }
     }
     if (arity_count == 0) {
-        if (inaccessible_internal) {
-            const message = try std.fmt.allocPrint(
-                self.allocator,
-                "method '{s}' is internal to its source file",
-                .{call.name},
-            );
+        if (inaccessible) {
+            const message = if (inaccessible_internal)
+                try std.fmt.allocPrint(self.allocator, "method '{s}' is internal to its source file", .{call.name})
+            else
+                try std.fmt.allocPrint(self.allocator, "method '{s}' is private and unavailable here", .{call.name});
             return self.fail(call.name_position, message);
         }
         const message = try std.fmt.allocPrint(
@@ -753,6 +756,33 @@ fn analyzeMutatingStatements(
             },
             .if_statement => |conditional| try analyzeMutatingIf(self, builder, method, structure_index, flat, self_local, conditional),
             .while_statement => |loop| try analyzeMutatingWhile(self, builder, method, structure_index, flat, self_local, loop),
+            .mutex_statement => |mutex| protected: {
+                try self.emit(builder, .mutex_lock);
+                builder.mutex_depth += 1;
+                defer builder.mutex_depth -= 1;
+                const binding_count = builder.bindings.items.len;
+                const ended = try analyzeMutatingStatements(self, builder, method, structure_index, flat, self_local, mutex.statements);
+                if (!ended) {
+                    try Resources.emitActiveDrops(self, builder, binding_count);
+                    try self.emit(builder, .mutex_unlock);
+                }
+                builder.bindings.shrinkRetainingCapacity(binding_count);
+                break :protected ended;
+            },
+            .expression_statement => |expression| switch (expression.value) {
+                .match_expression => |match_value| try Matches.analyzeStatementUsing(
+                    self,
+                    builder,
+                    method,
+                    match_value,
+                    MutatingMatchContext{ .structure_index = structure_index, .flat = flat, .self_local = self_local },
+                    analyzeMutatingMatchBranch,
+                ),
+                else => ordinary: {
+                    const one = [_]Ast.Statement{statement};
+                    break :ordinary try self.analyzeStatements(builder, method, &one);
+                },
+            },
             else => ordinary: {
                 const one = [_]Ast.Statement{statement};
                 break :ordinary try self.analyzeStatements(builder, method, &one);
@@ -761,6 +791,30 @@ fn analyzeMutatingStatements(
         if (terminated) return true;
     }
     return false;
+}
+
+const MutatingMatchContext = struct {
+    structure_index: usize,
+    flat: usize,
+    self_local: Ir.LocalId,
+};
+
+fn analyzeMutatingMatchBranch(
+    context: MutatingMatchContext,
+    self: anytype,
+    builder: anytype,
+    method: Ast.Function,
+    statements: []const Ast.Statement,
+) AnalyzeError!bool {
+    return analyzeMutatingStatements(
+        self,
+        builder,
+        method,
+        context.structure_index,
+        context.flat,
+        context.self_local,
+        statements,
+    );
 }
 
 fn analyzeMutatingIf(
@@ -818,7 +872,11 @@ fn analyzeMutatingWhile(
     const analyzed = try Control.analyzeCondition(self, builder, loop.condition, "while");
     self.terminate(builder, .{ .branch = .{ .condition = analyzed.condition.value, .then_block = body_block, .else_block = exit_block } });
     builder.current_block = body_block;
-    try builder.loops.append(self.allocator, .{ .continue_block = condition_block, .break_block = exit_block });
+    try builder.loops.append(self.allocator, .{
+        .continue_block = condition_block,
+        .break_block = exit_block,
+        .mutex_depth = builder.mutex_depth,
+    });
     const binding_count = builder.bindings.items.len;
     if (analyzed.binding) |binding| try Control.enterBinding(self, builder, binding);
     const terminated = try analyzeMutatingStatements(self, builder, method, structure_index, flat, self_local, loop.statements);
@@ -840,6 +898,7 @@ fn emitMutatingReturn(
     value: ?Ir.ValueId,
 ) !void {
     try Resources.emitActiveDrops(self, builder, 0);
+    try Resources.emitMutexUnlocks(self, builder, 0);
     const receiver_type = Ast.Type.structure(structure_index);
     const receiver = try self.newValue(builder, receiver_type);
     try self.emit(builder, .{ .local_load = .{ .result = receiver, .local = self_local } });
@@ -901,15 +960,26 @@ fn methodCount(program: Ast.Program) usize {
 fn statementsWriteSelf(statements: []const Ast.Statement) bool {
     for (statements) |statement| switch (statement) {
         .assignment_statement => |assignment| if (std.mem.eql(u8, assignment.target.name, "self")) return true,
+        .expression_statement => |expression| if (expressionMutatesSelfCollection(expression)) return true,
         .if_statement => |conditional| {
             for (conditional.branches) |branch| if (statementsWriteSelf(branch.statements)) return true;
             if (conditional.else_statements) |nested| if (statementsWriteSelf(nested)) return true;
         },
         .while_statement => |loop| if (statementsWriteSelf(loop.statements)) return true,
         .for_statement => |loop| if (statementsWriteSelf(loop.statements)) return true,
+        .mutex_statement => |mutex| if (statementsWriteSelf(mutex.statements)) return true,
         else => {},
     };
     return false;
+}
+
+fn expressionMutatesSelfCollection(expression: *const Ast.Expression) bool {
+    if (expression.value != .call) return false;
+    const call = expression.value.call;
+    if (!Collections.isMutation(call.name)) return false;
+    var receiver = call.receiver orelse return false;
+    while (receiver.value == .field_access) receiver = receiver.value.field_access.base;
+    return receiver.value == .identifier and std.mem.eql(u8, receiver.value.identifier, "self");
 }
 
 fn statementsCallMutatingSelf(program: Ast.Program, structure_index: usize, statements: []const Ast.Statement, mutating: []const bool) bool {
@@ -935,6 +1005,7 @@ fn statementsCallMutatingSelf(program: Ast.Program, structure_index: usize, stat
             }
             if (statementsCallMutatingSelf(program, structure_index, loop.statements, mutating)) return true;
         },
+        .mutex_statement => |mutex| if (statementsCallMutatingSelf(program, structure_index, mutex.statements, mutating)) return true,
         else => {},
     };
     return false;
@@ -943,6 +1014,7 @@ fn statementsCallMutatingSelf(program: Ast.Program, structure_index: usize, stat
 fn expressionCallsMutatingSelf(program: Ast.Program, structure_index: usize, expression: *const Ast.Expression, mutating: []const bool) bool {
     return switch (expression.value) {
         .call => |call| calls: {
+            if (expressionMutatesSelfCollection(expression)) break :calls true;
             if (call.receiver) |receiver| {
                 if (receiverStructure(program, structure_index, receiver)) |target| {
                     if (mutatingMethodInStructure(program, target, call.name, call.arguments.len, mutating)) break :calls true;

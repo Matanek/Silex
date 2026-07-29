@@ -32,6 +32,29 @@ pub fn build(b: *std.Build) void {
         "pub const object_bytes = @embedFile(\"silex-float-runtime.macho\");\n",
     );
     module.addAnonymousImport("float_runtime_object", .{ .root_source_file = runtime_module });
+    const float_runtime_x64_target = b.resolveTargetQuery(.{
+        .cpu_arch = .x86_64,
+        .os_tag = .linux,
+    });
+    const float_runtime_x64_module = b.createModule(.{
+        .root_source_file = b.path("Runtime/FloatFormat.zig"),
+        .target = float_runtime_x64_target,
+        .optimize = .ReleaseSmall,
+        .strip = true,
+        .unwind_tables = .none,
+    });
+    const float_runtime_x64 = b.addExecutable(.{
+        .name = "silex-float-runtime-x64",
+        .root_module = float_runtime_x64_module,
+    });
+    float_runtime_x64.entry = .{ .symbol_name = "silex_format_float" };
+    const runtime_x64_files = b.addWriteFiles();
+    _ = runtime_x64_files.addCopyFile(float_runtime_x64.getEmittedBin(), "silex-float-runtime-x64.elf");
+    const runtime_x64_module = runtime_x64_files.add(
+        "FloatRuntimeX64Object.zig",
+        "pub const object_bytes = @embedFile(\"silex-float-runtime-x64.elf\");\n",
+    );
+    module.addAnonymousImport("float_runtime_x64_object", .{ .root_source_file = runtime_x64_module });
     const deep_copy_runtime_module = b.createModule(.{
         .root_source_file = b.path("Runtime/DeepCopy.zig"),
         .target = runtime_target,

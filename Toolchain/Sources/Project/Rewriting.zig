@@ -1,5 +1,4 @@
 const Ast = @import("../Ast.zig");
-const GenericTypes = @import("GenericTypes.zig");
 const Iterations = @import("Iterations.zig");
 
 pub fn statements(self: anytype, module: usize, source: []const Ast.Statement, type_map: []const Ast.Type) ![]const Ast.Statement {
@@ -7,13 +6,13 @@ pub fn statements(self: anytype, module: usize, source: []const Ast.Statement, t
     for (source, 0..) |statement, index| rewritten[index] = switch (statement) {
         .variable_declaration => |declaration| variable: {
             var value = declaration;
-            if (value.annotation) |annotation| value.annotation = GenericTypes.remap(annotation, type_map, self.generic_type_maps[module]);
+            if (value.annotation) |annotation| value.annotation = self.remapType(module, type_map, annotation);
             if (value.initializer) |initializer| try self.rewriteExpression(module, initializer, type_map);
             break :variable .{ .variable_declaration = value };
         },
         .assignment_statement => |assignment| assignment_statement: {
             for (@constCast(assignment.target.type_arguments)) |*argument| {
-                argument.* = GenericTypes.remap(argument.*, type_map, self.generic_type_maps[module]);
+                argument.* = self.remapType(module, type_map, argument.*);
             }
             if (assignment.value) |value| try self.rewriteExpression(module, value, type_map);
             for (assignment.target.indices) |target_index| try self.rewriteExpression(module, target_index.value, type_map);
@@ -59,6 +58,10 @@ pub fn statements(self: anytype, module: usize, source: []const Ast.Statement, t
             break :loop_statement .{ .while_statement = value };
         },
         .for_statement => |loop| .{ .for_statement = try Iterations.rewrite(self, module, loop, type_map) },
+        .mutex_statement => |mutex| .{ .mutex_statement = .{
+            .position = mutex.position,
+            .statements = try self.rewriteStatements(module, mutex.statements, type_map),
+        } },
         .break_statement => |position| .{ .break_statement = position },
         .continue_statement => |position| .{ .continue_statement = position },
     };

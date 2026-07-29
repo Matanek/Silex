@@ -13,6 +13,7 @@ const ParserModule = @import("Parser.zig");
 const Reexports = @import("Project/Reexports.zig");
 const TypeAliases = @import("Project/TypeAliases.zig");
 const GenericTypes = @import("Project/GenericTypes.zig");
+const FunctionTypes = @import("Project/FunctionTypes.zig");
 const Paths = @import("Project/Paths.zig");
 const Lookup = @import("Project/Lookup.zig");
 const Iterations = @import("Project/Iterations.zig");
@@ -21,6 +22,7 @@ const Rewriting = @import("Project/Rewriting.zig");
 const ProjectExtensions = @import("Project/Extensions.zig");
 const Semantic = @import("Semantic/Analyzer.zig");
 const Source = @import("Source.zig");
+const TargetModule = @import("Target.zig");
 const Extensions = @import("Extensions.zig");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
@@ -34,6 +36,14 @@ const lastSegment = Names.lastSegment;
 const parent = Names.parent;
 const sameParent = Names.sameParent;
 const structureCanonicalName = Names.nominal;
+
+fn modeSpelling(mode: Ast.Parameter.Mode) []const u8 {
+    return switch (mode) {
+        .value => "",
+        .read => "@",
+        .mutable => "&",
+    };
+}
 pub const Error = anyerror;
 pub const Compilation = struct {
     ast: Ast.Program,
@@ -57,14 +67,21 @@ pub const Compiler = struct {
     entry_module: usize = 0,
     diagnostic: ?Source.Diagnostic = null,
     generic_type_maps: []const []const Ast.Type = &.{},
+    function_type_maps: []const []const Ast.Type = &.{},
     cache_modules: bool = false,
+    target: TargetModule.Target,
 
     pub fn init(allocator: Allocator, io: Io) Compiler {
-        return .{ .allocator = allocator, .io = io };
+        return .{ .allocator = allocator, .io = io, .target = TargetModule.Target.host() orelse .macos_arm64 };
     }
 
     pub fn initWithPackages(allocator: Allocator, io: Io, global_packages_root: ?[]const u8) Compiler {
-        return .{ .allocator = allocator, .io = io, .global_packages_root = global_packages_root };
+        return .{
+            .allocator = allocator,
+            .io = io,
+            .global_packages_root = global_packages_root,
+            .target = TargetModule.Target.host() orelse .macos_arm64,
+        };
     }
 
     pub fn initWithPackagesAndCache(
@@ -78,6 +95,7 @@ pub const Compiler = struct {
             .io = io,
             .global_packages_root = global_packages_root,
             .cache_modules = cache_modules,
+            .target = TargetModule.Target.host() orelse .macos_arm64,
         };
     }
 
@@ -88,7 +106,7 @@ pub const Compiler = struct {
         }
 
         const root_path = try Paths.findRoot(self.allocator, self.io, input_path);
-        var package_resolver = Packages.Resolver.init(self.allocator, self.io, self.global_packages_root);
+        var package_resolver = Packages.Resolver.initForTarget(self.allocator, self.io, self.global_packages_root, self.target);
         self.packages = package_resolver.resolve(root_path) catch |err| switch (err) {
             error.InvalidPackageGraph => return self.fail(
                 .{ .offset = 0, .line = 1, .column = 1 },
@@ -134,6 +152,7 @@ pub const Compiler = struct {
         };
         const interfaces = try self.buildInterfaces(composition.type_maps);
         var analyzer = Semantic.Analyzer.init(self.allocator);
+        analyzer.target = self.target;
         var ir = analyzer.analyze(ast) catch |err| {
             self.diagnostic = analyzer.diagnostic;
             return err;
@@ -274,7 +293,11 @@ pub const Compiler = struct {
     }
 
     fn resolveUse(self: *Compiler, source_module: usize, use: Ast.Use) Error!Binding {
-        if (std.mem.eql(u8, use.path, "Interop.C") or std.mem.eql(u8, use.path, "Interop.MacOS")) {
+        if (std.mem.eql(u8, use.path, "Interop.C") or
+            std.mem.eql(u8, use.path, "Interop.MacOS") or
+            std.mem.eql(u8, use.path, "Interop.Linux") or
+            std.mem.eql(u8, use.path, "Interop.Windows"))
+        {
             return .{
                 .alias = use.alias orelse lastSegment(use.path),
                 .path = use.path,
@@ -358,7 +381,7 @@ pub const Compiler = struct {
             try std.fmt.allocPrint(
                 self.allocator,
                 "module '{s}' is not available for {s}",
-                .{ use.path, Packages.target_name },
+                .{ use.path, self.target.name() },
             )
         else
             try std.fmt.allocPrint(self.allocator, "unknown module or declaration '{s}'", .{use.path});
@@ -593,6 +616,7 @@ pub const Compiler = struct {
                 try self.activateExpression(module, loop.condition.source());
                 for (loop.statements) |nested| try self.activateStatement(module, nested);
             },
+            .mutex_statement => |mutex| for (mutex.statements) |nested| try self.activateStatement(module, nested),
             .for_statement => |loop| try Iterations.activate(self, module, loop),
             .break_statement, .continue_statement => {},
         }
@@ -884,6 +908,20 @@ pub const Compiler = struct {
     fn canonicalTypeSpelling(self: *Compiler, module: usize, type_value: Ast.Type) Error![]const u8 {
         if (type_value.optionalChild()) |child| return std.fmt.allocPrint(self.allocator, "{s}?", .{try self.canonicalTypeSpelling(module, child)});
         if (type_value.genericParameterIndex()) |index| return std.fmt.allocPrint(self.allocator, "T{d}", .{index});
+        if (type_value.functionIndex()) |index| {
+            const function_type = self.units[module].program.?.function_types[index];
+            var spelling = try self.allocator.dupe(u8, "func(");
+            for (function_type.parameters, 0..) |parameter, parameter_index| spelling = try std.fmt.allocPrint(
+                self.allocator,
+                "{s}{s}{s}{s}",
+                .{ spelling, if (parameter_index == 0) "" else ",", modeSpelling(parameter.mode), try self.canonicalTypeSpelling(module, parameter.type) },
+            );
+            return std.fmt.allocPrint(
+                self.allocator,
+                "{s}){s}{s}",
+                .{ spelling, modeSpelling(function_type.return_mode), try self.canonicalTypeSpelling(module, function_type.return_type) },
+            );
+        }
         if (type_value.genericInstantiationIndex()) |index| {
             const generic = self.units[module].program.?.generic_types[index];
             var name = try self.allocator.dupe(u8, try self.canonicalTypeSpelling(module, generic.base));
@@ -990,6 +1028,8 @@ pub const Compiler = struct {
         }
         const generic_composition = try GenericTypes.compose(self.allocator, self.units, type_maps);
         self.generic_type_maps = generic_composition.maps;
+        const function_composition = try FunctionTypes.compose(self.allocator, self.units, type_maps, self.generic_type_maps);
+        self.function_type_maps = function_composition.maps;
         for (type_maps, 0..) |type_map, module| {
             for (@constCast(type_map)) |*type_value| {
                 type_value.* = GenericTypes.remap(type_value.*, &.{}, self.generic_type_maps[module]);
@@ -1006,6 +1046,7 @@ pub const Compiler = struct {
             const program = self.units[module].program.?;
             const type_map = type_maps[module];
             const generic_map = self.generic_type_maps[module];
+            const function_map = self.function_type_maps[module];
             for (program.extensions) |extension| {
                 try extensions.append(self.allocator, try ProjectExtensions.compose(self, module, provider, extension, type_map, generic_map));
             }
@@ -1029,28 +1070,28 @@ pub const Compiler = struct {
                 if (structure.enclosing) |enclosing| {
                     composed_structure.enclosing = try structureCanonicalName(self.allocator, provider.name, enclosing);
                 }
-                if (structure.base) |base| composed_structure.base = GenericTypes.remap(base, type_map, generic_map);
+                if (structure.base) |base| composed_structure.base = FunctionTypes.remap(base, type_map, generic_map, function_map);
                 const conformances = try self.allocator.alloc(Ast.Type, structure.conformances.len);
                 for (structure.conformances, 0..) |conformance, index| {
-                    conformances[index] = GenericTypes.remap(conformance, type_map, generic_map);
+                    conformances[index] = FunctionTypes.remap(conformance, type_map, generic_map, function_map);
                 }
                 composed_structure.conformances = conformances;
                 if (structure.collection) |collection| composed_structure.collection = .{
-                    .element = GenericTypes.remap(collection.element, type_map, generic_map),
+                    .element = FunctionTypes.remap(collection.element, type_map, generic_map, function_map),
                     .length = collection.length,
                     .view = collection.view,
                 };
                 const fields = try self.allocator.alloc(Ast.StructureField, structure.fields.len);
                 for (structure.fields, 0..) |field, index| {
                     fields[index] = field;
-                    fields[index].type = GenericTypes.remap(field.type, type_map, generic_map);
+                    fields[index].type = FunctionTypes.remap(field.type, type_map, generic_map, function_map);
                     if (field.default) |value| try self.rewriteExpression(module, value, type_map);
                 }
                 composed_structure.fields = fields;
                 const static_fields = try self.allocator.alloc(Ast.StructureField, structure.static_fields.len);
                 for (structure.static_fields, 0..) |field, index| {
                     static_fields[index] = field;
-                    static_fields[index].type = GenericTypes.remap(field.type, type_map, generic_map);
+                    static_fields[index].type = FunctionTypes.remap(field.type, type_map, generic_map, function_map);
                     if (field.default) |value| try self.rewriteExpression(module, value, type_map);
                 }
                 composed_structure.static_fields = static_fields;
@@ -1060,7 +1101,7 @@ pub const Compiler = struct {
                     const parameters = try self.allocator.alloc(Ast.Parameter, constructor.parameters.len);
                     for (constructor.parameters, 0..) |parameter, parameter_index| {
                         parameters[parameter_index] = parameter;
-                        parameters[parameter_index].type = GenericTypes.remap(parameter.type, type_map, generic_map);
+                        parameters[parameter_index].type = FunctionTypes.remap(parameter.type, type_map, generic_map, function_map);
                         if (parameter.default) |value| try self.rewriteExpression(module, value, type_map);
                     }
                     constructors[constructor_index].parameters = parameters;
@@ -1076,11 +1117,11 @@ pub const Compiler = struct {
                     const parameters = try self.allocator.alloc(Ast.Parameter, method.parameters.len);
                     for (method.parameters, 0..) |parameter, parameter_index| {
                         parameters[parameter_index] = parameter;
-                        parameters[parameter_index].type = GenericTypes.remap(parameter.type, type_map, generic_map);
+                        parameters[parameter_index].type = FunctionTypes.remap(parameter.type, type_map, generic_map, function_map);
                         if (parameter.default) |value| try self.rewriteExpression(module, value, type_map);
                     }
                     methods[method_index].parameters = parameters;
-                    methods[method_index].return_type = GenericTypes.remap(method.return_type, type_map, generic_map);
+                    methods[method_index].return_type = FunctionTypes.remap(method.return_type, type_map, generic_map, function_map);
                     methods[method_index].statements = try self.rewriteStatements(module, method.statements, type_map);
                 }
                 composed_structure.methods = methods;
@@ -1097,7 +1138,7 @@ pub const Compiler = struct {
                     variants[variant_index] = variant;
                     const associated_types = try self.allocator.alloc(Ast.Type, variant.associated_types.len);
                     for (variant.associated_types, 0..) |associated_type, type_index| {
-                        associated_types[type_index] = GenericTypes.remap(associated_type, type_map, generic_map);
+                        associated_types[type_index] = FunctionTypes.remap(associated_type, type_map, generic_map, function_map);
                     }
                     variants[variant_index].associated_types = associated_types;
                 }
@@ -1115,11 +1156,11 @@ pub const Compiler = struct {
                 const parameters = try self.allocator.alloc(Ast.Parameter, function.parameters.len);
                 for (function.parameters, 0..) |parameter, index| {
                     parameters[index] = parameter;
-                    parameters[index].type = GenericTypes.remap(parameter.type, type_map, generic_map);
+                    parameters[index].type = FunctionTypes.remap(parameter.type, type_map, generic_map, function_map);
                     if (parameter.default) |value| try self.rewriteExpression(module, value, type_map);
                 }
                 composed.parameters = parameters;
-                composed.return_type = GenericTypes.remap(function.return_type, type_map, generic_map);
+                composed.return_type = FunctionTypes.remap(function.return_type, type_map, generic_map, function_map);
                 composed.statements = try self.rewriteStatements(module, function.statements, type_map);
                 try functions.append(self.allocator, composed);
             }
@@ -1133,6 +1174,7 @@ pub const Compiler = struct {
         return .{ .program = .{
             .type_names = try type_names.toOwnedSlice(self.allocator),
             .generic_types = generic_composition.types,
+            .function_types = function_composition.types,
             .structures = try structures.toOwnedSlice(self.allocator),
             .enums = try enums.toOwnedSlice(self.allocator),
             .extensions = try extensions.toOwnedSlice(self.allocator),
@@ -1302,21 +1344,21 @@ pub const Compiler = struct {
             };
             if (structure.base) |base| try self.requirePublicType(module, base, structure.base_position, "public class", structure.name);
             for (structure.fields) |field| {
-                if (field.is_internal) continue;
+                if (field.is_internal or field.is_private or field.is_protected) continue;
                 try self.requirePublicType(module, field.type, field.name_position, "public structure", structure.name);
             }
             for (structure.static_fields) |field| {
-                if (field.is_internal) continue;
+                if (field.is_internal or field.is_private or field.is_protected) continue;
                 try self.requirePublicType(module, field.type, field.name_position, "public structure", structure.name);
             }
             for (structure.constructors) |constructor| {
-                if (constructor.is_internal) continue;
+                if (constructor.is_internal or constructor.is_private or constructor.is_protected) continue;
                 for (constructor.parameters) |parameter| {
                     try self.requirePublicType(module, parameter.type, parameter.position, "constructor of", structure.name);
                 }
             }
             for (structure.methods) |method| {
-                if (method.is_internal) continue;
+                if (method.is_internal or method.is_private or method.is_protected) continue;
                 for (method.type_parameters) |parameter| if (parameter.constraint) |constraint| {
                     try self.requirePublicType(module, constraint, parameter.position, "method of", structure.name);
                 };
@@ -1369,6 +1411,13 @@ pub const Compiler = struct {
         declaration_name: []const u8,
     ) Error!void {
         if (type_value.optionalChild()) |child| return self.requirePublicType(module, child, position, declaration_kind, declaration_name);
+        if (type_value.functionIndex()) |function_index| {
+            const program = self.units[module].program.?;
+            if (function_index >= program.function_types.len) return;
+            const function_type = program.function_types[function_index];
+            for (function_type.parameters) |parameter| try self.requirePublicType(module, parameter.type, position, declaration_kind, declaration_name);
+            return self.requirePublicType(module, function_type.return_type, position, declaration_kind, declaration_name);
+        }
         if (type_value.genericInstantiationIndex()) |generic_index| {
             const program = self.units[module].program.?;
             if (generic_index >= program.generic_types.len) return;
@@ -1423,28 +1472,51 @@ pub const Compiler = struct {
         return Rewriting.statements(self, module, statements, type_map);
     }
 
+    pub fn remapType(self: *Compiler, module: usize, type_map: []const Ast.Type, type_value: Ast.Type) Ast.Type {
+        return FunctionTypes.remap(type_value, type_map, self.generic_type_maps[module], self.function_type_maps[module]);
+    }
+
     pub fn rewriteExpression(self: *Compiler, module: usize, expression: *Ast.Expression, type_map: []const Ast.Type) Error!void {
         switch (expression.value) {
             .call => |*call| {
                 call.owner = self.index.providers[module].owner;
                 const type_arguments = try self.allocator.alloc(Ast.Type, call.type_arguments.len);
                 for (call.type_arguments, 0..) |type_argument, index| {
-                    type_arguments[index] = GenericTypes.remap(type_argument, type_map, self.generic_type_maps[module]);
+                    type_arguments[index] = self.remapType(module, type_map, type_argument);
                 }
                 call.type_arguments = type_arguments;
                 for (call.arguments) |argument| try self.rewriteExpression(module, argument, type_map);
                 for (call.named_arguments) |argument| try self.rewriteExpression(module, argument.value, type_map);
+                if (call.receiver == null and std.mem.eql(u8, call.name, "C.function_address") and call.arguments.len == 1 and
+                    call.arguments[0].value == .identifier)
+                {
+                    const name = &call.arguments[0].value.identifier;
+                    if (Lookup.findLocalFunction(self.units[module].program.?, name.*)) {
+                        name.* = try canonicalName(self.allocator, self.index.providers[module].name, name.*);
+                    } else if (try self.targetForCall(module, name.*)) |candidate| {
+                        if (try self.functionTarget(candidate)) |target| name.* = try canonicalName(
+                            self.allocator,
+                            self.index.providers[target.module].name,
+                            target.declaration,
+                        );
+                    }
+                }
                 if (call.receiver) |receiver| {
                     if (receiver.value == .generic_reference) {
                         const reference = &receiver.value.generic_reference;
-                        const target = try self.enumReceiverTarget(module, reference.name) orelse {
-                            const message = try std.fmt.allocPrint(self.allocator, "unknown generic enum '{s}'", .{reference.name});
+                        const enumeration = try self.enumReceiverTarget(module, reference.name);
+                        const structure = if (enumeration == null) try self.structureTarget(module, reference.name) else null;
+                        const target = enumeration orelse structure orelse {
+                            const message = try std.fmt.allocPrint(self.allocator, "unknown generic type '{s}'", .{reference.name});
                             return self.fail(receiver.position, message);
                         };
-                        try self.requirePublicEnum(module, target, call.name_position);
+                        if (enumeration != null)
+                            try self.requirePublicEnum(module, target, call.name_position)
+                        else
+                            try self.requirePublicStructure(module, target, call.name_position);
                         reference.name = try structureCanonicalName(self.allocator, self.index.providers[target.module].name, target.declaration);
                         for (@constCast(reference.type_arguments)) |*argument| {
-                            argument.* = GenericTypes.remap(argument.*, type_map, self.generic_type_maps[module]);
+                            argument.* = self.remapType(module, type_map, argument.*);
                         }
                     } else if (try expressionName(self.allocator, receiver)) |prefix| {
                         if (try self.enumReceiverTarget(module, prefix)) |target| {
@@ -1519,8 +1591,23 @@ pub const Compiler = struct {
             },
             .field_access => |access| try self.rewriteExpression(module, access.base, type_map),
             .generic_reference => |*reference| {
+                const enumeration = try self.enumReceiverTarget(module, reference.name);
+                const structure = if (enumeration == null) try self.structureTarget(module, reference.name) else null;
+                const target = enumeration orelse structure orelse {
+                    const message = try std.fmt.allocPrint(self.allocator, "unknown generic type '{s}'", .{reference.name});
+                    return self.fail(expression.position, message);
+                };
+                if (enumeration != null)
+                    try self.requirePublicEnum(module, target, expression.position)
+                else
+                    try self.requirePublicStructure(module, target, expression.position);
+                reference.name = try structureCanonicalName(
+                    self.allocator,
+                    self.index.providers[target.module].name,
+                    target.declaration,
+                );
                 for (@constCast(reference.type_arguments)) |*argument| {
-                    argument.* = GenericTypes.remap(argument.*, type_map, self.generic_type_maps[module]);
+                    argument.* = self.remapType(module, type_map, argument.*);
                 }
             },
             .unary => |unary| try self.rewriteExpression(module, unary.operand, type_map),
@@ -1529,12 +1616,12 @@ pub const Compiler = struct {
                 try self.rewriteExpression(module, binary.right, type_map);
             },
             .conversion => |*conversion| {
-                conversion.target = GenericTypes.remap(conversion.target, type_map, self.generic_type_maps[module]);
+                conversion.target = self.remapType(module, type_map, conversion.target);
                 try self.rewriteExpression(module, conversion.operand, type_map);
             },
             .string_count => |operand| try self.rewriteExpression(module, operand, type_map),
             .sequence_literal => |*literal| {
-                if (literal.inferred_type) |type_value| literal.inferred_type = GenericTypes.remap(type_value, type_map, self.generic_type_maps[module]);
+                if (literal.inferred_type) |type_value| literal.inferred_type = self.remapType(module, type_map, type_value);
                 for (literal.values) |value| try self.rewriteExpression(module, value, type_map);
             },
             .index_access => |access| {

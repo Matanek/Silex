@@ -9,15 +9,39 @@ Math/
     Vec3.sx
 ```
 
-A named package may also provide modules selected for the current target under
-`Platform/macos-arm64/Module/`. This directory is a second logical module root:
-`Platform/macos-arm64` never appears in module names. For example,
-`Platform/macos-arm64/Module/System/Write.sx` provides
+A named package may also provide modules selected for the current platform and
+exact compilation target:
+
+```text
+Platform/MacOS/Module/
+Platform/Linux/Module/
+Platform/Windows/Module/
+Target/macos-arm64/Module/
+Target/linux-x64/Module/
+Target/windows-x64/Module/
+Target/windows-arm64/Module/
+```
+
+For `macos-arm64`, the compiler indexes `Module/`,
+`Platform/MacOS/Module/`, then `Target/macos-arm64/Module/`. These physical
+segments never appear in module names. For example,
+`Platform/MacOS/Module/System/Write.sx` provides
 `PackageName.System.Write`.
 
-Only `Module/` and the exact `macos-arm64` root are indexed. Sources stored
-under another target are ignored. The common and selected roots must not both
-provide the same logical module.
+The platform root contains code shared by its architectures. Use the exact
+target root only when source genuinely depends on the architecture or ABI.
+Sources stored under another platform or target are ignored. Active roots must
+not provide the same logical module.
+
+`silex compile` selects the host target by default and accepts one explicit
+target through `--target`. The recognized targets are `macos-arm64`,
+`linux-x64`, `windows-x64`, and `windows-arm64`. A recognized target may still
+have only a partial native emitter; unsupported machine operations are rejected
+explicitly rather than silently changing the selected platform.
+
+`silex targets` prints the matrix recognized by the running compiler and marks
+its host target. This discovery belongs to the toolchain rather than a runtime
+package because the compiler and STD are versioned independently.
 
 A local source outside these public roots may nevertheless be compiled as the
 explicit program entry. For example, compiling `Math/Tests/Main.sx` makes that

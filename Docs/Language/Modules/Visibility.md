@@ -47,5 +47,21 @@ visibility.
 
 ## Structure members
 
-Members of a public structure are public by default. Explicit `public` is
-accepted when it makes the API easier to scan.
+Structure members are public by default. Explicit `public` is accepted when it
+makes the API easier to scan. Use `internal` to restrict a member to the exact
+source file, or `private` to restrict it to the structure and its nested type
+family:
+
+```sx
+public struct Iterator<T> {
+    private var values:T?[]
+
+    func isEmpty() bool {
+        return self.values.count() == 0
+    }
+}
+```
+
+Fields, constructors, methods, static members, and nested types accept
+`public`, `internal`, or `private`. Structures do not support `protected`,
+which is reserved for class inheritance.

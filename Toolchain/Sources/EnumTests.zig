@@ -58,13 +58,41 @@ test "diagnose invalid associated enum construction" {
         "enum 'Choice' has no variant named 'unknown'",
     );
     try expectCompileError(
-        "enum Choice { value } func main() { let equal = Choice.value() == Choice.value() }",
-        "operator '==' does not accept 'Choice' and 'Choice'",
-    );
-    try expectCompileError(
         "enum Choice { value; value } func main() {}",
         "enum variant is already declared",
     );
+}
+
+test "compare enum variants and associated values recursively" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\class Token {
+        \\    public let name:str
+        \\}
+        \\enum Inner { number(int); empty }
+        \\enum Choice { empty; pair(int, str); nested(Inner); token(Token) }
+        \\enum Direction:int { north = 1; south = -2 }
+        \\func main() {
+        \\    var token = Token(name:"same")
+        \\    var alias = token
+        \\    var distinct = Token(name:"same")
+        \\    print(Choice.empty() == Choice.empty())
+        \\    print(Choice.empty() != Choice.pair(0, ""))
+        \\    print(Choice.pair(7, "value") == Choice.pair(7, "value"))
+        \\    print(Choice.pair(7, "value") != Choice.pair(8, "value"))
+        \\    print(Choice.nested(Inner.number(3)) == Choice.nested(Inner.number(3)))
+        \\    print(Choice.nested(Inner.number(3)) != Choice.nested(Inner.empty()))
+        \\    print(Choice.token(token) == Choice.token(alias))
+        \\    print(Choice.token(token) != Choice.token(distinct))
+        \\    print(Direction.north() == Direction.north())
+        \\    print(Direction.north() != Direction.south())
+        \\}
+    );
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n", result.stdout);
 }
 
 test "use enum values in overloaded constructors" {

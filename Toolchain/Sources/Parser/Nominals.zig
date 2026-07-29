@@ -92,7 +92,7 @@ fn parseType(
             member_private = self.current.tag == .keyword_private;
             member_protected = self.current.tag == .keyword_protected;
             if (is_static_class and member_protected) return self.fail("static classes do not support protected members");
-            if (!is_class and (member_private or member_protected)) return self.fail("structures only support public or internal members");
+            if (!is_class and member_protected) return self.fail("structures only support public, internal, or private members");
             try self.advance();
         }
         var member_static = false;
@@ -246,7 +246,7 @@ fn parseConstructor(self: anytype, is_internal: bool, has_base: bool) !Ast.Const
         try parameters.append(self.allocator, parameter);
         if (self.current.tag != .comma) break;
         try self.advance();
-        if (self.current.tag == .right_parenthesis) return self.fail("expected parameter after ','");
+        if (self.current.tag == .right_parenthesis) break;
     };
     try self.expect(.right_parenthesis, "expected ')' after constructor parameters");
     var super_arguments: []const *Ast.Expression = &.{};

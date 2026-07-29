@@ -145,6 +145,7 @@ pub fn analyzeReturn(self: anytype, builder: anytype, function: Ast.Function, st
                 return self.fail(expression.position, "mutable borrowed return requires a mutable place from an '&' parameter");
             }
             try Resources.emitActiveDrops(self, builder, 0);
+            try Resources.emitMutexUnlocks(self, builder, 0);
             self.terminate(builder, .{ .return_value = if (function.return_mode == .mutable and !view_return) value.reference.? else value.value });
             return;
         }
@@ -152,6 +153,7 @@ pub fn analyzeReturn(self: anytype, builder: anytype, function: Ast.Function, st
             !Resources.containsClass(self, value.type);
         if (!copied_projection) try Borrowing.requireOwned(self, value, expression.position, "returned");
         try Resources.emitActiveDrops(self, builder, 0);
+        try Resources.emitMutexUnlocks(self, builder, 0);
         self.terminate(builder, .{ .return_value = value.value });
         return;
     }
@@ -161,5 +163,6 @@ pub fn analyzeReturn(self: anytype, builder: anytype, function: Ast.Function, st
         return self.fail(statement.position, message);
     }
     try Resources.emitActiveDrops(self, builder, 0);
+    try Resources.emitMutexUnlocks(self, builder, 0);
     self.terminate(builder, .return_void);
 }

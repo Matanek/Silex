@@ -80,6 +80,22 @@ let outcome = Outcome<int,str>.success(42)
 Every use writes the complete type argument list. Variant construction and
 `match` do not infer it.
 
+## Compare enum values
+
+`==` first compares the active variant, then recursively compares every value
+associated with that variant. Different variants are unequal. `!=` is the
+inverse of `==`.
+
+```sx
+Connection.connected("server") == Connection.connected("server")
+Connection.waiting() != Connection.closed("timeout")
+```
+
+The associated values must themselves be comparable. Structures compare their
+fields, while classes compare shared identity. Raw enums also compare their
+variant; their `raw_value` remains an explicit representation rather than an
+implicit equality conversion.
+
 Enum values copy their active payloads compositionally. When a payload declares
 `drop`, each copied enum owns an independent payload value and destroys only
 the active variant.

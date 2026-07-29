@@ -41,6 +41,20 @@ while ready() {
 
 `break` and `continue` target the nearest loop.
 
+## Protect shared state
+
+```sx
+mutex {
+    pending.append(value)
+}
+```
+
+`mutex` executes its lexical block while holding Silex's single process-wide
+critical-section lock. The lock is recursive, so protected code may call a
+helper that also uses `mutex`. It is released on every exit from the block,
+including `return`, `break`, `continue`, and recoverable `try` propagation.
+There is intentionally no manual `lock` or `unlock` operation.
+
 ## Iterate a range
 
 ```sx

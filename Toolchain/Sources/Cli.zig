@@ -1,4 +1,5 @@
 const std = @import("std");
+const TargetModule = @import("Target.zig");
 
 pub const Mode = enum { debug, release };
 
@@ -11,6 +12,9 @@ pub const Diagnostic = struct {
         multiple_sources,
         missing_output,
         duplicate_output,
+        missing_target,
+        duplicate_target,
+        unknown_target,
         conflicting_modes,
         option_unavailable,
         unknown_option,
@@ -18,6 +22,13 @@ pub const Diagnostic = struct {
 };
 
 pub const RunOptions = struct {
+    source_path: []const u8,
+    emit_ir: bool,
+    mode: Mode,
+    cache: bool,
+};
+
+pub const InterpretOptions = struct {
     source_path: []const u8,
     emit_ir: bool,
     cache: bool,
@@ -28,6 +39,7 @@ pub const CompileOptions = struct {
     output_path: []const u8,
     mode: Mode,
     cache: bool,
+    target: ?TargetModule.Target,
 };
 
 pub const RunResult = union(enum) {
@@ -40,17 +52,30 @@ pub const CompileResult = union(enum) {
     diagnostic: Diagnostic,
 };
 
+pub const InterpretResult = union(enum) {
+    options: InterpretOptions,
+    diagnostic: Diagnostic,
+};
+
 pub fn parseRun(args: []const []const u8) RunResult {
     var source_path: ?[]const u8 = null;
     var emit_ir = false;
+    var mode: Mode = .debug;
+    var explicit_mode: ?Mode = null;
     var cache = true;
 
     for (args) |argument| {
         if (std.mem.eql(u8, argument, "--emit-ir")) {
             emit_ir = true;
+        } else if (modeFor(argument)) |selected| {
+            if (explicit_mode) |previous| if (previous != selected) {
+                return failure(RunResult, .conflicting_modes, argument);
+            };
+            mode = selected;
+            explicit_mode = selected;
         } else if (isNoCacheOption(argument)) {
             cache = false;
-        } else if (isNativeOption(argument)) {
+        } else if (isOutputOption(argument)) {
             return failure(RunResult, .option_unavailable, argument);
         } else if (std.mem.startsWith(u8, argument, "-")) {
             return failure(RunResult, .unknown_option, argument);
@@ -64,6 +89,35 @@ pub fn parseRun(args: []const []const u8) RunResult {
     return .{ .options = .{
         .source_path = source_path orelse return failure(RunResult, .missing_source, null),
         .emit_ir = emit_ir,
+        .mode = mode,
+        .cache = cache,
+    } };
+}
+
+pub fn parseInterpret(args: []const []const u8) InterpretResult {
+    var source_path: ?[]const u8 = null;
+    var emit_ir = false;
+    var cache = true;
+
+    for (args) |argument| {
+        if (std.mem.eql(u8, argument, "--emit-ir")) {
+            emit_ir = true;
+        } else if (isNoCacheOption(argument)) {
+            cache = false;
+        } else if (isNativeOption(argument)) {
+            return failure(InterpretResult, .option_unavailable, argument);
+        } else if (std.mem.startsWith(u8, argument, "-")) {
+            return failure(InterpretResult, .unknown_option, argument);
+        } else if (source_path != null) {
+            return failure(InterpretResult, .multiple_sources, argument);
+        } else {
+            source_path = argument;
+        }
+    }
+
+    return .{ .options = .{
+        .source_path = source_path orelse return failure(InterpretResult, .missing_source, null),
+        .emit_ir = emit_ir,
         .cache = cache,
     } };
 }
@@ -74,6 +128,7 @@ pub fn parseCompile(args: []const []const u8) CompileResult {
     var mode: Mode = .debug;
     var explicit_mode: ?Mode = null;
     var cache = true;
+    var target: ?TargetModule.Target = null;
     var index: usize = 0;
 
     while (index < args.len) : (index += 1) {
@@ -91,6 +146,14 @@ pub fn parseCompile(args: []const []const u8) CompileResult {
             index += 1;
             if (index >= args.len) return failure(CompileResult, .missing_output, argument);
             output_path = args[index];
+        } else if (std.mem.eql(u8, argument, "--target")) {
+            if (target != null) return failure(CompileResult, .duplicate_target, argument);
+            index += 1;
+            if (index >= args.len or std.mem.startsWith(u8, args[index], "-")) {
+                return failure(CompileResult, .missing_target, argument);
+            }
+            target = TargetModule.Target.parse(args[index]) catch
+                return failure(CompileResult, .unknown_target, args[index]);
         } else if (std.mem.startsWith(u8, argument, "-")) {
             return failure(CompileResult, .unknown_option, argument);
         } else if (source_path != null) {
@@ -105,6 +168,7 @@ pub fn parseCompile(args: []const []const u8) CompileResult {
         .output_path = output_path orelse return failure(CompileResult, .missing_output, null),
         .mode = mode,
         .cache = cache,
+        .target = target,
     } };
 }
 
@@ -142,6 +206,19 @@ test "compile accepts short and long aliases in any order" {
     try std.testing.expectEqual(Mode.debug, long.mode);
 }
 
+test "compile accepts recognized targets and diagnoses invalid selections" {
+    const options = parseCompile(&.{ "Main.sx", "--target", "linux-x64", "-o", "Application" }).options;
+    try std.testing.expect(options.target.?.eql(.linux_x64));
+    try expectDiagnostic(parseCompile(&.{ "Main.sx", "--target", "unknown", "-o", "Application" }), .unknown_target, "unknown");
+    try expectDiagnostic(parseCompile(&.{ "Main.sx", "--target", "-o", "Application" }), .missing_target, "--target");
+    try expectDiagnostic(parseCompile(&.{ "Main.sx", "--target" }), .missing_target, "--target");
+    try expectDiagnostic(
+        parseCompile(&.{ "Main.sx", "--target", "macos-arm64", "--target", "linux-x64", "-o", "Application" }),
+        .duplicate_target,
+        "--target",
+    );
+}
+
 test "compile defaults to debug and accepts a repeated identical mode" {
     try std.testing.expectEqual(Mode.debug, parseCompile(&.{ "Main.sx", "-o", "Application" }).options.mode);
     try std.testing.expectEqual(
@@ -163,19 +240,29 @@ test "compile diagnoses missing duplicate and unexpected arguments" {
     try expectDiagnostic(parseCompile(&.{ "Main.sx", "Other.sx", "-o", "A" }), .multiple_sources, "Other.sx");
 }
 
-test "run accepts emit ir but rejects native compilation options" {
-    const options = parseRun(&.{ "--emit-ir", "Main.sx" }).options;
+test "run accepts native modes and emit ir but owns its output" {
+    const options = parseRun(&.{ "--emit-ir", "--release", "Main.sx" }).options;
     try std.testing.expect(options.emit_ir);
+    try std.testing.expectEqual(Mode.release, options.mode);
     try std.testing.expectEqualStrings("Main.sx", options.source_path);
-    try expectRunDiagnostic(parseRun(&.{ "Main.sx", "--release" }), .option_unavailable, "--release");
     try expectRunDiagnostic(parseRun(&.{ "Main.sx", "--output", "Application" }), .option_unavailable, "--output");
+    try expectRunDiagnostic(parseRun(&.{ "Main.sx", "--debug", "--release" }), .conflicting_modes, "--release");
 }
 
-test "run and compile accept nocache aliases but reject grouped short forms" {
+test "run interpret and compile accept nocache aliases but reject grouped short forms" {
     try std.testing.expect(!parseRun(&.{ "Main.sx", "-n" }).options.cache);
     try std.testing.expect(!parseRun(&.{ "--nocache", "Main.sx" }).options.cache);
+    try std.testing.expect(!parseInterpret(&.{ "Main.sx", "-n" }).options.cache);
     try std.testing.expect(!parseCompile(&.{ "Main.sx", "-n", "-o", "App" }).options.cache);
     try expectRunDiagnostic(parseRun(&.{ "Main.sx", "-nc" }), .unknown_option, "-nc");
+}
+
+test "interpret retains the explicit reference execution surface" {
+    const options = parseInterpret(&.{ "--emit-ir", "Main.sx" }).options;
+    try std.testing.expect(options.emit_ir);
+    try std.testing.expectEqualStrings("Main.sx", options.source_path);
+    try expectInterpretDiagnostic(parseInterpret(&.{ "Main.sx", "--release" }), .option_unavailable, "--release");
+    try expectInterpretDiagnostic(parseInterpret(&.{ "Main.sx", "--output", "Application" }), .option_unavailable, "--output");
 }
 
 fn expectDiagnostic(result: CompileResult, kind: Diagnostic.Kind, argument: ?[]const u8) !void {
@@ -185,6 +272,12 @@ fn expectDiagnostic(result: CompileResult, kind: Diagnostic.Kind, argument: ?[]c
 }
 
 fn expectRunDiagnostic(result: RunResult, kind: Diagnostic.Kind, argument: ?[]const u8) !void {
+    const diagnostic = result.diagnostic;
+    try std.testing.expectEqual(kind, diagnostic.kind);
+    if (argument) |expected| try std.testing.expectEqualStrings(expected, diagnostic.argument.?);
+}
+
+fn expectInterpretDiagnostic(result: InterpretResult, kind: Diagnostic.Kind, argument: ?[]const u8) !void {
     const diagnostic = result.diagnostic;
     try std.testing.expectEqual(kind, diagnostic.kind);
     if (argument) |expected| try std.testing.expectEqualStrings(expected, diagnostic.argument.?);

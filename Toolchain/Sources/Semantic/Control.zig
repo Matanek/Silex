@@ -15,6 +15,21 @@ pub const ConditionalValue = struct {
     expression: ?*Ast.Expression = null,
 };
 
+pub fn analyzeMutex(self: anytype, builder: anytype, function: Ast.Function, mutex: Ast.MutexStatement) !bool {
+    try self.emit(builder, .mutex_lock);
+    builder.mutex_depth += 1;
+    defer builder.mutex_depth -= 1;
+
+    const binding_count = builder.bindings.items.len;
+    const terminated = try self.analyzeStatements(builder, function, mutex.statements);
+    if (!terminated) {
+        try Resources.emitActiveDrops(self, builder, binding_count);
+        try self.emit(builder, .mutex_unlock);
+    }
+    builder.bindings.shrinkRetainingCapacity(binding_count);
+    return terminated;
+}
+
 const BindingValue = struct {
     declaration: Ast.ConditionalBinding,
     source: Model.TypedValue,
@@ -120,6 +135,7 @@ pub fn analyzeWhile(self: anytype, builder: anytype, function: Ast.Function, loo
         .availability_count = availability_count,
         .drop_binding_count = availability_count,
         .header_availability = header_availability,
+        .mutex_depth = builder.mutex_depth,
     });
     const loop_index = builder.loops.items.len - 1;
     const binding_count = builder.bindings.items.len;
@@ -231,6 +247,7 @@ fn analyzeCollectionFor(self: anytype, builder: anytype, function: Ast.Function,
         .availability_count = availability_count,
         .drop_binding_count = if (loop.mode == .mutable) binding_count + 1 else binding_count,
         .header_availability = header_availability,
+        .mutex_depth = builder.mutex_depth,
     });
     const loop_index = builder.loops.items.len - 1;
     const terminated = try self.analyzeStatements(builder, function, loop.statements);
@@ -317,6 +334,7 @@ fn analyzeRangeFor(self: anytype, builder: anytype, function: Ast.Function, loop
         .availability_count = availability_count,
         .drop_binding_count = availability_count,
         .header_availability = header_availability,
+        .mutex_depth = builder.mutex_depth,
     });
     const loop_index = builder.loops.items.len - 1;
     const terminated = try self.analyzeStatements(builder, function, loop.statements);
@@ -457,6 +475,7 @@ pub fn analyzeLoopControl(
         );
     }
     try Resources.emitActiveDrops(self, builder, loop.drop_binding_count);
+    try Resources.emitMutexUnlocks(self, builder, loop.mutex_depth);
     self.terminate(builder, .{ .jump = if (is_continue) loop.continue_block else loop.break_block });
     return true;
 }

@@ -20,6 +20,12 @@ pub const Value = union(enum) {
     enumeration: *const Enumeration,
     optional: Optional,
     reference: Reference,
+    function: Function,
+
+    pub const Function = struct {
+        type: Ir.Type,
+        id: Ir.FunctionId,
+    };
 
     pub const Reference = union(enum) {
         optional: *?Value,
@@ -88,6 +94,7 @@ pub const Value = union(enum) {
             .enumeration => |value| value.type,
             .optional => |value| value.type,
             .reference => .address,
+            .function => |value| value.type,
         };
     }
 };
@@ -152,6 +159,19 @@ pub fn equal(left: Value, right: Value) Error!bool {
             if (optional.value) |payload| break :optional_value try equal(payload.*, right.optional.value.?.*);
             break :optional_value true;
         },
-        .view, .enumeration, .reference, .void => error.InvalidProgram,
+        .enumeration => |enumeration| enum_value: {
+            if (enumeration.enumeration != right.enumeration.enumeration or
+                enumeration.variant != right.enumeration.variant)
+            {
+                break :enum_value false;
+            }
+            if (enumeration.values.len != right.enumeration.values.len) return error.InvalidProgram;
+            for (enumeration.values, right.enumeration.values) |left_value, right_value| {
+                if (!try equal(left_value, right_value)) break :enum_value false;
+            }
+            break :enum_value true;
+        },
+        .function => |function| function.id == right.function.id,
+        .view, .reference, .void => error.InvalidProgram,
     };
 }

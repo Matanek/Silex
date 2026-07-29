@@ -36,8 +36,9 @@ test "read-reference parameters accept readable places and temporaries" {
 test "forward and coexist read references without consuming their root" {
     const output = try run(
         \\func sum(first:@int, second:@int) int { return first + second }
+        \\func keep(value:int) int { return value }
         \\func forward(value:@int) int { return sum(value, value) }
-        \\func first(values:@int[]) int { return values[0] + 0 }
+        \\func first(values:@int[]) int { return keep(values[0]) }
         \\func with_default(value:@int = 21) int { return value * 2 }
         \\func main() {
         \\    var value = 20

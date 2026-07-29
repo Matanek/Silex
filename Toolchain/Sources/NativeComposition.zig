@@ -19,7 +19,7 @@ test "emit and execute a composed local-package Mach-O" {
     defer temporary.cleanup();
 
     try temporary.dir.createDirPath(std.testing.io, "Math/Module");
-    try temporary.dir.createDirPath(std.testing.io, "Math/Platform/macos-arm64/Module");
+    try temporary.dir.createDirPath(std.testing.io, "Math/Platform/MacOS/Module");
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Main.sx",
         .data =
@@ -33,7 +33,7 @@ test "emit and execute a composed local-package Mach-O" {
         .data = "{\"name\":\"Math\",\"version\":\"1.4.1\"}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "Math/Platform/macos-arm64/Module/Operations.sx",
+        .sub_path = "Math/Platform/MacOS/Module/Operations.sx",
         .data = "public func add(left:int, right:int) int { return left + right }",
     });
 

@@ -3,18 +3,17 @@ const Machine = @import("Machine.zig");
 const A64 = @import("Instructions.zig");
 const Fixups = @import("Fixups.zig");
 const StringRuntime = @import("StringRuntime.zig");
+const ExternalCalls = @import("ExternalCalls.zig");
+const Allocation = @import("Allocation.zig");
 
 const Allocator = std.mem.Allocator;
 pub const Error = Machine.Error || Allocator.Error || Fixups.Error;
-const macos_mmap = 197;
-const protection_read_write = 3;
-const map_private_anonymous = 0x1002;
 
-pub fn emitInit(allocator: Allocator, words: *std.ArrayList(u32), epilogue: *std.ArrayList(Fixups.Local), value: Machine.Instruction.ListInit) Error!void {
+pub fn emitInit(allocator: Allocator, words: *std.ArrayList(u32), epilogue: *std.ArrayList(Fixups.Local), sites: *std.ArrayList(ExternalCalls.Site), platform: Allocation.Platform, value: Machine.Instruction.ListInit) Error!void {
     const bytes = 8 + @as(u64, value.values.len) * value.element_width * Machine.slot_size;
-    try allocate(allocator, words, bytes);
+    try allocate(allocator, words, sites, platform, bytes);
     const failed = words.items.len;
-    try words.append(allocator, A64.conditionalBranch(.carry_set));
+    try words.append(allocator, Allocation.failureBranch(platform));
     try words.append(allocator, A64.moveRegister(.x15, .x0));
     try immediate(allocator, words, .x9, value.values.len);
     try words.append(allocator, A64.store64(.x9, .x15, 0));
@@ -47,6 +46,8 @@ pub fn emitEdit(
     words: *std.ArrayList(u32),
     data_fixups: *std.ArrayList(Fixups.Data),
     epilogue: *std.ArrayList(Fixups.Local),
+    sites: *std.ArrayList(ExternalCalls.Site),
+    platform: Allocation.Platform,
     program: Machine.Program,
     value: Machine.Instruction.ListEdit,
 ) Error!void {
@@ -97,9 +98,9 @@ pub fn emitEdit(
     try immediate(allocator, words, .x11, @as(u64, value.element_width) * Machine.slot_size);
     try words.append(allocator, A64.multiply(.x1, .x12, .x11));
     try words.append(allocator, A64.addSubtractImmediate(.x1, .x1, 8, true));
-    try allocateWithSize(allocator, words);
+    try allocateWithSize(allocator, words, sites, platform);
     const mmap_failed = words.items.len;
-    try words.append(allocator, A64.conditionalBranch(.carry_set));
+    try words.append(allocator, Allocation.failureBranch(platform));
     try words.append(allocator, A64.moveRegister(.x15, .x0));
     for ([_]struct { register: A64.Register, offset: u12 }{
         .{ .register = .x10, .offset = 0 }, .{ .register = .x13, .offset = 8 },
@@ -202,7 +203,7 @@ pub fn emitEdit(
     try Fixups.patch26(words.items, complete, words.items.len);
 }
 
-pub fn emitSlice(allocator: Allocator, words: *std.ArrayList(u32), epilogue: *std.ArrayList(Fixups.Local), value: Machine.Instruction.CollectionSlice) Error!void {
+pub fn emitSlice(allocator: Allocator, words: *std.ArrayList(u32), epilogue: *std.ArrayList(Fixups.Local), sites: *std.ArrayList(ExternalCalls.Site), platform: Allocation.Platform, value: Machine.Instruction.CollectionSlice) Error!void {
     if (value.view) {
         try words.append(allocator, A64.loadStack(.x10, value.collection.start));
         try words.append(allocator, A64.loadStack(.x13, @intCast(@as(usize, value.collection.start) + 1)));
@@ -231,9 +232,9 @@ pub fn emitSlice(allocator: Allocator, words: *std.ArrayList(u32), epilogue: *st
     try immediate(allocator, words, .x11, @as(u64, value.element_width) * Machine.slot_size);
     try words.append(allocator, A64.multiply(.x1, .x12, .x11));
     try words.append(allocator, A64.addSubtractImmediate(.x1, .x1, 8, true));
-    try allocateWithSize(allocator, words);
+    try allocateWithSize(allocator, words, sites, platform);
     const mmap_failed = words.items.len;
-    try words.append(allocator, A64.conditionalBranch(.carry_set));
+    try words.append(allocator, Allocation.failureBranch(platform));
     try words.append(allocator, A64.moveRegister(.x15, .x0));
     try words.append(allocator, A64.load64(.x10, .zero_or_sp, 0));
     try words.append(allocator, A64.load64(.x9, .zero_or_sp, 8));
@@ -259,10 +260,12 @@ pub fn emitView(
     allocator: Allocator,
     words: *std.ArrayList(u32),
     epilogue: *std.ArrayList(Fixups.Local),
+    sites: *std.ArrayList(ExternalCalls.Site),
+    platform: Allocation.Platform,
     value: Machine.Instruction.CollectionView,
 ) Error!void {
     if (value.reference != null and value.dynamic and !value.source_view) {
-        try detachDynamicRoot(allocator, words, epilogue, value.reference.?, value.element_width);
+        try detachDynamicRoot(allocator, words, epilogue, sites, platform, value.reference.?, value.element_width);
     }
     if (value.reference) |reference| {
         try words.append(allocator, A64.loadStack(.x10, reference));
@@ -308,6 +311,8 @@ fn detachDynamicRoot(
     allocator: Allocator,
     words: *std.ArrayList(u32),
     epilogue: *std.ArrayList(Fixups.Local),
+    sites: *std.ArrayList(ExternalCalls.Site),
+    platform: Allocation.Platform,
     reference: Machine.Slot,
     element_width: u12,
 ) Error!void {
@@ -321,9 +326,9 @@ fn detachDynamicRoot(
     try immediate(allocator, words, .x11, @as(u64, element_width) * Machine.slot_size);
     try words.append(allocator, A64.multiply(.x1, .x13, .x11));
     try words.append(allocator, A64.addSubtractImmediate(.x1, .x1, 8, true));
-    try allocateWithSize(allocator, words);
+    try allocateWithSize(allocator, words, sites, platform);
     const mmap_failed = words.items.len;
-    try words.append(allocator, A64.conditionalBranch(.carry_set));
+    try words.append(allocator, Allocation.failureBranch(platform));
     try words.append(allocator, A64.moveRegister(.x15, .x0));
     try words.append(allocator, A64.load64(.x10, .zero_or_sp, 0));
     try words.append(allocator, A64.load64(.x14, .zero_or_sp, 8));
@@ -456,11 +461,42 @@ pub fn emitLoad(
     try Fixups.patch26(words.items, complete, words.items.len);
 }
 
+pub fn emitReference(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    data_fixups: *std.ArrayList(Fixups.Data),
+    epilogue: *std.ArrayList(Fixups.Local),
+    program: Machine.Program,
+    value: Machine.Instruction.CollectionReference,
+) Error!void {
+    const bounds = if (value.view)
+        try boundsView(allocator, words, value.collection, value.index)
+    else
+        try boundsDynamic(allocator, words, value.collection.start, value.index);
+    if (!value.view) try words.append(allocator, A64.addSubtractImmediate(.x10, .x10, 8, true));
+    try immediate(allocator, words, .x11, @as(u64, value.element_width) * Machine.slot_size);
+    try words.append(allocator, A64.multiply(.x9, .x9, .x11));
+    try words.append(allocator, A64.addRegisters(.x10, .x10, .x9));
+    try words.append(allocator, A64.storeStack(.x10, value.result));
+    const complete = words.items.len;
+    try words.append(allocator, A64.branch());
+    const failure = words.items.len;
+    try Fixups.patch19(words.items, bounds.negative, failure);
+    try Fixups.patch19(words.items, bounds.upper, failure);
+    try StringRuntime.emitWriteStatic(allocator, words, data_fixups, program, value.header, 2);
+    try emitPrintInteger(allocator, words, value.index, 2, false);
+    try StringRuntime.emitWriteStatic(allocator, words, data_fixups, program, value.tail, 2);
+    try fail(allocator, words, epilogue);
+    try Fixups.patch26(words.items, complete, words.items.len);
+}
+
 pub fn emitReplace(
     allocator: Allocator,
     words: *std.ArrayList(u32),
     data_fixups: *std.ArrayList(Fixups.Data),
     epilogue: *std.ArrayList(Fixups.Local),
+    sites: *std.ArrayList(ExternalCalls.Site),
+    platform: Allocation.Platform,
     program: Machine.Program,
     value: Machine.Instruction.CollectionReplace,
 ) Error!void {
@@ -501,9 +537,9 @@ pub fn emitReplace(
     try immediate(allocator, words, .x11, @as(u64, value.replacement.width) * Machine.slot_size);
     try words.append(allocator, A64.multiply(.x1, .x13, .x11));
     try words.append(allocator, A64.addSubtractImmediate(.x1, .x1, 8, true));
-    try allocateWithSize(allocator, words);
+    try allocateWithSize(allocator, words, sites, platform);
     const mmap_failed = words.items.len;
-    try words.append(allocator, A64.conditionalBranch(.carry_set));
+    try words.append(allocator, Allocation.failureBranch(platform));
     try words.append(allocator, A64.moveRegister(.x15, .x0));
     try words.append(allocator, A64.load64(.x10, .zero_or_sp, 0));
     try words.append(allocator, A64.load64(.x13, .zero_or_sp, 8));
@@ -584,19 +620,13 @@ fn boundsWithLoadedCollection(allocator: Allocator, words: *std.ArrayList(u32), 
     return .{ .negative = negative, .upper = upper };
 }
 
-fn allocate(allocator: Allocator, words: *std.ArrayList(u32), bytes: u64) Error!void {
+fn allocate(allocator: Allocator, words: *std.ArrayList(u32), sites: *std.ArrayList(ExternalCalls.Site), platform: Allocation.Platform, bytes: u64) Error!void {
     try immediate(allocator, words, .x1, bytes);
-    return allocateWithSize(allocator, words);
+    return allocateWithSize(allocator, words, sites, platform);
 }
 
-fn allocateWithSize(allocator: Allocator, words: *std.ArrayList(u32)) Error!void {
-    try words.append(allocator, A64.moveWideZero32(.x0, 0));
-    try words.append(allocator, A64.moveWideZero32(.x2, protection_read_write));
-    try words.append(allocator, A64.moveWideZero32(.x3, map_private_anonymous));
-    try immediate(allocator, words, .x4, std.math.maxInt(u64));
-    try words.append(allocator, A64.moveWideZero32(.x5, 0));
-    try words.append(allocator, A64.moveWideZero32(.x16, macos_mmap));
-    try words.append(allocator, A64.serviceCall());
+fn allocateWithSize(allocator: Allocator, words: *std.ArrayList(u32), sites: *std.ArrayList(ExternalCalls.Site), platform: Allocation.Platform) Error!void {
+    try Allocation.emit(allocator, words, sites, platform);
 }
 
 fn fail(allocator: Allocator, words: *std.ArrayList(u32), epilogue: *std.ArrayList(Fixups.Local)) Error!void {

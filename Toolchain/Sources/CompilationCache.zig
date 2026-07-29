@@ -9,31 +9,21 @@ const Ast = @import("Ast.zig");
 pub const format = "silex-cache-v3-control-flow-safety";
 const State = struct { files: []const []const u8 };
 
-pub fn loadIr(allocator: Allocator, io: Io, source_path: []const u8) ?Ir.Program {
-    const state_digest = identity("frontend-state", source_path);
+pub fn loadIr(allocator: Allocator, io: Io, source_path: []const u8, target_name: []const u8) ?Ir.Program {
+    const state_digest = artifactKey("frontend-state", &.{ source_path, target_name });
     const state_bytes = load(allocator, io, state_digest, "state") orelse return null;
     const state = std.json.parseFromSliceLeaky(State, allocator, state_bytes, .{}) catch return null;
-    const digest = key(allocator, io, state.files, "frontend", source_path) catch return null;
+    const digest = key(allocator, io, state.files, "frontend", target_name) catch return null;
     const payload = load(allocator, io, digest, "ir-json") orelse return null;
     return std.json.parseFromSliceLeaky(Ir.Program, allocator, payload, .{}) catch null;
 }
 
-pub fn storeIr(allocator: Allocator, io: Io, source_path: []const u8, files: []const []const u8, program: Ir.Program) void {
-    const digest = key(allocator, io, files, "frontend", source_path) catch return;
+pub fn storeIr(allocator: Allocator, io: Io, source_path: []const u8, target_name: []const u8, files: []const []const u8, program: Ir.Program) void {
+    const digest = key(allocator, io, files, "frontend", target_name) catch return;
     const payload = std.json.Stringify.valueAlloc(allocator, program, .{}) catch return;
     store(allocator, io, digest, "ir-json", payload);
     const state_payload = std.json.Stringify.valueAlloc(allocator, State{ .files = files }, .{}) catch return;
-    store(allocator, io, identity("frontend-state", source_path), "state", state_payload);
-}
-
-fn identity(namespace: []const u8, value: []const u8) [Blake3.digest_length]u8 {
-    var hasher = Blake3.init(.{});
-    hasher.update(format);
-    hasher.update(namespace);
-    hasher.update(value);
-    var digest: [Blake3.digest_length]u8 = undefined;
-    hasher.final(&digest);
-    return digest;
+    store(allocator, io, artifactKey("frontend-state", &.{ source_path, target_name }), "state", state_payload);
 }
 
 pub fn loadAst(allocator: Allocator, io: Io, path: []const u8, source: []const u8) ?Ast.Program {

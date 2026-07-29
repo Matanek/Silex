@@ -39,6 +39,7 @@ pub const LoopContext = struct {
     drop_binding_count: usize = 0,
     header_availability: []const bool = &.{},
     break_availabilities: std.ArrayList([]const bool) = .empty,
+    mutex_depth: usize = 0,
 };
 
 pub const FunctionBuilder = struct {
@@ -49,4 +50,5 @@ pub const FunctionBuilder = struct {
     current_block: Ir.BlockId = 0,
     bindings: std.ArrayList(Binding) = .empty,
     loops: std.ArrayList(LoopContext) = .empty,
+    mutex_depth: usize = 0,
 };

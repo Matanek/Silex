@@ -36,6 +36,7 @@ fn compare(
             .enumeration => return error.UnsupportedType,
             .optional => return error.UnsupportedType,
             .reference => return error.UnsupportedType,
+            .function => return error.UnsupportedType,
             .void => return error.TestUnexpectedResult,
         };
     }
@@ -76,6 +77,7 @@ fn compare(
         .enumeration => return error.UnsupportedType,
         .optional => return error.UnsupportedType,
         .reference => return error.UnsupportedType,
+        .function => return error.UnsupportedType,
         .void => try std.testing.expectEqual(@as(i64, 0), native.value),
     }
 }
@@ -300,6 +302,47 @@ test "native ARM64 transports and compares flattened structure values" {
     try compare(allocator, compilation.ir, machine, "roundTripSame", &.{});
     try compare(allocator, compilation.ir, machine, "nestedField", &.{});
     try compare(allocator, compilation.ir, machine, "copiedDifferent", &.{});
+}
+
+test "native ARM64 agrees on recursive enum equality" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\class Token { public let name:str }
+        \\enum Inner { number(int); empty }
+        \\enum Choice { empty; text(str); number(int); nested(Inner); token(Token) }
+        \\enum Direction:int { north = 1; south = -2 }
+        \\func sameText() bool { return Choice.text("value") == Choice.text("value") }
+        \\func differentNumber() bool { return Choice.number(7) != Choice.number(8) }
+        \\func differentVariant() bool { return Choice.text("7") != Choice.number(7) }
+        \\func nestedSame() bool { return Choice.nested(Inner.number(3)) == Choice.nested(Inner.number(3)) }
+        \\func nestedDifferent() bool { return Choice.nested(Inner.number(3)) != Choice.nested(Inner.empty()) }
+        \\func sharedClass() bool {
+        \\    var token = Token(name:"same")
+        \\    var alias = token
+        \\    return Choice.token(token) == Choice.token(alias)
+        \\}
+        \\func distinctClass() bool {
+        \\    var first = Token(name:"same")
+        \\    var second = Token(name:"same")
+        \\    return Choice.token(first) != Choice.token(second)
+        \\}
+        \\func rawVariants() bool { return Direction.north() == Direction.north() && Direction.north() != Direction.south() }
+        \\func main() {}
+    );
+    const machine = try Lower.lower(allocator, compilation.ir);
+    try compare(allocator, compilation.ir, machine, "sameText", &.{});
+    try compare(allocator, compilation.ir, machine, "differentNumber", &.{});
+    try compare(allocator, compilation.ir, machine, "differentVariant", &.{});
+    try compare(allocator, compilation.ir, machine, "nestedSame", &.{});
+    try compare(allocator, compilation.ir, machine, "nestedDifferent", &.{});
+    try compare(allocator, compilation.ir, machine, "sharedClass", &.{});
+    try compare(allocator, compilation.ir, machine, "distinctClass", &.{});
+    try compare(allocator, compilation.ir, machine, "rawVariants", &.{});
 }
 
 test "native ARM64 agrees on nested field mutation and value copies" {

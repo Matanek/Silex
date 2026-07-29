@@ -29,8 +29,10 @@ pub const Parser = struct {
     diagnostic: ?Source.Diagnostic = null,
     type_names: std.ArrayList([]const u8) = .empty,
     generic_types: std.ArrayList(Ast.GenericType) = .empty,
+    function_types: std.ArrayList(Ast.FunctionType) = .empty,
     collection_structures: std.ArrayList(Ast.Structure) = .empty,
     nested_structures: std.ArrayList(Ast.Structure) = .empty,
+    anonymous_functions: std.ArrayList(Ast.Function) = .empty,
     type_parameters: []const Ast.TypeParameter = &.{},
     nominal_prefix: ?[]const u8 = null,
     match_depth: usize = 0,
@@ -92,15 +94,30 @@ pub const Parser = struct {
         }
         try structures.appendSlice(self.allocator, self.nested_structures.items);
         try structures.appendSlice(self.allocator, self.collection_structures.items);
+        try functions.appendSlice(self.allocator, self.anonymous_functions.items);
         if (external_functions.items.len != 0) {
             var has_c = false;
             var has_macos = false;
+            var has_linux = false;
+            var has_windows = false;
             for (uses.items) |use| {
                 has_c = has_c or std.mem.eql(u8, use.path, "Interop.C");
                 has_macos = has_macos or std.mem.eql(u8, use.path, "Interop.MacOS");
+                has_linux = has_linux or std.mem.eql(u8, use.path, "Interop.Linux");
+                has_windows = has_windows or std.mem.eql(u8, use.path, "Interop.Windows");
             }
             if (!has_c) return self.failAt(external_functions.items[0].position, "C.function requires 'use Interop.C'");
-            if (!has_macos) return self.failAt(external_functions.items[0].position, "MacOS library requires 'use Interop.MacOS'");
+            for (external_functions.items) |external| {
+                if (std.mem.startsWith(u8, external.library, "MacOS.") and !has_macos) {
+                    return self.failAt(external.position, "MacOS library requires 'use Interop.MacOS'");
+                }
+                if (std.mem.startsWith(u8, external.library, "Linux.") and !has_linux) {
+                    return self.failAt(external.position, "Linux library requires 'use Interop.Linux'");
+                }
+                if (std.mem.startsWith(u8, external.library, "Windows.") and !has_windows) {
+                    return self.failAt(external.position, "Windows library requires 'use Interop.Windows'");
+                }
+            }
         }
         var structure_index: usize = 1;
         while (structure_index < structures.items.len) : (structure_index += 1) {
@@ -110,10 +127,12 @@ pub const Parser = struct {
                 insertion -= 1;
             }
         }
+        for (functions.items) |function| _ = try self.internFunctionType(function);
         return .{
             .uses = try uses.toOwnedSlice(self.allocator),
             .type_names = try self.type_names.toOwnedSlice(self.allocator),
             .generic_types = try self.generic_types.toOwnedSlice(self.allocator),
+            .function_types = try self.function_types.toOwnedSlice(self.allocator),
             .structures = try structures.toOwnedSlice(self.allocator),
             .enums = try enums.toOwnedSlice(self.allocator),
             .extensions = try extensions.toOwnedSlice(self.allocator),
@@ -122,10 +141,34 @@ pub const Parser = struct {
         };
     }
 
+    fn internFunctionType(self: *Parser, function: Ast.Function) ParseError!Ast.Type {
+        const parameters = try self.allocator.alloc(Ast.FunctionType.ParameterType, function.parameters.len);
+        for (function.parameters, 0..) |parameter, index| parameters[index] = .{ .type = parameter.type, .mode = parameter.mode };
+        const candidate: Ast.FunctionType = .{
+            .parameters = parameters,
+            .return_type = function.return_type,
+            .return_mode = function.return_mode,
+        };
+        for (self.function_types.items, 0..) |existing, index| {
+            if (sameFunctionType(existing, candidate)) return .function(index);
+        }
+        const index = self.function_types.items.len;
+        try self.function_types.append(self.allocator, candidate);
+        return .function(index);
+    }
+
+    fn sameFunctionType(left: Ast.FunctionType, right: Ast.FunctionType) bool {
+        if (left.return_type != right.return_type or left.return_mode != right.return_mode or left.parameters.len != right.parameters.len) return false;
+        for (left.parameters, right.parameters) |left_parameter, right_parameter| {
+            if (left_parameter.type != right_parameter.type or left_parameter.mode != right_parameter.mode) return false;
+        }
+        return true;
+    }
+
     pub fn parseFunction(self: *Parser, is_public: bool, is_internal: bool) ParseError!Ast.Function {
         const position = self.current.position;
         try self.expect(.keyword_func, "expected 'func'");
-        if (self.current.tag != .identifier) return self.fail("expected function name");
+        if (self.current.tag != .identifier and self.current.tag != .keyword_copy) return self.fail("expected function name");
         const name = self.current.lexeme;
         const name_position = self.current.position;
         if (std.mem.eql(u8, name, "Result")) return self.failAt(name_position, "'Result' is a reserved intrinsic type name");
@@ -152,7 +195,7 @@ pub const Parser = struct {
                 try parameters.append(self.allocator, parameter);
                 if (self.current.tag != .comma) break;
                 try self.advance();
-                if (self.current.tag == .right_parenthesis) return self.fail("expected parameter after ','");
+                if (self.current.tag == .right_parenthesis) break;
             }
         }
         try self.expect(.right_parenthesis, "expected ')' after parameters");
@@ -162,7 +205,7 @@ pub const Parser = struct {
         if (self.current.tag == .at or self.current.tag == .amp) {
             return_mode = if (self.current.tag == .at) .read else .mutable;
             try self.advance();
-            if (self.current.tag == .identifier) {
+            if (self.current.tag == .identifier or self.current.tag == .keyword_self) {
                 var lexer = self.lexer;
                 const next = try lexer.next();
                 if (next.tag == .colon) {
@@ -198,6 +241,44 @@ pub const Parser = struct {
             .return_provenance = return_provenance,
             .statements = try self.parseBlock(),
         };
+    }
+
+    fn parseAnonymousFunction(self: *Parser) ParseError!*Ast.Expression {
+        const position = self.current.position;
+        try self.expect(.keyword_func, "expected 'func'");
+        try self.expect(.left_parenthesis, "expected '(' after 'func'");
+
+        var parameters: std.ArrayList(Ast.Parameter) = .empty;
+        if (self.current.tag != .right_parenthesis) {
+            while (true) {
+                const parameter = try self.parseParameter();
+                if (parameter.default != null) {
+                    return self.failAt(parameter.position, "anonymous function parameters cannot have default values");
+                }
+                try parameters.append(self.allocator, parameter);
+                if (self.current.tag != .comma) break;
+                try self.advance();
+                if (self.current.tag == .right_parenthesis) break;
+            }
+        }
+        try self.expect(.right_parenthesis, "expected ')' after anonymous function parameters");
+
+        const return_type: Ast.Type = if (self.current.tag == .left_brace) .void else try self.parseType();
+        const name = try std.fmt.allocPrint(self.allocator, "__silex_anonymous_{d}", .{position.offset});
+        try self.anonymous_functions.append(self.allocator, .{
+            .is_anonymous = true,
+            .is_internal = true,
+            .position = position,
+            .name_position = position,
+            .name = name,
+            .parameters = try parameters.toOwnedSlice(self.allocator),
+            .return_type = return_type,
+            .statements = try self.parseBlock(),
+        });
+        return self.newExpression(.{
+            .position = position,
+            .value = .{ .identifier = name },
+        });
     }
 
     pub fn parseParameter(self: *Parser) ParseError!Ast.Parameter {
@@ -257,6 +338,7 @@ pub const Parser = struct {
             .keyword_if => self.parseIf(),
             .keyword_while => self.parseWhile(),
             .keyword_for => Iterations.parseFor(self),
+            .keyword_mutex => self.parseMutex(),
             .keyword_break => self.parseLoopControl(false),
             .keyword_continue => self.parseLoopControl(true),
             .keyword_match => self.parseMatchStatement(),
@@ -279,6 +361,15 @@ pub const Parser = struct {
         return .{ .while_statement = .{
             .position = position,
             .condition = condition,
+            .statements = try self.parseBlock(),
+        } };
+    }
+
+    fn parseMutex(self: *Parser) ParseError!Ast.Statement {
+        const position = self.current.position;
+        try self.advance();
+        return .{ .mutex_statement = .{
+            .position = position,
             .statements = try self.parseBlock(),
         } };
     }
@@ -734,7 +825,7 @@ pub const Parser = struct {
             if (self.current.tag == .dot or self.current.tag == .question_dot) {
                 const safe = self.current.tag == .question_dot;
                 try self.advance();
-                if (self.current.tag != .identifier) return self.fail(if (safe)
+                if (self.current.tag != .identifier and self.current.tag != .keyword_copy) return self.fail(if (safe)
                     "expected member name after '?.'"
                 else
                     "expected member name after '.'");
@@ -831,6 +922,7 @@ pub const Parser = struct {
             },
             .left_bracket => return Collections.parseLiteral(self, token.position),
             .keyword_match => return Matches.parse(self),
+            .keyword_func => return self.parseAnonymousFunction(),
             else => return self.fail("expected expression"),
         }
     }
@@ -1347,13 +1439,16 @@ test "parse public functions and keep functions private by default" {
     try std.testing.expect(!program.functions[1].is_public);
 }
 
-test "parse public structures explicit public fields and qualified types" {
+test "parse public default internal and private structure members" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     var parser = Parser.init(arena.allocator(),
         \\public struct Vec2 {
         \\    public var x:int
         \\    let y:int
+        \\    internal func fileOnly() {}
+        \\    private init() {}
+        \\    private struct Storage {}
         \\}
         \\func read(value:Geometry.Point) int { return value.x }
         \\func main() {}
@@ -1362,8 +1457,43 @@ test "parse public structures explicit public fields and qualified types" {
     try std.testing.expect(program.structures[0].is_public);
     try std.testing.expect(program.structures[0].fields[0].is_public);
     try std.testing.expect(program.structures[0].fields[1].is_public);
+    try std.testing.expect(program.structures[0].methods[0].is_internal);
+    try std.testing.expect(program.structures[0].constructors[0].is_private);
+    try std.testing.expect(program.structures[1].is_private);
     const type_index = program.functions[0].parameters[0].type.structureIndex().?;
     try std.testing.expectEqualStrings("Geometry.Point", program.type_names[type_index]);
+}
+
+test "apply optional and collection type suffixes from left to right" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(),
+        \\struct Iterator<T> { private var values:T?[] }
+        \\struct State {
+        \\    let optional_values:int?[]
+        \\    let optional_list:int[]?
+        \\    let fixed_optionals:int?[3]
+        \\}
+        \\func main() {}
+    );
+    const program = try parser.parse();
+    var iterator: ?Ast.Structure = null;
+    var state: ?Ast.Structure = null;
+    for (program.structures) |structure| {
+        if (std.mem.eql(u8, structure.name, "Iterator")) iterator = structure;
+        if (std.mem.eql(u8, structure.name, "State")) state = structure;
+    }
+    try std.testing.expectEqualStrings("T?[]", program.type_names[iterator.?.fields[0].type.structureIndex().?]);
+    try std.testing.expectEqualStrings("int?[]", program.type_names[state.?.fields[0].type.structureIndex().?]);
+    try std.testing.expectEqualStrings("int[]", program.type_names[state.?.fields[1].type.optionalChild().?.structureIndex().?]);
+    try std.testing.expectEqualStrings("int?[3]", program.type_names[state.?.fields[2].type.structureIndex().?]);
+}
+
+test "reject protected structure members" {
+    try expectParseError(
+        "struct Value { protected var value:int } func main() {}",
+        "structures only support public, internal, or private members",
+    );
 }
 
 test "continue expressions after operators and inside parentheses" {
@@ -1399,6 +1529,31 @@ test "report malformed parameter at its source position" {
     try std.testing.expectEqual(@as(usize, 1), parser.diagnostic.?.position.line);
     try std.testing.expectEqual(@as(usize, 17), parser.diagnostic.?.position.column);
     try std.testing.expectEqualStrings("expected ':' after parameter name", parser.diagnostic.?.message);
+}
+
+test "parse anonymous function expressions" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(),
+        \\func apply(callback:func(int) bool) {}
+        \\func main() {
+        \\    apply(func(value:int) bool { return value > 0 })
+        \\}
+    );
+    const program = try parser.parse();
+    try std.testing.expectEqual(@as(usize, 3), program.functions.len);
+    try std.testing.expect(std.mem.startsWith(u8, program.functions[2].name, "__silex_anonymous_"));
+    try std.testing.expectEqual(Ast.Type.bool, program.functions[2].return_type);
+    try std.testing.expectEqual(@as(usize, 1), program.functions[2].parameters.len);
+    const argument = program.functions[1].statements[0].expression_statement.value.call.arguments[0];
+    try std.testing.expectEqualStrings(program.functions[2].name, argument.value.identifier);
+}
+
+test "reject defaults in anonymous function parameters" {
+    try expectParseError(
+        "func main() { let callback = func(value:int = 1) {} }",
+        "anonymous function parameters cannot have default values",
+    );
 }
 
 test "report malformed fundamental statements and expressions" {

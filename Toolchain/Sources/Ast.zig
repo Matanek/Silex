@@ -283,6 +283,11 @@ pub const ForStatement = struct {
     pub const Range = struct { start: *Expression, end: *Expression };
 };
 
+pub const MutexStatement = struct {
+    position: Source.Position,
+    statements: []const Statement,
+};
+
 pub const Statement = union(enum) {
     variable_declaration: VariableDeclaration,
     assignment_statement: AssignmentStatement,
@@ -294,6 +299,7 @@ pub const Statement = union(enum) {
     if_statement: IfStatement,
     while_statement: WhileStatement,
     for_statement: ForStatement,
+    mutex_statement: MutexStatement,
     break_statement: Source.Position,
     continue_statement: Source.Position,
 
@@ -309,6 +315,7 @@ pub const Statement = union(enum) {
             .if_statement => |statement| statement.position,
             .while_statement => |statement| statement.position,
             .for_statement => |statement| statement.position,
+            .mutex_statement => |statement| statement.position,
             .break_statement, .continue_statement => |source_position| source_position,
         };
     }
@@ -336,6 +343,17 @@ pub const GenericType = struct {
     arguments: []const Type,
 };
 
+pub const FunctionType = struct {
+    parameters: []const ParameterType,
+    return_type: Type,
+    return_mode: Parameter.Mode = .value,
+
+    pub const ParameterType = struct {
+        type: Type,
+        mode: Parameter.Mode = .value,
+    };
+};
+
 pub const StructureField = struct {
     is_static: bool = false,
     is_public: bool = true,
@@ -355,6 +373,7 @@ pub const Constructor = struct {
     is_internal: bool = false,
     is_private: bool = false,
     is_protected: bool = false,
+    specialization_file: ?usize = null,
     position: Source.Position,
     parameters: []const Parameter,
     super_arguments: []const *Expression = &.{},
@@ -428,6 +447,7 @@ pub const Use = struct {
 };
 
 pub const Function = struct {
+    is_anonymous: bool = false,
     is_static: bool = false,
     is_override: bool = false,
     is_public: bool = false,
@@ -450,10 +470,15 @@ pub const Function = struct {
 };
 
 pub const ExternalType = union(enum) {
+    void,
     int32,
+    int64,
+    uint32,
+    uint64,
     size,
     signed_size,
     read_pointer: Type,
+    mutable_pointer: Type,
 };
 
 pub const ExternalFunction = struct {
@@ -493,6 +518,7 @@ pub const Program = struct {
     uses: []const Use = &.{},
     type_names: []const []const u8 = &.{},
     generic_types: []const GenericType = &.{},
+    function_types: []const FunctionType = &.{},
     structures: []const Structure = &.{},
     enums: []const Enum = &.{},
     extensions: []const Extension = &.{},

@@ -43,3 +43,35 @@ test "reject collection mutation through let" {
     try std.testing.expectError(error.InvalidSource, frontend.compile("func main() { let values = [1, 2]; values.append(3) }"));
     try std.testing.expectEqualStrings("collection mutation requires a var receiver", frontend.diagnostic.?.message);
 }
+
+test "append an element through optional promotion" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\func main() {
+        \\    var values:int?[] = []
+        \\    values.append(42)
+        \\    if value = values[0] { print(value) }
+        \\}
+    );
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("42\n", result.stdout);
+}
+
+test "mutate a dynamic list stored in a mutable field" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\struct Values {
+        \\    var items:int[]
+        \\    func append(value:int) { self.items.append(value) }
+        \\}
+        \\func main() { var values = Values(items:[]); values.append(42); print(values.items[0]) }
+    );
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("42\n", result.stdout);
+}

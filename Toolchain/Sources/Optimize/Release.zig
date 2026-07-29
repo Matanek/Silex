@@ -103,7 +103,7 @@ fn optimizeFunction(allocator: Allocator, function: Ir.Function, summaries: []co
                     continue;
                 },
                 .local_store => |store| local_values[store.local] = canonical(aliases, store.operand),
-                .reference_store, .call, .dynamic_call => @memset(local_values, null),
+                .reference_store, .call, .indirect_call, .dynamic_call => @memset(local_values, null),
                 else => {},
             }
             instruction = foldInstruction(function, instruction, constants);
@@ -195,6 +195,9 @@ fn rewriteInstruction(allocator: Allocator, instruction: Ir.Instruction, aliases
         .optional_null,
         .global_load,
         .local_address,
+        .function_reference,
+        .mutex_lock,
+        .mutex_unlock,
         => instruction,
         .string_address => |value| .{ .string_address = .{
             .result = value.result,
@@ -203,6 +206,15 @@ fn rewriteInstruction(allocator: Allocator, instruction: Ir.Instruction, aliases
         .string_byte_count => |value| .{ .string_byte_count = .{
             .result = value.result,
             .operand = canonical(aliases, value.operand),
+        } },
+        .string_byte_at => |value| .{ .string_byte_at = .{
+            .result = value.result,
+            .operand = canonical(aliases, value.operand),
+            .index = canonical(aliases, value.index),
+        } },
+        .string_from_bytes => |value| .{ .string_from_bytes = .{
+            .result = value.result,
+            .bytes = canonical(aliases, value.bytes),
         } },
         .optional_some => |value| .{ .optional_some = .{ .result = value.result, .operand = canonical(aliases, value.operand) } },
         .optional_unwrap => |value| .{ .optional_unwrap = .{ .result = value.result, .operand = canonical(aliases, value.operand) } },
@@ -277,6 +289,13 @@ fn rewriteInstruction(allocator: Allocator, instruction: Ir.Instruction, aliases
             .index = canonical(aliases, value.index),
             .position = value.position,
         } },
+        .collection_reference => |value| .{ .collection_reference = .{
+            .result = value.result,
+            .collection = canonical(aliases, value.collection),
+            .reference = rewriteOptional(value.reference, aliases),
+            .index = canonical(aliases, value.index),
+            .position = value.position,
+        } },
         .collection_replace => |value| .{ .collection_replace = .{
             .result = value.result,
             .collection = canonical(aliases, value.collection),
@@ -302,6 +321,18 @@ fn rewriteInstruction(allocator: Allocator, instruction: Ir.Instruction, aliases
         .local_load => |value| .{ .local_load = value },
         .local_store => |value| .{ .local_store = .{ .local = value.local, .operand = canonical(aliases, value.operand) } },
         .reference_load => |value| .{ .reference_load = .{ .result = value.result, .reference = canonical(aliases, value.reference) } },
+        .address_load => |value| .{ .address_load = .{
+            .result = value.result,
+            .address = canonical(aliases, value.address),
+            .byte_offset = canonical(aliases, value.byte_offset),
+            .type = value.type,
+        } },
+        .address_store => |value| .{ .address_store = .{
+            .address = canonical(aliases, value.address),
+            .byte_offset = canonical(aliases, value.byte_offset),
+            .operand = canonical(aliases, value.operand),
+            .type = value.type,
+        } },
         .reference_store => |value| .{ .reference_store = .{
             .reference = canonical(aliases, value.reference),
             .operand = canonical(aliases, value.operand),
@@ -341,6 +372,11 @@ fn rewriteInstruction(allocator: Allocator, instruction: Ir.Instruction, aliases
         .call => |value| .{ .call = .{
             .result = value.result,
             .function = value.function,
+            .arguments = try rewriteValues(allocator, value.arguments, aliases),
+        } },
+        .indirect_call => |value| .{ .indirect_call = .{
+            .result = value.result,
+            .callee = canonical(aliases, value.callee),
             .arguments = try rewriteValues(allocator, value.arguments, aliases),
         } },
         .boundary_call => |value| .{ .boundary_call = .{
@@ -618,7 +654,10 @@ fn removableResult(instruction: Ir.Instruction) ?Ir.ValueId {
         .collection_count => |value| value.result,
         .local_load => |value| value.result,
         .reference_field => |value| value.result,
+        .collection_reference => |value| value.result,
         .string_count => |value| value.result,
+        .string_byte_at => |value| value.result,
+        .string_from_bytes => |value| value.result,
         .binary => |value| if (isRemovableBinary(value.operator)) value.result else null,
         else => null,
     };
@@ -639,6 +678,7 @@ fn countUses(instruction: Ir.Instruction, uses: []usize) void {
         .global_load,
         .local_load,
         .local_address,
+        .function_reference,
         => {},
         .optional_some => |value| useValue(uses, value.operand),
         .optional_unwrap => |value| useValue(uses, value.operand),
@@ -666,6 +706,11 @@ fn countUses(instruction: Ir.Instruction, uses: []usize) void {
             useValue(uses, value.collection);
             useValue(uses, value.index);
         },
+        .collection_reference => |value| {
+            useValue(uses, value.collection);
+            useOptional(uses, value.reference);
+            useValue(uses, value.index);
+        },
         .collection_replace => |value| {
             useValue(uses, value.collection);
             useValue(uses, value.index);
@@ -684,8 +729,22 @@ fn countUses(instruction: Ir.Instruction, uses: []usize) void {
             useOptional(uses, value.reference);
         },
         .string_address, .string_byte_count => |value| useValue(uses, value.operand),
+        .string_byte_at => |value| {
+            useValue(uses, value.operand);
+            useValue(uses, value.index);
+        },
+        .string_from_bytes => |value| useValue(uses, value.bytes),
         .local_store => |value| useValue(uses, value.operand),
         .reference_load => |value| useValue(uses, value.reference),
+        .address_load => |value| {
+            useValue(uses, value.address);
+            useValue(uses, value.byte_offset);
+        },
+        .address_store => |value| {
+            useValue(uses, value.address);
+            useValue(uses, value.byte_offset);
+            useValue(uses, value.operand);
+        },
         .reference_store => |value| {
             useValue(uses, value.reference);
             useValue(uses, value.operand);
@@ -704,6 +763,10 @@ fn countUses(instruction: Ir.Instruction, uses: []usize) void {
             useValue(uses, value.right);
         },
         .call => |value| useValues(uses, value.arguments),
+        .indirect_call => |value| {
+            useValue(uses, value.callee);
+            useValues(uses, value.arguments);
+        },
         .boundary_call => |value| useValues(uses, value.arguments),
         .dynamic_call => |value| {
             useValue(uses, value.receiver);
@@ -714,6 +777,7 @@ fn countUses(instruction: Ir.Instruction, uses: []usize) void {
             useValue(uses, value.condition);
             useValue(uses, value.message);
         },
+        .mutex_lock, .mutex_unlock => {},
     }
 }
 

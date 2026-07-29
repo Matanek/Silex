@@ -15,6 +15,8 @@ const CompletionKind = struct {
     const function: u8 = 3;
     const field: u8 = 5;
     const variable: u8 = 6;
+    const class: u8 = 7;
+    const interface: u8 = 8;
     const structure: u8 = 22;
     const value: u8 = 12;
     const enum_type: u8 = 13;
@@ -37,6 +39,7 @@ const Context = struct {
     prefix: []const u8,
     prefix_start: usize,
     receiver: ?[]const u8 = null,
+    nominal_relation: bool = false,
     in_loop: bool = false,
     after_conditional: bool = false,
     allow_conversion: bool = false,
@@ -51,6 +54,7 @@ const Candidate = struct {
 const ExpectedType = struct {
     name: []const u8,
     strict: bool = false,
+    function_type: ?Ast.Type = null,
 };
 
 const builtin_types = [_][]const u8{
@@ -99,7 +103,7 @@ pub fn itemsAt(
                 context,
                 .{
                     .label = structure.name,
-                    .kind = CompletionKind.structure,
+                    .kind = structureCompletionKind(structure),
                     .detail = structureDetail(structure),
                 },
                 8,
@@ -144,6 +148,7 @@ pub fn itemsAt(
         .structure_declaration => try appendKeywords(allocator, &candidates, context, &.{
             .{ "public", "Silex visibility" },
             .{ "internal", "Silex file visibility" },
+            .{ "private", "Silex type visibility" },
             .{ "let", "Silex immutable field" },
             .{ "var", "Silex mutable field" },
             .{ "init", "Silex value constructor" },
@@ -177,8 +182,11 @@ pub fn itemsAt(
         result[index] = candidate.item;
         result[index].sortText = try std.fmt.allocPrint(allocator, "{d:0>3}-{d:0>6}", .{ candidate.priority, index });
         result[index].filterText = candidate.item.label;
-        result[index].insertText = try insertTextFor(allocator, candidate.item);
-        result[index].insertTextFormat = insertTextFormatFor(candidate.item);
+        result[index].insertText = if (candidate.callable)
+            try insertTextFor(allocator, candidate.item)
+        else
+            candidate.item.label;
+        result[index].insertTextFormat = if (candidate.callable) insertTextFormatFor(candidate.item) else null;
     }
     return result;
 }
@@ -196,7 +204,7 @@ pub fn insertTextFormatFor(item: CompletionItem) ?u8 {
 
 fn callableSignature(item: CompletionItem) ?[]const u8 {
     if (item.kind != CompletionKind.method and item.kind != CompletionKind.function and
-        item.kind != CompletionKind.structure) return null;
+        item.kind != CompletionKind.structure and item.kind != CompletionKind.class) return null;
     if (!std.mem.startsWith(u8, item.detail, item.label)) return null;
     const signature = item.detail[item.label.len..];
     return if (std.mem.startsWith(u8, signature, "(")) signature else null;
@@ -227,10 +235,12 @@ fn classifyContext(allocator: Allocator, source: []const u8, cursor: usize) !Con
         .in_loop = scope.in_loop,
     };
 
-    if (isTypePosition(tokens, line_tokens, scope.pending_callable)) return .{
+    const nominal_relation = isNominalRelationPosition(line_tokens);
+    if (isTypePosition(tokens, line_tokens, scope.pending_callable, nominal_relation)) return .{
         .kind = .type_name,
         .prefix = prefix,
         .prefix_start = prefix_start,
+        .nominal_relation = nominal_relation,
         .in_loop = scope.in_loop,
     };
 
@@ -346,15 +356,22 @@ fn isUsePath(line_tokens: []const Token) bool {
     return false;
 }
 
-fn isTypePosition(tokens: []const Token, line_tokens: []const Token, pending_callable: bool) bool {
+fn isTypePosition(
+    tokens: []const Token,
+    line_tokens: []const Token,
+    pending_callable: bool,
+    nominal_relation: bool,
+) bool {
     if (tokens.len == 0) return false;
     const previous = tokens[tokens.len - 1].tag;
     if (previous == .keyword_as) return true;
+    if (nominal_relation and (previous == .colon or previous == .comma)) return true;
     if (previous == .colon) {
         const parenthesis = lastUnclosedParenthesis(tokens);
         if (parenthesis) |index| {
             if (index == 0) return false;
             if (tokens[index - 1].tag == .keyword_init) return true;
+            if (tokens[index - 1].tag == .keyword_func) return true;
             if (tokens[index - 1].tag != .identifier) return false;
             if (index >= 2 and tokens[index - 2].tag == .keyword_func) return true;
             return false;
@@ -364,6 +381,16 @@ fn isTypePosition(tokens: []const Token, line_tokens: []const Token, pending_cal
     }
     if (!pending_callable or previous != .right_parenthesis) return false;
     return true;
+}
+
+fn isNominalRelationPosition(line_tokens: []const Token) bool {
+    var declaration = false;
+    for (line_tokens) |token| switch (token.tag) {
+        .keyword_struct, .keyword_class, .keyword_extend => declaration = true,
+        .colon => if (declaration) return true,
+        else => {},
+    };
+    return false;
 }
 
 fn lastUnclosedParenthesis(tokens: []const Token) ?usize {
@@ -502,7 +529,7 @@ fn appendMembers(
             const label = if (std.mem.lastIndexOfScalar(u8, nested.name, '.')) |dot| nested.name[dot + 1 ..] else nested.name;
             try appendCandidate(allocator, candidates, context, .{
                 .label = label,
-                .kind = CompletionKind.structure,
+                .kind = structureCompletionKind(nested),
                 .detail = try std.fmt.allocPrint(allocator, "nested type {s}", .{nested.name}),
             }, 0, true);
         }
@@ -586,15 +613,22 @@ fn appendExpressionSymbols(
     }
 
     for (program.functions) |function| {
-        if (std.mem.eql(u8, function.name, "main")) continue;
+        if (function.is_anonymous or std.mem.eql(u8, function.name, "main")) continue;
         if (!callAcceptsParameters(source, cursor, program, function.parameters)) continue;
         const return_type = typeName(program, function.return_type);
-        if (!matchesExpectedType(expected_type, return_type)) continue;
+        const passed_as_value = if (expected_type) |expected|
+            if (expected.function_type) |function_type|
+                functionMatchesType(program, function, function_type)
+            else
+                false
+        else
+            false;
+        if (!passed_as_value and !matchesExpectedType(expected_type, return_type)) continue;
         try appendCandidate(allocator, candidates, context, .{
             .label = function.name,
             .kind = CompletionKind.function,
             .detail = try functionSignature(allocator, source, program, function),
-        }, typedPriority(25, expected_type, return_type), true);
+        }, typedPriority(25, expected_type, if (passed_as_value) "function" else return_type), !passed_as_value);
     }
     for (program.structures) |structure| {
         if (structure.is_protocol) continue;
@@ -602,14 +636,14 @@ fn appendExpressionSymbols(
         if (structure.constructors.len == 0) {
             try appendCandidate(allocator, candidates, context, .{
                 .label = structure.name,
-                .kind = CompletionKind.structure,
+                .kind = structureCompletionKind(structure),
                 .detail = try std.fmt.allocPrint(allocator, "{s}() {s}", .{ structure.name, structure.name }),
             }, typedPriority(30, expected_type, structure.name), true);
         } else for (structure.constructors) |constructor| {
             if (!callAcceptsParameters(source, cursor, program, constructor.parameters)) continue;
             try appendCandidate(allocator, candidates, context, .{
                 .label = structure.name,
-                .kind = CompletionKind.structure,
+                .kind = structureCompletionKind(structure),
                 .detail = try constructorSignature(allocator, source, program, structure.name, constructor),
             }, typedPriority(30, expected_type, structure.name), true);
         }
@@ -634,6 +668,7 @@ fn appendStatementKeywords(allocator: Allocator, candidates: *std.ArrayList(Cand
         .{ "var", "Silex mutable binding" },
         .{ "if", "Silex conditional" },
         .{ "while", "Silex loop" },
+        .{ "mutex", "Silex critical section" },
         .{ "return", "Silex return statement" },
         .{ "print", "Silex observable effect" },
         .{ "assert", "Silex assertion" },
@@ -737,35 +772,48 @@ const Callable = struct {
 };
 
 fn containingCallable(source: []const u8, program: Ast.Program, cursor: usize) ?Callable {
-    for (program.functions) |function| if (bodyContainsCursor(source, function.position.offset, cursor)) return .{
-        .position = function.position.offset,
-        .parameters = function.parameters,
-        .return_type = function.return_type,
-    };
+    var result: ?Callable = null;
+    for (program.functions) |function| {
+        if (bodyContainsCursor(source, function.position.offset, cursor) and
+            (result == null or function.position.offset > result.?.position)) result = .{
+            .position = function.position.offset,
+            .parameters = function.parameters,
+            .return_type = function.return_type,
+        };
+    }
     for (program.structures) |structure| {
-        for (structure.methods) |method| if (bodyContainsCursor(source, method.position.offset, cursor)) return .{
-            .position = method.position.offset,
-            .parameters = method.parameters,
-            .return_type = method.return_type,
-            .structure_name = structure.name,
-        };
-        for (structure.constructors) |constructor| if (bodyContainsCursor(source, constructor.position.offset, cursor)) return .{
-            .position = constructor.position.offset,
-            .parameters = constructor.parameters,
-            .return_type = .structure(findStructureIndex(program, structure.name) orelse 0),
-            .structure_name = structure.name,
-        };
+        for (structure.methods) |method| {
+            if (bodyContainsCursor(source, method.position.offset, cursor) and
+                (result == null or method.position.offset > result.?.position)) result = .{
+                .position = method.position.offset,
+                .parameters = method.parameters,
+                .return_type = method.return_type,
+                .structure_name = structure.name,
+            };
+        }
+        for (structure.constructors) |constructor| {
+            if (bodyContainsCursor(source, constructor.position.offset, cursor) and
+                (result == null or constructor.position.offset > result.?.position)) result = .{
+                .position = constructor.position.offset,
+                .parameters = constructor.parameters,
+                .return_type = .structure(findStructureIndex(program, structure.name) orelse 0),
+                .structure_name = structure.name,
+            };
+        }
     }
     for (program.extensions) |extension| {
         const target_name = typeName(program, extension.target);
-        for (extension.methods) |method| if (bodyContainsCursor(source, method.position.offset, cursor)) return .{
-            .position = method.position.offset,
-            .parameters = method.parameters,
-            .return_type = method.return_type,
-            .structure_name = target_name,
-        };
+        for (extension.methods) |method| {
+            if (bodyContainsCursor(source, method.position.offset, cursor) and
+                (result == null or method.position.offset > result.?.position)) result = .{
+                .position = method.position.offset,
+                .parameters = method.parameters,
+                .return_type = method.return_type,
+                .structure_name = target_name,
+            };
+        }
     }
-    return null;
+    return result;
 }
 
 fn bodyContainsCursor(source: []const u8, start: usize, cursor: usize) bool {
@@ -916,6 +964,11 @@ fn resolveReceiverType(
 
 fn expectedTypeAt(source: []const u8, program: Ast.Program, cursor: usize, context: Context) ?ExpectedType {
     if (context.kind != .expression and context.kind != .statement) return null;
+    if (expectedCallArgumentType(source[0..context.prefix_start], program)) |type_value| return .{
+        .name = typeName(program, type_value),
+        .strict = true,
+        .function_type = if (type_value.functionIndex() != null) type_value else null,
+    };
     const callable = containingCallable(source, program, cursor);
     const line = lineAtOffset(source, cursor);
     var lexer = LexerModule.Lexer.init(source[0..context.prefix_start]);
@@ -946,9 +999,81 @@ fn expectedTypeAt(source: []const u8, program: Ast.Program, cursor: usize, conte
     return if (has_equal and annotation != null) .{ .name = annotation.?, .strict = true } else null;
 }
 
+fn expectedCallArgumentType(source: []const u8, program: Ast.Program) ?Ast.Type {
+    const Call = struct {
+        name: ?[]const u8,
+        argument: usize = 0,
+        bracket_depth: usize = 0,
+    };
+    var calls: [128]Call = undefined;
+    var call_count: usize = 0;
+    var previous: ?Token = null;
+    var lexer = LexerModule.Lexer.init(source);
+    while (true) {
+        const token = lexer.next() catch return null;
+        if (token.tag == .end) break;
+        switch (token.tag) {
+            .left_parenthesis => {
+                if (call_count == calls.len) return null;
+                calls[call_count] = .{
+                    .name = if (previous != null and previous.?.tag == .identifier) previous.?.lexeme else null,
+                };
+                call_count += 1;
+            },
+            .right_parenthesis => if (call_count != 0) {
+                call_count -= 1;
+            },
+            .left_bracket => if (call_count != 0) {
+                calls[call_count - 1].bracket_depth += 1;
+            },
+            .right_bracket => if (call_count != 0) {
+                calls[call_count - 1].bracket_depth -|= 1;
+            },
+            .comma => if (call_count != 0 and calls[call_count - 1].bracket_depth == 0) {
+                calls[call_count - 1].argument += 1;
+            },
+            else => {},
+        }
+        previous = token;
+    }
+    var index = call_count;
+    while (index != 0) {
+        index -= 1;
+        const call = calls[index];
+        const name = call.name orelse return null;
+        var selected: ?Ast.Type = null;
+        for (program.functions) |function| {
+            if (!std.mem.eql(u8, function.name, name) or call.argument >= function.parameters.len) continue;
+            const candidate = function.parameters[call.argument].type;
+            if (selected != null and selected.? != candidate) return null;
+            selected = candidate;
+        }
+        return selected;
+    }
+    return null;
+}
+
+fn functionMatchesType(program: Ast.Program, function: Ast.Function, type_value: Ast.Type) bool {
+    const index = type_value.functionIndex() orelse return false;
+    if (index >= program.function_types.len) return false;
+    const expected = program.function_types[index];
+    if (expected.return_type != function.return_type or expected.return_mode != function.return_mode or
+        expected.parameters.len != function.parameters.len) return false;
+    for (expected.parameters, function.parameters) |expected_parameter, parameter| {
+        if (expected_parameter.type != parameter.type or expected_parameter.mode != parameter.mode) return false;
+    }
+    return true;
+}
+
 fn structureDetail(structure: Ast.Structure) []const u8 {
     if (structure.is_protocol) return "Silex protocol";
     return if (structure.is_class) "Silex class" else "Silex structure";
+}
+
+fn structureCompletionKind(structure: Ast.Structure) u8 {
+    if (structure.is_protocol) return CompletionKind.interface;
+    if (structure.is_class) return CompletionKind.class;
+    return CompletionKind.structure;
 }
 
 fn parseForCompletion(
@@ -966,7 +1091,12 @@ fn parseForCompletion(
         0;
     const before_prefix = std.mem.trim(u8, source[line_start..context.prefix_start], " \t\r");
     const placeholder: []const u8 = switch (context.kind) {
-        .member => if (context.prefix.len == 0) "__completion()" else "()",
+        .member => if (context.prefix.len != 0)
+            "()"
+        else if (memberFollowedByAssignment(source, cursor))
+            "__completion"
+        else
+            "__completion()",
         .type_name => "int",
         .statement => "print(true)",
         .expression => if (before_prefix.len == 0) "print(true)" else "true",
@@ -982,8 +1112,29 @@ fn parseForCompletion(
         source[cursor..],
     });
     parser = ParserModule.Parser.init(allocator, recovered);
-    const program = parser.parse() catch return null;
+    const program = parser.parse() catch blk: {
+        if (!context.nominal_relation) return null;
+        const line_end = if (std.mem.indexOfScalarPos(u8, source, cursor, '\n')) |newline|
+            newline + 1
+        else
+            source.len;
+        const without_incomplete_declaration = try std.fmt.allocPrint(allocator, "{s}{s}", .{
+            source[0..line_start],
+            source[line_end..],
+        });
+        parser = ParserModule.Parser.init(allocator, without_incomplete_declaration);
+        break :blk parser.parse() catch return null;
+    };
     return mergeExtensionsForCompletion(allocator, program);
+}
+
+fn memberFollowedByAssignment(source: []const u8, cursor: usize) bool {
+    var index = cursor;
+    while (index < source.len and (source[index] == ' ' or source[index] == '\t')) index += 1;
+    if (index >= source.len) return false;
+    if (source[index] == '=') return true;
+    if (index + 1 >= source.len or source[index + 1] != '=') return false;
+    return source[index] == '+' or source[index] == '-' or source[index] == '*' or source[index] == '/';
 }
 
 fn mergeExtensionsForCompletion(allocator: Allocator, program: Ast.Program) ?Ast.Program {
@@ -1191,6 +1342,78 @@ test "complete an instance with only its own members" {
     try std.testing.expect(!contains(items, "ignore"));
 }
 
+test "complete anonymous function parameters without exposing synthetic functions" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source =
+        \\func apply(callback:func(int)) {}
+        \\func main() {
+        \\    apply(func(value:int) {
+        \\        print(val)
+        \\    })
+        \\}
+    ;
+    const cursor = std.mem.indexOf(u8, source, "print(val").? + "print(val".len;
+    const context = try classifyContext(arena.allocator(), source, cursor);
+    try std.testing.expectEqual(ContextKind.expression, context.kind);
+    const parsed = (try parseForCompletion(arena.allocator(), source, cursor, context)).?;
+    const callable = containingCallable(source, parsed, cursor).?;
+    try std.testing.expectEqualStrings("value", callable.parameters[0].name);
+    try std.testing.expect(expectedTypeAt(source, parsed, cursor, context) == null);
+    const items = try itemsAt(arena.allocator(), source, cursor, .invoked);
+    try std.testing.expect(contains(items, "value"));
+    for (items) |item| try std.testing.expect(!std.mem.startsWith(u8, item.label, "__silex_anonymous_"));
+}
+
+test "insert nominal types without constructor parentheses in anonymous parameters" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source =
+        \\struct MyTask {}
+        \\func submit(callback:func(MyTask)) {}
+        \\func main() {
+        \\    submit(func(task:MyTa) {})
+        \\}
+    ;
+    const cursor = std.mem.lastIndexOf(u8, source, "MyTa").? + "MyTa".len;
+    const context = try classifyContext(arena.allocator(), source, cursor);
+    try std.testing.expectEqual(ContextKind.type_name, context.kind);
+    try std.testing.expect((try parseForCompletion(arena.allocator(), source, cursor, context)) != null);
+    const items = try itemsAt(arena.allocator(), source, cursor, .invoked);
+    const item_index = indexOf(items, "MyTask");
+    try std.testing.expect(item_index != null);
+    const item = items[item_index.?];
+    try std.testing.expectEqualStrings("MyTask", item.insertText.?);
+    try std.testing.expect(item.insertTextFormat == null);
+}
+
+test "distinguish function values from calls in argument completion" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const callback_source =
+        \\struct MyTask {}
+        \\func handle(task:MyTask) {}
+        \\func submit(task:MyTask, callback:func(MyTask)) {}
+        \\func main() { submit(MyTask(), han) }
+    ;
+    const callback_cursor = std.mem.indexOf(u8, callback_source, "han)").? + "han".len;
+    const callback_items = try itemsAt(arena.allocator(), callback_source, callback_cursor, .invoked);
+    const callback = callback_items[indexOf(callback_items, "handle").?];
+    try std.testing.expectEqualStrings("handle", callback.insertText.?);
+    try std.testing.expect(callback.insertTextFormat == null);
+
+    const value_source =
+        \\struct MyTask {}
+        \\func make() MyTask { return MyTask() }
+        \\func consume(task:MyTask) {}
+        \\func main() { consume(mak) }
+    ;
+    const value_cursor = std.mem.indexOf(u8, value_source, "mak)").? + "mak".len;
+    const value_items = try itemsAt(arena.allocator(), value_source, value_cursor, .invoked);
+    const value = value_items[indexOf(value_items, "make").?];
+    try std.testing.expectEqualStrings("make()", value.insertText.?);
+}
+
 test "complete a terminal member expression from its static type" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -1235,6 +1458,38 @@ test "complete a terminal member expression from its static type" {
     try std.testing.expectEqual(@as(usize, 1), protocol_items.len);
     try std.testing.expect(contains(protocol_items, "to_str"));
     try std.testing.expect(!contains(protocol_items, "x"));
+}
+
+test "complete self members immediately after the dot" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const assignment_source =
+        \\struct MyTask {
+        \\    var name:str
+        \\    func execute() {
+        \\        self. = "done"
+        \\    }
+        \\}
+        \\func main() {}
+    ;
+    const assignment_cursor = std.mem.indexOf(u8, assignment_source, "self.").? + "self.".len;
+    const assignment_items = try itemsAt(arena.allocator(), assignment_source, assignment_cursor, .trigger_character);
+    try std.testing.expect(contains(assignment_items, "name"));
+    try std.testing.expect(contains(assignment_items, "execute"));
+
+    const expression_source =
+        \\struct MyTask {
+        \\    var name:str
+        \\    func execute() {
+        \\        self.
+        \\    }
+        \\}
+        \\func main() {}
+    ;
+    const expression_cursor = std.mem.indexOf(u8, expression_source, "self.").? + "self.".len;
+    const expression_items = try itemsAt(arena.allocator(), expression_source, expression_cursor, .trigger_character);
+    try std.testing.expect(contains(expression_items, "name"));
+    try std.testing.expect(contains(expression_items, "execute"));
 }
 
 test "complete a dynamic protocol value with only its requirements" {
@@ -1325,6 +1580,15 @@ test "prioritize visible symbols before a valid statement keyword" {
     try std.testing.expect(indexOf(items, "initialize").? < indexOf(items, "if").?);
 }
 
+test "complete mutex in statement position" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source = "func main() { mut }";
+    const cursor = std.mem.indexOf(u8, source, "mut").? + 3;
+    const items = try itemsAt(arena.allocator(), source, cursor, .invoked);
+    try std.testing.expect(contains(items, "mutex"));
+}
+
 test "treat interpolation as an expression rather than a statement" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -1384,6 +1648,45 @@ test "complete every accessible local type after a colon" {
     try std.testing.expect(contains(items, "State"));
     try std.testing.expect(contains(items, "Axis"));
     try std.testing.expect(!contains(items, "func"));
+}
+
+test "complete local relations in partial structure and class declarations" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const structure_source =
+        \\protocol Runnable { func run() }
+        \\class Base {}
+        \\struct MyTask : Run
+    ;
+    const structure_items = try itemsAt(
+        arena.allocator(),
+        structure_source,
+        structure_source.len,
+        .invoked,
+    );
+    try std.testing.expect(contains(structure_items, "Runnable"));
+    try std.testing.expect(!contains(structure_items, "return"));
+
+    const class_source =
+        \\protocol Runnable { func run() }
+        \\class Base {}
+        \\class Child : Ba
+    ;
+    const class_items = try itemsAt(arena.allocator(), class_source, class_source.len, .invoked);
+    try std.testing.expect(contains(class_items, "Base"));
+
+    const conformance_source =
+        \\protocol Runnable { func run() }
+        \\class Base {}
+        \\class Child : Base, Run
+    ;
+    const conformance_items = try itemsAt(
+        arena.allocator(),
+        conformance_source,
+        conformance_source.len,
+        .invoked,
+    );
+    try std.testing.expect(contains(conformance_items, "Runnable"));
 }
 
 test "match visible symbols containing the typed text inside a function" {

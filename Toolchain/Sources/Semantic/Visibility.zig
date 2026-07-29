@@ -24,16 +24,17 @@ pub fn memberVisible(self: anytype, structure_index: usize, member: anytype, pos
 
 pub fn typeVisible(self: anytype, structure_index: usize, position: Source.Position) bool {
     const declaration = declarationAt(self, structure_index) orelse return false;
+    const active_file = self.specialization_file orelse position.file;
     if (declaration.enclosing) |owner_name| {
         const owner = self.structureIndex(owner_name) orelse return false;
         if (!typeVisible(self, owner, position)) return false;
         if (declaration.is_public) return true;
-        if (declaration.is_internal) return position.file == declaration.position.file;
+        if (declaration.is_internal) return position.file == declaration.position.file or active_file == declaration.position.file;
         const context = self.member_context orelse return false;
         if (sameFamily(self, context, structure_index)) return true;
         return declaration.is_protected and Inheritance.isDescendant(self, context, owner);
     }
-    return declaration.is_public or position.file == declaration.position.file;
+    return declaration.is_public or position.file == declaration.position.file or active_file == declaration.position.file;
 }
 
 pub fn sameFamily(self: anytype, left: usize, right: usize) bool {

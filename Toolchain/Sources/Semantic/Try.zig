@@ -77,6 +77,7 @@ fn analyze(self: anytype, builder: anytype, unary: Ast.Expression.Unary, require
         .values = values,
     } });
     try Resources.emitActiveDrops(self, builder, 0);
+    try Resources.emitMutexUnlocks(self, builder, 0);
     self.terminate(builder, .{ .return_value = propagated });
 
     builder.current_block = success_block;

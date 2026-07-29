@@ -71,6 +71,7 @@ pub fn internDynamicType(self: anytype, position: Source.Position, element: Ast.
     const name = try std.fmt.allocPrint(self.allocator, "{s}[]", .{try typeSpelling(self, element)});
     const type_value = try self.internTypeName(name);
     try self.collection_structures.append(self.allocator, .{
+        .is_public = true,
         .position = position,
         .name_position = position,
         .name = name,
@@ -88,6 +89,7 @@ pub fn internViewType(self: anytype, position: Source.Position, element: Ast.Typ
     const name = try std.fmt.allocPrint(self.allocator, "{s}[..]", .{try typeSpelling(self, element)});
     const type_value = try self.internTypeName(name);
     try self.collection_structures.append(self.allocator, .{
+        .is_public = true,
         .position = position,
         .name_position = position,
         .name = name,
@@ -113,6 +115,7 @@ pub fn internFixedType(self: anytype, position: Source.Position, element: Ast.Ty
         .default = null,
     };
     try self.collection_structures.append(self.allocator, .{
+        .is_public = true,
         .position = position,
         .name_position = position,
         .name = name,

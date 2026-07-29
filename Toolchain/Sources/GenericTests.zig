@@ -611,6 +611,42 @@ test "compose generic classes through aliases and reexports" {
     try std.testing.expectEqualStrings("42\n", result.stdout);
 }
 
+test "compose static calls on generic structures" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data =
+        \\struct Value<T> {
+        \\    static func answer() int { return 42 }
+        \\}
+        \\func main() { print(Value<int>.answer()) }
+        ,
+    });
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(input);
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("42\n", result.stdout);
+}
+
+test "prefer an exact generic collection overload over a borrowed view" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\func kind<T>(values:@T[]) int { return 1 }
+        \\func kind<T>(values:@T[..]) int { return 2 }
+        \\func main() { var values = [42]; print(kind(values)) }
+    );
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("1\n", result.stdout);
+}
+
 test "diagnose incomplete and invalid generic class arguments" {
     try expectCompileError(
         "class Box<T> {} func main() { var value = Box() }",

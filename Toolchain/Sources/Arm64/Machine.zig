@@ -4,6 +4,7 @@ const Types = @import("../Types.zig");
 const Allocator = std.mem.Allocator;
 
 pub const max_register_arguments = 8;
+pub const max_external_arguments = 10;
 pub const max_slots = 4095;
 pub const slot_size = 8;
 
@@ -68,6 +69,8 @@ pub const Instruction = union(enum) {
     global_store: GlobalStore,
     local_address: LocalAddress,
     reference_load: ReferenceLoad,
+    address_load: AddressLoad,
+    address_store: AddressStore,
     reference_store: ReferenceStore,
     reference_offset: ReferenceOffset,
     aggregate_init: AggregateInit,
@@ -83,6 +86,7 @@ pub const Instruction = union(enum) {
     enum_init: EnumInit,
     enum_test: EnumTest,
     collection_load: CollectionLoad,
+    collection_reference: CollectionReference,
     collection_replace: CollectionReplace,
     collection_count: CollectionCount,
     list_edit: ListEdit,
@@ -93,13 +97,19 @@ pub const Instruction = union(enum) {
     format_value: FormatValue,
     string_concat: StringConcat,
     string_count: StringCount,
+    string_byte_at: StringByteAt,
+    string_from_bytes: StringFromBytes,
     unary: Unary,
     binary: Binary,
+    function_address: FunctionAddress,
     call: Call,
+    indirect_call: IndirectCall,
     external_call: ExternalCall,
     dynamic_call: DynamicCall,
     print: Print,
     assert: Assert,
+    mutex_lock,
+    mutex_unlock,
     panic: Panic,
     return_value: Span,
     return_void,
@@ -170,6 +180,20 @@ pub const Instruction = union(enum) {
     pub const ReferenceLoad = struct {
         result: Span,
         reference: Slot,
+    };
+
+    pub const AddressLoad = struct {
+        result: Slot,
+        address: Slot,
+        byte_offset: Slot,
+        type: Types.Type,
+    };
+
+    pub const AddressStore = struct {
+        address: Slot,
+        byte_offset: Slot,
+        operand: Slot,
+        type: Types.Type,
     };
 
     pub const ReferenceStore = struct {
@@ -272,6 +296,19 @@ pub const Instruction = union(enum) {
         tail: usize,
     };
 
+    pub const CollectionReference = struct {
+        result: Slot,
+        collection: Span,
+        reference: ?Slot,
+        index: Slot,
+        element_width: u12,
+        count: u32,
+        dynamic: bool = false,
+        view: bool = false,
+        header: usize,
+        tail: usize,
+    };
+
     pub const CollectionReplace = struct {
         result: Span,
         collection: Span,
@@ -331,8 +368,19 @@ pub const Instruction = union(enum) {
         result: Slot,
         left: Span,
         right: Span,
-        leaf_types: []const Types.Type,
+        leaves: []const EqualityLeaf,
         equal: bool,
+    };
+
+    pub const EqualityLeaf = struct {
+        offset: u12,
+        type: Types.Type,
+        guards: []const EqualityGuard = &.{},
+    };
+
+    pub const EqualityGuard = struct {
+        offset: u12,
+        expected: u64,
     };
 
     pub const Convert = struct {
@@ -376,10 +424,33 @@ pub const Instruction = union(enum) {
         type: Types.Type = .int,
     };
 
+    pub const StringByteAt = struct {
+        result: Slot,
+        operand: Slot,
+        index: Slot,
+    };
+
+    pub const StringFromBytes = struct {
+        result: Slot,
+        bytes: Span,
+    };
+
     pub const Call = struct {
         result: ?Span,
         function: FunctionId,
         arguments: []const Span,
+    };
+
+    pub const FunctionAddress = struct {
+        result: Slot,
+        function: FunctionId,
+    };
+
+    pub const IndirectCall = struct {
+        result: ?Span,
+        callee: Slot,
+        arguments: []const Span,
+        return_type: Types.Type,
     };
 
     pub const ExternalCall = struct {
@@ -448,6 +519,9 @@ pub const Program = struct {
     globals: []const Global = &.{},
     strings: []const []const u8 = &.{},
     copy_model: []const u64 = &.{},
+    mutex_global: ?usize = null,
+    mutex_lock_function: ?usize = null,
+    mutex_unlock_function: ?usize = null,
 };
 
 pub const AbiValue = enum { int32, read_address, uint64, int64 };
@@ -496,291 +570,335 @@ pub fn validate(program: Program) Error!void {
         if (function.register_slots.len != 0 and function.register_slots.len != function.slot_count) {
             return error.InvalidMachineProgram;
         }
-        for (function.instructions) |instruction| switch (instruction) {
-            .constant_int => |value| try requireSlot(function, value.result),
-            .constant_bool => |value| try requireSlot(function, value.result),
-            .constant_str => |value| {
-                try requireSlot(function, value.result);
-                if (value.string >= program.strings.len) return error.InvalidMachineProgram;
-            },
-            .constant_float32 => |value| try requireSlot(function, value.result),
-            .constant_float64 => |value| try requireSlot(function, value.result),
-            .optional_null => |value| {
-                try requireSpan(function, value.result);
-                if (!value.result.aggregate or value.result.width < 2) return error.InvalidMachineProgram;
-            },
-            .optional_some => |value| {
-                try requireSpan(function, value.result);
-                try requireSpan(function, value.operand);
-                if (!value.result.aggregate or value.result.width != value.operand.width + 1) return error.InvalidMachineProgram;
-            },
-            .optional_unwrap => |value| {
-                try requireSpan(function, value.result);
-                try requireSpan(function, value.operand);
-                if (value.operand.width != value.result.width or value.operand.aggregate != value.result.aggregate) {
-                    return error.InvalidMachineProgram;
-                }
-            },
-            .copy => |value| {
-                try requireSlot(function, value.result);
-                try requireSlot(function, value.operand);
-            },
-            .copy_range => |value| {
-                try requireSpan(function, value.result);
-                try requireSpan(function, value.operand);
-                if (value.result.width != value.operand.width) return error.InvalidMachineProgram;
-            },
-            .deep_copy => |value| {
-                try requireSpan(function, value.result);
-                try requireSpan(function, value.operand);
-                if (value.result.width != value.operand.width or program.copy_model.len == 0) return error.InvalidMachineProgram;
-            },
-            .global_load => |value| {
-                try requireSpan(function, value.result);
-                if (value.global >= program.globals.len) return error.InvalidMachineProgram;
-            },
-            .global_store => |value| {
-                try requireSpan(function, value.operand);
-                if (value.global >= program.globals.len) return error.InvalidMachineProgram;
-            },
-            .local_address => |value| {
-                try requireSlot(function, value.result);
-                try requireSlot(function, value.local);
-            },
-            .reference_load => |value| {
-                try requireSpan(function, value.result);
-                try requireSlot(function, value.reference);
-            },
-            .reference_store => |value| {
-                try requireSlot(function, value.reference);
-                try requireSpan(function, value.operand);
-            },
-            .reference_offset => |value| {
-                try requireSlot(function, value.result);
-                try requireSlot(function, value.reference);
-            },
-            .aggregate_init => |value| {
-                try requireSpan(function, value.result);
-                var width: usize = 0;
-                for (value.fields) |field| {
-                    try requireSpan(function, field);
-                    width += field.width;
-                }
-                if (width != value.result.width or !value.result.aggregate) return error.InvalidMachineProgram;
-            },
-            .protocol_init => |value| {
-                try requireSpan(function, value.result);
-                try requireSpan(function, value.operand);
-                if (!value.result.aggregate or value.result.width == 0 or value.operand.width + 1 > value.result.width) {
-                    return error.InvalidMachineProgram;
-                }
-            },
-            .protocol_test => |value| {
-                try requireSlot(function, value.result);
-                try requireSlot(function, value.operand);
-            },
-            .protocol_extract => |value| {
-                try requireSpan(function, value.result);
-                try requireSpan(function, value.operand);
-                if (!value.operand.aggregate or value.operand.width == 0 or value.result.width + 1 > value.operand.width) {
-                    return error.InvalidMachineProgram;
-                }
-            },
-            .class_init => |value| {
-                try requireSlot(function, value.result);
-                for (value.fields) |field| try requireSpan(function, field);
-            },
-            .class_load => |value| {
-                try requireSpan(function, value.result);
-                try requireSlot(function, value.base);
-            },
-            .class_store => |value| {
-                try requireSlot(function, value.result);
-                try requireSlot(function, value.base);
-                try requireSpan(function, value.replacement);
-            },
-            .class_retain => |value| try requireSlot(function, value.operand),
-            .class_drop => |value| {
-                try requireSlot(function, value.operand);
-                for (value.plans) |plan| {
-                    for (plan.functions) |finalizer| if (finalizer >= program.functions.len) return error.InvalidMachineProgram;
-                }
-            },
-            .list_init => |value| {
-                try requireSlot(function, value.result);
-                if (value.element_width == 0) return error.InvalidMachineProgram;
-                for (value.values) |item| {
-                    try requireSpan(function, item);
-                    if (item.width != value.element_width) return error.InvalidMachineProgram;
-                }
-            },
-            .enum_init => |value| {
-                try requireSpan(function, value.result);
-                if (!value.result.aggregate or value.result.width == 0) return error.InvalidMachineProgram;
-                var width: usize = 1;
-                for (value.values) |field| {
-                    try requireSpan(function, field);
-                    width += field.width;
-                }
-                if (value.raw_value) |raw_value| {
-                    width += 1;
-                    if (raw_value == .string and raw_value.string >= program.strings.len) return error.InvalidMachineProgram;
-                }
-                if (width > value.result.width) return error.InvalidMachineProgram;
-            },
-            .enum_test => |value| {
-                try requireSlot(function, value.result);
-                try requireSpan(function, value.operand);
-                if (!value.operand.aggregate or value.operand.width == 0) return error.InvalidMachineProgram;
-            },
-            .collection_load => |value| {
-                try requireSpan(function, value.result);
-                try requireSpan(function, value.collection);
-                try requireSlot(function, value.index);
-                if ((!value.dynamic and (!value.collection.aggregate or value.collection.width != value.result.width * value.count)) or
-                    (value.dynamic and ((value.collection.aggregate != value.view) or value.collection.width != @as(u12, if (value.view) 2 else 1))) or
-                    value.header >= program.strings.len or value.tail >= program.strings.len) return error.InvalidMachineProgram;
-            },
-            .collection_replace => |value| {
-                try requireSpan(function, value.result);
-                try requireSpan(function, value.collection);
-                try requireSlot(function, value.index);
-                try requireSpan(function, value.replacement);
-                if ((!value.dynamic and (!value.result.aggregate or value.result.width != value.collection.width or
-                    value.collection.width != value.replacement.width * value.count)) or
-                    (value.dynamic and ((value.result.aggregate != value.view) or (value.collection.aggregate != value.view) or value.result.width != @as(u12, if (value.view) 2 else 1) or value.collection.width != @as(u12, if (value.view) 2 else 1))) or
-                    value.header >= program.strings.len or value.tail >= program.strings.len) return error.InvalidMachineProgram;
-            },
-            .collection_count => |value| {
-                try requireSlot(function, value.result);
-                try requireSpan(function, value.collection);
-                if (value.collection.width != @as(u12, if (value.view) 2 else 1)) return error.InvalidMachineProgram;
-            },
-            .list_edit => |value| {
-                try requireSlot(function, value.result);
-                try requireSlot(function, value.collection);
-                if (value.index) |slot| try requireSlot(function, slot);
-                if (value.argument) |span| try requireSpan(function, span);
-                if (value.removed) |span| try requireSpan(function, span);
-                if (value.element_width == 0 or value.header >= program.strings.len or value.tail >= program.strings.len) return error.InvalidMachineProgram;
-            },
-            .collection_slice => |value| {
-                try requireSlot(function, value.result);
-                try requireSpan(function, value.collection);
-                try requireSlot(function, value.start);
-                try requireSlot(function, value.end);
-                if (value.element_width == 0) return error.InvalidMachineProgram;
-            },
-            .collection_view => |value| {
-                try requireSpan(function, value.result);
-                try requireSpan(function, value.collection);
-                if (value.reference) |reference| try requireSlot(function, reference);
-                try requireSlot(function, value.start);
-                try requireSlot(function, value.end);
-                if (!value.result.aggregate or value.result.width != 2 or value.element_width == 0) return error.InvalidMachineProgram;
-            },
-            .aggregate_equal => |value| {
-                try requireSlot(function, value.result);
-                try requireSpan(function, value.left);
-                try requireSpan(function, value.right);
-                if (!value.left.aggregate or !value.right.aggregate or
-                    value.left.width != value.right.width or value.leaf_types.len != value.left.width)
-                {
-                    return error.InvalidMachineProgram;
-                }
-            },
-            .convert => |value| {
-                try requireSlot(function, value.result);
-                try requireSlot(function, value.operand);
-                if (value.header >= program.strings.len) return error.InvalidMachineProgram;
-            },
-            .format_value => |value| {
-                try requireSlot(function, value.result);
-                try requireSlot(function, value.operand);
-            },
-            .string_concat => |value| {
-                try requireSlot(function, value.result);
-                try requireSlot(function, value.left);
-                try requireSlot(function, value.right);
-            },
-            .string_count => |value| {
-                try requireSlot(function, value.result);
-                try requireSlot(function, value.operand);
-            },
-            .unary => |value| {
-                try requireSlot(function, value.result);
-                try requireSlot(function, value.operand);
-            },
-            .binary => |value| {
-                try requireSlot(function, value.result);
-                try requireSlot(function, value.left);
-                try requireSlot(function, value.right);
-            },
-            .call => |call| {
-                if (call.function >= program.functions.len) return error.InvalidMachineProgram;
-                if (call.arguments.len > max_register_arguments) return error.TooManyArguments;
-                if (call.arguments.len != program.functions[call.function].parameter_count) return error.InvalidMachineProgram;
-                if (call.result) |result| try requireSpan(function, result);
-                for (call.arguments, program.functions[call.function].parameters) |argument, parameter| {
-                    try requireSpan(function, argument);
-                    if (argument.width != parameter.width or argument.aggregate != parameter.aggregate) {
+        for (function.instructions) |instruction| {
+            switch (instruction) {
+                .constant_int => |value| try requireSlot(function, value.result),
+                .constant_bool => |value| try requireSlot(function, value.result),
+                .constant_str => |value| {
+                    try requireSlot(function, value.result);
+                    if (value.string >= program.strings.len) return error.InvalidMachineProgram;
+                },
+                .constant_float32 => |value| try requireSlot(function, value.result),
+                .constant_float64 => |value| try requireSlot(function, value.result),
+                .optional_null => |value| {
+                    try requireSpan(function, value.result);
+                    if (!value.result.aggregate or value.result.width < 2) return error.InvalidMachineProgram;
+                },
+                .optional_some => |value| {
+                    try requireSpan(function, value.result);
+                    try requireSpan(function, value.operand);
+                    if (!value.result.aggregate or value.result.width != value.operand.width + 1) return error.InvalidMachineProgram;
+                },
+                .optional_unwrap => |value| {
+                    try requireSpan(function, value.result);
+                    try requireSpan(function, value.operand);
+                    if (value.operand.width != value.result.width or value.operand.aggregate != value.result.aggregate) {
                         return error.InvalidMachineProgram;
                     }
-                }
-                const callee = program.functions[call.function];
-                if (call.result) |result| {
-                    if (result.width != callee.return_width or result.aggregate != callee.return_aggregate) {
+                },
+                .copy => |value| {
+                    try requireSlot(function, value.result);
+                    try requireSlot(function, value.operand);
+                },
+                .copy_range => |value| {
+                    try requireSpan(function, value.result);
+                    try requireSpan(function, value.operand);
+                    if (value.result.width != value.operand.width) return error.InvalidMachineProgram;
+                },
+                .deep_copy => |value| {
+                    try requireSpan(function, value.result);
+                    try requireSpan(function, value.operand);
+                    if (value.result.width != value.operand.width or program.copy_model.len == 0) return error.InvalidMachineProgram;
+                },
+                .global_load => |value| {
+                    try requireSpan(function, value.result);
+                    if (value.global >= program.globals.len) return error.InvalidMachineProgram;
+                },
+                .global_store => |value| {
+                    try requireSpan(function, value.operand);
+                    if (value.global >= program.globals.len) return error.InvalidMachineProgram;
+                },
+                .local_address => |value| {
+                    try requireSlot(function, value.result);
+                    try requireSlot(function, value.local);
+                },
+                .reference_load => |value| {
+                    try requireSpan(function, value.result);
+                    try requireSlot(function, value.reference);
+                },
+                .address_load => |value| {
+                    try requireSlot(function, value.result);
+                    try requireSlot(function, value.address);
+                    try requireSlot(function, value.byte_offset);
+                    if (!value.type.isInteger() and value.type != .address) return error.InvalidMachineProgram;
+                },
+                .address_store => |value| {
+                    try requireSlot(function, value.address);
+                    try requireSlot(function, value.byte_offset);
+                    try requireSlot(function, value.operand);
+                    if (!value.type.isInteger()) return error.InvalidMachineProgram;
+                },
+                .reference_store => |value| {
+                    try requireSlot(function, value.reference);
+                    try requireSpan(function, value.operand);
+                },
+                .reference_offset => |value| {
+                    try requireSlot(function, value.result);
+                    try requireSlot(function, value.reference);
+                },
+                .aggregate_init => |value| {
+                    try requireSpan(function, value.result);
+                    var width: usize = 0;
+                    for (value.fields) |field| {
+                        try requireSpan(function, field);
+                        width += field.width;
+                    }
+                    if (width != value.result.width or !value.result.aggregate) return error.InvalidMachineProgram;
+                },
+                .protocol_init => |value| {
+                    try requireSpan(function, value.result);
+                    try requireSpan(function, value.operand);
+                    if (!value.result.aggregate or value.result.width == 0 or value.operand.width + 1 > value.result.width) {
                         return error.InvalidMachineProgram;
                     }
-                } else if (callee.return_type != .void) return error.InvalidMachineProgram;
-            },
-            .external_call => |call| {
-                if (call.function >= program.external_functions.len or call.arguments.len > max_register_arguments) {
-                    return error.InvalidMachineProgram;
-                }
-                const external = program.external_functions[call.function];
-                if (!supportedExternal(external) or call.arguments.len != external.signature.arguments.len) {
-                    return error.InvalidMachineProgram;
-                }
-                for (call.arguments) |argument| try requireSlot(function, argument);
-                if (external.signature.result == null) {
-                    if (call.result != null) return error.InvalidMachineProgram;
-                } else {
-                    try requireSlot(function, call.result orelse return error.InvalidMachineProgram);
-                }
-            },
-            .dynamic_call => |call| {
-                if (call.function >= program.functions.len or call.arguments.len > max_register_arguments) return error.InvalidMachineProgram;
-                try requireSlot(function, call.receiver);
-                const fallback = program.functions[call.function];
-                if (call.arguments.len != fallback.parameter_count) return error.InvalidMachineProgram;
-                if (call.result) |result| try requireSpan(function, result);
-                for (call.implementations) |implementation| if (implementation.function >= program.functions.len) return error.InvalidMachineProgram;
-            },
-            .print => |value| try requireSlot(function, value.value),
-            .assert => |value| {
-                try requireSlot(function, value.condition);
-                try requireSlot(function, value.message);
-                if (value.header >= program.strings.len) return error.InvalidMachineProgram;
-            },
-            .panic => |value| {
-                try requireSlot(function, value.message);
-                if (value.header >= program.strings.len) return error.InvalidMachineProgram;
-            },
-            .return_value => |value| {
-                try requireSpan(function, value);
-                if (value.width != function.return_width or value.aggregate != function.return_aggregate) {
-                    return error.InvalidMachineProgram;
-                }
-            },
-            .return_void => {},
-            .jump => |target| if (target >= function.instructions.len) return error.InvalidMachineProgram,
-            .branch => |branch_value| {
-                try requireSlot(function, branch_value.condition);
-                if (branch_value.then_instruction >= function.instructions.len or
-                    branch_value.else_instruction >= function.instructions.len) return error.InvalidMachineProgram;
-            },
-        };
+                },
+                .protocol_test => |value| {
+                    try requireSlot(function, value.result);
+                    try requireSlot(function, value.operand);
+                },
+                .protocol_extract => |value| {
+                    try requireSpan(function, value.result);
+                    try requireSpan(function, value.operand);
+                    if (!value.operand.aggregate or value.operand.width == 0 or value.result.width + 1 > value.operand.width) {
+                        return error.InvalidMachineProgram;
+                    }
+                },
+                .class_init => |value| {
+                    try requireSlot(function, value.result);
+                    for (value.fields) |field| try requireSpan(function, field);
+                },
+                .class_load => |value| {
+                    try requireSpan(function, value.result);
+                    try requireSlot(function, value.base);
+                },
+                .class_store => |value| {
+                    try requireSlot(function, value.result);
+                    try requireSlot(function, value.base);
+                    try requireSpan(function, value.replacement);
+                },
+                .class_retain => |value| try requireSlot(function, value.operand),
+                .class_drop => |value| {
+                    try requireSlot(function, value.operand);
+                    for (value.plans) |plan| {
+                        for (plan.functions) |finalizer| if (finalizer >= program.functions.len) return error.InvalidMachineProgram;
+                    }
+                },
+                .list_init => |value| {
+                    try requireSlot(function, value.result);
+                    if (value.element_width == 0) return error.InvalidMachineProgram;
+                    for (value.values) |item| {
+                        try requireSpan(function, item);
+                        if (item.width != value.element_width) return error.InvalidMachineProgram;
+                    }
+                },
+                .enum_init => |value| {
+                    try requireSpan(function, value.result);
+                    if (!value.result.aggregate or value.result.width == 0) return error.InvalidMachineProgram;
+                    var width: usize = 1;
+                    for (value.values) |field| {
+                        try requireSpan(function, field);
+                        width += field.width;
+                    }
+                    if (value.raw_value) |raw_value| {
+                        width += 1;
+                        if (raw_value == .string and raw_value.string >= program.strings.len) return error.InvalidMachineProgram;
+                    }
+                    if (width > value.result.width) return error.InvalidMachineProgram;
+                },
+                .enum_test => |value| {
+                    try requireSlot(function, value.result);
+                    try requireSpan(function, value.operand);
+                    if (!value.operand.aggregate or value.operand.width == 0) return error.InvalidMachineProgram;
+                },
+                .collection_load => |value| {
+                    try requireSpan(function, value.result);
+                    try requireSpan(function, value.collection);
+                    try requireSlot(function, value.index);
+                    if ((!value.dynamic and (!value.collection.aggregate or value.collection.width != value.result.width * value.count)) or
+                        (value.dynamic and ((value.collection.aggregate != value.view) or value.collection.width != @as(u12, if (value.view) 2 else 1))) or
+                        value.header >= program.strings.len or value.tail >= program.strings.len) return error.InvalidMachineProgram;
+                },
+                .collection_reference => |value| {
+                    try requireSlot(function, value.result);
+                    try requireSpan(function, value.collection);
+                    if (value.reference) |reference| try requireSlot(function, reference);
+                    try requireSlot(function, value.index);
+                    if (value.element_width == 0 or
+                        (!value.dynamic and (value.reference == null or value.collection.width != value.element_width * value.count)) or
+                        (value.dynamic and ((value.collection.aggregate != value.view) or value.collection.width != @as(u12, if (value.view) 2 else 1))) or
+                        value.header >= program.strings.len or value.tail >= program.strings.len) return error.InvalidMachineProgram;
+                },
+                .collection_replace => |value| {
+                    try requireSpan(function, value.result);
+                    try requireSpan(function, value.collection);
+                    try requireSlot(function, value.index);
+                    try requireSpan(function, value.replacement);
+                    if ((!value.dynamic and (!value.result.aggregate or value.result.width != value.collection.width or
+                        value.collection.width != value.replacement.width * value.count)) or
+                        (value.dynamic and ((value.result.aggregate != value.view) or (value.collection.aggregate != value.view) or value.result.width != @as(u12, if (value.view) 2 else 1) or value.collection.width != @as(u12, if (value.view) 2 else 1))) or
+                        value.header >= program.strings.len or value.tail >= program.strings.len) return error.InvalidMachineProgram;
+                },
+                .collection_count => |value| {
+                    try requireSlot(function, value.result);
+                    try requireSpan(function, value.collection);
+                    if (value.collection.width != @as(u12, if (value.view) 2 else 1)) return error.InvalidMachineProgram;
+                },
+                .list_edit => |value| {
+                    try requireSlot(function, value.result);
+                    try requireSlot(function, value.collection);
+                    if (value.index) |slot| try requireSlot(function, slot);
+                    if (value.argument) |span| try requireSpan(function, span);
+                    if (value.removed) |span| try requireSpan(function, span);
+                    if (value.element_width == 0 or value.header >= program.strings.len or value.tail >= program.strings.len) return error.InvalidMachineProgram;
+                },
+                .collection_slice => |value| {
+                    try requireSlot(function, value.result);
+                    try requireSpan(function, value.collection);
+                    try requireSlot(function, value.start);
+                    try requireSlot(function, value.end);
+                    if (value.element_width == 0) return error.InvalidMachineProgram;
+                },
+                .collection_view => |value| {
+                    try requireSpan(function, value.result);
+                    try requireSpan(function, value.collection);
+                    if (value.reference) |reference| try requireSlot(function, reference);
+                    try requireSlot(function, value.start);
+                    try requireSlot(function, value.end);
+                    if (!value.result.aggregate or value.result.width != 2 or value.element_width == 0) return error.InvalidMachineProgram;
+                },
+                .aggregate_equal => |value| {
+                    try requireSlot(function, value.result);
+                    try requireSpan(function, value.left);
+                    try requireSpan(function, value.right);
+                    if (!value.left.aggregate or !value.right.aggregate or value.left.width != value.right.width)
+                        return error.InvalidMachineProgram;
+                    for (value.leaves) |leaf| {
+                        if (leaf.offset >= value.left.width) return error.InvalidMachineProgram;
+                        for (leaf.guards) |guard| if (guard.offset >= value.left.width) return error.InvalidMachineProgram;
+                    }
+                },
+                .convert => |value| {
+                    try requireSlot(function, value.result);
+                    try requireSlot(function, value.operand);
+                    if (value.header >= program.strings.len) return error.InvalidMachineProgram;
+                },
+                .format_value => |value| {
+                    try requireSlot(function, value.result);
+                    try requireSlot(function, value.operand);
+                },
+                .string_concat => |value| {
+                    try requireSlot(function, value.result);
+                    try requireSlot(function, value.left);
+                    try requireSlot(function, value.right);
+                },
+                .string_count => |value| {
+                    try requireSlot(function, value.result);
+                    try requireSlot(function, value.operand);
+                },
+                .string_byte_at => |value| {
+                    try requireSlot(function, value.result);
+                    try requireSlot(function, value.operand);
+                    try requireSlot(function, value.index);
+                },
+                .string_from_bytes => |value| {
+                    try requireSlot(function, value.result);
+                    try requireSpan(function, value.bytes);
+                    if (!value.bytes.aggregate or value.bytes.width != 2) return error.InvalidMachineProgram;
+                },
+                .unary => |value| {
+                    try requireSlot(function, value.result);
+                    try requireSlot(function, value.operand);
+                },
+                .binary => |value| {
+                    try requireSlot(function, value.result);
+                    try requireSlot(function, value.left);
+                    try requireSlot(function, value.right);
+                },
+                .function_address => |value| {
+                    try requireSlot(function, value.result);
+                    if (value.function >= program.functions.len) return error.InvalidMachineProgram;
+                },
+                .call => |call| {
+                    if (call.function >= program.functions.len) return error.InvalidMachineProgram;
+                    if (call.arguments.len > max_register_arguments) return error.TooManyArguments;
+                    if (call.arguments.len != program.functions[call.function].parameter_count) return error.InvalidMachineProgram;
+                    if (call.result) |result| try requireSpan(function, result);
+                    for (call.arguments, program.functions[call.function].parameters) |argument, parameter| {
+                        try requireSpan(function, argument);
+                        if (argument.width != parameter.width or argument.aggregate != parameter.aggregate) {
+                            return error.InvalidMachineProgram;
+                        }
+                    }
+                    const callee = program.functions[call.function];
+                    if (call.result) |result| {
+                        if (result.width != callee.return_width or result.aggregate != callee.return_aggregate) {
+                            return error.InvalidMachineProgram;
+                        }
+                    } else if (callee.return_type != .void) return error.InvalidMachineProgram;
+                },
+                .indirect_call => |call| {
+                    try requireSlot(function, call.callee);
+                    if (call.arguments.len > max_register_arguments) return error.TooManyArguments;
+                    for (call.arguments) |argument| try requireSpan(function, argument);
+                    if (call.result) |result| try requireSpan(function, result) else if (call.return_type != .void) return error.InvalidMachineProgram;
+                },
+                .external_call => |call| {
+                    if (call.function >= program.external_functions.len or call.arguments.len > max_external_arguments) {
+                        return error.InvalidMachineProgram;
+                    }
+                    const external = program.external_functions[call.function];
+                    if (!supportedExternal(external) or call.arguments.len != external.signature.arguments.len) {
+                        return error.InvalidMachineProgram;
+                    }
+                    for (call.arguments) |argument| try requireSlot(function, argument);
+                    if (external.signature.result == null) {
+                        if (call.result != null) return error.InvalidMachineProgram;
+                    } else {
+                        try requireSlot(function, call.result orelse return error.InvalidMachineProgram);
+                    }
+                },
+                .dynamic_call => |call| {
+                    if (call.function >= program.functions.len or call.arguments.len > max_register_arguments) return error.InvalidMachineProgram;
+                    try requireSlot(function, call.receiver);
+                    const fallback = program.functions[call.function];
+                    if (call.arguments.len != fallback.parameter_count) return error.InvalidMachineProgram;
+                    if (call.result) |result| try requireSpan(function, result);
+                    for (call.implementations) |implementation| if (implementation.function >= program.functions.len) return error.InvalidMachineProgram;
+                },
+                .print => |value| try requireSlot(function, value.value),
+                .assert => |value| {
+                    try requireSlot(function, value.condition);
+                    try requireSlot(function, value.message);
+                    if (value.header >= program.strings.len) return error.InvalidMachineProgram;
+                },
+                .mutex_lock, .mutex_unlock => {},
+                .panic => |value| {
+                    try requireSlot(function, value.message);
+                    if (value.header >= program.strings.len) return error.InvalidMachineProgram;
+                },
+                .return_value => |value| {
+                    try requireSpan(function, value);
+                    if (value.width != function.return_width or value.aggregate != function.return_aggregate) return error.InvalidMachineProgram;
+                },
+                .return_void => {},
+                .jump => |target| if (target >= function.instructions.len) return error.InvalidMachineProgram,
+                .branch => |branch_value| {
+                    try requireSlot(function, branch_value.condition);
+                    if (branch_value.then_instruction >= function.instructions.len or
+                        branch_value.else_instruction >= function.instructions.len) return error.InvalidMachineProgram;
+                },
+            }
+        }
         if (function.parameters.len != function.parameter_count) return error.InvalidMachineProgram;
         for (function.parameters) |parameter| try requireSpan(function, parameter);
         if (function.return_type == .void) {
@@ -794,11 +912,618 @@ pub fn validate(program: Program) Error!void {
 }
 
 fn supportedExternal(function: ExternalFunction) bool {
+    if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and
+        std.mem.eql(u8, function.source_name, "os_unfair_recursive_lock_lock_with_options"))
+    {
+        const arguments = [_]AbiValue{ .read_address, .uint64 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == null;
+    }
+    if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and
+        std.mem.eql(u8, function.source_name, "os_unfair_recursive_lock_unlock"))
+    {
+        const arguments = [_]AbiValue{.read_address};
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == null;
+    }
     const write_arguments = [_]AbiValue{ .int32, .read_address, .uint64 };
-    return std.mem.eql(u8, function.provider, "Darwin.lib_system") and
-        std.mem.eql(u8, function.source_name, "write") and
-        std.mem.eql(AbiValue, function.signature.arguments, &write_arguments) and
-        function.signature.result == .int64;
+    if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and std.mem.eql(u8, function.source_name, "write")) {
+        return std.mem.eql(AbiValue, function.signature.arguments, &write_arguments) and
+            function.signature.result == .int64;
+    }
+    if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and std.mem.eql(u8, function.source_name, "arc4random")) {
+        return function.signature.arguments.len == 0 and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and std.mem.eql(u8, function.source_name, "clock_gettime_nsec_np")) {
+        const arguments = [_]AbiValue{.int32};
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .uint64;
+    }
+    if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and std.mem.eql(u8, function.source_name, "read")) {
+        const arguments = [_]AbiValue{ .int32, .read_address, .uint64 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int64;
+    }
+    if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and std.mem.eql(u8, function.source_name, "isatty")) {
+        const arguments = [_]AbiValue{.int32};
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and std.mem.eql(u8, function.source_name, "__ioctl")) {
+        const arguments = [_]AbiValue{ .int32, .uint64, .read_address };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and std.mem.eql(u8, function.source_name, "__open")) {
+        const arguments = [_]AbiValue{ .read_address, .int32, .int32 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and
+        (std.mem.eql(u8, function.source_name, "close") or std.mem.eql(u8, function.source_name, "fsync")))
+    {
+        const arguments = [_]AbiValue{.int32};
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and std.mem.eql(u8, function.source_name, "lseek")) {
+        const arguments = [_]AbiValue{ .int32, .int64, .int32 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int64;
+    }
+    if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and std.mem.eql(u8, function.source_name, "ftruncate")) {
+        const arguments = [_]AbiValue{ .int32, .int64 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and std.mem.eql(u8, function.source_name, "poll")) {
+        const arguments = [_]AbiValue{ .read_address, .uint64, .int32 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and std.mem.eql(u8, function.source_name, "getenv")) {
+        const arguments = [_]AbiValue{.read_address};
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .read_address;
+    }
+    if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and std.mem.eql(u8, function.source_name, "setenv")) {
+        const arguments = [_]AbiValue{ .read_address, .read_address, .int32 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and std.mem.eql(u8, function.source_name, "unsetenv")) {
+        const arguments = [_]AbiValue{.read_address};
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and std.mem.eql(u8, function.source_name, "_NSGetEnviron")) {
+        return function.signature.arguments.len == 0 and function.signature.result == .read_address;
+    }
+    if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and
+        (std.mem.eql(u8, function.source_name, "_NSGetArgc") or std.mem.eql(u8, function.source_name, "_NSGetArgv")))
+    {
+        return function.signature.arguments.len == 0 and function.signature.result == .read_address;
+    }
+    if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and std.mem.eql(u8, function.source_name, "getcwd")) {
+        const arguments = [_]AbiValue{ .read_address, .uint64 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .read_address;
+    }
+    if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and std.mem.eql(u8, function.source_name, "chdir")) {
+        const arguments = [_]AbiValue{.read_address};
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and std.mem.eql(u8, function.source_name, "_NSGetExecutablePath")) {
+        const arguments = [_]AbiValue{ .read_address, .read_address };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and std.mem.eql(u8, function.source_name, "getpid")) {
+        return function.signature.arguments.len == 0 and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and
+        (std.mem.eql(u8, function.source_name, "stat") or std.mem.eql(u8, function.source_name, "lstat")))
+    {
+        const arguments = [_]AbiValue{ .read_address, .read_address };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and
+        (std.mem.eql(u8, function.source_name, "opendir") or std.mem.eql(u8, function.source_name, "readdir")))
+    {
+        const arguments = [_]AbiValue{.read_address};
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .read_address;
+    }
+    if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and
+        (std.mem.eql(u8, function.source_name, "closedir") or std.mem.eql(u8, function.source_name, "unlink") or
+            std.mem.eql(u8, function.source_name, "rmdir")))
+    {
+        const arguments = [_]AbiValue{.read_address};
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and
+        (std.mem.eql(u8, function.source_name, "mkdir") or std.mem.eql(u8, function.source_name, "chmod")))
+    {
+        const arguments = [_]AbiValue{ .read_address, .int32 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and std.mem.eql(u8, function.source_name, "rename")) {
+        const arguments = [_]AbiValue{ .read_address, .read_address };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and std.mem.eql(u8, function.source_name, "realpath")) {
+        const arguments = [_]AbiValue{ .read_address, .read_address };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .read_address;
+    }
+    if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and std.mem.eql(u8, function.source_name, "copyfile")) {
+        const arguments = [_]AbiValue{ .read_address, .read_address, .read_address, .int32 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and std.mem.eql(u8, function.source_name, "getaddrinfo")) {
+        const arguments = [_]AbiValue{ .read_address, .read_address, .read_address, .read_address };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and std.mem.eql(u8, function.source_name, "freeaddrinfo")) {
+        const arguments = [_]AbiValue{.read_address};
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == null;
+    }
+    if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and std.mem.eql(u8, function.source_name, "__error")) {
+        return function.signature.arguments.len == 0 and function.signature.result == .read_address;
+    }
+    if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and std.mem.eql(u8, function.source_name, "socket")) {
+        const arguments = [_]AbiValue{ .int32, .int32, .int32 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and
+        (std.mem.eql(u8, function.source_name, "connect") or std.mem.eql(u8, function.source_name, "bind")))
+    {
+        const arguments = [_]AbiValue{ .int32, .read_address, .int32 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and
+        (std.mem.eql(u8, function.source_name, "listen") or std.mem.eql(u8, function.source_name, "shutdown")))
+    {
+        const arguments = [_]AbiValue{ .int32, .int32 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and
+        (std.mem.eql(u8, function.source_name, "accept") or std.mem.eql(u8, function.source_name, "getsockname") or
+            std.mem.eql(u8, function.source_name, "getpeername")))
+    {
+        const arguments = [_]AbiValue{ .int32, .read_address, .read_address };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and
+        (std.mem.eql(u8, function.source_name, "recv") or std.mem.eql(u8, function.source_name, "send")))
+    {
+        const arguments = [_]AbiValue{ .int32, .read_address, .uint64, .int32 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int64;
+    }
+    if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and std.mem.eql(u8, function.source_name, "setsockopt")) {
+        const arguments = [_]AbiValue{ .int32, .int32, .int32, .read_address, .int32 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and std.mem.eql(u8, function.source_name, "sendto")) {
+        const arguments = [_]AbiValue{ .int32, .read_address, .uint64, .int32, .read_address, .int32 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int64;
+    }
+    if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and std.mem.eql(u8, function.source_name, "recvfrom")) {
+        const arguments = [_]AbiValue{ .int32, .read_address, .uint64, .int32, .read_address, .read_address };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int64;
+    }
+    if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and std.mem.eql(u8, function.source_name, "pipe")) {
+        const arguments = [_]AbiValue{.read_address};
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and std.mem.eql(u8, function.source_name, "fork")) {
+        return function.signature.arguments.len == 0 and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and std.mem.eql(u8, function.source_name, "dup2")) {
+        const arguments = [_]AbiValue{ .int32, .int32 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and std.mem.eql(u8, function.source_name, "execve")) {
+        const arguments = [_]AbiValue{ .read_address, .read_address, .read_address };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and std.mem.eql(u8, function.source_name, "_exit")) {
+        const arguments = [_]AbiValue{.int32};
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == null;
+    }
+    if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and std.mem.eql(u8, function.source_name, "waitpid")) {
+        const arguments = [_]AbiValue{ .int32, .read_address, .int32 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and std.mem.eql(u8, function.source_name, "kill")) {
+        const arguments = [_]AbiValue{ .int32, .int32 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and std.mem.eql(u8, function.source_name, "pthread_create")) {
+        const arguments = [_]AbiValue{ .read_address, .read_address, .read_address, .read_address };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and std.mem.eql(u8, function.source_name, "pthread_join")) {
+        const arguments = [_]AbiValue{ .uint64, .read_address };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Linux.kernel") and
+        (std.mem.eql(u8, function.source_name, "read") or std.mem.eql(u8, function.source_name, "write")))
+    {
+        const arguments = [_]AbiValue{ .int32, .read_address, .uint64 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int64;
+    }
+    if (std.mem.eql(u8, function.provider, "Linux.kernel") and std.mem.eql(u8, function.source_name, "ioctl")) {
+        const arguments = [_]AbiValue{ .int32, .uint64, .read_address };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Linux.kernel") and std.mem.eql(u8, function.source_name, "openat")) {
+        const arguments = [_]AbiValue{ .int32, .read_address, .int32, .int32 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Linux.kernel") and
+        (std.mem.eql(u8, function.source_name, "close") or std.mem.eql(u8, function.source_name, "fsync")))
+    {
+        const arguments = [_]AbiValue{.int32};
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Linux.kernel") and std.mem.eql(u8, function.source_name, "lseek")) {
+        const arguments = [_]AbiValue{ .int32, .int64, .int32 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int64;
+    }
+    if (std.mem.eql(u8, function.provider, "Linux.kernel") and std.mem.eql(u8, function.source_name, "ftruncate")) {
+        const arguments = [_]AbiValue{ .int32, .int64 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Linux.kernel") and std.mem.eql(u8, function.source_name, "poll")) {
+        const arguments = [_]AbiValue{ .read_address, .uint64, .int32 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Linux.kernel") and std.mem.eql(u8, function.source_name, "getrandom")) {
+        const arguments = [_]AbiValue{ .read_address, .uint64, .int32 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int64;
+    }
+    if (std.mem.eql(u8, function.provider, "Linux.kernel") and std.mem.eql(u8, function.source_name, "clock_gettime")) {
+        const arguments = [_]AbiValue{ .int32, .read_address };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Linux.kernel") and std.mem.eql(u8, function.source_name, "getcwd")) {
+        const arguments = [_]AbiValue{ .read_address, .uint64 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int64;
+    }
+    if (std.mem.eql(u8, function.provider, "Linux.kernel") and std.mem.eql(u8, function.source_name, "chdir")) {
+        const arguments = [_]AbiValue{.read_address};
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int64;
+    }
+    if (std.mem.eql(u8, function.provider, "Linux.kernel") and std.mem.eql(u8, function.source_name, "readlink")) {
+        const arguments = [_]AbiValue{ .read_address, .read_address, .uint64 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int64;
+    }
+    if (std.mem.eql(u8, function.provider, "Linux.kernel") and std.mem.eql(u8, function.source_name, "newfstatat")) {
+        const arguments = [_]AbiValue{ .int32, .read_address, .read_address, .int32 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Linux.kernel") and std.mem.eql(u8, function.source_name, "getdents64")) {
+        const arguments = [_]AbiValue{ .int32, .read_address, .uint64 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int64;
+    }
+    if (std.mem.eql(u8, function.provider, "Linux.kernel") and
+        (std.mem.eql(u8, function.source_name, "mkdir") or std.mem.eql(u8, function.source_name, "chmod")))
+    {
+        const arguments = [_]AbiValue{ .read_address, .int32 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Linux.kernel") and
+        (std.mem.eql(u8, function.source_name, "unlink") or std.mem.eql(u8, function.source_name, "rmdir")))
+    {
+        const arguments = [_]AbiValue{.read_address};
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Linux.kernel") and std.mem.eql(u8, function.source_name, "rename")) {
+        const arguments = [_]AbiValue{ .read_address, .read_address };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Linux.kernel") and std.mem.eql(u8, function.source_name, "thread_spawn")) {
+        const arguments = [_]AbiValue{ .uint64, .uint64 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .uint64;
+    }
+    if (std.mem.eql(u8, function.provider, "Linux.kernel") and std.mem.eql(u8, function.source_name, "thread_join")) {
+        const arguments = [_]AbiValue{.uint64};
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Linux.kernel") and std.mem.eql(u8, function.source_name, "getpid")) {
+        return function.signature.arguments.len == 0 and function.signature.result == .int64;
+    }
+    if (std.mem.eql(u8, function.provider, "Linux.kernel") and std.mem.eql(u8, function.source_name, "socket")) {
+        const arguments = [_]AbiValue{ .int32, .int32, .int32 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Linux.kernel") and std.mem.eql(u8, function.source_name, "connect")) {
+        const arguments = [_]AbiValue{ .int32, .read_address, .int32 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Linux.kernel") and std.mem.eql(u8, function.source_name, "bind")) {
+        const arguments = [_]AbiValue{ .int32, .read_address, .int32 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Linux.kernel") and
+        (std.mem.eql(u8, function.source_name, "listen") or std.mem.eql(u8, function.source_name, "shutdown")))
+    {
+        const arguments = [_]AbiValue{ .int32, .int32 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Linux.kernel") and
+        (std.mem.eql(u8, function.source_name, "accept") or std.mem.eql(u8, function.source_name, "getsockname") or
+            std.mem.eql(u8, function.source_name, "getpeername")))
+    {
+        const arguments = [_]AbiValue{ .int32, .read_address, .read_address };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Linux.kernel") and std.mem.eql(u8, function.source_name, "setsockopt")) {
+        const arguments = [_]AbiValue{ .int32, .int32, .int32, .read_address, .int32 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Linux.kernel") and std.mem.eql(u8, function.source_name, "sendto")) {
+        const arguments = [_]AbiValue{ .int32, .read_address, .uint64, .int32, .read_address, .int32 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int64;
+    }
+    if (std.mem.eql(u8, function.provider, "Linux.kernel") and std.mem.eql(u8, function.source_name, "recvfrom")) {
+        const arguments = [_]AbiValue{ .int32, .read_address, .uint64, .int32, .read_address, .read_address };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int64;
+    }
+    if (std.mem.eql(u8, function.provider, "Linux.kernel") and std.mem.eql(u8, function.source_name, "pipe")) {
+        const arguments = [_]AbiValue{.read_address};
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Linux.kernel") and std.mem.eql(u8, function.source_name, "fork")) return function.signature.arguments.len == 0 and function.signature.result == .int32;
+    if (std.mem.eql(u8, function.provider, "Linux.kernel") and std.mem.eql(u8, function.source_name, "dup2")) {
+        const arguments = [_]AbiValue{ .int32, .int32 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Linux.kernel") and std.mem.eql(u8, function.source_name, "execve")) {
+        const arguments = [_]AbiValue{ .read_address, .read_address, .read_address };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Linux.kernel") and std.mem.eql(u8, function.source_name, "exit")) {
+        const arguments = [_]AbiValue{.int32};
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int64;
+    }
+    if (std.mem.eql(u8, function.provider, "Linux.kernel") and std.mem.eql(u8, function.source_name, "wait4")) {
+        const arguments = [_]AbiValue{ .int32, .read_address, .int32, .read_address };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Linux.kernel") and std.mem.eql(u8, function.source_name, "kill")) {
+        const arguments = [_]AbiValue{ .int32, .int32 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Windows.bcrypt_primitives") and std.mem.eql(u8, function.source_name, "ProcessPrng")) {
+        const arguments = [_]AbiValue{ .read_address, .uint64 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Windows.kernel32") and
+        (std.mem.eql(u8, function.source_name, "QueryPerformanceCounter") or
+            std.mem.eql(u8, function.source_name, "QueryPerformanceFrequency")))
+    {
+        const arguments = [_]AbiValue{.read_address};
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Windows.ucrtbase") and
+        (std.mem.eql(u8, function.source_name, "_write") or std.mem.eql(u8, function.source_name, "_read")))
+    {
+        const arguments = [_]AbiValue{ .int32, .read_address, .int32 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Windows.ucrtbase") and std.mem.eql(u8, function.source_name, "_isatty")) {
+        const arguments = [_]AbiValue{.int32};
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Windows.ucrtbase") and std.mem.eql(u8, function.source_name, "_wopen")) {
+        const arguments = [_]AbiValue{ .read_address, .int32, .int32 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Windows.ucrtbase") and
+        (std.mem.eql(u8, function.source_name, "_close") or std.mem.eql(u8, function.source_name, "_commit")))
+    {
+        const arguments = [_]AbiValue{.int32};
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Windows.ucrtbase") and std.mem.eql(u8, function.source_name, "_lseeki64")) {
+        const arguments = [_]AbiValue{ .int32, .int64, .int32 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int64;
+    }
+    if (std.mem.eql(u8, function.provider, "Windows.ucrtbase") and std.mem.eql(u8, function.source_name, "_chsize_s")) {
+        const arguments = [_]AbiValue{ .int32, .int64 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Windows.ucrtbase") and
+        (std.mem.eql(u8, function.source_name, "__p___argc") or std.mem.eql(u8, function.source_name, "__p___wargv")))
+    {
+        return function.signature.arguments.len == 0 and function.signature.result == .read_address;
+    }
+    if (std.mem.eql(u8, function.provider, "Windows.kernel32") and std.mem.eql(u8, function.source_name, "GetStdHandle")) {
+        const arguments = [_]AbiValue{.int32};
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .uint64;
+    }
+    if (std.mem.eql(u8, function.provider, "Windows.kernel32") and std.mem.eql(u8, function.source_name, "GetConsoleScreenBufferInfo")) {
+        const arguments = [_]AbiValue{ .uint64, .read_address };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Windows.kernel32") and std.mem.eql(u8, function.source_name, "GetConsoleMode")) {
+        const arguments = [_]AbiValue{ .uint64, .read_address };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Windows.kernel32") and std.mem.eql(u8, function.source_name, "SetConsoleMode")) {
+        const arguments = [_]AbiValue{ .uint64, .int32 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Windows.kernel32") and std.mem.eql(u8, function.source_name, "GetConsoleCP")) {
+        return function.signature.arguments.len == 0 and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Windows.kernel32") and std.mem.eql(u8, function.source_name, "SetConsoleCP")) {
+        const arguments = [_]AbiValue{.int32};
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Windows.kernel32") and std.mem.eql(u8, function.source_name, "WaitForSingleObject")) {
+        const arguments = [_]AbiValue{ .uint64, .int32 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Windows.kernel32") and std.mem.eql(u8, function.source_name, "GetCurrentDirectoryW")) {
+        const arguments = [_]AbiValue{ .int32, .read_address };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Windows.kernel32") and std.mem.eql(u8, function.source_name, "SetCurrentDirectoryW")) {
+        const arguments = [_]AbiValue{.read_address};
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Windows.kernel32") and std.mem.eql(u8, function.source_name, "GetModuleFileNameW")) {
+        const arguments = [_]AbiValue{ .uint64, .read_address, .int32 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Windows.kernel32") and std.mem.eql(u8, function.source_name, "GetCurrentProcessId")) {
+        return function.signature.arguments.len == 0 and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Windows.kernel32") and std.mem.eql(u8, function.source_name, "GetEnvironmentVariableW")) {
+        const arguments = [_]AbiValue{ .read_address, .read_address, .int32 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Windows.kernel32") and std.mem.eql(u8, function.source_name, "SetEnvironmentVariableW")) {
+        const arguments = [_]AbiValue{ .read_address, .read_address };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Windows.kernel32") and std.mem.eql(u8, function.source_name, "GetEnvironmentStringsW")) {
+        return function.signature.arguments.len == 0 and function.signature.result == .read_address;
+    }
+    if (std.mem.eql(u8, function.provider, "Windows.kernel32") and std.mem.eql(u8, function.source_name, "FreeEnvironmentStringsW")) {
+        const arguments = [_]AbiValue{.read_address};
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Windows.kernel32") and std.mem.eql(u8, function.source_name, "GetFileAttributesExW")) {
+        const arguments = [_]AbiValue{ .read_address, .int32, .read_address };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Windows.kernel32") and std.mem.eql(u8, function.source_name, "FindFirstFileW")) {
+        const arguments = [_]AbiValue{ .read_address, .read_address };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .uint64;
+    }
+    if (std.mem.eql(u8, function.provider, "Windows.kernel32") and std.mem.eql(u8, function.source_name, "FindNextFileW")) {
+        const arguments = [_]AbiValue{ .uint64, .read_address };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Windows.kernel32") and std.mem.eql(u8, function.source_name, "FindClose")) {
+        const arguments = [_]AbiValue{.uint64};
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Windows.kernel32") and std.mem.eql(u8, function.source_name, "CreateDirectoryW")) {
+        const arguments = [_]AbiValue{ .read_address, .read_address };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Windows.kernel32") and
+        (std.mem.eql(u8, function.source_name, "DeleteFileW") or std.mem.eql(u8, function.source_name, "RemoveDirectoryW")))
+    {
+        const arguments = [_]AbiValue{.read_address};
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Windows.kernel32") and std.mem.eql(u8, function.source_name, "MoveFileExW")) {
+        const arguments = [_]AbiValue{ .read_address, .read_address, .int32 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Windows.kernel32") and std.mem.eql(u8, function.source_name, "CopyFileW")) {
+        const arguments = [_]AbiValue{ .read_address, .read_address, .int32 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Windows.kernel32") and std.mem.eql(u8, function.source_name, "SetFileAttributesW")) {
+        const arguments = [_]AbiValue{ .read_address, .int32 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Windows.kernel32") and std.mem.eql(u8, function.source_name, "GetFullPathNameW")) {
+        const arguments = [_]AbiValue{ .read_address, .int32, .read_address, .read_address };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Windows.kernel32") and std.mem.eql(u8, function.source_name, "CreatePipe")) {
+        const arguments = [_]AbiValue{ .read_address, .read_address, .read_address, .int32 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Windows.kernel32") and std.mem.eql(u8, function.source_name, "SetHandleInformation")) {
+        const arguments = [_]AbiValue{ .uint64, .int32, .int32 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Windows.kernel32") and std.mem.eql(u8, function.source_name, "CreateProcessW")) {
+        const arguments = [_]AbiValue{ .read_address, .read_address, .read_address, .read_address, .int32, .int32, .read_address, .read_address, .read_address, .read_address };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Windows.kernel32") and
+        (std.mem.eql(u8, function.source_name, "ReadFile") or std.mem.eql(u8, function.source_name, "WriteFile")))
+    {
+        const arguments = [_]AbiValue{ .uint64, .read_address, .int32, .read_address, .read_address };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Windows.kernel32") and std.mem.eql(u8, function.source_name, "PeekNamedPipe")) {
+        const arguments = [_]AbiValue{ .uint64, .read_address, .int32, .read_address, .read_address, .read_address };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Windows.kernel32") and std.mem.eql(u8, function.source_name, "CloseHandle")) {
+        const arguments = [_]AbiValue{.uint64};
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Windows.kernel32") and std.mem.eql(u8, function.source_name, "TerminateProcess")) {
+        const arguments = [_]AbiValue{ .uint64, .int32 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Windows.kernel32") and std.mem.eql(u8, function.source_name, "GetExitCodeProcess")) {
+        const arguments = [_]AbiValue{ .uint64, .read_address };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Windows.kernel32") and std.mem.eql(u8, function.source_name, "GetLastError")) return function.signature.arguments.len == 0 and function.signature.result == .int32;
+    if (std.mem.eql(u8, function.provider, "Windows.kernel32") and std.mem.eql(u8, function.source_name, "CreateThread")) {
+        const arguments = [_]AbiValue{ .read_address, .uint64, .read_address, .read_address, .int32, .read_address };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .uint64;
+    }
+    if (std.mem.eql(u8, function.provider, "Windows.ws2_32") and std.mem.eql(u8, function.source_name, "GetAddrInfoW")) {
+        const arguments = [_]AbiValue{ .read_address, .read_address, .read_address, .read_address };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Windows.ws2_32") and std.mem.eql(u8, function.source_name, "FreeAddrInfoW")) {
+        const arguments = [_]AbiValue{.read_address};
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == null;
+    }
+    if (std.mem.eql(u8, function.provider, "Windows.ws2_32") and std.mem.eql(u8, function.source_name, "WSAStartup")) {
+        const arguments = [_]AbiValue{ .int32, .read_address };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Windows.ws2_32") and std.mem.eql(u8, function.source_name, "WSACleanup")) {
+        return function.signature.arguments.len == 0 and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Windows.ws2_32") and std.mem.eql(u8, function.source_name, "socket")) {
+        const arguments = [_]AbiValue{ .int32, .int32, .int32 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int64;
+    }
+    if (std.mem.eql(u8, function.provider, "Windows.ws2_32") and
+        (std.mem.eql(u8, function.source_name, "connect") or std.mem.eql(u8, function.source_name, "bind")))
+    {
+        const arguments = [_]AbiValue{ .int64, .read_address, .int32 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Windows.ws2_32") and
+        (std.mem.eql(u8, function.source_name, "listen") or std.mem.eql(u8, function.source_name, "shutdown")))
+    {
+        const arguments = [_]AbiValue{ .int64, .int32 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Windows.ws2_32") and std.mem.eql(u8, function.source_name, "accept")) {
+        const arguments = [_]AbiValue{ .int64, .read_address, .read_address };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int64;
+    }
+    if (std.mem.eql(u8, function.provider, "Windows.ws2_32") and
+        (std.mem.eql(u8, function.source_name, "recv") or std.mem.eql(u8, function.source_name, "send")))
+    {
+        const arguments = [_]AbiValue{ .int64, .read_address, .int32, .int32 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Windows.ws2_32") and std.mem.eql(u8, function.source_name, "closesocket")) {
+        const arguments = [_]AbiValue{.int64};
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Windows.ws2_32") and
+        (std.mem.eql(u8, function.source_name, "getsockname") or std.mem.eql(u8, function.source_name, "getpeername")))
+    {
+        const arguments = [_]AbiValue{ .int64, .read_address, .read_address };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Windows.ws2_32") and std.mem.eql(u8, function.source_name, "setsockopt")) {
+        const arguments = [_]AbiValue{ .int64, .int32, .int32, .read_address, .int32 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Windows.ws2_32") and std.mem.eql(u8, function.source_name, "sendto")) {
+        const arguments = [_]AbiValue{ .int64, .read_address, .int32, .int32, .read_address, .int32 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.provider, "Windows.ws2_32") and std.mem.eql(u8, function.source_name, "recvfrom")) {
+        const arguments = [_]AbiValue{ .int64, .read_address, .int32, .int32, .read_address, .read_address };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    return false;
 }
 
 fn requireSlot(function: Function, slot: Slot) Error!void {

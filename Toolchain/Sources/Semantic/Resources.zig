@@ -107,6 +107,9 @@ fn containsView(self: anytype, type_value: Ast.Type) bool {
 
 pub fn analyzeDrop(self: anytype, structure_index: usize, declaration: Ast.Structure, drop: Ast.Drop) !Ir.Function {
     try validateDrop(self, drop);
+    const previous_context = self.member_context;
+    self.member_context = structure_index;
+    defer self.member_context = previous_context;
     const structure_type = Ast.Type.structure(structure_index);
     var builder: Model.FunctionBuilder = .{ .return_type = .void };
     try builder.blocks.append(self.allocator, .{});
@@ -241,6 +244,13 @@ pub fn emitActiveDrops(self: anytype, builder: anytype, first_binding: usize) !v
             break :value loaded;
         } else binding.value orelse continue;
         try emitDrop(self, builder, binding.type, value);
+    }
+}
+
+pub fn emitMutexUnlocks(self: anytype, builder: anytype, target_depth: usize) !void {
+    var depth = builder.mutex_depth;
+    while (depth > target_depth) : (depth -= 1) {
+        try self.emit(builder, .mutex_unlock);
     }
 }
 
@@ -523,6 +533,7 @@ fn statementForbidden(statement: Ast.Statement) bool {
         },
         .while_statement => |value| expressionHasTry(value.condition.source()) or statementsForbidden(value.statements),
         .for_statement => |value| statementsForbidden(value.statements),
+        .mutex_statement => |value| statementsForbidden(value.statements),
         .break_statement, .continue_statement => false,
     };
 }

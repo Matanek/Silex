@@ -47,7 +47,7 @@ fn parseRequirement(self: anytype) !Ast.Function {
         try parameters.append(self.allocator, parameter);
         if (self.current.tag != .comma) break;
         try self.advance();
-        if (self.current.tag == .right_parenthesis) return self.fail("expected parameter after ','");
+        if (self.current.tag == .right_parenthesis) break;
     };
     try self.expect(.right_parenthesis, "expected ')' after parameters");
     var return_mode: Ast.Parameter.Mode = .value;

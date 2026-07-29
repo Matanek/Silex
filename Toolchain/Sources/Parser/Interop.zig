@@ -28,10 +28,18 @@ pub fn parseFunction(self: anytype) !Ast.ExternalFunction {
     try self.expect(.left_parenthesis, "expected '(' after C.function signature");
     try expectIdentifier(self, "library", "expected 'library' argument in C.function");
     try self.expect(.colon, "expected ':' after 'library'");
-    try expectIdentifier(self, "MacOS", "expected a platform library such as MacOS.lib_system");
+    if (self.current.tag != .identifier) return self.fail("expected a platform library such as MacOS.lib_system");
+    const platform = self.current.lexeme;
+    if (!std.mem.eql(u8, platform, "MacOS") and
+        !std.mem.eql(u8, platform, "Linux") and
+        !std.mem.eql(u8, platform, "Windows"))
+    {
+        return self.fail("unknown interop platform");
+    }
+    try self.advance();
     try self.expect(.dot, "expected library name after platform");
     if (self.current.tag != .identifier) return self.fail("expected platform library name");
-    const library = try std.fmt.allocPrint(self.allocator, "MacOS.{s}", .{self.current.lexeme});
+    const library = try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ platform, self.current.lexeme });
     try self.advance();
     try self.expect(.comma, "expected ',' after C.function library");
     try expectIdentifier(self, "name", "expected 'name' argument in C.function");
@@ -53,22 +61,39 @@ pub fn parseFunction(self: anytype) !Ast.ExternalFunction {
 }
 
 fn parseType(self: anytype) !Ast.ExternalType {
+    if (self.current.tag == .keyword_void) {
+        try self.advance();
+        return .void;
+    }
     if (self.current.tag == .keyword_int32) {
         try self.advance();
         return .int32;
     }
-    try expectIdentifier(self, "C", "foreign signatures currently require int32 or a C type");
+    if (self.current.tag == .keyword_int) {
+        try self.advance();
+        return .int64;
+    }
+    if (self.current.tag == .keyword_uint32) {
+        try self.advance();
+        return .uint32;
+    }
+    if (self.current.tag == .keyword_uint) {
+        try self.advance();
+        return .uint64;
+    }
+    try expectIdentifier(self, "C", "foreign signatures currently require void, an integer, or a C type");
     try self.expect(.dot, "expected C type name after 'C'");
     if (self.current.tag != .identifier) return self.fail("expected C type name");
     const name = self.current.lexeme;
     try self.advance();
     if (std.mem.eql(u8, name, "Size")) return .size;
     if (std.mem.eql(u8, name, "SignedSize")) return .signed_size;
-    if (!std.mem.eql(u8, name, "Pointer")) return self.fail("unknown C foreign type");
-    try self.expect(.less, "expected '<' after C.Pointer");
+    const mutable = std.mem.eql(u8, name, "MutablePointer");
+    if (!mutable and !std.mem.eql(u8, name, "Pointer")) return self.fail("unknown C foreign type");
+    try self.expect(.less, "expected '<' after C pointer type");
     const child = try self.parseType();
-    try self.expect(.greater, "expected '>' after C.Pointer element type");
-    return .{ .read_pointer = child };
+    try self.expect(.greater, "expected '>' after C pointer element type");
+    return if (mutable) .{ .mutable_pointer = child } else .{ .read_pointer = child };
 }
 
 fn expectIdentifier(self: anytype, expected: []const u8, message: []const u8) !void {
