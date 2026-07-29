@@ -65,6 +65,11 @@ fn parse(self: anytype, fragment: usize) !void {
         if (self.cache_modules) CompilationCache.storeAst(self.allocator, self.io, provider.path, source, installed);
         break :parsed installed;
     };
+    for (self.units[fragment].program.?.functions) |function| {
+        if (function.is_public and std.mem.eql(u8, function.name, "main")) {
+            return self.fail(function.name_position, "'main' cannot be public");
+        }
+    }
 }
 
 fn bind(self: anytype, module: usize) !void {

@@ -37,6 +37,66 @@ test "compile only the explicit local module closure" {
     try std.testing.expectEqualStrings("Math.Operations.add", compilation.ir.functions[2].name);
 }
 
+test "keep main local to the explicit source file" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data =
+        \\use Library
+        \\func answer() int { return Library.answer() }
+        \\func main() { answer() }
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Library.sx",
+        .data =
+        \\public func answer() int { return 42 }
+        \\func main() { missing_function() }
+        ,
+    });
+
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const input = try std.fs.path.join(allocator, &.{ root, "Main.sx" });
+    var compiler = Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(input);
+    const answer = try @import("../Interpreter.zig").invoke(allocator, compilation.ir, 0, &.{});
+    try std.testing.expectEqual(@as(i64, 42), answer.integer);
+    for (compilation.ir.functions) |function| {
+        try std.testing.expect(!std.mem.eql(u8, function.name, "Library.main"));
+    }
+    for (compilation.interfaces) |interface| for (interface.functions) |function| {
+        try std.testing.expect(!std.mem.eql(u8, function.export_name, "main"));
+    };
+
+    const library_input = try std.fs.path.join(allocator, &.{ root, "Library.sx" });
+    var direct = Compiler.init(allocator, std.testing.io);
+    try std.testing.expectError(error.InvalidSource, direct.compile(library_input));
+    try std.testing.expectEqualStrings("unknown function 'Library.missing_function'", direct.diagnostic.?.message);
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Library.sx",
+        .data =
+        \\public func answer() int { return 42 }
+        \\public func main() {}
+        ,
+    });
+    var invalid_public = Compiler.init(allocator, std.testing.io);
+    try std.testing.expectError(error.InvalidSource, invalid_public.compile(input));
+    try std.testing.expectEqualStrings("'main' cannot be public", invalid_public.diagnostic.?.message);
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Library.sx",
+        .data = "public func answer() int { return 42 }\nfunc main() {",
+    });
+    var invalid_syntax = Compiler.init(allocator, std.testing.io);
+    try std.testing.expectError(error.InvalidSource, invalid_syntax.compile(input));
+}
+
 test "report missing modules and duplicate aliases" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

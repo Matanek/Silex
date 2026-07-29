@@ -55,6 +55,7 @@ test "try propagates only string failures through recoverable main" {
 }
 
 test "diagnose every invalid main return contract" {
+    try expectCompileError("public func main() {}", "'main' cannot be public");
     try expectCompileError("func main() int { return 0 }", "'main' must return 'void' or 'Result<void,str>'");
     try expectCompileError(
         "func main() Result<int,str> { return Result<int,str>.success(0) }",

@@ -14,6 +14,8 @@ const PE = @import("Windows/PE.zig");
 const WindowsImports = @import("Windows/Imports.zig");
 const ReleaseOptimizer = @import("Optimize/Release.zig");
 const Project = @import("Project.zig");
+const NativeTestRunner = @import("NativeTestRunner.zig");
+const TestDiscovery = @import("TestDiscovery.zig");
 const TargetModule = @import("Target.zig");
 
 const Io = std.Io;
@@ -21,6 +23,7 @@ const Io = std.Io;
 const usage =
     \\Usage: silex run <source.sx> [-d|--debug|-r|--release] [-n|--nocache] [--emit-ir]
     \\       silex interpret <source.sx> [-n|--nocache] [--emit-ir]
+    \\       silex test <source.sx|directory> [-n|--nocache] [--emit-ir]
     \\       silex compile <source.sx> [--target <target>] [-d|--debug|-r|--release] [-n|--nocache] -o|--output <executable>
     \\       silex targets
     \\       silex lsp
@@ -46,11 +49,183 @@ fn runCli(init: std.process.Init) !u8 {
     }
     if (std.mem.eql(u8, args[1], "run")) return runSource(init, allocator, args[2..]);
     if (std.mem.eql(u8, args[1], "interpret")) return interpretSource(init, allocator, args[2..]);
+    if (std.mem.eql(u8, args[1], "test")) return testSource(init, allocator, args[2..]);
     if (std.mem.eql(u8, args[1], "compile")) return compileNative(init, allocator, args[2..]);
     if (std.mem.eql(u8, args[1], "targets")) return listTargets(init, allocator, args[2..]);
     if (std.mem.eql(u8, args[1], "lsp")) return runLanguageServer(init, args[2..]);
     std.debug.print("silex: unknown command '{s}'\n\n{s}", .{ args[1], usage });
     return 1;
+}
+
+fn testSource(init: std.process.Init, allocator: std.mem.Allocator, args: []const []const u8) !u8 {
+    const options = switch (Cli.parseInterpret(args)) {
+        .options => |options| options,
+        .diagnostic => |diagnostic| {
+            printCliDiagnostic("test", diagnostic);
+            return 1;
+        },
+    };
+    const target = TargetModule.Target.host() orelse {
+        std.debug.print("silex: 'test' requires a recognized host target\n", .{});
+        return 1;
+    };
+    const input_stat = Io.Dir.cwd().statFile(init.io, options.source_path, .{}) catch |err| {
+        std.debug.print("silex: cannot inspect test path '{s}': {t}\n", .{ options.source_path, err });
+        return 1;
+    };
+    const directory_input = input_stat.kind == .directory;
+    const sources = TestDiscovery.sources(allocator, init.io, options.source_path, target) catch |err| switch (err) {
+        error.InvalidTestPath => {
+            std.debug.print("silex: test path must be a .sx source file or a directory\n", .{});
+            return 1;
+        },
+        else => return err,
+    };
+    const packages_root = try globalPackagesRoot(allocator, init.environ_map);
+    var passed: usize = 0;
+    var failed: usize = 0;
+    var source_errors: usize = 0;
+    for (sources) |source_path| {
+        var source_arena = std.heap.ArenaAllocator.init(init.gpa);
+        defer source_arena.deinit();
+        const source_allocator = source_arena.allocator();
+        var compiler = Project.Compiler.initWithPackagesAndCache(source_allocator, init.io, packages_root, options.cache);
+        compiler.target = target;
+        const compilation = compiler.compileTests(source_path) catch |err| switch (err) {
+            error.InvalidSource => {
+                printSourceDiagnostic(compiler, source_path);
+                source_errors += 1;
+                continue;
+            },
+            else => {
+                std.debug.print("silex: cannot compile tests in '{s}': {t}\n", .{ source_path, err });
+                source_errors += 1;
+                continue;
+            },
+        };
+        if (options.emit_ir) {
+            try Io.File.stdout().writeStreamingAll(init.io, try Ir.writeText(source_allocator, compilation.ir));
+        }
+        const native_program = if (target.eql(.macos_arm64))
+            NativeTestRunner.lower(
+                source_allocator,
+                init.io,
+                compilation.ir,
+                compilation.boundaries,
+                options.cache,
+            ) catch |err| native: {
+                std.debug.print("silex: native test backend cannot lower '{s}': {t}\n", .{ source_path, err });
+                source_errors += 1;
+                break :native null;
+            }
+        else
+            null;
+        if (target.eql(.macos_arm64) and native_program == null) continue;
+        if (native_program == null) {
+            var executable = true;
+            for (compilation.boundaries) |boundary| {
+                if (Interpreter.supportsBoundary(boundary)) continue;
+                std.debug.print(
+                    "silex: '{s}' cannot execute foreign function '{s}' from '{s}'\n",
+                    .{ source_path, boundary.source_name, boundary.provider },
+                );
+                executable = false;
+                break;
+            }
+            if (!executable) {
+                source_errors += 1;
+                continue;
+            }
+        }
+
+        const display_path = if (directory_input) relativeTestPath(options.source_path, source_path) else source_path;
+        for (compilation.tests) |case| {
+            const case_name = case.name orelse try std.fmt.allocPrint(source_allocator, "test at line {d}", .{case.position.line});
+            const label = if (directory_input)
+                try std.fmt.allocPrint(source_allocator, "{s} :: {s}", .{ display_path, case_name })
+            else
+                case_name;
+            const succeeded = if (native_program) |machine| succeeded: {
+                const result = NativeTestRunner.execute(
+                    source_allocator,
+                    init.io,
+                    machine,
+                    case.function,
+                    source_path,
+                    compilation.files,
+                    options.cache,
+                ) catch |err| {
+                    failed += 1;
+                    std.debug.print("silex: cannot execute native test '{s}': {t}\n", .{ label, err });
+                    try Io.File.stdout().writeStreamingAll(init.io, try std.fmt.allocPrint(source_allocator, "FAILED - {s}\n", .{label}));
+                    continue;
+                };
+                try Io.File.stdout().writeStreamingAll(init.io, result.stdout);
+                try Io.File.stderr().writeStreamingAll(init.io, result.stderr);
+                break :succeeded switch (result.term) {
+                    .exited => |code| code == 0,
+                    .signal => |signal| signaled: {
+                        std.debug.print("silex: native test '{s}' terminated by signal {d}\n", .{ label, @intFromEnum(signal) });
+                        break :signaled false;
+                    },
+                    .stopped => |signal| stopped: {
+                        std.debug.print("silex: native test '{s}' stopped by signal {d}\n", .{ label, @intFromEnum(signal) });
+                        break :stopped false;
+                    },
+                    .unknown => |status| unknown: {
+                        std.debug.print("silex: native test '{s}' terminated with unknown status {d}\n", .{ label, status });
+                        break :unknown false;
+                    },
+                };
+            } else succeeded: {
+                const result = Interpreter.runFunctionCaptureWithBoundaries(
+                    source_allocator,
+                    init.io,
+                    compilation.ir,
+                    case.function,
+                    compilation.boundaries,
+                ) catch |err| {
+                    failed += 1;
+                    std.debug.print("silex: test runtime error in '{s}': {t}\n", .{ label, err });
+                    try Io.File.stdout().writeStreamingAll(init.io, try std.fmt.allocPrint(source_allocator, "FAILED - {s}\n", .{label}));
+                    continue;
+                };
+                try Io.File.stdout().writeStreamingAll(init.io, result.stdout);
+                try Io.File.stderr().writeStreamingAll(init.io, result.stderr);
+                break :succeeded result.exit_code == 0;
+            };
+            const status = if (succeeded) status: {
+                passed += 1;
+                break :status "ok";
+            } else status: {
+                failed += 1;
+                break :status "FAILED";
+            };
+            try Io.File.stdout().writeStreamingAll(init.io, try std.fmt.allocPrint(source_allocator, "{s} - {s}\n", .{ status, label }));
+        }
+    }
+    const summary = if (directory_input)
+        try std.fmt.allocPrint(allocator, "{d} passed; {d} failed in {d} files", .{ passed, failed, sources.len })
+    else
+        try std.fmt.allocPrint(allocator, "{d} passed; {d} failed", .{ passed, failed });
+    const line = if (source_errors == 0)
+        try std.fmt.allocPrint(allocator, "{s}\n", .{summary})
+    else
+        try std.fmt.allocPrint(allocator, "{s}; {d} source errors\n", .{ summary, source_errors });
+    try Io.File.stdout().writeStreamingAll(init.io, line);
+    return if (failed == 0 and source_errors == 0) 0 else 1;
+}
+
+fn relativeTestPath(root: []const u8, path: []const u8) []const u8 {
+    if (std.mem.eql(u8, root, ".")) return path;
+    var prefix_len = root.len;
+    while (prefix_len != 0 and (root[prefix_len - 1] == '/' or root[prefix_len - 1] == '\\')) prefix_len -= 1;
+    if (path.len > prefix_len and std.mem.startsWith(u8, path, root[0..prefix_len]) and
+        (path[prefix_len] == '/' or path[prefix_len] == '\\'))
+    {
+        return path[prefix_len + 1 ..];
+    }
+    return path;
 }
 
 fn listTargets(init: std.process.Init, allocator: std.mem.Allocator, args: []const []const u8) !u8 {
@@ -509,8 +684,14 @@ fn executeNative(init: std.process.Init, executable_path: []const u8) !u8 {
 
 fn printCliDiagnostic(command: []const u8, diagnostic: Cli.Diagnostic) void {
     switch (diagnostic.kind) {
-        .missing_source => std.debug.print("silex: '{s}' expects one source file\n", .{command}),
-        .multiple_sources => std.debug.print("silex: '{s}' accepts only one source file, found '{s}'\n", .{ command, diagnostic.argument.? }),
+        .missing_source => if (std.mem.eql(u8, command, "test"))
+            std.debug.print("silex: 'test' expects one source file or directory\n", .{})
+        else
+            std.debug.print("silex: '{s}' expects one source file\n", .{command}),
+        .multiple_sources => if (std.mem.eql(u8, command, "test"))
+            std.debug.print("silex: 'test' accepts only one source file or directory, found '{s}'\n", .{diagnostic.argument.?})
+        else
+            std.debug.print("silex: '{s}' accepts only one source file, found '{s}'\n", .{ command, diagnostic.argument.? }),
         .missing_output => if (diagnostic.argument) |argument|
             std.debug.print("silex: option '{s}' expects an output path\n", .{argument})
         else
@@ -600,6 +781,9 @@ test {
     _ = @import("OptionalTests.zig");
     _ = @import("ResultTests.zig");
     _ = @import("TryTests.zig");
+    _ = @import("TestBlockTests.zig");
+    _ = @import("TestDiscovery.zig");
+    _ = @import("NativeTestRunner.zig");
     _ = @import("ViewTests.zig");
     _ = @import("ClassTests.zig");
     _ = @import("ProtocolTests.zig");

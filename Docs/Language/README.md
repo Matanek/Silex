@@ -19,6 +19,7 @@ The guide is grouped by the part of the language you are using.
 - [Branch and repeat](Getting-started/Control-flow.md)
 - [Build strings](Getting-started/Strings.md)
 - [Print and stop a program](Getting-started/Output.md)
+- [Test one source](Getting-started/Tests.md)
 
 ## Functions
 

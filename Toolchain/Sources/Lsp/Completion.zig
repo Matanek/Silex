@@ -144,6 +144,7 @@ pub fn itemsAt(
             .{ "protocol", "Silex nominal contract declaration" },
             .{ "enum", "Silex enumeration declaration" },
             .{ "func", "Silex function declaration" },
+            .{ "test", "Silex source-local test" },
             .{ "extend", "Silex type extension" },
         }, 70),
         .structure_declaration => try appendKeywords(allocator, &candidates, context, &.{
@@ -338,28 +339,35 @@ fn scopeAt(tokens: []const Token) Scope {
     var pending: Block = .plain;
     var pending_callable = false;
     var interpolation_depth: usize = 0;
-    for (tokens) |token| switch (token.tag) {
-        .keyword_struct, .keyword_extend => pending = .structure,
-        .keyword_func, .keyword_init => {
+    for (tokens) |token| {
+        if (count == 0 and token.tag == .identifier and std.mem.eql(u8, token.lexeme, "test")) {
             pending = .callable;
             pending_callable = true;
-        },
-        .keyword_while => pending = .loop,
-        .left_brace => {
-            if (count < blocks.len) {
-                blocks[count] = pending;
-                count += 1;
-            }
-            if (pending == .callable) pending_callable = false;
-            pending = .plain;
-        },
-        .right_brace => if (count != 0) {
-            count -= 1;
-        },
-        .interpolation_start => interpolation_depth += 1,
-        .interpolation_end => interpolation_depth -|= 1,
-        else => {},
-    };
+            continue;
+        }
+        switch (token.tag) {
+            .keyword_struct, .keyword_extend => pending = .structure,
+            .keyword_func, .keyword_init => {
+                pending = .callable;
+                pending_callable = true;
+            },
+            .keyword_while => pending = .loop,
+            .left_brace => {
+                if (count < blocks.len) {
+                    blocks[count] = pending;
+                    count += 1;
+                }
+                if (pending == .callable) pending_callable = false;
+                pending = .plain;
+            },
+            .right_brace => if (count != 0) {
+                count -= 1;
+            },
+            .interpolation_start => interpolation_depth += 1,
+            .interpolation_end => interpolation_depth -|= 1,
+            else => {},
+        }
+    }
     var result: Scope = .{ .interpolation_depth = interpolation_depth, .pending_callable = pending_callable };
     for (blocks[0..count]) |block| switch (block) {
         .structure => result.in_structure = true,
@@ -648,6 +656,12 @@ fn appendExpressionSymbols(
 
     for (program.functions) |function| {
         if (function.is_anonymous or std.mem.eql(u8, function.name, "main")) continue;
+        if (function.is_test) {
+            if (function.is_test_entry) continue;
+            const current = callable orelse continue;
+            const owner = function.test_owner orelse continue;
+            if (current.test_owner == null or !std.mem.eql(u8, current.test_owner.?, owner)) continue;
+        }
         if (!callAcceptsParameters(source, cursor, program, function.parameters)) continue;
         const return_type = typeName(program, function.return_type);
         const passed_as_value = if (expected_type) |expected|
@@ -658,10 +672,12 @@ fn appendExpressionSymbols(
         else
             false;
         if (!passed_as_value and !matchesExpectedType(expected_type, return_type)) continue;
+        var displayed = function;
+        displayed.name = function.test_source_name orelse function.name;
         try appendCandidate(allocator, candidates, context, .{
-            .label = function.name,
+            .label = displayed.name,
             .kind = CompletionKind.function,
-            .detail = try functionSignature(allocator, source, program, function),
+            .detail = try functionSignature(allocator, source, program, displayed),
         }, typedPriority(25, expected_type, if (passed_as_value) "function" else return_type), !passed_as_value);
     }
     for (program.structures) |structure| {
@@ -803,6 +819,7 @@ const Callable = struct {
     parameters: []const Ast.Parameter,
     return_type: Ast.Type,
     structure_name: ?[]const u8 = null,
+    test_owner: ?[]const u8 = null,
 };
 
 fn containingCallable(source: []const u8, program: Ast.Program, cursor: usize) ?Callable {
@@ -813,6 +830,7 @@ fn containingCallable(source: []const u8, program: Ast.Program, cursor: usize) ?
             .position = function.position.offset,
             .parameters = function.parameters,
             .return_type = function.return_type,
+            .test_owner = function.test_owner,
         };
     }
     for (program.structures) |structure| {
@@ -1548,6 +1566,32 @@ test "complete anonymous function parameters without exposing synthetic function
     const items = try itemsAt(arena.allocator(), source, cursor, .invoked);
     try std.testing.expect(contains(items, "value"));
     for (items) |item| try std.testing.expect(!std.mem.startsWith(u8, item.label, "__silex_anonymous_"));
+}
+
+test "complete test-local helpers only inside their block" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source =
+        \\test "local" {
+        \\    func helper() int { return 42 }
+        \\    print(hel)
+        \\}
+        \\test "other" {
+        \\    print(hel)
+        \\}
+        \\func main() { print(hel) }
+    ;
+    const first = std.mem.indexOf(u8, source, "print(hel)").? + "print(hel".len;
+    const second_start = std.mem.indexOfPos(u8, source, first, "print(hel)").?;
+    const second = second_start + "print(hel".len;
+    const outside_start = std.mem.lastIndexOf(u8, source, "print(hel)").?;
+    const outside = outside_start + "print(hel".len;
+
+    const local_items = try itemsAt(arena.allocator(), source, first, .invoked);
+    try std.testing.expect(contains(local_items, "helper"));
+    for (local_items) |item| try std.testing.expect(!std.mem.startsWith(u8, item.label, "__silex_test_"));
+    try std.testing.expect(!contains(try itemsAt(arena.allocator(), source, second, .invoked), "helper"));
+    try std.testing.expect(!contains(try itemsAt(arena.allocator(), source, outside, .invoked), "helper"));
 }
 
 test "insert nominal types without constructor parentheses in anonymous parameters" {

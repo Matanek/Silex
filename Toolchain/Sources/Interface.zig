@@ -155,6 +155,7 @@ pub fn buildMappedGenerics(
 ) Allocator.Error!Module {
     var structures: std.ArrayList(Structure) = .empty;
     for (program.structures) |structure| {
+        if (structure.is_test) continue;
         if (!structure.is_public or !publicOwners(program, structure)) continue;
         var fields: std.ArrayList(StructureField) = .empty;
         for (structure.fields) |field| {
@@ -259,7 +260,7 @@ pub fn buildMappedGenerics(
         });
     }
     for (program.functions) |function| {
-        if (!function.is_public) continue;
+        if (function.is_test or !function.is_public or std.mem.eql(u8, function.name, "main")) continue;
         const parameter_types = try allocator.alloc(Types.Type, function.parameters.len);
         for (function.parameters, 0..) |parameter, index| parameter_types[index] = mappedType(parameter.type, type_map, generic_map);
         const type_parameters = try allocator.alloc([]const u8, function.type_parameters.len);
