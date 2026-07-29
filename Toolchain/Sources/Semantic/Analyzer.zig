@@ -742,6 +742,9 @@ pub const Analyzer = struct {
 
     fn analyzeFieldAccess(self: *Analyzer, builder: *FunctionBuilder, access: Ast.Expression.FieldAccess) AnalyzeError!TypedValue {
         if (try GenericSyntax.qualifiedName(self.allocator, access.base)) |owner_name| {
+            if (Enums.find(self, owner_name)) |enum_index| {
+                return Enums.analyzeValue(self, builder, access.name, access.name_position, enum_index);
+            }
             if (StaticMembers.ownerIndex(self, owner_name)) |structure_index| {
                 if (!Visibility.typeVisible(self, structure_index, access.name_position)) {
                     return self.fail(access.name_position, "nested type is unavailable in this context");

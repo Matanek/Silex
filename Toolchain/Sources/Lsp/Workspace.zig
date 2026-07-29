@@ -19,6 +19,7 @@ const CompletionKind = struct {
     const interface: u8 = 8;
     const module: u8 = 9;
     const enum_type: u8 = 13;
+    const enum_member: u8 = 20;
     const structure: u8 = 22;
 };
 
@@ -454,6 +455,14 @@ fn queryAt(
                 .prefix = prefix,
                 .cursor = cursor,
                 .type_only = isQualifiedTypePrefix(source, prefix_start),
+            } };
+        }
+        if (try importedTypePath(allocator, program, project, Completion.nominalReceiverName(receiver))) |type_path| {
+            return .{ .imported_member = .{
+                .type_path = type_path,
+                .prefix = prefix,
+                .cursor = cursor,
+                .static_receiver = true,
             } };
         }
         if (Completion.qualifiedCall(receiver)) |call| {
@@ -1054,6 +1063,19 @@ fn appendImportedMembers(
             structure,
             ranked,
         );
+        return;
+    }
+    for (loaded.program.enums) |enumeration| {
+        if (!std.mem.eql(u8, enumeration.name, target.declaration)) continue;
+        if (!enumeration.is_public or !query.static_receiver) return;
+        for (enumeration.variants) |variant| {
+            if (!std.mem.startsWith(u8, variant.name, query.prefix)) continue;
+            try appendRanked(allocator, ranked, .{
+                .label = variant.name,
+                .kind = CompletionKind.enum_member,
+                .detail = try Completion.variantSignature(allocator, loaded.program, enumeration, variant),
+            }, 0, variant.associated_types.len != 0);
+        }
         return;
     }
 }

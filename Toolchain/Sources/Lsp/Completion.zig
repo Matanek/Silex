@@ -20,6 +20,7 @@ const CompletionKind = struct {
     const structure: u8 = 22;
     const value: u8 = 12;
     const enum_type: u8 = 13;
+    const enum_member: u8 = 20;
     const keyword: u8 = 14;
 };
 
@@ -227,7 +228,7 @@ pub fn callFollows(source: []const u8, cursor: usize) bool {
 }
 
 fn callableSignature(item: CompletionItem) ?[]const u8 {
-    if (item.kind != CompletionKind.method and item.kind != CompletionKind.function and
+    if (item.kind != CompletionKind.method and item.kind != CompletionKind.function and item.kind != CompletionKind.enum_member and
         item.kind != CompletionKind.structure and item.kind != CompletionKind.class) return null;
     if (!std.mem.startsWith(u8, item.detail, item.label)) return null;
     const signature = item.detail[item.label.len..];
@@ -536,6 +537,15 @@ fn appendMembers(
     context: Context,
 ) !void {
     const receiver = context.receiver orelse return;
+    const trimmed_receiver = std.mem.trim(u8, receiver, " \t\r\n");
+    if (findEnum(program, trimmed_receiver)) |enumeration| {
+        for (enumeration.variants) |variant| try appendCandidate(allocator, candidates, context, .{
+            .label = variant.name,
+            .kind = CompletionKind.enum_member,
+            .detail = try variantSignature(allocator, program, enumeration, variant),
+        }, 0, variant.associated_types.len != 0);
+        return;
+    }
     const type_name = resolveReceiverType(allocator, source, program, cursor, receiver) orelse return;
     if (std.mem.eql(u8, type_name, "str")) {
         try appendCandidate(allocator, candidates, context, .{
@@ -1221,6 +1231,26 @@ pub fn constructorSignature(
     return std.fmt.allocPrint(allocator, "{s}) {s}", .{ result, name });
 }
 
+pub fn variantSignature(
+    allocator: Allocator,
+    program: Ast.Program,
+    enumeration: Ast.Enum,
+    variant: Ast.EnumVariant,
+) ![]const u8 {
+    if (variant.associated_types.len == 0) {
+        return std.fmt.allocPrint(allocator, "{s} {s}", .{ variant.name, enumeration.name });
+    }
+    var result = try std.fmt.allocPrint(allocator, "{s}(", .{variant.name});
+    for (variant.associated_types, 0..) |associated, index| {
+        result = try std.fmt.allocPrint(allocator, "{s}{s}{s}", .{
+            result,
+            if (index == 0) "" else ", ",
+            typeName(program, associated),
+        });
+    }
+    return std.fmt.allocPrint(allocator, "{s}) {s}", .{ result, enumeration.name });
+}
+
 fn parameterDefaultText(source: []const u8, start: usize) ?[]const u8 {
     if (start >= source.len) return null;
     var lexer = LexerModule.Lexer.init(source[start..]);
@@ -1259,6 +1289,14 @@ fn memberTypeName(program: Ast.Program, type_value: Ast.Type) []const u8 {
 fn findStructure(program: Ast.Program, name: []const u8) ?Ast.Structure {
     for (program.structures) |structure| {
         if (std.mem.eql(u8, structure.name, name) or std.mem.endsWith(u8, name, structure.name)) return structure;
+    }
+    return null;
+}
+
+fn findEnum(program: Ast.Program, name: []const u8) ?Ast.Enum {
+    const nominal_name = nominalReceiverName(name);
+    for (program.enums) |enumeration| {
+        if (std.mem.eql(u8, enumeration.name, nominal_name) or std.mem.endsWith(u8, nominal_name, enumeration.name)) return enumeration;
     }
     return null;
 }
@@ -1303,8 +1341,25 @@ pub fn memberReceiver(source: []const u8, dot: usize) ?[]const u8 {
             }
         }
     }
+    if (start != 0 and source[start - 1] == '>') {
+        var depth: usize = 0;
+        while (start != 0) {
+            start -= 1;
+            if (source[start] == '>') depth += 1;
+            if (source[start] == '<') {
+                depth -|= 1;
+                if (depth == 0) break;
+            }
+        }
+    }
     while (start != 0 and (isIdentifierContinue(source[start - 1]) or source[start - 1] == '.')) start -= 1;
     return source[start..dot];
+}
+
+pub fn nominalReceiverName(receiver: []const u8) []const u8 {
+    const trimmed = std.mem.trim(u8, receiver, " \t\r\n");
+    const generic = std.mem.indexOfScalar(u8, trimmed, '<') orelse return trimmed;
+    return trimmed[0..generic];
 }
 
 pub const QualifiedCall = struct {
@@ -1440,6 +1495,36 @@ test "complete an instance with only its own members" {
     try std.testing.expect(!contains(items, "if"));
     try std.testing.expect(!contains(items, "float"));
     try std.testing.expect(!contains(items, "ignore"));
+}
+
+test "complete empty enum variants as values and payload variants as calls" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source =
+        \\enum State { ready; value(int) }
+        \\func main() { let state = State. }
+    ;
+    const cursor = std.mem.indexOf(u8, source, "State.").? + "State.".len;
+    const items = try itemsAt(arena.allocator(), source, cursor, .trigger_character);
+    const ready = items[indexOf(items, "ready").?];
+    const value = items[indexOf(items, "value").?];
+    try std.testing.expectEqualStrings("ready", ready.insertText.?);
+    try std.testing.expect(ready.insertTextFormat == null);
+    try std.testing.expectEqualStrings("value($0)", value.insertText.?);
+    try std.testing.expectEqual(@as(?u8, 2), value.insertTextFormat);
+}
+
+test "complete variants on a specialized generic enum" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source =
+        \\enum Choice<T> { empty; value(T) }
+        \\func main() { let choice = Choice<int>. }
+    ;
+    const cursor = std.mem.indexOf(u8, source, "Choice<int>.").? + "Choice<int>.".len;
+    const items = try itemsAt(arena.allocator(), source, cursor, .trigger_character);
+    try std.testing.expectEqualStrings("empty", items[indexOf(items, "empty").?].insertText.?);
+    try std.testing.expectEqualStrings("value($0)", items[indexOf(items, "value").?].insertText.?);
 }
 
 test "complete anonymous function parameters without exposing synthetic functions" {

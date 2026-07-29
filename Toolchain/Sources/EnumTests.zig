@@ -27,7 +27,7 @@ test "construct and transport associated enum variants" {
         \\func identity(value:Connection) Connection { return value }
         \\func accept(value:Connection) int { return 42 }
         \\func main() {
-        \\    let waiting = Connection.waiting()
+        \\    let waiting = Connection.waiting
         \\    let connected = identity(Connection.connected("server"))
         \\    let measured = Connection.measured(7, true)
         \\    let box = Box(connection:connected)
@@ -52,6 +52,10 @@ test "diagnose invalid associated enum construction" {
     try expectCompileError(
         "enum Choice { value(int) } func main() { Choice.value(false) }",
         "cannot implicitly convert 'bool' to 'int'",
+    );
+    try expectCompileError(
+        "enum Choice { value(int) } func main() { let selected = Choice.value }",
+        "variant 'Choice.value' expects 1 arguments and must be called",
     );
     try expectCompileError(
         "enum Choice { value } func main() { Choice.unknown() }",
@@ -79,16 +83,16 @@ test "compare enum variants and associated values recursively" {
         \\    var token = Token(name:"same")
         \\    var alias = token
         \\    var distinct = Token(name:"same")
-        \\    print(Choice.empty() == Choice.empty())
-        \\    print(Choice.empty() != Choice.pair(0, ""))
+        \\    print(Choice.empty == Choice.empty())
+        \\    print(Choice.empty != Choice.pair(0, ""))
         \\    print(Choice.pair(7, "value") == Choice.pair(7, "value"))
         \\    print(Choice.pair(7, "value") != Choice.pair(8, "value"))
         \\    print(Choice.nested(Inner.number(3)) == Choice.nested(Inner.number(3)))
-        \\    print(Choice.nested(Inner.number(3)) != Choice.nested(Inner.empty()))
+        \\    print(Choice.nested(Inner.number(3)) != Choice.nested(Inner.empty))
         \\    print(Choice.token(token) == Choice.token(alias))
         \\    print(Choice.token(token) != Choice.token(distinct))
-        \\    print(Direction.north() == Direction.north())
-        \\    print(Direction.north() != Direction.south())
+        \\    print(Direction.north == Direction.north())
+        \\    print(Direction.north() != Direction.south)
         \\}
     );
     const result = try Interpreter.runCapture(allocator, compilation.ir);
@@ -124,10 +128,10 @@ test "construct and observe integer and string raw enums" {
         \\func direction_name(value:Direction) str { return match value { north => "north"; south => "south" } }
         \\func relay(value:Label) Label { return value }
         \\func main() {
-        \\    print(code(Direction.north()))
-        \\    print(Direction.south().raw_value)
-        \\    print(direction_name(Direction.north()))
-        \\    print(relay(Label.line()).raw_value)
+        \\    print(code(Direction.north))
+        \\    print(Direction.south.raw_value)
+        \\    print(direction_name(Direction.north))
+        \\    print(relay(Label.line).raw_value)
         \\}
     );
     const result = try Interpreter.runCapture(allocator, compilation.ir);

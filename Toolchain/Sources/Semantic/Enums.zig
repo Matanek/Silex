@@ -92,6 +92,46 @@ pub fn analyzeInitializer(self: anytype, builder: anytype, call: Ast.Expression.
     return .{ .type = result_type, .value = result };
 }
 
+pub fn analyzeValue(
+    self: anytype,
+    builder: anytype,
+    name: []const u8,
+    position: @import("../Source.zig").Position,
+    enum_index: usize,
+) !Model.TypedValue {
+    const enumeration = self.program.enums[enum_index];
+    if (enumeration.is_internal and position.file != enumeration.position.file) {
+        const message = try std.fmt.allocPrint(self.allocator, "enum '{s}' is internal to its source file", .{enumeration.name});
+        return self.fail(position, message);
+    }
+    var selected: ?usize = null;
+    for (enumeration.variants, 0..) |variant, variant_index| {
+        if (std.mem.eql(u8, variant.name, name)) selected = variant_index;
+    }
+    const variant_index = selected orelse {
+        const message = try std.fmt.allocPrint(self.allocator, "enum '{s}' has no variant named '{s}'", .{ enumeration.name, name });
+        return self.fail(position, message);
+    };
+    const variant = enumeration.variants[variant_index];
+    if (variant.associated_types.len != 0) {
+        const message = try std.fmt.allocPrint(
+            self.allocator,
+            "variant '{s}.{s}' expects {d} arguments and must be called",
+            .{ enumeration.name, variant.name, variant.associated_types.len },
+        );
+        return self.fail(position, message);
+    }
+    const result_type = Ast.Type.structure(typeIndex(self.program, enumeration.name).?);
+    const result = try self.newValue(builder, result_type);
+    try self.emit(builder, .{ .enum_init = .{
+        .result = result,
+        .enumeration = enum_index,
+        .variant = variant_index,
+        .values = &.{},
+    } });
+    return .{ .type = result_type, .value = result };
+}
+
 pub fn analyzeProperty(self: anytype, builder: anytype, base: Model.TypedValue, name: []const u8, position: @import("../Source.zig").Position) !?Model.TypedValue {
     const enum_index = findByType(self, base.type) orelse return null;
     if (!std.mem.eql(u8, name, "raw_value")) {
