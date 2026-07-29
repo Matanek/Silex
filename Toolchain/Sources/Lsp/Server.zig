@@ -129,7 +129,8 @@ pub const Server = struct {
                 return try self.replyInvalidParams(allocator, id, "invalid completion position");
             };
             const trigger_kind = Protocol.completionTriggerKind(params);
-            if (std.mem.indexOf(u8, source, "use ") != null) {
+            const needs_workspace = needsWorkspaceCompletion(source, cursor);
+            if (needs_workspace) {
                 const project_items = Workspace.itemsAtForTarget(
                     allocator,
                     self.io,
@@ -146,7 +147,7 @@ pub const Server = struct {
                 }
             }
             const items = try Completion.itemsAt(allocator, source, cursor, trigger_kind);
-            if (std.mem.indexOf(u8, source, "use ") != null) {
+            if (needs_workspace) {
                 const imported = Workspace.scopeItemsAtForTarget(
                     allocator,
                     self.io,
@@ -170,7 +171,21 @@ pub const Server = struct {
 
     fn diagnosticsNotification(self: *Server, allocator: Allocator, uri: []const u8) ![]const u8 {
         const source = self.documentText(uri).?;
-        const diagnostics = try Diagnostics.analyze(allocator, source, self.position_encoding);
+        const has_project_context = Workspace.hasContextualReferenceForTarget(
+            allocator,
+            self.io,
+            self.global_packages_root,
+            self.target,
+            self.workspace_root_uri,
+            uri,
+            source,
+        ) catch false;
+        const diagnostics = try Diagnostics.analyze(
+            allocator,
+            source,
+            self.position_encoding,
+            has_project_context,
+        );
         return self.notification(allocator, "textDocument/publishDiagnostics", .{
             .uri = uri,
             .diagnostics = diagnostics,
@@ -280,8 +295,34 @@ fn completionItemLessThan(_: void, left: Types.CompletionItem, right: Types.Comp
     return std.mem.lessThan(u8, left.label, right.label);
 }
 
+fn needsWorkspaceCompletion(source: []const u8, cursor: usize) bool {
+    if (std.mem.indexOf(u8, source, "use ") != null) return true;
+    if (cursor > source.len) return false;
+    var prefix_start = cursor;
+    while (prefix_start != 0 and
+        (std.ascii.isAlphanumeric(source[prefix_start - 1]) or source[prefix_start - 1] == '_'))
+    {
+        prefix_start -= 1;
+    }
+    const prefix = source[prefix_start..cursor];
+    if (prefix.len != 0 and
+        (std.mem.startsWith(u8, "Platform", prefix) or std.mem.startsWith(u8, "Target", prefix)))
+    {
+        return true;
+    }
+    const before = source[0..prefix_start];
+    return std.mem.endsWith(u8, before, "Platform.") or std.mem.endsWith(u8, before, "Target.");
+}
+
+test "contextual qualifiers request workspace completion without an import" {
+    try std.testing.expect(needsWorkspaceCompletion("func seed() { Pla }", 17));
+    try std.testing.expect(needsWorkspaceCompletion("func seed() { Platform. }", 23));
+    try std.testing.expect(needsWorkspaceCompletion("func seed() { Target. }", 21));
+    try std.testing.expect(!needsWorkspaceCompletion("func seed() { local }", 19));
+}
+
 test "initialize advertises only the current LSP foundation" {
-    var server = Server.init(std.testing.allocator, undefined);
+    var server = Server.init(std.testing.allocator, std.testing.io);
     defer server.deinit();
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -294,7 +335,7 @@ test "initialize advertises only the current LSP foundation" {
 }
 
 test "document changes publish and clear current frontend diagnostics" {
-    var server = Server.init(std.testing.allocator, undefined);
+    var server = Server.init(std.testing.allocator, std.testing.io);
     defer server.deinit();
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -309,7 +350,7 @@ test "document changes publish and clear current frontend diagnostics" {
 }
 
 test "completion exposes an interpolation binding without historical types" {
-    var server = Server.init(std.testing.allocator, undefined);
+    var server = Server.init(std.testing.allocator, std.testing.io);
     defer server.deinit();
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -327,7 +368,7 @@ test "completion exposes an interpolation binding without historical types" {
 }
 
 test "member completion never leaks the global language catalogue" {
-    var server = Server.init(std.testing.allocator, undefined);
+    var server = Server.init(std.testing.allocator, std.testing.io);
     defer server.deinit();
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

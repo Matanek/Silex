@@ -1,3 +1,4 @@
+const std = @import("std");
 const Source = @import("../Source.zig");
 const Inheritance = @import("Inheritance.zig");
 
@@ -34,7 +35,32 @@ pub fn typeVisible(self: anytype, structure_index: usize, position: Source.Posit
         if (sameFamily(self, context, structure_index)) return true;
         return declaration.is_protected and Inheritance.isDescendant(self, context, owner);
     }
-    return declaration.is_public or position.file == declaration.position.file or active_file == declaration.position.file;
+    if (declaration.is_public) return true;
+    if (position.file == declaration.position.file or active_file == declaration.position.file) return true;
+    if (declaration.is_internal) return false;
+    return sameModule(self, structure_index);
+}
+
+fn sameModule(self: anytype, structure_index: usize) bool {
+    const target_root = root(self, structure_index);
+    const target = declarationAt(self, target_root) orelse return false;
+    const target_module = moduleName(target.name) orelse return false;
+    if (self.module_context) |context| return std.mem.eql(u8, logicalModule(context), target_module);
+    const context = self.member_context orelse return false;
+    const context_declaration = declarationAt(self, root(self, context)) orelse return false;
+    const context_module = moduleName(context_declaration.name) orelse return false;
+    return std.mem.eql(u8, context_module, target_module);
+}
+
+fn moduleName(name_value: []const u8) ?[]const u8 {
+    const separator = std.mem.lastIndexOfScalar(u8, name_value, '.') orelse return null;
+    return logicalModule(name_value[0..separator]);
+}
+
+fn logicalModule(module: []const u8) []const u8 {
+    if (std.mem.endsWith(u8, module, ".$Platform")) return module[0 .. module.len - ".$Platform".len];
+    if (std.mem.endsWith(u8, module, ".$Target")) return module[0 .. module.len - ".$Target".len];
+    return module;
 }
 
 pub fn sameFamily(self: anytype, left: usize, right: usize) bool {
@@ -65,5 +91,3 @@ pub fn name(member: anytype) []const u8 {
     if (member.is_protected) return "protected";
     return "private";
 }
-
-const std = @import("std");

@@ -54,6 +54,7 @@ pub const Analyzer = struct {
     constructor_context: ?usize = null,
     extension_context: bool = false,
     specialization_file: ?usize = null,
+    module_context: ?[]const u8 = null,
     anonymous_function_context: bool = false,
     target: ?Target = null,
     pub fn init(allocator: Allocator) Analyzer {
@@ -285,6 +286,12 @@ pub const Analyzer = struct {
 
     fn analyzeFunction(self: *Analyzer, function_id: Ir.FunctionId, function: Ast.Function) AnalyzeError!Ir.Function {
         _ = function_id;
+        const previous_module_context = self.module_context;
+        self.module_context = if (std.mem.lastIndexOfScalar(u8, function.name, '.')) |separator|
+            function.name[0..separator]
+        else
+            null;
+        defer self.module_context = previous_module_context;
         const previous_anonymous_function_context = self.anonymous_function_context;
         self.anonymous_function_context = function.is_anonymous;
         defer self.anonymous_function_context = previous_anonymous_function_context;

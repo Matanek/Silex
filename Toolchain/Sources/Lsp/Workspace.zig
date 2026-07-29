@@ -132,6 +132,45 @@ pub fn itemsAtForTarget(
     return result;
 }
 
+pub fn hasContextualReferenceForTarget(
+    allocator: Allocator,
+    io: Io,
+    global_packages_root: ?[]const u8,
+    selected_target: TargetModule.Target,
+    root_uri: ?[]const u8,
+    document_uri: []const u8,
+    source: []const u8,
+) !bool {
+    const program = try parseCurrent(allocator, source) orelse return false;
+    const references_platform = hasQualifiedIdentifier(source, "Platform");
+    const references_target = hasQualifiedIdentifier(source, "Target");
+    if (!references_platform and !references_target) return false;
+    const document_path = try pathFromUri(allocator, document_uri);
+    const root_hint = if (root_uri) |uri| try pathFromUri(allocator, uri) else null;
+    const root = try projectRoot(allocator, io, document_path, root_hint);
+    const project = try indexProject(allocator, io, global_packages_root, selected_target, root, document_path);
+    for ([_][]const u8{ "Platform", "Target" }) |qualifier| {
+        if (std.mem.eql(u8, qualifier, "Platform") and !references_platform) continue;
+        if (std.mem.eql(u8, qualifier, "Target") and !references_target) continue;
+        if (hasLocalNominal(program, qualifier)) continue;
+        if (contextualProvider(project, qualifier) == null) continue;
+        return true;
+    }
+    return false;
+}
+
+fn hasQualifiedIdentifier(source: []const u8, qualifier: []const u8) bool {
+    var lexer = LexerModule.Lexer.init(source);
+    while (true) {
+        const token = lexer.next() catch return false;
+        if (token.tag == .end) return false;
+        if (token.tag != .identifier or !std.mem.eql(u8, token.lexeme, qualifier)) continue;
+        const separator = lexer.next() catch return false;
+        if (separator.tag == .dot) return true;
+        if (separator.tag == .end) return false;
+    }
+}
+
 pub fn scopeItemsAt(
     allocator: Allocator,
     io: Io,
@@ -172,13 +211,33 @@ pub fn scopeItemsAtForTarget(
     const type_only = isTypePrefix(source, prefix_start);
     const program = try parseCurrentAtScope(allocator, source, cursor, prefix_start, type_only) orelse
         return allocator.alloc(Types.CompletionItem, 0);
-    if (program.uses.len == 0) return allocator.alloc(Types.CompletionItem, 0);
+    const wants_platform = !type_only and matchesPrefix("Platform", prefix) and
+        !hasLocalNominal(program, "Platform") and findUseByAlias(program, "Platform") == null;
+    const wants_target = !type_only and matchesPrefix("Target", prefix) and
+        !hasLocalNominal(program, "Target") and findUseByAlias(program, "Target") == null;
+    if (program.uses.len == 0 and !wants_platform and !wants_target) {
+        return allocator.alloc(Types.CompletionItem, 0);
+    }
     const document_path = try pathFromUri(allocator, document_uri);
     const root_hint = if (root_uri) |uri| try pathFromUri(allocator, uri) else null;
     const root = try projectRoot(allocator, io, document_path, root_hint);
     const project = try indexProject(allocator, io, global_packages_root, selected_target, root, document_path);
 
     var ranked: std.ArrayList(RankedItem) = .empty;
+    if (wants_platform and contextualProvider(project, "Platform") != null) {
+        try appendRanked(allocator, &ranked, .{
+            .label = "Platform",
+            .kind = CompletionKind.module,
+            .detail = "Silex contextual platform fragment",
+        }, 16, false);
+    }
+    if (wants_target and contextualProvider(project, "Target") != null) {
+        try appendRanked(allocator, &ranked, .{
+            .label = "Target",
+            .kind = CompletionKind.module,
+            .detail = "Silex contextual target fragment",
+        }, 16, false);
+    }
     for (program.uses) |use| {
         const label = use.alias orelse lastSegment(use.path);
         if (!matchesPrefix(label, prefix)) continue;
@@ -290,6 +349,12 @@ pub fn scopeItemsAtForTarget(
     return result;
 }
 
+fn hasLocalNominal(program: Ast.Program, name: []const u8) bool {
+    for (program.structures) |structure| if (std.mem.eql(u8, structure.name, name)) return true;
+    for (program.enums) |enumeration| if (std.mem.eql(u8, enumeration.name, name)) return true;
+    return false;
+}
+
 fn isTypePrefix(source: []const u8, prefix_start: usize) bool {
     const before = std.mem.trimEnd(u8, source[0..prefix_start], " \t\r\n");
     if (before.len == 0) return false;
@@ -365,6 +430,16 @@ fn queryAt(
                 .type_only = isQualifiedTypePrefix(source, prefix_start),
             } };
         }
+        if ((std.mem.eql(u8, receiver, "Platform") or std.mem.eql(u8, receiver, "Target")) and
+            !hasLocalNominal(program, receiver))
+        {
+            return .{ .qualifier = .{
+                .path = receiver,
+                .prefix = prefix,
+                .cursor = cursor,
+                .type_only = isQualifiedTypePrefix(source, prefix_start),
+            } };
+        }
         if (try declaredCallReturnTypePath(
             allocator,
             io,
@@ -416,9 +491,9 @@ fn indexProject(
     for (graph.packages, 0..) |package, owner| {
         for (package.module_roots) |module_root| {
             const discovered = if (owner == 0)
-                try Modules.discoverOwnedExcluding(allocator, io, module_root, package.name, owner, excluded_roots)
+                try Modules.discoverOwnedExcludingAs(allocator, io, module_root.path, package.name, owner, excluded_roots, module_root.origin)
             else
-                try Modules.discoverOwned(allocator, io, module_root, package.name, owner);
+                try Modules.discoverOwnedAs(allocator, io, module_root.path, package.name, owner, module_root.origin);
             try indexes.append(allocator, discovered);
         }
     }
@@ -446,7 +521,11 @@ fn appendPathItems(
         ""
     else
         try std.fmt.allocPrint(allocator, "{s}.", .{query.qualifier});
-    const exact_provider = findProvider(project.index, query.qualifier);
+    const contextual_provider = contextualProvider(project, query.qualifier);
+    const exact_provider = if (contextual_provider) |provider_index|
+        project.index.providers[provider_index]
+    else
+        findProvider(project.index, query.qualifier);
     const exact_loaded = if (exact_provider) |provider|
         if (project.graph.canAccess(project.current_owner, provider.owner, provider.name))
             try loadProgram(allocator, io, documents, provider)
@@ -490,104 +569,134 @@ fn appendPathItems(
         }, child_priority, false);
     }
 
-    const provider = exact_provider orelse return;
-    const loaded = exact_loaded orelse return;
-    for (loaded.program.structures) |structure| {
-        if (!structure.is_public) continue;
-        if (!matchesPrefix(structure.name, query.prefix)) continue;
-        if (query.type_only or call_source == null) {
-            try appendRanked(allocator, ranked, .{
-                .label = structure.name,
-                .kind = nominalCompletionKind(structure),
-                .detail = try nominalCompletionDetail(allocator, structure),
-            }, type_priority, false);
-        } else if (structure.is_protocol or structure.is_static) {
-            try appendRanked(allocator, ranked, .{
-                .label = structure.name,
-                .kind = nominalCompletionKind(structure),
-                .detail = try nominalCompletionDetail(allocator, structure),
-            }, type_priority, false);
-        } else if (structure.constructors.len == 0) {
-            try appendRanked(allocator, ranked, .{
-                .label = structure.name,
-                .kind = nominalCompletionKind(structure),
-                .detail = try std.fmt.allocPrint(allocator, "{s}() {s}", .{ structure.name, structure.name }),
-            }, type_priority, false);
-        } else for (structure.constructors) |constructor| {
-            if (!Completion.callAcceptsParameters(
-                call_source.?,
-                call_cursor,
-                loaded.program,
-                constructor.parameters,
-            )) continue;
-            try appendRanked(allocator, ranked, .{
-                .label = structure.name,
-                .kind = nominalCompletionKind(structure),
-                .detail = try Completion.constructorSignature(
-                    allocator,
-                    loaded.source,
+    if (exact_provider == null) return;
+    for (project.index.providers, 0..) |provider, provider_index| {
+        if (contextual_provider != null) {
+            if (provider_index != contextual_provider.?) continue;
+        } else if (!std.mem.eql(u8, provider.name, query.qualifier)) continue;
+        if (!project.graph.canAccess(project.current_owner, provider.owner, provider.name)) continue;
+        const loaded = try loadProgram(allocator, io, documents, provider) orelse continue;
+        for (loaded.program.structures) |structure| {
+            if (structure.is_internal) continue;
+            if (contextual_provider == null and !structure.is_public) continue;
+            if (!matchesPrefix(structure.name, query.prefix)) continue;
+            if (query.type_only or call_source == null) {
+                try appendRanked(allocator, ranked, .{
+                    .label = structure.name,
+                    .kind = nominalCompletionKind(structure),
+                    .detail = try nominalCompletionDetail(allocator, structure),
+                }, type_priority, false);
+            } else if (structure.is_protocol or structure.is_static) {
+                try appendRanked(allocator, ranked, .{
+                    .label = structure.name,
+                    .kind = nominalCompletionKind(structure),
+                    .detail = try nominalCompletionDetail(allocator, structure),
+                }, type_priority, false);
+            } else if (structure.constructors.len == 0) {
+                try appendRanked(allocator, ranked, .{
+                    .label = structure.name,
+                    .kind = nominalCompletionKind(structure),
+                    .detail = try std.fmt.allocPrint(allocator, "{s}() {s}", .{ structure.name, structure.name }),
+                }, type_priority, false);
+            } else for (structure.constructors) |constructor| {
+                if (!Completion.callAcceptsParameters(
+                    call_source.?,
+                    call_cursor,
                     loaded.program,
-                    structure.name,
-                    constructor,
-                ),
-            }, type_priority, true);
+                    constructor.parameters,
+                )) continue;
+                try appendRanked(allocator, ranked, .{
+                    .label = structure.name,
+                    .kind = nominalCompletionKind(structure),
+                    .detail = try Completion.constructorSignature(
+                        allocator,
+                        loaded.source,
+                        loaded.program,
+                        structure.name,
+                        constructor,
+                    ),
+                }, type_priority, true);
+            }
         }
-    }
-    for (loaded.program.enums) |enumeration| {
-        if (!enumeration.is_public or !matchesPrefix(enumeration.name, query.prefix)) continue;
-        try appendRanked(allocator, ranked, .{
-            .label = enumeration.name,
-            .kind = CompletionKind.enum_type,
-            .detail = try std.fmt.allocPrint(allocator, "enum {s}", .{enumeration.name}),
-        }, type_priority, false);
-    }
-    if (!query.type_only) {
-        for (loaded.program.functions) |function| {
-            if (function.is_internal) continue;
-            if (provider.owner != project.current_owner and !function.is_public) continue;
-            if (call_source) |text| if (!Completion.callAcceptsParameters(
-                text,
-                call_cursor,
-                loaded.program,
-                function.parameters,
-            )) continue;
-            if (!matchesPrefix(function.name, query.prefix)) continue;
+        for (loaded.program.enums) |enumeration| {
+            if (enumeration.is_internal or !matchesPrefix(enumeration.name, query.prefix)) continue;
+            if (contextual_provider == null and !enumeration.is_public) continue;
             try appendRanked(allocator, ranked, .{
-                .label = function.name,
-                .kind = CompletionKind.function,
-                .detail = try Completion.functionSignature(allocator, loaded.source, loaded.program, function),
-            }, 10, true);
-        }
-    }
-    for (loaded.program.uses) |exported| {
-        if (!exported.is_public or exported.alias == null or
-            !matchesPrefix(exported.alias.?, query.prefix)) continue;
-        if (fundamentalAliasTarget(loaded.program, exported, 0)) |type_target| {
-            if (query.type_only or call_source == null) try appendRanked(allocator, ranked, .{
-                .label = exported.alias.?,
-                .kind = 22,
-                .detail = try std.fmt.allocPrint(allocator, "type {s} = {s}", .{
-                    exported.alias.?,
-                    type_target.name(),
-                }),
+                .label = enumeration.name,
+                .kind = CompletionKind.enum_type,
+                .detail = try std.fmt.allocPrint(allocator, "enum {s}", .{enumeration.name}),
             }, type_priority, false);
-            continue;
         }
-        try appendReexportTarget(
-            allocator,
-            io,
-            documents,
-            project,
-            exported.path,
-            exported.alias.?,
-            query.prefix,
-            call_source,
-            call_cursor,
-            ranked,
-            0,
-            query.type_only,
-        );
+        if (!query.type_only) {
+            for (loaded.program.functions) |function| {
+                if (function.is_internal) continue;
+                if (provider.owner != project.current_owner and !function.is_public) continue;
+                if (call_source) |text| if (!Completion.callAcceptsParameters(
+                    text,
+                    call_cursor,
+                    loaded.program,
+                    function.parameters,
+                )) continue;
+                if (!matchesPrefix(function.name, query.prefix)) continue;
+                try appendRanked(allocator, ranked, .{
+                    .label = function.name,
+                    .kind = CompletionKind.function,
+                    .detail = try Completion.functionSignature(allocator, loaded.source, loaded.program, function),
+                }, 10, true);
+            }
+        }
+        if (contextual_provider != null) continue;
+        for (loaded.program.uses) |exported| {
+            if (!exported.is_public or exported.alias == null or
+                !matchesPrefix(exported.alias.?, query.prefix)) continue;
+            if (fundamentalAliasTarget(loaded.program, exported, 0)) |type_target| {
+                if (query.type_only or call_source == null) try appendRanked(allocator, ranked, .{
+                    .label = exported.alias.?,
+                    .kind = 22,
+                    .detail = try std.fmt.allocPrint(allocator, "type {s} = {s}", .{
+                        exported.alias.?,
+                        type_target.name(),
+                    }),
+                }, type_priority, false);
+                continue;
+            }
+            try appendReexportTarget(
+                allocator,
+                io,
+                documents,
+                project,
+                exported.path,
+                exported.alias.?,
+                query.prefix,
+                call_source,
+                call_cursor,
+                ranked,
+                0,
+                query.type_only,
+            );
+        }
     }
+}
+
+fn contextualProvider(project: IndexedProject, qualifier: []const u8) ?usize {
+    const origin: Modules.Origin = if (std.mem.eql(u8, qualifier, "Platform"))
+        .platform
+    else if (std.mem.eql(u8, qualifier, "Target"))
+        .target
+    else
+        return null;
+    var current: ?Modules.Provider = null;
+    for (project.index.providers) |provider| {
+        if (samePath(provider.path, project.current_path)) {
+            current = provider;
+            break;
+        }
+    }
+    const source = current orelse return null;
+    for (project.index.providers, 0..) |provider, index| {
+        if (provider.owner == source.owner and provider.origin == origin and std.mem.eql(u8, provider.name, source.name)) return index;
+    }
+    return null;
 }
 
 fn hasPublicDeclaration(program: Ast.Program, name: []const u8) bool {
@@ -1994,6 +2103,18 @@ test "workspace indexes the selected package platform root" {
         .data = "public func visible() {}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Bridge/Module/Combined.sx",
+        .data = "public func portable() {}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Bridge/Platform/MacOS/Module/Combined.sx",
+        .data = "public func macos_fragment() {}\nfunc platform_private() {}\ninternal func platform_internal() {}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Bridge/Platform/Linux/Module/Combined.sx",
+        .data = "public func linux_fragment() {}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Bridge/Platform/MacOS/Module/Implementation.sx",
         .data = "public func macos() {}",
     });
@@ -2004,6 +2125,10 @@ test "workspace indexes the selected package platform root" {
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Bridge/Target/macos-arm64/Module/MacTarget.sx",
         .data = "public func macos_target() {}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Bridge/Target/macos-arm64/Module/Combined.sx",
+        .data = "func target_private() {}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Bridge/Target/linux-x64/Module/LinuxTarget.sx",
@@ -2047,6 +2172,103 @@ test "workspace indexes the selected package platform root" {
     try std.testing.expect(hasLabel(linux_items, "LinuxTarget"));
     try std.testing.expect(!hasLabel(linux_items, "Implementation"));
     try std.testing.expect(!hasLabel(linux_items, "MacTarget"));
+
+    const portable_source = "use Bridge.Combined\nfunc main() { Combined.p }";
+    const portable_cursor = std.mem.indexOf(u8, portable_source, " }").?;
+    const portable_items = (try itemsAt(
+        allocator,
+        std.testing.io,
+        null,
+        root_uri,
+        uri,
+        &.{},
+        portable_source,
+        portable_cursor,
+    )).?;
+    try std.testing.expect(hasLabel(portable_items, "portable"));
+    const platform_source = "use Bridge.Combined\nfunc main() { Combined.fragment }";
+    const platform_cursor = std.mem.indexOf(u8, platform_source, " }").?;
+    const platform_items = (try itemsAt(
+        allocator,
+        std.testing.io,
+        null,
+        root_uri,
+        uri,
+        &.{},
+        platform_source,
+        platform_cursor,
+    )).?;
+    try std.testing.expect(hasLabel(platform_items, "macos_fragment"));
+    try std.testing.expect(!hasLabel(platform_items, "linux_fragment"));
+
+    const combined_path = try std.fs.path.join(allocator, &.{ root, "Bridge", "Module", "Combined.sx" });
+    const combined_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{combined_path});
+    try std.testing.expect(try hasContextualReferenceForTarget(
+        allocator,
+        std.testing.io,
+        null,
+        .macos_arm64,
+        root_uri,
+        combined_uri,
+        "func portable() { Platform.macos_fragment() }",
+    ));
+    try std.testing.expect(!try hasContextualReferenceForTarget(
+        allocator,
+        std.testing.io,
+        null,
+        .macos_arm64,
+        root_uri,
+        combined_uri,
+        "struct Platform {}\nfunc portable() { Platform.missing() }",
+    ));
+    const contextual_scope_source = "func portable() {\n    Pla\n}";
+    const contextual_scope_cursor = std.mem.indexOf(u8, contextual_scope_source, "\n}").?;
+    const contextual_scope_items = try scopeItemsAtForTarget(
+        allocator,
+        std.testing.io,
+        null,
+        .macos_arm64,
+        root_uri,
+        combined_uri,
+        &.{},
+        contextual_scope_source,
+        contextual_scope_cursor,
+    );
+    try std.testing.expect(hasLabel(contextual_scope_items, "Platform"));
+    try std.testing.expect(!hasLabel(contextual_scope_items, "Target"));
+    const contextual_platform_source = "func portable() { Platform. }";
+    const contextual_platform_cursor = std.mem.indexOf(u8, contextual_platform_source, " }").?;
+    const contextual_platform_items = (try itemsAtForTarget(
+        allocator,
+        std.testing.io,
+        null,
+        .macos_arm64,
+        root_uri,
+        combined_uri,
+        &.{},
+        contextual_platform_source,
+        contextual_platform_cursor,
+    )).?;
+    try std.testing.expect(hasLabel(contextual_platform_items, "macos_fragment"));
+    try std.testing.expect(hasLabel(contextual_platform_items, "platform_private"));
+    try std.testing.expect(!hasLabel(contextual_platform_items, "platform_internal"));
+    try std.testing.expect(!hasLabel(contextual_platform_items, "portable"));
+
+    const contextual_target_source = "func portable() { Target. }";
+    const contextual_target_cursor = std.mem.indexOf(u8, contextual_target_source, " }").?;
+    const contextual_target_items = (try itemsAtForTarget(
+        allocator,
+        std.testing.io,
+        null,
+        .macos_arm64,
+        root_uri,
+        combined_uri,
+        &.{},
+        contextual_target_source,
+        contextual_target_cursor,
+    )).?;
+    try std.testing.expect(hasLabel(contextual_target_items, "target_private"));
+    try std.testing.expect(!hasLabel(contextual_target_items, "platform_private"));
 }
 
 fn labelCount(items: []const Types.CompletionItem, label: []const u8) usize {

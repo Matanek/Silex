@@ -7,9 +7,10 @@ pub fn analyze(
     allocator: std.mem.Allocator,
     source: []const u8,
     encoding: Types.PositionEncoding,
+    has_project_context: bool,
 ) ![]const Types.Diagnostic {
     var frontend = Frontend.Frontend.init(allocator);
-    frontend.checkDocument(source) catch |err| switch (err) {
+    frontend.checkDocumentInProject(source, has_project_context) catch |err| switch (err) {
         error.InvalidSource => return allocator.dupe(Types.Diagnostic, &.{
             Protocol.diagnosticFromSource(source, frontend.diagnostic.?, encoding),
         }),
@@ -21,7 +22,7 @@ pub fn analyze(
 test "surface the current frontend diagnostic" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
-    const diagnostics = try analyze(arena.allocator(), "func main() { let value:int = }", .utf16);
+    const diagnostics = try analyze(arena.allocator(), "func main() { let value:int = }", .utf16, false);
     try std.testing.expectEqual(@as(usize, 1), diagnostics.len);
     try std.testing.expectEqualStrings("expected expression", diagnostics[0].message);
 }
@@ -29,7 +30,7 @@ test "surface the current frontend diagnostic" {
 test "clear diagnostics for a valid current program" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
-    const diagnostics = try analyze(arena.allocator(), "func main() { let value:int = 42 }", .utf16);
+    const diagnostics = try analyze(arena.allocator(), "func main() { let value:int = 42 }", .utf16, false);
     try std.testing.expectEqual(@as(usize, 0), diagnostics.len);
 }
 
@@ -39,6 +40,18 @@ test "do not invent semantic failures before imported overlays exist" {
     const diagnostics = try analyze(arena.allocator(),
         \\use Math.Operations
         \\public func answer() int { return Operations.add(40, 2) }
-    , .utf16);
+    , .utf16, false);
+    try std.testing.expectEqual(@as(usize, 0), diagnostics.len);
+}
+
+test "do not diagnose a contextual platform qualifier as a local variable" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const diagnostics = try analyze(
+        arena.allocator(),
+        "public func seed() int { return Platform.system_seed() }",
+        .utf16,
+        true,
+    );
     try std.testing.expectEqual(@as(usize, 0), diagnostics.len);
 }

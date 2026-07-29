@@ -26,6 +26,10 @@ internal func advance() {}
 ```
 
 Neighboring modules cannot name an `internal` declaration.
+Fragments of one logical module are still distinct source files, so an
+`internal` declaration is not visible from another fragment. An ordinary
+private declaration in a specialized fragment is accessible from portable code
+through `Platform.name` or `Target.name`, never as an unqualified name.
 
 ## Class members
 

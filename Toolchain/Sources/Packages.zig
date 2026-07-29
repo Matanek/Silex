@@ -67,9 +67,14 @@ pub const Package = struct {
     name: ?[]const u8,
     version: ?Version,
     root: []const u8,
-    module_roots: []const []const u8,
+    module_roots: []const ModuleRoot,
     inactive_modules: []const []const u8,
     dependencies: []const Dependency,
+};
+
+pub const ModuleRoot = struct {
+    path: []const u8,
+    origin: Modules.Origin,
 };
 
 pub const Graph = struct {
@@ -319,22 +324,25 @@ pub const Resolver = struct {
     }
 
     const ModuleRoots = struct {
-        active: []const []const u8,
+        active: []const ModuleRoot,
         inactive: []const []const u8,
     };
 
     fn moduleRoots(self: *Resolver, root: []const u8, named: bool) !ModuleRoots {
         if (!named) return .{
-            .active = try self.allocator.dupe([]const u8, &.{root}),
+            .active = try self.allocator.dupe(ModuleRoot, &.{.{ .path = root, .origin = .portable }}),
             .inactive = &.{},
         };
 
-        var active: std.ArrayList([]const u8) = .empty;
-        try active.append(self.allocator, try std.fs.path.join(self.allocator, &.{ root, "Module" }));
+        var active: std.ArrayList(ModuleRoot) = .empty;
+        try active.append(self.allocator, .{
+            .path = try std.fs.path.join(self.allocator, &.{ root, "Module" }),
+            .origin = .portable,
+        });
         const platform = try std.fs.path.join(self.allocator, &.{ root, "Platform", self.target.platform.directoryName(), "Module" });
-        if (try exists(self.io, platform)) try active.append(self.allocator, platform);
+        if (try exists(self.io, platform)) try active.append(self.allocator, .{ .path = platform, .origin = .platform });
         const selected = try std.fs.path.join(self.allocator, &.{ root, "Target", self.target.name(), "Module" });
-        if (try exists(self.io, selected)) try active.append(self.allocator, selected);
+        if (try exists(self.io, selected)) try active.append(self.allocator, .{ .path = selected, .origin = .target });
         return .{
             .active = try active.toOwnedSlice(self.allocator),
             .inactive = try self.inactiveModuleNames(root),
