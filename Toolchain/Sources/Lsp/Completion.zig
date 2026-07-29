@@ -183,10 +183,13 @@ pub fn itemsAt(
         result[index].sortText = try std.fmt.allocPrint(allocator, "{d:0>3}-{d:0>6}", .{ candidate.priority, index });
         result[index].filterText = candidate.item.label;
         result[index].insertText = if (candidate.callable)
-            try insertTextFor(allocator, candidate.item)
+            try insertTextForAt(allocator, candidate.item, source, cursor)
         else
             candidate.item.label;
-        result[index].insertTextFormat = if (candidate.callable) insertTextFormatFor(candidate.item) else null;
+        result[index].insertTextFormat = if (candidate.callable)
+            insertTextFormatForAt(candidate.item, source, cursor)
+        else
+            null;
     }
     return result;
 }
@@ -200,6 +203,27 @@ pub fn insertTextFor(allocator: Allocator, item: CompletionItem) ![]const u8 {
 pub fn insertTextFormatFor(item: CompletionItem) ?u8 {
     const signature = callableSignature(item) orelse return null;
     return if (std.mem.startsWith(u8, signature, "()")) null else 2;
+}
+
+pub fn insertTextForAt(
+    allocator: Allocator,
+    item: CompletionItem,
+    source: []const u8,
+    cursor: usize,
+) ![]const u8 {
+    if (callFollows(source, cursor)) return item.label;
+    return insertTextFor(allocator, item);
+}
+
+pub fn insertTextFormatForAt(item: CompletionItem, source: []const u8, cursor: usize) ?u8 {
+    if (callFollows(source, cursor)) return null;
+    return insertTextFormatFor(item);
+}
+
+pub fn callFollows(source: []const u8, cursor: usize) bool {
+    var index = cursor;
+    while (index < source.len and (source[index] == ' ' or source[index] == '\t')) index += 1;
+    return index < source.len and source[index] == '(';
 }
 
 fn callableSignature(item: CompletionItem) ?[]const u8 {
@@ -924,7 +948,17 @@ fn resolveReceiverType(
         const name = std.mem.trim(u8, trimmed[0..open], " \t");
         if (findStructure(program, name)) |_| return name;
         for (program.functions) |function| if (std.mem.eql(u8, function.name, name)) return memberTypeName(program, function.return_type);
-        return null;
+        const qualified = qualifiedCall(trimmed) orelse return null;
+        const owner = findStructure(program, qualified.owner) orelse return null;
+        var return_type: ?[]const u8 = null;
+        for (owner.methods) |method| {
+            if (!method.is_static or !std.mem.eql(u8, method.name, qualified.name) or
+                !acceptsArity(method.parameters, qualified.arity)) continue;
+            const candidate = memberTypeName(program, method.return_type);
+            if (return_type != null and !std.mem.eql(u8, return_type.?, candidate)) return null;
+            return_type = candidate;
+        }
+        return return_type;
     }
 
     var parts = std.mem.splitScalar(u8, trimmed, '.');
@@ -1091,7 +1125,9 @@ fn parseForCompletion(
         0;
     const before_prefix = std.mem.trim(u8, source[line_start..context.prefix_start], " \t\r");
     const placeholder: []const u8 = switch (context.kind) {
-        .member => if (context.prefix.len != 0)
+        .member => if (callFollows(source, cursor))
+            if (context.prefix.len == 0) "__completion" else ""
+        else if (context.prefix.len != 0)
             "()"
         else if (memberFollowedByAssignment(source, cursor))
             "__completion"
@@ -1253,7 +1289,7 @@ fn isIdentifierContinue(character: u8) bool {
     return std.ascii.isAlphanumeric(character) or character == '_';
 }
 
-fn memberReceiver(source: []const u8, dot: usize) ?[]const u8 {
+pub fn memberReceiver(source: []const u8, dot: usize) ?[]const u8 {
     if (dot == 0) return null;
     var start = dot;
     if (source[start - 1] == ')') {
@@ -1269,6 +1305,70 @@ fn memberReceiver(source: []const u8, dot: usize) ?[]const u8 {
     }
     while (start != 0 and (isIdentifierContinue(source[start - 1]) or source[start - 1] == '.')) start -= 1;
     return source[start..dot];
+}
+
+pub const QualifiedCall = struct {
+    owner: []const u8,
+    name: []const u8,
+    arity: usize,
+};
+
+pub fn qualifiedCall(receiver: []const u8) ?QualifiedCall {
+    var tokens: [256]Token = undefined;
+    var count: usize = 0;
+    var lexer = LexerModule.Lexer.init(receiver);
+    while (true) {
+        const token = lexer.next() catch return null;
+        if (token.tag == .end) break;
+        if (count == tokens.len) return null;
+        tokens[count] = token;
+        count += 1;
+    }
+    if (count < 5 or tokens[count - 1].tag != .right_parenthesis) return null;
+
+    var depth: usize = 0;
+    var open: ?usize = null;
+    var index = count;
+    while (index != 0) {
+        index -= 1;
+        switch (tokens[index].tag) {
+            .right_parenthesis => depth += 1,
+            .left_parenthesis => {
+                depth -|= 1;
+                if (depth == 0) {
+                    open = index;
+                    break;
+                }
+            },
+            else => {},
+        }
+    }
+    const opening = open orelse return null;
+    if (opening != 3 or tokens[0].tag != .identifier or tokens[1].tag != .dot or
+        tokens[2].tag != .identifier) return null;
+
+    var nesting: usize = 0;
+    var arguments: usize = 0;
+    var has_argument = false;
+    for (tokens[opening + 1 .. count - 1]) |token| switch (token.tag) {
+        .left_parenthesis, .left_bracket, .left_brace => {
+            nesting += 1;
+            has_argument = true;
+        },
+        .right_parenthesis, .right_bracket, .right_brace => nesting -|= 1,
+        .comma => if (nesting == 0) {
+            arguments += 1;
+        } else {
+            has_argument = true;
+        },
+        else => has_argument = true,
+    };
+    if (has_argument) arguments += 1;
+    return .{
+        .owner = tokens[0].lexeme,
+        .name = tokens[2].lexeme,
+        .arity = arguments,
+    };
 }
 
 fn currentLineTokenStart(tokens: []const Token, line: usize) usize {
