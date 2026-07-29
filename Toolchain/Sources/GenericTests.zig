@@ -308,6 +308,22 @@ test "specialize generic associated enums and match concrete payloads" {
     try std.testing.expectEqualStrings("value 42\nfailed\n7\n", result.stdout);
 }
 
+test "construct an empty generic enum variant without parentheses" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\enum Choice<T> { empty; value(T) }
+        \\func main() {
+        \\    let choice = Choice<int>.empty
+        \\    print(match choice { empty => "empty"; value(number) => "$(number)" })
+        \\}
+    );
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("empty\n", result.stdout);
+}
+
 test "compose generic enums through modules aliases and reexports" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

@@ -23,7 +23,7 @@ test "construct and match intrinsic Result value and void successes" {
         \\    return Result<int, str>.failure("bad")
         \\}
         \\func save(allowed:bool) Result<void, str> {
-        \\    if allowed { return Result<void, str>.success() }
+        \\    if allowed { return Result<void, str>.success }
         \\    return Result<void, str>.failure("denied")
         \\}
         \\func main() {

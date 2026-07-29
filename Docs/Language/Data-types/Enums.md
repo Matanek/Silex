@@ -9,11 +9,13 @@ enum Connection {
     closed(str)
 }
 
-let pending = Connection.waiting()
+let pending = Connection.waiting
 let active = Connection.connected("server")
 ```
 
-Construction always uses parentheses, including a variant without payload.
+A variant without associated values is a value and does not need parentheses.
+The historical `Connection.waiting()` form remains accepted. A variant with
+associated values remains a construction and requires parentheses.
 
 ## Read a value with match
 
@@ -60,7 +62,7 @@ enum Direction:int {
     south = -2
 }
 
-let code:int = Direction.north().raw_value
+let code:int = Direction.north.raw_value
 ```
 
 A raw enum uses either `int` or `str`. Every variant supplies one unique
@@ -88,7 +90,7 @@ inverse of `==`.
 
 ```sx
 Connection.connected("server") == Connection.connected("server")
-Connection.waiting() != Connection.closed("timeout")
+Connection.waiting != Connection.closed("timeout")
 ```
 
 The associated values must themselves be comparable. Structures compare their

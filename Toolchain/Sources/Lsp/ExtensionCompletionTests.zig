@@ -112,6 +112,47 @@ test "complete imported types and their current extension context" {
     try std.testing.expect(!hasLabel(expression_items, "false"));
 }
 
+test "complete imported enum variants according to their payload" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "func main() {}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Api.sx",
+        .data = "public enum State { ready; value(int) }",
+    });
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const main_path = try std.fs.path.join(allocator, &.{ root, "Main.sx" });
+    const uri = try std.fmt.allocPrint(allocator, "file://{s}", .{main_path});
+    const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
+    const source =
+        \\use Api
+        \\func main() { let state = Api.State. }
+    ;
+    const cursor = std.mem.indexOf(u8, source, "Api.State.").? + "Api.State.".len;
+    const items = (try Workspace.itemsAt(
+        allocator,
+        std.testing.io,
+        null,
+        root_uri,
+        uri,
+        &.{},
+        source,
+        cursor,
+    )).?;
+    const ready = itemWithLabel(items, "ready").?;
+    const value = itemWithLabel(items, "value").?;
+    try std.testing.expectEqualStrings("ready", ready.insertText.?);
+    try std.testing.expect(ready.insertTextFormat == null);
+    try std.testing.expectEqualStrings("value($0)", value.insertText.?);
+    try std.testing.expectEqual(@as(?u8, 2), value.insertTextFormat);
+}
+
 test "complete extensions declared by an on-demand package child module" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

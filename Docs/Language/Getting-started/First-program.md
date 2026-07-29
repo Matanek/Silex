@@ -32,7 +32,7 @@ func main() Result<void,str> {
     }
 
     print("ready")
-    return Result<void,str>.success()
+    return Result<void,str>.success
 }
 ```
 

@@ -13,6 +13,8 @@ constraints.
 | Protocol | `protocol Name { ... }` |
 | Extension | `extend Name { ... }` |
 | Enum variant | `caseName(Type)` inside `enum` |
+| Empty enum value | `Enum.caseName` |
+| Enum value with payload | `Enum.caseName(value)` |
 | Constructor | `init(value:type) { ... }` |
 | Import | `use Module.Path` |
 | C function binding | `let name = C.function<func(...) Return>(...)` |
