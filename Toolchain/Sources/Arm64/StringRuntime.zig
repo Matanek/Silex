@@ -2,6 +2,8 @@ const std = @import("std");
 const Machine = @import("Machine.zig");
 const A64 = @import("Instructions.zig");
 const Fixups = @import("Fixups.zig");
+const ExternalCalls = @import("ExternalCalls.zig");
+const Allocation = @import("Allocation.zig");
 
 const Allocator = std.mem.Allocator;
 const Register = A64.Register;
@@ -11,9 +13,6 @@ pub const Error = Machine.Error || Allocator.Error || Fixups.Error;
 const descriptor_header_size = 8;
 const concat_scratch_size = 48;
 const macos_write = 4;
-const macos_mmap = 197;
-const protection_read_write = 3;
-const map_private_anonymous = 0x1002;
 
 pub fn emitLiteral(
     allocator: Allocator,
@@ -108,6 +107,8 @@ pub fn emitConcat(
     allocator: Allocator,
     words: *std.ArrayList(u32),
     epilogue_fixups: *std.ArrayList(Fixups.Local),
+    sites: *std.ArrayList(ExternalCalls.Site),
+    platform: Allocation.Platform,
     concat: Machine.Instruction.StringConcat,
 ) Error!void {
     try words.append(allocator, A64.loadStack(.x9, concat.left));
@@ -130,15 +131,9 @@ pub fn emitConcat(
     try words.append(allocator, A64.store64(.x13, .zero_or_sp, 16));
     try words.append(allocator, A64.store64(.x14, .zero_or_sp, 24));
     try words.append(allocator, A64.store64(.x15, .zero_or_sp, 32));
-    try words.append(allocator, A64.moveWideZero32(.x0, 0));
-    try words.append(allocator, A64.moveWideZero32(.x2, protection_read_write));
-    try words.append(allocator, A64.moveWideZero32(.x3, map_private_anonymous));
-    try emitImmediate64(allocator, words, .x4, std.math.maxInt(u64));
-    try words.append(allocator, A64.moveWideZero32(.x5, 0));
-    try words.append(allocator, A64.moveWideZero32(.x16, macos_mmap));
-    try words.append(allocator, A64.serviceCall());
+    try Allocation.emit(allocator, words, sites, platform);
     const mmap_failed = words.items.len;
-    try words.append(allocator, A64.conditionalBranch(.carry_set));
+    try words.append(allocator, Allocation.failureBranch(platform));
 
     try words.append(allocator, A64.moveRegister(.x15, .x0));
     try words.append(allocator, A64.load64(.x10, .zero_or_sp, 32));
@@ -163,6 +158,51 @@ pub fn emitConcat(
     const finished = words.items.len;
 
     try Fixups.patch19(words.items, length_overflow, failure);
+    try Fixups.patch19(words.items, allocation_overflow, failure);
+    try Fixups.patch19(words.items, mmap_failed, scratch_failure);
+    try Fixups.patch26(words.items, normal_finished, finished);
+}
+
+pub fn emitFromBytes(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    epilogue_fixups: *std.ArrayList(Fixups.Local),
+    sites: *std.ArrayList(ExternalCalls.Site),
+    platform: Allocation.Platform,
+    conversion: Machine.Instruction.StringFromBytes,
+) Error!void {
+    try words.append(allocator, A64.loadStack(.x10, conversion.bytes.start));
+    try words.append(allocator, A64.loadStack(.x11, @intCast(@as(usize, conversion.bytes.start) + 1)));
+    try words.append(allocator, A64.moveWideZero32(.x9, descriptor_header_size));
+    try words.append(allocator, A64.addSetFlags(.x1, .x11, .x9));
+    const allocation_overflow = words.items.len;
+    try words.append(allocator, A64.conditionalBranch(.carry_set));
+
+    try words.append(allocator, A64.addSubtractImmediate(.zero_or_sp, .zero_or_sp, 32, false));
+    try words.append(allocator, A64.store64(.x10, .zero_or_sp, 0));
+    try words.append(allocator, A64.store64(.x11, .zero_or_sp, 8));
+    try Allocation.emit(allocator, words, sites, platform);
+    const mmap_failed = words.items.len;
+    try words.append(allocator, Allocation.failureBranch(platform));
+
+    try words.append(allocator, A64.moveRegister(.x15, .x0));
+    try words.append(allocator, A64.load64(.x10, .zero_or_sp, 8));
+    try words.append(allocator, A64.store64(.x10, .x15, 0));
+    try words.append(allocator, A64.load64(.x11, .zero_or_sp, 0));
+    try words.append(allocator, A64.addSubtractImmediate(.x12, .x15, descriptor_header_size, true));
+    try emitCopyByteSlots(allocator, words, .x10, .x11, .x12);
+    try words.append(allocator, A64.addSubtractImmediate(.zero_or_sp, .zero_or_sp, 32, true));
+    try words.append(allocator, A64.storeStack(.x15, conversion.result));
+    const normal_finished = words.items.len;
+    try words.append(allocator, A64.branch());
+
+    const scratch_failure = words.items.len;
+    try words.append(allocator, A64.addSubtractImmediate(.zero_or_sp, .zero_or_sp, 32, true));
+    const failure = words.items.len;
+    try words.append(allocator, A64.moveWideZero32(.x8, @intFromEnum(Machine.Status.runtime_failure)));
+    try Fixups.appendLocal(allocator, words, epilogue_fixups, A64.branch(), .imm26);
+    const finished = words.items.len;
+
     try Fixups.patch19(words.items, allocation_overflow, failure);
     try Fixups.patch19(words.items, mmap_failed, scratch_failure);
     try Fixups.patch26(words.items, normal_finished, finished);
@@ -220,6 +260,27 @@ fn emitCopy(
     try words.append(allocator, A64.loadByte(.x9, source));
     try words.append(allocator, A64.storeByte(.x9, destination));
     try words.append(allocator, A64.addSubtractImmediate(source, source, 1, true));
+    try words.append(allocator, A64.addSubtractImmediate(destination, destination, 1, true));
+    try words.append(allocator, A64.addSubtractImmediate(length, length, 1, false));
+    const repeat = words.items.len;
+    try words.append(allocator, A64.compareBranchNonZero64(length));
+    try Fixups.patch19(words.items, repeat, loop);
+    try Fixups.patch19(words.items, empty, words.items.len);
+}
+
+fn emitCopyByteSlots(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    length: Register,
+    source: Register,
+    destination: Register,
+) Error!void {
+    const empty = words.items.len;
+    try words.append(allocator, A64.compareBranchZero64(length));
+    const loop = words.items.len;
+    try words.append(allocator, A64.loadByte(.x9, source));
+    try words.append(allocator, A64.storeByte(.x9, destination));
+    try words.append(allocator, A64.addSubtractImmediate(source, source, Machine.slot_size, true));
     try words.append(allocator, A64.addSubtractImmediate(destination, destination, 1, true));
     try words.append(allocator, A64.addSubtractImmediate(length, length, 1, false));
     const repeat = words.items.len;

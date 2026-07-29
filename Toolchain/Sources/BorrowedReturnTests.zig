@@ -75,6 +75,27 @@ test "methods return shared and mutable aliases without return prefixes" {
     try std.testing.expectEqualStrings("5\n7\n7\n", output);
 }
 
+test "methods can return a mutable alias to an indexed collection element" {
+    const output = try run(
+        \\struct Bag {
+        \\    private var values:int[]
+        \\    init() { self.values = [10, 20, 30] }
+        \\    func at(index:int) &self:int { return &self.values[index] }
+        \\    func value(index:int) int { return self.values[index] }
+        \\}
+        \\func main() {
+        \\    var bag = Bag()
+        \\    if true {
+        \\        var item = bag.at(1)
+        \\        item += 2
+        \\    }
+        \\    print(bag.value(1))
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("22\n", output);
+}
+
 test "borrowed returns reject ambiguous wrong and temporary provenance" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

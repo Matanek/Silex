@@ -115,6 +115,36 @@ test "resolve a principal structure through its parent namespace" {
     try std.testing.expect(found_vec3 and found_state);
 }
 
+test "public constructor remains available when a class owns a drop" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Resource.sx",
+        .data =
+        \\public class Resource {
+        \\    private let handle:int
+        \\    public init(handle:int) { self.handle = handle }
+        \\    public func value() int { return self.handle }
+        \\    drop {}
+        \\}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "use Resource\nfunc main() { var resource = Resource(42); print(resource.value()) }",
+    });
+
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(input);
+    const result = try @import("Interpreter.zig").runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("42\n", result.stdout);
+}
+
 test "reject private structure access and public signature leaks" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

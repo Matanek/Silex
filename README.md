@@ -32,11 +32,25 @@ cd Toolchain
 zig build run -- run /path/to/Main.sx
 ```
 
-Add `--emit-ir` to inspect the portable typed IR:
+`run` builds a private native executable under `.silex/run/`, executes it with
+the current terminal streams and returns its exit code. Debug is the default;
+pass `--release` to select the optimized pipeline. Add `--emit-ir` to inspect
+the portable typed IR before native lowering:
 
 ```sh
 zig build run -- run /path/to/Main.sx --emit-ir
 ```
+
+Select the reference interpreter explicitly when validating portable
+semantics without a native executable:
+
+```sh
+zig build run -- interpret /path/to/Main.sx --emit-ir
+```
+
+The interpreter intentionally supports only the few platform boundaries it can
+model without reproducing an operating-system runtime. Use `run` for ordinary
+programs that depend on STD interop.
 
 ## Compile for Apple Silicon macOS
 
@@ -57,18 +71,18 @@ silex compile Main.sx -r -o Application
 silex compile Main.sx --release --output Application
 ```
 
-`run` always uses the reference interpreter. It shares parsing and typed IR
-construction with `compile`, but creates no native executable or hidden output.
-
-Both commands use a content-addressed compilation cache rooted in
+The commands use a content-addressed compilation cache rooted in
 `<current-directory>/.silex/cache`. The root depends on the directory from
-which `silex` is invoked, not on the source file's parent. Disable every cache
-read and write for one invocation with `-n` or `--nocache`:
+which `silex` is invoked, not on the source file's parent. Disable reusable
+cache reads and writes for one invocation with `-n` or `--nocache`:
 
 ```sh
 silex run Sandbox/Main.sx --nocache
 silex compile Sandbox/Main.sx -r -n -o Application
 ```
+
+For `run`, `--nocache` forces a rebuild but the executable still belongs under
+`.silex/run/`; cache policy does not change the command's output location.
 
 The cache persists per-module ASTs, the composed portable IR and native Mach-O
 outputs. Entries are keyed by exact source content and compilation mode,
@@ -88,6 +102,16 @@ binary sizes, compilation times, and execution times under
 
 The native path emits ARM64 instructions and the Mach-O executable container.
 It invokes no C/C++ generator, external assembler, or linker.
+
+List the exact targets recognized by the current compiler with:
+
+```sh
+silex targets
+```
+
+The host target is annotated in the output. Runtime code obtains its selected
+platform and architecture through the independently versioned `STD.System`
+API rather than embedding this compiler-owned list.
 
 ## Repository layout
 

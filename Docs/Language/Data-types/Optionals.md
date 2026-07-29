@@ -11,6 +11,10 @@ var position:Position? = null
 The value is either `null` or one `T`. A `T` promotes to `T?`; extraction is
 never implicit. `null` needs an expected optional type.
 
+Type suffixes compose from left to right. `Position?[]` is a list whose
+elements are optional positions, while `Position[]?` is an optional list.
+Likewise, `int?[3]` is a fixed array of three optional integers.
+
 ## Prove that a local is present
 
 ```sx

@@ -88,6 +88,7 @@ pub const Instruction = union(enum) {
     field_load: FieldLoad,
     field_store: FieldStore,
     collection_load: CollectionLoad,
+    collection_reference: CollectionReference,
     collection_replace: CollectionReplace,
     collection_count: CollectionCount,
     list_edit: ListEdit,
@@ -95,10 +96,15 @@ pub const Instruction = union(enum) {
     collection_view: CollectionSlice,
     string_address: StringProjection,
     string_byte_count: StringProjection,
+    string_byte_at: StringByteAt,
+    string_from_bytes: StringFromBytes,
+    function_reference: FunctionReference,
     local_load: LocalLoad,
     local_store: LocalStore,
     local_address: LocalAddress,
     reference_load: ReferenceLoad,
+    address_load: AddressLoad,
+    address_store: AddressStore,
     reference_store: ReferenceStore,
     reference_field: ReferenceField,
     convert: Convert,
@@ -108,10 +114,13 @@ pub const Instruction = union(enum) {
     unary: Unary,
     binary: Binary,
     call: Call,
+    indirect_call: IndirectCall,
     boundary_call: BoundaryCall,
     dynamic_call: DynamicCall,
     print: Print,
     assert: Assert,
+    mutex_lock,
+    mutex_unlock,
 
     pub const ConstantInt = struct {
         result: ValueId,
@@ -254,6 +263,14 @@ pub const Instruction = union(enum) {
         position: Source.Position,
     };
 
+    pub const CollectionReference = struct {
+        result: ValueId,
+        collection: ValueId,
+        reference: ?ValueId,
+        index: ValueId,
+        position: Source.Position,
+    };
+
     pub const CollectionReplace = struct {
         result: ValueId,
         collection: ValueId,
@@ -291,6 +308,22 @@ pub const Instruction = union(enum) {
         operand: ValueId,
     };
 
+    pub const StringByteAt = struct {
+        result: ValueId,
+        operand: ValueId,
+        index: ValueId,
+    };
+
+    pub const StringFromBytes = struct {
+        result: ValueId,
+        bytes: ValueId,
+    };
+
+    pub const FunctionReference = struct {
+        result: ValueId,
+        function: FunctionId,
+    };
+
     pub const LocalLoad = struct {
         result: ValueId,
         local: LocalId,
@@ -309,6 +342,20 @@ pub const Instruction = union(enum) {
     pub const ReferenceLoad = struct {
         result: ValueId,
         reference: ValueId,
+    };
+
+    pub const AddressLoad = struct {
+        result: ValueId,
+        address: ValueId,
+        byte_offset: ValueId,
+        type: Type,
+    };
+
+    pub const AddressStore = struct {
+        address: ValueId,
+        byte_offset: ValueId,
+        operand: ValueId,
+        type: Type,
     };
 
     pub const ReferenceStore = struct {
@@ -367,8 +414,14 @@ pub const Instruction = union(enum) {
         arguments: []const ValueId,
     };
 
+    pub const IndirectCall = struct {
+        result: ?ValueId,
+        callee: ValueId,
+        arguments: []const ValueId,
+    };
+
     pub const BoundaryCall = struct {
-        result: ValueId,
+        result: ?ValueId,
         function: usize,
         arguments: []const ValueId,
     };
@@ -470,8 +523,14 @@ pub const Program = struct {
     globals: []const Global = &.{},
     structures: []const Structure = &.{},
     enums: []const Enum = &.{},
+    function_types: []const FunctionType = &.{},
     functions: []const Function,
     files: []const []const u8 = &.{"<source>"},
+};
+
+pub const FunctionType = struct {
+    parameter_types: []const Type,
+    return_type: Type,
 };
 
 pub const Global = struct {
@@ -833,6 +892,19 @@ fn writeInstruction(
             try output.appendSlice(allocator, ", ");
             try appendValueChecked(output, allocator, function, load.index);
         },
+        .collection_reference => |reference| {
+            try appendResult(output, allocator, program, function, reference.result);
+            try output.appendSlice(allocator, "collection.reference ");
+            try appendValueChecked(output, allocator, function, reference.collection);
+            try output.appendSlice(allocator, ", ");
+            try appendValueChecked(output, allocator, function, reference.index);
+            if (reference.reference) |source| {
+                try output.appendSlice(allocator, ", through ");
+                try appendValueChecked(output, allocator, function, source);
+                if (function.value_types[source] != .address) return error.InvalidProgram;
+            }
+            if (function.value_types[reference.result] != .address or function.value_types[reference.index] != .int) return error.InvalidProgram;
+        },
         .collection_replace => |replacement| {
             try appendResult(output, allocator, program, function, replacement.result);
             try output.appendSlice(allocator, "collection.replace ");
@@ -896,6 +968,36 @@ fn writeInstruction(
             try appendValueChecked(output, allocator, function, count.operand);
             if (function.value_types[count.result] != .uint) return error.InvalidProgram;
         },
+        .string_byte_at => |access| {
+            try appendResult(output, allocator, program, function, access.result);
+            try output.appendSlice(allocator, "str.byte_at ");
+            try appendValueChecked(output, allocator, function, access.operand);
+            try output.appendSlice(allocator, ", ");
+            try appendValueChecked(output, allocator, function, access.index);
+            if (function.value_types[access.result] != .uint8 or function.value_types[access.operand] != .str or
+                function.value_types[access.index] != .uint) return error.InvalidProgram;
+        },
+        .string_from_bytes => |conversion| {
+            try appendResult(output, allocator, program, function, conversion.result);
+            try output.appendSlice(allocator, "str.from_bytes ");
+            try appendValueChecked(output, allocator, function, conversion.bytes);
+            if (function.value_types[conversion.result] != .str) return error.InvalidProgram;
+            const type_value = function.value_types[conversion.bytes];
+            const structure = type_value.structureIndex() orelse return error.InvalidProgram;
+            if (structure >= program.structures.len) return error.InvalidProgram;
+            const collection = program.structures[structure].collection orelse return error.InvalidProgram;
+            if (!collection.view or collection.element != .uint8) return error.InvalidProgram;
+        },
+        .function_reference => |reference| {
+            if (reference.function >= program.functions.len or reference.result >= function.value_types.len or
+                function.value_types[reference.result].functionIndex() == null)
+            {
+                return error.InvalidProgram;
+            }
+            try appendResult(output, allocator, program, function, reference.result);
+            try output.appendSlice(allocator, "function @");
+            try output.appendSlice(allocator, program.functions[reference.function].name);
+        },
         .local_load => |load| {
             try appendResult(output, allocator, program, function, load.result);
             try output.appendSlice(allocator, "load ");
@@ -920,6 +1022,26 @@ fn writeInstruction(
             try output.appendSlice(allocator, "reference.load ");
             try appendValueChecked(output, allocator, function, load.reference);
             if (function.value_types[load.reference] != .address) return error.InvalidProgram;
+        },
+        .address_load => |load| {
+            try appendResult(output, allocator, program, function, load.result);
+            try output.appendSlice(allocator, "boundary.load ");
+            try appendValueChecked(output, allocator, function, load.address);
+            try output.appendSlice(allocator, ", ");
+            try appendValueChecked(output, allocator, function, load.byte_offset);
+            if ((function.value_types[load.address] != .address and function.value_types[load.address] != .uint) or function.value_types[load.byte_offset] != .uint or
+                function.value_types[load.result] != load.type or (!load.type.isInteger() and load.type != .address)) return error.InvalidProgram;
+        },
+        .address_store => |store| {
+            try output.appendSlice(allocator, "boundary.store ");
+            try appendValueChecked(output, allocator, function, store.address);
+            try output.appendSlice(allocator, ", ");
+            try appendValueChecked(output, allocator, function, store.byte_offset);
+            try output.appendSlice(allocator, ", ");
+            try appendValueChecked(output, allocator, function, store.operand);
+            if ((function.value_types[store.address] != .address and function.value_types[store.address] != .uint) or
+                function.value_types[store.byte_offset] != .uint or function.value_types[store.operand] != store.type or
+                !store.type.isInteger()) return error.InvalidProgram;
         },
         .reference_store => |store| {
             try output.appendSlice(allocator, "reference.store ");
@@ -987,8 +1109,19 @@ fn writeInstruction(
             }
             try output.append(allocator, ')');
         },
+        .indirect_call => |call| {
+            if (call.result) |result| try appendResult(output, allocator, program, function, result);
+            try output.appendSlice(allocator, "call.indirect ");
+            try appendValueChecked(output, allocator, function, call.callee);
+            try output.append(allocator, '(');
+            for (call.arguments, 0..) |argument, index| {
+                if (index != 0) try output.appendSlice(allocator, ", ");
+                try appendValueChecked(output, allocator, function, argument);
+            }
+            try output.append(allocator, ')');
+        },
         .boundary_call => |call| {
-            try appendResult(output, allocator, program, function, call.result);
+            if (call.result) |result| try appendResult(output, allocator, program, function, result);
             try output.appendSlice(allocator, "boundary.call #");
             try output.appendSlice(allocator, try std.fmt.allocPrint(allocator, "{d}", .{call.function}));
             try output.append(allocator, '(');
@@ -1015,6 +1148,8 @@ fn writeInstruction(
             try output.appendSlice(allocator, ", ");
             try appendValueChecked(output, allocator, function, assertion.message);
         },
+        .mutex_lock => try output.appendSlice(allocator, "mutex.lock"),
+        .mutex_unlock => try output.appendSlice(allocator, "mutex.unlock"),
     }
 }
 
@@ -1027,6 +1162,17 @@ fn appendType(output: *std.ArrayList(u8), allocator: Allocator, program: Program
         if (index >= program.structures.len) return error.InvalidProgram;
         try output.append(allocator, '@');
         return output.appendSlice(allocator, program.structures[index].name);
+    }
+    if (type_value.functionIndex()) |index| {
+        if (index >= program.function_types.len) return error.InvalidProgram;
+        const function_type = program.function_types[index];
+        try output.appendSlice(allocator, "func(");
+        for (function_type.parameter_types, 0..) |parameter, parameter_index| {
+            if (parameter_index != 0) try output.appendSlice(allocator, ",");
+            try appendType(output, allocator, program, parameter);
+        }
+        try output.appendSlice(allocator, ") ");
+        return appendType(output, allocator, program, function_type.return_type);
     }
     try output.appendSlice(allocator, type_value.name());
 }

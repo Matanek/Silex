@@ -58,10 +58,12 @@ pub const Specializer = struct {
     structures: std.ArrayList(Ast.Structure) = .empty,
     enums: std.ArrayList(Ast.Enum) = .empty,
     type_names: std.ArrayList([]const u8) = .empty,
+    function_types: std.ArrayList(Ast.FunctionType) = .empty,
     specializations: std.ArrayList(FunctionSpecialization) = .empty,
     structure_specializations: std.ArrayList(StructureSpecialization) = .empty,
     enum_specializations: std.ArrayList(EnumSpecialization) = .empty,
     method_specializations: std.ArrayList(MethodSpecialization) = .empty,
+    specialization_file: ?usize = null,
     diagnostic: ?Source.Diagnostic = null,
 
     pub fn init(allocator: Allocator) Specializer {
@@ -92,7 +94,7 @@ pub const Specializer = struct {
         }
         const concrete_structure_count = self.structures.items.len;
         for (0..concrete_structure_count) |structure_index| {
-            try self.rewriteStructureAt(structure_index, &.{});
+            try self.rewriteStructureAt(structure_index, &.{}, null);
         }
         for (program.functions) |function| {
             if (function.type_parameters.len == 0) try self.functions.append(self.allocator, function);
@@ -118,6 +120,7 @@ pub const Specializer = struct {
         var result = program;
         result.type_names = try self.type_names.toOwnedSlice(self.allocator);
         result.generic_types = &.{};
+        result.function_types = try self.function_types.toOwnedSlice(self.allocator);
         result.structures = try self.structures.toOwnedSlice(self.allocator);
         result.enums = try self.enums.toOwnedSlice(self.allocator);
         result.functions = try self.functions.toOwnedSlice(self.allocator);
@@ -179,6 +182,12 @@ pub const Specializer = struct {
                 }
             }
         }
+        for (self.function_types.items) |*function_type| {
+            for (@constCast(function_type.parameters)) |*parameter| {
+                parameter.type = Remap.concreteType(parameter.type, map);
+            }
+            function_type.return_type = Remap.concreteType(function_type.return_type, map);
+        }
         self.type_names = names;
     }
 
@@ -198,7 +207,7 @@ pub const Specializer = struct {
         self.enums.items[enum_index] = enumeration;
     }
 
-    fn rewriteStructureAt(self: *Specializer, structure_index: usize, arguments: []const Ast.Type) SpecializeError!void {
+    fn rewriteStructureAt(self: *Specializer, structure_index: usize, arguments: []const Ast.Type, specialization_file: ?usize) SpecializeError!void {
         var structure = self.structures.items[structure_index];
         structure.type_parameters = &.{};
         const self_type = self.typeForName(structure.name) orelse return error.InvalidSource;
@@ -234,6 +243,7 @@ pub const Specializer = struct {
         const constructors = try self.allocator.alloc(Ast.Constructor, structure.constructors.len);
         for (structure.constructors, 0..) |constructor, constructor_index| {
             constructors[constructor_index] = constructor;
+            constructors[constructor_index].specialization_file = specialization_file;
             var locals: std.ArrayList(Binding) = .empty;
             try locals.append(self.allocator, .{ .name = "self", .type = self_type });
             constructors[constructor_index].parameters = try self.rewriteParameters(constructor.parameters, arguments, &locals);
@@ -259,6 +269,7 @@ pub const Specializer = struct {
         const initial_method_count = structure.methods.len;
         for (0..initial_method_count) |method_index| {
             var method = self.structures.items[structure_index].methods[method_index];
+            method.specialization_file = specialization_file;
             var locals: std.ArrayList(Binding) = .empty;
             try locals.append(self.allocator, .{ .name = "self", .type = self_type });
             method.parameters = try self.rewriteParameters(method.parameters, arguments, &locals);
@@ -426,6 +437,13 @@ pub const Specializer = struct {
                 locals.shrinkRetainingCapacity(local_count);
                 break :value .{ .for_statement = copy };
             },
+            .mutex_statement => |mutex| value: {
+                var copy = mutex;
+                const local_count = locals.items.len;
+                copy.statements = try self.rewriteStatements(mutex.statements, arguments, locals);
+                locals.shrinkRetainingCapacity(local_count);
+                break :value .{ .mutex_statement = copy };
+            },
             .break_statement => |position| .{ .break_statement = position },
             .continue_statement => |position| .{ .continue_statement = position },
         };
@@ -457,6 +475,55 @@ pub const Specializer = struct {
                 const type_arguments = try self.allocator.alloc(Ast.Type, copy.type_arguments.len);
                 for (copy.type_arguments, 0..) |type_argument, index| type_arguments[index] = try self.rewriteType(type_argument, arguments, copy.name_position);
                 copy.type_arguments = type_arguments;
+                if (copy.receiver == null and std.mem.eql(u8, copy.name, "C.function_address") and copy.type_arguments.len != 0) {
+                    if (copy.arguments.len != 1 or copy.named_arguments.len != 0 or copy.arguments[0].value != .identifier) {
+                        return self.fail(copy.name_position, "C.function_address<T...> expects one named generic function");
+                    }
+                    const function_name = copy.arguments[0].value.identifier;
+                    var selected: ?Ast.Function = null;
+                    for (self.source.functions) |candidate| {
+                        const name_matches = std.mem.eql(u8, candidate.name, function_name) or
+                            (candidate.name.len > function_name.len and std.mem.endsWith(u8, candidate.name, function_name) and
+                                candidate.name[candidate.name.len - function_name.len - 1] == '.');
+                        if (!name_matches or
+                            candidate.type_parameters.len != copy.type_arguments.len or !functionVisible(copy, candidate)) continue;
+                        if (selected != null) {
+                            const message = try std.fmt.allocPrint(
+                                self.allocator,
+                                "generic function reference '{s}' is ambiguous",
+                                .{function_name},
+                            );
+                            return self.fail(copy.arguments[0].position, message);
+                        }
+                        selected = candidate;
+                    }
+                    const template = selected orelse {
+                        const message = try std.fmt.allocPrint(
+                            self.allocator,
+                            "unknown generic function '{s}' accepting {d} type arguments",
+                            .{ function_name, copy.type_arguments.len },
+                        );
+                        return self.fail(copy.arguments[0].position, message);
+                    };
+                    copy.arguments[0].value.identifier = try self.instantiate(template, copy.type_arguments, copy.name_position);
+                    const parameter_types = try self.allocator.alloc(Ast.FunctionType.ParameterType, template.parameters.len);
+                    for (template.parameters, 0..) |parameter, parameter_index| parameter_types[parameter_index] = .{
+                        .type = try self.rewriteType(parameter.type, copy.type_arguments, parameter.position),
+                        .mode = parameter.mode,
+                    };
+                    const signature: Ast.FunctionType = .{
+                        .parameters = parameter_types,
+                        .return_type = try self.rewriteType(template.return_type, copy.type_arguments, template.name_position),
+                        .return_mode = template.return_mode,
+                    };
+                    var known_signature = false;
+                    for (self.function_types.items) |existing| if (sameFunctionType(existing, signature)) {
+                        known_signature = true;
+                        break;
+                    };
+                    if (!known_signature) try self.function_types.append(self.allocator, signature);
+                    copy.type_arguments = &.{};
+                }
                 if (copy.receiver) |receiver| if (receiver.value == .identifier) {
                     if (self.typeForName(receiver.value.identifier)) |receiver_type| {
                         if (self.enumTemplateForType(receiver_type)) |template| {
@@ -582,11 +649,24 @@ pub const Specializer = struct {
     }
 
     fn specializeCall(self: *Specializer, call: Ast.Expression.Call, locals: []const Binding) SpecializeError!?[]const u8 {
+        if (std.mem.eql(u8, call.name, "C.load") or std.mem.eql(u8, call.name, "C.store") or
+            std.mem.eql(u8, call.name, "C.object_from_address")) return null;
         const actual_types = try self.allocator.alloc(Ast.Type, call.arguments.len);
         for (call.arguments, 0..) |argument, index| {
-            actual_types[index] = self.inferExpressionType(argument, locals) orelse {
+            actual_types[index] = self.inferExpressionType(argument, locals) orelse contextual_type: {
                 if (call.type_arguments.len == 0) return null;
-                return self.fail(call.arguments[index].position, "cannot determine argument type for generic specialization");
+                var contextual: ?Ast.Type = null;
+                for (self.source.functions) |function| {
+                    if (!std.mem.eql(u8, function.name, call.name) or function.type_parameters.len != call.type_arguments.len or
+                        !parametersAcceptArity(function.parameters, call.arguments.len) or !functionVisible(call, function)) continue;
+                    const candidate = try self.rewriteType(function.parameters[index].type, call.type_arguments, call.arguments[index].position);
+                    if (contextual != null and contextual.? != candidate) {
+                        contextual = null;
+                        break;
+                    }
+                    contextual = candidate;
+                }
+                break :contextual_type contextual orelse return self.fail(call.arguments[index].position, "cannot determine argument type for generic specialization");
             };
         }
 
@@ -594,6 +674,8 @@ pub const Specializer = struct {
 
         var selected: ?*const Ast.Function = null;
         var selected_arguments: []const Ast.Type = &.{};
+        var selected_cost: usize = std.math.maxInt(usize);
+        var is_ambiguous = false;
         var saw_generic = false;
         var saw_arity = false;
         for (self.source.functions) |*function| {
@@ -604,19 +686,28 @@ pub const Specializer = struct {
                 saw_arity = true;
                 if (!parametersAcceptArity(function.parameters, actual_types.len)) continue;
                 if (!self.argumentsMatch(function.parameters, actual_types, call.type_arguments)) continue;
-                if (selected != null) return self.ambiguous(call.name_position, call.name);
-                selected = function;
-                selected_arguments = call.type_arguments;
+                const cost = self.argumentAdaptationCost(function.parameters, actual_types);
+                if (cost < selected_cost) {
+                    selected = function;
+                    selected_arguments = call.type_arguments;
+                    selected_cost = cost;
+                    is_ambiguous = false;
+                } else if (cost == selected_cost) is_ambiguous = true;
                 continue;
             }
             if (!parametersAcceptArity(function.parameters, actual_types.len)) continue;
             saw_arity = true;
             const inferred = try self.inferTypeArguments(function.*, actual_types) orelse continue;
-            if (selected != null) return self.ambiguous(call.name_position, call.name);
-            selected = function;
-            selected_arguments = inferred;
+            const cost = self.argumentAdaptationCost(function.parameters, actual_types);
+            if (cost < selected_cost) {
+                selected = function;
+                selected_arguments = inferred;
+                selected_cost = cost;
+                is_ambiguous = false;
+            } else if (cost == selected_cost) is_ambiguous = true;
         }
 
+        if (is_ambiguous) return self.ambiguous(call.name_position, call.name);
         if (selected) |template| return try self.instantiate(template.*, selected_arguments, call.name_position);
         if (!saw_generic) {
             if (call.type_arguments.len == 0) return null;
@@ -784,6 +875,9 @@ pub const Specializer = struct {
         arguments: []const Ast.Type,
         position: Source.Position,
     ) SpecializeError![]const u8 {
+        const previous_specialization_file = self.specialization_file;
+        self.specialization_file = previous_specialization_file orelse position.file;
+        defer self.specialization_file = previous_specialization_file;
         for (arguments) |argument| if (argument == .void) return self.fail(position, "'void' is not a generic type argument");
         try self.validateArguments(template.type_parameters, arguments, position);
         for (self.method_specializations.items) |specialization| {
@@ -809,7 +903,7 @@ pub const Specializer = struct {
         var concrete = template;
         concrete.name = name;
         concrete.type_parameters = &.{};
-        concrete.specialization_file = position.file;
+        concrete.specialization_file = self.specialization_file;
         var locals: std.ArrayList(Binding) = .empty;
         try locals.append(self.allocator, .{ .name = "self", .type = structure_type });
         concrete.parameters = try self.rewriteParameters(template.parameters, arguments, &locals);
@@ -828,6 +922,9 @@ pub const Specializer = struct {
         arguments: []const Ast.Type,
         position: Source.Position,
     ) SpecializeError![]const u8 {
+        const previous_specialization_file = self.specialization_file;
+        self.specialization_file = previous_specialization_file orelse position.file;
+        defer self.specialization_file = previous_specialization_file;
         for (arguments) |argument| if (argument == .void) return self.fail(position, "'void' is not a generic type argument");
         try self.validateArguments(template.type_parameters, arguments, position);
         for (self.specializations.items) |specialization| {
@@ -854,7 +951,7 @@ pub const Specializer = struct {
         var concrete = template;
         concrete.name = name;
         concrete.type_parameters = &.{};
-        concrete.specialization_file = position.file;
+        concrete.specialization_file = self.specialization_file;
         var locals: std.ArrayList(Binding) = .empty;
         concrete.parameters = try self.rewriteParameters(template.parameters, arguments, &locals);
         concrete.return_type = try self.rewriteType(template.return_type, arguments, template.name_position);
@@ -871,6 +968,24 @@ pub const Specializer = struct {
         position: Source.Position,
     ) SpecializeError!Ast.Type {
         if (type_value.optionalChild()) |child| return .optional(try self.rewriteType(child, arguments, position));
+        if (type_value.functionIndex()) |function_index| {
+            if (function_index >= self.source.function_types.len) return error.InvalidSource;
+            const source = self.source.function_types[function_index];
+            const parameters = try self.allocator.alloc(Ast.FunctionType.ParameterType, source.parameters.len);
+            for (source.parameters, 0..) |parameter, index| parameters[index] = .{
+                .type = try self.rewriteType(parameter.type, arguments, position),
+                .mode = parameter.mode,
+            };
+            const candidate: Ast.FunctionType = .{
+                .parameters = parameters,
+                .return_type = try self.rewriteType(source.return_type, arguments, position),
+                .return_mode = source.return_mode,
+            };
+            for (self.function_types.items, 0..) |existing, index| if (sameFunctionType(existing, candidate)) return .function(index);
+            const index = self.function_types.items.len;
+            try self.function_types.append(self.allocator, candidate);
+            return .function(index);
+        }
         if (type_value.genericParameterIndex()) |parameter| {
             if (parameter >= arguments.len) return self.fail(position, "unknown type parameter");
             return arguments[parameter];
@@ -964,7 +1079,7 @@ pub const Specializer = struct {
         concrete.collection = .{ .element = element, .length = source_collection.length, .view = source_collection.view };
         const structure_index = self.structures.items.len;
         try self.structures.append(self.allocator, concrete);
-        try self.rewriteStructureAt(structure_index, arguments);
+        try self.rewriteStructureAt(structure_index, arguments, self.specialization_file orelse position.file);
         return type_value;
     }
 
@@ -974,6 +1089,9 @@ pub const Specializer = struct {
         arguments: []const Ast.Type,
         position: Source.Position,
     ) SpecializeError!Ast.Type {
+        const previous_specialization_file = self.specialization_file;
+        self.specialization_file = previous_specialization_file orelse position.file;
+        defer self.specialization_file = previous_specialization_file;
         const template = self.structureTemplateForType(base) orelse {
             const name = self.typeName(base);
             const declaration = self.structureForType(base);
@@ -1021,7 +1139,7 @@ pub const Specializer = struct {
         if (try Nested.concreteEnclosing(self, template, arguments, position)) |owner| concrete.enclosing = owner;
         const structure_index = self.structures.items.len;
         try self.structures.append(self.allocator, concrete);
-        try self.rewriteStructureAt(structure_index, arguments);
+        try self.rewriteStructureAt(structure_index, arguments, self.specialization_file);
         self.structure_specializations.items[specialization_index].visiting = false;
         return type_value;
     }
@@ -1109,6 +1227,23 @@ pub const Specializer = struct {
             inferred[index] = actual;
             return true;
         }
+        if (pattern.functionIndex()) |pattern_index| {
+            const actual_index = actual.functionIndex() orelse return false;
+            if (pattern_index >= self.source.function_types.len) return false;
+            const pattern_function = self.source.function_types[pattern_index];
+            const actual_function = if (actual_index < self.function_types.items.len)
+                self.function_types.items[actual_index]
+            else if (actual_index < self.source.function_types.len)
+                self.source.function_types[actual_index]
+            else
+                return false;
+            if (pattern_function.return_mode != actual_function.return_mode or pattern_function.parameters.len != actual_function.parameters.len) return false;
+            if (!self.unifyType(pattern_function.return_type, actual_function.return_type, inferred)) return false;
+            for (pattern_function.parameters, actual_function.parameters) |pattern_parameter, actual_parameter| {
+                if (pattern_parameter.mode != actual_parameter.mode or !self.unifyType(pattern_parameter.type, actual_parameter.type, inferred)) return false;
+            }
+            return true;
+        }
         if (pattern.genericInstantiationIndex()) |generic_index| {
             if (generic_index >= self.source.generic_types.len) return false;
             const generic = self.source.generic_types[generic_index];
@@ -1142,6 +1277,24 @@ pub const Specializer = struct {
         return true;
     }
 
+    fn argumentAdaptationCost(self: *Specializer, parameters: []const Ast.Parameter, actual: []const Ast.Type) usize {
+        var cost: usize = 0;
+        for (parameters[0..actual.len], actual) |parameter, actual_type| {
+            cost += self.typeAdaptationCost(parameter.type, actual_type);
+        }
+        return cost;
+    }
+
+    fn typeAdaptationCost(self: *Specializer, pattern: Ast.Type, actual: Ast.Type) usize {
+        if (pattern.optionalChild()) |child| return self.typeAdaptationCost(child, actual.optionalChild() orelse actual);
+        if (self.collectionForSourceType(pattern)) |pattern_collection| {
+            const actual_collection = self.collectionForSourceType(actual) orelse return 0;
+            return @intFromBool(pattern_collection.view and !actual_collection.view) +
+                self.typeAdaptationCost(pattern_collection.element, actual_collection.element);
+        }
+        return 0;
+    }
+
     fn matchesPattern(self: *Specializer, pattern: Ast.Type, actual: Ast.Type, arguments: []const Ast.Type) bool {
         if (pattern.optionalChild()) |child| {
             const expected_child = self.substitutedPattern(child, arguments) orelse return false;
@@ -1149,6 +1302,23 @@ pub const Specializer = struct {
         }
         if (pattern.genericParameterIndex()) |index| {
             return index < arguments.len and compatible(actual, arguments[index]);
+        }
+        if (pattern.functionIndex()) |pattern_index| {
+            const actual_index = actual.functionIndex() orelse return false;
+            if (pattern_index >= self.source.function_types.len) return false;
+            const pattern_function = self.source.function_types[pattern_index];
+            const actual_function = if (actual_index < self.function_types.items.len)
+                self.function_types.items[actual_index]
+            else if (actual_index < self.source.function_types.len)
+                self.source.function_types[actual_index]
+            else
+                return false;
+            if (pattern_function.return_mode != actual_function.return_mode or pattern_function.parameters.len != actual_function.parameters.len) return false;
+            if (!self.matchesPattern(pattern_function.return_type, actual_function.return_type, arguments)) return false;
+            for (pattern_function.parameters, actual_function.parameters) |pattern_parameter, actual_parameter| {
+                if (pattern_parameter.mode != actual_parameter.mode or !self.matchesPattern(pattern_parameter.type, actual_parameter.type, arguments)) return false;
+            }
+            return true;
         }
         if (pattern.genericInstantiationIndex()) |generic_index| {
             if (generic_index >= self.source.generic_types.len) return false;
@@ -1195,7 +1365,20 @@ pub const Specializer = struct {
                     index -= 1;
                     if (std.mem.eql(u8, locals[index].name, name)) break :local locals[index].type;
                 }
-                break :local null;
+                var matched: ?Ast.Type = null;
+                for (self.source.functions) |function| {
+                    if (!functionNameMatches(function.name, name) or function.type_parameters.len != 0) continue;
+                    var found_type: ?Ast.Type = null;
+                    for (self.source.function_types, 0..) |function_type, function_index| {
+                        if (functionTypeMatchesDeclaration(function_type, function)) {
+                            found_type = .function(function_index);
+                            break;
+                        }
+                    }
+                    if (found_type == null or matched != null) break :local null;
+                    matched = found_type;
+                }
+                break :local matched;
             },
             .call => |call| call_type: {
                 if (call.result_type) |result_type| break :call_type result_type;
@@ -1437,6 +1620,10 @@ pub const Specializer = struct {
             return std.fmt.allocPrint(self.allocator, "{s}?", .{self.typeName(child)}) catch "optional";
         }
         if (type_value.structureIndex()) |index| if (index < self.type_names.items.len) return self.type_names.items[index];
+        if (type_value.functionIndex()) |index| {
+            const signatures = if (index < self.function_types.items.len) self.function_types.items else self.source.function_types;
+            if (index < signatures.len) return "function";
+        }
         return type_value.name();
     }
 
@@ -1460,6 +1647,28 @@ fn compatible(actual: Ast.Type, expected: Ast.Type) bool {
     if (actual == expected or Numeric.canWiden(actual, expected)) return true;
     if (expected.optionalChild()) |child| return actual == child or actual.optionalChild() == child;
     return false;
+}
+
+fn sameFunctionType(left: Ast.FunctionType, right: Ast.FunctionType) bool {
+    if (left.return_type != right.return_type or left.return_mode != right.return_mode or left.parameters.len != right.parameters.len) return false;
+    for (left.parameters, right.parameters) |left_parameter, right_parameter| {
+        if (left_parameter.type != right_parameter.type or left_parameter.mode != right_parameter.mode) return false;
+    }
+    return true;
+}
+
+fn functionTypeMatchesDeclaration(function_type: Ast.FunctionType, function: Ast.Function) bool {
+    if (function_type.return_type != function.return_type or function_type.return_mode != function.return_mode or function_type.parameters.len != function.parameters.len) return false;
+    for (function_type.parameters, function.parameters) |parameter_type, parameter| {
+        if (parameter_type.type != parameter.type or parameter_type.mode != parameter.mode) return false;
+    }
+    return true;
+}
+
+fn functionNameMatches(candidate: []const u8, requested: []const u8) bool {
+    if (std.mem.eql(u8, candidate, requested)) return true;
+    if (!std.mem.endsWith(u8, candidate, requested) or candidate.len == requested.len) return false;
+    return candidate[candidate.len - requested.len - 1] == '.';
 }
 
 fn parametersAcceptArity(parameters: []const Ast.Parameter, arity: usize) bool {

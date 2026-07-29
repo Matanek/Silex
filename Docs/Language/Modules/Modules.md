@@ -50,8 +50,12 @@ A module file and modules below the same path form one qualified namespace:
 
 ```text
 STD/Module/Math.sx       -> STD.Math
-STD/Module/Math/Vec3.sx  -> STD.Math.Vec3
+STD/Module/Math.Vec3.sx  -> STD.Math.Vec3
 ```
+
+STD uses dotted filenames so the complete namespace remains visible in one
+directory. Other packages may equivalently use `Math/Vec3.sx`; both paths
+provide `Math.Vec3`.
 
 One import exposes both parts on demand:
 

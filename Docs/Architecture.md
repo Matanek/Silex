@@ -55,6 +55,9 @@ open Silex document
   do not expose an address or reference; target lowering alone chooses stack
   slots. `while`, `break`, and `continue` are ordinary CFG branches and
   backedges before they reach the machine backend.
+- A `mutex` block lowers to paired portable `mutex.lock` and `mutex.unlock`
+  effects. Semantic control-flow cleanup inserts unlocks before every exit;
+  target lowering owns the process-wide recursive lock representation.
 - Nominal structures are portable IR declarations. Construction records one
   typed value per declared field and reads select fields by structured indices;
   source code never observes a tuple, address, offset, layout or copy machine
@@ -171,7 +174,12 @@ open Silex document
   resolves a C library or user symbol.
 - `main` is the only source name with entry-point semantics. Other function
   names are chosen freely by the user.
-- The initial backend targets only `macos-arm64`. It uses an internal
+- Package composition recognizes `macos-arm64`, `linux-x64`, `windows-x64`,
+  and `windows-arm64`. It combines common modules with an OS-level
+  `Platform/<OS>/Module/` root and an optional exact `Target/<target>/Module/`
+  root. Recognizing and analyzing a target does not claim that its native
+  backend is implemented.
+- The complete initial backend targets `macos-arm64`. It uses an internal
   register-and-stack ABI, places every IR value in a deterministic stack slot,
   and reports checked arithmetic failures through an internal status register.
 - Native structure lowering flattens fundamental leaves into private stack-slot
@@ -181,17 +189,37 @@ open Silex document
 - The compiler writes the Mach-O headers, load commands, `__text`, entry
   wrapper, and ad-hoc SHA-256 code signature itself. It does not produce an
   object file or invoke an assembler, linker, or `codesign`.
+- The Linux X64 backend owns a distinct Silex call convention, encodes X64
+  instructions directly and writes an ELF64 container without section headers
+  or an external linker. Its integer, control-flow, class, aggregate and
+  `getrandom` vertical slice executes under Alpine; other machine operations
+  remain explicit encoder errors until the differential corpus covers them.
+  Mutable globals are currently appended to the bootstrap image, so its single
+  load segment is temporarily executable and writable. A dedicated writable
+  data segment is required before the X64 container is hardened.
+- The Windows emitters write PE32+ for X64 and ARM64, including deterministic
+  import descriptors, lookup tables and IAT entries for `VirtualAlloc` and
+  `ProcessPrng`. X64 uses the Win64 boundary registers and ARM64 shares the
+  instruction encoder while substituting the Windows allocation boundary.
+  The X64 bootstrap image likewise keeps its combined code/global section
+  writable until PE emission gains a distinct data section. These PE paths are
+  structurally tested but are not yet declared verified on Windows hosts.
 - The `macos-arm64` target can lower one verified C ABI contract declared in
   Silex as `MacOS.lib_system.write`. After portable composition, the target maps
   it to its internal Darwin provider and emits the `libSystem` load command,
   `_write` symbol, binding stream and GOT directly. Only the typed `Interop`
   declaration is exposed to binding authors; the target mechanism does not
   change the language's internal calling convention.
-- The command `silex run <source.sx> [-n|--nocache]` uses the reference interpreter.
-  `silex compile <source.sx> [-d|--debug|-r|--release]
-  [-n|--nocache] -o|--output <executable>` selects the native path. Debug is the default;
-  Release selects semantics-preserving optimization. `run` shares the frontend
-  through typed IR but emits no native executable or implicit output file.
+- The command `silex run <source.sx> [-d|--debug|-r|--release]
+  [-n|--nocache]` expresses the intent to execute on the host. It emits a
+  private native executable under `.silex/run/`, inherits the terminal streams,
+  waits for the program and returns its exit code. Debug is the default and
+  Release selects semantics-preserving optimization.
+- `silex interpret <source.sx> [-n|--nocache] [--emit-ir]` explicitly selects
+  the reference interpreter. It is intended for semantic validation and cannot
+  execute most platform boundaries. `silex compile <source.sx>
+  [--target <target>] [-d|--debug|-r|--release] [-n|--nocache]
+  -o|--output <executable>` emits at a caller-selected path without running it.
 - Release propagates constants and copies through straight-line functions,
   folds checked scalar operations, removes dead constants, and inlines functions proven constant,
   identity-only or scalar-binary. ARM64 lowering then performs deterministic
@@ -205,7 +233,10 @@ open Silex document
   to reuse independently, and mode-specific Mach-O images. Exact source
   contents are re-hashed before reuse; corrupt or unavailable entries are
   misses, and atomic publication prevents readers from observing partial data.
-  `-n` and `--nocache` perform no cache access and do not create `.silex`.
+  Native images use target-specific Mach-O, ELF or PE cache kinds.
+  `-n` and `--nocache` bypass reusable compilation entries. `run` still writes
+  its private executable under `.silex/run/`; the option forces rebuilding it
+  and does not change the command's output location.
 - The command `silex lsp` speaks framed JSON-RPC over standard input and
   output. Its public capabilities describe editor intentions; AST and IR
   structures remain private implementation details.

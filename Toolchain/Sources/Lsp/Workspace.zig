@@ -2,6 +2,7 @@ const std = @import("std");
 const Ast = @import("../Ast.zig");
 const Modules = @import("../Modules.zig");
 const Packages = @import("../Packages.zig");
+const TargetModule = @import("../Target.zig");
 const ParserModule = @import("../Parser.zig");
 const Completion = @import("Completion.zig");
 const LexerModule = @import("../Lexer.zig");
@@ -9,6 +10,17 @@ const Types = @import("Types.zig");
 
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
+
+const CompletionKind = struct {
+    const method: u8 = 2;
+    const function: u8 = 3;
+    const field: u8 = 5;
+    const class: u8 = 7;
+    const interface: u8 = 8;
+    const module: u8 = 9;
+    const enum_type: u8 = 13;
+    const structure: u8 = 22;
+};
 
 const Query = union(enum) {
     use_path: PathQuery,
@@ -33,6 +45,7 @@ const ImportedMemberQuery = struct {
     type_path: []const u8,
     prefix: []const u8,
     cursor: usize,
+    static_receiver: bool = false,
     inside_extension: bool = false,
 };
 
@@ -58,10 +71,34 @@ pub fn itemsAt(
     source: []const u8,
     cursor: usize,
 ) !?[]const Types.CompletionItem {
+    return itemsAtForTarget(
+        allocator,
+        io,
+        global_packages_root,
+        TargetModule.Target.host() orelse .macos_arm64,
+        root_uri,
+        document_uri,
+        documents,
+        source,
+        cursor,
+    );
+}
+
+pub fn itemsAtForTarget(
+    allocator: Allocator,
+    io: Io,
+    global_packages_root: ?[]const u8,
+    selected_target: TargetModule.Target,
+    root_uri: ?[]const u8,
+    document_uri: []const u8,
+    documents: []const Types.Document,
+    source: []const u8,
+    cursor: usize,
+) !?[]const Types.CompletionItem {
     const document_path = try pathFromUri(allocator, document_uri);
     const root_hint = if (root_uri) |uri| try pathFromUri(allocator, uri) else null;
     const root = try projectRoot(allocator, io, document_path, root_hint);
-    const project = try indexProject(allocator, io, global_packages_root, root, document_path);
+    const project = try indexProject(allocator, io, global_packages_root, selected_target, root, document_path);
     const query = try queryAt(allocator, source, cursor, project, io, documents);
     if (query == null) return null;
 
@@ -105,6 +142,30 @@ pub fn scopeItemsAt(
     source: []const u8,
     cursor: usize,
 ) ![]const Types.CompletionItem {
+    return scopeItemsAtForTarget(
+        allocator,
+        io,
+        global_packages_root,
+        TargetModule.Target.host() orelse .macos_arm64,
+        root_uri,
+        document_uri,
+        documents,
+        source,
+        cursor,
+    );
+}
+
+pub fn scopeItemsAtForTarget(
+    allocator: Allocator,
+    io: Io,
+    global_packages_root: ?[]const u8,
+    selected_target: TargetModule.Target,
+    root_uri: ?[]const u8,
+    document_uri: []const u8,
+    documents: []const Types.Document,
+    source: []const u8,
+    cursor: usize,
+) ![]const Types.CompletionItem {
     if (cursor > source.len) return allocator.alloc(Types.CompletionItem, 0);
     const prefix_start = prefixStart(source, cursor);
     const prefix = source[prefix_start..cursor];
@@ -115,7 +176,7 @@ pub fn scopeItemsAt(
     const document_path = try pathFromUri(allocator, document_uri);
     const root_hint = if (root_uri) |uri| try pathFromUri(allocator, uri) else null;
     const root = try projectRoot(allocator, io, document_path, root_hint);
-    const project = try indexProject(allocator, io, global_packages_root, root, document_path);
+    const project = try indexProject(allocator, io, global_packages_root, selected_target, root, document_path);
 
     var ranked: std.ArrayList(RankedItem) = .empty;
     for (program.uses) |use| {
@@ -137,20 +198,23 @@ pub fn scopeItemsAt(
             for (loaded.program.structures) |structure| {
                 if (!std.mem.eql(u8, structure.name, target.declaration)) continue;
                 if (!structure.is_public) continue;
-                if (type_only or structure.constructors.len == 0) {
+                if (type_only or structure.is_protocol or structure.is_static) {
                     try appendRanked(allocator, &ranked, .{
                         .label = label,
-                        .kind = 22,
-                        .detail = if (type_only)
-                            try std.fmt.allocPrint(allocator, "struct {s}", .{structure.name})
-                        else
-                            try std.fmt.allocPrint(allocator, "{s}() {s}", .{ structure.name, structure.name }),
-                    }, if (type_only) 18 else 30, false);
+                        .kind = nominalCompletionKind(structure),
+                        .detail = try nominalCompletionDetail(allocator, structure),
+                    }, 18, false);
+                } else if (structure.constructors.len == 0) {
+                    try appendRanked(allocator, &ranked, .{
+                        .label = label,
+                        .kind = nominalCompletionKind(structure),
+                        .detail = try std.fmt.allocPrint(allocator, "{s}() {s}", .{ structure.name, structure.name }),
+                    }, 30, false);
                 } else for (structure.constructors) |constructor| {
                     if (!Completion.callAcceptsParameters(source, cursor, loaded.program, constructor.parameters)) continue;
                     try appendRanked(allocator, &ranked, .{
                         .label = label,
-                        .kind = 22,
+                        .kind = nominalCompletionKind(structure),
                         .detail = try Completion.constructorSignature(
                             allocator,
                             loaded.source,
@@ -169,7 +233,7 @@ pub fn scopeItemsAt(
                 if (!Completion.callAcceptsParameters(source, cursor, loaded.program, function.parameters)) continue;
                 try appendRanked(allocator, &ranked, .{
                     .label = label,
-                    .kind = 3,
+                    .kind = CompletionKind.function,
                     .detail = try Completion.functionSignature(allocator, loaded.source, loaded.program, function),
                 }, 35, true);
                 matched = true;
@@ -206,9 +270,10 @@ pub fn scopeItemsAt(
             if (matched) continue;
         }
         if (findProvider(project.index, use.path) != null or project.index.isNamespace(use.path)) {
+            if (!try modulePathVisible(allocator, io, documents, project, use.path)) continue;
             try appendRanked(allocator, &ranked, .{
                 .label = label,
-                .kind = 9,
+                .kind = CompletionKind.module,
                 .detail = "Silex imported module namespace",
             }, 20, false);
         }
@@ -229,9 +294,27 @@ fn isTypePrefix(source: []const u8, prefix_start: usize) bool {
     const before = std.mem.trimEnd(u8, source[0..prefix_start], " \t\r\n");
     if (before.len == 0) return false;
     if (before[before.len - 1] == ':') return true;
+    if (before[before.len - 1] == ',') {
+        const line_start = if (std.mem.lastIndexOfScalar(u8, before, '\n')) |newline| newline + 1 else 0;
+        if (isNominalRelationLine(before[line_start..])) return true;
+    }
     const word_start = prefixStart(before, before.len);
     const owner = before[word_start..];
     return std.mem.eql(u8, owner, "as") or std.mem.eql(u8, owner, "extend");
+}
+
+fn isNominalRelationLine(line: []const u8) bool {
+    var lexer = LexerModule.Lexer.init(line);
+    var declaration = false;
+    while (true) {
+        const token = lexer.next() catch return false;
+        if (token.tag == .end) return false;
+        switch (token.tag) {
+            .keyword_struct, .keyword_class, .keyword_extend => declaration = true,
+            .colon => if (declaration) return true,
+            else => {},
+        }
+    }
 }
 
 fn queryAt(
@@ -267,6 +350,14 @@ fn queryAt(
     );
     if (current_program) |program| {
         if (findUseByAlias(program, receiver)) |use| {
+            if (findProvider(project.index, use.path) == null and declarationTarget(project.index, use.path) != null) {
+                return .{ .imported_member = .{
+                    .type_path = use.path,
+                    .prefix = prefix,
+                    .cursor = cursor,
+                    .static_receiver = true,
+                } };
+            }
             return .{ .qualifier = .{
                 .path = use.path,
                 .prefix = prefix,
@@ -274,6 +365,20 @@ fn queryAt(
                 .type_only = isQualifiedTypePrefix(source, prefix_start),
             } };
         }
+        if (try declaredCallReturnTypePath(
+            allocator,
+            io,
+            documents,
+            project,
+            program,
+            source,
+            cursor,
+            receiver,
+        )) |type_path| return .{ .imported_member = .{
+            .type_path = type_path,
+            .prefix = prefix,
+            .cursor = cursor,
+        } };
         if (try declaredTypePath(allocator, source, cursor, receiver)) |type_path| {
             if (try importedTypePath(allocator, program, project, type_path)) |resolved| {
                 return .{ .imported_member = .{ .type_path = resolved, .prefix = prefix, .cursor = cursor } };
@@ -292,8 +397,6 @@ fn queryAt(
             }
         }
     }
-    _ = io;
-    _ = documents;
     return null;
 }
 
@@ -301,10 +404,11 @@ fn indexProject(
     allocator: Allocator,
     io: Io,
     global_packages_root: ?[]const u8,
+    target: TargetModule.Target,
     root: []const u8,
     document_path: []const u8,
 ) !IndexedProject {
-    var resolver = Packages.Resolver.init(allocator, io, global_packages_root);
+    var resolver = Packages.Resolver.initForTarget(allocator, io, global_packages_root, target);
     const graph = try resolver.resolve(root);
     var indexes: std.ArrayList(Modules.Index) = .empty;
     const excluded_roots = try allocator.alloc([]const u8, graph.packages.len - 1);
@@ -361,6 +465,11 @@ fn appendPathItems(
         const end = std.mem.indexOfScalar(u8, remainder, '.') orelse remainder.len;
         const child = remainder[0..end];
         if (!matchesPrefix(child, query.prefix)) continue;
+        const child_path = if (query.qualifier.len == 0)
+            child
+        else
+            try std.fmt.allocPrint(allocator, "{s}.{s}", .{ query.qualifier, child });
+        if (!try modulePathVisible(allocator, io, documents, project, child_path)) continue;
         if (call_source != null and end == remainder.len and
             (exact_loaded == null or !hasPublicDeclaration(exact_loaded.?.program, child)) and
             try appendPrincipalType(
@@ -376,7 +485,7 @@ fn appendPathItems(
             )) continue;
         try appendRanked(allocator, ranked, .{
             .label = child,
-            .kind = 9,
+            .kind = CompletionKind.module,
             .detail = if (end == remainder.len) "Silex module" else "Silex module namespace",
         }, child_priority, false);
     }
@@ -389,16 +498,19 @@ fn appendPathItems(
         if (query.type_only or call_source == null) {
             try appendRanked(allocator, ranked, .{
                 .label = structure.name,
-                .kind = 22,
-                .detail = try std.fmt.allocPrint(allocator, "{s} {s}", .{
-                    if (structure.is_class) "class" else "struct",
-                    structure.name,
-                }),
+                .kind = nominalCompletionKind(structure),
+                .detail = try nominalCompletionDetail(allocator, structure),
+            }, type_priority, false);
+        } else if (structure.is_protocol or structure.is_static) {
+            try appendRanked(allocator, ranked, .{
+                .label = structure.name,
+                .kind = nominalCompletionKind(structure),
+                .detail = try nominalCompletionDetail(allocator, structure),
             }, type_priority, false);
         } else if (structure.constructors.len == 0) {
             try appendRanked(allocator, ranked, .{
                 .label = structure.name,
-                .kind = 22,
+                .kind = nominalCompletionKind(structure),
                 .detail = try std.fmt.allocPrint(allocator, "{s}() {s}", .{ structure.name, structure.name }),
             }, type_priority, false);
         } else for (structure.constructors) |constructor| {
@@ -410,7 +522,7 @@ fn appendPathItems(
             )) continue;
             try appendRanked(allocator, ranked, .{
                 .label = structure.name,
-                .kind = 22,
+                .kind = nominalCompletionKind(structure),
                 .detail = try Completion.constructorSignature(
                     allocator,
                     loaded.source,
@@ -425,7 +537,7 @@ fn appendPathItems(
         if (!enumeration.is_public or !matchesPrefix(enumeration.name, query.prefix)) continue;
         try appendRanked(allocator, ranked, .{
             .label = enumeration.name,
-            .kind = 13,
+            .kind = CompletionKind.enum_type,
             .detail = try std.fmt.allocPrint(allocator, "enum {s}", .{enumeration.name}),
         }, type_priority, false);
     }
@@ -442,7 +554,7 @@ fn appendPathItems(
             if (!matchesPrefix(function.name, query.prefix)) continue;
             try appendRanked(allocator, ranked, .{
                 .label = function.name,
-                .kind = 3,
+                .kind = CompletionKind.function,
                 .detail = try Completion.functionSignature(allocator, loaded.source, loaded.program, function),
             }, 10, true);
         }
@@ -494,6 +606,55 @@ fn hasPublicDeclaration(program: Ast.Program, name: []const u8) bool {
     return false;
 }
 
+fn hasPublicApi(program: Ast.Program) bool {
+    for (program.structures) |structure| if (structure.is_public) return true;
+    for (program.enums) |enumeration| if (enumeration.is_public) return true;
+    for (program.functions) |function| if (function.is_public) return true;
+    for (program.uses) |use| if (use.is_public and use.alias != null) return true;
+    for (program.extensions) |extension| {
+        if (extension.conformances.len != 0) return true;
+        for (extension.methods) |method| if (method.is_public) return true;
+    }
+    return false;
+}
+
+fn modulePathVisible(
+    allocator: Allocator,
+    io: Io,
+    documents: []const Types.Document,
+    project: IndexedProject,
+    path: []const u8,
+) !bool {
+    for (project.index.providers) |provider| {
+        const matches = std.mem.eql(u8, provider.name, path) or
+            (provider.name.len > path.len and std.mem.startsWith(u8, provider.name, path) and
+                provider.name[path.len] == '.');
+        if (!matches or !project.graph.canAccess(project.current_owner, provider.owner, provider.name)) continue;
+        if (provider.owner == project.current_owner) return true;
+        const loaded = try loadProgram(allocator, io, documents, provider) orelse continue;
+        if (hasPublicApi(loaded.program)) return true;
+    }
+    return false;
+}
+
+fn nominalCompletionKind(structure: Ast.Structure) u8 {
+    if (structure.is_protocol) return CompletionKind.interface;
+    if (structure.is_class) return CompletionKind.class;
+    return CompletionKind.structure;
+}
+
+fn nominalCompletionDetail(allocator: Allocator, structure: Ast.Structure) ![]const u8 {
+    const declaration = if (structure.is_protocol)
+        "protocol"
+    else if (structure.is_static)
+        "static class"
+    else if (structure.is_class)
+        "class"
+    else
+        "struct";
+    return std.fmt.allocPrint(allocator, "{s} {s}", .{ declaration, structure.name });
+}
+
 fn appendPrincipalType(
     allocator: Allocator,
     io: Io,
@@ -508,17 +669,23 @@ fn appendPrincipalType(
     const loaded = try loadProgram(allocator, io, documents, provider) orelse return false;
     for (loaded.program.structures) |structure| {
         if (!structure.is_public or !std.mem.eql(u8, structure.name, name)) continue;
-        if (structure.constructors.len == 0) {
+        if (structure.is_protocol or structure.is_static) {
             try appendRanked(allocator, ranked, .{
                 .label = name,
-                .kind = 22,
+                .kind = nominalCompletionKind(structure),
+                .detail = try nominalCompletionDetail(allocator, structure),
+            }, priority, false);
+        } else if (structure.constructors.len == 0) {
+            try appendRanked(allocator, ranked, .{
+                .label = name,
+                .kind = nominalCompletionKind(structure),
                 .detail = try std.fmt.allocPrint(allocator, "{s}() {s}", .{ name, name }),
             }, priority, false);
         } else for (structure.constructors) |constructor| {
             if (!Completion.callAcceptsParameters(call_source, call_cursor, loaded.program, constructor.parameters)) continue;
             try appendRanked(allocator, ranked, .{
                 .label = name,
-                .kind = 22,
+                .kind = nominalCompletionKind(structure),
                 .detail = try Completion.constructorSignature(
                     allocator,
                     loaded.source,
@@ -534,7 +701,7 @@ fn appendPrincipalType(
         if (!enumeration.is_public or !std.mem.eql(u8, enumeration.name, name)) continue;
         try appendRanked(allocator, ranked, .{
             .label = name,
-            .kind = 13,
+            .kind = CompletionKind.enum_type,
             .detail = try std.fmt.allocPrint(allocator, "enum {s}", .{name}),
         }, priority, false);
         return true;
@@ -563,23 +730,23 @@ fn appendReexportTarget(
     const loaded = try loadProgram(allocator, io, documents, provider) orelse return;
     for (loaded.program.structures) |structure| {
         if (!structure.is_public or !std.mem.eql(u8, structure.name, target.declaration)) continue;
-        if (type_only or call_source == null) {
+        if (type_only or call_source == null or structure.is_protocol or structure.is_static) {
             try appendRanked(allocator, ranked, .{
                 .label = label,
-                .kind = 22,
-                .detail = try std.fmt.allocPrint(allocator, "struct {s}", .{structure.name}),
+                .kind = nominalCompletionKind(structure),
+                .detail = try nominalCompletionDetail(allocator, structure),
             }, 5, false);
         } else if (structure.constructors.len == 0) {
             try appendRanked(allocator, ranked, .{
                 .label = label,
-                .kind = 22,
+                .kind = nominalCompletionKind(structure),
                 .detail = try std.fmt.allocPrint(allocator, "{s}() {s}", .{ label, label }),
             }, 5, false);
         } else for (structure.constructors) |constructor| {
             if (!Completion.callAcceptsParameters(call_source.?, call_cursor, loaded.program, constructor.parameters)) continue;
             try appendRanked(allocator, ranked, .{
                 .label = label,
-                .kind = 22,
+                .kind = nominalCompletionKind(structure),
                 .detail = try Completion.constructorSignature(
                     allocator,
                     loaded.source,
@@ -595,7 +762,7 @@ fn appendReexportTarget(
         if (!enumeration.is_public or !std.mem.eql(u8, enumeration.name, target.declaration)) continue;
         try appendRanked(allocator, ranked, .{
             .label = label,
-            .kind = 13,
+            .kind = CompletionKind.enum_type,
             .detail = try std.fmt.allocPrint(allocator, "enum {s}", .{enumeration.name}),
         }, 5, false);
         return;
@@ -612,7 +779,7 @@ fn appendReexportTarget(
             )) continue;
             try appendRanked(allocator, ranked, .{
                 .label = label,
-                .kind = 3,
+                .kind = CompletionKind.function,
                 .detail = try Completion.functionSignature(allocator, loaded.source, loaded.program, function),
             }, 10, true);
             found_function = true;
@@ -673,12 +840,42 @@ fn appendImportedMembers(
     for (loaded.program.structures) |structure| {
         if (!std.mem.eql(u8, structure.name, target.declaration)) continue;
         if (!structure.is_public) return;
+        if (query.static_receiver) {
+            for (structure.static_fields) |field| {
+                if (field.is_internal or field.is_private or field.is_protected) continue;
+                if (!std.mem.startsWith(u8, field.name, query.prefix)) continue;
+                try appendRanked(allocator, ranked, .{
+                    .label = field.name,
+                    .kind = CompletionKind.field,
+                    .detail = try std.fmt.allocPrint(allocator, "static {s}:{s}", .{
+                        field.name,
+                        Completion.typeName(loaded.program, field.type),
+                    }),
+                }, 0, false);
+            }
+            for (structure.methods) |method| {
+                if (!method.is_static or method.is_internal or method.is_private or method.is_protected) continue;
+                if (!std.mem.startsWith(u8, method.name, query.prefix)) continue;
+                if (!Completion.callAcceptsParameters(
+                    current_source,
+                    query.cursor,
+                    loaded.program,
+                    method.parameters,
+                )) continue;
+                try appendRanked(allocator, ranked, .{
+                    .label = method.name,
+                    .kind = CompletionKind.method,
+                    .detail = try Completion.functionSignature(allocator, loaded.source, loaded.program, method),
+                }, 0, true);
+            }
+            return;
+        }
         for (structure.fields) |field| {
             if (field.is_internal or field.is_private or field.is_protected) continue;
             if (!std.mem.startsWith(u8, field.name, query.prefix)) continue;
             try appendRanked(allocator, ranked, .{
                 .label = field.name,
-                .kind = 5,
+                .kind = CompletionKind.field,
                 .detail = try std.fmt.allocPrint(allocator, "{s}:{s}", .{
                     field.name,
                     Completion.typeName(loaded.program, field.type),
@@ -696,7 +893,7 @@ fn appendImportedMembers(
             )) continue;
             try appendRanked(allocator, ranked, .{
                 .label = method.name,
-                .kind = 2,
+                .kind = CompletionKind.method,
                 .detail = try Completion.functionSignature(allocator, loaded.source, loaded.program, method),
             }, 0, true);
         }
@@ -868,7 +1065,17 @@ fn parseCurrentAtScope(
         placeholder,
         source[cursor..],
     });
-    return parseCurrent(allocator, recovered);
+    if (try parseCurrent(allocator, recovered)) |program| return program;
+    if (!type_only or !isNominalRelationLine(source[line_start..prefix_start])) return null;
+    const line_end = if (std.mem.indexOfScalarPos(u8, source, cursor, '\n')) |newline|
+        newline + 1
+    else
+        source.len;
+    const without_incomplete_declaration = try std.fmt.allocPrint(allocator, "{s}{s}", .{
+        source[0..line_start],
+        source[line_end..],
+    });
+    return parseCurrent(allocator, without_incomplete_declaration);
 }
 
 fn findUseByAlias(program: Ast.Program, alias: []const u8) ?Ast.Use {
@@ -912,6 +1119,101 @@ fn declaredTypePath(
         found = try joinQualified(allocator, tokens.items[start .. end + 1]);
     }
     return found;
+}
+
+fn declaredCallReturnTypePath(
+    allocator: Allocator,
+    io: Io,
+    documents: []const Types.Document,
+    project: IndexedProject,
+    current: Ast.Program,
+    source: []const u8,
+    cursor: usize,
+    receiver: []const u8,
+) !?[]const u8 {
+    var tokens: std.ArrayList(LexerModule.Token) = .empty;
+    var lexer = LexerModule.Lexer.init(source[0..cursor]);
+    while (true) {
+        const token = lexer.next() catch break;
+        if (token.tag == .end) break;
+        try tokens.append(allocator, token);
+    }
+    var index: usize = 0;
+    while (index + 6 < tokens.items.len) : (index += 1) {
+        if (tokens.items[index].tag != .keyword_let and tokens.items[index].tag != .keyword_var) continue;
+        if (tokens.items[index + 1].tag != .identifier or
+            !std.mem.eql(u8, tokens.items[index + 1].lexeme, receiver) or
+            tokens.items[index + 2].tag != .equal or
+            tokens.items[index + 3].tag != .identifier or
+            tokens.items[index + 4].tag != .dot or
+            tokens.items[index + 5].tag != .identifier or
+            tokens.items[index + 6].tag != .left_parenthesis) continue;
+
+        const owner_alias = tokens.items[index + 3].lexeme;
+        const method_name = tokens.items[index + 5].lexeme;
+        var depth: usize = 1;
+        var arguments: usize = 0;
+        var has_argument = false;
+        var end = index + 7;
+        while (end < tokens.items.len) : (end += 1) switch (tokens.items[end].tag) {
+            .left_parenthesis => {
+                if (depth == 1) has_argument = true;
+                depth += 1;
+            },
+            .right_parenthesis => {
+                depth -|= 1;
+                if (depth == 0) break;
+            },
+            .comma => if (depth == 1) {
+                arguments += 1;
+            },
+            else => {
+                if (depth == 1) has_argument = true;
+            },
+        };
+        if (depth != 0) continue;
+        if (has_argument) arguments += 1;
+
+        const use = findUseByAlias(current, owner_alias) orelse continue;
+        const target = declarationTarget(project.index, use.path) orelse continue;
+        const provider = project.index.providers[target.provider];
+        if (!project.graph.canAccess(project.current_owner, provider.owner, provider.name)) continue;
+        const loaded = try loadProgram(allocator, io, documents, provider) orelse continue;
+        var return_name: ?[]const u8 = null;
+        for (loaded.program.structures) |structure| {
+            if (!std.mem.eql(u8, structure.name, target.declaration) or !structure.is_public) continue;
+            for (structure.methods) |method| {
+                if (!method.is_static or !std.mem.eql(u8, method.name, method_name) or
+                    !parametersAcceptArity(method.parameters, arguments)) continue;
+                const candidate = returnTypeName(loaded.program, method.return_type) orelse continue;
+                if (return_name != null and !std.mem.eql(u8, return_name.?, candidate)) return null;
+                return_name = candidate;
+            }
+        }
+        const name = return_name orelse return null;
+        if (std.mem.indexOfScalar(u8, name, '.') != null) return name;
+        const qualified: []const u8 = try std.fmt.allocPrint(allocator, "{s}.{s}", .{ provider.name, name });
+        return qualified;
+    }
+    return null;
+}
+
+fn returnTypeName(program: Ast.Program, source_type: Ast.Type) ?[]const u8 {
+    const type_value = source_type.optionalChild() orelse source_type;
+    if (type_value.genericInstantiationIndex()) |index| {
+        if (index >= program.generic_types.len) return null;
+        return Completion.typeName(program, program.generic_types[index].base);
+    }
+    return if (type_value.structureIndex() != null) Completion.typeName(program, type_value) else null;
+}
+
+fn parametersAcceptArity(parameters: []const Ast.Parameter, arity: usize) bool {
+    var required = parameters.len;
+    for (parameters, 0..) |parameter, parameter_index| if (parameter.default != null) {
+        required = parameter_index;
+        break;
+    };
+    return arity >= required and arity <= parameters.len;
 }
 
 fn importedTypePath(
@@ -1277,6 +1579,18 @@ test "complete public package APIs module aliases members and overlays" {
         \\    internal func hidden_method() int { return self.hidden_value }
         \\    func to_str() str { return "vector" }
         \\}
+        \\public protocol Task { func execute() }
+        \\public class TaskHandle<T> {
+        \\    public func complete() T { panic("unused") }
+        \\    public func complete(callback:func(T)) {}
+        \\}
+        \\public class TaskWaitHandle<T> {
+        \\    public func complete() {}
+        \\}
+        \\public static class TaskManager {
+        \\    public static func submit<T>(value:T) TaskHandle<T> { panic("unused") }
+        \\    public static func submit<T>(value:T, callback:func(T)) TaskWaitHandle<T> { panic("unused") }
+        \\}
         \\public func add(left:int, right:int = 1) int { return left + right }
         \\public func add(value:str) str { return value }
         \\func hidden() int { return 0 }
@@ -1285,6 +1599,15 @@ test "complete public package APIs module aliases members and overlays" {
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Math/Module/Operations.sx",
         .data = operations_source,
+    });
+    try temporary.dir.createDirPath(std.testing.io, "Math/Module/Operations");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Math/Module/Operations/Platform.sx",
+        .data = "func spawn() {}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Math/Module/Operations/Visible.sx",
+        .data = "public func open() {}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Math/Module/Facade.sx",
@@ -1314,9 +1637,15 @@ test "complete public package APIs module aliases members and overlays" {
         import_source.len,
     )).?;
     try std.testing.expect(hasLabel(import_items, "Vector"));
+    try std.testing.expect(hasLabel(import_items, "Task"));
     try std.testing.expect(hasLabel(import_items, "add"));
+    try std.testing.expect(hasLabel(import_items, "Visible"));
+    try std.testing.expect(!hasLabel(import_items, "Platform"));
     try std.testing.expect(!hasLabel(import_items, "hidden"));
     try std.testing.expect(!hasLabel(import_items, "file_only"));
+    const task_item = import_items[labelIndex(import_items, "Task").?];
+    try std.testing.expectEqual(CompletionKind.interface, task_item.kind);
+    try std.testing.expectEqualStrings("protocol Task", task_item.detail);
 
     const facade_source = "use Math.Facade.";
     const facade_items = (try itemsAt(
@@ -1399,6 +1728,66 @@ test "complete public package APIs module aliases members and overlays" {
     try std.testing.expect(!hasLabel(member_items, "add"));
     try std.testing.expect(!hasLabel(member_items, "hidden_value"));
     try std.testing.expect(!hasLabel(member_items, "hidden_method"));
+
+    const static_source =
+        \\use Math.Operations.TaskManager
+        \\func main() { TaskManager. }
+    ;
+    const static_cursor = std.mem.indexOf(u8, static_source, "TaskManager.").? + "TaskManager.".len;
+    const static_items = (try itemsAt(
+        allocator,
+        std.testing.io,
+        null,
+        root_uri,
+        uri,
+        &.{},
+        static_source,
+        static_cursor,
+    )).?;
+    try std.testing.expectEqual(@as(usize, 2), labelCount(static_items, "submit"));
+    try std.testing.expect(!hasLabel(static_items, "to_str"));
+
+    const wait_handle_source =
+        \\use Math.Operations.TaskManager
+        \\struct Work {}
+        \\func main() {
+        \\    var handle = TaskManager.submit(Work(), func(task:Work) {})
+        \\    handle.
+        \\}
+    ;
+    const wait_handle_cursor = std.mem.indexOf(u8, wait_handle_source, "handle.").? + "handle.".len;
+    const wait_handle_items = (try itemsAt(
+        allocator,
+        std.testing.io,
+        null,
+        root_uri,
+        uri,
+        &.{},
+        wait_handle_source,
+        wait_handle_cursor,
+    )).?;
+    try std.testing.expect(hasLabel(wait_handle_items, "complete"));
+
+    const task_handle_source =
+        \\use Math.Operations.TaskManager
+        \\struct Work {}
+        \\func main() {
+        \\    var handle = TaskManager.submit(Work())
+        \\    handle.
+        \\}
+    ;
+    const task_handle_cursor = std.mem.indexOf(u8, task_handle_source, "handle.").? + "handle.".len;
+    const task_handle_items = (try itemsAt(
+        allocator,
+        std.testing.io,
+        null,
+        root_uri,
+        uri,
+        &.{},
+        task_handle_source,
+        task_handle_cursor,
+    )).?;
+    try std.testing.expectEqual(@as(usize, 2), labelCount(task_handle_items, "complete"));
 
     const overlay_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{operations_path});
     const overlays = [_]Types.Document{.{
@@ -1583,7 +1972,7 @@ fn hasLabel(items: []const Types.CompletionItem, label: []const u8) bool {
     return false;
 }
 
-test "workspace indexes the selected package target root" {
+test "workspace indexes the selected package platform root" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -1591,20 +1980,34 @@ test "workspace indexes the selected package target root" {
     defer temporary.cleanup();
 
     try temporary.dir.createDirPath(std.testing.io, "Bridge/Module");
-    try temporary.dir.createDirPath(std.testing.io, "Bridge/Platform/macos-arm64/Module");
-    try temporary.dir.createDirPath(std.testing.io, "Bridge/Platform/linux-x64-gnu/Module");
+    try temporary.dir.createDirPath(std.testing.io, "Bridge/Platform/MacOS/Module");
+    try temporary.dir.createDirPath(std.testing.io, "Bridge/Platform/Linux/Module");
+    try temporary.dir.createDirPath(std.testing.io, "Bridge/Platform/Windows/Module");
+    try temporary.dir.createDirPath(std.testing.io, "Bridge/Target/macos-arm64/Module");
+    try temporary.dir.createDirPath(std.testing.io, "Bridge/Target/linux-x64/Module");
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Bridge/Package.json",
         .data = "{\"name\":\"Bridge\",\"version\":\"1.0.0\"}",
     });
-    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Bridge/Module/Public.sx", .data = "" });
     try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "Bridge/Platform/macos-arm64/Module/Implementation.sx",
-        .data = "",
+        .sub_path = "Bridge/Module/Public.sx",
+        .data = "public func visible() {}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "Bridge/Platform/linux-x64-gnu/Module/LinuxOnly.sx",
-        .data = "this source is deliberately invalid",
+        .sub_path = "Bridge/Platform/MacOS/Module/Implementation.sx",
+        .data = "public func macos() {}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Bridge/Platform/Linux/Module/LinuxOnly.sx",
+        .data = "public func linux() {}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Bridge/Target/macos-arm64/Module/MacTarget.sx",
+        .data = "public func macos_target() {}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Bridge/Target/linux-x64/Module/LinuxTarget.sx",
+        .data = "public func linux_target() {}",
     });
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = "func main() {}" });
 
@@ -1625,7 +2028,25 @@ test "workspace indexes the selected package target root" {
     )).?;
     try std.testing.expect(hasLabel(items, "Public"));
     try std.testing.expect(hasLabel(items, "Implementation"));
+    try std.testing.expect(hasLabel(items, "MacTarget"));
     try std.testing.expect(!hasLabel(items, "LinuxOnly"));
+
+    const linux_items = (try itemsAtForTarget(
+        allocator,
+        std.testing.io,
+        null,
+        .linux_x64,
+        root_uri,
+        uri,
+        &.{},
+        source,
+        source.len,
+    )).?;
+    try std.testing.expect(hasLabel(linux_items, "Public"));
+    try std.testing.expect(hasLabel(linux_items, "LinuxOnly"));
+    try std.testing.expect(hasLabel(linux_items, "LinuxTarget"));
+    try std.testing.expect(!hasLabel(linux_items, "Implementation"));
+    try std.testing.expect(!hasLabel(linux_items, "MacTarget"));
 }
 
 fn labelCount(items: []const Types.CompletionItem, label: []const u8) usize {

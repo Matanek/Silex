@@ -88,3 +88,23 @@ test "compose fixed arrays through public module functions" {
     const result = try Interpreter.runCapture(allocator, (try compiler.compile(input)).ir);
     try std.testing.expectEqualStrings("29\n", result.stdout);
 }
+
+test "reuse an interned fixed array from a dependency implementation" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Storage.sx",
+        .data = "public func identity(values:uint8[16]) uint8[16] { return values }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "use Storage\nfunc local() uint8[16] { var values:uint8[16]; return values }\nfunc main() { let values = local(); print(values[0]) }",
+    });
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    const result = try Interpreter.runCapture(allocator, (try compiler.compile(input)).ir);
+    try std.testing.expectEqualStrings("0\n", result.stdout);
+}

@@ -33,6 +33,53 @@ pub fn parseType(self: anytype) !Ast.Type {
     const type_position = self.current.position;
     var consumed = false;
     var result: Ast.Type = switch (self.current.tag) {
+        .keyword_func => function: {
+            try self.advance();
+            try self.expect(.left_parenthesis, "expected '(' after 'func' in function type");
+            var parameters: std.ArrayList(Ast.FunctionType.ParameterType) = .empty;
+            if (self.current.tag != .right_parenthesis) while (true) {
+                const mode: Ast.Parameter.Mode = switch (self.current.tag) {
+                    .at => mode: {
+                        try self.advance();
+                        break :mode .read;
+                    },
+                    .amp => mode: {
+                        try self.advance();
+                        break :mode .mutable;
+                    },
+                    else => .value,
+                };
+                try parameters.append(self.allocator, .{ .type = try parseType(self), .mode = mode });
+                if (self.current.tag != .comma) break;
+                try self.advance();
+                if (self.current.tag == .right_parenthesis) break;
+            };
+            try self.expect(.right_parenthesis, "expected ')' after function parameter types");
+            const has_return_type = startsType(self.current.tag) or self.current.tag == .at or self.current.tag == .amp;
+            const return_mode: Ast.Parameter.Mode = if (!has_return_type) .value else switch (self.current.tag) {
+                .at => mode: {
+                    try self.advance();
+                    break :mode .read;
+                },
+                .amp => mode: {
+                    try self.advance();
+                    break :mode .mutable;
+                },
+                else => .value,
+            };
+            const signature: Ast.FunctionType = .{
+                .parameters = try parameters.toOwnedSlice(self.allocator),
+                .return_type = if (has_return_type) try parseType(self) else .void,
+                .return_mode = return_mode,
+            };
+            consumed = true;
+            for (self.function_types.items, 0..) |existing, index| {
+                if (sameFunctionType(existing, signature)) break :function .function(index);
+            }
+            const index = self.function_types.items.len;
+            try self.function_types.append(self.allocator, signature);
+            break :function .function(index);
+        },
         .keyword_void => .void,
         .keyword_int => .int,
         .keyword_int8 => .int8,
@@ -85,34 +132,70 @@ pub fn parseType(self: anytype) !Ast.Type {
         const arguments = try Generics.parseTypeArguments(self);
         result = try self.internGenericType(type_position, result, arguments);
     }
-    while (self.current.tag == .left_bracket) {
-        const bracket_position = self.current.position;
-        try self.advance();
-        if (self.current.tag == .dot_dot) {
+    while (true) switch (self.current.tag) {
+        .question => {
+            if (result == .void) return self.fail("'void?' is not a valid type");
+            if (result.optionalChild() != null) return self.fail("nested optional types are not supported");
+            result = .optional(result);
             try self.advance();
-            try self.expect(.right_bracket, "expected ']' after view type");
-            if (result == .void) return self.failAt(bracket_position, "view element type cannot be 'void'");
-            result = try Collections.internViewType(self, type_position, result);
-            continue;
-        }
-        if (self.current.tag == .right_bracket) {
+        },
+        .left_bracket => {
+            const bracket_position = self.current.position;
             try self.advance();
-            if (result == .void) return self.failAt(bracket_position, "list element type cannot be 'void'");
-            result = try Collections.internDynamicType(self, type_position, result);
-            continue;
-        }
-        if (self.current.tag != .integer) return self.fail("fixed array length must be an integer literal");
-        const length = std.fmt.parseInt(usize, self.current.lexeme, 10) catch return self.failAt(self.current.position, "fixed array length is too large");
-        try self.advance();
-        try self.expect(.right_bracket, "expected ']' after fixed array length");
-        if (result == .void) return self.failAt(bracket_position, "array element type cannot be 'void'");
-        result = try Collections.internFixedType(self, type_position, result, length);
-    }
-    if (self.current.tag == .question) {
-        if (result == .void) return self.fail("'void?' is not a valid type");
-        result = .optional(result);
-        try self.advance();
-        if (self.current.tag == .question) return self.fail("nested optional types are not supported");
-    }
+            if (self.current.tag == .dot_dot) {
+                try self.advance();
+                try self.expect(.right_bracket, "expected ']' after view type");
+                if (result == .void) return self.failAt(bracket_position, "view element type cannot be 'void'");
+                result = try Collections.internViewType(self, type_position, result);
+                continue;
+            }
+            if (self.current.tag == .right_bracket) {
+                try self.advance();
+                if (result == .void) return self.failAt(bracket_position, "list element type cannot be 'void'");
+                result = try Collections.internDynamicType(self, type_position, result);
+                continue;
+            }
+            if (self.current.tag != .integer) return self.fail("fixed array length must be an integer literal");
+            const length = std.fmt.parseInt(usize, self.current.lexeme, 10) catch return self.failAt(self.current.position, "fixed array length is too large");
+            try self.advance();
+            try self.expect(.right_bracket, "expected ']' after fixed array length");
+            if (result == .void) return self.failAt(bracket_position, "array element type cannot be 'void'");
+            result = try Collections.internFixedType(self, type_position, result, length);
+        },
+        else => break,
+    };
     return result;
+}
+
+fn startsType(tag: anytype) bool {
+    return switch (tag) {
+        .keyword_func,
+        .keyword_void,
+        .keyword_int,
+        .keyword_int8,
+        .keyword_int16,
+        .keyword_int32,
+        .keyword_int64,
+        .keyword_uint,
+        .keyword_uint8,
+        .keyword_uint16,
+        .keyword_uint32,
+        .keyword_uint64,
+        .keyword_bool,
+        .keyword_float,
+        .keyword_float32,
+        .keyword_float64,
+        .keyword_str,
+        .identifier,
+        => true,
+        else => false,
+    };
+}
+
+fn sameFunctionType(left: Ast.FunctionType, right: Ast.FunctionType) bool {
+    if (left.return_type != right.return_type or left.return_mode != right.return_mode or left.parameters.len != right.parameters.len) return false;
+    for (left.parameters, right.parameters) |left_parameter, right_parameter| {
+        if (left_parameter.type != right_parameter.type or left_parameter.mode != right_parameter.mode) return false;
+    }
+    return true;
 }

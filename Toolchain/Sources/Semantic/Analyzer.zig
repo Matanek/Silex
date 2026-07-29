@@ -15,6 +15,7 @@ const Resources = @import("Resources.zig");
 const Optionals = @import("Optionals.zig");
 const Constructors = @import("Constructors.zig");
 const Collections = @import("Collections.zig");
+const Callbacks = @import("Callbacks.zig");
 const Model = @import("Model.zig");
 const Methods = @import("Methods.zig");
 const Control = @import("Control.zig");
@@ -32,6 +33,7 @@ const Protocols = @import("Protocols.zig");
 const Conversions = @import("Conversions.zig");
 const GenericSyntax = @import("../Parser/Generics.zig");
 const Types = @import("../Types.zig");
+const Target = @import("../Target.zig").Target;
 const Allocator = std.mem.Allocator;
 const AnalyzeError = Source.Error || Allocator.Error;
 pub const Binding = Model.Binding;
@@ -52,6 +54,8 @@ pub const Analyzer = struct {
     constructor_context: ?usize = null,
     extension_context: bool = false,
     specialization_file: ?usize = null,
+    anonymous_function_context: bool = false,
+    target: ?Target = null,
     pub fn init(allocator: Allocator) Analyzer {
         return .{ .allocator = allocator };
     }
@@ -65,6 +69,7 @@ pub const Analyzer = struct {
         self.program = program;
         self.diagnostic = null;
         self.structures = try Declarations.prepareStructures(self);
+        const function_types = try Callbacks.prepare(self);
         self.globals = try StaticMembers.prepare(self);
         self.external_functions = try Interop.prepare(self);
         self.enums = try Enums.prepare(self);
@@ -108,6 +113,7 @@ pub const Analyzer = struct {
             .globals = self.globals,
             .structures = self.structures,
             .enums = self.enums,
+            .function_types = function_types,
             .functions = try functions.toOwnedSlice(self.allocator),
         };
     }
@@ -279,6 +285,9 @@ pub const Analyzer = struct {
 
     fn analyzeFunction(self: *Analyzer, function_id: Ir.FunctionId, function: Ast.Function) AnalyzeError!Ir.Function {
         _ = function_id;
+        const previous_anonymous_function_context = self.anonymous_function_context;
+        self.anonymous_function_context = function.is_anonymous;
+        defer self.anonymous_function_context = previous_anonymous_function_context;
         const previous_specialization_file = self.specialization_file;
         self.specialization_file = function.specialization_file;
         defer self.specialization_file = previous_specialization_file;
@@ -411,6 +420,7 @@ pub const Analyzer = struct {
             .if_statement => |conditional| Control.analyzeIf(self, builder, function, conditional),
             .while_statement => |loop| Control.analyzeWhile(self, builder, function, loop),
             .for_statement => |loop| Control.analyzeFor(self, builder, function, loop),
+            .mutex_statement => |mutex| Control.analyzeMutex(self, builder, function, mutex),
             .break_statement => |position| Control.analyzeLoopControl(self, builder, position, false),
             .continue_statement => |position| Control.analyzeLoopControl(self, builder, position, true),
         };
@@ -439,9 +449,29 @@ pub const Analyzer = struct {
             .null_value => Optionals.analyzeNull(self, builder, expected, expression.position),
             .string => |value| self.emitString(builder, value),
             .interpolated_string => |value| self.analyzeInterpolatedString(builder, value),
-            .identifier => |name| Borrowing.analyzeIdentifier(self, builder, expression.position, name),
+            .identifier => |name| identifier: {
+                if (Support.findBinding(builder.bindings.items, name) != null) {
+                    break :identifier Borrowing.analyzeIdentifier(self, builder, expression.position, name);
+                }
+                if (expected) |target| {
+                    break :identifier (try Callbacks.reference(self, builder, expression.position, name, target)) orelse
+                        Borrowing.analyzeIdentifier(self, builder, expression.position, name);
+                }
+                break :identifier (try Callbacks.inferredReference(self, builder, expression.position, name)) orelse
+                    Borrowing.analyzeIdentifier(self, builder, expression.position, name);
+            },
             .generic_reference => self.fail(expression.position, "generic type reference was not specialized"),
-            .field_access => |access| self.analyzeFieldAccess(builder, access),
+            .field_access => |access| function_reference: {
+                if (access.base.value == .identifier and Support.findBinding(builder.bindings.items, access.base.value.identifier) != null) {
+                    break :function_reference try self.analyzeFieldAccess(builder, access);
+                }
+                if (expected) |target| if (target.functionIndex() != null) {
+                    if (try GenericSyntax.qualifiedName(self.allocator, expression)) |name| {
+                        if (try Callbacks.reference(self, builder, expression.position, name, target)) |reference| break :function_reference reference;
+                    }
+                };
+                break :function_reference try self.analyzeFieldAccess(builder, access);
+            },
             .call => |call| (try self.analyzeCall(builder, call)) orelse {
                 const message = try std.fmt.allocPrint(self.allocator, "function '{s}' returns 'void' and cannot be used as a value", .{call.name});
                 return self.fail(call.name_position, message);
@@ -828,14 +858,15 @@ pub const Analyzer = struct {
         const declaration = self.findAstStructure(structure.name).?;
         if (declaration.is_protocol) return self.fail(call.name_position, "protocols cannot be constructed");
         if (!Visibility.typeVisible(self, structure_index, call.name_position)) {
-            return self.fail(call.name_position, "nested type is unavailable in this context");
+            const message = try std.fmt.allocPrint(self.allocator, "type '{s}' is unavailable in this context", .{structure.name});
+            return self.fail(call.name_position, message);
         }
         if (declaration.is_static) return self.fail(call.name_position, "static classes cannot be constructed");
-        if (declaration.drop != null and !self.ownerStorageVisible(structure_index, call.name_position)) {
-            return self.fail(call.name_position, "owner structure aggregate initializer is private to its declaring file and direct module users");
-        }
         if (declaration.constructors.len != 0) {
             return Constructors.analyzeCall(self, builder, structure_index, declaration, call);
+        }
+        if (declaration.drop != null and !self.ownerStorageVisible(structure_index, call.name_position)) {
+            return self.fail(call.name_position, "owner structure aggregate initializer is private to its declaring file and direct module users");
         }
         if (call.arguments.len != 0) {
             const message = try std.fmt.allocPrint(self.allocator, "structure '{s}' uses named fields", .{structure.name});
@@ -927,6 +958,20 @@ pub const Analyzer = struct {
 
     pub fn emitIntrinsic(self: *Analyzer, builder: *FunctionBuilder, type_value: Types.Type, position: Source.Position) AnalyzeError!TypedValue {
         if (try Optionals.intrinsic(self, builder, type_value)) |value| return value;
+        if (type_value.functionIndex() != null) {
+            const result = try self.newValue(builder, type_value);
+            try self.emit(builder, .{ .constant_int = .{ .result = result, .bits = 0 } });
+            return .{ .type = type_value, .value = result };
+        }
+        if (type_value.structureIndex()) |structure_index| if (structure_index < self.structures.len) {
+            if (self.structures[structure_index].collection) |collection| {
+                if (collection.length == null and !collection.view) {
+                    const result = try self.newValue(builder, type_value);
+                    try self.emit(builder, .{ .list_init = .{ .result = result, .values = &.{} } });
+                    return .{ .type = type_value, .value = result };
+                }
+            }
+        };
         return switch (type_value) {
             .int8, .int16, .int32, .int, .uint8, .uint16, .uint32, .uint => self.emitInteger(builder, 0, type_value),
             .bool => self.emitBool(builder, false),
@@ -945,6 +990,7 @@ pub const Analyzer = struct {
     }
 
     fn analyzeCall(self: *Analyzer, builder: *FunctionBuilder, call: Ast.Expression.Call) AnalyzeError!?TypedValue {
+        if (try Callbacks.call(self, builder, call)) |result| return result.value;
         if (call.receiver == null and std.mem.eql(u8, call.name, "map_error")) return try MapError.analyze(self, builder, call);
         if (try Interop.analyzeIntrinsic(self, builder, call)) |value| return value;
         if (call.receiver) |receiver_expression| {
@@ -991,7 +1037,7 @@ pub const Analyzer = struct {
                 return try self.emitStringCount(builder, value);
             }
         }
-        if (try Interop.analyzeCall(self, builder, call)) |value| return value;
+        if (Interop.hasFunction(self, call.name)) return Interop.analyzeCall(self, builder, call);
         var total_named: usize = 0;
         var named_count: usize = 0;
         var arity_count: usize = 0;

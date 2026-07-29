@@ -6,7 +6,10 @@ const Resources = @import("Resources.zig");
 
 pub fn analyzeIdentifier(self: anytype, builder: anytype, position: @import("../Source.zig").Position, name: []const u8) !Model.TypedValue {
     const binding = Support.findBinding(builder.bindings.items, name) orelse {
-        const message = try std.fmt.allocPrint(self.allocator, "unknown variable '{s}'", .{name});
+        const message = if (self.anonymous_function_context)
+            try std.fmt.allocPrint(self.allocator, "anonymous functions cannot capture surrounding value '{s}' yet", .{name})
+        else
+            try std.fmt.allocPrint(self.allocator, "unknown variable '{s}'", .{name});
         return self.fail(position, message);
     };
     if (!binding.available) {

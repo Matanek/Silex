@@ -126,6 +126,32 @@ test "lower nominal structure aggregates and chained field reads" {
     try std.testing.expect(std.mem.indexOf(u8, text, "field %4, .layer") != null);
 }
 
+test "enforce private structure fields and methods while keeping defaults public" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var parser = Parser.init(allocator,
+        \\struct Vault {
+        \\    private let secret:int = 40
+        \\    private func offset() int { return 2 }
+        \\    func reveal() int { return self.secret + self.offset() }
+        \\}
+        \\func main() { print(Vault().reveal()) }
+    );
+    var analyzer = Analyzer.init(allocator);
+    const result = try @import("../Interpreter.zig").runCapture(allocator, try analyzer.analyze(try parser.parse()));
+    try std.testing.expectEqualStrings("42\n", result.stdout);
+
+    try expectSemanticError(
+        "struct Vault { private let secret:int = 1 } func main() { print(Vault().secret) }",
+        "field 'secret' is private and unavailable here",
+    );
+    try expectSemanticError(
+        "struct Vault { private func secret() int { return 1 } } func main() { print(Vault().secret()) }",
+        "method 'secret' is private and unavailable here",
+    );
+}
+
 test "enforce structure fields nominal identity defaults and representation cycles" {
     try expectSemanticError(
         "struct Position { var x:int } struct Velocity { var x:int } func main() { let value:Velocity = Position(x:1) }",

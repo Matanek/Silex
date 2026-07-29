@@ -18,7 +18,7 @@ pub const Prepared = struct {
     steps: []const Step,
 };
 
-pub fn prepare(self: anytype, builder: anytype, expression: *const Ast.Expression, expected: Ast.Type) !Prepared {
+pub fn prepare(self: anytype, builder: anytype, expression: *const Ast.Expression, expected: ?Ast.Type) !Prepared {
     var steps: std.ArrayList(Step) = .empty;
     const root_name = rootName(expression) orelse return self.fail(expression.position, "mutable reference requires a var, mutable field, or mutable element");
     const root_index = Support.findBindingIndex(builder.bindings.items, root_name) orelse {
@@ -35,10 +35,10 @@ pub fn prepare(self: anytype, builder: anytype, expression: *const Ast.Expressio
     var current = try loadRoot(self, builder, binding);
     var current_type = binding.type;
     try descend(self, builder, expression, root_name, &steps, &current, &current_type);
-    if (current_type != expected) {
-        const message = try std.fmt.allocPrint(self.allocator, "mutable reference expects '{s}', found '{s}'", .{ self.typeName(expected), self.typeName(current_type) });
+    if (expected) |expected_type| if (current_type != expected_type) {
+        const message = try std.fmt.allocPrint(self.allocator, "mutable reference expects '{s}', found '{s}'", .{ self.typeName(expected_type), self.typeName(current_type) });
         return self.fail(expression.position, message);
-    }
+    };
 
     var stable_reference = binding.reference;
     if (stable_reference == null and binding.local != null) {

@@ -4,6 +4,7 @@ const Diagnostics = @import("Diagnostics.zig");
 const Protocol = @import("Protocol.zig");
 const Types = @import("Types.zig");
 const Workspace = @import("Workspace.zig");
+const TargetModule = @import("../Target.zig");
 
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
@@ -12,17 +13,23 @@ pub const Server = struct {
     allocator: Allocator,
     io: Io,
     global_packages_root: ?[]const u8 = null,
+    target: TargetModule.Target,
     documents: std.ArrayList(Types.Document) = .empty,
     workspace_root_uri: ?[]const u8 = null,
     position_encoding: Types.PositionEncoding = .utf16,
     exit_requested: bool = false,
 
     pub fn init(allocator: Allocator, io: Io) Server {
-        return .{ .allocator = allocator, .io = io };
+        return .{ .allocator = allocator, .io = io, .target = TargetModule.Target.host() orelse .macos_arm64 };
     }
 
     pub fn initWithPackages(allocator: Allocator, io: Io, global_packages_root: ?[]const u8) Server {
-        return .{ .allocator = allocator, .io = io, .global_packages_root = global_packages_root };
+        return .{
+            .allocator = allocator,
+            .io = io,
+            .global_packages_root = global_packages_root,
+            .target = TargetModule.Target.host() orelse .macos_arm64,
+        };
     }
 
     pub fn deinit(self: *Server) void {
@@ -123,10 +130,11 @@ pub const Server = struct {
             };
             const trigger_kind = Protocol.completionTriggerKind(params);
             if (std.mem.indexOf(u8, source, "use ") != null) {
-                const project_items = Workspace.itemsAt(
+                const project_items = Workspace.itemsAtForTarget(
                     allocator,
                     self.io,
                     self.global_packages_root,
+                    self.target,
                     self.workspace_root_uri,
                     uri,
                     self.documents.items,
@@ -139,10 +147,11 @@ pub const Server = struct {
             }
             const items = try Completion.itemsAt(allocator, source, cursor, trigger_kind);
             if (std.mem.indexOf(u8, source, "use ") != null) {
-                const imported = Workspace.scopeItemsAt(
+                const imported = Workspace.scopeItemsAtForTarget(
                     allocator,
                     self.io,
                     self.global_packages_root,
+                    self.target,
                     self.workspace_root_uri,
                     uri,
                     self.documents.items,
@@ -377,6 +386,48 @@ test "project completion exposes module children before accessible declarations"
     const declaration = std.mem.indexOf(u8, response, "\"label\":\"inside\"") orelse return error.TestUnexpectedResult;
     try std.testing.expect(child < declaration);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"label\":\"if\"") == null);
+}
+
+test "inheritance completion merges local imported types and module aliases" {
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "func main() {}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Threading.sx",
+        .data = "public protocol Task { func run() }",
+    });
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const main_path = try std.fs.path.join(allocator, &.{ root, "Main.sx" });
+    const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
+    const main_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{main_path});
+    const source =
+        \\use Threading
+        \\use Threading.Task
+        \\protocol Local { func run() }
+        \\struct MyTask :
+    ;
+
+    var server = Server.init(std.testing.allocator, std.testing.io);
+    defer server.deinit();
+    server.workspace_root_uri = try std.testing.allocator.dupe(u8, root_uri);
+    try server.setDocument(.{ .uri = main_uri, .text = source, .version = 1 });
+    const request = try std.fmt.allocPrint(
+        allocator,
+        "{{\"jsonrpc\":\"2.0\",\"id\":8,\"method\":\"textDocument/completion\",\"params\":{{\"textDocument\":{{\"uri\":\"{s}\"}},\"position\":{{\"line\":3,\"character\":{d}}}}}}}",
+        .{ main_uri, "struct MyTask :".len },
+    );
+    const response = (try server.handleBody(allocator, request)).?;
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"label\":\"Local\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"label\":\"Task\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"label\":\"Threading\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"label\":\"return\"") == null);
 }
 
 test "use completion is strictly limited to accessible modules and packages" {

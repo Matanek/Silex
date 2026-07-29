@@ -445,7 +445,7 @@ test "nested families share private access without leaking private types" {
 
     try expectCompileError(
         "class Vault { class Key {} } func main() { var key = Vault.Key() }",
-        "nested type is unavailable in this context",
+        "type 'Vault.Key' is unavailable in this context",
     );
     try expectCompileError(
         "struct Api { static var Entry:int = 1; struct Entry {} } func main() {}",

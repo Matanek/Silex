@@ -1,4 +1,5 @@
 const std = @import("std");
+const Boundary = @import("Boundary.zig");
 const Ir = @import("Ir.zig");
 const MainBoundary = @import("MainBoundary.zig");
 const Numeric = @import("Numeric.zig");
@@ -19,6 +20,7 @@ pub const Error = Allocator.Error || error{
     DivisionByZero,
     CallStackOverflow,
     RuntimeTerminated,
+    UnsupportedBoundary,
     InvalidConversion,
     InvalidShift,
 };
@@ -33,12 +35,15 @@ pub const RunResult = struct {
 
 pub const Session = struct {
     allocator: Allocator,
+    io: ?std.Io = null,
+    boundaries: []const Boundary.Function = &.{},
     stdout: std.ArrayList(u8) = .empty,
     stderr: std.ArrayList(u8) = .empty,
     terminated: bool = false,
     globals: []Value = &.{},
     classes: std.ArrayList(Classes.Entry) = .empty,
     snapshot_gate: SnapshotGate.Gate = .{},
+    mutex_depth: usize = 0,
 };
 
 pub fn run(allocator: Allocator, program: Ir.Program) Error!u8 {
@@ -46,6 +51,15 @@ pub fn run(allocator: Allocator, program: Ir.Program) Error!u8 {
 }
 
 pub fn runCapture(allocator: Allocator, program: Ir.Program) Error!RunResult {
+    return runCaptureWithBoundaries(allocator, null, program, &.{});
+}
+
+pub fn runCaptureWithBoundaries(
+    allocator: Allocator,
+    io: ?std.Io,
+    program: Ir.Program,
+    boundaries: []const Boundary.Function,
+) Error!RunResult {
     var main: ?Ir.FunctionId = null;
     for (program.functions, 0..) |function, function_id| {
         if (!std.mem.eql(u8, function.name, "main")) continue;
@@ -56,7 +70,12 @@ pub fn runCapture(allocator: Allocator, program: Ir.Program) Error!RunResult {
     const function = program.functions[function_id];
     const recoverable = MainBoundary.accepts(program.enums, function.return_type);
     if (function.parameter_types.len != 0 or (function.return_type != .void and !recoverable)) return error.InvalidProgram;
-    var session: Session = .{ .allocator = allocator, .globals = try Globals.initialize(allocator, program.globals) };
+    var session: Session = .{
+        .allocator = allocator,
+        .io = io,
+        .boundaries = boundaries,
+        .globals = try Globals.initialize(allocator, program.globals),
+    };
     const result = invokeDepth(allocator, program, function_id, &.{}, 0, &session) catch |err| switch (err) {
         error.RuntimeTerminated => return .{
             .exit_code = 1,
@@ -65,6 +84,7 @@ pub fn runCapture(allocator: Allocator, program: Ir.Program) Error!RunResult {
         },
         else => |other| return other,
     };
+    if (session.mutex_depth != 0) return error.InvalidProgram;
     if (function.return_type == .void) {
         if (result != .void) return error.InvalidProgram;
     } else {
@@ -173,10 +193,38 @@ fn executeInstruction(
     session: *Session,
 ) Error!?Value {
     switch (instruction.*) {
-        .string_address, .string_byte_count, .boundary_call => return error.InvalidProgram,
+        .string_address => return error.UnsupportedBoundary,
+        .string_byte_count => |count| {
+            const text = try string(try load(values, count.operand));
+            try store(function, values, count.result, .{ .typed_integer = .{ .type = .uint, .bits = text.len } });
+        },
+        .string_byte_at => |access| {
+            const text = try string(try load(values, access.operand));
+            const index = try numericInteger(try load(values, access.index));
+            if (index.bits >= text.len) return error.InvalidProgram;
+            try store(function, values, access.result, .{ .typed_integer = .{ .type = .uint8, .bits = text[@intCast(index.bits)] } });
+        },
+        .string_from_bytes => |conversion| {
+            const source = switch (try load(values, conversion.bytes)) {
+                .view => |view| view.fields,
+                else => return error.InvalidProgram,
+            };
+            const result = try allocator.alloc(u8, source.len);
+            for (source, 0..) |item, index| {
+                const byte = switch (item) {
+                    .typed_integer => |integer_value| if (integer_value.type == .uint8) integer_value.bits else return error.InvalidProgram,
+                    else => return error.InvalidProgram,
+                };
+                result[index] = @intCast(byte);
+            }
+            try store(function, values, conversion.result, .{ .string = result });
+        },
+        .boundary_call => |call| try executeBoundary(function, values, call, session),
         .constant_int => |constant| {
             const type_value = function.value_types[constant.result];
-            const value: Value = if (type_value == .int)
+            const value: Value = if (type_value.functionIndex() != null)
+                .{ .function = .{ .type = type_value, .id = std.math.maxInt(Ir.FunctionId) } }
+            else if (type_value == .int)
                 .{ .integer = @bitCast(constant.bits) }
             else
                 .{ .typed_integer = .{ .type = type_value, .bits = constant.bits } };
@@ -186,6 +234,13 @@ fn executeInstruction(
         .constant_str => |constant| try store(function, values, constant.result, .{ .string = constant.value }),
         .constant_float32 => |constant| try store(function, values, constant.result, .{ .float32 = @bitCast(constant.bits) }),
         .constant_float64 => |constant| try store(function, values, constant.result, .{ .float64 = @bitCast(constant.bits) }),
+        .function_reference => |reference| {
+            if (reference.function >= program.functions.len) return error.InvalidProgram;
+            try store(function, values, reference.result, .{ .function = .{
+                .type = function.value_types[reference.result],
+                .id = reference.function,
+            } });
+        },
         .optional_null => |optional| {
             const type_value = function.value_types[optional.result];
             if (type_value.optionalChild() == null) return error.InvalidProgram;
@@ -365,6 +420,7 @@ fn executeInstruction(
             try store(function, values, field.result, .{ .class = instance });
         },
         .collection_load => |access| try executeCollectionLoad(allocator, program, function, values, access, session),
+        .collection_reference => |access| try executeCollectionReference(allocator, program, function, values, access, session),
         .collection_replace => |replacement| try executeCollectionReplace(allocator, program, function, values, replacement, session),
         .collection_count => |count| try executeCollectionCount(function, values, count),
         .list_edit => |edit| try executeListEdit(allocator, program, function, values, edit, session),
@@ -391,6 +447,7 @@ fn executeInstruction(
             };
             try store(function, values, reference.result, try cloneValue(allocator, try pointer.load()));
         },
+        .address_load, .address_store => return error.UnsupportedBoundary,
         .reference_store => |reference| {
             const guard = session.snapshot_gate.mutation();
             defer guard.release();
@@ -470,6 +527,23 @@ fn executeInstruction(
                 return error.InvalidProgram;
             }
         },
+        .indirect_call => |call| {
+            const callback = switch (try load(values, call.callee)) {
+                .function => |value| value,
+                else => return error.InvalidProgram,
+            };
+            if (callback.id >= program.functions.len) return error.InvalidProgram;
+            const callee = program.functions[callback.id];
+            if (call.arguments.len != callee.parameter_types.len) return error.InvalidProgram;
+            const call_arguments = try allocator.alloc(Value, call.arguments.len);
+            defer allocator.free(call_arguments);
+            for (call.arguments, 0..) |argument, index| call_arguments[index] = try load(values, argument);
+            const result = try invokeDepth(allocator, program, callback.id, call_arguments, depth + 1, session);
+            if (call.result) |result_id| {
+                if (callee.return_type == .void or result == .void) return error.InvalidProgram;
+                try store(function, values, result_id, result);
+            } else if (callee.return_type != .void or result != .void) return error.InvalidProgram;
+        },
         .dynamic_call => |call| try Dispatch.execute(allocator, program, function, values, call, depth, session, invokeDepth),
         .print => |print_value| {
             try Output.appendValueText(&session.stdout, session.allocator, try load(values, print_value.value));
@@ -484,8 +558,37 @@ fn executeInstruction(
                 return error.RuntimeTerminated;
             }
         },
+        .mutex_lock => session.mutex_depth += 1,
+        .mutex_unlock => {
+            if (session.mutex_depth == 0) return error.InvalidProgram;
+            session.mutex_depth -= 1;
+        },
     }
     return null;
+}
+
+pub fn supportsBoundary(boundary: Boundary.Function) bool {
+    return std.mem.eql(u8, boundary.provider, "MacOS.lib_system") and
+        std.mem.eql(u8, boundary.source_name, "arc4random") and
+        boundary.parameters.len == 0 and boundary.return_type == .uint32;
+}
+
+fn executeBoundary(
+    function: Ir.Function,
+    values: []?Value,
+    call: Ir.Instruction.BoundaryCall,
+    session: *Session,
+) Error!void {
+    if (call.function >= session.boundaries.len) return error.UnsupportedBoundary;
+    const boundary = session.boundaries[call.function];
+    if (!supportsBoundary(boundary) or call.arguments.len != 0) return error.UnsupportedBoundary;
+    const io = session.io orelse return error.UnsupportedBoundary;
+    const result = call.result orelse return error.InvalidProgram;
+    var bits: u32 = undefined;
+    io.random(std.mem.asBytes(&bits));
+    try store(function, values, result, .{
+        .typed_integer = .{ .type = .uint32, .bits = bits },
+    });
 }
 
 fn store(function: Ir.Function, values: []?Value, id: Ir.ValueId, value: Value) Error!void {
@@ -736,6 +839,33 @@ fn executeCollectionLoad(
         return error.RuntimeTerminated;
     };
     try store(function, values, access.result, try cloneValue(allocator, aggregate.fields[offset]));
+}
+
+fn executeCollectionReference(
+    allocator: Allocator,
+    program: Ir.Program,
+    function: Ir.Function,
+    values: []?Value,
+    access: Ir.Instruction.CollectionReference,
+    session: *Session,
+) Error!void {
+    const source = if (access.reference) |reference| switch (try load(values, reference)) {
+        .reference => |pointer| try pointer.load(),
+        else => return error.InvalidProgram,
+    } else try load(values, access.collection);
+    const fields = switch (source) {
+        .structure => |value| value.fields,
+        .view => |value| value.fields,
+        else => return error.InvalidProgram,
+    };
+    const source_index = try integer(try load(values, access.index));
+    const offset = normalizedCollectionIndex(source_index, fields.len) orelse {
+        const message = try std.fmt.allocPrint(allocator, "collection index {d} is out of bounds for count {d}", .{ source_index, fields.len });
+        try Output.appendRuntimeError(session, program, access.position, "", message);
+        session.terminated = true;
+        return error.RuntimeTerminated;
+    };
+    try store(function, values, access.result, .{ .reference = .{ .value = &fields[offset] } });
 }
 
 fn executeCollectionReplace(

@@ -79,6 +79,14 @@ pub fn storeByte(source: Register, base: Register) u32 {
     return 0x39000000 | (registerBits(base) << 5) | registerBits(source);
 }
 
+pub fn store16(source: Register, base: Register) u32 {
+    return 0x79000000 | (registerBits(base) << 5) | registerBits(source);
+}
+
+pub fn store32(source: Register, base: Register) u32 {
+    return 0xb9000000 | (registerBits(base) << 5) | registerBits(source);
+}
+
 pub fn store64(source: Register, base: Register, byte_offset: u12) u32 {
     return 0xf9000000 |
         ((@as(u32, byte_offset) / 8) << 10) |
@@ -95,6 +103,14 @@ pub fn load64(destination: Register, base: Register, byte_offset: u12) u32 {
 
 pub fn loadByte(destination: Register, base: Register) u32 {
     return 0x39400000 | (registerBits(base) << 5) | registerBits(destination);
+}
+
+pub fn load16(destination: Register, base: Register) u32 {
+    return 0x79400000 | (registerBits(base) << 5) | registerBits(destination);
+}
+
+pub fn load32(destination: Register, base: Register) u32 {
+    return 0xb9400000 | (registerBits(base) << 5) | registerBits(destination);
 }
 
 pub fn addRegisters(destination: Register, left: Register, right: Register) u32 {

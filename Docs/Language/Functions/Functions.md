@@ -20,6 +20,55 @@ func greet(name:str) {
 
 Arguments are positional and evaluated from left to right.
 
+## Pass functions as callbacks
+
+A function type spells out its parameter modes and return type:
+
+```sx
+func any<T>(values:T[], predicate:func(@T) bool) bool {
+    for value in values {
+        if predicate(value) {
+            return true
+        }
+    }
+    return false
+}
+
+func positive(value:@int) bool { return value > 0 }
+
+let found = any<int>([-1, 2], positive)
+```
+
+Use `func(T)` when the callback returns `void`, and `func(T) Result` for a
+value result. Callback parameters retain the ordinary Silex modes: value,
+read reference `@`, or mutable reference `&`. Overloaded function names are
+resolved from the expected callback signature.
+
+Use an anonymous function when the callback is local to the call:
+
+```sx
+let found = any<int>([-1, 2], func(value:@int) bool {
+    return value > 0
+})
+```
+
+Omit the return type when the anonymous function returns `void`:
+
+```sx
+TaskManager.submit(task, func(completed:Task) {
+    print("completed")
+})
+```
+
+Anonymous functions currently cannot capture values from their surrounding
+function. Their parameters and declarations made inside their body remain
+available normally. A capture produces a targeted diagnostic until closure
+environments and their lifetime rules are implemented.
+
+Function values can be stored in structure fields and called like ordinary
+functions. They are language values; this does not expose a machine address or
+a platform calling convention.
+
 ## Default arguments
 
 ```sx

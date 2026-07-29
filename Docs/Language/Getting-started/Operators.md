@@ -26,6 +26,7 @@ let ordered = left < right
 
 Numbers support `==`, `!=`, `<`, `<=`, `>`, and `>=`. Strings compare exact
 UTF-8 bytes. Structures compare recursively when all fields are comparable.
+Enums compare their active variant and its associated values recursively.
 Classes compare identity.
 
 ## Combine conditions

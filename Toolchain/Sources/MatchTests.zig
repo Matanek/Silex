@@ -41,6 +41,36 @@ test "evaluate exhaustive associated enum matches" {
     try std.testing.expect(std.mem.indexOf(u8, text, "enum.payload") != null);
 }
 
+test "compile terminal match nested in a mutating method branch" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\enum Outcome { success(int); failure(str) }
+        \\func outcome() Outcome { return Outcome.success(7) }
+        \\class Parser {
+        \\    var offset:int
+        \\    public init(offset:int) { self.offset = offset }
+        \\    public func run() Result<int, str> {
+        \\        if self.offset == 0 {
+        \\            match outcome() {
+        \\                success(value) => { return Result<int, str>.success(value) }
+        \\                failure(error) => { return Result<int, str>.failure(error) }
+        \\            }
+        \\        }
+        \\        return Result<int, str>.success(0)
+        \\    }
+        \\}
+        \\func main() {
+        \\    var parser = Parser(0)
+        \\    match parser.run() { success(value) => { assert(value == 7, "nested match") }; failure(error) => { panic(error) } }
+        \\}
+    );
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqual(@as(u8, 0), result.exit_code);
+}
+
 test "diagnose invalid exhaustive match patterns" {
     try expectCompileError(
         "enum Choice { left; right } func main() { let value = match Choice.left() { left => 1 } }",

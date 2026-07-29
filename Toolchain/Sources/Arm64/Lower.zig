@@ -91,19 +91,36 @@ fn lowerInternal(
         if (mode == .release and lowered.register_slots.len == 0) lowered = try allocateRegisters(allocator, lowered);
         try functions.append(allocator, lowered);
     }
-    const globals = try allocator.alloc(Machine.Global, program.globals.len);
+    const has_mutex = programUsesMutex(program);
+    const globals = try allocator.alloc(Machine.Global, program.globals.len + @intFromBool(has_mutex));
     for (program.globals, 0..) |global, index| globals[index] = .{
         .bits = global.bits,
         .width = @intCast(try leafCount(program, global.type)),
     };
-    const external_functions = try allocator.alloc(Machine.ExternalFunction, boundaries.len);
+    if (has_mutex) globals[program.globals.len] = .{ .bits = 0, .width = 8 };
+    const external_functions = try allocator.alloc(Machine.ExternalFunction, boundaries.len + if (has_mutex) @as(usize, 2) else 0);
     for (boundaries, 0..) |external, index| {
         const arguments = try allocator.alloc(Machine.AbiValue, external.parameters.len);
         for (external.parameters, 0..) |parameter, parameter_index| arguments[parameter_index] = try lowerExternalType(parameter);
         external_functions[index] = .{
             .provider = if (std.mem.eql(u8, external.provider, "MacOS.lib_system")) "Darwin.lib_system" else external.provider,
             .source_name = external.source_name,
-            .signature = .{ .arguments = arguments, .result = try lowerExternalType(external.return_type) },
+            .signature = .{
+                .arguments = arguments,
+                .result = if (external.return_type == .void) null else try lowerExternalType(external.return_type),
+            },
+        };
+    }
+    if (has_mutex) {
+        external_functions[boundaries.len] = .{
+            .provider = "Darwin.lib_system",
+            .source_name = "os_unfair_recursive_lock_lock_with_options",
+            .signature = .{ .arguments = &.{ .read_address, .uint64 }, .result = null },
+        };
+        external_functions[boundaries.len + 1] = .{
+            .provider = "Darwin.lib_system",
+            .source_name = "os_unfair_recursive_lock_unlock",
+            .signature = .{ .arguments = &.{.read_address}, .result = null },
         };
     }
     const result: Machine.Program = .{
@@ -112,14 +129,25 @@ fn lowerInternal(
         .globals = globals,
         .strings = try strings.toOwnedSlice(allocator),
         .copy_model = try buildCopyModel(allocator, program),
+        .mutex_global = if (has_mutex) program.globals.len else null,
+        .mutex_lock_function = if (has_mutex) boundaries.len else null,
+        .mutex_unlock_function = if (has_mutex) boundaries.len + 1 else null,
     };
     try Machine.validate(result);
     return result;
 }
 
+fn programUsesMutex(program: Ir.Program) bool {
+    for (program.functions) |function| for (function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
+        .mutex_lock, .mutex_unlock => return true,
+        else => {},
+    };
+    return false;
+}
+
 fn lowerExternalType(type_value: Ir.Type) Machine.Error!Machine.AbiValue {
     return switch (type_value) {
-        .int32 => .int32,
+        .int32, .uint32 => .int32,
         .address => .read_address,
         .uint => .uint64,
         .int => .int64,
@@ -227,6 +255,10 @@ fn lowerInstruction(
             .result = layout.values[constant.result].start,
             .bits = constant.bits,
         } },
+        .function_reference => |reference| .{ .function_address = .{
+            .result = layout.values[reference.result].start,
+            .function = reference.function,
+        } },
         .optional_null => |optional| .{ .optional_null = .{ .result = layout.values[optional.result] } },
         .optional_some => |optional| .{ .optional_some = .{
             .result = layout.values[optional.result],
@@ -331,6 +363,22 @@ fn lowerInstruction(
                 .tail = try internString(allocator, strings, if (collection.length == null) " is out of bounds for count " else try std.fmt.allocPrint(allocator, " is out of bounds for count {d}\n", .{count})),
             } };
         },
+        .collection_reference => |access| collection_reference: {
+            const collection = collectionForType(program, function.value_types[access.collection]) orelse return error.InvalidMachineProgram;
+            const element_width: u12 = @intCast(try leafCount(program, collection.element));
+            break :collection_reference .{ .collection_reference = .{
+                .result = layout.values[access.result].start,
+                .collection = layout.values[access.collection],
+                .reference = if (access.reference) |reference| layout.values[reference].start else null,
+                .index = layout.values[access.index].start,
+                .element_width = element_width,
+                .count = @intCast(collection.length orelse 0),
+                .dynamic = collection.length == null,
+                .view = collection.view,
+                .header = try internString(allocator, strings, try collectionRuntimeHeader(allocator, program, access.position)),
+                .tail = try internString(allocator, strings, if (collection.length == null) " is out of bounds for count " else try std.fmt.allocPrint(allocator, " is out of bounds for count {d}\n", .{collection.length.?})),
+            } };
+        },
         .collection_replace => |replacement| collection_replace: {
             const collection = collectionForType(program, function.value_types[replacement.collection]) orelse return error.InvalidMachineProgram;
             const count: u32 = @intCast(collection.length orelse 0);
@@ -404,6 +452,15 @@ fn lowerInstruction(
             .result = layout.values[count.result],
             .reference = layout.values[count.operand].start,
         } },
+        .string_byte_at => |access| .{ .string_byte_at = .{
+            .result = layout.values[access.result].start,
+            .operand = layout.values[access.operand].start,
+            .index = layout.values[access.index].start,
+        } },
+        .string_from_bytes => |conversion| .{ .string_from_bytes = .{
+            .result = layout.values[conversion.result].start,
+            .bytes = layout.values[conversion.bytes],
+        } },
         .enum_payload => |payload| enum_payload: {
             if (payload.enumeration >= program.enums.len) return error.InvalidMachineProgram;
             const enumeration = program.enums[payload.enumeration];
@@ -461,6 +518,18 @@ fn lowerInstruction(
             .result = layout.values[load.result],
             .reference = layout.values[load.reference].start,
         } },
+        .address_load => |load| .{ .address_load = .{
+            .result = layout.values[load.result].start,
+            .address = layout.values[load.address].start,
+            .byte_offset = layout.values[load.byte_offset].start,
+            .type = load.type,
+        } },
+        .address_store => |store| .{ .address_store = .{
+            .address = layout.values[store.address].start,
+            .byte_offset = layout.values[store.byte_offset].start,
+            .operand = layout.values[store.operand].start,
+            .type = store.type,
+        } },
         .reference_store => |store| .{ .reference_store = .{
             .reference = layout.values[store.reference].start,
             .operand = layout.values[store.operand],
@@ -511,7 +580,7 @@ fn lowerInstruction(
                     .result = layout.values[binary.result].start,
                     .left = layout.values[binary.left],
                     .right = layout.values[binary.right],
-                    .leaf_types = try flattenedTypes(allocator, program, function.value_types[binary.left]),
+                    .leaves = try equalityLeaves(allocator, program, function.value_types[binary.left]),
                     .equal = binary.operator == .equal,
                 } };
             }
@@ -549,12 +618,23 @@ fn lowerInstruction(
                 .arguments = arguments,
             } };
         },
-        .boundary_call => |call| external_call: {
+        .indirect_call => |call| indirect: {
             _ = try Machine.checkedArgumentCount(call.arguments.len);
+            const arguments = try allocator.alloc(Machine.Span, call.arguments.len);
+            for (call.arguments, 0..) |argument, index| arguments[index] = layout.values[argument];
+            break :indirect .{ .indirect_call = .{
+                .result = if (call.result) |result| layout.values[result] else null,
+                .callee = layout.values[call.callee].start,
+                .arguments = arguments,
+                .return_type = if (call.result) |result| function.value_types[result] else .void,
+            } };
+        },
+        .boundary_call => |call| external_call: {
+            if (call.arguments.len > Machine.max_external_arguments) return error.TooManyArguments;
             const arguments = try allocator.alloc(Machine.Slot, call.arguments.len);
             for (call.arguments, 0..) |argument, index| arguments[index] = layout.values[argument].start;
             break :external_call .{ .external_call = .{
-                .result = layout.values[call.result].start,
+                .result = if (call.result) |result| layout.values[result].start else null,
                 .function = call.function,
                 .arguments = arguments,
             } };
@@ -586,6 +666,8 @@ fn lowerInstruction(
             .message = layout.values[assertion.message].start,
             .header = try internString(allocator, strings, try runtimeHeader(allocator, program, assertion.position, true)),
         } },
+        .mutex_lock => .mutex_lock,
+        .mutex_unlock => .mutex_unlock,
     };
 }
 
@@ -814,6 +896,110 @@ fn flattenedTypes(allocator: Allocator, program: Ir.Program, type_value: Ir.Type
     return result.toOwnedSlice(allocator);
 }
 
+fn equalityLeaves(
+    allocator: Allocator,
+    program: Ir.Program,
+    type_value: Ir.Type,
+) Machine.Error![]const Machine.Instruction.EqualityLeaf {
+    var result: std.ArrayList(Machine.Instruction.EqualityLeaf) = .empty;
+    var offset: usize = 0;
+    try appendEqualityLeaves(allocator, program, type_value, &.{}, &offset, &result);
+    if (offset != try leafCount(program, type_value)) return error.InvalidMachineProgram;
+    return result.toOwnedSlice(allocator);
+}
+
+fn appendEqualityLeaves(
+    allocator: Allocator,
+    program: Ir.Program,
+    type_value: Ir.Type,
+    guards: []const Machine.Instruction.EqualityGuard,
+    offset: *usize,
+    result: *std.ArrayList(Machine.Instruction.EqualityLeaf),
+) Machine.Error!void {
+    if (type_value.optionalChild()) |child| {
+        const tag_offset = try Machine.checkedSlot(offset.*);
+        try result.append(allocator, .{ .offset = tag_offset, .type = .bool, .guards = guards });
+        offset.* += 1;
+        const present = try appendEqualityGuard(allocator, guards, .{ .offset = tag_offset, .expected = 1 });
+        return appendEqualityLeaves(allocator, program, child, present, offset, result);
+    }
+    if (enumByType(program, type_value)) |enumeration| {
+        const start = offset.*;
+        const tag_offset = try Machine.checkedSlot(start);
+        try result.append(allocator, .{ .offset = tag_offset, .type = .uint, .guards = guards });
+        if (enumeration.raw_type == null) {
+            for (enumeration.variants, 0..) |variant, variant_index| {
+                var payload_offset = start + 1;
+                const active = try appendEqualityGuard(allocator, guards, .{
+                    .offset = tag_offset,
+                    .expected = variant_index,
+                });
+                for (variant.associated_types) |associated| {
+                    try appendEqualityLeaves(allocator, program, associated, active, &payload_offset, result);
+                }
+            }
+        }
+        offset.* = start + try leafCount(program, type_value);
+        return;
+    }
+    const structure_index = type_value.structureIndex() orelse {
+        try result.append(allocator, .{
+            .offset = try Machine.checkedSlot(offset.*),
+            .type = type_value,
+            .guards = guards,
+        });
+        offset.* += 1;
+        return;
+    };
+    if (structure_index >= program.structures.len) return error.InvalidMachineProgram;
+    const structure = program.structures[structure_index];
+    if (structure.is_protocol) return error.UnsupportedType;
+    if (structure.is_class) {
+        try result.append(allocator, .{
+            .offset = try Machine.checkedSlot(offset.*),
+            .type = .uint,
+            .guards = guards,
+        });
+        offset.* += 1;
+        return;
+    }
+    if (structure.collection) |collection| {
+        if (collection.length) |length| {
+            for (0..length) |_| try appendEqualityLeaves(allocator, program, collection.element, guards, offset, result);
+        } else {
+            try result.append(allocator, .{
+                .offset = try Machine.checkedSlot(offset.*),
+                .type = .uint,
+                .guards = guards,
+            });
+            offset.* += 1;
+            if (collection.view) {
+                try result.append(allocator, .{
+                    .offset = try Machine.checkedSlot(offset.*),
+                    .type = .uint,
+                    .guards = guards,
+                });
+                offset.* += 1;
+            }
+        }
+        return;
+    }
+    for (structure.fields) |field| {
+        try appendEqualityLeaves(allocator, program, field.type, guards, offset, result);
+    }
+}
+
+fn appendEqualityGuard(
+    allocator: Allocator,
+    guards: []const Machine.Instruction.EqualityGuard,
+    guard: Machine.Instruction.EqualityGuard,
+) Allocator.Error![]const Machine.Instruction.EqualityGuard {
+    const result = try allocator.alloc(Machine.Instruction.EqualityGuard, guards.len + 1);
+    @memcpy(result[0..guards.len], guards);
+    result[guards.len] = guard;
+    return result;
+}
+
 fn appendFlattenedTypes(
     allocator: Allocator,
     program: Ir.Program,
@@ -847,6 +1033,15 @@ fn appendFlattenedTypes(
         return result.appendSlice(allocator, widest);
     }
     if (program.structures[structure_index].is_class) return result.append(allocator, .uint);
+    if (program.structures[structure_index].collection) |collection| {
+        if (collection.length) |length| {
+            for (0..length) |_| try appendFlattenedTypes(allocator, program, collection.element, result);
+        } else {
+            try result.append(allocator, .uint);
+            if (collection.view) try result.append(allocator, .uint);
+        }
+        return;
+    }
     for (program.structures[structure_index].fields) |field| {
         try appendFlattenedTypes(allocator, program, field.type, result);
     }

@@ -1,5 +1,6 @@
 const std = @import("std");
 const Modules = @import("Modules.zig");
+const TargetModule = @import("Target.zig");
 
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
@@ -110,8 +111,6 @@ pub const Graph = struct {
     }
 };
 
-pub const target_name = "macos-arm64";
-
 pub const Result = struct {
     graph: Graph,
     diagnostic: ?[]const u8 = null,
@@ -146,12 +145,17 @@ pub const Resolver = struct {
     allocator: Allocator,
     io: Io,
     global_root: ?[]const u8,
+    target: TargetModule.Target,
     local_root: []const u8 = "",
     builders: std.ArrayList(Builder) = .empty,
     diagnostic: ?[]const u8 = null,
 
     pub fn init(allocator: Allocator, io: Io, global_root: ?[]const u8) Resolver {
-        return .{ .allocator = allocator, .io = io, .global_root = global_root };
+        return initForTarget(allocator, io, global_root, TargetModule.Target.host() orelse .macos_arm64);
+    }
+
+    pub fn initForTarget(allocator: Allocator, io: Io, global_root: ?[]const u8, target: TargetModule.Target) Resolver {
+        return .{ .allocator = allocator, .io = io, .global_root = global_root, .target = target };
     }
 
     pub fn resolve(self: *Resolver, project_root: []const u8) !Graph {
@@ -327,7 +331,9 @@ pub const Resolver = struct {
 
         var active: std.ArrayList([]const u8) = .empty;
         try active.append(self.allocator, try std.fs.path.join(self.allocator, &.{ root, "Module" }));
-        const selected = try std.fs.path.join(self.allocator, &.{ root, "Platform", target_name, "Module" });
+        const platform = try std.fs.path.join(self.allocator, &.{ root, "Platform", self.target.platform.directoryName(), "Module" });
+        if (try exists(self.io, platform)) try active.append(self.allocator, platform);
+        const selected = try std.fs.path.join(self.allocator, &.{ root, "Target", self.target.name(), "Module" });
         if (try exists(self.io, selected)) try active.append(self.allocator, selected);
         return .{
             .active = try active.toOwnedSlice(self.allocator),
@@ -336,21 +342,9 @@ pub const Resolver = struct {
     }
 
     fn inactiveModuleNames(self: *Resolver, root: []const u8) ![]const []const u8 {
-        const platform_path = try std.fs.path.join(self.allocator, &.{ root, "Platform" });
-        var platform = Io.Dir.cwd().openDir(self.io, platform_path, .{ .iterate = true }) catch |err| switch (err) {
-            error.FileNotFound, error.NotDir => return &.{},
-            else => return &.{},
-        };
-        defer platform.close(self.io);
-
         var names: std.ArrayList([]const u8) = .empty;
-        var targets = platform.iterateAssumeFirstIteration();
-        while (targets.next(self.io) catch null) |entry| {
-            if (entry.kind != .directory or std.mem.eql(u8, entry.name, target_name)) continue;
-            const module_root = try std.fs.path.join(self.allocator, &.{ platform_path, entry.name, "Module" });
-            const discovered = Modules.discoverOwned(self.allocator, self.io, module_root, null, 0) catch continue;
-            for (discovered.providers) |provider| try names.append(self.allocator, provider.name);
-        }
+        try self.appendInactiveRootModules(root, "Platform", self.target.platform.directoryName(), &names);
+        try self.appendInactiveRootModules(root, "Target", self.target.name(), &names);
         std.mem.sort([]const u8, names.items, {}, stringLessThan);
         var unique: std.ArrayList([]const u8) = .empty;
         for (names.items) |name| {
@@ -359,6 +353,25 @@ pub const Resolver = struct {
             }
         }
         return unique.toOwnedSlice(self.allocator);
+    }
+
+    fn appendInactiveRootModules(
+        self: *Resolver,
+        root: []const u8,
+        category: []const u8,
+        selected: []const u8,
+        names: *std.ArrayList([]const u8),
+    ) !void {
+        const category_path = try std.fs.path.join(self.allocator, &.{ root, category });
+        var directory = Io.Dir.cwd().openDir(self.io, category_path, .{ .iterate = true }) catch return;
+        defer directory.close(self.io);
+        var entries = directory.iterateAssumeFirstIteration();
+        while (entries.next(self.io) catch null) |entry| {
+            if (entry.kind != .directory or std.mem.eql(u8, entry.name, selected)) continue;
+            const module_root = try std.fs.path.join(self.allocator, &.{ category_path, entry.name, "Module" });
+            const discovered = Modules.discoverOwned(self.allocator, self.io, module_root, null, 0) catch continue;
+            for (discovered.providers) |provider| try names.append(self.allocator, provider.name);
+        }
     }
 
     fn validateSelected(

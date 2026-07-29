@@ -16,33 +16,71 @@ pub fn isMutation(name: []const u8) bool {
 }
 
 pub fn receiverIsCollection(structures: []const Ir.Structure, builder: anytype, expression: *const Ast.Expression) bool {
-    const name = switch (expression.value) {
-        .identifier => |value| value,
-        else => return false,
-    };
-    const binding = Support.findBinding(builder.bindings.items, name) orelse return false;
-    return collectionForType(structures, binding.type) != null;
+    const type_value = inferReceiverType(structures, builder, expression) orelse return false;
+    return collectionForType(structures, type_value) != null;
 }
 
 pub fn analyzeMutation(self: anytype, builder: anytype, call: Ast.Expression.Call) !?Model.TypedValue {
-    if (call.safe or call.named_arguments.len != 0 or call.type_arguments.len != 0) return self.fail(call.name_position, "collection mutations use positional arguments");
     const receiver_expression = call.receiver.?;
-    const name = switch (receiver_expression.value) {
-        .identifier => |value| value,
-        else => return self.fail(receiver_expression.position, "collection mutation requires a var receiver"),
+    var source: Model.TypedValue = undefined;
+    const binding: Model.Binding = switch (receiver_expression.value) {
+        .identifier => |name| binding: {
+            const existing = findBinding(builder.bindings.items, name) orelse return self.fail(receiver_expression.position, "unknown collection variable");
+            if (collectionForType(self.structures, existing.type) == null) return null;
+            if (existing.borrowed_root == null) try @import("Borrowing.zig").ensureRootUnborrowed(self, builder, name, receiver_expression.position);
+            if (!existing.mutable or (existing.local == null and existing.reference == null)) return self.fail(receiver_expression.position, "collection mutation requires a var receiver");
+            source = try self.analyzeExpression(builder, receiver_expression);
+            break :binding existing;
+        },
+        .field_access => binding: {
+            source = try self.analyzeExpression(builder, receiver_expression);
+            if (collectionForType(self.structures, source.type) == null) return null;
+            var reference = source.reference;
+            if (reference == null) {
+                const access = receiver_expression.value.field_access;
+                if (access.base.value == .identifier) {
+                    const root = findBinding(builder.bindings.items, access.base.value.identifier) orelse
+                        return self.fail(receiver_expression.position, "collection mutation requires a mutable field receiver");
+                    if (!root.mutable or (root.local == null and root.reference == null)) {
+                        return self.fail(receiver_expression.position, "collection mutation requires a mutable field receiver");
+                    }
+                    const structure_index = root.type.structureIndex() orelse
+                        return self.fail(receiver_expression.position, "collection mutation requires a mutable field receiver");
+                    var field_index: ?usize = null;
+                    for (self.structures[structure_index].fields, 0..) |field, index| if (std.mem.eql(u8, field.name, access.name)) {
+                        if (!field.mutable) return self.fail(access.name_position, "collection mutation requires a mutable field receiver");
+                        field_index = index;
+                        break;
+                    };
+                    const root_reference = if (root.reference) |existing|
+                        existing
+                    else root_reference: {
+                        const created = try self.newValue(builder, .address);
+                        try self.emit(builder, .{ .local_address = .{ .result = created, .local = root.local.? } });
+                        break :root_reference created;
+                    };
+                    reference = try self.newValue(builder, .address);
+                    try self.emit(builder, .{ .reference_field = .{
+                        .result = reference.?,
+                        .reference = root_reference,
+                        .structure = structure_index,
+                        .field = field_index orelse return self.fail(access.name_position, "unknown structure field"),
+                    } });
+                }
+            }
+            const stable_reference = reference orelse return self.fail(receiver_expression.position, "collection mutation requires a mutable field receiver");
+            break :binding .{ .name = "<field>", .type = source.type, .reference = stable_reference, .mutable = true };
+        },
+        else => return null,
     };
-    const binding = Support.findBinding(builder.bindings.items, name) orelse return self.fail(receiver_expression.position, "unknown collection variable");
-    if (binding.borrowed_root == null) try @import("Borrowing.zig").ensureRootUnborrowed(self, builder, name, receiver_expression.position);
-    if (!binding.mutable or (binding.local == null and binding.reference == null)) return self.fail(receiver_expression.position, "collection mutation requires a var receiver");
     const collection = collectionForType(self.structures, binding.type) orelse return self.fail(receiver_expression.position, "collection mutation requires an array or list");
+    if (call.safe or call.named_arguments.len != 0 or call.type_arguments.len != 0) return self.fail(call.name_position, "collection mutations use positional arguments");
     if (collection.view and binding.borrowed_mode != .mutable and binding.parameter_mode != .mutable) {
         return self.fail(receiver_expression.position, "a shared view cannot be mutated");
     }
     if (collection.view and !std.mem.eql(u8, call.name, "swap")) {
         return self.fail(call.name_position, "views only support in-place 'swap'; resizing, extraction, replacement, and global reordering are unavailable");
     }
-    const source = try self.analyzeExpression(builder, receiver_expression);
-
     if (std.mem.eql(u8, call.name, "replace")) {
         try requireArity(self, call, 2);
         const index = try requireIndex(self, builder, call.arguments[0]);
@@ -113,6 +151,11 @@ pub fn analyzeMutation(self: anytype, builder: anytype, call: Ast.Expression.Cal
         if (value.type == collection.element) {
             kind = .append;
             argument = value.value;
+            argument_type = collection.element;
+        } else if (self.canImplicitlyConvert(value.type, collection.element)) {
+            const converted = try self.coerce(builder, value, collection.element, call.arguments[0].position);
+            kind = .append;
+            argument = converted.value;
             argument_type = collection.element;
         } else if (collectionForType(self.structures, value.type)) |other| {
             if (other.element != collection.element) return self.fail(call.arguments[0].position, "append sequence element type is incompatible");
@@ -237,7 +280,13 @@ pub fn analyzeIndex(self: anytype, builder: anytype, access: Ast.Expression.Inde
         .index = index.value,
         .position = access.bracket_position,
     } });
-    return .{ .type = collection.element, .value = result, .borrowed_root = source.borrowed_root, .borrowed_mode = source.borrowed_mode };
+    const aliases_source = Resources.needsDrop(self, collection.element) or Resources.containsClass(self, collection.element);
+    return .{
+        .type = collection.element,
+        .value = result,
+        .borrowed_root = if (aliases_source) source.borrowed_root else null,
+        .borrowed_mode = if (aliases_source) source.borrowed_mode else .value,
+    };
 }
 
 pub fn analyzeSlice(self: anytype, builder: anytype, access: Ast.Expression.SliceAccess, expected: ?Ast.Type) !Model.TypedValue {
@@ -263,6 +312,7 @@ pub fn analyzeSlice(self: anytype, builder: anytype, access: Ast.Expression.Slic
 }
 
 pub fn analyzeView(self: anytype, builder: anytype, unary: Ast.Expression.Unary) !Model.TypedValue {
+    if (unary.operand.value == .index_access) return analyzeElementReference(self, builder, unary);
     const access = switch (unary.operand.value) {
         .slice_access => |value| value,
         else => return self.fail(unary.operator_position, "'@' and '&' expressions require a bounded collection slice"),
@@ -274,7 +324,7 @@ pub fn analyzeView(self: anytype, builder: anytype, unary: Ast.Expression.Unary)
     const mode: Ast.Parameter.Mode = if (unary.operator == .borrow_mutable) .mutable else .read;
     if (mode == .mutable) {
         const root_name = @import("Borrowing.zig").rootName(access.base).?;
-        const binding = Support.findBinding(builder.bindings.items, root_name) orelse return self.fail(access.base.position, "unknown collection root");
+        const binding = findBinding(builder.bindings.items, root_name) orelse return self.fail(access.base.position, "unknown collection root");
         if (!binding.mutable and binding.borrowed_mode != .mutable and binding.parameter_mode != .mutable) {
             return self.fail(access.base.position, "a mutable view requires a var collection root");
         }
@@ -286,7 +336,7 @@ pub fn analyzeView(self: anytype, builder: anytype, unary: Ast.Expression.Unary)
     const result = try self.newValue(builder, result_type);
     var reference: ?Ir.ValueId = null;
     if (mode == .mutable) {
-        const binding = Support.findBinding(builder.bindings.items, @import("Borrowing.zig").rootName(access.base).?).?;
+        const binding = findBinding(builder.bindings.items, @import("Borrowing.zig").rootName(access.base).?).?;
         reference = binding.reference;
         if (reference == null and binding.local != null) {
             reference = try self.newValue(builder, .address);
@@ -303,9 +353,40 @@ pub fn analyzeView(self: anytype, builder: anytype, unary: Ast.Expression.Unary)
     return .{ .type = result_type, .value = result, .borrowed_root = root, .borrowed_mode = mode };
 }
 
+fn analyzeElementReference(self: anytype, builder: anytype, unary: Ast.Expression.Unary) !Model.TypedValue {
+    const access = unary.operand.value.index_access;
+    const source = try self.analyzeExpression(builder, access.base);
+    const collection = collectionForType(self.structures, source.type) orelse
+        return self.fail(access.bracket_position, "a borrowed element requires an array, list, or view source");
+    const root = source.borrowed_root orelse @import("Borrowing.zig").rootName(access.base) orelse
+        return self.fail(unary.operator_position, "a borrowed element requires a stable collection root");
+    const mode: Ast.Parameter.Mode = if (unary.operator == .borrow_mutable) .mutable else .read;
+    if (mode == .mutable and (source.borrowed_mode != .mutable or source.reference == null)) {
+        return self.fail(unary.operator_position, "a mutable element reference requires a mutable collection place");
+    }
+    const index = try requireIndex(self, builder, access.index);
+    const result = try self.newValue(builder, .address);
+    try self.emit(builder, .{ .collection_reference = .{
+        .result = result,
+        .collection = source.value,
+        .reference = source.reference,
+        .index = index.value,
+        .position = access.bracket_position,
+    } });
+    const value = try self.newValue(builder, collection.element);
+    try self.emit(builder, .{ .reference_load = .{ .result = value, .reference = result } });
+    return .{
+        .type = collection.element,
+        .value = value,
+        .borrowed_root = root,
+        .borrowed_mode = mode,
+        .reference = result,
+    };
+}
+
 pub fn analyzeCall(self: anytype, builder: anytype, call: Ast.Expression.Call) !?Model.TypedValue {
     const receiver_expression = call.receiver orelse return null;
-    const receiver_type = inferReceiverType(builder, receiver_expression) orelse return null;
+    const receiver_type = inferReceiverType(self.structures, builder, receiver_expression) orelse return null;
     const collection = collectionForType(self.structures, receiver_type) orelse return null;
     if (call.safe or call.arguments.len != 0 or call.named_arguments.len != 0 or call.type_arguments.len != 0) return null;
     const source = try self.analyzeExpression(builder, receiver_expression);
@@ -330,6 +411,12 @@ pub fn analyzeCall(self: anytype, builder: anytype, call: Ast.Expression.Call) !
         return .{ .type = .bool, .value = result };
     }
     return null;
+}
+
+fn findBinding(bindings: []const Model.Binding, requested: []const u8) ?Model.Binding {
+    if (Support.findBinding(bindings, requested)) |binding| return binding;
+    const dot = std.mem.lastIndexOfScalar(u8, requested, '.') orelse return null;
+    return Support.findBinding(bindings, requested[dot + 1 ..]);
 }
 
 pub fn collectionForType(structures: []const Ir.Structure, type_value: Ast.Type) ?Ast.Collection {
@@ -362,6 +449,19 @@ pub fn bindFunctionParameter(self: anytype, builder: anytype, parameter: Ast.Par
             .parameter = true,
             .parameter_mode = .mutable,
         });
+    } else if (parameter.mode == .value and parameter.type.structureIndex() != null and
+        !self.structures[parameter.type.structureIndex().?].is_class)
+    {
+        const local = builder.local_types.items.len;
+        try builder.local_types.append(self.allocator, parameter.type);
+        try self.emit(builder, .{ .local_store = .{ .local = local, .operand = value } });
+        try builder.bindings.append(self.allocator, .{
+            .name = parameter.name,
+            .type = parameter.type,
+            .local = local,
+            .mutable = true,
+            .parameter = true,
+        });
     } else try builder.bindings.append(self.allocator, .{
         .name = parameter.name,
         .type = parameter.type,
@@ -381,9 +481,16 @@ fn viewTypeForElement(structures: []const Ir.Structure, element: Ast.Type) ?Ast.
     return null;
 }
 
-fn inferReceiverType(builder: anytype, expression: *const Ast.Expression) ?Ast.Type {
+fn inferReceiverType(structures: []const Ir.Structure, builder: anytype, expression: *const Ast.Expression) ?Ast.Type {
     return switch (expression.value) {
         .identifier => |name| if (@import("Support.zig").findBinding(builder.bindings.items, name)) |binding| binding.type else null,
+        .field_access => |access| field: {
+            const base = inferReceiverType(structures, builder, access.base) orelse break :field null;
+            const structure_index = base.structureIndex() orelse break :field null;
+            if (structure_index >= structures.len) break :field null;
+            for (structures[structure_index].fields) |item| if (std.mem.eql(u8, item.name, access.name)) break :field item.type;
+            break :field null;
+        },
         .sequence_literal => |literal| literal.inferred_type,
         .call => |call| call.result_type,
         else => null,

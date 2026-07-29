@@ -17,6 +17,7 @@ pub const Type = enum(u32) {
     _,
 
     const structure_base = 0x100;
+    const function_base = 0x10000000;
     const generic_instantiation_base = 0x20000000;
     const generic_parameter_base = 0x40000000;
     const optional_flag = 0x80000000;
@@ -27,7 +28,16 @@ pub const Type = enum(u32) {
 
     pub fn structureIndex(self: Type) ?usize {
         const value = @intFromEnum(self);
-        return if (value >= structure_base and value < generic_instantiation_base) value - structure_base else null;
+        return if (value >= structure_base and value < function_base) value - structure_base else null;
+    }
+
+    pub fn function(index: usize) Type {
+        return @enumFromInt(function_base + @as(u32, @intCast(index)));
+    }
+
+    pub fn functionIndex(self: Type) ?usize {
+        const value = @intFromEnum(self);
+        return if (value >= function_base and value < generic_instantiation_base) value - function_base else null;
     }
 
     pub fn genericInstantiation(index: usize) Type {
@@ -77,6 +87,8 @@ pub const Type = enum(u32) {
                 "optional"
             else if (self.genericInstantiationIndex() != null)
                 "generic type"
+            else if (self.functionIndex() != null)
+                "function"
             else if (self.genericParameterIndex() != null)
                 "type parameter"
             else

@@ -46,6 +46,7 @@ pub fn statementTypes(statements: []const Ast.Statement, map: []const ?Ast.Type)
             }
             statementTypes(loop.statements, map);
         },
+        .mutex_statement => |mutex| statementTypes(mutex.statements, map),
         .break_statement, .continue_statement => {},
     };
 }

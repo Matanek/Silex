@@ -30,6 +30,10 @@ constraints.
 | Transfer | `move value` |
 | Checked conversion | `value as Type` |
 | Recover success | `try operation()` |
+| Critical section | `mutex { ... }` |
+
+The type suffixes `?`, `[]`, and `[N]` apply from left to right, so `Type?[]`
+and `Type[]?` are distinct types.
 
 ## Statements
 
@@ -48,6 +52,10 @@ for value in collection {
 }
 
 for value in start...end {
+}
+
+mutex {
+    update_shared_state()
 }
 
 return value

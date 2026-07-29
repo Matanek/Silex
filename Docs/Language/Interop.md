@@ -1,10 +1,13 @@
-# Call a macOS system function
+# Bind a platform system function
 
 `Interop` is the low-level boundary used to build Silex bindings. Application
 code should normally depend on a portable package such as `STD` instead.
 
-The current compiler supports one complete contract on `macos-arm64`:
-`write` from the system `libSystem` library.
+The current native backends expose a closed set of typed system contracts used
+by the platform parts of `STD`: entropy, monotonic time, console and terminal
+I/O, files, processes, filesystem operations, and name resolution. macOS calls
+fixed libSystem symbols, Linux X64 uses kernel syscalls, and Windows PE32+
+imports the selected system DLL functions.
 
 ```sx
 use Interop.C
@@ -39,21 +42,111 @@ func write_text(text:str) C.SignedSize {
 `C.pointer(text)` exposes the read-only address of the string's UTF-8 bytes for
 that foreign call. The pointer cannot be stored. `C.byte_count(text)` returns
 the UTF-8 byte count as `C.Size`; `text.count()` instead counts Unicode scalar
-values.
+values. `C.byte_at(text, index)` returns one `uint8` from that UTF-8 sequence;
+the index must be below `C.byte_count(text)`. These byte operations also let a
+portable package implement byte-defined algorithms without binding a system
+library.
+
+System APIs that consume a null-terminated UTF-8 string use
+`C.terminated_pointer(text)`. It has the same direct-call lifetime as
+`C.pointer`, but additionally guarantees one zero byte after the string. The
+terminator is not included in `C.byte_count(text)`.
 
 The raw result follows the C library contract. A binding is responsible for
 partial writes, system errors, and conversion to its public Silex error type.
+A system function with no result uses `void`; calling it as an instruction does
+not allocate a hidden Silex value.
+
+Platform bindings that let the system fill a scalar use a mutable pointer that
+is likewise valid only as a direct foreign argument:
+
+```sx
+var seed:uint32 = 0
+let written = getrandom(C.mutable_pointer(seed), 4 as C.Size, 0)
+```
+
+`C.mutable_pointer` accepts stable `var uint32`, `var int`, `var uint`, and
+fixed arrays of those scalar types. The storage is valid only for the direct
+foreign call; the address cannot be retained or returned.
+
+Byte-oriented system calls cannot consume a `uint8[..]` view directly because
+Silex collection elements follow the private slot layout of the language, not
+a C array layout. A platform binding first compacts the view with `C.string`,
+then may expose that private `var str` through
+`C.mutable_string_pointer(buffer)` for one direct call. If the call writes into
+it, the binding reads the resulting bytes with `C.byte_at` and copies them back
+to the public mutable view. This operation is reserved for freshly allocated,
+unaliased platform buffers; it does not make ordinary Silex strings mutable.
+
+Platform code can inspect and populate fields inside that direct-call storage
+with `C.load<T>(address, byte_offset)` and
+`C.store<T>(address, byte_offset, value)`. Both operations are restricted to
+integer scalar types and explicit byte offsets. `C.store` evaluates to the
+stored value. These primitives are intended for private platform layouts such
+as `sockaddr`; they do not make those layouts part of a package's public API.
+
+System callbacks use named Silex functions. `C.function_address(callback)`
+returns the entry address of a concrete callback; a generic callback is
+specialized explicitly with `C.function_address<T...>(callback)`. Likewise,
+`C.object_address(value)` and `C.object_from_address<T>(address)` carry a class
+identity through an opaque system callback context. These operations are for
+private platform adapters: the object must remain alive until the system has
+finished using the context.
 
 ## Current boundary
 
 The implemented surface is deliberately narrow:
 
-- target: `macos-arm64`;
-- provider: `MacOS.lib_system`;
-- function: `write`;
-- signature: `func(int32, C.Pointer<uint8>, C.Size) C.SignedSize`;
-- pointer source: the UTF-8 bytes of a `str`, valid only for the direct call.
+- composed targets: `macos-arm64`, `linux-x64`, `windows-x64`, and
+  `windows-arm64` for the implemented STD slices;
+- validated providers: `MacOS.lib_system`, `Linux.kernel`,
+  `Windows.kernel32`, `Windows.bcrypt_primitives`, `Windows.ucrtbase`, and
+  `Windows.ws2_32`;
+- implemented capabilities: random seeding, monotonic clocks, byte console
+  I/O, terminal sessions, files, process metadata, subprocesses, filesystem
+  operations, sockets, name resolution, and operating-system threads;
+- Windows console bindings cover UCRT byte I/O, console modes, UTF-8 input code
+  pages, handle waits and screen-buffer dimensions. Their PE imports are
+  verified on X64 and ARM64 but execution still awaits the Windows CI matrix;
+- macOS uses the fixed `__open` and `__ioctl` syscall veneers where the public C
+  functions are variadic under the Apple ARM64 ABI;
+- execution: `silex run` builds and executes the native host target, so platform
+  boundaries work without a separate manual compile step; the explicit
+  `silex interpret` reference path emulates `arc4random` only and rejects the
+  other boundaries;
+- pointer sources: UTF-8 bytes of a `str` for `C.Pointer<uint8>`, a private
+  mutable string buffer for byte-oriented system output, or stable
+  scalar/fixed-array storage for `C.MutablePointer<T>`.
 
-Other functions, binary buffers, retained pointers, callbacks, structures,
-variadic calls, Linux, Windows, and arbitrary library paths are not implemented
-yet.
+General retained pointers, captured callbacks, C structure types, variadic
+calls, and arbitrary library paths are not implemented. Named callbacks with
+an opaque class context are supported for the platform threading adapters.
+Raw C structures are represented
+only inside platform modules by fixed, contiguous scalar storage with an
+explicit documented layout. The Linux X64 backend still rejects portable
+operations outside its implemented vertical slices; Windows execution remains
+unverified until the target matrix runs it.
+
+A package can keep a platform binding private behind a common Silex API. For
+example, `STD.Randomizer` keeps its algorithm in `Module/Randomizer.sx` and
+delegates only system seeding to
+`Platform/MacOS/Module/Randomizer.Seed.sx`. The platform helper is
+private to the package; callers manipulate `Randomizer`, not `arc4random`:
+
+```sx
+let system_random = C.function<func() uint32>(
+    library:MacOS.lib_system,
+    name:"arc4random"
+)
+
+func generate() int {
+    return system_random() as int
+}
+```
+
+The Linux variant calls the kernel `getrandom` capability through
+`Linux.kernel`; the Windows variant calls
+`ProcessPrng` from `Windows.bcrypt_primitives`. Both fill a private `uint32`
+owned by the platform module. Linux X64 has executed this path under Alpine;
+the Windows emitters produce typed imports for both architectures but remain
+provisional until execution on Windows.
