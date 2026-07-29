@@ -129,9 +129,17 @@ unverified until the target matrix runs it.
 
 A package can keep a platform binding private behind a common Silex API. For
 example, `STD.Randomizer` keeps its algorithm in `Module/Randomizer.sx` and
-delegates only system seeding to
-`Platform/MacOS/Module/Randomizer.Seed.sx`. The platform helper is
-private to the package; callers manipulate `Randomizer`, not `arc4random`:
+receives its system seeding fragment from
+`Platform/MacOS/Module/Randomizer.sx`. Both files compose the logical module
+`STD.Randomizer`; the platform helper is private and callers manipulate
+`Randomizer`, not `arc4random`:
+
+```sx
+self.state = Platform.system_seed()
+```
+
+The qualifier identifies the physical origin without introducing a public
+`Platform` module or an import.
 
 ```sx
 let system_random = C.function<func() uint32>(
@@ -139,7 +147,7 @@ let system_random = C.function<func() uint32>(
     name:"arc4random"
 )
 
-func generate() int {
+func system_seed() int {
     return system_random() as int
 }
 ```

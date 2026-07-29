@@ -8,11 +8,19 @@ pub const Error = Allocator.Error || Io.Dir.OpenError || Io.Dir.Iterator.Error |
     InvalidModulePath,
 };
 
+pub const Origin = enum {
+    portable,
+    platform,
+    target,
+    entry,
+};
+
 pub const Provider = struct {
     name: []const u8,
     path: []const u8,
     file: usize,
     owner: usize = 0,
+    origin: Origin = .portable,
 };
 
 pub const Index = struct {
@@ -57,8 +65,21 @@ pub fn discoverOwned(
     prefix: ?[]const u8,
     owner: usize,
 ) Error!Index {
-    return discoverOwnedExcluding(allocator, io, root_path, prefix, owner, &.{});
+    return discoverOwnedAs(allocator, io, root_path, prefix, owner, .portable);
 }
+
+pub fn discoverOwnedAs(
+    allocator: Allocator,
+    io: Io,
+    root_path: []const u8,
+    prefix: ?[]const u8,
+    owner: usize,
+    origin: Origin,
+) Error!Index {
+    return discoverOwnedExcludingAs(allocator, io, root_path, prefix, owner, excluded_none, origin);
+}
+
+const excluded_none: []const []const u8 = &.{};
 
 pub fn discoverOwnedExcluding(
     allocator: Allocator,
@@ -67,6 +88,18 @@ pub fn discoverOwnedExcluding(
     prefix: ?[]const u8,
     owner: usize,
     excluded_roots: []const []const u8,
+) Error!Index {
+    return discoverOwnedExcludingAs(allocator, io, root_path, prefix, owner, excluded_roots, .portable);
+}
+
+pub fn discoverOwnedExcludingAs(
+    allocator: Allocator,
+    io: Io,
+    root_path: []const u8,
+    prefix: ?[]const u8,
+    owner: usize,
+    excluded_roots: []const []const u8,
+    origin: Origin,
 ) Error!Index {
     var root = try Io.Dir.cwd().openDir(io, root_path, .{ .iterate = true });
     defer root.close(io);
@@ -99,6 +132,7 @@ pub fn discoverOwnedExcluding(
             .path = full_path,
             .file = 0,
             .owner = owner,
+            .origin = origin,
         });
     }
 
@@ -126,7 +160,10 @@ pub fn combine(allocator: Allocator, indexes: []const Index) (Allocator.Error ||
     std.mem.sort(Provider, providers.items, {}, lessThan);
     for (providers.items, 0..) |*provider, index| {
         provider.file = index;
-        if (index != 0 and std.mem.eql(u8, providers.items[index - 1].name, provider.name)) {
+        if (index != 0 and
+            std.mem.eql(u8, providers.items[index - 1].name, provider.name) and
+            providers.items[index - 1].owner != provider.owner)
+        {
             return error.DuplicateModule;
         }
     }

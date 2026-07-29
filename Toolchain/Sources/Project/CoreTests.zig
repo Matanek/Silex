@@ -402,7 +402,206 @@ test "select named package module roots for the macOS platform" {
     compiler = Compiler.init(allocator, std.testing.io);
     try std.testing.expectError(error.InvalidSource, compiler.compile(input));
     try std.testing.expectEqualStrings(
-        "multiple source files provide the same module",
+        "function 'Bridge.Implementation.value' with these parameter types is already declared",
+        compiler.diagnostic.?.message,
+    );
+}
+
+test "compose same-package module fragments across active roots" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.createDirPath(std.testing.io, "Bridge/Module");
+    inline for (.{ "MacOS", "Linux", "Windows" }) |platform| {
+        try temporary.dir.createDirPath(std.testing.io, "Bridge/Platform/" ++ platform ++ "/Module");
+    }
+    inline for (.{ "macos-arm64", "linux-x64", "windows-x64", "windows-arm64" }) |target| {
+        try temporary.dir.createDirPath(std.testing.io, "Bridge/Target/" ++ target ++ "/Module");
+    }
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Bridge/Package.json",
+        .data = "{\"name\":\"Bridge\",\"version\":\"1.0.0\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Bridge/Module/Combined.sx",
+        .data = "public func value() int { return Platform.PlatformValue(value:Platform.value()).value + Target.value() }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Bridge/Platform/MacOS/Module/Combined.sx", .data = "struct PlatformValue { let value:int }\nfunc value() int { return 100 }" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Bridge/Platform/Linux/Module/Combined.sx", .data = "struct PlatformValue { let value:int }\nfunc value() int { return 200 }" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Bridge/Platform/Windows/Module/Combined.sx", .data = "struct PlatformValue { let value:int }\nfunc value() int { return 300 }" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Bridge/Target/macos-arm64/Module/Combined.sx", .data = "func value() int { return 1 }" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Bridge/Target/linux-x64/Module/Combined.sx", .data = "func value() int { return 2 }" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Bridge/Target/windows-x64/Module/Combined.sx", .data = "func value() int { return 3 }" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Bridge/Target/windows-arm64/Module/Combined.sx", .data = "func value() int { return 4 }" });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "use Bridge.Combined\nfunc answer() int { return Combined.value() }\nfunc main() {}",
+    });
+
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    const cases = [_]struct { target: @import("../Target.zig").Target, expected: i64 }{
+        .{ .target = .macos_arm64, .expected = 101 },
+        .{ .target = .linux_x64, .expected = 202 },
+        .{ .target = .windows_x64, .expected = 303 },
+        .{ .target = .windows_arm64, .expected = 304 },
+    };
+    for (cases) |case| {
+        var compiler = Compiler.init(allocator, std.testing.io);
+        compiler.cache_modules = true;
+        compiler.target = case.target;
+        const compilation = try compiler.compile(input);
+        var answer_id: ?usize = null;
+        for (compilation.ir.functions, 0..) |function, id| {
+            if (std.mem.eql(u8, function.name, "Main.answer")) answer_id = id;
+        }
+        const answer = try @import("../Interpreter.zig").invoke(
+            allocator,
+            compilation.ir,
+            answer_id orelse return error.TestUnexpectedResult,
+            &.{},
+        );
+        try std.testing.expectEqual(case.expected, answer.integer);
+        var fragment_count: usize = 0;
+        for (compiler.index.providers) |provider| {
+            if (std.mem.eql(u8, provider.name, "Bridge.Combined")) fragment_count += 1;
+        }
+        try std.testing.expectEqual(@as(usize, 3), fragment_count);
+    }
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Bridge/Platform/MacOS/Module/Combined.sx",
+        .data = "struct PlatformValue { let value:int }\nfunc value() int { return 110 }",
+    });
+    var changed_compiler = Compiler.init(allocator, std.testing.io);
+    changed_compiler.cache_modules = true;
+    changed_compiler.target = .macos_arm64;
+    const changed = try changed_compiler.compile(input);
+    var changed_answer_id: ?usize = null;
+    for (changed.ir.functions, 0..) |function, id| {
+        if (std.mem.eql(u8, function.name, "Main.answer")) changed_answer_id = id;
+    }
+    const changed_answer = try @import("../Interpreter.zig").invoke(
+        allocator,
+        changed.ir,
+        changed_answer_id orelse return error.TestUnexpectedResult,
+        &.{},
+    );
+    try std.testing.expectEqual(@as(i64, 111), changed_answer.integer);
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Bridge/Platform/MacOS/Module/Combined.sx",
+        .data = "struct PlatformValue { let value:int }\ninternal func value() int { return 100 }",
+    });
+    var internal_compiler = Compiler.init(allocator, std.testing.io);
+    internal_compiler.target = .macos_arm64;
+    try std.testing.expectError(error.InvalidSource, internal_compiler.compile(input));
+    try std.testing.expectEqualStrings(
+        "function 'Bridge.Combined.$Platform.value' is internal to its source file",
+        internal_compiler.diagnostic.?.message,
+    );
+    try std.testing.expect(std.mem.endsWith(
+        u8,
+        internal_compiler.diagnosticPath(input),
+        "Bridge/Module/Combined.sx",
+    ));
+}
+
+test "keep fragment imports local to their source file" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.createDirPath(std.testing.io, "Bridge/Module");
+    try temporary.dir.createDirPath(std.testing.io, "Bridge/Platform/MacOS/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Bridge/Package.json",
+        .data = "{\"name\":\"Bridge\",\"version\":\"1.0.0\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Bridge/Module/Helper.sx",
+        .data = "public func value() int { return 42 }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Bridge/Module/Combined.sx",
+        .data = "public func value() int { return Helper.value() }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Bridge/Platform/MacOS/Module/Combined.sx",
+        .data = "use Bridge.Helper\nfunc platform_value() int { return Helper.value() }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "use Bridge.Combined\nfunc main() { print(Combined.value()) }",
+    });
+
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Compiler.init(allocator, std.testing.io);
+    compiler.target = .macos_arm64;
+    try std.testing.expectError(error.InvalidSource, compiler.compile(input));
+    try std.testing.expectEqualStrings("unknown function 'Helper.value'", compiler.diagnostic.?.message);
+}
+
+test "require explicit contextual qualifiers for specialized fragments" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.createDirPath(std.testing.io, "Bridge/Module");
+    try temporary.dir.createDirPath(std.testing.io, "Bridge/Platform/MacOS/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Bridge/Package.json",
+        .data = "{\"name\":\"Bridge\",\"version\":\"1.0.0\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Bridge/Platform/MacOS/Module/Combined.sx",
+        .data = "func specialized() int { return 42 }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "use Bridge.Combined\nfunc main() { print(Combined.value()) }",
+    });
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Bridge/Module/Combined.sx",
+        .data = "public func value() int { return specialized() }",
+    });
+    var compiler = Compiler.init(allocator, std.testing.io);
+    compiler.target = .macos_arm64;
+    try std.testing.expectError(error.InvalidSource, compiler.compile(input));
+    try std.testing.expectEqualStrings(
+        "function 'specialized' from the Platform fragment must be accessed as 'Platform.specialized'",
+        compiler.diagnostic.?.message,
+    );
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Bridge/Module/Combined.sx",
+        .data = "public func value() int { return Platform.missing() }",
+    });
+    compiler = Compiler.init(allocator, std.testing.io);
+    compiler.target = .macos_arm64;
+    try std.testing.expectError(error.InvalidSource, compiler.compile(input));
+    try std.testing.expectEqualStrings(
+        "Platform fragment of 'Bridge.Combined' has no declaration 'missing'",
+        compiler.diagnostic.?.message,
+    );
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Bridge/Module/Combined.sx",
+        .data = "public func value() int { return Target.missing() }",
+    });
+    compiler = Compiler.init(allocator, std.testing.io);
+    compiler.target = .macos_arm64;
+    try std.testing.expectError(error.InvalidSource, compiler.compile(input));
+    try std.testing.expectEqualStrings(
+        "module 'Bridge.Combined' has no Target fragment for macos-arm64",
         compiler.diagnostic.?.message,
     );
 }
@@ -476,7 +675,10 @@ test "compose platform and exact target roots across the portability matrix" {
     var collision = Compiler.init(allocator, std.testing.io);
     collision.target = .macos_arm64;
     try std.testing.expectError(error.InvalidSource, collision.compile(input));
-    try std.testing.expectEqualStrings("multiple source files provide the same module", collision.diagnostic.?.message);
+    try std.testing.expectEqualStrings(
+        "function 'Bridge.TargetValue.value' with these parameter types is already declared",
+        collision.diagnostic.?.message,
+    );
 }
 
 test "compile an explicit package test entry outside public module roots" {

@@ -3,6 +3,14 @@ const Ast = @import("../Ast.zig");
 const GenericTypes = @import("GenericTypes.zig");
 const Reexports = @import("Reexports.zig");
 
+pub fn modeSpelling(mode: Ast.Parameter.Mode) []const u8 {
+    return switch (mode) {
+        .value => "",
+        .read => "@",
+        .mutable => "&",
+    };
+}
+
 pub const Composition = struct {
     types: []const Ast.FunctionType,
     maps: []const []const Ast.Type,

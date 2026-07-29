@@ -1,7 +1,6 @@
 const std = @import("std");
 const Ast = @import("Ast.zig");
 const Boundary = @import("Boundary.zig");
-const CompilationCache = @import("CompilationCache.zig");
 const Interface = @import("Interface.zig");
 const GenericSpecializer = @import("Generics/Specializer.zig").Specializer;
 const Result = @import("Intrinsics/Result.zig");
@@ -9,16 +8,17 @@ const Ir = @import("Ir.zig");
 const Modules = @import("Modules.zig");
 const Names = @import("Project/Names.zig");
 const Packages = @import("Packages.zig");
-const ParserModule = @import("Parser.zig");
 const Reexports = @import("Project/Reexports.zig");
 const TypeAliases = @import("Project/TypeAliases.zig");
 const GenericTypes = @import("Project/GenericTypes.zig");
 const FunctionTypes = @import("Project/FunctionTypes.zig");
+const Fragments = @import("Project/Fragments.zig");
+const Loading = @import("Project/Loading.zig");
 const Paths = @import("Project/Paths.zig");
 const Lookup = @import("Project/Lookup.zig");
-const Iterations = @import("Project/Iterations.zig");
 const Activation = @import("Project/Activation.zig");
 const Rewriting = @import("Project/Rewriting.zig");
+const Resolution = @import("Project/Resolution.zig");
 const ProjectExtensions = @import("Project/Extensions.zig");
 const Semantic = @import("Semantic/Analyzer.zig");
 const Source = @import("Source.zig");
@@ -37,13 +37,6 @@ const parent = Names.parent;
 const sameParent = Names.sameParent;
 const structureCanonicalName = Names.nominal;
 
-fn modeSpelling(mode: Ast.Parameter.Mode) []const u8 {
-    return switch (mode) {
-        .value => "",
-        .read => "@",
-        .mutable => "&",
-    };
-}
 pub const Error = anyerror;
 pub const Compilation = struct {
     ast: Ast.Program,
@@ -127,6 +120,7 @@ pub const Compiler = struct {
         };
         self.units = try self.allocator.alloc(Unit, self.index.providers.len);
         @memset(self.units, .{});
+        try Fragments.install(self.allocator, self.index, self.units);
         const files = try self.allocator.alloc([]const u8, self.index.providers.len);
         for (self.index.providers, 0..) |provider, file| files[file] = provider.path;
         self.files = files;
@@ -175,124 +169,11 @@ pub const Compiler = struct {
         return self.files[diagnostic.position.file];
     }
 
-    fn loadModule(self: *Compiler, module: usize, from: ?usize) Error!void {
-        if (from) |source| try self.recordActivation(source, module);
-        switch (self.units[module].state) {
-            .loaded => return,
-            .loading => {
-                if (from) |source| {
-                    if (!sameParent(self.index.providers[source].name, self.index.providers[module].name)) {
-                        return self.fail(
-                            .{ .offset = 0, .line = 1, .column = 1, .file = self.index.providers[source].file },
-                            "module dependency cycle crosses logical parents",
-                        );
-                    }
-                }
-                return;
-            },
-            .fresh => {},
-        }
-        self.units[module].state = .loading;
-
-        const provider = self.index.providers[module];
-        const source = try Io.Dir.cwd().readFileAlloc(
-            self.io,
-            provider.path,
-            self.allocator,
-            .limited(1024 * 1024),
-        );
-        const cached = if (self.cache_modules) CompilationCache.loadAst(self.allocator, self.io, provider.path, source) else null;
-        const program = cached orelse parsed: {
-            var parser = ParserModule.Parser.initFile(self.allocator, source, provider.file);
-            const parsed_program = parser.parse() catch |err| {
-                self.diagnostic = parser.diagnostic;
-                return err;
-            };
-            const installed = try Result.install(self.allocator, parsed_program);
-            if (self.cache_modules) CompilationCache.storeAst(self.allocator, self.io, provider.path, source, installed);
-            break :parsed installed;
-        };
-        self.units[module].program = program;
-
-        var bindings: std.ArrayList(Binding) = .empty;
-        for (program.uses) |use| {
-            const binding = try self.resolveUse(module, use);
-            for (program.functions) |function| {
-                if (std.mem.eql(u8, function.name, binding.alias)) {
-                    const position = use.alias_position orelse use.position;
-                    const message = try std.fmt.allocPrint(
-                        self.allocator,
-                        "use alias '{s}' collides with a local declaration",
-                        .{binding.alias},
-                    );
-                    return self.fail(position, message);
-                }
-            }
-            for (program.external_functions) |external| {
-                if (std.mem.eql(u8, external.name, binding.alias)) {
-                    const position = use.alias_position orelse use.position;
-                    const message = try std.fmt.allocPrint(
-                        self.allocator,
-                        "use alias '{s}' collides with a local declaration",
-                        .{binding.alias},
-                    );
-                    return self.fail(position, message);
-                }
-            }
-            for (program.structures) |structure| {
-                if (std.mem.eql(u8, structure.name, binding.alias)) {
-                    const position = use.alias_position orelse use.position;
-                    const message = try std.fmt.allocPrint(
-                        self.allocator,
-                        "use alias '{s}' collides with a local declaration",
-                        .{binding.alias},
-                    );
-                    return self.fail(position, message);
-                }
-            }
-            for (program.enums) |enumeration| {
-                if (std.mem.eql(u8, enumeration.name, binding.alias)) {
-                    const position = use.alias_position orelse use.position;
-                    const message = try std.fmt.allocPrint(
-                        self.allocator,
-                        "use alias '{s}' collides with a local declaration",
-                        .{binding.alias},
-                    );
-                    return self.fail(position, message);
-                }
-            }
-            for (bindings.items) |existing| {
-                if (std.mem.eql(u8, existing.alias, binding.alias)) {
-                    const position = use.alias_position orelse use.position;
-                    const message = try std.fmt.allocPrint(
-                        self.allocator,
-                        "use alias '{s}' is already declared",
-                        .{binding.alias},
-                    );
-                    return self.fail(position, message);
-                }
-            }
-            try bindings.append(self.allocator, binding);
-            if (binding.module) |dependency| try self.loadModule(dependency, module);
-        }
-        self.units[module].bindings = try bindings.toOwnedSlice(self.allocator);
-        try self.activateQualifiedReferences(module);
-        self.units[module].state = .loaded;
+    pub fn loadModule(self: *Compiler, module: usize, from: ?usize) Error!void {
+        return Loading.load(self, module, from);
     }
 
-    fn recordActivation(self: *Compiler, source: usize, dependency: usize) Error!void {
-        if (source == dependency) return;
-        for (self.units[source].activated_modules) |existing| {
-            if (existing == dependency) return;
-        }
-        const previous = self.units[source].activated_modules;
-        const expanded = try self.allocator.alloc(usize, previous.len + 1);
-        @memcpy(expanded[0..previous.len], previous);
-        expanded[previous.len] = dependency;
-        self.units[source].activated_modules = expanded;
-    }
-
-    fn resolveUse(self: *Compiler, source_module: usize, use: Ast.Use) Error!Binding {
+    pub fn resolveUse(self: *Compiler, source_module: usize, use: Ast.Use) Error!Binding {
         if (std.mem.eql(u8, use.path, "Interop.C") or
             std.mem.eql(u8, use.path, "Interop.MacOS") or
             std.mem.eql(u8, use.path, "Interop.Linux") or
@@ -485,7 +366,7 @@ pub const Compiler = struct {
         }
     }
 
-    fn resolveTypeAlias(
+    pub fn resolveTypeAlias(
         self: *Compiler,
         module: usize,
         name: []const u8,
@@ -560,7 +441,7 @@ pub const Compiler = struct {
         return self.fail(position, message);
     }
 
-    fn resolveReexport(
+    pub fn resolveReexport(
         self: *Compiler,
         module: usize,
         name: []const u8,
@@ -573,116 +454,25 @@ pub const Compiler = struct {
         };
     }
 
-    fn activateQualifiedReferences(self: *Compiler, module: usize) Error!void {
+    pub fn activateQualifiedReferences(self: *Compiler, module: usize) Error!void {
         return Activation.activate(self, module);
     }
 
     pub fn activateType(self: *Compiler, module: usize, type_value: Ast.Type) Error!void {
-        if (type_value.optionalChild()) |child| return self.activateType(module, child);
-        const index = type_value.structureIndex() orelse return;
-        const program = self.units[module].program.?;
-        if (index >= program.type_names.len) return;
-        const target = try self.nominalCandidate(module, program.type_names[index]) orelse return;
-        if (target.module != module) try self.loadModule(target.module, module);
+        return Activation.activateType(self, module, type_value);
     }
 
     pub fn activateStatement(self: *Compiler, module: usize, statement: Ast.Statement) Error!void {
-        switch (statement) {
-            .variable_declaration => |declaration| if (declaration.initializer) |value|
-                try self.activateExpression(module, value),
-            .assignment_statement => |assignment| {
-                if (assignment.value) |value| try self.activateExpression(module, value);
-                for (assignment.target.indices) |target_index| try self.activateExpression(module, target_index.value);
-            },
-            .return_statement => |value| if (value.value) |expression|
-                try self.activateExpression(module, expression),
-            .expression_statement => |expression| try self.activateExpression(module, expression),
-            .print_statement => |print_statement| for (print_statement.values) |value| try self.activateExpression(module, value),
-            .panic_statement => |effect| try self.activateExpression(module, effect.value),
-            .assert_statement => |assertion| {
-                try self.activateExpression(module, assertion.condition);
-                try self.activateExpression(module, assertion.message);
-            },
-            .if_statement => |conditional| {
-                for (conditional.branches) |branch| {
-                    try self.activateExpression(module, branch.condition.source());
-                    for (branch.statements) |nested| try self.activateStatement(module, nested);
-                }
-                if (conditional.else_statements) |statements| {
-                    for (statements) |nested| try self.activateStatement(module, nested);
-                }
-            },
-            .while_statement => |loop| {
-                try self.activateExpression(module, loop.condition.source());
-                for (loop.statements) |nested| try self.activateStatement(module, nested);
-            },
-            .mutex_statement => |mutex| for (mutex.statements) |nested| try self.activateStatement(module, nested),
-            .for_statement => |loop| try Iterations.activate(self, module, loop),
-            .break_statement, .continue_statement => {},
-        }
+        return Activation.activateStatement(self, module, statement);
     }
 
     pub fn activateExpression(self: *Compiler, module: usize, expression: *Ast.Expression) Error!void {
-        switch (expression.value) {
-            .call => |call| {
-                const qualified_name = if (call.receiver) |receiver|
-                    if (try expressionName(self.allocator, receiver)) |prefix|
-                        try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ prefix, call.name })
-                    else
-                        null
-                else
-                    call.name;
-                if (qualified_name) |name| {
-                    if (call.receiver) |receiver| if (try expressionName(self.allocator, receiver)) |prefix| {
-                        for (self.units[module].bindings) |binding| {
-                            if (std.mem.eql(u8, binding.alias, prefix)) {
-                                if (binding.module) |target_module| try self.loadModule(target_module, module);
-                            }
-                        }
-                    };
-                    if (try self.targetForCall(module, name)) |target| {
-                        try self.loadModule(target.module, module);
-                    } else if (call.receiver) |receiver| try self.activateExpression(module, receiver);
-                } else if (call.receiver) |receiver| try self.activateExpression(module, receiver);
-                for (call.arguments) |argument| try self.activateExpression(module, argument);
-                for (call.named_arguments) |argument| try self.activateExpression(module, argument.value);
-            },
-            .field_access => |access| try self.activateExpression(module, access.base),
-            .unary => |unary| try self.activateExpression(module, unary.operand),
-            .binary => |binary| {
-                try self.activateExpression(module, binary.left);
-                try self.activateExpression(module, binary.right);
-            },
-            .conversion => |conversion| try self.activateExpression(module, conversion.operand),
-            .string_count => |operand| try self.activateExpression(module, operand),
-            .sequence_literal => |literal| for (literal.values) |value| try self.activateExpression(module, value),
-            .index_access => |access| {
-                try self.activateExpression(module, access.base);
-                try self.activateExpression(module, access.index);
-            },
-            .slice_access => |access| {
-                try self.activateExpression(module, access.base);
-                try self.activateExpression(module, access.start);
-                try self.activateExpression(module, access.end);
-            },
-            .interpolated_string => |interpolated| for (interpolated.parts) |part| switch (part) {
-                .text => {},
-                .expression => |value| try self.activateExpression(module, value),
-            },
-            .match_expression => |match_value| {
-                try self.activateExpression(module, match_value.subject);
-                for (match_value.branches) |branch| {
-                    if (branch.value) |value| try self.activateExpression(module, value);
-                    if (branch.statements) |statements| for (statements) |statement| try self.activateStatement(module, statement);
-                }
-            },
-            else => {},
-        }
+        return Activation.activateExpression(self, module, expression);
     }
 
     const CallTarget = Reexports.Target;
 
-    fn targetForCall(self: *Compiler, module: usize, call_name: []const u8) Error!?CallTarget {
+    pub fn targetForCall(self: *Compiler, module: usize, call_name: []const u8) Error!?CallTarget {
         const separator = std.mem.indexOfScalar(u8, call_name, '.');
         if (separator == null) {
             for (self.units[module].bindings) |binding| {
@@ -698,7 +488,7 @@ pub const Compiler = struct {
         for (self.units[module].bindings) |binding| {
             if (!std.mem.eql(u8, binding.alias, head) or binding.declaration != null) continue;
             if (binding.module) |target_module| {
-                if (!self.hasPublicDeclaration(target_module, tail)) {
+                if (!Fragments.hasPublicDeclaration(self.index, self.units, target_module, tail)) {
                     const canonical = try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ binding.path, tail });
                     if (self.longestModulePrefix(canonical, self.index.providers[module].owner)) |target| {
                         if (target.module != target_module) return target;
@@ -715,179 +505,49 @@ pub const Compiler = struct {
         return null;
     }
 
-    fn hasPublicDeclaration(self: *Compiler, module: usize, name: []const u8) bool {
-        const program = self.units[module].program orelse return false;
-        for (program.functions) |function| {
-            if (function.is_public and std.mem.eql(u8, function.name, name)) return true;
-        }
-        for (program.structures) |structure| {
-            if (Reexports.structureExported(program, structure) and std.mem.eql(u8, structure.name, name)) return true;
-        }
-        for (program.enums) |enumeration| {
-            if (enumeration.is_public and std.mem.eql(u8, enumeration.name, name)) return true;
-        }
-        for (self.units[module].bindings) |binding| {
-            if (binding.is_public and binding.declaration != null and std.mem.eql(u8, binding.alias, name)) return true;
-        }
-        return false;
+    pub fn nominalCandidate(self: *Compiler, module: usize, name: []const u8) Error!?CallTarget {
+        return try Resolution.structureCandidate(self, module, name) orelse try Resolution.enumCandidate(self, module, name);
     }
 
-    fn structureCandidate(self: *Compiler, module: usize, name: []const u8) Error!?CallTarget {
-        if (findStructure(self.units[module].program.?, name) != null) {
-            return .{ .module = module, .declaration = name };
-        }
-        if (std.mem.indexOfScalar(u8, name, '.') != null) return self.targetForCall(module, name);
-        for (self.units[module].bindings) |binding| {
-            if (!std.mem.eql(u8, binding.alias, name)) continue;
-            const target_module = binding.module orelse continue;
-            return .{
-                .module = target_module,
-                .declaration = binding.declaration orelse lastSegment(self.index.providers[target_module].name),
-            };
-        }
-        if (try self.resolveTypeAlias(module, name, expressionPosition(module), false)) |target| {
-            return switch (target) {
-                .fundamental => null,
-                .structure => |structure| structure,
-                .enumeration => null,
-            };
-        }
-        return null;
-    }
-
-    fn enumCandidate(self: *Compiler, module: usize, name: []const u8) Error!?CallTarget {
-        if (findEnum(self.units[module].program.?, name) != null) {
-            return .{ .module = module, .declaration = name };
-        }
-        if (std.mem.indexOfScalar(u8, name, '.') != null) return self.targetForCall(module, name);
-        for (self.units[module].bindings) |binding| {
-            if (!std.mem.eql(u8, binding.alias, name)) continue;
-            const target_module = binding.module orelse continue;
-            return .{
-                .module = target_module,
-                .declaration = binding.declaration orelse lastSegment(self.index.providers[target_module].name),
-            };
-        }
-        if (try self.resolveTypeAlias(module, name, expressionPosition(module), false)) |target| {
-            return switch (target) {
-                .fundamental, .structure => null,
-                .enumeration => |enumeration| enumeration,
-            };
-        }
-        return null;
-    }
-
-    fn nominalCandidate(self: *Compiler, module: usize, name: []const u8) Error!?CallTarget {
-        return try self.structureCandidate(module, name) orelse try self.enumCandidate(module, name);
+    fn requireContextualTarget(
+        self: *Compiler,
+        module: usize,
+        path: []const u8,
+        origin: Modules.Origin,
+    ) Error!CallTarget {
+        return Resolution.requireContextualTarget(self, module, path, origin);
     }
 
     fn structureTarget(self: *Compiler, module: usize, name: []const u8) Error!?CallTarget {
-        const target = try self.structureCandidate(module, name) orelse return null;
-        if (self.units[target.module].state != .loaded) return null;
-        if (findStructure(self.units[target.module].program.?, target.declaration) != null) return target;
-        return self.resolveReexport(
-            target.module,
-            target.declaration,
-            .structure,
-            try self.allocator.alloc(bool, self.units.len),
-        );
+        return Resolution.structureTarget(self, module, name);
     }
 
     fn enumTarget(self: *Compiler, module: usize, name: []const u8) Error!?CallTarget {
-        const target = try self.enumCandidate(module, name) orelse return null;
-        if (self.units[target.module].state != .loaded) return null;
-        if (findEnum(self.units[target.module].program.?, target.declaration) != null) return target;
-        return self.resolveReexport(
-            target.module,
-            target.declaration,
-            .enumeration,
-            try self.allocator.alloc(bool, self.units.len),
-        );
+        return Resolution.enumTarget(self, module, name);
     }
 
     fn enumReceiverTarget(self: *Compiler, module: usize, name: []const u8) Error!?CallTarget {
-        const separator = std.mem.indexOfScalar(u8, name, '.');
-        if (separator == null) return self.enumTarget(module, name);
-        if (try self.targetForCall(module, name)) |target| {
-            if (try self.enumTarget(target.module, target.declaration)) |enumeration| return enumeration;
-        }
-        for (self.index.providers, 0..) |provider, target_module| {
-            if (self.units[target_module].state != .loaded) continue;
-            for (self.units[target_module].program.?.enums) |enumeration| {
-                const canonical = try structureCanonicalName(self.allocator, provider.name, enumeration.name);
-                if (std.mem.eql(u8, canonical, name)) return .{ .module = target_module, .declaration = enumeration.name };
-            }
-        }
-        return null;
+        return Resolution.enumReceiverTarget(self, module, name);
     }
 
     fn functionTarget(self: *Compiler, target: CallTarget) Error!?CallTarget {
-        const program = self.units[target.module].program orelse return null;
-        for (program.functions) |function| {
-            if (std.mem.eql(u8, function.name, target.declaration)) return target;
-        }
-        return self.resolveReexport(
-            target.module,
-            target.declaration,
-            .function,
-            try self.allocator.alloc(bool, self.units.len),
-        );
+        return Resolution.functionTarget(self, target);
     }
 
     fn resolveStructure(self: *Compiler, module: usize, name: []const u8, position: Source.Position) Error!CallTarget {
-        const target = try self.structureTarget(module, name) orelse {
-            const message = try std.fmt.allocPrint(self.allocator, "unknown structure type '{s}'", .{name});
-            return self.fail(position, message);
-        };
-        try self.requirePublicStructure(module, target, position);
-        return target;
-    }
-
-    fn resolveEnum(self: *Compiler, module: usize, name: []const u8, position: Source.Position) Error!CallTarget {
-        const target = try self.enumTarget(module, name) orelse {
-            const message = try std.fmt.allocPrint(self.allocator, "unknown enum type '{s}'", .{name});
-            return self.fail(position, message);
-        };
-        try self.requirePublicEnum(module, target, position);
-        return target;
+        return Resolution.resolveStructure(self, module, name, position);
     }
 
     fn requirePublicStructure(self: *Compiler, source_module: usize, target: CallTarget, position: Source.Position) Error!void {
-        if (source_module == target.module) return;
-        const target_program = self.units[target.module].program.?;
-        const structure = findStructure(target_program, target.declaration).?;
-        if (Reexports.structureExported(target_program, structure)) return;
-        const message = if (structure.is_internal)
-            try std.fmt.allocPrint(self.allocator, "structure '{s}' is internal to its source file", .{target.declaration})
-        else
-            try std.fmt.allocPrint(self.allocator, "structure '{s}' is private outside its module", .{target.declaration});
-        return self.fail(position, message);
+        return Resolution.requirePublicStructure(self, source_module, target, position);
     }
 
     fn requirePublicEnum(self: *Compiler, source_module: usize, target: CallTarget, position: Source.Position) Error!void {
-        if (source_module == target.module) return;
-        const enumeration = findEnum(self.units[target.module].program.?, target.declaration).?;
-        if (enumeration.is_public) return;
-        const message = if (enumeration.is_internal)
-            try std.fmt.allocPrint(self.allocator, "enum '{s}' is internal to its source file", .{target.declaration})
-        else
-            try std.fmt.allocPrint(self.allocator, "enum '{s}' is private outside its module", .{target.declaration});
-        return self.fail(position, message);
+        return Resolution.requirePublicEnum(self, source_module, target, position);
     }
 
     fn longestModulePrefix(self: *Compiler, path: []const u8, owner: usize) ?CallTarget {
-        var end = path.len;
-        while (true) {
-            const prefix = path[0..end];
-            if (Lookup.findAccessibleModule(self, prefix, owner)) |module| {
-                if (end == path.len) return .{
-                    .module = module,
-                    .declaration = lastSegment(prefix),
-                };
-                return .{ .module = module, .declaration = path[end + 1 ..] };
-            }
-            end = std.mem.lastIndexOfScalar(u8, prefix, '.') orelse return null;
-        }
+        return Lookup.longestAccessibleModulePrefix(self, path, owner);
     }
 
     const AstComposition = struct {
@@ -914,12 +574,12 @@ pub const Compiler = struct {
             for (function_type.parameters, 0..) |parameter, parameter_index| spelling = try std.fmt.allocPrint(
                 self.allocator,
                 "{s}{s}{s}{s}",
-                .{ spelling, if (parameter_index == 0) "" else ",", modeSpelling(parameter.mode), try self.canonicalTypeSpelling(module, parameter.type) },
+                .{ spelling, if (parameter_index == 0) "" else ",", FunctionTypes.modeSpelling(parameter.mode), try self.canonicalTypeSpelling(module, parameter.type) },
             );
             return std.fmt.allocPrint(
                 self.allocator,
                 "{s}){s}{s}",
-                .{ spelling, modeSpelling(function_type.return_mode), try self.canonicalTypeSpelling(module, function_type.return_type) },
+                .{ spelling, FunctionTypes.modeSpelling(function_type.return_mode), try self.canonicalTypeSpelling(module, function_type.return_type) },
             );
         }
         if (type_value.genericInstantiationIndex()) |index| {
@@ -940,18 +600,41 @@ pub const Compiler = struct {
             if (structure.collection) |collection| return self.collectionCanonicalName(module, collection);
         }
         const target = try self.structureTarget(module, local_name) orelse try self.enumTarget(module, local_name) orelse return local_name;
-        return structureCanonicalName(self.allocator, self.index.providers[target.module].name, target.declaration);
+        return structureCanonicalName(self.allocator, try self.nominalModule(target), target.declaration);
+    }
+
+    pub fn canonicalModule(self: *Compiler, module: usize) Error![]const u8 {
+        return Fragments.canonicalModuleName(self.allocator, self.index.providers[module]);
+    }
+
+    fn functionModule(self: *Compiler, target: CallTarget) Error![]const u8 {
+        return Resolution.functionModule(self, target);
+    }
+
+    fn structureModule(self: *Compiler, target: CallTarget) Error![]const u8 {
+        return Resolution.structureModule(self, target);
+    }
+
+    pub fn enumModule(self: *Compiler, target: CallTarget) Error![]const u8 {
+        return Resolution.enumModule(self, target);
+    }
+
+    fn nominalModule(self: *Compiler, target: CallTarget) Error![]const u8 {
+        return Resolution.nominalModule(self, target);
     }
 
     fn composeAst(self: *Compiler) Error!AstComposition {
         var type_names: std.ArrayList([]const u8) = .empty;
         for (self.index.providers, 0..) |provider, module| {
             if (self.units[module].state != .loaded) continue;
-            for (self.units[module].program.?.structures) |structure| {
+            const provider_name = try self.canonicalModule(module);
+            const program = self.units[module].program.?;
+            for (program.structures) |structure| {
+                const declaration_module = if (Reexports.structureExported(program, structure)) provider.name else provider_name;
                 const name = if (structure.collection) |collection|
                     try self.collectionCanonicalName(module, collection)
                 else
-                    try structureCanonicalName(self.allocator, provider.name, structure.name);
+                    try structureCanonicalName(self.allocator, declaration_module, structure.name);
                 for (type_names.items) |existing| {
                     if (std.mem.eql(u8, existing, name)) {
                         if (structure.collection != null) break;
@@ -960,8 +643,12 @@ pub const Compiler = struct {
                     }
                 } else try type_names.append(self.allocator, name);
             }
-            for (self.units[module].program.?.enums) |enumeration| {
-                const name = try structureCanonicalName(self.allocator, provider.name, enumeration.name);
+            for (program.enums) |enumeration| {
+                const name = try structureCanonicalName(
+                    self.allocator,
+                    if (enumeration.is_public) provider.name else provider_name,
+                    enumeration.name,
+                );
                 if (std.mem.eql(u8, name, Result.name) and findName(type_names.items, name) != null) continue;
                 for (type_names.items) |existing| {
                     if (std.mem.eql(u8, existing, name)) {
@@ -991,7 +678,7 @@ pub const Compiler = struct {
                             try self.requirePublicStructure(module, target, expressionPosition(module));
                             const canonical = try structureCanonicalName(
                                 self.allocator,
-                                self.index.providers[target.module].name,
+                                try self.structureModule(target),
                                 target.declaration,
                             );
                             break :structure_type .structure(
@@ -1002,7 +689,7 @@ pub const Compiler = struct {
                             try self.requirePublicEnum(module, target, expressionPosition(module));
                             const canonical = try structureCanonicalName(
                                 self.allocator,
-                                self.index.providers[target.module].name,
+                                try self.enumModule(target),
                                 target.declaration,
                             );
                             break :enum_type .structure(
@@ -1018,7 +705,7 @@ pub const Compiler = struct {
                 } else if (self.genericAliasBaseTarget(module, index, name)) |generic_target| generic_target else try self.resolveStructure(module, name, expressionPosition(module));
                 const canonical = try structureCanonicalName(
                     self.allocator,
-                    self.index.providers[target.module].name,
+                    try self.nominalModule(target),
                     target.declaration,
                 );
                 map[index] = .structure(findName(type_names.items, canonical) orelse return error.InvalidSource);
@@ -1043,6 +730,7 @@ pub const Compiler = struct {
         var extensions: std.ArrayList(Ast.Extension) = .empty;
         for (self.index.providers, 0..) |provider, module| {
             if (self.units[module].state != .loaded) continue;
+            const provider_name = try self.canonicalModule(module);
             const program = self.units[module].program.?;
             const type_map = type_maps[module];
             const generic_map = self.generic_type_maps[module];
@@ -1051,10 +739,11 @@ pub const Compiler = struct {
                 try extensions.append(self.allocator, try ProjectExtensions.compose(self, module, provider, extension, type_map, generic_map));
             }
             for (program.structures) |structure| {
+                const declaration_module = if (Reexports.structureExported(program, structure)) provider.name else provider_name;
                 const composed_name = if (structure.collection) |collection|
                     try self.collectionCanonicalName(module, collection)
                 else
-                    try structureCanonicalName(self.allocator, provider.name, structure.name);
+                    try structureCanonicalName(self.allocator, declaration_module, structure.name);
                 if (structure.collection != null) {
                     var already_composed = false;
                     for (structures.items) |existing| if (std.mem.eql(u8, existing.name, composed_name)) {
@@ -1068,7 +757,12 @@ pub const Compiler = struct {
                 composed_structure.name = composed_name;
                 composed_structure.type_parameters = try GenericTypes.remapParameters(self.allocator, structure.type_parameters, type_map, generic_map);
                 if (structure.enclosing) |enclosing| {
-                    composed_structure.enclosing = try structureCanonicalName(self.allocator, provider.name, enclosing);
+                    const enclosing_structure = findStructure(program, enclosing);
+                    const enclosing_module = if (enclosing_structure != null and Reexports.structureExported(program, enclosing_structure.?))
+                        provider.name
+                    else
+                        provider_name;
+                    composed_structure.enclosing = try structureCanonicalName(self.allocator, enclosing_module, enclosing);
                 }
                 if (structure.base) |base| composed_structure.base = FunctionTypes.remap(base, type_map, generic_map, function_map);
                 const conformances = try self.allocator.alloc(Ast.Type, structure.conformances.len);
@@ -1131,7 +825,11 @@ pub const Compiler = struct {
             for (program.enums) |enumeration| {
                 var composed = enumeration;
                 composed.owner = provider.owner;
-                composed.name = try structureCanonicalName(self.allocator, provider.name, enumeration.name);
+                composed.name = try structureCanonicalName(
+                    self.allocator,
+                    if (enumeration.is_public) provider.name else provider_name,
+                    enumeration.name,
+                );
                 composed.type_parameters = try GenericTypes.remapParameters(self.allocator, enumeration.type_parameters, type_map, generic_map);
                 const variants = try self.allocator.alloc(Ast.EnumVariant, enumeration.variants.len);
                 for (enumeration.variants, 0..) |variant, variant_index| {
@@ -1152,7 +850,11 @@ pub const Compiler = struct {
                 composed.name = if (module == self.entry_module and std.mem.eql(u8, function.name, "main"))
                     "main"
                 else
-                    try canonicalName(self.allocator, provider.name, function.name);
+                    try canonicalName(
+                        self.allocator,
+                        if (function.is_public) provider.name else provider_name,
+                        function.name,
+                    );
                 const parameters = try self.allocator.alloc(Ast.Parameter, function.parameters.len);
                 for (function.parameters, 0..) |parameter, index| {
                     parameters[index] = parameter;
@@ -1167,7 +869,7 @@ pub const Compiler = struct {
             for (program.external_functions) |external| {
                 var composed = external;
                 composed.owner = provider.owner;
-                composed.name = try canonicalName(self.allocator, provider.name, external.name);
+                composed.name = try canonicalName(self.allocator, provider_name, external.name);
                 try external_functions.append(self.allocator, composed);
             }
         }
@@ -1193,18 +895,52 @@ pub const Compiler = struct {
                 .{ .package = name }
             else
                 .project;
-            interface_by_module[module] = interfaces.items.len;
-            try interfaces.append(
+            const fragment_interface = try Interface.buildMappedGenerics(
                 self.allocator,
-                try Interface.buildMappedGenerics(
-                    self.allocator,
-                    owner,
-                    provider.name,
-                    self.units[module].program.?,
-                    type_maps[module],
-                    self.generic_type_maps[module],
-                ),
+                owner,
+                provider.name,
+                self.units[module].program.?,
+                type_maps[module],
+                self.generic_type_maps[module],
             );
+            var destination: ?usize = null;
+            for (0..module) |candidate| {
+                if (!Fragments.same(self.index, module, candidate)) continue;
+                if (interface_by_module[candidate]) |existing| {
+                    destination = existing;
+                    break;
+                }
+            }
+            if (destination) |existing| {
+                interface_by_module[module] = existing;
+                interfaces.items[existing].structures = try Fragments.concatenate(
+                    self.allocator,
+                    Interface.Structure,
+                    interfaces.items[existing].structures,
+                    fragment_interface.structures,
+                );
+                interfaces.items[existing].enums = try Fragments.concatenate(
+                    self.allocator,
+                    Interface.Enum,
+                    interfaces.items[existing].enums,
+                    fragment_interface.enums,
+                );
+                interfaces.items[existing].functions = try Fragments.concatenate(
+                    self.allocator,
+                    Interface.Function,
+                    interfaces.items[existing].functions,
+                    fragment_interface.functions,
+                );
+                interfaces.items[existing].type_aliases = try Fragments.concatenate(
+                    self.allocator,
+                    Interface.TypeAlias,
+                    interfaces.items[existing].type_aliases,
+                    fragment_interface.type_aliases,
+                );
+            } else {
+                interface_by_module[module] = interfaces.items.len;
+                try interfaces.append(self.allocator, fragment_interface);
+            }
         }
         for (self.units, 0..) |unit, module| {
             const destination_index = interface_by_module[module] orelse continue;
@@ -1492,11 +1228,12 @@ pub const Compiler = struct {
                 {
                     const name = &call.arguments[0].value.identifier;
                     if (Lookup.findLocalFunction(self.units[module].program.?, name.*)) {
-                        name.* = try canonicalName(self.allocator, self.index.providers[module].name, name.*);
+                        const local_target: CallTarget = .{ .module = module, .declaration = name.* };
+                        name.* = try canonicalName(self.allocator, try self.functionModule(local_target), name.*);
                     } else if (try self.targetForCall(module, name.*)) |candidate| {
                         if (try self.functionTarget(candidate)) |target| name.* = try canonicalName(
                             self.allocator,
-                            self.index.providers[target.module].name,
+                            try self.functionModule(target),
                             target.declaration,
                         );
                     }
@@ -1514,20 +1251,63 @@ pub const Compiler = struct {
                             try self.requirePublicEnum(module, target, call.name_position)
                         else
                             try self.requirePublicStructure(module, target, call.name_position);
-                        reference.name = try structureCanonicalName(self.allocator, self.index.providers[target.module].name, target.declaration);
+                        reference.name = try structureCanonicalName(self.allocator, try self.nominalModule(target), target.declaration);
                         for (@constCast(reference.type_arguments)) |*argument| {
                             argument.* = self.remapType(module, type_map, argument.*);
                         }
                     } else if (try expressionName(self.allocator, receiver)) |prefix| {
-                        if (try self.enumReceiverTarget(module, prefix)) |target| {
+                        const qualified = try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ prefix, call.name });
+                        const contextual_origin = Fragments.contextualOrigin(qualified);
+                        const direct_contextual = if (contextual_origin) |origin|
+                            std.mem.eql(u8, prefix, Fragments.label(origin)) and
+                                !Fragments.hasBindingAlias(self.units, module, prefix) and
+                                findStructure(self.units[module].program.?, prefix) == null and
+                                findEnum(self.units[module].program.?, prefix) == null
+                        else
+                            false;
+                        if (direct_contextual) {
+                            const origin = contextual_origin.?;
+                            const target = try self.requireContextualTarget(module, qualified, origin);
+                            const program = self.units[target.module].program.?;
+                            var found_function = false;
+                            for (program.functions) |function| {
+                                if (std.mem.eql(u8, function.name, target.declaration)) {
+                                    found_function = true;
+                                    break;
+                                }
+                            }
+                            if (found_function) {
+                                call.name = try canonicalName(
+                                    self.allocator,
+                                    try self.functionModule(target),
+                                    target.declaration,
+                                );
+                                call.receiver = null;
+                            } else if (findStructure(program, target.declaration) != null or
+                                findEnum(program, target.declaration) != null)
+                            {
+                                call.name = try structureCanonicalName(
+                                    self.allocator,
+                                    try self.nominalModule(target),
+                                    target.declaration,
+                                );
+                                call.receiver = null;
+                            } else {
+                                const message = try std.fmt.allocPrint(
+                                    self.allocator,
+                                    "{s} fragment of '{s}' has no declaration '{s}'",
+                                    .{ Fragments.label(origin), self.index.providers[module].name, target.declaration },
+                                );
+                                return self.fail(call.name_position, message);
+                            }
+                        } else if (try self.enumReceiverTarget(module, prefix)) |target| {
                             try self.requirePublicEnum(module, target, call.name_position);
                             receiver.value = .{ .identifier = try structureCanonicalName(
                                 self.allocator,
-                                self.index.providers[target.module].name,
+                                try self.enumModule(target),
                                 target.declaration,
                             ) };
                         } else {
-                            const qualified = try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ prefix, call.name });
                             const qualified_function = if (try self.targetForCall(module, qualified)) |candidate|
                                 try self.functionTarget(candidate)
                             else
@@ -1539,7 +1319,7 @@ pub const Compiler = struct {
                                 try self.requirePublicStructure(module, target, call.name_position);
                                 receiver.value = .{ .identifier = try structureCanonicalName(
                                     self.allocator,
-                                    self.index.providers[target.module].name,
+                                    try self.structureModule(target),
                                     target.declaration,
                                 ) };
                             } else if (try self.structureTarget(module, qualified) != null or try self.targetForCall(module, qualified) != null) {
@@ -1558,11 +1338,12 @@ pub const Compiler = struct {
                         if (try self.targetForCall(module, transformer.*)) |candidate| {
                             if (try self.functionTarget(candidate)) |target| transformer.* = try canonicalName(
                                 self.allocator,
-                                self.index.providers[target.module].name,
+                                try self.functionModule(target),
                                 target.declaration,
                             );
                         } else if (Lookup.findLocalFunction(self.units[module].program.?, transformer.*)) {
-                            transformer.* = try canonicalName(self.allocator, self.index.providers[module].name, transformer.*);
+                            const local_target: CallTarget = .{ .module = module, .declaration = transformer.* };
+                            transformer.* = try canonicalName(self.allocator, try self.functionModule(local_target), transformer.*);
                         }
                     }
                     return;
@@ -1571,22 +1352,43 @@ pub const Compiler = struct {
                     try self.requirePublicStructure(module, target, call.name_position);
                     call.name = try structureCanonicalName(
                         self.allocator,
-                        self.index.providers[target.module].name,
+                        try self.structureModule(target),
                         target.declaration,
                     );
                 } else if (try self.targetForCall(module, call.name)) |candidate| {
                     if (try self.functionTarget(candidate)) |target| {
                         call.name = try canonicalName(
                             self.allocator,
-                            self.index.providers[target.module].name,
+                            try self.functionModule(target),
                             target.declaration,
                         );
                     }
                 } else if (call.receiver == null and std.mem.indexOfScalar(u8, call.name, '.') == null) {
-                    call.name = if (findStructure(self.units[module].program.?, call.name) != null)
-                        try structureCanonicalName(self.allocator, self.index.providers[module].name, call.name)
-                    else
-                        try canonicalName(self.allocator, self.index.providers[module].name, call.name);
+                    if (!Lookup.findLocalFunction(self.units[module].program.?, call.name)) {
+                        if (Fragments.otherFunctionTarget(self.index, self.units, module, call.name)) |target| {
+                            const origin = self.index.providers[target.module].origin;
+                            const message = try std.fmt.allocPrint(
+                                self.allocator,
+                                "function '{s}' from the {s} fragment must be accessed as '{s}.{s}'",
+                                .{ call.name, Fragments.label(origin), Fragments.label(origin), call.name },
+                            );
+                            return self.fail(call.name_position, message);
+                        }
+                    }
+                    if (findStructure(self.units[module].program.?, call.name) != null) {
+                        const local_target: CallTarget = .{ .module = module, .declaration = call.name };
+                        call.name = try structureCanonicalName(
+                            self.allocator,
+                            try self.structureModule(local_target),
+                            call.name,
+                        );
+                    } else {
+                        const function_module = if (Lookup.findLocalFunction(self.units[module].program.?, call.name)) local: {
+                            const local_target: CallTarget = .{ .module = module, .declaration = call.name };
+                            break :local try self.functionModule(local_target);
+                        } else try self.canonicalModule(module);
+                        call.name = try canonicalName(self.allocator, function_module, call.name);
+                    }
                 }
             },
             .field_access => |access| try self.rewriteExpression(module, access.base, type_map),
@@ -1603,7 +1405,7 @@ pub const Compiler = struct {
                     try self.requirePublicStructure(module, target, expression.position);
                 reference.name = try structureCanonicalName(
                     self.allocator,
-                    self.index.providers[target.module].name,
+                    try self.nominalModule(target),
                     target.declaration,
                 );
                 for (@constCast(reference.type_arguments)) |*argument| {
@@ -1649,11 +1451,40 @@ pub const Compiler = struct {
                 }
                 match_value.branches = branches;
             },
+            .identifier => |*name| if (Fragments.contextualOrigin(name.*)) |origin| if (!Fragments.hasBindingAlias(
+                self.units,
+                module,
+                Fragments.label(origin),
+            ) and findStructure(self.units[module].program.?, Fragments.label(origin)) == null and
+                findEnum(self.units[module].program.?, Fragments.label(origin)) == null)
+            {
+                const target = try self.requireContextualTarget(module, name.*, origin);
+                var found = false;
+                for (self.units[target.module].program.?.functions) |function| {
+                    if (std.mem.eql(u8, function.name, target.declaration)) {
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    const message = try std.fmt.allocPrint(
+                        self.allocator,
+                        "{s} fragment of '{s}' has no function '{s}'",
+                        .{ Fragments.label(origin), self.index.providers[module].name, target.declaration },
+                    );
+                    return self.fail(expression.position, message);
+                }
+                name.* = try canonicalName(
+                    self.allocator,
+                    try self.functionModule(target),
+                    target.declaration,
+                );
+            },
             else => {},
         }
     }
 
-    fn fail(self: *Compiler, position: Source.Position, message: []const u8) Source.Error {
+    pub fn fail(self: *Compiler, position: Source.Position, message: []const u8) Source.Error {
         self.diagnostic = .{ .position = position, .message = message };
         return error.InvalidSource;
     }

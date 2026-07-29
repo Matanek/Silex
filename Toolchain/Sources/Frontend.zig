@@ -51,12 +51,20 @@ pub const Frontend = struct {
     }
 
     pub fn checkDocument(self: *Frontend, source: []const u8) CompileError!void {
+        return self.checkDocumentInProject(source, false);
+    }
+
+    pub fn checkDocumentInProject(
+        self: *Frontend,
+        source: []const u8,
+        has_unresolved_project_context: bool,
+    ) CompileError!void {
         var parser = ParserModule.Parser.init(self.allocator, source);
         var ast = parser.parse() catch |err| {
             self.diagnostic = parser.diagnostic;
             return err;
         };
-        if (ast.uses.len != 0) return;
+        if (ast.uses.len != 0 or has_unresolved_project_context) return;
         ast = try Result.install(self.allocator, ast);
         var extensions = Extensions.Merger.init(self.allocator);
         ast = extensions.merge(ast, true, true) catch |err| {

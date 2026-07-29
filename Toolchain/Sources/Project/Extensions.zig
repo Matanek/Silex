@@ -12,7 +12,7 @@ pub fn compose(
 ) !Ast.Extension {
     var result = source;
     result.target = GenericTypes.remap(source.target, type_map, generic_map);
-    result.provider = provider.name;
+    result.provider = try self.canonicalModule(module);
     result.visible_files = try visibleFiles(self, module);
     const conformances = try self.allocator.alloc(Ast.Type, source.conformances.len);
     for (source.conformances, 0..) |conformance, index| conformances[index] = GenericTypes.remap(conformance, type_map, generic_map);
@@ -40,6 +40,14 @@ fn visibleFiles(self: anytype, provider: usize) ![]const usize {
     var result: std.ArrayList(usize) = .empty;
     for (self.units, 0..) |unit, consumer| {
         if (unit.state != .loaded) continue;
+        const consumer_provider = self.index.providers[consumer];
+        const extension_provider = self.index.providers[provider];
+        if (consumer_provider.owner == extension_provider.owner and
+            std.mem.eql(u8, consumer_provider.name, extension_provider.name))
+        {
+            try result.append(self.allocator, consumer_provider.file);
+            continue;
+        }
         const visited = try self.allocator.alloc(bool, self.units.len);
         @memset(visited, false);
         if (dependsOn(self.units, consumer, provider, visited)) try result.append(self.allocator, self.index.providers[consumer].file);

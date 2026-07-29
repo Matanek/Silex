@@ -29,7 +29,7 @@ pub fn reference(self: anytype, builder: anytype, position: anytype, name: []con
     const signature = self.program.function_types[signature_index];
     var selected: ?Ir.FunctionId = null;
     for (self.program.functions, 0..) |function, function_id| {
-        if (!nameMatches(function.name, name) or !visible(function, position.file) or !matches(signature, function)) continue;
+        if (!nameMatches(function.name, name) or !visible(self, function, position.file) or !matches(signature, function)) continue;
         if (selected != null) {
             const message = try std.fmt.allocPrint(self.allocator, "function reference '{s}' is ambiguous for the expected callback type", .{name});
             return self.fail(position, message);
@@ -46,7 +46,7 @@ pub fn inferredReference(self: anytype, builder: anytype, position: anytype, nam
     var selected_function: ?Ir.FunctionId = null;
     var selected_type: ?Ast.Type = null;
     for (self.program.functions, 0..) |function, function_id| {
-        if (!nameMatches(function.name, name) or !visible(function, position.file)) continue;
+        if (!nameMatches(function.name, name) or !visible(self, function, position.file)) continue;
         var function_type: ?Ast.Type = null;
         for (self.program.function_types, 0..) |signature, signature_index| if (matches(signature, function)) {
             function_type = .function(signature_index);
@@ -155,8 +155,18 @@ fn matches(signature: Ast.FunctionType, function: Ast.Function) bool {
     return true;
 }
 
-fn visible(function: Ast.Function, file: usize) bool {
-    return function.is_public or function.position.file == file;
+fn visible(self: anytype, function: Ast.Function, file: usize) bool {
+    if (function.is_internal) return function.position.file == file;
+    if (function.is_public or function.position.file == file) return true;
+    const context = self.module_context orelse return false;
+    const separator = std.mem.lastIndexOfScalar(u8, function.name, '.') orelse return false;
+    return std.mem.eql(u8, logicalModule(function.name[0..separator]), logicalModule(context));
+}
+
+fn logicalModule(module: []const u8) []const u8 {
+    if (std.mem.endsWith(u8, module, ".$Platform")) return module[0 .. module.len - ".$Platform".len];
+    if (std.mem.endsWith(u8, module, ".$Target")) return module[0 .. module.len - ".$Target".len];
+    return module;
 }
 
 fn nameMatches(candidate: []const u8, requested: []const u8) bool {
