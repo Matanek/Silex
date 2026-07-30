@@ -22,7 +22,7 @@ pub fn emitLiteral(
     result: Machine.Slot,
 ) Error!void {
     try data_fixups.append(allocator, .{ .at = words.items.len, .string = string_id });
-    try words.append(allocator, A64.addressRelative(.x9));
+    try appendRelocatableAddress(allocator, words, .x9);
     try words.append(allocator, A64.storeStack(.x9, result));
 }
 
@@ -241,10 +241,19 @@ pub fn emitWriteStatic(
         .string = string_id,
         .byte_offset = descriptor_header_size,
     });
-    try words.append(allocator, A64.addressRelative(.x1));
+    try appendRelocatableAddress(allocator, words, .x1);
     try emitImmediate64(allocator, words, .x2, program.strings[string_id].len);
     try words.append(allocator, A64.moveWideZero32(.x16, macos_write));
     try words.append(allocator, A64.serviceCall());
+}
+
+fn appendRelocatableAddress(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    register: Register,
+) Allocator.Error!void {
+    try words.append(allocator, A64.addressPage(register));
+    try words.append(allocator, A64.addSubtractImmediate(register, register, 0, true));
 }
 
 fn emitCopy(

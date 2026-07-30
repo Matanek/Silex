@@ -493,6 +493,7 @@ fn inferReceiverType(structures: []const Ir.Structure, builder: anytype, express
         },
         .sequence_literal => |literal| literal.inferred_type,
         .call => |call| call.result_type,
+        .cascade => |cascade| inferReceiverType(structures, builder, cascade.receiver),
         else => null,
     };
 }

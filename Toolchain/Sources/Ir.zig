@@ -107,6 +107,7 @@ pub const Instruction = union(enum) {
     address_store: AddressStore,
     reference_store: ReferenceStore,
     reference_field: ReferenceField,
+    reference_optional: ReferenceOptional,
     convert: Convert,
     format_value: FormatValue,
     string_concat: StringConcat,
@@ -368,6 +369,11 @@ pub const Instruction = union(enum) {
         reference: ValueId,
         structure: usize,
         field: usize,
+    };
+
+    pub const ReferenceOptional = struct {
+        result: ValueId,
+        reference: ValueId,
     };
 
     pub const Convert = struct {
@@ -1058,6 +1064,12 @@ fn writeInstruction(
             try output.appendSlice(allocator, ", ");
             try output.appendSlice(allocator, program.structures[field.structure].fields[field.field].name);
             if (function.value_types[field.result] != .address or function.value_types[field.reference] != .address) return error.InvalidProgram;
+        },
+        .reference_optional => |optional| {
+            try appendResult(output, allocator, program, function, optional.result);
+            try output.appendSlice(allocator, "reference.optional ");
+            try appendValueChecked(output, allocator, function, optional.reference);
+            if (function.value_types[optional.result] != .address or function.value_types[optional.reference] != .address) return error.InvalidProgram;
         },
         .convert => |conversion| {
             try appendResult(output, allocator, program, function, conversion.result);

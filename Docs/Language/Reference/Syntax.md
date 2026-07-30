@@ -33,6 +33,8 @@ constraints.
 | Checked conversion | `value as Type` |
 | Recover success | `try operation()` |
 | Critical section | `mutex { ... }` |
+| Cascade method | `value..update()` |
+| Cascade field assignment | `value..field = replacement` |
 
 The type suffixes `?`, `[]`, and `[N]` apply from left to right, so `Type?[]`
 and `Type[]?` are distinct types.
@@ -83,7 +85,12 @@ as
 ==  !=
 &&
 ||
+..method(...)  ..field = value
 ```
+
+Cascade `..` binds more weakly than the ordinary expression operators. A
+single `.` following a cascade method segment resumes ordinary member access
+on the resulting receiver. The range token `...` is separate from `..`.
 
 Statements end at a line break, before `}`, or at `;`. Statements on the same
 line need `;`.

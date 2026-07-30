@@ -14,6 +14,7 @@ const Visibility = @import("Visibility.zig");
 const Inheritance = @import("Inheritance.zig");
 const ProtocolValues = @import("ProtocolValues.zig");
 const Matches = @import("Matches.zig");
+const TypedResources = @import("TypedResources.zig");
 
 const AnalyzeError = error{ InvalidSource, OutOfMemory };
 
@@ -31,7 +32,7 @@ pub fn inferMutability(allocator: std.mem.Allocator, program: Ast.Program) ![]co
     var flat: usize = 0;
     for (program.structures) |structure| {
         for (structure.methods) |method| {
-            mutating[flat] = method.return_mode == .mutable or statementsWriteSelf(method.statements);
+            mutating[flat] = method.return_mode == .mutable or intrinsicMutates(method.intrinsic) or statementsWriteSelf(method.statements);
             flat += 1;
         }
     }
@@ -94,6 +95,7 @@ pub fn analyze(self: anytype, structure_index: usize, method_index: usize, sourc
     self.specialization_file = source_method.specialization_file;
     defer self.specialization_file = previous_specialization_file;
     if (source_method.is_static) return analyzeStatic(self, structure_index, method_index, source_method);
+    if (source_method.intrinsic != null) return TypedResources.analyze(self, structure_index, method_index, source_method);
     const previous_context = self.member_context;
     self.member_context = structure_index;
     defer self.member_context = previous_context;
@@ -428,6 +430,9 @@ fn analyzeCallWithReceiver(
     const mutating = self.method_mutability[flat];
     const class_receiver = self.structures[receiver_structure_index].is_class;
     const borrowed_mutable = method.return_mode == .mutable;
+    if (mutating) if (Borrowing.rootName(receiver_expression)) |root| {
+        try Borrowing.ensureRootUnborrowed(self, builder, root, receiver_expression.position);
+    };
     if (mutating and receiver.borrowed_mode == .read) {
         const message = try std.fmt.allocPrint(self.allocator, "mutating method '{s}' cannot be called through a read reference", .{call.name});
         return self.fail(call.name_position, message);
@@ -456,10 +461,11 @@ fn analyzeCallWithReceiver(
             continue;
         }
         if (parameter.mode != .read) try Borrowing.requireOwned(self, argument, call.arguments[index].position, "passed by value");
-        try argument_ids.append(
-            self.allocator,
-            (try self.coerce(builder, argument, parameter.type, call.arguments[index].position)).value,
-        );
+        const converted = try self.coerce(builder, argument, parameter.type, call.arguments[index].position);
+        if (parameter.mode == .value and Resources.containsClass(self, parameter.type)) {
+            try Resources.retainValue(self, builder, parameter.type, converted.value);
+        }
+        try argument_ids.append(self.allocator, converted.value);
     }
     for (method.parameters[arguments.items.len..]) |parameter| {
         const value = try self.analyzeParameterDefault(builder, parameter);
@@ -489,6 +495,9 @@ fn analyzeCallWithReceiver(
         .implementations = implementations,
     } });
     for (mutable_arguments.items) |prepared| try MutableReferences.writeBack(self, builder, prepared);
+    if (receiver.transferred and Resources.containsClass(self, receiver.type)) {
+        try Resources.emitDrop(self, builder, receiver.type, receiver.value);
+    }
 
     if (borrowed_mutable) {
         try MutableReferences.writeBack(self, builder, borrowed_receiver.?);
@@ -503,6 +512,7 @@ fn analyzeCallWithReceiver(
             .value = value,
             .borrowed_root = if (method.return_mode == .read) receiver.borrowed_root orelse Borrowing.rootName(receiver_expression) else null,
             .borrowed_mode = method.return_mode,
+            .transferred = method.return_mode == .value and Resources.containsClass(self, method.return_type),
         };
         return null;
     }
@@ -518,7 +528,14 @@ fn analyzeCallWithReceiver(
     if (class_receiver) {
         const value = try self.newValue(builder, method.return_type);
         try self.emit(builder, .{ .field_load = .{ .result = value, .base = call_result.?, .field = 1 } });
-        return .{ .type = method.return_type, .value = value };
+        return .{
+            .type = method.return_type,
+            .value = value,
+            .transferred = Resources.containsClass(self, method.return_type) or if (method.intrinsic) |intrinsic| switch (intrinsic) {
+                .resource_remove => true,
+                else => false,
+            } else false,
+        };
     }
     const updated_receiver = try self.newValue(builder, receiver.type);
     try self.emit(builder, .{ .field_load = .{ .result = updated_receiver, .base = call_result.?, .field = 0 } });
@@ -529,7 +546,11 @@ fn analyzeCallWithReceiver(
     try writePlace(self, builder, place.?, replacement);
     const value = try self.newValue(builder, method.return_type);
     try self.emit(builder, .{ .field_load = .{ .result = value, .base = call_result.?, .field = 1 } });
-    return .{ .type = method.return_type, .value = value };
+    return .{
+        .type = method.return_type,
+        .value = value,
+        .transferred = Resources.containsClass(self, method.return_type),
+    };
 }
 
 fn analyzeProtocolCall(
@@ -899,6 +920,9 @@ fn emitMutatingReturn(
 ) !void {
     try Resources.emitActiveDrops(self, builder, 0);
     try Resources.emitMutexUnlocks(self, builder, 0);
+    if (value) |returned| if (Resources.containsClass(self, method.return_type)) {
+        try Resources.retainValue(self, builder, method.return_type, returned);
+    };
     const receiver_type = Ast.Type.structure(structure_index);
     const receiver = try self.newValue(builder, receiver_type);
     try self.emit(builder, .{ .local_load = .{ .result = receiver, .local = self_local } });
@@ -955,6 +979,14 @@ fn methodCount(program: Ast.Program) usize {
     var result: usize = 0;
     for (program.structures) |structure| result += structure.methods.len;
     return result;
+}
+
+fn intrinsicMutates(intrinsic: ?Ast.FunctionIntrinsic) bool {
+    const value = intrinsic orelse return false;
+    return switch (value) {
+        .resource_insert, .resource_get_mut, .resource_try_get_mut, .resource_remove, .resource_clear => true,
+        .resource_has, .resource_get, .resource_try_get, .system_adapter => false,
+    };
 }
 
 fn statementsWriteSelf(statements: []const Ast.Statement) bool {
@@ -1023,6 +1055,21 @@ fn expressionCallsMutatingSelf(program: Ast.Program, structure_index: usize, exp
             }
             for (call.arguments) |argument| if (expressionCallsMutatingSelf(program, structure_index, argument, mutating)) break :calls true;
             for (call.named_arguments) |argument| if (expressionCallsMutatingSelf(program, structure_index, argument.value, mutating)) break :calls true;
+            break :calls false;
+        },
+        .cascade => |cascade| calls: {
+            if (expressionCallsMutatingSelf(program, structure_index, cascade.receiver, mutating)) break :calls true;
+            const receiver_structure = receiverStructure(program, structure_index, cascade.receiver);
+            for (cascade.operations) |operation| switch (operation) {
+                .method_call => |method| {
+                    if (receiver_structure) |target| if (mutatingMethodInStructure(program, target, method.name, method.arguments.len, mutating)) break :calls true;
+                    for (method.arguments) |argument| if (expressionCallsMutatingSelf(program, structure_index, argument, mutating)) break :calls true;
+                },
+                .field_assignment => |field| {
+                    if (receiver_structure == structure_index) break :calls true;
+                    if (expressionCallsMutatingSelf(program, structure_index, field.value, mutating)) break :calls true;
+                },
+            };
             break :calls false;
         },
         .field_access => |access| expressionCallsMutatingSelf(program, structure_index, access.base, mutating),

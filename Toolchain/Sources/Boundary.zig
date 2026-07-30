@@ -6,4 +6,6 @@ pub const Function = struct {
     source_name: []const u8,
     parameters: []const Types.Type,
     return_type: Types.Type,
+    owner: usize = 0,
+    package_private: bool = false,
 };

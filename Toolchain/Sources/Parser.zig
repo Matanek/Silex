@@ -16,12 +16,12 @@ const Extensions = @import("Parser/Extensions.zig");
 const Interop = @import("Parser/Interop.zig");
 const TestBlocks = @import("Parser/TestBlocks.zig");
 const ControlFlow = @import("Parser/ControlFlow.zig");
+const Cascades = @import("Parser/Cascades.zig");
 
 const Allocator = std.mem.Allocator;
 const Token = LexerModule.Token;
 const TokenTag = LexerModule.TokenTag;
 const ParseError = Source.Error || Allocator.Error;
-
 pub const Parser = struct {
     allocator: Allocator,
     lexer: LexerModule.Lexer,
@@ -41,7 +41,6 @@ pub const Parser = struct {
     type_parameters: []const Ast.TypeParameter = &.{},
     nominal_prefix: ?[]const u8 = null,
     match_depth: usize = 0,
-
     pub const TestLocalFunction = struct {
         source: []const u8,
         generated: []const u8,
@@ -511,7 +510,7 @@ pub const Parser = struct {
             } };
         }
         switch (expression.value) {
-            .call => {},
+            .call, .cascade => {},
             else => return self.failAt(expression.position, "expected assignment or function call"),
         }
         try self.expectStatementTerminator();
@@ -561,10 +560,10 @@ pub const Parser = struct {
     }
 
     pub fn parseExpression(self: *Parser, allow_line_breaks: bool) ParseError!*Ast.Expression {
-        return self.parseLogicalOr(allow_line_breaks);
+        return Cascades.parse(self, try self.parseLogicalOr(allow_line_breaks));
     }
 
-    fn parseLogicalOr(self: *Parser, allow_line_breaks: bool) ParseError!*Ast.Expression {
+    pub fn parseLogicalOr(self: *Parser, allow_line_breaks: bool) ParseError!*Ast.Expression {
         var expression = try self.parseLogicalAnd(allow_line_breaks);
         while (self.current.tag == .pipe_pipe and self.canContinueExpression(allow_line_breaks)) {
             const operator = self.current;
@@ -689,7 +688,11 @@ pub const Parser = struct {
     }
 
     fn parseConversion(self: *Parser) ParseError!*Ast.Expression {
-        var expression = try self.parsePrimary();
+        return self.parsePostfix(try self.parsePrimary());
+    }
+
+    pub fn parsePostfix(self: *Parser, initial: *Ast.Expression) ParseError!*Ast.Expression {
+        var expression = initial;
         while (true) {
             if (self.current.tag == .less and expression.value == .identifier and try Generics.memberFollows(self)) {
                 const generic_name = expression.value.identifier;

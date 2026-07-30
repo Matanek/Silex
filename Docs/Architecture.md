@@ -20,9 +20,24 @@ typed Silex IR
     -> macos-arm64 lowering
     -> ARM64 machine IR
     -> direct AArch64 instruction encoding
-    -> direct Mach-O emission and ad-hoc signature
+    -> direct Mach-O executable emission and ad-hoc signature
     -> native executable
 ```
+
+A program that actually calls a package-private native provider takes a second
+bootstrap path after instruction encoding:
+
+```text
+ARM64 encoded image
+    -> relocatable Mach-O object
+    -> package-owned static archives and Apple frameworks
+    -> bootstrap system linker
+    -> native executable
+```
+
+The choice and linker inputs come from the resolved package graph. They remain
+toolchain data and never enter portable IR or the consuming application's
+manifest.
 
 The editor path reuses the same source contracts without exposing compiler
 internals through LSP:
@@ -196,9 +211,15 @@ open Silex document
   spans. Aggregate arguments use internal addresses and aggregate returns use
   an internal hidden destination; neither convention, nor the flattened layout,
   is observable or stable outside the backend.
-- The compiler writes the Mach-O headers, load commands, `__text`, entry
-  wrapper, and ad-hoc SHA-256 code signature itself. It does not produce an
-  object file or invoke an assembler, linker, or `codesign`.
+- Without a package-native provider, the compiler writes the Mach-O headers,
+  load commands, `__text`, entry wrapper, and ad-hoc SHA-256 code signature
+  itself. It invokes neither an assembler, linker, nor `codesign` on that path.
+- For a referenced package-private provider on `macos-arm64`, the compiler can
+  instead write a relocatable ARM64 Mach-O object with section, symbol and
+  relocation tables. It then invokes the bootstrap linker with only the
+  resolved package's static archive and declared Apple frameworks. This path
+  does not compile foreign sources and does not define a stable Silex object
+  format or ABI.
 - The Linux X64 backend owns a distinct Silex call convention, encodes X64
   instructions directly and writes an ELF64 container without section headers
   or an external linker. Its integer, control-flow, class, aggregate and
@@ -275,9 +296,9 @@ open Silex document
   reclamation and a general allocation model remain future internal work.
 - No public system API or general native allocation API exists yet.
 - The native backend has no debugging information, general dynamic-library
-  model, source-level external declarations, or ABI stability guarantee yet.
-  Its sole external import is the internal `libSystem.write` validation
-  contract described above.
+  model, public source-level external declarations, or ABI stability guarantee
+  yet. Besides the closed system contracts, `macos-arm64` supports typed C ABI
+  calls owned privately by a package that declares its static provider.
 - Native executable emission and native tests currently require an Apple
   Silicon macOS host.
 - Interfaces, IR and package graphs are in-memory structures and have no stable

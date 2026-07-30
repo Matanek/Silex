@@ -129,6 +129,13 @@ pub fn activateExpression(self: anytype, module: usize, expression: *Ast.Express
             for (call.arguments) |argument| try self.activateExpression(module, argument);
             for (call.named_arguments) |argument| try self.activateExpression(module, argument.value);
         },
+        .cascade => |cascade| {
+            try self.activateExpression(module, cascade.receiver);
+            for (cascade.operations) |operation| switch (operation) {
+                .method_call => |method| for (method.arguments) |argument| try self.activateExpression(module, argument),
+                .field_assignment => |field| try self.activateExpression(module, field.value),
+            };
+        },
         .field_access => |access| try self.activateExpression(module, access.base),
         .unary => |unary| try self.activateExpression(module, unary.operand),
         .binary => |binary| {

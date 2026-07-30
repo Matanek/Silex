@@ -129,6 +129,16 @@ fn conflictsWithRead(expression: *const Ast.Expression, root: []const u8) bool {
             for (call.named_arguments) |argument| if (conflictsWithRead(argument.value, root)) break :call_conflict true;
             break :call_conflict false;
         },
+        .cascade => |cascade| cascade_conflict: {
+            if (conflictsWithRead(cascade.receiver, root)) break :cascade_conflict true;
+            for (cascade.operations) |operation| switch (operation) {
+                .method_call => |method| for (method.arguments) |argument| {
+                    if (conflictsWithRead(argument, root)) break :cascade_conflict true;
+                },
+                .field_assignment => |field| if (conflictsWithRead(field.value, root)) break :cascade_conflict true,
+            };
+            break :cascade_conflict false;
+        },
         .field_access => |access| conflictsWithRead(access.base, root),
         .binary => |binary| conflictsWithRead(binary.left, root) or conflictsWithRead(binary.right, root),
         .conversion => |conversion| conflictsWithRead(conversion.operand, root),

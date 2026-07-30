@@ -3,11 +3,14 @@ const Ast = @import("../Ast.zig");
 const Boundary = @import("../Boundary.zig");
 const Ir = @import("../Ir.zig");
 const MainBoundary = @import("../MainBoundary.zig");
+const InjectedSystems = @import("InjectedSystems.zig");
+const Packages = @import("../Packages.zig");
 const Numeric = @import("../Numeric.zig");
 const Source = @import("../Source.zig");
 const Mutation = @import("Mutation.zig");
 const Moves = @import("Moves.zig");
 const Copies = @import("Copies.zig");
+const Cascades = @import("Cascades.zig");
 const Borrowing = @import("Borrowing.zig");
 const Bindings = @import("Bindings.zig");
 const MutableReferences = @import("MutableReferences.zig");
@@ -57,6 +60,7 @@ pub const Analyzer = struct {
     module_context: ?[]const u8 = null,
     anonymous_function_context: bool = false,
     target: ?Target = null,
+    packages: ?Packages.Graph = null,
     pub fn init(allocator: Allocator) Analyzer {
         return .{ .allocator = allocator };
     }
@@ -287,6 +291,10 @@ pub const Analyzer = struct {
 
     fn analyzeFunction(self: *Analyzer, function_id: Ir.FunctionId, function: Ast.Function) AnalyzeError!Ir.Function {
         _ = function_id;
+        if (function.intrinsic) |intrinsic| switch (intrinsic) {
+            .system_adapter => |adapter| return InjectedSystems.analyze(self, function, adapter),
+            else => {},
+        };
         const previous_module_context = self.module_context;
         self.module_context = if (std.mem.lastIndexOfScalar(u8, function.name, '.')) |separator|
             function.name[0..separator]
@@ -407,6 +415,13 @@ pub const Analyzer = struct {
                     return false;
                 },
                 .match_expression => |match_value| return Matches.analyzeStatement(self, builder, function, match_value),
+                .cascade => {
+                    const value = try self.analyzeExpression(builder, expression);
+                    if (Resources.needsDrop(self, value.type) or Resources.containsClass(self, value.type)) {
+                        try Resources.emitDrop(self, builder, value.type, value.value);
+                    }
+                    return false;
+                },
                 .unary => |unary| if (unary.operator == .propagate) {
                     try Try.analyzeStatement(self, builder, unary);
                     return false;
@@ -484,6 +499,7 @@ pub const Analyzer = struct {
                 const message = try std.fmt.allocPrint(self.allocator, "function '{s}' returns 'void' and cannot be used as a value", .{call.name});
                 return self.fail(call.name_position, message);
             },
+            .cascade => |cascade| Cascades.analyze(self, builder, cascade, expected),
             .unary => |unary| self.analyzeUnary(builder, unary, expected),
             .binary => |binary| self.analyzeBinary(builder, binary, expected),
             .conversion => |conversion| self.analyzeConversion(builder, conversion),
@@ -1000,7 +1016,7 @@ pub const Analyzer = struct {
         };
     }
 
-    fn analyzeCall(self: *Analyzer, builder: *FunctionBuilder, call: Ast.Expression.Call) AnalyzeError!?TypedValue {
+    pub fn analyzeCall(self: *Analyzer, builder: *FunctionBuilder, call: Ast.Expression.Call) AnalyzeError!?TypedValue {
         if (try Callbacks.call(self, builder, call)) |result| return result.value;
         if (call.receiver == null and std.mem.eql(u8, call.name, "map_error")) return try MapError.analyze(self, builder, call);
         if (try Interop.analyzeIntrinsic(self, builder, call)) |value| return value;
@@ -1223,6 +1239,9 @@ pub const Analyzer = struct {
             }
             if (parameter.mode != .read) try Borrowing.requireOwned(self, argument, call.arguments[index].position, "passed by value");
             const converted = try self.coerce(builder, argument, parameter.type, call.name_position);
+            if (parameter.mode == .value and Resources.containsClass(self, parameter.type)) {
+                try Resources.retainValue(self, builder, parameter.type, converted.value);
+            }
             try argument_ids.append(self.allocator, converted.value);
         }
         for (function.parameters[arguments.items.len..]) |parameter| {
@@ -1250,7 +1269,11 @@ pub const Analyzer = struct {
         } });
         for (mutable_arguments.items) |argument| try MutableReferences.writeBack(self, builder, argument.prepared);
         if (result == null) return null;
-        if (function.return_mode == .value) return .{ .type = function.return_type, .value = result.? };
+        if (function.return_mode == .value) return .{
+            .type = function.return_type,
+            .value = result.?,
+            .transferred = Resources.containsClass(self, function.return_type),
+        };
         const provenance = function.return_provenance.?;
         var parameter_index: ?usize = null;
         for (function.parameters, 0..) |parameter, index| if (std.mem.eql(u8, parameter.name, provenance)) {

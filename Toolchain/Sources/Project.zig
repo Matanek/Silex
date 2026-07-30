@@ -164,6 +164,7 @@ pub const Compiler = struct {
         const interfaces = try self.buildInterfaces(composition.type_maps);
         var analyzer = Semantic.Analyzer.init(self.allocator);
         analyzer.target = self.target;
+        analyzer.packages = self.packages;
         var ir = (if (self.include_tests) analyzer.analyzeUnit(ast) else analyzer.analyze(ast)) catch |err| {
             self.diagnostic = analyzer.diagnostic;
             return err;
@@ -1251,6 +1252,19 @@ pub const Compiler = struct {
         return FunctionTypes.remap(type_value, type_map, self.generic_type_maps[module], self.function_type_maps[module]);
     }
 
+    fn qualifyFunctionReference(self: *Compiler, module: usize, name: *[]const u8) Error!void {
+        if (Lookup.findLocalFunction(self.units[module].program.?, name.*)) {
+            const local_target: CallTarget = .{ .module = module, .declaration = name.* };
+            name.* = try canonicalName(self.allocator, try self.functionModule(local_target), name.*);
+        } else if (try self.targetForCall(module, name.*)) |candidate| {
+            if (try self.functionTarget(candidate)) |target| name.* = try canonicalName(
+                self.allocator,
+                try self.functionModule(target),
+                target.declaration,
+            );
+        }
+    }
+
     pub fn rewriteExpression(self: *Compiler, module: usize, expression: *Ast.Expression, type_map: []const Ast.Type) Error!void {
         switch (expression.value) {
             .call => |*call| {
@@ -1265,17 +1279,13 @@ pub const Compiler = struct {
                 if (call.receiver == null and std.mem.eql(u8, call.name, "C.function_address") and call.arguments.len == 1 and
                     call.arguments[0].value == .identifier)
                 {
-                    const name = &call.arguments[0].value.identifier;
-                    if (Lookup.findLocalFunction(self.units[module].program.?, name.*)) {
-                        const local_target: CallTarget = .{ .module = module, .declaration = name.* };
-                        name.* = try canonicalName(self.allocator, try self.functionModule(local_target), name.*);
-                    } else if (try self.targetForCall(module, name.*)) |candidate| {
-                        if (try self.functionTarget(candidate)) |target| name.* = try canonicalName(
-                            self.allocator,
-                            try self.functionModule(target),
-                            target.declaration,
-                        );
-                    }
+                    try self.qualifyFunctionReference(module, &call.arguments[0].value.identifier);
+                }
+                if (call.receiver != null and
+                    (std.mem.eql(u8, call.name, "add_system") or std.mem.eql(u8, call.name, "add_after_system")) and
+                    call.arguments.len == 2 and call.arguments[1].value == .identifier)
+                {
+                    try self.qualifyFunctionReference(module, &call.arguments[1].value.identifier);
                 }
                 if (call.receiver) |receiver| {
                     if (receiver.value == .generic_reference) {
@@ -1373,17 +1383,7 @@ pub const Compiler = struct {
                 }
                 if (call.receiver == null and std.mem.eql(u8, call.name, "map_error")) {
                     if (call.arguments.len == 2 and call.arguments[1].value == .identifier) {
-                        const transformer = &call.arguments[1].value.identifier;
-                        if (try self.targetForCall(module, transformer.*)) |candidate| {
-                            if (try self.functionTarget(candidate)) |target| transformer.* = try canonicalName(
-                                self.allocator,
-                                try self.functionModule(target),
-                                target.declaration,
-                            );
-                        } else if (Lookup.findLocalFunction(self.units[module].program.?, transformer.*)) {
-                            const local_target: CallTarget = .{ .module = module, .declaration = transformer.* };
-                            transformer.* = try canonicalName(self.allocator, try self.functionModule(local_target), transformer.*);
-                        }
+                        try self.qualifyFunctionReference(module, &call.arguments[1].value.identifier);
                     }
                     return;
                 }
@@ -1429,6 +1429,20 @@ pub const Compiler = struct {
                         call.name = try canonicalName(self.allocator, function_module, call.name);
                     }
                 }
+            },
+            .cascade => |cascade| {
+                try self.rewriteExpression(module, cascade.receiver, type_map);
+                for (@constCast(cascade.operations)) |*operation| switch (operation.*) {
+                    .method_call => |*method| {
+                        const type_arguments = try self.allocator.alloc(Ast.Type, method.type_arguments.len);
+                        for (method.type_arguments, 0..) |type_argument, index| {
+                            type_arguments[index] = self.remapType(module, type_map, type_argument);
+                        }
+                        method.type_arguments = type_arguments;
+                        for (method.arguments) |argument| try self.rewriteExpression(module, argument, type_map);
+                    },
+                    .field_assignment => |field| try self.rewriteExpression(module, field.value, type_map),
+                };
             },
             .field_access => |access| {
                 if (access.base.value == .generic_reference) {

@@ -47,6 +47,7 @@ pub const Expression = struct {
         identifier: []const u8,
         generic_reference: GenericReference,
         call: Call,
+        cascade: Cascade,
         field_access: FieldAccess,
         unary: Unary,
         binary: Binary,
@@ -68,6 +69,29 @@ pub const Expression = struct {
         type_arguments: []const Type = &.{},
         result_type: ?Type = null,
         owner: usize = 0,
+    };
+
+    pub const Cascade = struct {
+        receiver: *Expression,
+        operations: []const Operation,
+
+        pub const Operation = union(enum) {
+            method_call: MethodCall,
+            field_assignment: FieldAssignment,
+        };
+
+        pub const MethodCall = struct {
+            name: []const u8,
+            name_position: Source.Position,
+            arguments: []const *Expression,
+            type_arguments: []const Type = &.{},
+        };
+
+        pub const FieldAssignment = struct {
+            name: []const u8,
+            name_position: Source.Position,
+            value: *Expression,
+        };
     };
 
     pub const NamedArgument = struct {
@@ -472,7 +496,33 @@ pub const Function = struct {
     return_type: Type,
     return_mode: Parameter.Mode = .value,
     return_provenance: ?[]const u8 = null,
+    intrinsic: ?FunctionIntrinsic = null,
     statements: []const Statement,
+};
+
+pub const FunctionIntrinsic = union(enum) {
+    resource_insert: usize,
+    resource_has: usize,
+    resource_get: usize,
+    resource_get_mut: usize,
+    resource_try_get: usize,
+    resource_try_get_mut: usize,
+    resource_remove: usize,
+    resource_clear,
+    system_adapter: SystemAdapter,
+};
+
+pub const SystemAdapter = struct {
+    target: []const u8,
+    target_position: Source.Position,
+    dependencies: []const SystemDependency,
+};
+
+pub const SystemDependency = struct {
+    type: Type,
+    mode: Parameter.Mode,
+    has_method: []const u8,
+    get_method: []const u8,
 };
 
 pub const ExternalType = union(enum) {

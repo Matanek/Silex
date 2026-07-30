@@ -95,3 +95,37 @@ Silex first checks a compatible sibling package, then installed packages under
 
 Dependencies are direct. Declare every package used by the application; a
 transitive dependency is not automatically visible.
+
+## Declare a private native boundary
+
+A package that implements a platform boundary may bundle one precompiled
+static archive for `macos-arm64` and name the Apple frameworks it requires:
+
+```json
+{
+  "name": "GFX",
+  "version": "0.1.0",
+  "boundary": {
+    "macos-arm64": {
+      "providers": {
+        "SDL3": {
+          "archive": "Boundary/macos-arm64/libSDL3.a",
+          "frameworks": ["Cocoa", "Metal"]
+        }
+      }
+    }
+  }
+}
+```
+
+The archive path is relative to and must remain inside the package. The
+compiler verifies that it is an ARM64 Mach-O archive, selects this declaration
+only for the matching target, and supplies the archive and frameworks to the
+final link when one of its symbols is used.
+
+Only source owned by that package may bind the provider, for example as
+`MacOS.SDL3`. Consumers depend on the ordinary Silex package and see only its
+public Silex API; they do not repeat archive paths, linker flags, framework
+lists, or the private foreign API. This bootstrap contract neither compiles
+foreign source nor grants access to transitive packages. Dynamic libraries and
+native package artefacts for Linux or Windows are not supported yet.

@@ -79,12 +79,19 @@ pub const Image = struct {
     entry_offset: ?u32,
     data_offset: ?u32 = null,
     external_call_sites: []const ExternalCalls.Site = &.{},
+    address_sites: []const AddressSite = &.{},
 
     pub fn deinit(self: Image, allocator: Allocator) void {
         allocator.free(self.code);
         allocator.free(self.function_offsets);
         allocator.free(self.external_call_sites);
+        allocator.free(self.address_sites);
     }
+};
+
+pub const AddressSite = struct {
+    instruction_offset: u32,
+    target_offset: u32,
 };
 
 const CallFixup = Fixups.Call;
@@ -123,6 +130,7 @@ fn encodeForPlatform(allocator: Allocator, program: Machine.Program, entry: Entr
     var snapshot_data_fixups: std.ArrayList(usize) = .empty;
     var external_call_sites: std.ArrayList(ExternalCalls.Site) = .empty;
     var function_addresses: std.ArrayList(FunctionAddressFixup) = .empty;
+    var address_sites: std.ArrayList(AddressSite) = .empty;
 
     for (program.functions, 0..) |function, function_id| {
         offsets[function_id] = @intCast(words.items.len * 4);
@@ -264,15 +272,32 @@ fn encodeForPlatform(allocator: Allocator, program: Machine.Program, entry: Entr
             string_offsets[fixup.string]
         else
             return error.InvalidMachineProgram;
-        try patchAdr(words.items, fixup.at, target + fixup.byte_offset);
+        const target_offset = target + fixup.byte_offset;
+        try patchPageAddress(words.items, fixup.at, target_offset);
+        try address_sites.append(allocator, .{
+            .instruction_offset = @intCast(fixup.at * @sizeOf(u32)),
+            .target_offset = @intCast(target_offset),
+        });
     }
     if (deep_copy_calls.items.len != 0) {
         const target = copy_model_offset orelse return error.InvalidMachineProgram;
-        for (deep_copy_calls.items) |fixup| try patchAdr(words.items, fixup.data_at, target);
+        for (deep_copy_calls.items) |fixup| {
+            try patchPageAddress(words.items, fixup.data_at, target);
+            try address_sites.append(allocator, .{
+                .instruction_offset = @intCast(fixup.data_at * @sizeOf(u32)),
+                .target_offset = @intCast(target),
+            });
+        }
     }
     if (snapshot_data_fixups.items.len != 0) {
         const target = snapshot_lock_offset orelse return error.InvalidMachineProgram;
-        for (snapshot_data_fixups.items) |at| try patchAdr(words.items, at, target);
+        for (snapshot_data_fixups.items) |at| {
+            try patchPageAddress(words.items, at, target);
+            try address_sites.append(allocator, .{
+                .instruction_offset = @intCast(at * @sizeOf(u32)),
+                .target_offset = @intCast(target),
+            });
+        }
     }
 
     const code = try allocator.alloc(u8, image_size);
@@ -295,12 +320,13 @@ fn encodeForPlatform(allocator: Allocator, program: Machine.Program, entry: Entr
         .entry_offset = entry_offset,
         .data_offset = data_offset,
         .external_call_sites = try external_call_sites.toOwnedSlice(allocator),
+        .address_sites = try address_sites.toOwnedSlice(allocator),
     };
 }
 
 fn emitSnapshotAcquire(allocator: Allocator, words: *std.ArrayList(u32), data_fixups: *std.ArrayList(usize)) Error!void {
     try data_fixups.append(allocator, words.items.len);
-    try words.append(allocator, addressRelative(.x14));
+    try appendRelocatableAddress(allocator, words, .x14);
     const retry = words.items.len;
     try words.append(allocator, A64.loadAcquireExclusive64(.x9, .x14));
     const occupied = words.items.len;
@@ -315,7 +341,7 @@ fn emitSnapshotAcquire(allocator: Allocator, words: *std.ArrayList(u32), data_fi
 
 fn emitSnapshotRelease(allocator: Allocator, words: *std.ArrayList(u32), data_fixups: *std.ArrayList(usize)) Error!void {
     try data_fixups.append(allocator, words.items.len);
-    try words.append(allocator, addressRelative(.x14));
+    try appendRelocatableAddress(allocator, words, .x14);
     try words.append(allocator, A64.storeRelease64(.zero_or_sp, .x14));
 }
 
@@ -407,7 +433,7 @@ fn encodeFunction(
                 try emitStackAddress(allocator, words, .x0, copy.operand.start);
                 try emitStackAddress(allocator, words, .x1, copy.result.start);
                 const data_at = words.items.len;
-                try words.append(allocator, addressRelative(.x2));
+                try appendRelocatableAddress(allocator, words, .x2);
                 try emitImmediate64(allocator, words, .x3, @intFromEnum(copy.type));
                 const call_at = words.items.len;
                 try words.append(allocator, branchLink());
@@ -417,7 +443,7 @@ fn encodeFunction(
             },
             .global_load => |global| {
                 try data_fixups.append(allocator, .{ .at = words.items.len, .global = global.global });
-                try words.append(allocator, addressRelative(.x10));
+                try appendRelocatableAddress(allocator, words, .x10);
                 for (0..global.result.width) |leaf| {
                     try words.append(allocator, load64(.x9, .x10, @intCast(leaf * Machine.slot_size)));
                     try words.append(allocator, storeStack(.x9, @intCast(@as(usize, global.result.start) + leaf)));
@@ -425,7 +451,7 @@ fn encodeFunction(
             },
             .global_store => |global| {
                 try data_fixups.append(allocator, .{ .at = words.items.len, .global = global.global });
-                try words.append(allocator, addressRelative(.x10));
+                try appendRelocatableAddress(allocator, words, .x10);
                 for (0..global.operand.width) |leaf| {
                     try words.append(allocator, loadStack(.x9, @intCast(@as(usize, global.operand.start) + leaf)));
                     try words.append(allocator, store64(.x9, .x10, @intCast(leaf * Machine.slot_size)));
@@ -468,6 +494,17 @@ fn encodeFunction(
             .reference_store => |store| try emitReferenceCopy(allocator, words, store.operand, store.reference, false),
             .reference_offset => |offset| {
                 try words.append(allocator, loadStack(.x9, offset.reference));
+                if (offset.byte_offset <= std.math.maxInt(u12)) {
+                    try words.append(allocator, addSubtractImmediate(.x9, .x9, @intCast(offset.byte_offset), true));
+                } else {
+                    try emitImmediate64(allocator, words, .x10, offset.byte_offset);
+                    try words.append(allocator, addRegisters(.x9, .x9, .x10));
+                }
+                try words.append(allocator, storeStack(.x9, offset.result));
+            },
+            .reference_indirect_offset => |offset| {
+                try words.append(allocator, loadStack(.x9, offset.reference));
+                try words.append(allocator, load64(.x9, .x9, 0));
                 if (offset.byte_offset <= std.math.maxInt(u12)) {
                     try words.append(allocator, addSubtractImmediate(.x9, .x9, @intCast(offset.byte_offset), true));
                 } else {
@@ -827,7 +864,7 @@ fn emitMutexOperation(
     else
         program.mutex_unlock_function orelse return error.InvalidMachineProgram;
     try data_fixups.append(allocator, .{ .at = words.items.len, .global = global });
-    try words.append(allocator, addressRelative(.x0));
+    try appendRelocatableAddress(allocator, words, .x0);
     if (lock) try words.append(allocator, moveWideZero64(.x1, 0, 0));
     try sites.append(allocator, .{
         .instruction_offset = @intCast(words.items.len * @sizeOf(u32)),
@@ -847,7 +884,7 @@ fn emitWindowsMutexCall(
     symbol: @import("../Windows/Imports.zig").Symbol,
 ) Error!void {
     try data_fixups.append(allocator, .{ .at = words.items.len, .global = global });
-    try words.append(allocator, addressRelative(.x0));
+    try appendRelocatableAddress(allocator, words, .x0);
     try sites.append(allocator, .{
         .instruction_offset = @intCast(words.items.len * @sizeOf(u32)),
         .function = 0,
@@ -1768,6 +1805,27 @@ fn patchAdr(words: []u32, at: usize, target_byte: usize) Error!void {
     words[at] |= ((immediate & 0x3) << 29) | (((immediate >> 2) & 0x7ffff) << 5);
 }
 
+fn appendRelocatableAddress(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    register: Register,
+) Allocator.Error!void {
+    try words.append(allocator, A64.addressPage(register));
+    try words.append(allocator, A64.addSubtractImmediate(register, register, 0, true));
+}
+
+fn patchPageAddress(words: []u32, at: usize, target_byte: usize) Error!void {
+    if (at + 1 >= words.len) return error.InvalidMachineProgram;
+    const instruction_page = (at * @sizeOf(u32)) & ~@as(usize, 0xfff);
+    const target_page = target_byte & ~@as(usize, 0xfff);
+    const delta = @as(i64, @intCast(target_page)) - @as(i64, @intCast(instruction_page));
+    const pages = @divExact(delta, 0x1000);
+    if (pages < -(1 << 20) or pages >= (1 << 20)) return error.BranchOutOfRange;
+    const immediate: u21 = @bitCast(@as(i21, @intCast(pages)));
+    words[at] |= (@as(u32, immediate & 0x3) << 29) | (@as(u32, immediate >> 2) << 5);
+    words[at + 1] |= @as(u32, @intCast(target_byte & 0xfff)) << 10;
+}
+
 test "encode known AArch64 instruction words" {
     try std.testing.expectEqual(@as(u32, 0xa9bf7bfd), saveFrame());
     try std.testing.expectEqual(@as(u32, 0x910003fd), moveFramePointer());
@@ -1818,7 +1876,7 @@ test "resolve calls and append a native test entry" {
     try std.testing.expect(image.entry_offset.? > 0);
     try std.testing.expectEqual(@as(usize, 0), image.code.len % 4);
     const entry_word = std.mem.readInt(u32, image.code[image.entry_offset.?..][0..4], .little);
-    const call_word = image.entry_offset.? / 4 + 8;
+    const call_word = image.entry_offset.? / 4 + 9;
     const delta: i32 = -@as(i32, @intCast(call_word));
     const expected = @as(u32, 0x94000000) | (@as(u32, @bitCast(delta)) & 0x03ffffff);
     const encoded_call = std.mem.readInt(u32, image.code[call_word * 4 ..][0..4], .little);

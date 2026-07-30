@@ -44,6 +44,7 @@ const Context = struct {
     in_loop: bool = false,
     after_conditional: bool = false,
     allow_conversion: bool = false,
+    cascade: bool = false,
 };
 
 const Candidate = struct {
@@ -253,16 +254,22 @@ fn classifyContext(allocator: Allocator, source: []const u8, cursor: usize) !Con
         .prefix_start = prefix_start,
     };
 
-    if (tokens[tokens.len - 1].tag == .dot or tokens[tokens.len - 1].tag == .question_dot) return .{
+    if (tokens[tokens.len - 1].tag == .dot or tokens[tokens.len - 1].tag == .question_dot or
+        tokens[tokens.len - 1].tag == .dot_dot) return .{
         .kind = .member,
         .prefix = prefix,
         .prefix_start = prefix_start,
-        .receiver = memberReceiver(source, tokens[tokens.len - 1].start),
+        .receiver = if (tokens[tokens.len - 1].tag == .dot_dot)
+            cascadeReceiver(source, tokens[tokens.len - 1].start)
+        else
+            memberReceiver(source, tokens[tokens.len - 1].start),
         .in_loop = scope.in_loop,
+        .cascade = tokens[tokens.len - 1].tag == .dot_dot,
     };
 
     const nominal_relation = isNominalRelationPosition(line_tokens);
-    if (isTypePosition(tokens, line_tokens, scope.pending_callable, nominal_relation)) return .{
+    if (isTypePosition(tokens, line_tokens, scope.pending_callable, nominal_relation) or
+        isTypeArgumentPrefix(source, prefix_start)) return .{
         .kind = .type_name,
         .prefix = prefix,
         .prefix_start = prefix_start,
@@ -1147,6 +1154,13 @@ fn parseForCompletion(
     var parser = ParserModule.Parser.init(allocator, source);
     if (parser.parse()) |program| return mergeExtensionsForCompletion(allocator, program) else |_| {}
 
+    if (context.cascade) {
+        const recovered = try recoverCascadeForParsing(allocator, source, cursor) orelse return null;
+        parser = ParserModule.Parser.init(allocator, recovered);
+        const program = parser.parse() catch return null;
+        return mergeExtensionsForCompletion(allocator, program);
+    }
+
     const line_start = if (std.mem.lastIndexOfScalar(u8, source[0..context.prefix_start], '\n')) |newline|
         newline + 1
     else
@@ -1345,6 +1359,34 @@ fn isIdentifierContinue(character: u8) bool {
     return std.ascii.isAlphanumeric(character) or character == '_';
 }
 
+pub fn isTypeArgumentPrefix(source: []const u8, end: usize) bool {
+    if (end > source.len) return false;
+    var lexer = LexerModule.Lexer.init(source[0..end]);
+    var candidates: [128]bool = undefined;
+    var depth: usize = 0;
+    var previous: ?Token = null;
+    while (true) {
+        const token = lexer.next() catch return false;
+        if (token.tag == .end) break;
+        switch (token.tag) {
+            .less => {
+                if (depth == candidates.len) return false;
+                candidates[depth] = if (previous) |owner|
+                    owner.tag == .identifier and owner.end == token.start
+                else
+                    false;
+                depth += 1;
+            },
+            .greater => depth -|= 1,
+            .shift_right => depth -|= 2,
+            else => {},
+        }
+        previous = token;
+    }
+    for (candidates[0..depth]) |candidate| if (candidate) return true;
+    return false;
+}
+
 pub fn memberReceiver(source: []const u8, dot: usize) ?[]const u8 {
     if (dot == 0) return null;
     var start = dot;
@@ -1372,6 +1414,66 @@ pub fn memberReceiver(source: []const u8, dot: usize) ?[]const u8 {
     }
     while (start != 0 and (isIdentifierContinue(source[start - 1]) or source[start - 1] == '.')) start -= 1;
     return source[start..dot];
+}
+
+pub fn cascadeReceiver(source: []const u8, dot_dot: usize) ?[]const u8 {
+    if (dot_dot + 1 >= source.len or source[dot_dot] != '.' or source[dot_dot + 1] != '.') return null;
+    const cascade_start = cascadeRecoveryStart(source, dot_dot);
+    const base_end = if (cascade_start < dot_dot) cascade_start else dot_dot;
+    var end = base_end;
+    while (end != 0 and (source[end - 1] == ' ' or source[end - 1] == '\t' or source[end - 1] == '\r' or
+        source[end - 1] == '\n')) end -= 1;
+    if (end == 0) return null;
+
+    const line_start = if (std.mem.lastIndexOfScalar(u8, source[0..end], '\n')) |newline| newline + 1 else 0;
+    const line = std.mem.trimStart(u8, source[line_start..end], " \t");
+    if (bindingName(line)) |name| return name;
+    return memberReceiver(source, end);
+}
+
+pub fn recoverCascadeForParsing(
+    allocator: Allocator,
+    source: []const u8,
+    cursor: usize,
+) !?[]const u8 {
+    const prefix_start = identifierPrefixStart(source, cursor);
+    if (prefix_start < 2 or source[prefix_start - 2] != '.' or source[prefix_start - 1] != '.') return null;
+    const start = cascadeRecoveryStart(source, prefix_start - 2);
+    const end = if (std.mem.indexOfScalarPos(u8, source, cursor, '\n')) |newline| newline else source.len;
+    const recovered: []const u8 = try std.fmt.allocPrint(allocator, "{s}{s}", .{ source[0..start], source[end..] });
+    return recovered;
+}
+
+fn cascadeRecoveryStart(source: []const u8, dot_dot: usize) usize {
+    const line_start = if (std.mem.lastIndexOfScalar(u8, source[0..dot_dot], '\n')) |newline| newline + 1 else 0;
+    if (std.mem.trim(u8, source[line_start..dot_dot], " \t\r").len != 0) return dot_dot;
+
+    var start = line_start;
+    while (start != 0) {
+        const previous_end = start - 1;
+        const previous_start = if (std.mem.lastIndexOfScalar(u8, source[0..previous_end], '\n')) |newline|
+            newline + 1
+        else
+            0;
+        const previous = std.mem.trim(u8, source[previous_start..previous_end], " \t\r");
+        if (!std.mem.startsWith(u8, previous, "..")) break;
+        start = previous_start;
+    }
+    return start;
+}
+
+fn bindingName(line: []const u8) ?[]const u8 {
+    const keyword_length: usize = if (std.mem.startsWith(u8, line, "let "))
+        "let ".len
+    else if (std.mem.startsWith(u8, line, "var "))
+        "var ".len
+    else
+        return null;
+    var end = keyword_length;
+    while (end < line.len and isIdentifierContinue(line[end])) end += 1;
+    if (end == keyword_length) return null;
+    if (std.mem.indexOfScalar(u8, line[end..], '=') == null) return null;
+    return line[keyword_length..end];
 }
 
 pub fn nominalReceiverName(receiver: []const u8) []const u8 {
@@ -1513,6 +1615,65 @@ test "complete an instance with only its own members" {
     try std.testing.expect(!contains(items, "if"));
     try std.testing.expect(!contains(items, "float"));
     try std.testing.expect(!contains(items, "ignore"));
+}
+
+test "complete members of the original receiver in a cascade" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source =
+        \\class Application {
+        \\    public func install() Application { return self }
+        \\    public func run() int { return 0 }
+        \\}
+        \\func main() {
+        \\    var app = Application()
+        \\        ..
+        \\}
+    ;
+    const cursor = std.mem.indexOf(u8, source, "..\n").? + "..".len;
+    const items = try itemsAt(arena.allocator(), source, cursor, .trigger_character);
+    try std.testing.expectEqual(@as(usize, 2), items.len);
+    try std.testing.expect(contains(items, "install"));
+    try std.testing.expect(contains(items, "run"));
+    try std.testing.expect(!contains(items, "if"));
+
+    const continued_source =
+        \\class Application {
+        \\    public func install() Application { return self }
+        \\    public func run() int { return 0 }
+        \\}
+        \\func main() {
+        \\    var app = Application()
+        \\        ..install()
+        \\        ..r
+        \\}
+    ;
+    const continued_cursor = std.mem.indexOf(u8, continued_source, "..r").? + "..r".len;
+    const continued = try itemsAt(arena.allocator(), continued_source, continued_cursor, .trigger_character);
+    try std.testing.expectEqual(@as(usize, 1), continued.len);
+    try std.testing.expectEqualStrings("run", continued[0].label);
+}
+
+test "complete local types in explicit cascade method arguments" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source =
+        \\protocol Plugin {}
+        \\struct FooPlugin : Plugin {}
+        \\class Application {
+        \\    func install<T:Plugin>() Application { return self }
+        \\    func run() int { return 0 }
+        \\}
+        \\func main() {
+        \\    var app = Application()
+        \\        ..install<FooP>()
+        \\        ..run()
+        \\}
+    ;
+    const cursor = std.mem.indexOf(u8, source, "FooP>").? + "FooP".len;
+    const items = try itemsAt(arena.allocator(), source, cursor, .invoked);
+    try std.testing.expect(contains(items, "FooPlugin"));
+    try std.testing.expect(!contains(items, "if"));
 }
 
 test "complete empty enum variants as values and payload variants as calls" {
