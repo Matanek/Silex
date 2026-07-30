@@ -462,14 +462,6 @@ fn queryAt(
                 .type_only = isQualifiedTypePrefix(source, prefix_start),
             } };
         }
-        if (try importedTypePath(allocator, program, project, Completion.nominalReceiverName(receiver))) |type_path| {
-            return .{ .imported_member = .{
-                .type_path = type_path,
-                .prefix = prefix,
-                .cursor = cursor,
-                .static_receiver = true,
-            } };
-        }
         if (Completion.qualifiedCall(receiver)) |call| {
             if (try importedQualifiedCallReturnTypePath(
                 allocator,
@@ -482,6 +474,14 @@ fn queryAt(
                 .type_path = type_path,
                 .prefix = prefix,
                 .cursor = cursor,
+            } };
+        }
+        if (try importedTypePath(allocator, program, project, Completion.nominalReceiverName(receiver))) |type_path| {
+            return .{ .imported_member = .{
+                .type_path = type_path,
+                .prefix = prefix,
+                .cursor = cursor,
+                .static_receiver = true,
             } };
         }
         if (try declaredCallReturnTypePath(
@@ -1452,6 +1452,7 @@ fn importedQualifiedCallReturnTypePath(
     }
     const name = return_name orelse return null;
     if (std.mem.indexOfScalar(u8, name, '.') != null) return name;
+    if (std.mem.eql(u8, name, target.declaration)) return use.path;
     const qualified: []const u8 = try std.fmt.allocPrint(allocator, "{s}.{s}", .{ provider.name, name });
     return qualified;
 }
