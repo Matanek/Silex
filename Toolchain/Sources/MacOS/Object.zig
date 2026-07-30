@@ -14,7 +14,15 @@ const no_operation: u32 = 0xd503201f;
 
 pub fn emit(allocator: Allocator, program: Machine.Program) Error![]u8 {
     const main = try findMain(program);
-    var encoded = try Encoder.encode(allocator, program, .{ .executable_main = main });
+    return emitFunction(allocator, program, main);
+}
+
+pub fn emitFunction(
+    allocator: Allocator,
+    program: Machine.Program,
+    function: Machine.FunctionId,
+) Error![]u8 {
+    var encoded = try Encoder.encode(allocator, program, .{ .executable_main = function });
     defer encoded.deinit(allocator);
     return emitEncoded(allocator, program, &encoded);
 }
