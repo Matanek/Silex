@@ -28,18 +28,19 @@ pub fn parseFunction(self: anytype) !Ast.ExternalFunction {
     try self.expect(.left_parenthesis, "expected '(' after C.function signature");
     try expectIdentifier(self, "library", "expected 'library' argument in C.function");
     try self.expect(.colon, "expected ':' after 'library'");
-    if (self.current.tag != .identifier) return self.fail("expected a platform library such as MacOS.lib_system");
-    const platform = self.current.lexeme;
-    if (!std.mem.eql(u8, platform, "MacOS") and
-        !std.mem.eql(u8, platform, "Linux") and
-        !std.mem.eql(u8, platform, "Windows"))
+    if (self.current.tag != .identifier) return self.fail("expected an interop library such as MacOS.lib_system or Boundary.Provider");
+    const namespace = self.current.lexeme;
+    if (!std.mem.eql(u8, namespace, "Boundary") and
+        !std.mem.eql(u8, namespace, "MacOS") and
+        !std.mem.eql(u8, namespace, "Linux") and
+        !std.mem.eql(u8, namespace, "Windows"))
     {
-        return self.fail("unknown interop platform");
+        return self.fail("unknown interop namespace");
     }
     try self.advance();
     try self.expect(.dot, "expected library name after platform");
-    if (self.current.tag != .identifier) return self.fail("expected platform library name");
-    const library = try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ platform, self.current.lexeme });
+    if (self.current.tag != .identifier) return self.fail("expected interop library name");
+    const library = try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ namespace, self.current.lexeme });
     try self.advance();
     try self.expect(.comma, "expected ',' after C.function library");
     try expectIdentifier(self, "name", "expected 'name' argument in C.function");

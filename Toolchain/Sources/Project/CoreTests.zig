@@ -490,10 +490,7 @@ test "reserve a custom boundary provider to its declaring package" {
 
     try temporary.dir.createDirPath(std.testing.io, "Bridge/Boundary/macos-arm64");
     try temporary.dir.createDirPath(std.testing.io, "Bridge/Module");
-    try temporary.dir.createDirPath(std.testing.io, "Bridge/Platform/MacOS/Module");
-    try temporary.dir.createDirPath(std.testing.io, "Bridge/Platform/Linux/Module");
     try temporary.dir.createDirPath(std.testing.io, "Thief/Module");
-    try temporary.dir.createDirPath(std.testing.io, "Thief/Platform/MacOS/Module");
     try writeBoundaryArchive(temporary.dir);
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Bridge/Package.json",
@@ -502,20 +499,11 @@ test "reserve a custom boundary provider to its declaring package" {
         ,
     });
     try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "Bridge/Platform/MacOS/Module/Api.sx",
+        .sub_path = "Bridge/Module/Api.sx",
         .data =
         \\use Interop.C
-        \\use Interop.MacOS
-        \\let native_answer = C.function<func() int32>(library:MacOS.Native, name:"boundary_answer")
-        \\public func answer() int32 { return native_answer() }
-        ,
-    });
-    try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "Bridge/Platform/Linux/Module/Api.sx",
-        .data =
-        \\use Interop.C
-        \\use Interop.Linux
-        \\let native_answer = C.function<func() int32>(library:Linux.Native, name:"boundary_answer")
+        \\use Interop.Boundary
+        \\let native_answer = C.function<func() int32>(library:Boundary.Native, name:"boundary_answer")
         \\public func answer() int32 { return native_answer() }
         ,
     });
@@ -524,11 +512,11 @@ test "reserve a custom boundary provider to its declaring package" {
         .data = "{\"name\":\"Thief\",\"version\":\"1.0.0\"}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "Thief/Platform/MacOS/Module/Api.sx",
+        .sub_path = "Thief/Module/Api.sx",
         .data =
         \\use Interop.C
-        \\use Interop.MacOS
-        \\let stolen = C.function<func() int32>(library:MacOS.Native, name:"boundary_answer")
+        \\use Interop.Boundary
+        \\let stolen = C.function<func() int32>(library:Boundary.Native, name:"boundary_answer")
         \\public func answer() int32 { return stolen() }
         ,
     });
@@ -542,9 +530,34 @@ test "reserve a custom boundary provider to its declaring package" {
     var compiler = Compiler.init(allocator, std.testing.io);
     const compilation = try compiler.compile(input);
     try std.testing.expectEqual(@as(usize, 1), compilation.boundaries.len);
-    try std.testing.expectEqualStrings("MacOS.Native", compilation.boundaries[0].provider);
+    try std.testing.expectEqualStrings("Boundary.Native", compilation.boundaries[0].provider);
     try std.testing.expectEqual(@as(usize, 1), compilation.boundaries[0].owner);
     try std.testing.expect(compilation.boundaries[0].package_private);
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Bridge/Module/Api.sx",
+        .data =
+        \\use Interop.C
+        \\use Interop.MacOS
+        \\let native_answer = C.function<func() int32>(library:MacOS.Native, name:"boundary_answer")
+        \\public func answer() int32 { return native_answer() }
+        ,
+    });
+    var system_prefixed = Compiler.init(allocator, std.testing.io);
+    try std.testing.expectError(error.InvalidSource, system_prefixed.compile(input));
+    try std.testing.expectEqualStrings(
+        "package boundary provider 'Native' must use library:Boundary.Native",
+        system_prefixed.diagnostic.?.message,
+    );
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Bridge/Module/Api.sx",
+        .data =
+        \\use Interop.C
+        \\use Interop.Boundary
+        \\let native_answer = C.function<func() int32>(library:Boundary.Native, name:"boundary_answer")
+        \\public func answer() int32 { return native_answer() }
+        ,
+    });
 
     var unavailable = Compiler.init(allocator, std.testing.io);
     unavailable.target = .linux_x64;

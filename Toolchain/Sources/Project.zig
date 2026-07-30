@@ -204,6 +204,7 @@ pub const Compiler = struct {
 
     pub fn resolveUse(self: *Compiler, source_module: usize, use: Ast.Use) Error!Binding {
         if (std.mem.eql(u8, use.path, "Interop.C") or
+            std.mem.eql(u8, use.path, "Interop.Boundary") or
             std.mem.eql(u8, use.path, "Interop.MacOS") or
             std.mem.eql(u8, use.path, "Interop.Linux") or
             std.mem.eql(u8, use.path, "Interop.Windows"))
