@@ -22,6 +22,9 @@ constraints.
 | Public declaration | `public ...` |
 | File-local declaration | `internal ...` |
 | Optional | `Type?` |
+| Named tuple | `(width:int, height:int)` |
+| Positional tuple | `(int, int)` |
+| Tuple destructuring | `let (first, second) = value` |
 | Fixed array | `Type[3]` |
 | Dynamic list | `Type[]` |
 | Shared view | `@Type[..]` |

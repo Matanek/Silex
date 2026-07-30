@@ -82,7 +82,15 @@ fn parseType(self: anytype) !Ast.ExternalType {
         try self.advance();
         return .uint64;
     }
-    try expectIdentifier(self, "C", "foreign signatures currently require void, an integer, or a C type");
+    if (self.current.tag == .keyword_float32) {
+        try self.advance();
+        return .float32;
+    }
+    if (self.current.tag == .keyword_float) {
+        try self.advance();
+        return .float64;
+    }
+    try expectIdentifier(self, "C", "foreign signatures currently require void, a scalar, or a C type");
     try self.expect(.dot, "expected C type name after 'C'");
     if (self.current.tag != .identifier) return self.fail("expected C type name");
     const name = self.current.lexeme;

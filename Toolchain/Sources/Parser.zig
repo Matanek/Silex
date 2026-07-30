@@ -17,6 +17,7 @@ const Interop = @import("Parser/Interop.zig");
 const TestBlocks = @import("Parser/TestBlocks.zig");
 const ControlFlow = @import("Parser/ControlFlow.zig");
 const Cascades = @import("Parser/Cascades.zig");
+const Tuples = @import("Parser/Tuples.zig");
 
 const Allocator = std.mem.Allocator;
 const Token = LexerModule.Token;
@@ -38,6 +39,7 @@ pub const Parser = struct {
     anonymous_functions: std.ArrayList(Ast.Function) = .empty,
     test_local_functions: std.ArrayList(TestLocalFunction) = .empty,
     test_prefix: ?[]const u8 = null,
+    tuple_literal_count: usize = 0,
     type_parameters: []const Ast.TypeParameter = &.{},
     nominal_prefix: ?[]const u8 = null,
     match_depth: usize = 0,
@@ -437,6 +439,7 @@ pub const Parser = struct {
     fn parseVariableDeclaration(self: *Parser, mutable: bool) ParseError!Ast.Statement {
         const position = self.current.position;
         try self.advance();
+        if (self.current.tag == .left_parenthesis) return Tuples.parseDestructuring(self, position, mutable);
         if (self.current.tag != .identifier) return self.fail("expected variable name");
         const name = self.current.lexeme;
         const name_position = self.current.position;
@@ -833,10 +836,7 @@ pub const Parser = struct {
                 });
             },
             .left_parenthesis => {
-                try self.advance();
-                const expression = try self.parseExpression(true);
-                try self.expect(.right_parenthesis, "expected ')' after expression");
-                return expression;
+                return Tuples.parseExpression(self);
             },
             .left_bracket => return Collections.parseLiteral(self, token.position),
             .keyword_match => return Matches.parse(self),

@@ -469,8 +469,8 @@ fn encodeFunction(
                 try words.append(allocator, switch (load.type) {
                     .int8, .uint8 => A64.loadByte(.x9, .x9),
                     .int16, .uint16 => A64.load16(.x9, .x9),
-                    .int32, .uint32 => A64.load32(.x9, .x9),
-                    .int, .uint, .address => A64.load64(.x9, .x9, 0),
+                    .int32, .uint32, .float32 => A64.load32(.x9, .x9),
+                    .int, .uint, .address, .float64 => A64.load64(.x9, .x9, 0),
                     else => return error.InvalidMachineProgram,
                 });
                 if (load.type == .int8 or load.type == .int16 or load.type == .int32) {
@@ -486,8 +486,8 @@ fn encodeFunction(
                 try words.append(allocator, switch (store.type) {
                     .int8, .uint8 => A64.storeByte(.x11, .x9),
                     .int16, .uint16 => A64.store16(.x11, .x9),
-                    .int32, .uint32 => A64.store32(.x11, .x9),
-                    .int, .uint => A64.store64(.x11, .x9, 0),
+                    .int32, .uint32, .float32 => A64.store32(.x11, .x9),
+                    .int, .uint, .float64 => A64.store64(.x11, .x9, 0),
                     else => return error.InvalidMachineProgram,
                 });
             },
@@ -733,7 +733,7 @@ fn encodeFunction(
                 try appendFixup(allocator, words, &fixups.epilogue, compareBranchNonZero(.x8), .imm19);
                 if (call.result) |result| if (!result.aggregate) try words.append(allocator, storeStack(.x0, result.start));
             },
-            .external_call => |call| try ExternalCalls.emit(allocator, words, external_call_sites, function, call),
+            .external_call => |call| try ExternalCalls.emit(allocator, words, external_call_sites, program, function, call),
             .mutex_lock => try emitMutexOperation(allocator, words, data_fixups, external_call_sites, platform, program, true),
             .mutex_unlock => try emitMutexOperation(allocator, words, data_fixups, external_call_sites, platform, program, false),
             .dynamic_call => |call| try encodeDynamicCall(allocator, words, calls, &fixups, call),

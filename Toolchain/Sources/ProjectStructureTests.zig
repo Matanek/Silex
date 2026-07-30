@@ -204,6 +204,28 @@ test "reject colliding canonical structure identities" {
     try std.testing.expectEqualStrings("structure identity 'Geometry.Vec2' is already provided", compiler.diagnostic.?.message);
 }
 
+test "compose public named tuple signatures across modules" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Api.sx",
+        .data = "public struct State { let modal:bool } public func state() State { return State(modal:true) } public func size() (width:int, height:int) { return (width:1280, height:720) }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "use Api\nfunc main() { let value = Api.size(); if Api.state().modal { print(value.width + value.height + 1) } }",
+    });
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(input);
+    const result = try @import("Interpreter.zig").runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("2001\n", result.stdout);
+}
+
 test "compose a public structure from a direct local package dependency" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

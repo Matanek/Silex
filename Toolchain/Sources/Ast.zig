@@ -54,6 +54,7 @@ pub const Expression = struct {
         conversion: Conversion,
         string_count: *Expression,
         sequence_literal: SequenceLiteral,
+        tuple_literal: TupleLiteral,
         index_access: IndexAccess,
         slice_access: SliceAccess,
         match_expression: Match,
@@ -163,6 +164,18 @@ pub const Expression = struct {
         inferred_type: ?Type = null,
     };
 
+    pub const TupleLiteral = struct {
+        elements: []const Element,
+        placeholder_type: Type,
+        named: bool,
+
+        pub const Element = struct {
+            position: Source.Position,
+            name: ?[]const u8 = null,
+            value: *Expression,
+        };
+    };
+
     pub const SliceAccess = struct {
         base: *Expression,
         start: *Expression,
@@ -188,6 +201,12 @@ pub const VariableDeclaration = struct {
     annotation: ?Type,
     annotation_mode: Parameter.Mode = .value,
     initializer: ?*Expression,
+    destructuring: []const DestructuredBinding = &.{},
+
+    pub const DestructuredBinding = struct {
+        position: Source.Position,
+        name: []const u8,
+    };
 };
 
 pub const AssignmentOperator = enum {
@@ -413,6 +432,9 @@ pub const Structure = struct {
     is_class: bool = false,
     is_static: bool = false,
     is_protocol: bool = false,
+    is_tuple: bool = false,
+    tuple_named: bool = false,
+    tuple_placeholder: bool = false,
     enclosing: ?[]const u8 = null,
     owner: usize = 0,
     position: Source.Position,
@@ -531,6 +553,8 @@ pub const ExternalType = union(enum) {
     int64,
     uint32,
     uint64,
+    float32,
+    float64,
     size,
     signed_size,
     read_pointer: Type,

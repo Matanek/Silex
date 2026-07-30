@@ -88,6 +88,10 @@ pub fn expressionTypes(expression: *Ast.Expression, map: []const ?Ast.Type) void
             if (literal.inferred_type) |type_value| literal.inferred_type = concreteType(type_value, map);
             for (literal.values) |value| expressionTypes(value, map);
         },
+        .tuple_literal => |*literal| {
+            literal.placeholder_type = concreteType(literal.placeholder_type, map);
+            for (literal.elements) |element| expressionTypes(element.value, map);
+        },
         .index_access => |access| {
             expressionTypes(access.base, map);
             expressionTypes(access.index, map);

@@ -525,7 +525,7 @@ pub const Program = struct {
     mutex_unlock_function: ?usize = null,
 };
 
-pub const AbiValue = enum { int32, read_address, uint64, int64 };
+pub const AbiValue = enum { int32, read_address, uint64, int64, float32, float64 };
 
 pub const ExternalFunction = struct {
     provider: []const u8,
@@ -632,13 +632,13 @@ pub fn validate(program: Program) Error!void {
                     try requireSlot(function, value.result);
                     try requireSlot(function, value.address);
                     try requireSlot(function, value.byte_offset);
-                    if (!value.type.isInteger() and value.type != .address) return error.InvalidMachineProgram;
+                    if (!value.type.isInteger() and !value.type.isFloat() and value.type != .address) return error.InvalidMachineProgram;
                 },
                 .address_store => |value| {
                     try requireSlot(function, value.address);
                     try requireSlot(function, value.byte_offset);
                     try requireSlot(function, value.operand);
-                    if (!value.type.isInteger()) return error.InvalidMachineProgram;
+                    if (!value.type.isInteger() and !value.type.isFloat()) return error.InvalidMachineProgram;
                 },
                 .reference_store => |value| {
                     try requireSlot(function, value.reference);

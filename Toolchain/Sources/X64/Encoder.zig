@@ -258,11 +258,11 @@ fn encodeFunction(
                 try bytes.appendSlice(allocator, switch (load.type) {
                     .uint8 => &.{ 0x48, 0x0f, 0xb6, 0x00 },
                     .uint16 => &.{ 0x48, 0x0f, 0xb7, 0x00 },
-                    .uint32 => &.{ 0x8b, 0x00 },
+                    .uint32, .float32 => &.{ 0x8b, 0x00 },
                     .int8 => &.{ 0x48, 0x0f, 0xbe, 0x00 },
                     .int16 => &.{ 0x48, 0x0f, 0xbf, 0x00 },
                     .int32 => &.{ 0x48, 0x63, 0x00 },
-                    .int, .uint, .address => &.{ 0x48, 0x8b, 0x00 },
+                    .int, .uint, .address, .float64 => &.{ 0x48, 0x8b, 0x00 },
                     else => return error.InvalidMachineProgram,
                 });
                 try emitStoreStack(allocator, bytes, .rax, load.result);
@@ -275,8 +275,8 @@ fn encodeFunction(
                 try bytes.appendSlice(allocator, switch (store.type) {
                     .int8, .uint8 => &.{ 0x88, 0x10 },
                     .int16, .uint16 => &.{ 0x66, 0x89, 0x10 },
-                    .int32, .uint32 => &.{ 0x89, 0x10 },
-                    .int, .uint => &.{ 0x48, 0x89, 0x10 },
+                    .int32, .uint32, .float32 => &.{ 0x89, 0x10 },
+                    .int, .uint, .float64 => &.{ 0x48, 0x89, 0x10 },
                     else => return error.InvalidMachineProgram,
                 });
             },

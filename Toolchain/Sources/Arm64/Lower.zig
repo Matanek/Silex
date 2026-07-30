@@ -152,6 +152,8 @@ fn lowerExternalType(type_value: Ir.Type) Machine.Error!Machine.AbiValue {
         .address => .read_address,
         .uint => .uint64,
         .int => .int64,
+        .float32 => .float32,
+        .float64 => .float64,
         else => error.UnsupportedType,
     };
 }
