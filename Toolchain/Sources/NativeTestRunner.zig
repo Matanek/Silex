@@ -105,11 +105,12 @@ test "execute native test entries independently and preserve failures" {
     var temporary = std.testing.tmpDir(.{});
     defer temporary.cleanup();
     const base = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
-    const executable = try std.fs.path.join(allocator, &.{ base, "native-test" });
-    const failed = try executeAt(allocator, std.testing.io, machine, entries.items[0], executable);
+    const failed_executable = try std.fs.path.join(allocator, &.{ base, "native-test-fails" });
+    const continued_executable = try std.fs.path.join(allocator, &.{ base, "native-test-continues" });
+    const failed = try executeAt(allocator, std.testing.io, machine, entries.items[0], failed_executable);
     try std.testing.expectEqual(@as(u8, 1), exitCode(failed.term));
     try std.testing.expect(std.mem.indexOf(u8, failed.stderr, "assertion failed: planned") != null);
-    const continued = try executeAt(allocator, std.testing.io, machine, entries.items[1], executable);
+    const continued = try executeAt(allocator, std.testing.io, machine, entries.items[1], continued_executable);
     try std.testing.expectEqual(@as(u8, 0), exitCode(continued.term));
     try std.testing.expectEqualStrings("continued\n", continued.stdout);
 }

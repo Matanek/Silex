@@ -31,6 +31,7 @@ const ContextKind = enum {
     use_path,
     module_declaration,
     structure_declaration,
+    aggregate_field,
     statement,
     expression,
 };
@@ -45,6 +46,12 @@ const Context = struct {
     after_conditional: bool = false,
     allow_conversion: bool = false,
     cascade: bool = false,
+    aggregate: ?AggregateContext = null,
+};
+
+pub const AggregateContext = struct {
+    type_name: []const u8,
+    supplied_fields: []const []const u8,
 };
 
 const Candidate = struct {
@@ -161,6 +168,25 @@ pub fn itemsAt(
             .{ "class", "Silex nested reference type" },
             .{ "drop", "Silex deterministic destruction" },
         }, 70),
+        .aggregate_field => if (program) |parsed| {
+            const aggregate = context.aggregate.?;
+            for (parsed.structures) |structure| {
+                if (!std.mem.eql(u8, structure.name, aggregate.type_name)) continue;
+                for (structure.fields) |field| {
+                    if (field.is_internal or field.is_private or field.is_protected or
+                        suppliedAggregateField(aggregate, field.name)) continue;
+                    try appendCandidate(allocator, &candidates, context, .{
+                        .label = field.name,
+                        .kind = CompletionKind.field,
+                        .detail = try std.fmt.allocPrint(allocator, "{s}:{s}", .{
+                            field.name,
+                            typeName(parsed, field.type),
+                        }),
+                    }, 0, false);
+                }
+                break;
+            }
+        },
         .statement, .expression => if (program) |parsed| {
             try appendExpressionSymbols(
                 allocator,
@@ -283,6 +309,14 @@ fn classifyContext(allocator: Allocator, source: []const u8, cursor: usize) !Con
         .prefix_start = prefix_start,
         .in_loop = scope.in_loop,
         .allow_conversion = expressionCanConvert(line_tokens),
+    };
+
+    if (try aggregateContextAt(allocator, source, cursor)) |aggregate| return .{
+        .kind = .aggregate_field,
+        .prefix = prefix,
+        .prefix_start = prefix_start,
+        .aggregate = aggregate,
+        .in_loop = scope.in_loop,
     };
 
     if (scope.in_callable) {
@@ -1176,6 +1210,7 @@ fn parseForCompletion(
         else
             "__completion()",
         .type_name => "int",
+        .aggregate_field => "__completion:true",
         .statement => "print(true)",
         .expression => if (before_prefix.len == 0) "print(true)" else "true",
         else => return null,
@@ -1204,6 +1239,63 @@ fn parseForCompletion(
         break :blk parser.parse() catch return null;
     };
     return mergeExtensionsForCompletion(allocator, program);
+}
+
+pub fn aggregateContextAt(allocator: Allocator, source: []const u8, cursor: usize) !?AggregateContext {
+    if (cursor > source.len) return null;
+    const prefix_start = identifierPrefixStart(source, cursor);
+    const tokens = try tokensUntil(allocator, source, prefix_start);
+
+    var openings: std.ArrayList(usize) = .empty;
+    for (tokens, 0..) |token, index| switch (token.tag) {
+        .left_parenthesis => try openings.append(allocator, index),
+        .right_parenthesis => if (openings.items.len != 0) {
+            _ = openings.pop();
+        },
+        else => {},
+    };
+    if (openings.items.len == 0) return null;
+    const opening = openings.items[openings.items.len - 1];
+    if (opening == 0 or tokens[opening - 1].tag != .identifier) return null;
+
+    var supplied: std.ArrayList([]const u8) = .empty;
+    var nesting: usize = 0;
+    var segment_start = opening + 1;
+    var index = segment_start;
+    while (index < tokens.len) : (index += 1) {
+        const token = tokens[index];
+        switch (token.tag) {
+            .left_parenthesis, .left_bracket, .left_brace => nesting += 1,
+            .right_parenthesis, .right_bracket, .right_brace => nesting -|= 1,
+            .comma => if (nesting == 0) {
+                try appendSuppliedAggregateField(&supplied, allocator, tokens[segment_start..index]);
+                segment_start = index + 1;
+            },
+            else => {},
+        }
+    }
+
+    // At a field position, the current top-level segment contains only the
+    // identifier prefix, which is deliberately excluded from `tokens`.
+    if (segment_start != tokens.len or supplied.items.len == 0) return null;
+    return .{
+        .type_name = tokens[opening - 1].lexeme,
+        .supplied_fields = try supplied.toOwnedSlice(allocator),
+    };
+}
+
+fn appendSuppliedAggregateField(
+    fields: *std.ArrayList([]const u8),
+    allocator: Allocator,
+    tokens: []const Token,
+) !void {
+    if (tokens.len < 2 or tokens[0].tag != .identifier or tokens[1].tag != .colon) return;
+    try fields.append(allocator, tokens[0].lexeme);
+}
+
+pub fn suppliedAggregateField(context: AggregateContext, name: []const u8) bool {
+    for (context.supplied_fields) |field| if (std.mem.eql(u8, field, name)) return true;
+    return false;
 }
 
 fn memberFollowedByAssignment(source: []const u8, cursor: usize) bool {
@@ -1447,6 +1539,7 @@ pub fn recoverCascadeForParsing(
 fn cascadeRecoveryStart(source: []const u8, dot_dot: usize) usize {
     const line_start = if (std.mem.lastIndexOfScalar(u8, source[0..dot_dot], '\n')) |newline| newline + 1 else 0;
     if (std.mem.trim(u8, source[line_start..dot_dot], " \t\r").len != 0) return dot_dot;
+    const indentation = source[line_start..dot_dot];
 
     var start = line_start;
     while (start != 0) {
@@ -1455,8 +1548,10 @@ fn cascadeRecoveryStart(source: []const u8, dot_dot: usize) usize {
             newline + 1
         else
             0;
-        const previous = std.mem.trim(u8, source[previous_start..previous_end], " \t\r");
-        if (!std.mem.startsWith(u8, previous, "..")) break;
+        const previous_line = source[previous_start..previous_end];
+        const previous = std.mem.trimStart(u8, previous_line, " \t");
+        const previous_indentation = previous_line[0 .. previous_line.len - previous.len];
+        if (!std.mem.eql(u8, previous_indentation, indentation) or !std.mem.startsWith(u8, previous, "..")) break;
         start = previous_start;
     }
     return start;
@@ -1487,6 +1582,45 @@ pub const QualifiedCall = struct {
     name: []const u8,
     arity: usize,
 };
+
+pub const DirectCall = struct {
+    name: []const u8,
+    arity: usize,
+};
+
+pub fn directCall(receiver: []const u8) ?DirectCall {
+    var tokens: [256]Token = undefined;
+    var count: usize = 0;
+    var lexer = LexerModule.Lexer.init(receiver);
+    while (true) {
+        const token = lexer.next() catch return null;
+        if (token.tag == .end) break;
+        if (count == tokens.len) return null;
+        tokens[count] = token;
+        count += 1;
+    }
+    if (count < 3 or tokens[0].tag != .identifier or tokens[1].tag != .left_parenthesis or
+        tokens[count - 1].tag != .right_parenthesis) return null;
+
+    var nesting: usize = 0;
+    var arguments: usize = 0;
+    var has_argument = false;
+    for (tokens[2 .. count - 1]) |token| switch (token.tag) {
+        .left_parenthesis, .left_bracket, .left_brace => {
+            nesting += 1;
+            has_argument = true;
+        },
+        .right_parenthesis, .right_bracket, .right_brace => nesting -|= 1,
+        .comma => if (nesting == 0) {
+            arguments += 1;
+        } else {
+            has_argument = true;
+        },
+        else => has_argument = true,
+    };
+    if (has_argument) arguments += 1;
+    return .{ .name = tokens[0].lexeme, .arity = arguments };
+}
 
 pub fn qualifiedCall(receiver: []const u8) ?QualifiedCall {
     var tokens: [256]Token = undefined;
@@ -1590,6 +1724,31 @@ fn contains(items: []const CompletionItem, label: []const u8) bool {
 fn indexOf(items: []const CompletionItem, label: []const u8) ?usize {
     for (items, 0..) |item, index| if (std.mem.eql(u8, item.label, label)) return index;
     return null;
+}
+
+test "complete remaining fields in a local structure aggregate" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source =
+        \\struct Settings {
+        \\    let title:str = "Window"
+        \\    let width:int = 1280
+        \\    let resizable:bool = true
+        \\}
+        \\func main() {
+        \\    let settings = Settings(
+        \\        title:"Silex",
+        \\        width:1024,
+        \\        re
+        \\    )
+        \\}
+    ;
+    const cursor = std.mem.indexOf(u8, source, "re\n").? + "re".len;
+    const items = try itemsAt(arena.allocator(), source, cursor, .invoked);
+    try std.testing.expect(contains(items, "resizable"));
+    try std.testing.expect(!contains(items, "title"));
+    try std.testing.expect(!contains(items, "width"));
+    try std.testing.expect(!contains(items, "return"));
 }
 
 test "complete an instance with only its own members" {

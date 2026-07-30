@@ -226,7 +226,8 @@ pub fn scopeItemsAtForTarget(
     const prefix_start = prefixStart(source, cursor);
     const prefix = source[prefix_start..cursor];
     const type_only = isTypePrefix(source, prefix_start);
-    const program = try parseCurrentAtScope(allocator, source, cursor, prefix_start, type_only) orelse
+    const aggregate = try Completion.aggregateContextAt(allocator, source, cursor);
+    const program = try parseCurrentAtScope(allocator, source, cursor, prefix_start, type_only, aggregate != null) orelse
         return allocator.alloc(Types.CompletionItem, 0);
     const wants_platform = !type_only and matchesPrefix("Platform", prefix) and
         !hasLocalNominal(program, "Platform") and findUseByAlias(program, "Platform") == null;
@@ -241,6 +242,43 @@ pub fn scopeItemsAtForTarget(
     const project = try indexProject(allocator, io, global_packages_root, selected_target, root, document_path);
 
     var ranked: std.ArrayList(RankedItem) = .empty;
+    if (aggregate) |context| {
+        if (findUseByAlias(program, context.type_name)) |use| {
+            if (declarationTarget(project.index, use.path)) |target| {
+                const provider = project.index.providers[target.provider];
+                if (project.graph.canAccess(project.current_owner, provider.owner, provider.name)) {
+                    if (try loadProgram(allocator, io, documents, provider)) |loaded| {
+                        for (loaded.program.structures) |structure| {
+                            if (!structure.is_public or !std.mem.eql(u8, structure.name, target.declaration)) continue;
+                            for (structure.fields) |field| {
+                                if (field.is_internal or field.is_private or field.is_protected or
+                                    Completion.suppliedAggregateField(context, field.name) or
+                                    !matchesPrefix(field.name, prefix)) continue;
+                                try appendRanked(allocator, &ranked, .{
+                                    .label = field.name,
+                                    .kind = CompletionKind.field,
+                                    .detail = try std.fmt.allocPrint(allocator, "{s}:{s}", .{
+                                        field.name,
+                                        Completion.typeName(loaded.program, field.type),
+                                    }),
+                                }, 0, false);
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        std.mem.sort(RankedItem, ranked.items, {}, rankedLessThan);
+        const result = try allocator.alloc(Types.CompletionItem, ranked.items.len);
+        for (ranked.items, 0..) |entry, index| {
+            result[index] = entry.item;
+            result[index].sortText = try std.fmt.allocPrint(allocator, "{d:0>3}-{d:0>6}", .{ entry.priority, index });
+            result[index].filterText = entry.item.label;
+            result[index].insertText = entry.item.label;
+        }
+        return result;
+    }
     if (wants_platform and contextualProvider(project, "Platform") != null) {
         try appendRanked(allocator, &ranked, .{
             .label = "Platform",
@@ -464,6 +502,20 @@ fn queryAt(
         }
         if (Completion.qualifiedCall(receiver)) |call| {
             if (try importedQualifiedCallReturnTypePath(
+                allocator,
+                io,
+                documents,
+                project,
+                program,
+                call,
+            )) |type_path| return .{ .imported_member = .{
+                .type_path = type_path,
+                .prefix = prefix,
+                .cursor = cursor,
+            } };
+        }
+        if (Completion.directCall(receiver)) |call| {
+            if (try importedConstructorCallTypePath(
                 allocator,
                 io,
                 documents,
@@ -1241,6 +1293,7 @@ fn parseCurrentAtScope(
     cursor: usize,
     prefix_start: usize,
     type_only: bool,
+    aggregate_field: bool,
 ) !?Ast.Program {
     if (try parseCurrent(allocator, source)) |program| return program;
     const line_start = if (std.mem.lastIndexOfScalar(u8, source[0..prefix_start], '\n')) |newline|
@@ -1248,7 +1301,9 @@ fn parseCurrentAtScope(
     else
         0;
     const before_prefix = std.mem.trim(u8, source[line_start..prefix_start], " \t\r");
-    const placeholder = if (type_only)
+    const placeholder = if (aggregate_field)
+        "__completion:true"
+    else if (type_only)
         "int"
     else if (before_prefix.len == 0)
         "print(true)"
@@ -1347,6 +1402,33 @@ fn parameterTypePathAt(
 fn parameterTypePath(program: Ast.Program, parameters: []const Ast.Parameter, receiver: []const u8) ?[]const u8 {
     for (parameters) |parameter| {
         if (std.mem.eql(u8, parameter.name, receiver)) return Completion.typeName(program, parameter.type);
+    }
+    return null;
+}
+
+fn importedConstructorCallTypePath(
+    allocator: Allocator,
+    io: Io,
+    documents: []const Types.Document,
+    project: IndexedProject,
+    current: Ast.Program,
+    call: Completion.DirectCall,
+) !?[]const u8 {
+    const use = findUseByAlias(current, call.name) orelse return null;
+    const target = declarationTarget(project.index, use.path) orelse return null;
+    const provider = project.index.providers[target.provider];
+    if (!project.graph.canAccess(project.current_owner, provider.owner, provider.name)) return null;
+    const loaded = try loadProgram(allocator, io, documents, provider) orelse return null;
+    for (loaded.program.structures) |structure| {
+        if (!structure.is_public or structure.is_protocol or structure.is_static or
+            !std.mem.eql(u8, structure.name, target.declaration)) continue;
+        if (structure.constructors.len == 0) return if (call.arity == 0) use.path else null;
+        for (structure.constructors) |constructor| {
+            if (constructor.is_internal or constructor.is_private or constructor.is_protected) continue;
+            if (provider.owner != project.current_owner and !constructor.is_public) continue;
+            if (parametersAcceptArity(constructor.parameters, call.arity)) return use.path;
+        }
+        return null;
     }
     return null;
 }
@@ -1450,6 +1532,24 @@ fn importedQualifiedCallReturnTypePath(
             return_name = candidate;
         }
     }
+    if (return_name == null) for (loaded.program.uses) |exported| {
+        if (!exported.is_public or exported.alias == null or
+            !std.mem.eql(u8, exported.alias.?, call.name)) continue;
+        const exported_target = declarationTarget(project.index, exported.path) orelse continue;
+        const exported_provider = project.index.providers[exported_target.provider];
+        if (!project.graph.canAccess(project.current_owner, exported_provider.owner, exported_provider.name)) continue;
+        const exported_program = try loadProgram(allocator, io, documents, exported_provider) orelse continue;
+        for (exported_program.program.structures) |structure| {
+            if (!structure.is_public or structure.is_protocol or structure.is_static or
+                !std.mem.eql(u8, structure.name, exported_target.declaration)) continue;
+            if (structure.constructors.len == 0) return if (call.arity == 0) exported.path else null;
+            for (structure.constructors) |constructor| {
+                if (constructor.is_internal or constructor.is_private or constructor.is_protected) continue;
+                if (exported_provider.owner != project.current_owner and !constructor.is_public) continue;
+                if (parametersAcceptArity(constructor.parameters, call.arity)) return exported.path;
+            }
+        }
+    };
     const name = return_name orelse return null;
     if (std.mem.indexOfScalar(u8, name, '.') != null) return name;
     if (std.mem.eql(u8, name, target.declaration)) return use.path;
@@ -2232,6 +2332,128 @@ test "complete imported application members in a cascade" {
     try std.testing.expect(hasLabel(items, "install"));
     try std.testing.expect(hasLabel(items, "run"));
     try std.testing.expect(!hasLabel(items, "if"));
+}
+
+test "complete remaining fields of an imported aggregate inside a cascade" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "GFX/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Package.json",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/Window.sx",
+        .data =
+        \\public struct Settings {
+        \\    let title:str = "Window"
+        \\    let width:int = 1280
+        \\    let height:int = 720
+        \\    let resizable:bool = true
+        \\    let fullscreen:bool = false
+        \\    let borderless:bool = false
+        \\    let high_pixel_density:bool = true
+        \\    let hidden:bool = false
+        \\}
+        ,
+    });
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const main_path = try std.fs.path.join(allocator, &.{ root, "Main.sx" });
+    const uri = try std.fmt.allocPrint(allocator, "file://{s}", .{main_path});
+    const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
+    const source =
+        \\use GFX.Window.Settings as WindowSettings
+        \\func main() {
+        \\    Application()
+        \\        ..install(WindowPlugin(WindowSettings(
+        \\            title:"Silex",
+        \\            width:1024,
+        \\            height:640,
+        \\            re
+        \\        )))
+        \\        ..run()
+        \\}
+    ;
+    const cursor = std.mem.indexOf(u8, source, "re\n").? + "re".len;
+    const items = try scopeItemsAt(
+        allocator,
+        std.testing.io,
+        null,
+        root_uri,
+        uri,
+        &.{},
+        source,
+        cursor,
+    );
+    try std.testing.expect(hasLabel(items, "resizable"));
+    try std.testing.expect(!hasLabel(items, "title"));
+    try std.testing.expect(!hasLabel(items, "width"));
+    try std.testing.expect(!hasLabel(items, "height"));
+    try std.testing.expect(hasLabel(items, "fullscreen"));
+    try std.testing.expect(!hasLabel(items, "hidden"));
+}
+
+test "complete imported settings fields from a nested constructor cascade" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "GFX/Module/Plugins");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Package.json",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/Window.sx",
+        .data =
+        \\public struct Settings {
+        \\    var title:str = "Window"
+        \\    var width:int = 1280
+        \\    var height:int = 720
+        \\}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/Plugins/WindowPlugin.sx",
+        .data =
+        \\public use GFX.Window.Settings as Settings
+        \\public struct WindowPlugin {}
+        ,
+    });
+
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const main_path = try std.fs.path.join(allocator, &.{ root, "Main.sx" });
+    const uri = try std.fmt.allocPrint(allocator, "file://{s}", .{main_path});
+    const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
+    const source =
+        \\use GFX.Plugins.WindowPlugin
+        \\func main() {
+        \\    Application()
+        \\        ..install(WindowPlugin(WindowPlugin.Settings()
+        \\            ..
+        \\        ))
+        \\        ..run()
+        \\}
+    ;
+    const cursor = std.mem.indexOf(u8, source, "            ..\n").? + "            ..".len;
+    const items = (try itemsAt(
+        allocator,
+        std.testing.io,
+        null,
+        root_uri,
+        uri,
+        &.{},
+        source,
+        cursor,
+    )).?;
+    try std.testing.expect(hasLabel(items, "title"));
+    try std.testing.expect(hasLabel(items, "width"));
+    try std.testing.expect(hasLabel(items, "height"));
+    try std.testing.expect(!hasLabel(items, "return"));
 }
 
 test "complete imported members on borrowed function parameters" {
