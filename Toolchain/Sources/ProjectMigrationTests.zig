@@ -114,6 +114,47 @@ test "compose public reexports through a package facade" {
     try std.testing.expectEqualStrings("42\n", result.stdout);
 }
 
+test "prefer a facade reexport over a homonymous principal type static call" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data =
+        \\use Facade
+        \\func main() {
+        \\    let settings = Facade.Settings()
+        \\        ..title = "Silex"
+        \\    print(settings.title)
+        \\}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Facade.sx",
+        .data =
+        \\public use Api.Settings as Settings
+        \\public struct Facade {}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Api.sx",
+        .data =
+        \\public struct Settings {
+        \\    var title:str = "Default"
+        \\}
+        ,
+    });
+
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(input);
+    const result = try @import("Interpreter.zig").runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("Silex\n", result.stdout);
+}
+
 test "diagnose invalid public reexports and cycles" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

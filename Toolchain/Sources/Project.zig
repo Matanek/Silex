@@ -1364,6 +1364,14 @@ pub const Compiler = struct {
                             if (qualified_function != null) {
                                 call.name = qualified;
                                 call.receiver = null;
+                            } else if (try self.structureTarget(module, qualified)) |target| {
+                                try self.requirePublicStructure(module, target, call.name_position);
+                                call.name = try structureCanonicalName(
+                                    self.allocator,
+                                    try self.structureModule(target),
+                                    target.declaration,
+                                );
+                                call.receiver = null;
                             } else if (try self.structureTarget(module, prefix)) |target| {
                                 try self.requirePublicStructure(module, target, call.name_position);
                                 receiver.value = .{ .identifier = try structureCanonicalName(
@@ -1371,7 +1379,7 @@ pub const Compiler = struct {
                                     try self.structureModule(target),
                                     target.declaration,
                                 ) };
-                            } else if (try self.structureTarget(module, qualified) != null or try self.targetForCall(module, qualified) != null) {
+                            } else if (try self.targetForCall(module, qualified) != null) {
                                 call.name = qualified;
                                 call.receiver = null;
                             } else if (prefix.len != 0 and std.ascii.isUpper(prefix[0])) {
