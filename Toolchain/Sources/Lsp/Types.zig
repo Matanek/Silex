@@ -19,6 +19,18 @@ pub const Range = struct {
     end: Position,
 };
 
+pub const Color = struct {
+    red: f64,
+    green: f64,
+    blue: f64,
+    alpha: f64,
+};
+
+pub const ColorInformation = struct {
+    range: Range,
+    color: Color,
+};
+
 pub const PositionEncoding = enum {
     utf8,
     utf16,

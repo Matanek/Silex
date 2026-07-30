@@ -1,6 +1,7 @@
 const std = @import("std");
 const Completion = @import("Completion.zig");
 const Diagnostics = @import("Diagnostics.zig");
+const DocumentColors = @import("DocumentColors.zig");
 const Protocol = @import("Protocol.zig");
 const Types = @import("Types.zig");
 const Workspace = @import("Workspace.zig");
@@ -79,6 +80,7 @@ pub const Server = struct {
                         .change = @as(u8, 1),
                     },
                     .completionProvider = Types.CompletionOptions{},
+                    .colorProvider = true,
                 },
                 .serverInfo = .{ .name = "Silex" },
             });
@@ -163,6 +165,14 @@ pub const Server = struct {
                 return try self.reply(allocator, id, .{ .isIncomplete = false, .items = merged });
             }
             return try self.reply(allocator, id, .{ .isIncomplete = false, .items = items });
+        }
+        if (std.mem.eql(u8, request.method, "textDocument/documentColor")) {
+            const id = request.id orelse return null;
+            const params = request.params orelse return try self.replyInvalidParams(allocator, id, "missing document color parameters");
+            const uri = Protocol.textDocumentUri(params) orelse return try self.replyInvalidParams(allocator, id, "missing text document URI");
+            const source = self.documentText(uri) orelse return try self.reply(allocator, id, &[_]Types.ColorInformation{});
+            const colors = try DocumentColors.inSource(allocator, source, self.position_encoding);
+            return try self.reply(allocator, id, colors);
         }
 
         if (request.id) |id| return try self.errorReply(allocator, id, -32601, "method not found");
@@ -321,7 +331,7 @@ test "contextual qualifiers request workspace completion without an import" {
     try std.testing.expect(!needsWorkspaceCompletion("func seed() { local }", 19));
 }
 
-test "initialize advertises only the current LSP foundation" {
+test "initialize advertises completion and document colors" {
     var server = Server.init(std.testing.allocator, std.testing.io);
     defer server.deinit();
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
@@ -331,7 +341,25 @@ test "initialize advertises only the current LSP foundation" {
     )).?;
     try std.testing.expect(std.mem.indexOf(u8, response, "\"positionEncoding\":\"utf-8\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"completionProvider\":{\"resolveProvider\":false,\"triggerCharacters\":[\".\"]}") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"colorProvider\":true") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "hoverProvider") == null);
+}
+
+test "document colors expose literal and named GFX colors" {
+    var server = Server.init(std.testing.allocator, std.testing.io);
+    defer server.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    _ = try server.handleBody(arena.allocator(),
+        \\{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///Main.sx","version":1,"text":"let warm = Color.bytes(255, 32, 86)\nlet cool = Color.blue_500()"}}}
+    );
+    const response = (try server.handleBody(arena.allocator(),
+        \\{"jsonrpc":"2.0","id":2,"method":"textDocument/documentColor","params":{"textDocument":{"uri":"file:///Main.sx"}}}
+    )).?;
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"red\":1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"green\":0.12549019607843137") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"line\":1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"id\":2") != null);
 }
 
 test "document changes publish and clear current frontend diagnostics" {

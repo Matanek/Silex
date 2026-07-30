@@ -50,6 +50,7 @@ open Silex document
     -> context and inferred syntactic intention
     -> typed frontend declarations and package graph
     -> prioritized completion from visible declarations
+    -> inline colors for direct GFX.Color expressions
 ```
 
 ## Current decisions
@@ -308,6 +309,11 @@ open Silex document
   resolves the project module index and direct package graph, with open buffers
   masking their disk providers. The bootstrap rebuilds that completion view for
   each request; an incremental cache remains a performance optimization and
-  must preserve the same observable results. Navigation, rename, hover,
-  formatting, semantic tokens and project-wide semantic diagnostics are not
-  implemented yet.
+  must preserve the same observable results. Document colors recognize direct
+  `Color.bytes`, `Color.rgb`, `Color.rgba` and named GFX palette expressions
+  whose components are literals in the displayable `[0.0, 1.0]` range. This
+  bootstrap recognition is intentionally syntactic; semantic constant
+  evaluation should eventually replace its local palette knowledge so aliases
+  and computed colors work without coupling the language server to one package
+  API. Navigation, rename, hover, formatting, semantic tokens and project-wide
+  semantic diagnostics are not implemented yet.
