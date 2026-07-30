@@ -498,10 +498,25 @@ fn executeInstruction(
                 .optional => |value| value.* orelse return error.InvalidProgram,
                 .value => |value| value.*,
             };
-            if (root != .structure) return error.InvalidProgram;
-            var structure = root.structure;
+            var structure = switch (root) {
+                .structure => |value| value,
+                .class => |value| value.instance.*,
+                else => return error.InvalidProgram,
+            };
             if (structure.type.structureIndex() != field.structure or field.field >= structure.fields.len) return error.InvalidProgram;
             try store(function, values, field.result, .{ .reference = .{ .value = &structure.fields[field.field] } });
+        },
+        .reference_optional => |optional| {
+            const pointer = switch (try load(values, optional.reference)) {
+                .reference => |value| value,
+                else => return error.InvalidProgram,
+            };
+            const root = try pointer.load();
+            const payload = switch (root) {
+                .optional => |value| value.value orelse return error.InvalidProgram,
+                else => return error.InvalidProgram,
+            };
+            try store(function, values, optional.result, .{ .reference = .{ .value = @constCast(payload) } });
         },
         .convert => |conversion| {
             const operand = try load(values, conversion.operand);

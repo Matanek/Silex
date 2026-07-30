@@ -40,6 +40,7 @@ pub fn prepare(self: anytype) ![]const Boundary.Function {
             parameters[parameter_index] = try externalType(self, parameter, external.position);
         }
         const return_type = try externalType(self, external.return_type, external.position);
+        var package_private = false;
         if (std.mem.eql(u8, external.library, "MacOS.lib_system") and std.mem.eql(u8, external.source_name, "write")) {
             if (parameters.len != 3 or parameters[0] != .int32 or parameters[1] != .address or
                 parameters[2] != .uint or return_type != .int)
@@ -670,16 +671,39 @@ pub fn prepare(self: anytype) ![]const Boundary.Function {
             if (parameters.len != 6 or parameters[0] != .int or parameters[1] != .address or parameters[2] != .int32 or parameters[3] != .int32 or parameters[4] != .address or parameters[5] != .address or return_type != .int32) {
                 return self.fail(external.position, "recvfrom expects func(int, C.MutablePointer<uint8>, int32, int32, C.MutablePointer<int>, C.MutablePointer<int32>) int32");
             }
-        } else return self.fail(external.position, "interop library or function is not supported yet");
+        } else {
+            package_private = try customProviderAvailable(self, external);
+            if (!package_private) return self.fail(external.position, "interop library or function is not supported yet");
+        }
         try result.append(self.allocator, .{
             .name = external.name,
             .provider = external.library,
             .source_name = external.source_name,
             .parameters = parameters,
             .return_type = return_type,
+            .owner = external.owner,
+            .package_private = package_private,
         });
     }
     return result.toOwnedSlice(self.allocator);
+}
+
+fn customProviderAvailable(self: anytype, external: Ast.ExternalFunction) !bool {
+    const packages = self.packages orelse return false;
+    if (external.owner >= packages.packages.len) return false;
+    const package = packages.packages[external.owner];
+    if (package.name == null) return false;
+    const separator = std.mem.indexOfScalar(u8, external.library, '.') orelse return false;
+    const provider_name = external.library[separator + 1 ..];
+    for (package.boundary_providers) |provider| {
+        if (std.mem.eql(u8, provider.name, provider_name)) return true;
+    }
+    const message = try std.fmt.allocPrint(
+        self.allocator,
+        "boundary provider '{s}' is not declared by package '{s}' for this target",
+        .{ provider_name, package.name.? },
+    );
+    return self.fail(external.position, message);
 }
 
 fn externalType(self: anytype, value: Ast.ExternalType, position: anytype) !Types.Type {
@@ -695,10 +719,10 @@ fn externalType(self: anytype, value: Ast.ExternalType, position: anytype) !Type
             .address
         else
             self.fail(position, "C.Pointer currently supports only uint8"),
-        .mutable_pointer => |child| if (child == .uint8 or child == .uint32 or child == .int or child == .uint)
+        .mutable_pointer => |child| if (child == .uint8 or child == .int32 or child == .uint32 or child == .int or child == .uint)
             .address
         else
-            self.fail(position, "C.MutablePointer currently supports uint32, int, and uint"),
+            self.fail(position, "C.MutablePointer currently supports int32, uint32, int, and uint"),
     };
 }
 
@@ -880,13 +904,14 @@ pub fn analyzeIntrinsic(self: anytype, builder: anytype, call: Ast.Expression.Ca
             return self.fail(call.name_position, "C.mutable_pointer expects one stable mutable value");
         }
         const prepared = try @import("MutableReferences.zig").prepare(self, builder, call.arguments[0], null);
-        const supported_scalar = prepared.type == .uint32 or prepared.type == .int or prepared.type == .uint;
+        const supported_scalar = prepared.type == .int32 or prepared.type == .uint32 or prepared.type == .int or prepared.type == .uint;
         const supported_array = if (Collections.collectionForType(self.structures, prepared.type)) |collection|
-            collection.length != null and (collection.element == .uint32 or collection.element == .int or collection.element == .uint)
+            collection.length != null and
+                (collection.element == .int32 or collection.element == .uint32 or collection.element == .int or collection.element == .uint)
         else
             false;
         if (!supported_scalar and !supported_array) {
-            return self.fail(call.name_position, "C.mutable_pointer supports uint32, int, uint, and their fixed arrays");
+            return self.fail(call.name_position, "C.mutable_pointer supports int32, uint32, int, uint, and their fixed arrays");
         }
         if (prepared.temporary != null) {
             return self.fail(call.arguments[0].position, "C.mutable_pointer requires stable mutable storage");

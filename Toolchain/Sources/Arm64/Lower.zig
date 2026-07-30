@@ -105,6 +105,7 @@ fn lowerInternal(
         external_functions[index] = .{
             .provider = if (std.mem.eql(u8, external.provider, "MacOS.lib_system")) "Darwin.lib_system" else external.provider,
             .source_name = external.source_name,
+            .package_private = external.package_private,
             .signature = .{
                 .arguments = arguments,
                 .result = if (external.return_type == .void) null else try lowerExternalType(external.return_type),
@@ -534,10 +535,22 @@ fn lowerInstruction(
             .reference = layout.values[store.reference].start,
             .operand = layout.values[store.operand],
         } },
-        .reference_field => |field| .{ .reference_offset = .{
-            .result = layout.values[field.result].start,
-            .reference = layout.values[field.reference].start,
-            .byte_offset = @intCast((try fieldOffset(program, field.structure, field.field)) * Machine.slot_size),
+        .reference_field => |field| reference_field: {
+            const is_class = program.structures[field.structure].is_class;
+            const value: Machine.Instruction.ReferenceOffset = .{
+                .result = layout.values[field.result].start,
+                .reference = layout.values[field.reference].start,
+                .byte_offset = @intCast((try fieldOffset(program, field.structure, field.field) + @as(usize, if (is_class) 3 else 0)) * Machine.slot_size),
+            };
+            break :reference_field if (is_class)
+                .{ .reference_indirect_offset = value }
+            else
+                .{ .reference_offset = value };
+        },
+        .reference_optional => |optional| .{ .reference_offset = .{
+            .result = layout.values[optional.result].start,
+            .reference = layout.values[optional.reference].start,
+            .byte_offset = Machine.slot_size,
         } },
         .convert => |conversion| .{ .convert = .{
             .result = layout.values[conversion.result].start,

@@ -163,6 +163,31 @@ test "class constructors establish private invariants and overloads" {
     try std.testing.expectEqualStrings("abc 7! 2\n", output);
 }
 
+test "class constructor parameters survive when retained by the new instance" {
+    const output = try run(
+        \\class Token {
+        \\    public let label:str
+        \\    drop { print("drop ", self.label) }
+        \\}
+        \\struct Lifetime { var token:Token? = null }
+        \\class Owner {
+        \\    private var lifetime:Lifetime = Lifetime()
+        \\    public init(token:Token) { self.lifetime = Lifetime(token:token) }
+        \\    public func label() str {
+        \\        if var token = self.lifetime.token { return token.label }
+        \\        return "missing"
+        \\    }
+        \\}
+        \\func main() {
+        \\    var token = Token(label:"alive")
+        \\    var owner = Owner(token)
+        \\    print(owner.label())
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("alive\ndrop alive\n", output);
+}
+
 test "class visibility closes construction and private state" {
     try expectCompileError(
         "class Session { let token:str; public init(token:str) { self.token = token } } func main() { var value = Session(token:\"x\") }",

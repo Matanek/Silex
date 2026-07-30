@@ -373,6 +373,7 @@ fn hasLocalNominal(program: Ast.Program, name: []const u8) bool {
 }
 
 fn isTypePrefix(source: []const u8, prefix_start: usize) bool {
+    if (Completion.isTypeArgumentPrefix(source, prefix_start)) return true;
     const before = std.mem.trimEnd(u8, source[0..prefix_start], " \t\r\n");
     if (before.len == 0) return false;
     if (before[before.len - 1] == ':') return true;
@@ -422,7 +423,11 @@ fn queryAt(
     } };
 
     if (prefix_start == 0 or source[prefix_start - 1] != '.') return null;
-    const receiver = Completion.memberReceiver(source, prefix_start - 1) orelse return null;
+    const cascade = prefix_start >= 2 and source[prefix_start - 2] == '.';
+    const receiver = (if (cascade)
+        Completion.cascadeReceiver(source, prefix_start - 2)
+    else
+        Completion.memberReceiver(source, prefix_start - 1)) orelse return null;
     const current_program = try parseCurrentAtCompletion(
         allocator,
         source,
@@ -493,6 +498,11 @@ fn queryAt(
             .prefix = prefix,
             .cursor = cursor,
         } };
+        if (parameterTypePathAt(source, program, cursor, receiver)) |type_path| {
+            if (try importedTypePath(allocator, program, project, type_path)) |resolved| {
+                return .{ .imported_member = .{ .type_path = resolved, .prefix = prefix, .cursor = cursor } };
+            }
+        }
         if (try declaredTypePath(allocator, source, cursor, receiver)) |type_path| {
             if (try importedTypePath(allocator, program, project, type_path)) |resolved| {
                 return .{ .imported_member = .{ .type_path = resolved, .prefix = prefix, .cursor = cursor } };
@@ -1188,6 +1198,9 @@ fn parseCurrentAtCompletion(
     type_position: bool,
 ) !?Ast.Program {
     if (try parseCurrent(allocator, source)) |program| return program;
+    if (try Completion.recoverCascadeForParsing(allocator, source, cursor)) |recovered| {
+        if (try parseCurrent(allocator, recovered)) |program| return program;
+    }
     const placeholder = if (type_position)
         if (prefix.len == 0) "__Completion" else ""
     else if (Completion.callFollows(source, cursor))
@@ -1201,7 +1214,25 @@ fn parseCurrentAtCompletion(
         placeholder,
         source[cursor..],
     });
-    return parseCurrent(allocator, recovered);
+    if (try parseCurrent(allocator, recovered)) |program| return program;
+    if (!type_position or prefix.len > cursor) return null;
+
+    const prefix_start = cursor - prefix.len;
+    const line_start = if (std.mem.lastIndexOfScalar(u8, source[0..prefix_start], '\n')) |newline|
+        newline + 1
+    else
+        0;
+    if (!isNominalRelationLine(source[line_start..prefix_start])) return null;
+
+    const line_end = if (std.mem.indexOfScalarPos(u8, source, cursor, '\n')) |newline|
+        newline + 1
+    else
+        source.len;
+    const without_incomplete_declaration = try std.fmt.allocPrint(allocator, "{s}{s}", .{
+        source[0..line_start],
+        source[line_end..],
+    });
+    return parseCurrent(allocator, without_incomplete_declaration);
 }
 
 fn parseCurrentAtScope(
@@ -1282,6 +1313,42 @@ fn declaredTypePath(
         found = try joinQualified(allocator, tokens.items[start .. end + 1]);
     }
     return found;
+}
+
+fn parameterTypePathAt(
+    source: []const u8,
+    program: Ast.Program,
+    cursor: usize,
+    receiver: []const u8,
+) ?[]const u8 {
+    for (program.functions) |function| {
+        if (!bodyContainsCursor(source, function.position.offset, cursor)) continue;
+        if (parameterTypePath(program, function.parameters, receiver)) |type_path| return type_path;
+    }
+    for (program.structures) |structure| {
+        for (structure.methods) |method| {
+            if (!bodyContainsCursor(source, method.position.offset, cursor)) continue;
+            if (parameterTypePath(program, method.parameters, receiver)) |type_path| return type_path;
+        }
+        for (structure.constructors) |constructor| {
+            if (!bodyContainsCursor(source, constructor.position.offset, cursor)) continue;
+            if (parameterTypePath(program, constructor.parameters, receiver)) |type_path| return type_path;
+        }
+    }
+    for (program.extensions) |extension| {
+        for (extension.methods) |method| {
+            if (!bodyContainsCursor(source, method.position.offset, cursor)) continue;
+            if (parameterTypePath(program, method.parameters, receiver)) |type_path| return type_path;
+        }
+    }
+    return null;
+}
+
+fn parameterTypePath(program: Ast.Program, parameters: []const Ast.Parameter, receiver: []const u8) ?[]const u8 {
+    for (parameters) |parameter| {
+        if (std.mem.eql(u8, parameter.name, receiver)) return Completion.typeName(program, parameter.type);
+    }
+    return null;
 }
 
 fn declaredCallReturnTypePath(
@@ -1914,6 +1981,28 @@ test "complete public package APIs module aliases members and overlays" {
     try std.testing.expect(!hasLabel(member_items, "hidden_value"));
     try std.testing.expect(!hasLabel(member_items, "hidden_method"));
 
+    const cascade_source =
+        \\use Math.Operations
+        \\func main() {
+        \\    var pos = Operations.Vector(1)
+        \\        ..
+        \\}
+    ;
+    const cascade_cursor = std.mem.indexOf(u8, cascade_source, "..\n").? + "..".len;
+    const cascade_items = (try itemsAt(
+        allocator,
+        std.testing.io,
+        null,
+        root_uri,
+        uri,
+        &.{},
+        cascade_source,
+        cascade_cursor,
+    )).?;
+    try std.testing.expect(hasLabel(cascade_items, "to_str"));
+    try std.testing.expect(!hasLabel(cascade_items, "add"));
+    try std.testing.expect(!hasLabel(cascade_items, "if"));
+
     const static_source =
         \\use Math.Operations.TaskManager
         \\func main() { TaskManager. }
@@ -2094,6 +2183,126 @@ test "complete public package APIs module aliases members and overlays" {
         imported_alias_cursor,
     );
     try std.testing.expect(hasLabel(imported_aliases, "Number"));
+}
+
+test "complete imported application members in a cascade" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "GFX/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Package.json",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/Bootstrap.sx",
+        .data =
+        \\public class Application {
+        \\    public func install() Application { return self }
+        \\    public func run() int { return 0 }
+        \\}
+        ,
+    });
+
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const main_path = try std.fs.path.join(allocator, &.{ root, "Main.sx" });
+    const uri = try std.fmt.allocPrint(allocator, "file://{s}", .{main_path});
+    const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
+    const source =
+        \\use GFX.Bootstrap
+        \\func main() {
+        \\    var app = Bootstrap.Application()
+        \\        ..
+        \\}
+    ;
+    const cursor = std.mem.indexOf(u8, source, "..\n").? + "..".len;
+    const items = (try itemsAt(
+        allocator,
+        std.testing.io,
+        null,
+        root_uri,
+        uri,
+        &.{},
+        source,
+        cursor,
+    )).?;
+    try std.testing.expect(hasLabel(items, "install"));
+    try std.testing.expect(hasLabel(items, "run"));
+    try std.testing.expect(!hasLabel(items, "if"));
+}
+
+test "complete imported members on borrowed function parameters" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "GFX/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Package.json",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/Input.sx",
+        .data =
+        \\public class State {
+        \\    public func is_quit_requested() bool { return false }
+        \\}
+        \\public class Input {
+        \\    public func is_quit_requested() bool { return false }
+        \\    public func update() {}
+        \\}
+        ,
+    });
+
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const main_path = try std.fs.path.join(allocator, &.{ root, "Main.sx" });
+    const uri = try std.fmt.allocPrint(allocator, "file://{s}", .{main_path});
+    const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
+    const source =
+        \\use GFX.Input
+        \\func advance_frame(input:@Input) {
+        \\    input.
+        \\}
+    ;
+    const cursor = std.mem.indexOf(u8, source, "input.\n").? + "input.".len;
+    const items = (try itemsAt(
+        allocator,
+        std.testing.io,
+        null,
+        root_uri,
+        uri,
+        &.{},
+        source,
+        cursor,
+    )).?;
+    try std.testing.expect(hasLabel(items, "is_quit_requested"));
+    try std.testing.expect(hasLabel(items, "update"));
+    try std.testing.expect(!hasLabel(items, "if"));
+
+    const state_source =
+        \\use GFX.Input
+        \\use GFX.Input.State as InputState
+        \\func advance_frame(input:@InputState) {
+        \\    input.
+        \\}
+    ;
+    const state_cursor = std.mem.indexOf(u8, state_source, "input.\n").? + "input.".len;
+    const state_items = (try itemsAt(
+        allocator,
+        std.testing.io,
+        null,
+        root_uri,
+        uri,
+        &.{},
+        state_source,
+        state_cursor,
+    )).?;
+    try std.testing.expect(hasLabel(state_items, "is_quit_requested"));
+    try std.testing.expect(!hasLabel(state_items, "update"));
+    try std.testing.expect(!hasLabel(state_items, "if"));
 }
 
 test "complete a module facade together with its child namespace" {

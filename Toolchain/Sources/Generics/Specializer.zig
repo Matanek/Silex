@@ -6,6 +6,8 @@ const Source = @import("../Source.zig");
 const Nested = @import("Nested.zig");
 const Remap = @import("Remap.zig");
 const Conformances = @import("Conformances.zig");
+const TypedResources = @import("TypedResources.zig");
+const InjectedSystems = @import("InjectedSystems.zig");
 
 const Allocator = std.mem.Allocator;
 const SpecializeError = Source.Error || Allocator.Error;
@@ -95,6 +97,7 @@ pub const Specializer = struct {
         const concrete_structure_count = self.structures.items.len;
         for (0..concrete_structure_count) |structure_index| {
             try self.rewriteStructureAt(structure_index, &.{}, null);
+            TypedResources.markConcreteMethods(self, structure_index);
         }
         for (program.functions) |function| {
             if (function.type_parameters.len == 0) try self.functions.append(self.allocator, function);
@@ -173,6 +176,12 @@ pub const Specializer = struct {
         for (self.functions.items) |*function| {
             for (@constCast(function.parameters)) |*parameter| parameter.type = Remap.concreteType(parameter.type, map);
             function.return_type = Remap.concreteType(function.return_type, map);
+            if (function.intrinsic) |*intrinsic| switch (intrinsic.*) {
+                .system_adapter => |*adapter| for (@constCast(adapter.dependencies)) |*dependency| {
+                    dependency.type = Remap.concreteType(dependency.type, map);
+                },
+                else => {},
+            };
             Remap.statementTypes(function.statements, map);
         }
         for (self.enums.items) |*enumeration| {
@@ -542,6 +551,7 @@ pub const Specializer = struct {
                     break :value .{ .call = copy };
                 }
                 if (copy.receiver != null and copy.named_arguments.len == 0) {
+                    _ = try InjectedSystems.rewriteRegistration(self, &copy, locals.items);
                     if (try self.specializeMethodCall(copy, locals.items)) |name| {
                         copy.name = name;
                         copy.type_arguments = &.{};
@@ -561,6 +571,47 @@ pub const Specializer = struct {
                     }
                 }
                 break :value .{ .call = copy };
+            },
+            .cascade => |cascade| value: {
+                var copy = cascade;
+                copy.receiver = try self.rewriteExpression(cascade.receiver, arguments, locals);
+                const operations = try self.allocator.alloc(Ast.Expression.Cascade.Operation, cascade.operations.len);
+                for (cascade.operations, 0..) |operation, index| operations[index] = switch (operation) {
+                    .method_call => |method| operation: {
+                        var method_copy = method;
+                        const method_type_arguments = try self.allocator.alloc(Ast.Type, method.type_arguments.len);
+                        for (method.type_arguments, 0..) |type_argument, type_index| {
+                            method_type_arguments[type_index] = try self.rewriteType(type_argument, arguments, method.name_position);
+                        }
+                        method_copy.type_arguments = method_type_arguments;
+                        const method_arguments = try self.allocator.alloc(*Ast.Expression, method.arguments.len);
+                        for (method.arguments, 0..) |argument, argument_index| {
+                            method_arguments[argument_index] = try self.rewriteExpression(argument, arguments, locals);
+                        }
+                        method_copy.arguments = method_arguments;
+                        var call: Ast.Expression.Call = .{
+                            .name = method_copy.name,
+                            .name_position = method_copy.name_position,
+                            .receiver = copy.receiver,
+                            .arguments = method_copy.arguments,
+                            .type_arguments = method_copy.type_arguments,
+                        };
+                        _ = try InjectedSystems.rewriteRegistration(self, &call, locals.items);
+                        method_copy.arguments = call.arguments;
+                        if (try self.specializeMethodCall(call, locals.items)) |name| {
+                            method_copy.name = name;
+                            method_copy.type_arguments = &.{};
+                        }
+                        break :operation .{ .method_call = method_copy };
+                    },
+                    .field_assignment => |field| operation: {
+                        var field_copy = field;
+                        field_copy.value = try self.rewriteExpression(field.value, arguments, locals);
+                        break :operation .{ .field_assignment = field_copy };
+                    },
+                };
+                copy.operations = operations;
+                break :value .{ .cascade = copy };
             },
             .field_access => |access| value: {
                 var copy = access;
@@ -868,7 +919,7 @@ pub const Specializer = struct {
         return self.fail(call.name_position, message);
     }
 
-    fn instantiateMethod(
+    pub fn instantiateMethod(
         self: *Specializer,
         structure_type: Ast.Type,
         template: Ast.Function,
@@ -908,6 +959,13 @@ pub const Specializer = struct {
         try locals.append(self.allocator, .{ .name = "self", .type = structure_type });
         concrete.parameters = try self.rewriteParameters(template.parameters, arguments, &locals);
         concrete.return_type = try self.rewriteType(template.return_type, arguments, template.name_position);
+        concrete.intrinsic = try TypedResources.intrinsicForSpecialization(
+            self,
+            structure_type,
+            template.name,
+            arguments,
+            position,
+        );
         const structure_index = self.structureIndexForType(structure_type) orelse return error.InvalidSource;
         const method_index = try self.appendMethod(structure_index, concrete);
         concrete.statements = try self.rewriteStatements(template.statements, arguments, &locals);
@@ -1351,7 +1409,7 @@ pub const Specializer = struct {
         return pattern;
     }
 
-    fn inferExpressionType(self: *Specializer, expression: *const Ast.Expression, locals: []const Binding) ?Ast.Type {
+    pub fn inferExpressionType(self: *Specializer, expression: *const Ast.Expression, locals: []const Binding) ?Ast.Type {
         return switch (expression.value) {
             .integer => .int,
             .floating => .float32,
@@ -1406,6 +1464,7 @@ pub const Specializer = struct {
                 }
                 break :call_type null;
             },
+            .cascade => |cascade| self.inferExpressionType(cascade.receiver, locals),
             .field_access => |access| field_type: {
                 const base = self.inferExpressionType(access.base, locals) orelse break :field_type null;
                 const child = base.optionalChild() orelse base;
@@ -1494,7 +1553,7 @@ pub const Specializer = struct {
         return false;
     }
 
-    fn structureIndexForType(self: *Specializer, type_value: Ast.Type) ?usize {
+    pub fn structureIndexForType(self: *Specializer, type_value: Ast.Type) ?usize {
         const index = type_value.structureIndex() orelse return null;
         if (index >= self.type_names.items.len) return null;
         const name = self.type_names.items[index];
@@ -1637,7 +1696,7 @@ pub const Specializer = struct {
         return self.fail(position, message);
     }
 
-    fn fail(self: *Specializer, position: Source.Position, message: []const u8) Source.Error {
+    pub fn fail(self: *Specializer, position: Source.Position, message: []const u8) Source.Error {
         self.diagnostic = .{ .position = position, .message = message };
         return error.InvalidSource;
     }

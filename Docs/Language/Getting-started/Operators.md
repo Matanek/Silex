@@ -62,4 +62,38 @@ of its left operand.
 let full_name = first + " " + last
 ```
 
+## Apply several operations to one value
+
+The cascade operator `..` applies every segment to the same receiver. The
+receiver is evaluated once, method results between segments are ignored, and
+the complete expression produces the receiver after its mutations.
+
+```sx
+var values:int[] = []
+    ..append(10)
+    ..append(20)
+    ..reverse()
+```
+
+A segment is either a method call or a direct field assignment. The ordinary
+mutability, visibility, ownership, and borrowing rules still apply. An
+existing value must therefore be mutable when a segment writes to it, while a
+newly owned temporary can be configured directly:
+
+```sx
+let point = Point(x:0, y:0)
+    ..x = 10
+    ..move(2, 3)
+```
+
+A single `.` after a method segment ends the cascade and resumes ordinary
+member access on its resulting receiver:
+
+```sx
+let count = values..append(30).count()
+```
+
+`..` is a single token. It is distinct from `...`, which forms an integer
+range in a `for` loop.
+
 For precedence, see the [syntax quick reference](../Reference/Syntax.md).

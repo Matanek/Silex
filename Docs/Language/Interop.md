@@ -7,7 +7,9 @@ The current native backends expose a closed set of typed system contracts used
 by the platform parts of `STD`: entropy, monotonic time, console and terminal
 I/O, files, processes, filesystem operations, and name resolution. macOS calls
 fixed libSystem symbols, Linux X64 uses kernel syscalls, and Windows PE32+
-imports the selected system DLL functions.
+imports the selected system DLL functions. A named package may additionally
+own a private `macos-arm64` static provider declared in its manifest; that
+provider is unavailable to application code and to other packages.
 
 ```sx
 use Interop.C
@@ -65,9 +67,9 @@ var seed:uint32 = 0
 let written = getrandom(C.mutable_pointer(seed), 4 as C.Size, 0)
 ```
 
-`C.mutable_pointer` accepts stable `var uint32`, `var int`, `var uint`, and
-fixed arrays of those scalar types. The storage is valid only for the direct
-foreign call; the address cannot be retained or returned.
+`C.mutable_pointer` accepts stable `var int32`, `var uint32`, `var int`,
+`var uint`, and fixed arrays of those scalar types. The storage is valid only
+for the direct foreign call; the address cannot be retained or returned.
 
 Byte-oriented system calls cannot consume a `uint8[..]` view directly because
 Silex collection elements follow the private slot layout of the language, not
@@ -101,7 +103,8 @@ The implemented surface is deliberately narrow:
   `windows-arm64` for the implemented STD slices;
 - validated providers: `MacOS.lib_system`, `Linux.kernel`,
   `Windows.kernel32`, `Windows.bcrypt_primitives`, `Windows.ucrtbase`, and
-  `Windows.ws2_32`;
+  `Windows.ws2_32`, plus package-private static providers authorized by the
+  owning manifest for `macos-arm64`;
 - implemented capabilities: random seeding, monotonic clocks, byte console
   I/O, terminal sessions, files, process metadata, subprocesses, filesystem
   operations, sockets, name resolution, and operating-system threads;
@@ -119,7 +122,8 @@ The implemented surface is deliberately narrow:
   scalar/fixed-array storage for `C.MutablePointer<T>`.
 
 General retained pointers, captured callbacks, C structure types, variadic
-calls, and arbitrary library paths are not implemented. Named callbacks with
+calls, arbitrary library paths, and public foreign providers are not
+implemented. Named callbacks with
 an opaque class context are supported for the platform threading adapters.
 Raw C structures are represented
 only inside platform modules by fixed, contiguous scalar storage with an

@@ -343,6 +343,10 @@ fn rewriteInstruction(allocator: Allocator, instruction: Ir.Instruction, aliases
             .structure = value.structure,
             .field = value.field,
         } },
+        .reference_optional => |value| .{ .reference_optional = .{
+            .result = value.result,
+            .reference = canonical(aliases, value.reference),
+        } },
         .convert => |value| .{ .convert = .{
             .result = value.result,
             .operand = canonical(aliases, value.operand),
@@ -654,6 +658,7 @@ fn removableResult(instruction: Ir.Instruction) ?Ir.ValueId {
         .collection_count => |value| value.result,
         .local_load => |value| value.result,
         .reference_field => |value| value.result,
+        .reference_optional => |value| value.result,
         .collection_reference => |value| value.result,
         .string_count => |value| value.result,
         .string_byte_at => |value| value.result,
@@ -750,6 +755,7 @@ fn countUses(instruction: Ir.Instruction, uses: []usize) void {
             useValue(uses, value.operand);
         },
         .reference_field => |value| useValue(uses, value.reference),
+        .reference_optional => |value| useValue(uses, value.reference),
         .convert => |value| useValue(uses, value.operand),
         .format_value => |value| useValue(uses, value.operand),
         .string_concat => |value| {

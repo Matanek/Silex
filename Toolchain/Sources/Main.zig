@@ -8,12 +8,15 @@ const Interpreter = @import("Interpreter.zig");
 const Ir = @import("Ir.zig");
 const Lsp = @import("Lsp/Server.zig");
 const MachO = @import("MacOS/MachO.zig");
+const MachOObject = @import("MacOS/Object.zig");
+const MacOSLink = @import("MacOS/Link.zig");
 const Elf = @import("Linux/Elf.zig");
 const X64Encoder = @import("X64/Encoder.zig");
 const PE = @import("Windows/PE.zig");
 const WindowsImports = @import("Windows/Imports.zig");
 const ReleaseOptimizer = @import("Optimize/Release.zig");
 const Project = @import("Project.zig");
+const Packages = @import("Packages.zig");
 const NativeTestRunner = @import("NativeTestRunner.zig");
 const TestDiscovery = @import("TestDiscovery.zig");
 const TargetModule = @import("Target.zig");
@@ -32,6 +35,11 @@ const usage =
     \\reference interpreter, emits an executable, or serves editor requests.
     \\
 ;
+
+test {
+    _ = MachOObject;
+    _ = MacOSLink;
+}
 
 pub fn main(init: std.process.Init) u8 {
     return runCli(init) catch |err| {
@@ -386,6 +394,7 @@ fn compileNativeOptions(
         return 1;
     };
     var boundaries: []const Boundary.Function = &.{};
+    var package_graph: ?Packages.Graph = null;
     const portable_ir = if (options.cache) CompilationCache.loadIr(allocator, init.io, options.source_path, target.name()) else null;
     const program = portable_ir orelse program: {
         var compiler = Project.Compiler.initWithPackagesAndCache(
@@ -403,6 +412,7 @@ fn compileNativeOptions(
             else => return err,
         };
         boundaries = compilation.boundaries;
+        package_graph = compilation.packages;
         // A portable-IR cache entry deliberately contains no target provider or ABI
         // information. Boundary-bearing programs are therefore cached only after
         // target lowering, where their complete native contract is represented.
@@ -422,8 +432,10 @@ fn compileNativeOptions(
         return 1;
     }
 
+    const boundary_providers = try requiredBoundaryProviders(allocator, boundaries, package_graph);
+
     const native_variant = try std.fmt.allocPrint(allocator, "{s}:{s}:{s}", .{ target.name(), @tagName(options.mode), options.source_path });
-    const cache_key = if (options.cache)
+    const cache_key = if (options.cache and boundary_providers.len == 0)
         CompilationCache.key(allocator, init.io, program.files, "compile", native_variant) catch null
     else
         null;
@@ -453,6 +465,25 @@ fn compileNativeOptions(
         std.debug.print("silex: native backend cannot lower this program: {t}\n", .{err});
         return 1;
     };
+    if (target.eql(.macos_arm64) and boundary_providers.len != 0) {
+        const object = MachOObject.emit(allocator, machine) catch |err| {
+            std.debug.print("silex: cannot emit relocatable native object: {t}\n", .{err});
+            return 1;
+        };
+        const object_path = try linkedObjectPath(allocator, options, boundary_providers);
+        if (std.fs.path.dirname(object_path)) |directory| try Io.Dir.cwd().createDirPath(init.io, directory);
+        {
+            const file = try Io.Dir.cwd().createFile(init.io, object_path, .{});
+            defer file.close(init.io);
+            try file.writeStreamingAll(init.io, object);
+        }
+        if (std.fs.path.dirname(options.output_path)) |directory| try Io.Dir.cwd().createDirPath(init.io, directory);
+        MacOSLink.executable(allocator, init.io, object_path, options.output_path, boundary_providers) catch |err| {
+            std.debug.print("silex: cannot link native package artifacts: {t}\n", .{err});
+            return 1;
+        };
+        return 0;
+    }
     const executable = executable: {
         if (target.eql(.macos_arm64)) break :executable MachO.emit(allocator, machine) catch |err| {
             std.debug.print("silex: cannot emit native executable: {t}\n", .{err});
@@ -603,6 +634,38 @@ fn compileNativeOptions(
     return writeExecutable(init, options.output_path, executable);
 }
 
+fn requiredBoundaryProviders(
+    allocator: std.mem.Allocator,
+    boundaries: []const Boundary.Function,
+    graph: ?Packages.Graph,
+) ![]const Packages.BoundaryProvider {
+    const packages = graph orelse return &.{};
+    var providers: std.ArrayList(Packages.BoundaryProvider) = .empty;
+    for (boundaries) |boundary| {
+        const provider = packages.boundaryProvider(boundary.owner, boundary.provider) orelse continue;
+        var duplicate = false;
+        for (providers.items) |existing| if (std.mem.eql(u8, existing.archive, provider.archive)) {
+            duplicate = true;
+            break;
+        };
+        if (!duplicate) try providers.append(allocator, provider);
+    }
+    return providers.toOwnedSlice(allocator);
+}
+
+fn linkedObjectPath(
+    allocator: std.mem.Allocator,
+    options: Cli.CompileOptions,
+    providers: []const Packages.BoundaryProvider,
+) ![]const u8 {
+    var dependencies: std.ArrayList([]const u8) = .empty;
+    try dependencies.appendSlice(allocator, &.{ options.source_path, options.output_path, @tagName(options.mode) });
+    for (providers) |provider| try dependencies.append(allocator, provider.archive);
+    const digest = CompilationCache.artifactKey("linked-object", dependencies.items);
+    const hex = std.fmt.bytesToHex(digest, .lower);
+    return std.fmt.allocPrint(allocator, ".silex/link/{s}.o", .{hex[0..16]});
+}
+
 fn findMachineMain(program: @import("Arm64/Machine.zig").Program) ?usize {
     for (program.functions, 0..) |function, index| {
         if (std.mem.eql(u8, function.name, "main") and function.parameter_count == 0) return index;
@@ -749,6 +812,7 @@ test {
     _ = @import("Arm64/Runner.zig");
     _ = @import("BorrowedReturnTests.zig");
     _ = @import("CallbackTests.zig");
+    _ = @import("CascadeTests.zig");
     _ = @import("MacOS/CodeSignature.zig");
     _ = @import("MacOS/MachO.zig");
     _ = @import("Linux/Elf.zig");
@@ -781,6 +845,7 @@ test {
     _ = @import("OptionalTests.zig");
     _ = @import("ResultTests.zig");
     _ = @import("TryTests.zig");
+    _ = @import("TypedResourceTests.zig");
     _ = @import("TestBlockTests.zig");
     _ = @import("TestDiscovery.zig");
     _ = @import("NativeTestRunner.zig");

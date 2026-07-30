@@ -60,6 +60,16 @@ pub fn expressionTypes(expression: *Ast.Expression, map: []const ?Ast.Type) void
             for (call.named_arguments) |argument| expressionTypes(argument.value, map);
             if (call.receiver) |receiver| expressionTypes(receiver, map);
         },
+        .cascade => |cascade| {
+            expressionTypes(cascade.receiver, map);
+            for (cascade.operations) |operation| switch (operation) {
+                .method_call => |method| {
+                    for (@constCast(method.type_arguments)) |*argument| argument.* = concreteType(argument.*, map);
+                    for (method.arguments) |argument| expressionTypes(argument, map);
+                },
+                .field_assignment => |field| expressionTypes(field.value, map),
+            };
+        },
         .field_access => |access| expressionTypes(access.base, map),
         .generic_reference => |reference| for (@constCast(reference.type_arguments)) |*argument| {
             argument.* = concreteType(argument.*, map);

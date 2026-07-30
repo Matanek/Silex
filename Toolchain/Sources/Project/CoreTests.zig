@@ -2,6 +2,20 @@ const std = @import("std");
 const Compiler = @import("../Project.zig").Compiler;
 const Types = @import("../Types.zig");
 
+fn writeBoundaryArchive(directory: std.Io.Dir) !void {
+    var archive = [_]u8{' '} ** (8 + 60 + 8);
+    @memcpy(archive[0..8], "!<arch>\n");
+    @memcpy(archive[8..24], "probe.o/        ");
+    @memcpy(archive[8 + 48 .. 8 + 58], "8         ");
+    @memcpy(archive[8 + 58 .. 8 + 60], "`\n");
+    std.mem.writeInt(u32, archive[68..72], std.macho.MH_MAGIC_64, .little);
+    std.mem.writeInt(u32, archive[72..76], @bitCast(std.macho.CPU_TYPE_ARM64), .little);
+    try directory.writeFile(std.testing.io, .{
+        .sub_path = "Bridge/Boundary/macos-arm64/libBridge.a",
+        .data = &archive,
+    });
+}
+
 test "compile only the explicit local module closure" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -464,6 +478,91 @@ test "select named package module roots for the macOS platform" {
     try std.testing.expectEqualStrings(
         "function 'Bridge.Implementation.value' with these parameter types is already declared",
         compiler.diagnostic.?.message,
+    );
+}
+
+test "reserve a custom boundary provider to its declaring package" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.createDirPath(std.testing.io, "Bridge/Boundary/macos-arm64");
+    try temporary.dir.createDirPath(std.testing.io, "Bridge/Module");
+    try temporary.dir.createDirPath(std.testing.io, "Bridge/Platform/MacOS/Module");
+    try temporary.dir.createDirPath(std.testing.io, "Bridge/Platform/Linux/Module");
+    try temporary.dir.createDirPath(std.testing.io, "Thief/Module");
+    try temporary.dir.createDirPath(std.testing.io, "Thief/Platform/MacOS/Module");
+    try writeBoundaryArchive(temporary.dir);
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Bridge/Package.json",
+        .data =
+        \\{"name":"Bridge","version":"1.0.0","boundary":{"macos-arm64":{"providers":{"Native":{"archive":"Boundary/macos-arm64/libBridge.a"}}}}}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Bridge/Platform/MacOS/Module/Api.sx",
+        .data =
+        \\use Interop.C
+        \\use Interop.MacOS
+        \\let native_answer = C.function<func() int32>(library:MacOS.Native, name:"boundary_answer")
+        \\public func answer() int32 { return native_answer() }
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Bridge/Platform/Linux/Module/Api.sx",
+        .data =
+        \\use Interop.C
+        \\use Interop.Linux
+        \\let native_answer = C.function<func() int32>(library:Linux.Native, name:"boundary_answer")
+        \\public func answer() int32 { return native_answer() }
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Thief/Package.json",
+        .data = "{\"name\":\"Thief\",\"version\":\"1.0.0\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Thief/Platform/MacOS/Module/Api.sx",
+        .data =
+        \\use Interop.C
+        \\use Interop.MacOS
+        \\let stolen = C.function<func() int32>(library:MacOS.Native, name:"boundary_answer")
+        \\public func answer() int32 { return stolen() }
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "use Bridge.Api\nfunc main() { Api.answer() }",
+    });
+
+    const base = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const input = try std.fs.path.join(allocator, &.{ base, "Main.sx" });
+    var compiler = Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(input);
+    try std.testing.expectEqual(@as(usize, 1), compilation.boundaries.len);
+    try std.testing.expectEqualStrings("MacOS.Native", compilation.boundaries[0].provider);
+    try std.testing.expectEqual(@as(usize, 1), compilation.boundaries[0].owner);
+    try std.testing.expect(compilation.boundaries[0].package_private);
+
+    var unavailable = Compiler.init(allocator, std.testing.io);
+    unavailable.target = .linux_x64;
+    try std.testing.expectError(error.InvalidSource, unavailable.compile(input));
+    try std.testing.expectEqualStrings(
+        "boundary provider 'Native' is not declared by package 'Bridge' for this target",
+        unavailable.diagnostic.?.message,
+    );
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "use Thief.Api\nfunc main() { Api.answer() }",
+    });
+    var rejected = Compiler.init(allocator, std.testing.io);
+    try std.testing.expectError(error.InvalidSource, rejected.compile(input));
+    try std.testing.expectEqualStrings(
+        "boundary provider 'Native' is not declared by package 'Thief' for this target",
+        rejected.diagnostic.?.message,
     );
 }
 

@@ -73,6 +73,7 @@ pub const Instruction = union(enum) {
     address_store: AddressStore,
     reference_store: ReferenceStore,
     reference_offset: ReferenceOffset,
+    reference_indirect_offset: ReferenceOffset,
     aggregate_init: AggregateInit,
     protocol_init: ProtocolInit,
     protocol_test: ProtocolTest,
@@ -530,6 +531,7 @@ pub const ExternalFunction = struct {
     provider: []const u8,
     source_name: []const u8,
     signature: Signature,
+    package_private: bool = false,
 
     pub const Signature = struct {
         arguments: []const AbiValue,
@@ -643,6 +645,10 @@ pub fn validate(program: Program) Error!void {
                     try requireSpan(function, value.operand);
                 },
                 .reference_offset => |value| {
+                    try requireSlot(function, value.result);
+                    try requireSlot(function, value.reference);
+                },
+                .reference_indirect_offset => |value| {
                     try requireSlot(function, value.result);
                     try requireSlot(function, value.reference);
                 },
@@ -912,6 +918,7 @@ pub fn validate(program: Program) Error!void {
 }
 
 fn supportedExternal(function: ExternalFunction) bool {
+    if (function.package_private) return true;
     if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and
         std.mem.eql(u8, function.source_name, "os_unfair_recursive_lock_lock_with_options"))
     {

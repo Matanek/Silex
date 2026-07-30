@@ -97,7 +97,9 @@ pub fn analyzeVariable(self: anytype, builder: anytype, declaration: Ast.Variabl
         );
         return self.fail(if (declaration.initializer) |value| value.position else declaration.name_position, message);
     }
-    if (Resources.containsClass(self, declared_type)) try Resources.retainValue(self, builder, declared_type, initializer.value);
+    if (Resources.containsClass(self, declared_type) and !initializer.transferred) {
+        try Resources.retainValue(self, builder, declared_type, initializer.value);
+    }
     if (declaration.mutable) {
         const local = builder.local_types.items.len;
         try builder.local_types.append(self.allocator, declared_type);
@@ -152,6 +154,9 @@ pub fn analyzeReturn(self: anytype, builder: anytype, function: Ast.Function, st
         const copied_projection = value.borrowed_root != null and expression.value == .field_access and
             !Resources.containsClass(self, value.type);
         if (!copied_projection) try Borrowing.requireOwned(self, value, expression.position, "returned");
+        if (Resources.containsClass(self, value.type) and !value.transferred) {
+            try Resources.retainValue(self, builder, value.type, value.value);
+        }
         try Resources.emitActiveDrops(self, builder, 0);
         try Resources.emitMutexUnlocks(self, builder, 0);
         self.terminate(builder, .{ .return_value = value.value });

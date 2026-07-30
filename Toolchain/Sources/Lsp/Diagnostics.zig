@@ -11,9 +11,11 @@ pub fn analyze(
 ) ![]const Types.Diagnostic {
     var frontend = Frontend.Frontend.init(allocator);
     frontend.checkDocumentInProject(source, has_project_context) catch |err| switch (err) {
-        error.InvalidSource => return allocator.dupe(Types.Diagnostic, &.{
-            Protocol.diagnosticFromSource(source, frontend.diagnostic.?, encoding),
-        }),
+        error.InvalidSource => {
+            return allocator.dupe(Types.Diagnostic, &.{
+                Protocol.diagnosticFromSource(source, frontend.diagnostic.?, encoding),
+            });
+        },
         error.OutOfMemory => return error.OutOfMemory,
     };
     return allocator.alloc(Types.Diagnostic, 0);
@@ -32,6 +34,33 @@ test "clear diagnostics for a valid current program" {
     defer arena.deinit();
     const diagnostics = try analyze(arena.allocator(), "func main() { let value:int = 42 }", .utf16, false);
     try std.testing.expectEqual(@as(usize, 0), diagnostics.len);
+}
+
+test "clear diagnostics for valid cascades owned by the frontend" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const diagnostics = try analyze(arena.allocator(),
+        \\use GFX.Bootstrap
+        \\func main() {
+        \\    var app = Bootstrap.Application()
+        \\        ..install()
+        \\        ..run()
+        \\}
+    , .utf16, true);
+    try std.testing.expectEqual(@as(usize, 0), diagnostics.len);
+}
+
+test "preserve parser diagnostics inside malformed cascades" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const diagnostics = try analyze(arena.allocator(),
+        \\use GFX.Bootstrap
+        \\func main() {
+        \\    var app = Bootstrap.Application()
+        \\        ..run(
+        \\}
+    , .utf16, true);
+    try std.testing.expectEqual(@as(usize, 1), diagnostics.len);
 }
 
 test "do not invent semantic failures before imported overlays exist" {

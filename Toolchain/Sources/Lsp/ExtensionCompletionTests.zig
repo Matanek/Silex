@@ -112,6 +112,61 @@ test "complete imported types and their current extension context" {
     try std.testing.expect(!hasLabel(expression_items, "false"));
 }
 
+test "complete an imported nominal relation before its body exists" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "GFX/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "func main() {}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Package.json",
+        .data = "{\"name\":\"GFX\",\"version\":\"0.1.0\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/Bootstrap.sx",
+        .data = "public protocol Plugin {}",
+    });
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const main_path = try std.fs.path.join(allocator, &.{ root, "Main.sx" });
+    const uri = try std.fmt.allocPrint(allocator, "file://{s}", .{main_path});
+    const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
+
+    const sources = [_][]const u8{
+        \\use GFX.Bootstrap
+        \\
+        \\struct FooPlugin : Bootstrap.Pl
+        \\
+        \\func main() {}
+        ,
+        \\use GFX.Bootstrap
+        \\
+        \\struct FooPlugin : Bootstrap.Pl {}
+        \\
+        \\func main() {}
+        ,
+    };
+    for (sources) |source| {
+        const cursor = std.mem.indexOf(u8, source, "Bootstrap.Pl").? + "Bootstrap.Pl".len;
+        const items = (try Workspace.itemsAt(
+            allocator,
+            std.testing.io,
+            null,
+            root_uri,
+            uri,
+            &.{},
+            source,
+            cursor,
+        )).?;
+        const plugin = itemWithLabel(items, "Plugin").?;
+        try std.testing.expectEqualStrings("Plugin", plugin.insertText.?);
+    }
+}
+
 test "complete imported enum variants according to their payload" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

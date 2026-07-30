@@ -261,10 +261,11 @@ pub fn analyzeCall(
             continue;
         }
         if (parameter.mode != .read) try Borrowing.requireOwned(self, argument, call.arguments[index].position, "passed by value");
-        try argument_ids.append(
-            self.allocator,
-            (try self.coerce(builder, argument, parameter.type, call.arguments[index].position)).value,
-        );
+        const converted = try self.coerce(builder, argument, parameter.type, call.arguments[index].position);
+        if (parameter.mode == .value and Resources.containsClass(self, parameter.type)) {
+            try Resources.retainValue(self, builder, parameter.type, converted.value);
+        }
+        try argument_ids.append(self.allocator, converted.value);
     }
     for (constructor.parameters[arguments.items.len..]) |parameter| {
         const value = try self.analyzeParameterDefault(builder, parameter);
@@ -480,6 +481,9 @@ fn analyzeSelfAssignment(
         );
         return self.fail(assignment.value.?.position, message);
     }
+    if (Resources.containsClass(self, field.type)) {
+        try Resources.retainValue(self, builder, field.type, value.value);
+    }
 
     const structure_index = fieldOwnerIndex(self, structure.name);
     const structure_type = Ast.Type.structure(structure_index);
@@ -552,6 +556,13 @@ fn validateExpressionReads(self: anytype, structure: Ast.Structure, expression: 
             if (call.receiver) |receiver| try validateExpressionReads(self, structure, receiver, initialized);
             for (call.arguments) |argument| try validateExpressionReads(self, structure, argument, initialized);
             for (call.named_arguments) |argument| try validateExpressionReads(self, structure, argument.value, initialized);
+        },
+        .cascade => |cascade| {
+            try validateExpressionReads(self, structure, cascade.receiver, initialized);
+            for (cascade.operations) |operation| switch (operation) {
+                .method_call => |method| for (method.arguments) |argument| try validateExpressionReads(self, structure, argument, initialized),
+                .field_assignment => |field| try validateExpressionReads(self, structure, field.value, initialized),
+            };
         },
         .unary => |unary| try validateExpressionReads(self, structure, unary.operand, initialized),
         .binary => |binary| {

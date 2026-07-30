@@ -15,6 +15,7 @@ pub const SavedRefinement = struct {
 };
 
 pub fn expectedContext(type_value: Types.Type, expression: *const Ast.Expression) ?Types.Type {
+    if (expression.value == .cascade) return expectedContext(type_value, expression.value.cascade.receiver);
     if (expression.value == .sequence_literal) return type_value;
     if (type_value.optionalChild() != null) return type_value;
     if (type_value.functionIndex() != null) return type_value;

@@ -22,6 +22,7 @@ pub const Binding = struct {
 pub const TypedValue = struct {
     type: Types.Type,
     value: Ir.ValueId,
+    transferred: bool = false,
     borrowed_root: ?[]const u8 = null,
     borrowed_mode: Ast.Parameter.Mode = .value,
     reference: ?Ir.ValueId = null,

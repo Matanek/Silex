@@ -1,4 +1,5 @@
 const std = @import("std");
+const macho = std.macho;
 const Modules = @import("Modules.zig");
 const TargetModule = @import("Target.zig");
 
@@ -70,6 +71,13 @@ pub const Package = struct {
     module_roots: []const ModuleRoot,
     inactive_modules: []const []const u8,
     dependencies: []const Dependency,
+    boundary_providers: []const BoundaryProvider = &.{},
+};
+
+pub const BoundaryProvider = struct {
+    name: []const u8,
+    archive: []const u8,
+    frameworks: []const []const u8,
 };
 
 pub const ModuleRoot = struct {
@@ -114,6 +122,16 @@ pub const Graph = struct {
         }
         return false;
     }
+
+    pub fn boundaryProvider(self: Graph, owner: usize, library: []const u8) ?BoundaryProvider {
+        if (owner >= self.packages.len) return null;
+        const separator = std.mem.indexOfScalar(u8, library, '.') orelse return null;
+        const name = library[separator + 1 ..];
+        for (self.packages[owner].boundary_providers) |provider| {
+            if (std.mem.eql(u8, provider.name, name)) return provider;
+        }
+        return null;
+    }
 };
 
 pub const Result = struct {
@@ -125,12 +143,14 @@ const RawManifest = struct {
     name: ?[]const u8 = null,
     version: ?[]const u8 = null,
     dependencies: ?std.json.Value = null,
+    boundary: ?std.json.Value = null,
 };
 
 const ParsedManifest = struct {
     name: ?[]const u8,
     version: ?Version,
     dependencies: []const RequestedDependency,
+    boundary_providers: []const BoundaryProvider,
 };
 
 const RequestedDependency = struct {
@@ -183,6 +203,7 @@ pub const Resolver = struct {
                 .module_roots = roots.active,
                 .inactive_modules = roots.inactive,
                 .dependencies = &.{},
+                .boundary_providers = if (root_manifest) |manifest| manifest.boundary_providers else &.{},
             },
             .state = .visiting,
         });
@@ -315,6 +336,7 @@ pub const Resolver = struct {
                 .module_roots = roots.active,
                 .inactive_modules = roots.inactive,
                 .dependencies = &.{},
+                .boundary_providers = manifest.boundary_providers,
             },
             .state = .visiting,
         });
@@ -470,7 +492,90 @@ pub const Resolver = struct {
             .name = raw.name,
             .version = version,
             .dependencies = try dependencies.toOwnedSlice(self.allocator),
+            .boundary_providers = try self.parseBoundary(raw.boundary, raw.name, std.fs.path.dirname(path) orelse "."),
         };
+    }
+
+    fn parseBoundary(
+        self: *Resolver,
+        value: ?std.json.Value,
+        package_name: ?[]const u8,
+        root: []const u8,
+    ) ![]const BoundaryProvider {
+        const boundary_value = value orelse return &.{};
+        if (package_name == null) return self.fail("an application manifest cannot declare a native boundary");
+        const targets = switch (boundary_value) {
+            .object => |object| object,
+            else => return self.fail("boundary must be an object keyed by target"),
+        };
+        const selected = targets.get(self.target.name()) orelse return &.{};
+        const target_object = switch (selected) {
+            .object => |object| object,
+            else => return self.fail("a boundary target must be an object"),
+        };
+        if (target_object.count() != 1 or target_object.get("providers") == null) {
+            return self.fail("a boundary target accepts only providers");
+        }
+        const providers_object = switch (target_object.get("providers").?) {
+            .object => |object| object,
+            else => return self.fail("boundary providers must be an object"),
+        };
+        var providers: std.ArrayList(BoundaryProvider) = .empty;
+        var iterator = providers_object.iterator();
+        while (iterator.next()) |entry| {
+            const provider_name = entry.key_ptr.*;
+            if (!Modules.validName(provider_name) or std.mem.indexOfScalar(u8, provider_name, '.') != null) {
+                return self.fail("invalid boundary provider name");
+            }
+            const provider = switch (entry.value_ptr.*) {
+                .object => |object| object,
+                else => return self.fail("a boundary provider must be an object"),
+            };
+            if (provider.count() == 0 or provider.count() > 2 or provider.get("archive") == null) {
+                return self.fail("a boundary provider requires archive and optionally frameworks");
+            }
+            var field_iterator = provider.iterator();
+            while (field_iterator.next()) |field| {
+                if (!std.mem.eql(u8, field.key_ptr.*, "archive") and !std.mem.eql(u8, field.key_ptr.*, "frameworks")) {
+                    return self.fail("unsupported boundary provider field");
+                }
+            }
+            const relative_archive = switch (provider.get("archive").?) {
+                .string => |archive| archive,
+                else => return self.fail("boundary archive must be a relative path string"),
+            };
+            if (!validRelativePath(relative_archive)) return self.fail("boundary archive must stay inside its package");
+            const archive = try std.fs.path.join(self.allocator, &.{ root, relative_archive });
+            if (!validArm64Archive(self.io, archive)) return self.fail("boundary archive is not a macOS ARM64 static archive");
+            var frameworks: std.ArrayList([]const u8) = .empty;
+            if (provider.get("frameworks")) |framework_value| {
+                const array = switch (framework_value) {
+                    .array => |array| array,
+                    else => return self.fail("boundary frameworks must be an array of names"),
+                };
+                for (array.items) |item| {
+                    const framework = switch (item) {
+                        .string => |name| name,
+                        else => return self.fail("boundary frameworks must contain names"),
+                    };
+                    if (!Modules.validName(framework) or std.mem.indexOfScalar(u8, framework, '.') != null) {
+                        return self.fail("invalid boundary framework name");
+                    }
+                    for (frameworks.items) |existing| if (std.mem.eql(u8, existing, framework)) {
+                        return self.fail("duplicate boundary framework");
+                    };
+                    try frameworks.append(self.allocator, framework);
+                }
+                std.mem.sort([]const u8, frameworks.items, {}, stringLessThan);
+            }
+            try providers.append(self.allocator, .{
+                .name = provider_name,
+                .archive = archive,
+                .frameworks = try frameworks.toOwnedSlice(self.allocator),
+            });
+        }
+        std.mem.sort(BoundaryProvider, providers.items, {}, boundaryProviderLessThan);
+        return providers.toOwnedSlice(self.allocator);
     }
 
     fn find(self: Resolver, name: []const u8) ?usize {
@@ -492,6 +597,55 @@ fn belongsTo(module_name: []const u8, package_name: []const u8) bool {
             module_name[package_name.len] == '.');
 }
 
+fn validRelativePath(path: []const u8) bool {
+    if (path.len == 0 or std.fs.path.isAbsolute(path) or std.mem.indexOfScalar(u8, path, '\\') != null) return false;
+    var components = std.mem.splitScalar(u8, path, '/');
+    while (components.next()) |component| {
+        if (component.len == 0 or std.mem.eql(u8, component, ".") or std.mem.eql(u8, component, "..")) return false;
+    }
+    return true;
+}
+
+fn validArm64Archive(io: Io, path: []const u8) bool {
+    const file = Io.Dir.cwd().openFile(io, path, .{}) catch return false;
+    defer file.close(io);
+    const stat = file.stat(io) catch return false;
+    var signature: [8]u8 = undefined;
+    if ((file.readPositionalAll(io, &signature, 0) catch return false) != signature.len or
+        !std.mem.eql(u8, &signature, "!<arch>\n")) return false;
+    var found_object = false;
+    var offset: u64 = signature.len;
+    while (offset + 60 <= stat.size) {
+        var header: [60]u8 = undefined;
+        if ((file.readPositionalAll(io, &header, offset) catch return false) != header.len or
+            !std.mem.eql(u8, header[58..60], "`\n")) return false;
+        const member_size = std.fmt.parseInt(u64, std.mem.trim(u8, header[48..58], " "), 10) catch return false;
+        const data_offset = offset + header.len;
+        if (data_offset + member_size > stat.size) return false;
+        const raw_name = std.mem.trimEnd(u8, header[0..16], " ");
+        var object_offset = data_offset;
+        if (std.mem.startsWith(u8, raw_name, "#1/")) {
+            const name_size = std.fmt.parseInt(u64, raw_name[3..], 10) catch return false;
+            if (name_size > member_size) return false;
+            object_offset += name_size;
+        }
+        var object_header: [8]u8 = undefined;
+        if (object_offset + object_header.len <= data_offset + member_size and
+            (file.readPositionalAll(io, &object_header, object_offset) catch return false) == object_header.len and
+            std.mem.readInt(u32, object_header[0..4], .little) == macho.MH_MAGIC_64)
+        {
+            if (std.mem.readInt(u32, object_header[4..8], .little) != @as(u32, @bitCast(macho.CPU_TYPE_ARM64))) return false;
+            found_object = true;
+        }
+        offset = data_offset + member_size + (member_size & 1);
+    }
+    return found_object;
+}
+
+fn boundaryProviderLessThan(_: void, left: BoundaryProvider, right: BoundaryProvider) bool {
+    return std.mem.lessThan(u8, left.name, right.name);
+}
+
 fn exists(io: Io, path: []const u8) !bool {
     _ = Io.Dir.cwd().statFile(io, path, .{}) catch |err| switch (err) {
         error.FileNotFound, error.NotDir => return false,
@@ -508,6 +662,17 @@ fn dependencyLessThan(_: void, left: RequestedDependency, right: RequestedDepend
     return std.mem.lessThan(u8, left.name, right.name);
 }
 
+fn writeTestArm64Archive(directory: Io.Dir, io: Io, path: []const u8) !void {
+    var archive = [_]u8{' '} ** (8 + 60 + 8);
+    @memcpy(archive[0..8], "!<arch>\n");
+    @memcpy(archive[8..24], "probe.o/        ");
+    @memcpy(archive[8 + 48 .. 8 + 58], "8         ");
+    @memcpy(archive[8 + 58 .. 8 + 60], "`\n");
+    std.mem.writeInt(u32, archive[68..72], macho.MH_MAGIC_64, .little);
+    std.mem.writeInt(u32, archive[72..76], @bitCast(macho.CPU_TYPE_ARM64), .little);
+    try directory.writeFile(io, .{ .sub_path = path, .data = &archive });
+}
+
 test "parse exact and caret stable versions" {
     try std.testing.expect((try Constraint.parse("=1.4.1")).accepts(try Version.parse("1.4.1")));
     try std.testing.expect(!(try Constraint.parse("=1.4.1")).accepts(try Version.parse("1.4.2")));
@@ -516,6 +681,65 @@ test "parse exact and caret stable versions" {
     try std.testing.expect((try Constraint.parse("^0.2.1")).accepts(try Version.parse("0.2.9")));
     try std.testing.expect(!(try Constraint.parse("^0.2.1")).accepts(try Version.parse("0.3.0")));
     try std.testing.expectError(error.InvalidVersion, Version.parse("1.2.3-beta"));
+}
+
+test "resolve a target-private ARM64 archive and reject escaping paths" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "Bridge/Boundary/macos-arm64");
+    try writeTestArm64Archive(temporary.dir, std.testing.io, "Bridge/Boundary/macos-arm64/libBridge.a");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Bridge/Package.json",
+        .data =
+        \\{"name":"Bridge","version":"1.0.0","boundary":{"macos-arm64":{"providers":{"Native":{"archive":"Boundary/macos-arm64/libBridge.a","frameworks":["Metal","Cocoa"]}}}}}
+        ,
+    });
+    const base = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Bridge" });
+    var resolver = Resolver.initForTarget(allocator, std.testing.io, null, .macos_arm64);
+    const graph = try resolver.resolve(base);
+    try std.testing.expectEqual(@as(usize, 1), graph.packages[0].boundary_providers.len);
+    const provider = graph.packages[0].boundary_providers[0];
+    try std.testing.expectEqualStrings("Native", provider.name);
+    try std.testing.expect(std.mem.endsWith(u8, provider.archive, "Boundary/macos-arm64/libBridge.a"));
+    try std.testing.expectEqualStrings("Cocoa", provider.frameworks[0]);
+    try std.testing.expectEqualStrings("Metal", provider.frameworks[1]);
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Bridge/Package.json",
+        .data =
+        \\{"name":"Bridge","version":"1.0.0","boundary":{"macos-arm64":{"providers":{"Native":{"archive":"../libBridge.a"}}}}}
+        ,
+    });
+    resolver = Resolver.initForTarget(allocator, std.testing.io, null, .macos_arm64);
+    try std.testing.expectError(error.InvalidPackageGraph, resolver.resolve(base));
+    try std.testing.expectEqualStrings("boundary archive must stay inside its package", resolver.diagnostic.?);
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Bridge/Package.json",
+        .data =
+        \\{"name":"Bridge","version":"1.0.0","boundary":{"macos-arm64":{"providers":{"Native":{"archive":"Boundary/macos-arm64/missing.a"}}}}}
+        ,
+    });
+    resolver = Resolver.initForTarget(allocator, std.testing.io, null, .macos_arm64);
+    try std.testing.expectError(error.InvalidPackageGraph, resolver.resolve(base));
+    try std.testing.expectEqualStrings("boundary archive is not a macOS ARM64 static archive", resolver.diagnostic.?);
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Bridge/Boundary/macos-arm64/invalid.a",
+        .data = "not an archive",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Bridge/Package.json",
+        .data =
+        \\{"name":"Bridge","version":"1.0.0","boundary":{"macos-arm64":{"providers":{"Native":{"archive":"Boundary/macos-arm64/invalid.a"}}}}}
+        ,
+    });
+    resolver = Resolver.initForTarget(allocator, std.testing.io, null, .macos_arm64);
+    try std.testing.expectError(error.InvalidPackageGraph, resolver.resolve(base));
+    try std.testing.expectEqualStrings("boundary archive is not a macOS ARM64 static archive", resolver.diagnostic.?);
 }
 
 test "prefer compatible sibling and otherwise select newest global version" {
