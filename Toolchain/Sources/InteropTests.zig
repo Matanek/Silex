@@ -118,6 +118,33 @@ test "compose typed loads and stores from explicit interop address bits" {
     try std.testing.expect(std.mem.indexOf(u8, text, "boundary.store") != null);
 }
 
+test "compose float32 loads and stores for private platform layouts" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data =
+        \\use Interop.C
+        \\func main() {
+        \\    var storage:uint = 0
+        \\    let address = C.address_bits(C.mutable_pointer(storage))
+        \\    let stored = C.store<float32>(address, 0 as uint, 1.5)
+        \\    assert(C.load<float32>(address, 0 as uint) == 1.5 as float32)
+        \\}
+        ,
+    });
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(input);
+    const text = try Ir.writeText(allocator, compilation.ir);
+    try std.testing.expect(std.mem.indexOf(u8, text, "boundary.load") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "boundary.store") != null);
+    _ = try Lower.lowerBoundaries(allocator, compilation.ir, compilation.boundaries);
+}
+
 test "expose stable int32 storage to a foreign mutable pointer" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

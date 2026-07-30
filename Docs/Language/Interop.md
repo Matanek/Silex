@@ -67,8 +67,8 @@ var seed:uint32 = 0
 let written = getrandom(C.mutable_pointer(seed), 4 as C.Size, 0)
 ```
 
-`C.mutable_pointer` accepts stable `var int32`, `var uint32`, `var int`,
-`var uint`, and fixed arrays of those scalar types. The storage is valid only
+`C.mutable_pointer` accepts stable integer and floating-point scalar variables,
+and fixed arrays of those scalar types. The storage is valid only
 for the direct foreign call; the address cannot be retained or returned.
 
 Byte-oriented system calls cannot consume a `uint8[..]` view directly because
@@ -83,7 +83,7 @@ unaliased platform buffers; it does not make ordinary Silex strings mutable.
 Platform code can inspect and populate fields inside that direct-call storage
 with `C.load<T>(address, byte_offset)` and
 `C.store<T>(address, byte_offset, value)`. Both operations are restricted to
-integer scalar types and explicit byte offsets. `C.store` evaluates to the
+integer or floating-point scalar types and explicit byte offsets. `C.store` evaluates to the
 stored value. These primitives are intended for private platform layouts such
 as `sockaddr`; they do not make those layouts part of a package's public API.
 

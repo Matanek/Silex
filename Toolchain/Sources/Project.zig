@@ -1210,6 +1210,12 @@ pub const Compiler = struct {
         const target = try self.structureTarget(module, name) orelse try self.enumTarget(module, name) orelse return;
         const target_program = self.units[target.module].program.?;
         if (findStructure(target_program, target.declaration)) |structure| {
+            if (structure.is_tuple) {
+                for (structure.fields) |field| {
+                    try self.requirePublicType(target.module, field.type, position, declaration_kind, declaration_name);
+                }
+                return;
+            }
             if (structure.collection) |collection| {
                 return self.requirePublicType(module, collection.element, position, declaration_kind, declaration_name);
             }
@@ -1510,6 +1516,10 @@ pub const Compiler = struct {
             .sequence_literal => |*literal| {
                 if (literal.inferred_type) |type_value| literal.inferred_type = self.remapType(module, type_map, type_value);
                 for (literal.values) |value| try self.rewriteExpression(module, value, type_map);
+            },
+            .tuple_literal => |*literal| {
+                literal.placeholder_type = self.remapType(module, type_map, literal.placeholder_type);
+                for (literal.elements) |element| try self.rewriteExpression(module, element.value, type_map);
             },
             .index_access => |access| {
                 try self.rewriteExpression(module, access.base, type_map);

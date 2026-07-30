@@ -90,7 +90,9 @@ pub const Specializer = struct {
         const concrete_enum_count = self.enums.items.len;
         for (0..concrete_enum_count) |enum_index| try self.rewriteEnumAt(enum_index, &.{});
         for (program.structures) |structure| {
-            if (structure.type_parameters.len == 0 and !self.collectionNeedsSpecialization(structure)) {
+            if (structure.type_parameters.len == 0 and !self.collectionNeedsSpecialization(structure) and
+                !self.tupleNeedsSpecialization(structure))
+            {
                 try self.structures.append(self.allocator, structure);
             }
         }
@@ -644,6 +646,17 @@ pub const Specializer = struct {
                     .inferred_type = if (literal.inferred_type) |type_value| try self.rewriteType(type_value, arguments, expression.position) else null,
                 } };
             },
+            .tuple_literal => |literal| value: {
+                var copy = literal;
+                const elements = try self.allocator.alloc(Ast.Expression.TupleLiteral.Element, literal.elements.len);
+                for (literal.elements, 0..) |element, index| {
+                    elements[index] = element;
+                    elements[index].value = try self.rewriteExpression(element.value, arguments, locals);
+                }
+                copy.elements = elements;
+                copy.placeholder_type = try self.rewriteType(copy.placeholder_type, arguments, expression.position);
+                break :value .{ .tuple_literal = copy };
+            },
             .index_access => |access| value: {
                 var copy = access;
                 copy.base = try self.rewriteExpression(access.base, arguments, locals);
@@ -1064,6 +1077,7 @@ pub const Specializer = struct {
         }
         if (self.sourceStructureForType(type_value)) |structure| {
             if (self.collectionNeedsSpecialization(structure)) return self.instantiateCollection(structure, arguments, position);
+            if (self.tupleNeedsSpecialization(structure)) return self.instantiateTuple(structure, arguments, position);
         }
         if (self.structureTemplateForType(type_value)) |template| {
             const kind = if (template.is_class) "class" else "struct";
@@ -1139,6 +1153,42 @@ pub const Specializer = struct {
         try self.structures.append(self.allocator, concrete);
         try self.rewriteStructureAt(structure_index, arguments, self.specialization_file orelse position.file);
         return type_value;
+    }
+
+    fn instantiateTuple(
+        self: *Specializer,
+        template: Ast.Structure,
+        arguments: []const Ast.Type,
+        position: Source.Position,
+    ) SpecializeError!Ast.Type {
+        const fields = try self.allocator.alloc(Ast.StructureField, template.fields.len);
+        var name = try self.allocator.dupe(u8, "(");
+        for (template.fields, 0..) |field, index| {
+            fields[index] = field;
+            fields[index].type = try self.rewriteType(field.type, arguments, position);
+            name = try std.fmt.allocPrint(self.allocator, "{s}{s}{s}{s}", .{
+                name,
+                if (index == 0) "" else ", ",
+                if (template.tuple_named) try std.fmt.allocPrint(self.allocator, "{s}:", .{field.name}) else "",
+                self.typeName(fields[index].type),
+            });
+        }
+        name = try std.fmt.allocPrint(self.allocator, "{s})", .{name});
+        if (self.typeForName(name)) |existing| return existing;
+        const result: Ast.Type = .structure(self.type_names.items.len);
+        try self.type_names.append(self.allocator, name);
+        var concrete = template;
+        concrete.name = name;
+        concrete.fields = fields;
+        concrete.tuple_placeholder = false;
+        try self.structures.append(self.allocator, concrete);
+        return result;
+    }
+
+    fn tupleNeedsSpecialization(self: *Specializer, structure: Ast.Structure) bool {
+        if (!structure.is_tuple or structure.tuple_placeholder) return false;
+        for (structure.fields) |field| if (self.typeNeedsSpecialization(field.type)) return true;
+        return false;
     }
 
     pub fn instantiateStructure(
@@ -1319,6 +1369,16 @@ pub const Specializer = struct {
             }
             return true;
         }
+        if (self.sourceStructureForType(pattern)) |pattern_structure| if (pattern_structure.is_tuple) {
+            const actual_structure = self.structureForType(actual) orelse return false;
+            if (!actual_structure.is_tuple or pattern_structure.tuple_named != actual_structure.tuple_named or
+                pattern_structure.fields.len != actual_structure.fields.len) return false;
+            for (pattern_structure.fields, actual_structure.fields) |pattern_field, actual_field| {
+                if (pattern_structure.tuple_named and !std.mem.eql(u8, pattern_field.name, actual_field.name)) return false;
+                if (!self.unifyType(pattern_field.type, actual_field.type, inferred)) return false;
+            }
+            return true;
+        };
         if (self.collectionForSourceType(pattern)) |pattern_collection| {
             const actual_collection = self.collectionForSourceType(actual) orelse return false;
             return (pattern_collection.view or pattern_collection.length == actual_collection.length) and
@@ -1400,6 +1460,16 @@ pub const Specializer = struct {
             return (pattern_collection.view or pattern_collection.length == actual_collection.length) and
                 self.matchesPattern(pattern_collection.element, actual_collection.element, arguments);
         }
+        if (self.sourceStructureForType(pattern)) |pattern_structure| if (pattern_structure.is_tuple) {
+            const actual_structure = self.structureForType(actual) orelse return false;
+            if (!actual_structure.is_tuple or pattern_structure.tuple_named != actual_structure.tuple_named or
+                pattern_structure.fields.len != actual_structure.fields.len) return false;
+            for (pattern_structure.fields, actual_structure.fields) |pattern_field, actual_field| {
+                if (pattern_structure.tuple_named and !std.mem.eql(u8, pattern_field.name, actual_field.name)) return false;
+                if (!self.matchesPattern(pattern_field.type, actual_field.type, arguments)) return false;
+            }
+            return true;
+        };
         return compatible(actual, pattern);
     }
 
@@ -1487,6 +1557,7 @@ pub const Specializer = struct {
             .conversion => |conversion| conversion.target,
             .string_count => .int,
             .sequence_literal => |literal| literal.inferred_type,
+            .tuple_literal => |literal| literal.placeholder_type,
             .index_access => |access| index_type: {
                 const base = self.inferExpressionType(access.base, locals) orelse break :index_type null;
                 const structure = self.structureForType(base) orelse break :index_type null;
@@ -1547,8 +1618,17 @@ pub const Specializer = struct {
             for (generic.arguments) |argument| if (self.typeNeedsSpecialization(argument)) return true;
             return false;
         }
+        if (type_value.functionIndex()) |index| {
+            if (index >= self.source.function_types.len) return false;
+            const signature = self.source.function_types[index];
+            if (self.typeNeedsSpecialization(signature.return_type)) return true;
+            for (signature.parameters) |parameter| if (self.typeNeedsSpecialization(parameter.type)) return true;
+        }
         if (self.sourceStructureForType(type_value)) |nested| if (nested.collection != null) {
             return self.collectionNeedsSpecialization(nested);
+        };
+        if (self.sourceStructureForType(type_value)) |nested| if (nested.is_tuple) {
+            return self.tupleNeedsSpecialization(nested);
         };
         return false;
     }

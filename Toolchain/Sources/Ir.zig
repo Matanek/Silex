@@ -499,6 +499,8 @@ pub const StructureField = struct {
 pub const Structure = struct {
     name: []const u8,
     fields: []const StructureField,
+    is_tuple: bool = false,
+    tuple_named: bool = false,
     is_class: bool = false,
     is_static: bool = false,
     is_protocol: bool = false,
@@ -548,8 +550,9 @@ pub const Global = struct {
 
 pub fn writeText(allocator: Allocator, program: Program) Error![]u8 {
     var output: std.ArrayList(u8) = .empty;
-    for (program.structures, 0..) |structure, structure_index| {
-        if (structure_index != 0) try output.append(allocator, '\n');
+    for (program.structures) |structure| {
+        if (structure.is_tuple) continue;
+        if (output.items.len != 0) try output.append(allocator, '\n');
         try output.appendSlice(allocator, if (structure.is_protocol) "protocol @" else "struct @");
         try output.appendSlice(allocator, structure.name);
         try output.appendSlice(allocator, " {\n");
@@ -563,7 +566,7 @@ pub fn writeText(allocator: Allocator, program: Program) Error![]u8 {
         try output.appendSlice(allocator, "}\n");
     }
     for (program.enums) |enumeration| {
-        if (program.structures.len != 0 or enumeration.type_index != 0) try output.append(allocator, '\n');
+        if (output.items.len != 0) try output.append(allocator, '\n');
         try output.appendSlice(allocator, "enum @");
         try output.appendSlice(allocator, enumeration.name);
         if (enumeration.raw_type) |raw_type| {
@@ -593,7 +596,8 @@ pub fn writeText(allocator: Allocator, program: Program) Error![]u8 {
         try output.appendSlice(allocator, "}\n");
     }
     for (program.functions, 0..) |function, function_index| {
-        if (function_index != 0 or program.structures.len != 0 or program.enums.len != 0) try output.append(allocator, '\n');
+        _ = function_index;
+        if (output.items.len != 0) try output.append(allocator, '\n');
         try output.appendSlice(allocator, "func @");
         try output.appendSlice(allocator, function.name);
         try output.append(allocator, '(');
@@ -1036,7 +1040,7 @@ fn writeInstruction(
             try output.appendSlice(allocator, ", ");
             try appendValueChecked(output, allocator, function, load.byte_offset);
             if ((function.value_types[load.address] != .address and function.value_types[load.address] != .uint) or function.value_types[load.byte_offset] != .uint or
-                function.value_types[load.result] != load.type or (!load.type.isInteger() and load.type != .address)) return error.InvalidProgram;
+                function.value_types[load.result] != load.type or (!load.type.isInteger() and !load.type.isFloat() and load.type != .address)) return error.InvalidProgram;
         },
         .address_store => |store| {
             try output.appendSlice(allocator, "boundary.store ");
@@ -1047,7 +1051,7 @@ fn writeInstruction(
             try appendValueChecked(output, allocator, function, store.operand);
             if ((function.value_types[store.address] != .address and function.value_types[store.address] != .uint) or
                 function.value_types[store.byte_offset] != .uint or function.value_types[store.operand] != store.type or
-                !store.type.isInteger()) return error.InvalidProgram;
+                (!store.type.isInteger() and !store.type.isFloat())) return error.InvalidProgram;
         },
         .reference_store => |store| {
             try output.appendSlice(allocator, "reference.store ");
@@ -1172,6 +1176,7 @@ fn appendType(output: *std.ArrayList(u8), allocator: Allocator, program: Program
     }
     if (type_value.structureIndex()) |index| {
         if (index >= program.structures.len) return error.InvalidProgram;
+        if (program.structures[index].is_tuple) return output.appendSlice(allocator, program.structures[index].name);
         try output.append(allocator, '@');
         return output.appendSlice(allocator, program.structures[index].name);
     }

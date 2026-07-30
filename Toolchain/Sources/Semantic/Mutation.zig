@@ -102,6 +102,23 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
             return self.fail(target_field.name_position, message);
         }
         const structure = self.structures[structure_index];
+        if (structure.is_tuple) {
+            for (structure.fields) |field| {
+                if (!std.mem.eql(u8, field.name, target_field.name)) continue;
+                const message = try std.fmt.allocPrint(
+                    self.allocator,
+                    "cannot assign through immutable field '{s}'",
+                    .{field.name},
+                );
+                return self.fail(target_field.name_position, message);
+            }
+            const message = try std.fmt.allocPrint(
+                self.allocator,
+                "tuple '{s}' has no field named '{s}'",
+                .{ structure.name, target_field.name },
+            );
+            return self.fail(target_field.name_position, message);
+        }
         if (structure.is_class) mutable_path = true;
         const source_structure = self.program.structures[structure_index];
         if (source_structure.drop != null and !self.ownerStorageVisible(structure_index, target_field.name_position)) {

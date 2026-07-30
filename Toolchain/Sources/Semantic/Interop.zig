@@ -723,16 +723,18 @@ fn externalType(self: anytype, value: Ast.ExternalType, position: anytype) !Type
         .int64 => .int,
         .uint32 => .uint32,
         .uint64 => .uint,
+        .float32 => .float32,
+        .float64 => .float64,
         .size => .uint,
         .signed_size => .int,
         .read_pointer => |child| if (child == .uint8)
             .address
         else
             self.fail(position, "C.Pointer currently supports only uint8"),
-        .mutable_pointer => |child| if (child == .uint8 or child == .int32 or child == .uint32 or child == .int or child == .uint)
+        .mutable_pointer => |child| if (child == .uint8 or child == .int32 or child == .uint32 or child == .int or child == .uint or child == .float32 or child == .float64)
             .address
         else
-            self.fail(position, "C.MutablePointer currently supports int32, uint32, int, and uint"),
+            self.fail(position, "C.MutablePointer currently supports integer and floating-point scalars"),
     };
 }
 
@@ -742,7 +744,7 @@ pub fn analyzeIntrinsic(self: anytype, builder: anytype, call: Ast.Expression.Ca
             return self.fail(call.name_position, "C.load<T> expects an address and a uint byte offset");
         }
         const loaded_type = call.type_arguments[0];
-        if (!loaded_type.isInteger()) return self.fail(call.name_position, "C.load<T> supports integer scalar types");
+        if (!loaded_type.isInteger() and !loaded_type.isFloat()) return self.fail(call.name_position, "C.load<T> supports numeric scalar types");
         const address = try self.analyzeExpression(builder, call.arguments[0]);
         if (address.type != .address and address.type != .uint) return self.fail(call.arguments[0].position, "C.load<T> expects an interop address or address bits");
         const byte_offset = try self.analyzeExpressionExpected(builder, call.arguments[1], .uint);
@@ -761,7 +763,7 @@ pub fn analyzeIntrinsic(self: anytype, builder: anytype, call: Ast.Expression.Ca
             return self.fail(call.name_position, "C.store<T> expects an address, a uint byte offset, and a value");
         }
         const stored_type = call.type_arguments[0];
-        if (!stored_type.isInteger()) return self.fail(call.name_position, "C.store<T> supports integer scalar types");
+        if (!stored_type.isInteger() and !stored_type.isFloat()) return self.fail(call.name_position, "C.store<T> supports numeric scalar types");
         const address = try self.analyzeExpression(builder, call.arguments[0]);
         if (address.type != .address and address.type != .uint) return self.fail(call.arguments[0].position, "C.store<T> expects an interop address or address bits");
         const byte_offset = try self.analyzeExpressionExpected(builder, call.arguments[1], .uint);
@@ -914,14 +916,14 @@ pub fn analyzeIntrinsic(self: anytype, builder: anytype, call: Ast.Expression.Ca
             return self.fail(call.name_position, "C.mutable_pointer expects one stable mutable value");
         }
         const prepared = try @import("MutableReferences.zig").prepare(self, builder, call.arguments[0], null);
-        const supported_scalar = prepared.type == .int32 or prepared.type == .uint32 or prepared.type == .int or prepared.type == .uint;
+        const supported_scalar = prepared.type == .int32 or prepared.type == .uint32 or prepared.type == .int or prepared.type == .uint or prepared.type == .float32 or prepared.type == .float64;
         const supported_array = if (Collections.collectionForType(self.structures, prepared.type)) |collection|
             collection.length != null and
-                (collection.element == .int32 or collection.element == .uint32 or collection.element == .int or collection.element == .uint)
+                (collection.element == .int32 or collection.element == .uint32 or collection.element == .int or collection.element == .uint or collection.element == .float32 or collection.element == .float64)
         else
             false;
         if (!supported_scalar and !supported_array) {
-            return self.fail(call.name_position, "C.mutable_pointer supports int32, uint32, int, uint, and their fixed arrays");
+            return self.fail(call.name_position, "C.mutable_pointer supports numeric scalars and their fixed arrays");
         }
         if (prepared.temporary != null) {
             return self.fail(call.arguments[0].position, "C.mutable_pointer requires stable mutable storage");

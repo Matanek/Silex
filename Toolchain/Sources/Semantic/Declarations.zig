@@ -21,7 +21,7 @@ pub fn prepareStructures(self: anytype) ![]const Ir.Structure {
             return self.fail(structure.name_position, message);
         };
         for (structure.fields, 0..) |field, field_index| {
-            if (field.type == .void) return self.fail(field.name_position, "a structure field cannot have type 'void'");
+            if (field.type == .void and !structure.tuple_placeholder) return self.fail(field.name_position, "a structure field cannot have type 'void'");
             for (structure.fields[0..field_index]) |previous| if (std.mem.eql(u8, field.name, previous.name)) {
                 const message = try std.fmt.allocPrint(self.allocator, "field '{s}' is already declared in this structure", .{field.name});
                 return self.fail(field.name_position, message);
@@ -48,6 +48,8 @@ pub fn prepareStructures(self: anytype) ![]const Ir.Structure {
         structures[type_index] = .{
             .name = name,
             .fields = fields,
+            .is_tuple = declaration.is_tuple,
+            .tuple_named = declaration.tuple_named,
             .is_class = declaration.is_class,
             .is_static = declaration.is_static,
             .is_protocol = declaration.is_protocol,

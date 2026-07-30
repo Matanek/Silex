@@ -11,6 +11,7 @@ const Mutation = @import("Mutation.zig");
 const Moves = @import("Moves.zig");
 const Copies = @import("Copies.zig");
 const Cascades = @import("Cascades.zig");
+const Tuples = @import("Tuples.zig");
 const Borrowing = @import("Borrowing.zig");
 const Bindings = @import("Bindings.zig");
 const MutableReferences = @import("MutableReferences.zig");
@@ -397,7 +398,10 @@ pub const Analyzer = struct {
     fn analyzeStatement(self: *Analyzer, builder: *FunctionBuilder, function: Ast.Function, statement: Ast.Statement) AnalyzeError!bool {
         return switch (statement) {
             .variable_declaration => |declaration| variable: {
-                try Bindings.analyzeVariable(self, builder, declaration);
+                if (declaration.destructuring.len != 0)
+                    try Tuples.analyzeDestructuring(self, builder, declaration)
+                else
+                    try Bindings.analyzeVariable(self, builder, declaration);
                 break :variable false;
             },
             .assignment_statement => |assignment| assignment_statement: {
@@ -505,6 +509,7 @@ pub const Analyzer = struct {
             .conversion => |conversion| self.analyzeConversion(builder, conversion),
             .string_count => |operand| self.analyzeStringCount(builder, operand),
             .sequence_literal => |literal| Collections.analyzeLiteral(self, builder, literal, expected, expression.position),
+            .tuple_literal => |literal| Tuples.analyzeLiteral(self, builder, literal, expected, expression.position),
             .index_access => |access| Collections.analyzeIndex(self, builder, access),
             .slice_access => |access| Collections.analyzeSlice(self, builder, access, expected),
             .match_expression => |match_value| Matches.analyze(self, builder, match_value),
@@ -827,11 +832,24 @@ pub const Analyzer = struct {
         };
         if (try Enums.analyzeProperty(self, builder, base, access.name, access.name_position)) |value| return value;
         const structure = self.structures[structure_index];
+        if (structure.is_tuple) {
+            if (!structure.tuple_named) {
+                return self.fail(access.name_position, "a positional tuple has no named members; use destructuring");
+            }
+            for (structure.fields, 0..) |field, field_index| {
+                if (!std.mem.eql(u8, field.name, access.name)) continue;
+                const result = try self.newValue(builder, field.type);
+                try self.emit(builder, .{ .field_load = .{ .result = result, .base = base.value, .field = field_index } });
+                return .{ .type = field.type, .value = result, .borrowed_root = base.borrowed_root, .borrowed_mode = base.borrowed_mode };
+            }
+            const message = try std.fmt.allocPrint(self.allocator, "type '{s}' has no member named '{s}'", .{ self.typeName(base.type), access.name });
+            return self.fail(access.name_position, message);
+        }
         const declaration = self.findAstStructure(structure.name) orelse {
             const message = try std.fmt.allocPrint(self.allocator, "type '{s}' has no fields", .{self.typeName(base.type)});
             return self.fail(access.name_position, message);
         };
-        if (declaration.drop != null and !self.ownerStorageVisible(structure_index, access.name_position)) {
+        if (!structure.is_tuple and declaration.drop != null and !self.ownerStorageVisible(structure_index, access.name_position)) {
             return self.fail(access.name_position, "owner structure storage is private to its declaring file and direct module users");
         }
         if (declaration.is_internal and access.name_position.file != declaration.position.file) {
@@ -869,7 +887,7 @@ pub const Analyzer = struct {
         }
         const message = try std.fmt.allocPrint(
             self.allocator,
-            "structure '{s}' has no field named '{s}'",
+            "type '{s}' has no member named '{s}'",
             .{ structure.name, access.name },
         );
         return self.fail(access.name_position, message);

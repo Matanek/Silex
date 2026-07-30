@@ -106,18 +106,21 @@ pub fn itemsAt(
                 .kind = CompletionKind.keyword,
                 .detail = "Silex fundamental type",
             }, 10, false);
-            if (program) |parsed| for (parsed.structures) |structure| try appendCandidate(
-                allocator,
-                &candidates,
-                context,
-                .{
-                    .label = structure.name,
-                    .kind = structureCompletionKind(structure),
-                    .detail = structureDetail(structure),
-                },
-                8,
-                false,
-            );
+            if (program) |parsed| for (parsed.structures) |structure| {
+                if (structure.is_tuple) continue;
+                try appendCandidate(
+                    allocator,
+                    &candidates,
+                    context,
+                    .{
+                        .label = structure.name,
+                        .kind = structureCompletionKind(structure),
+                        .detail = structureDetail(structure),
+                    },
+                    8,
+                    false,
+                );
+            };
             if (program) |parsed| for (parsed.enums) |enumeration| try appendCandidate(
                 allocator,
                 &candidates,
@@ -605,6 +608,7 @@ fn appendMembers(
         return;
     }
     const structure = findStructure(program, type_name) orelse return;
+    if (structure.is_tuple and !structure.tuple_named) return;
     if (std.mem.eql(u8, std.mem.trim(u8, receiver, " \t\r\n"), structure.name)) {
         for (program.structures) |nested| {
             const enclosing = nested.enclosing orelse continue;
@@ -722,7 +726,7 @@ fn appendExpressionSymbols(
         }, typedPriority(25, expected_type, if (passed_as_value) "function" else return_type), !passed_as_value);
     }
     for (program.structures) |structure| {
-        if (structure.is_protocol) continue;
+        if (structure.is_protocol or structure.is_tuple) continue;
         if (!matchesExpectedType(expected_type, structure.name)) continue;
         if (structure.constructors.len == 0) {
             try appendCandidate(allocator, candidates, context, .{
@@ -1053,7 +1057,19 @@ fn resolveReceiverType(
             }
         }
     }
+    if (current_type) |candidate| if (findStructure(program, candidate) == null) {
+        for (program.functions) |function| if (std.mem.eql(u8, function.name, candidate)) {
+            current_type = memberTypeName(program, function.return_type);
+            break;
+        };
+    };
     while (parts.next()) |field_name| {
+        if (current_type) |candidate| if (findStructure(program, candidate) == null) {
+            for (program.functions) |function| if (std.mem.eql(u8, function.name, candidate)) {
+                current_type = memberTypeName(program, function.return_type);
+                break;
+            };
+        };
         const owner = findStructure(program, current_type orelse return null) orelse return null;
         var next: ?[]const u8 = null;
         for (owner.fields) |field| if (std.mem.eql(u8, field.name, field_name)) {
@@ -2007,6 +2023,37 @@ test "complete a terminal member expression from its static type" {
     try std.testing.expectEqual(@as(usize, 1), protocol_items.len);
     try std.testing.expect(contains(protocol_items, "to_str"));
     try std.testing.expect(!contains(protocol_items, "x"));
+}
+
+test "complete named tuple members returned by a function" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source =
+        \\func size() (width:int, height:int) { return (width:1280, height:720) }
+        \\func main() {
+        \\    let value = size()
+        \\    print(value.)
+        \\}
+    ;
+    const cursor = std.mem.indexOf(u8, source, "value.").? + "value.".len;
+    const items = try itemsAt(arena.allocator(), source, cursor, .trigger_character);
+    try std.testing.expectEqual(@as(usize, 2), items.len);
+    try std.testing.expect(contains(items, "width"));
+    try std.testing.expect(contains(items, "height"));
+    const width = items[indexOf(items, "width").?];
+    try std.testing.expectEqualStrings("width:int", width.detail);
+}
+
+test "do not invent members for positional tuples" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source =
+        \\func pair() (int, int) { return (1, 2) }
+        \\func main() { print(pair().) }
+    ;
+    const cursor = std.mem.indexOf(u8, source, "pair().").? + "pair().".len;
+    const items = try itemsAt(arena.allocator(), source, cursor, .trigger_character);
+    try std.testing.expectEqual(@as(usize, 0), items.len);
 }
 
 test "complete self members immediately after the dot" {

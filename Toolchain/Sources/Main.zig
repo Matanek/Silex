@@ -832,6 +832,7 @@ test {
     _ = @import("SnapshotTests.zig");
     _ = @import("EnumTests.zig");
     _ = @import("FixedArrayTests.zig");
+    _ = @import("TupleTests.zig");
     _ = @import("DynamicListTests.zig");
     _ = @import("CollectionMutationTests.zig");
     _ = @import("CollectionSliceTests.zig");

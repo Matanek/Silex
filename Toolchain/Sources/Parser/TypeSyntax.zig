@@ -2,6 +2,7 @@ const std = @import("std");
 const Ast = @import("../Ast.zig");
 const Collections = @import("Collections.zig");
 const Generics = @import("Generics.zig");
+const Tuples = @import("Tuples.zig");
 
 pub fn parseParameter(self: anytype) !Ast.Parameter {
     if (self.current.tag != .identifier) return self.fail("expected parameter name");
@@ -33,6 +34,10 @@ pub fn parseType(self: anytype) !Ast.Type {
     const type_position = self.current.position;
     var consumed = false;
     var result: Ast.Type = switch (self.current.tag) {
+        .left_parenthesis => tuple: {
+            consumed = true;
+            break :tuple try Tuples.parseType(self, type_position);
+        },
         .keyword_func => function: {
             try self.advance();
             try self.expect(.left_parenthesis, "expected '(' after 'func' in function type");
@@ -187,6 +192,7 @@ fn startsType(tag: anytype) bool {
         .keyword_float64,
         .keyword_str,
         .identifier,
+        .left_parenthesis,
         => true,
         else => false,
     };

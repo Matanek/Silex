@@ -74,11 +74,12 @@ open Silex document
 - A `mutex` block lowers to paired portable `mutex.lock` and `mutex.unlock`
   effects. Semantic control-flow cleanup inserts unlocks before every exit;
   target lowering owns the process-wide recursive lock representation.
-- Nominal structures are portable IR declarations. Construction records one
-  typed value per declared field and reads select fields by structured indices;
-  source code never observes a tuple, address, offset, layout or copy machine
-  operation. Calls, returns, local storage and recursive equality preserve
-  value semantics in the reference interpreter and native backend.
+- Nominal structures and structural tuples remain typed aggregates in portable
+  IR. Construction records one typed value per element and reads select
+  elements by structured indices; source code never observes an address,
+  offset, layout or copy machine operation. Calls, returns, local storage and
+  recursive equality preserve value semantics in the reference interpreter and
+  native backend.
 - Class roots lower to typed retain and finalization operations. Their runtime
   representation, unique-finalization guard, cycle handling and target layout
   remain private to the interpreter and target lowering; source code observes

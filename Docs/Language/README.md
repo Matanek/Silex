@@ -44,6 +44,7 @@ syntax and overload behavior matter.
 - [Extend an existing type](Data-types/Extensions.md)
 - [Represent absence with optionals](Data-types/Optionals.md)
 - [Represent choices with enums](Data-types/Enums.md)
+- [Group structural values with tuples](Data-types/Tuples.md)
 
 Generic structures, classes, and enums are documented in their respective
 pages. The same pages explain `drop` where those types can declare it.
