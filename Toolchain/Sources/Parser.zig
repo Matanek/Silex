@@ -111,17 +111,22 @@ pub const Parser = struct {
         try functions.appendSlice(self.allocator, self.anonymous_functions.items);
         if (external_functions.items.len != 0) {
             var has_c = false;
+            var has_boundary = false;
             var has_macos = false;
             var has_linux = false;
             var has_windows = false;
             for (uses.items) |use| {
                 has_c = has_c or std.mem.eql(u8, use.path, "Interop.C");
+                has_boundary = has_boundary or std.mem.eql(u8, use.path, "Interop.Boundary");
                 has_macos = has_macos or std.mem.eql(u8, use.path, "Interop.MacOS");
                 has_linux = has_linux or std.mem.eql(u8, use.path, "Interop.Linux");
                 has_windows = has_windows or std.mem.eql(u8, use.path, "Interop.Windows");
             }
             if (!has_c) return self.failAt(external_functions.items[0].position, "C.function requires 'use Interop.C'");
             for (external_functions.items) |external| {
+                if (std.mem.startsWith(u8, external.library, "Boundary.") and !has_boundary) {
+                    return self.failAt(external.position, "Boundary library requires 'use Interop.Boundary'");
+                }
                 if (std.mem.startsWith(u8, external.library, "MacOS.") and !has_macos) {
                     return self.failAt(external.position, "MacOS library requires 'use Interop.MacOS'");
                 }

@@ -26,7 +26,8 @@ pub fn prepare(self: anytype) ![]const Boundary.Function {
                 external.position,
                 "interop provider must name its platform",
             );
-            if (!std.mem.eql(u8, external.library[0..separator], expected)) {
+            const namespace = external.library[0..separator];
+            if (!std.mem.eql(u8, namespace, "Boundary") and !std.mem.eql(u8, namespace, expected)) {
                 const message = try std.fmt.allocPrint(
                     self.allocator,
                     "interop provider '{s}' is unavailable for target '{s}'",
@@ -696,7 +697,16 @@ fn customProviderAvailable(self: anytype, external: Ast.ExternalFunction) !bool 
     const separator = std.mem.indexOfScalar(u8, external.library, '.') orelse return false;
     const provider_name = external.library[separator + 1 ..];
     for (package.boundary_providers) |provider| {
-        if (std.mem.eql(u8, provider.name, provider_name)) return true;
+        if (!std.mem.eql(u8, provider.name, provider_name)) continue;
+        if (!std.mem.startsWith(u8, external.library, "Boundary.")) {
+            const message = try std.fmt.allocPrint(
+                self.allocator,
+                "package boundary provider '{s}' must use library:Boundary.{s}",
+                .{ provider_name, provider_name },
+            );
+            return self.fail(external.position, message);
+        }
+        return true;
     }
     const message = try std.fmt.allocPrint(
         self.allocator,

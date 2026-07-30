@@ -365,6 +365,13 @@ test "lower Windows ProcessPrng through the shared ARM64 machine contract" {
 test "reject incomplete and invalid C.function declarations" {
     try expectError(
         \\use Interop.C
+        \\let native = C.function<func() int32>(library:Boundary.Native, name:"answer")
+        \\func main() {}
+    ,
+        "Boundary library requires 'use Interop.Boundary'",
+    );
+    try expectError(
+        \\use Interop.C
         \\let write = C.function<func(int32, C.Pointer<uint8>, C.Size) C.SignedSize>(library:MacOS.lib_system, name:"write")
         \\func main() {}
     ,

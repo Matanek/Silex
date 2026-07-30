@@ -103,8 +103,9 @@ The implemented surface is deliberately narrow:
   `windows-arm64` for the implemented STD slices;
 - validated providers: `MacOS.lib_system`, `Linux.kernel`,
   `Windows.kernel32`, `Windows.bcrypt_primitives`, `Windows.ucrtbase`, and
-  `Windows.ws2_32`, plus package-private static providers authorized by the
-  owning manifest for `macos-arm64`;
+`Windows.ws2_32`, plus target-selected package-private static providers named
+as `Boundary.<Provider>` and authorized by the owning manifest for
+`macos-arm64`;
 - implemented capabilities: random seeding, monotonic clocks, byte console
   I/O, terminal sessions, files, process metadata, subprocesses, filesystem
   operations, sockets, name resolution, and operating-system threads;
@@ -130,6 +131,24 @@ only inside platform modules by fixed, contiguous scalar storage with an
 explicit documented layout. The Linux X64 backend still rejects portable
 operations outside its implemented vertical slices; Windows execution remains
 unverified until the target matrix runs it.
+
+A provider bundled by the current package is independent of the system
+namespace used to implement the target. Import `Interop.Boundary` and name the
+provider selected from the active manifest branch:
+
+```sx
+use Interop.C
+use Interop.Boundary
+
+let initialize = C.function<func(uint32) int32>(
+    library:Boundary.SDL3,
+    name:"SDL_Init"
+)
+```
+
+Only source owned by the declaring package can use this provider. A target
+without a matching `SDL3` declaration reports the missing package boundary;
+the source does not switch to `MacOS`, `Linux`, or `Windows`.
 
 A package can keep a platform binding private behind a common Silex API. For
 example, `STD.Randomizer` keeps its algorithm in `Module/Randomizer.sx` and
