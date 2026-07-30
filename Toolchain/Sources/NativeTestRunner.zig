@@ -5,6 +5,9 @@ const Ir = @import("Ir.zig");
 const Lower = @import("Arm64/Lower.zig");
 const Machine = @import("Arm64/Machine.zig");
 const MachO = @import("MacOS/MachO.zig");
+const MachOObject = @import("MacOS/Object.zig");
+const MacOSLink = @import("MacOS/Link.zig");
+const Packages = @import("Packages.zig");
 
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
@@ -29,10 +32,12 @@ pub fn execute(
     function: Machine.FunctionId,
     source_path: []const u8,
     files: []const []const u8,
+    providers: []const Packages.BoundaryProvider,
     cache: bool,
 ) !std.process.RunResult {
     const function_text = try std.fmt.allocPrint(allocator, "{d}", .{function});
-    const digest = if (cache)
+    const reusable = cache and providers.len == 0;
+    const digest = if (reusable)
         try CompilationCache.key(
             allocator,
             io,
@@ -43,8 +48,8 @@ pub fn execute(
     else
         CompilationCache.artifactKey("native-test", &.{ source_path, function_text });
     const executable = try artifactPath(allocator, source_path, digest);
-    if (cache and exists(io, executable)) return run(allocator, io, executable);
-    return executeAt(allocator, io, program, function, executable);
+    if (reusable and exists(io, executable)) return run(allocator, io, executable);
+    return executeAt(allocator, io, program, function, executable, providers);
 }
 
 fn executeAt(
@@ -53,9 +58,21 @@ fn executeAt(
     program: Machine.Program,
     function: Machine.FunctionId,
     executable: []const u8,
+    providers: []const Packages.BoundaryProvider,
 ) !std.process.RunResult {
-    const bytes = try MachO.emitFunction(allocator, program, function);
     try Io.Dir.cwd().createDirPath(io, std.fs.path.dirname(executable).?);
+    if (providers.len != 0) {
+        const object = try MachOObject.emitFunction(allocator, program, function);
+        const object_path = try std.fmt.allocPrint(allocator, "{s}.o", .{executable});
+        {
+            const file = try Io.Dir.cwd().createFile(io, object_path, .{});
+            defer file.close(io);
+            try file.writeStreamingAll(io, object);
+        }
+        try MacOSLink.executable(allocator, io, object_path, executable, providers);
+        return run(allocator, io, executable);
+    }
+    const bytes = try MachO.emitFunction(allocator, program, function);
     {
         const file = try Io.Dir.cwd().createFile(io, executable, .{ .permissions = .executable_file });
         defer file.close(io);
@@ -107,10 +124,10 @@ test "execute native test entries independently and preserve failures" {
     const base = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
     const failed_executable = try std.fs.path.join(allocator, &.{ base, "native-test-fails" });
     const continued_executable = try std.fs.path.join(allocator, &.{ base, "native-test-continues" });
-    const failed = try executeAt(allocator, std.testing.io, machine, entries.items[0], failed_executable);
+    const failed = try executeAt(allocator, std.testing.io, machine, entries.items[0], failed_executable, &.{});
     try std.testing.expectEqual(@as(u8, 1), exitCode(failed.term));
     try std.testing.expect(std.mem.indexOf(u8, failed.stderr, "assertion failed: planned") != null);
-    const continued = try executeAt(allocator, std.testing.io, machine, entries.items[1], continued_executable);
+    const continued = try executeAt(allocator, std.testing.io, machine, entries.items[1], continued_executable, &.{});
     try std.testing.expectEqual(@as(u8, 0), exitCode(continued.term));
     try std.testing.expectEqualStrings("continued\n", continued.stdout);
 }
@@ -143,9 +160,73 @@ test "execute a native test through a macOS system boundary" {
     const compilation = try compiler.compileTests(input);
     try std.testing.expectEqual(@as(usize, 1), compilation.tests.len);
     const machine = try lower(allocator, std.testing.io, compilation.ir, compilation.boundaries, false);
-    const result = try executeAt(allocator, std.testing.io, machine, compilation.tests[0].function, executable);
+    const result = try executeAt(allocator, std.testing.io, machine, compilation.tests[0].function, executable, &.{});
     try std.testing.expectEqual(@as(u8, 0), exitCode(result.term));
     try std.testing.expectEqualStrings("native boundary\n", result.stdout);
+}
+
+test "link a package boundary provider into a native test" {
+    const builtin = @import("builtin");
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "Bridge/Module");
+    try temporary.dir.createDirPath(std.testing.io, "Bridge/Tests");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Bridge/provider.c",
+        .data = "int boundary_answer(void) { return 42; }\n",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Bridge/Package.json",
+        .data =
+        \\{"name":"Bridge","version":"1.0.0","boundary":{"macos-arm64":{"providers":{"Native":{"archive":"libProvider.a"}}}}}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Bridge/Module/Api.sx", .data =
+        \\use Interop.C
+        \\use Interop.Boundary
+        \\let native_answer = C.function<func() int32>(library:Boundary.Native, name:"boundary_answer")
+        \\public func answer() int32 { return native_answer() }
+    });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Bridge/Tests/Boundary.sx", .data =
+        \\use Bridge.Api
+        \\test "provider" { assert(Api.answer() == 42) }
+    });
+    const base = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Bridge" });
+    const input = try std.fs.path.join(allocator, &.{ base, "Tests/Boundary.sx" });
+    const provider_source = try std.fs.path.join(allocator, &.{ base, "provider.c" });
+    const provider_object = try std.fs.path.join(allocator, &.{ base, "provider.o" });
+    const archive = try std.fs.path.join(allocator, &.{ base, "libProvider.a" });
+    const executable = try std.fs.path.join(allocator, &.{ base, "provider-test" });
+    for ([_][]const []const u8{
+        &.{ "zig", "cc", "-target", "aarch64-macos", "-c", provider_source, "-o", provider_object },
+        &.{ "zig", "ar", "rcs", archive, provider_object },
+    }) |arguments| {
+        const result = try std.process.run(allocator, std.testing.io, .{ .argv = arguments });
+        try std.testing.expectEqual(@as(u8, 0), exitCode(result.term));
+    }
+
+    var compiler = @import("Project.zig").Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compileTests(input);
+    const machine = try lower(allocator, std.testing.io, compilation.ir, compilation.boundaries, false);
+    const providers = [_]Packages.BoundaryProvider{.{
+        .name = "Provider",
+        .archive = archive,
+        .frameworks = &.{},
+    }};
+    const result = try executeAt(
+        allocator,
+        std.testing.io,
+        machine,
+        compilation.tests[0].function,
+        executable,
+        &providers,
+    );
+    try std.testing.expectEqual(@as(u8, 0), exitCode(result.term));
 }
 
 fn exitCode(term: std.process.Child.Term) u8 {

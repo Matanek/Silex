@@ -129,6 +129,11 @@ fn testSource(init: std.process.Init, allocator: std.mem.Allocator, args: []cons
         else
             null;
         if (target.eql(.macos_arm64) and native_program == null) continue;
+        const boundary_providers = try requiredBoundaryProviders(
+            source_allocator,
+            compilation.boundaries,
+            compilation.packages,
+        );
         if (native_program == null) {
             var executable = true;
             for (compilation.boundaries) |boundary| {
@@ -161,6 +166,7 @@ fn testSource(init: std.process.Init, allocator: std.mem.Allocator, args: []cons
                     case.function,
                     source_path,
                     compilation.files,
+                    boundary_providers,
                     options.cache,
                 ) catch |err| {
                     failed += 1;
