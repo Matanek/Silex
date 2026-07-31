@@ -1557,9 +1557,10 @@ fn cascadeRecoveryStart(source: []const u8, dot_dot: usize) usize {
     if (std.mem.trim(u8, source[line_start..dot_dot], " \t\r").len != 0) return dot_dot;
     const indentation = source[line_start..dot_dot];
 
-    var start = line_start;
-    while (start != 0) {
-        const previous_end = start - 1;
+    var recovery_start = line_start;
+    var scan = line_start;
+    while (scan != 0) {
+        const previous_end = scan - 1;
         const previous_start = if (std.mem.lastIndexOfScalar(u8, source[0..previous_end], '\n')) |newline|
             newline + 1
         else
@@ -1567,10 +1568,26 @@ fn cascadeRecoveryStart(source: []const u8, dot_dot: usize) usize {
         const previous_line = source[previous_start..previous_end];
         const previous = std.mem.trimStart(u8, previous_line, " \t");
         const previous_indentation = previous_line[0 .. previous_line.len - previous.len];
-        if (!std.mem.eql(u8, previous_indentation, indentation) or !std.mem.startsWith(u8, previous, "..")) break;
-        start = previous_start;
+        if (!std.mem.startsWith(u8, previous_indentation, indentation)) break;
+        if (std.mem.eql(u8, previous_indentation, indentation) and std.mem.startsWith(u8, previous, "..")) {
+            recovery_start = previous_start;
+            scan = previous_start;
+            continue;
+        }
+
+        // A cascade operation can span nested calls and nested cascades. Keep
+        // walking through their more deeply indented lines and through closing
+        // delimiters aligned with the outer cascade until its preceding `..`
+        // is found.
+        if (previous_indentation.len > indentation.len or previous.len == 0 or
+            previous[0] == ')' or previous[0] == ']')
+        {
+            scan = previous_start;
+            continue;
+        }
+        break;
     }
-    return start;
+    return recovery_start;
 }
 
 fn bindingName(line: []const u8) ?[]const u8 {
@@ -1827,6 +1844,34 @@ test "complete members of the original receiver in a cascade" {
     const continued = try itemsAt(arena.allocator(), continued_source, continued_cursor, .trigger_character);
     try std.testing.expectEqual(@as(usize, 1), continued.len);
     try std.testing.expectEqualStrings("run", continued[0].label);
+}
+
+test "resume an outer cascade after a nested cascade argument" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source =
+        \\struct Settings {
+        \\    var title:str
+        \\}
+        \\struct Plugin {}
+        \\class Application {
+        \\    public func install(plugin:Plugin) Application { return self }
+        \\    public func run() int { return 0 }
+        \\}
+        \\func main() {
+        \\    Application()
+        \\        ..install(Plugin(Settings()
+        \\            ..title = "Silex"
+        \\        ))
+        \\        ..
+        \\        ..run()
+        \\}
+    ;
+    const cursor = std.mem.indexOf(u8, source, "        ..\n").? + "        ..".len;
+    const items = try itemsAt(arena.allocator(), source, cursor, .trigger_character);
+    try std.testing.expect(contains(items, "install"));
+    try std.testing.expect(contains(items, "run"));
+    try std.testing.expect(!contains(items, "title"));
 }
 
 test "complete local types in explicit cascade method arguments" {

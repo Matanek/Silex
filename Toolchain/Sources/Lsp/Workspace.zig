@@ -2332,6 +2332,34 @@ test "complete imported application members in a cascade" {
     try std.testing.expect(hasLabel(items, "install"));
     try std.testing.expect(hasLabel(items, "run"));
     try std.testing.expect(!hasLabel(items, "if"));
+
+    const nested_source =
+        \\use GFX.Bootstrap.Application
+        \\struct Settings { var title:str }
+        \\struct WindowPlugin {}
+        \\func main() {
+        \\    Application()
+        \\        ..install(WindowPlugin(Settings()
+        \\            ..title = "Silex"
+        \\        ))
+        \\        ..
+        \\        ..run()
+        \\}
+    ;
+    const nested_cursor = std.mem.indexOf(u8, nested_source, "        ..\n").? + "        ..".len;
+    const nested_items = (try itemsAt(
+        allocator,
+        std.testing.io,
+        null,
+        root_uri,
+        uri,
+        &.{},
+        nested_source,
+        nested_cursor,
+    )).?;
+    try std.testing.expect(hasLabel(nested_items, "install"));
+    try std.testing.expect(hasLabel(nested_items, "run"));
+    try std.testing.expect(!hasLabel(nested_items, "title"));
 }
 
 test "complete remaining fields of an imported aggregate inside a cascade" {

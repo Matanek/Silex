@@ -416,6 +416,60 @@ test "member completion never leaks the global language catalogue" {
     try std.testing.expect(std.mem.indexOf(u8, response, "\"label\":\"if\"") == null);
 }
 
+test "server resumes an imported outer cascade after a nested cascade" {
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "GFX/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Package.json",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/Bootstrap.sx",
+        .data =
+        \\public class Application {
+        \\    public func install() Application { return self }
+        \\    public func run() int { return 0 }
+        \\}
+        ,
+    });
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const main_path = try std.fs.path.join(allocator, &.{ root, "Main.sx" });
+    const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
+    const main_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{main_path});
+    const source =
+        \\use GFX.Bootstrap.Application
+        \\struct Settings { var title:str }
+        \\struct WindowPlugin {}
+        \\func main() {
+        \\    Application()
+        \\        ..install(WindowPlugin(Settings()
+        \\            ..title = "Silex"
+        \\        ))
+        \\        ..
+        \\        ..run()
+        \\}
+    ;
+
+    var server = Server.init(std.testing.allocator, std.testing.io);
+    defer server.deinit();
+    server.workspace_root_uri = try std.testing.allocator.dupe(u8, root_uri);
+    try server.setDocument(.{ .uri = main_uri, .text = source, .version = 1 });
+    const request = try std.fmt.allocPrint(
+        allocator,
+        "{{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"textDocument/completion\",\"params\":{{\"textDocument\":{{\"uri\":\"{s}\"}},\"position\":{{\"line\":8,\"character\":10}},\"context\":{{\"triggerKind\":2,\"triggerCharacter\":\".\"}}}}}}",
+        .{main_uri},
+    );
+    const response = (try server.handleBody(allocator, request)).?;
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"label\":\"install\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"label\":\"run\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"label\":\"title\"") == null);
+}
+
 test "project completion exposes module children before accessible declarations" {
     var temporary = std.testing.tmpDir(.{});
     defer temporary.cleanup();
