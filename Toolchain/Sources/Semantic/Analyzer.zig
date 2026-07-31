@@ -63,6 +63,10 @@ pub const Analyzer = struct {
     anonymous_function_context: bool = false,
     target: ?Target = null,
     packages: ?Packages.Graph = null,
+    io: ?std.Io = null,
+    source_files: []const []const u8 = &.{},
+    shadercross_path: ?[]const u8 = null,
+    shader_files: std.ArrayList([]const u8) = .empty,
     pub fn init(allocator: Allocator) Analyzer {
         return .{ .allocator = allocator };
     }

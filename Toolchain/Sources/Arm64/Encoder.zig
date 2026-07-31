@@ -211,7 +211,7 @@ fn encodeForPlatform(allocator: Allocator, program: Machine.Program, entry: Entr
     var runtime_bytes: std.ArrayList(u8) = .empty;
     if (float_calls.items.len != 0) {
         const runtime = try FloatRuntime.payload();
-        while ((words.items.len * 4 + runtime_bytes.items.len) % 4096 != runtime.page_offset) try runtime_bytes.appendNTimes(allocator, 0, 4);
+        try appendRuntimePadding(allocator, words.items.len, &runtime_bytes, runtime.page_offset);
         const runtime_start = words.items.len * 4 + runtime_bytes.items.len;
         const formatter_target = (runtime_start + runtime.entry_offset) / 4;
         for (float_calls.items) |at| try patch26(words.items, at, formatter_target);
@@ -219,7 +219,7 @@ fn encodeForPlatform(allocator: Allocator, program: Machine.Program, entry: Entr
     }
     if (deep_copy_calls.items.len != 0) {
         const runtime = try DeepCopyRuntime.payload();
-        while ((words.items.len * 4 + runtime_bytes.items.len) % 4096 != runtime.page_offset) try runtime_bytes.appendNTimes(allocator, 0, 4);
+        try appendRuntimePadding(allocator, words.items.len, &runtime_bytes, runtime.page_offset);
         const runtime_start = words.items.len * 4 + runtime_bytes.items.len;
         const target = (runtime_start + runtime.entry_offset) / 4;
         for (deep_copy_calls.items) |fixup| try patch26(words.items, fixup.call_at, target);
@@ -322,6 +322,18 @@ fn encodeForPlatform(allocator: Allocator, program: Machine.Program, entry: Entr
         .external_call_sites = try external_call_sites.toOwnedSlice(allocator),
         .address_sites = try address_sites.toOwnedSlice(allocator),
     };
+}
+
+fn appendRuntimePadding(
+    allocator: Allocator,
+    word_count: usize,
+    runtime_bytes: *std.ArrayList(u8),
+    page_offset: u12,
+) Allocator.Error!void {
+    const page_size = 4096;
+    const current = (word_count * 4 + runtime_bytes.items.len) % page_size;
+    const padding = (@as(usize, page_offset) + page_size - current) % page_size;
+    try runtime_bytes.appendNTimes(allocator, 0, padding);
 }
 
 fn emitSnapshotAcquire(allocator: Allocator, words: *std.ArrayList(u32), data_fixups: *std.ArrayList(usize)) Error!void {
@@ -1836,6 +1848,17 @@ test "encode known AArch64 instruction words" {
     try std.testing.expectEqual(@as(u32, 0xc80afdc9), A64.storeReleaseExclusive64(.x10, .x9, .x14));
     try std.testing.expectEqual(@as(u32, 0xc89ffddf), A64.storeRelease64(.zero_or_sp, .x14));
     try std.testing.expectEqual(@as(u32, 0xd65f03c0), returnInstruction());
+}
+
+test "runtime padding reaches a page offset after an unaligned payload" {
+    var bytes: std.ArrayList(u8) = .empty;
+    defer bytes.deinit(std.testing.allocator);
+    try bytes.appendSlice(std.testing.allocator, "odd");
+
+    try appendRuntimePadding(std.testing.allocator, 0, &bytes, 0);
+
+    try std.testing.expectEqual(@as(usize, 4096), bytes.items.len);
+    try std.testing.expectEqual(@as(usize, 0), bytes.items.len % 4096);
 }
 
 test "form large stack addresses from sp" {

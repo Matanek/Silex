@@ -5,9 +5,17 @@ const Io = std.Io;
 const Blake3 = std.crypto.hash.Blake3;
 const Ir = @import("Ir.zig");
 const Ast = @import("Ast.zig");
+const Boundary = @import("Boundary.zig");
+const Packages = @import("Packages.zig");
 
-pub const format = "silex-cache-v7-public-use-default-alias";
+pub const format = "silex-cache-v8-native-boundary-input";
 const State = struct { files: []const []const u8 };
+
+pub const NativeInput = struct {
+    program: Ir.Program,
+    boundaries: []const Boundary.Function,
+    providers: []const Packages.BoundaryProvider,
+};
 
 pub fn loadIr(allocator: Allocator, io: Io, source_path: []const u8, target_name: []const u8) ?Ir.Program {
     const state_digest = artifactKey("frontend-state", &.{ source_path, target_name });
@@ -24,6 +32,30 @@ pub fn storeIr(allocator: Allocator, io: Io, source_path: []const u8, target_nam
     store(allocator, io, digest, "ir-json", payload);
     const state_payload = std.json.Stringify.valueAlloc(allocator, State{ .files = files }, .{}) catch return;
     store(allocator, io, artifactKey("frontend-state", &.{ source_path, target_name }), "state", state_payload);
+}
+
+pub fn loadNativeInput(allocator: Allocator, io: Io, source_path: []const u8, target_name: []const u8) ?NativeInput {
+    const state_digest = artifactKey("native-input-state", &.{ source_path, target_name });
+    const state_bytes = load(allocator, io, state_digest, "state") orelse return null;
+    const state = std.json.parseFromSliceLeaky(State, allocator, state_bytes, .{}) catch return null;
+    const digest = key(allocator, io, state.files, "native-input", target_name) catch return null;
+    const payload = load(allocator, io, digest, "native-input-json") orelse return null;
+    return std.json.parseFromSliceLeaky(NativeInput, allocator, payload, .{}) catch null;
+}
+
+pub fn storeNativeInput(
+    allocator: Allocator,
+    io: Io,
+    source_path: []const u8,
+    target_name: []const u8,
+    files: []const []const u8,
+    input: NativeInput,
+) void {
+    const digest = key(allocator, io, files, "native-input", target_name) catch return;
+    const payload = std.json.Stringify.valueAlloc(allocator, input, .{}) catch return;
+    store(allocator, io, digest, "native-input-json", payload);
+    const state_payload = std.json.Stringify.valueAlloc(allocator, State{ .files = files }, .{}) catch return;
+    store(allocator, io, artifactKey("native-input-state", &.{ source_path, target_name }), "state", state_payload);
 }
 
 pub fn loadAst(allocator: Allocator, io: Io, path: []const u8, source: []const u8) ?Ast.Program {
@@ -74,7 +106,10 @@ pub fn key(
     hasher.update(variant);
     for (paths) |path| {
         hasher.update(path);
-        const source = try Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(16 * 1024 * 1024));
+        // Native cache keys also cover boundary archives. SDL3 alone is larger
+        // than a regular source file, so the key must accept package artifacts
+        // without silently disabling the linked-executable cache.
+        const source = try Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(512 * 1024 * 1024));
         defer allocator.free(source);
         hasher.update(source);
         hashAncestorManifests(allocator, io, &hasher, path);
@@ -148,4 +183,33 @@ test "cache key depends on command variant paths and exact contents" {
     const debug = try key(std.testing.allocator, std.testing.io, &.{"build.zig"}, "compile", "debug");
     const release = try key(std.testing.allocator, std.testing.io, &.{"build.zig"}, "compile", "release");
     try std.testing.expect(!std.mem.eql(u8, &debug, &release));
+}
+
+test "native input cache retains linked boundary providers" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = "func main() {}\n" });
+    const source_path = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    const files = &.{source_path};
+    const providers = &.{Packages.BoundaryProvider{
+        .name = "SDL3",
+        .archive = "Boundary/macos-arm64/libSDL3.a",
+        .frameworks = &.{"Metal"},
+        .libraries = &.{},
+    }};
+    const input = NativeInput{
+        .program = .{ .functions = &.{}, .files = files },
+        .boundaries = &.{},
+        .providers = providers,
+    };
+
+    storeNativeInput(allocator, std.testing.io, source_path, "macos-arm64", files, input);
+    const loaded = loadNativeInput(allocator, std.testing.io, source_path, "macos-arm64").?;
+
+    try std.testing.expectEqual(@as(usize, 1), loaded.providers.len);
+    try std.testing.expectEqualStrings("SDL3", loaded.providers[0].name);
+    try std.testing.expectEqualStrings("Metal", loaded.providers[0].frameworks[0]);
 }

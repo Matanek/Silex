@@ -6,6 +6,7 @@ const Support = @import("Support.zig");
 const Visibility = @import("Visibility.zig");
 const Optionals = @import("Optionals.zig");
 const Model = @import("Model.zig");
+const ShaderAssets = @import("../ShaderAssets.zig");
 
 pub const Field = struct {
     global: usize,
@@ -66,6 +67,7 @@ pub fn analyzeLoad(self: anytype, builder: anytype, structure_index: usize, name
 
 pub fn analyzeCall(self: anytype, builder: anytype, structure_index: usize, call: Ast.Expression.Call) !?Model.TypedValue {
     const structure = self.program.structures[structure_index];
+    if (try ShaderAssets.analyze(self, builder, structure_index, call)) |value| return value;
     var candidates: std.ArrayList(usize) = .empty;
     for (structure.methods, 0..) |method, index| {
         if (!method.is_static or !std.mem.eql(u8, method.name, call.name)) continue;
