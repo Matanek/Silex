@@ -174,6 +174,7 @@ pub const Resolver = struct {
     global_root: ?[]const u8,
     target: TargetModule.Target,
     local_root: []const u8 = "",
+    shared_root: []const u8 = "",
     builders: std.ArrayList(Builder) = .empty,
     diagnostic: ?[]const u8 = null,
 
@@ -195,6 +196,10 @@ pub const Resolver = struct {
             std.fs.path.dirname(project_root) orelse project_root
         else
             project_root;
+        self.shared_root = try std.fs.path.join(self.allocator, &.{
+            std.fs.path.dirname(project_root) orelse ".",
+            "Packages",
+        });
         const named_root = root_manifest != null and root_manifest.?.name != null;
         const roots = try self.moduleRoots(project_root, named_root);
         try self.builders.append(self.allocator, .{
@@ -226,24 +231,40 @@ pub const Resolver = struct {
     }
 
     fn resolveAdjacent(self: *Resolver) !void {
-        var directory = try Io.Dir.cwd().openDir(self.io, self.local_root, .{ .iterate = true });
+        try self.resolveAdjacentFrom(self.local_root);
+        try self.resolveAdjacentFrom(self.shared_root);
+    }
+
+    fn resolveAdjacentFrom(self: *Resolver, root_path: []const u8) !void {
+        var directory = Io.Dir.cwd().openDir(self.io, root_path, .{ .iterate = true }) catch |err| switch (err) {
+            error.FileNotFound, error.NotDir => return,
+            else => return err,
+        };
         defer directory.close(self.io);
         var names: std.ArrayList([]const u8) = .empty;
         var iterator = directory.iterateAssumeFirstIteration();
         while (try iterator.next(self.io)) |entry| {
             if (entry.kind != .directory) continue;
-            const manifest_path = try std.fs.path.join(self.allocator, &.{ self.local_root, entry.name, "Package.json" });
+            const manifest_path = try std.fs.path.join(self.allocator, &.{ root_path, entry.name, "Package.json" });
             if (!try exists(self.io, manifest_path)) continue;
             try names.append(self.allocator, try self.allocator.dupe(u8, entry.name));
         }
         std.mem.sort([]const u8, names.items, {}, stringLessThan);
         for (names.items) |name| {
-            const root = try std.fs.path.join(self.allocator, &.{ self.local_root, name });
+            const root = try std.fs.path.join(self.allocator, &.{ root_path, name });
             const manifest = try self.loadRequired(root);
             const identity = manifest.name orelse return self.fail("a sibling package requires name and version");
             const version = manifest.version orelse return self.fail("a sibling package requires name and version");
             if (!std.mem.eql(u8, identity, name)) return self.fail("local package folder and manifest name differ");
             const index = try self.resolveSelected(root, manifest, identity, version);
+            var direct = false;
+            for (self.builders.items[0].dependencies.items) |dependency| {
+                if (std.mem.eql(u8, dependency.name, identity)) {
+                    direct = true;
+                    break;
+                }
+            }
+            if (direct) continue;
             try self.builders.items[0].dependencies.append(self.allocator, .{
                 .name = identity,
                 .package = index,
@@ -280,6 +301,15 @@ pub const Resolver = struct {
             const manifest = try self.loadRequired(local_root);
             const version = try self.validateSelected(manifest, request.name, local_root, false);
             if (request.constraint.accepts(version)) return self.resolveSelected(local_root, manifest, request.name, version);
+        }
+
+        const shared_root = try std.fs.path.join(self.allocator, &.{ self.shared_root, request.name });
+        try self.rejectLegacy(shared_root);
+        const shared_manifest_path = try std.fs.path.join(self.allocator, &.{ shared_root, "Package.json" });
+        if (try exists(self.io, shared_manifest_path)) {
+            const manifest = try self.loadRequired(shared_root);
+            const version = try self.validateSelected(manifest, request.name, shared_root, false);
+            if (request.constraint.accepts(version)) return self.resolveSelected(shared_root, manifest, request.name, version);
         }
 
         if (try self.bestGlobal(request)) |selected| {
@@ -914,6 +944,35 @@ test "prefer compatible sibling and otherwise select newest global version" {
     resolver = Resolver.init(allocator, std.testing.io, global);
     graph = try resolver.resolve(app);
     try std.testing.expect(graph.packages[1].version.?.eql(try Version.parse("1.9.0")));
+}
+
+test "discover packages beside the source directory parent" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.createDirPath(std.testing.io, "Sandbox");
+    try temporary.dir.createDirPath(std.testing.io, "Packages/GFX/Module");
+    try temporary.dir.createDirPath(std.testing.io, "Packages/STD/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Packages/GFX/Package.json",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"dependencies\":{\"STD\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Packages/STD/Package.json",
+        .data = "{\"name\":\"STD\",\"version\":\"1.0.0\"}",
+    });
+    const base = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const sandbox = try std.fs.path.join(allocator, &.{ base, "Sandbox" });
+    var resolver = Resolver.init(allocator, std.testing.io, null);
+    const graph = try resolver.resolve(sandbox);
+    try std.testing.expectEqual(@as(usize, 3), graph.packages.len);
+    try std.testing.expectEqualStrings("GFX", graph.packages[1].name.?);
+    try std.testing.expect(std.mem.endsWith(u8, graph.packages[1].root, "Packages/GFX"));
+    try std.testing.expectEqualStrings("STD", graph.packages[2].name.?);
+    try std.testing.expectEqual(@as(usize, 2), graph.packages[0].dependencies.len);
 }
 
 test "reject path fields conflicts and package cycles" {
