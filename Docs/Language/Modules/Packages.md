@@ -96,10 +96,48 @@ Silex first checks a compatible sibling package, then installed packages under
 Dependencies are direct. Declare every package used by the application; a
 transitive dependency is not automatically visible.
 
+## Install verified package artifacts
+
+A source package may keep large, prebuilt files outside Git and declare where
+Silex installs them for each target:
+
+~~~json
+{
+  "artifacts": {
+    "macos-arm64": {
+      "SDL3": {
+        "path": "Boundary/macos-arm64/libSDL3.a",
+        "url": "https://github.com/example/GFX/releases/download/sdl3-3.4.10/SDL3-macos-arm64.a",
+        "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+      }
+    }
+  }
+}
+~~~
+
+Install the artifacts for the host:
+
+~~~sh
+silex install path/to/GFX
+~~~
+
+Or prepare one explicit compilation target:
+
+~~~sh
+silex install path/to/GFX --target windows-x64
+~~~
+
+`path` is relative to the package and cannot escape it. `url` must use HTTPS,
+and `sha256` pins the exact content. Silex keeps an existing file whose checksum
+already matches, otherwise it downloads to a temporary file, verifies it, then
+replaces the destination. Compilation itself never downloads from the network.
+If a declared boundary archive is absent, the compiler asks for the explicit
+installation command.
+
 ## Declare a private native boundary
 
 A package that implements a platform boundary may bundle one precompiled
-static archive for `macos-arm64` and name the Apple frameworks it requires:
+static archive per target and name the platform libraries it requires:
 
 ```json
 {
@@ -118,10 +156,39 @@ static archive for `macos-arm64` and name the Apple frameworks it requires:
 }
 ```
 
+The same provider can declare system libraries on Linux and Windows without
+exposing raw linker flags:
+
+```json
+{
+  "boundary": {
+    "linux-x64": {
+      "providers": {
+        "SDL3": {
+          "archive": "Boundary/linux-x64/libSDL3.a",
+          "libraries": ["dl", "m", "pthread"]
+        }
+      }
+    },
+    "windows-x64": {
+      "providers": {
+        "SDL3": {
+          "archive": "Boundary/windows-x64/SDL3.lib",
+          "libraries": ["user32", "winmm"]
+        }
+      }
+    }
+  }
+}
+```
+
 The archive path is relative to and must remain inside the package. The
-compiler verifies that it is an ARM64 Mach-O archive, selects this declaration
-only for the matching target, and supplies the archive and frameworks to the
-final link when one of its symbols is used.
+compiler verifies that its object format and architecture match the manifest
+target: Mach-O ARM64 on macOS, ELF x64 on Linux, and COFF x64 or ARM64 on
+Windows. It selects only the matching declaration and supplies the archive,
+Apple frameworks, and named system libraries to the final link when one of its
+symbols is used. `frameworks` is restricted to macOS; `libraries` contains
+portable names rather than `-l` flags or paths.
 
 Only source owned by that package may bind the provider through the
 target-independent `Boundary` namespace:
@@ -140,5 +207,5 @@ The active target selects the provider declaration from the manifest.
 Consumers depend on the ordinary Silex package and see only its
 public Silex API; they do not repeat archive paths, linker flags, framework
 lists, or the private foreign API. This bootstrap contract neither compiles
-foreign source nor grants access to transitive packages. Dynamic libraries and
-native package artefacts for Linux or Windows are not supported yet.
+foreign source nor grants access to transitive packages. Dynamic libraries are
+not part of this package contract.

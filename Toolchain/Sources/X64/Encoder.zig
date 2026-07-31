@@ -14,10 +14,12 @@ pub const Image = struct {
     code: []u8,
     entry_offset: u32,
     windows_import_sites: []const WindowsImports.X64Site = &.{},
+    external_call_sites: []const ExternalCalls.Site = &.{},
 
     pub fn deinit(self: Image, allocator: Allocator) void {
         allocator.free(self.code);
         allocator.free(self.windows_import_sites);
+        allocator.free(self.external_call_sites);
     }
 };
 
@@ -35,14 +37,22 @@ const Platform = ExternalCalls.Platform;
 /// scalar arguments use RDI, RSI, RDX, RCX, R8, R9, R10, R11; scalar results
 /// use RAX; the execution status uses RDX.
 pub fn encodeLinux(allocator: Allocator, program: Machine.Program) Error!Image {
-    return encode(allocator, program, .linux);
+    return encode(allocator, program, .linux, false);
 }
 
 pub fn encodeWindows(allocator: Allocator, program: Machine.Program) Error!Image {
-    return encode(allocator, program, .windows);
+    return encode(allocator, program, .windows, false);
 }
 
-fn encode(allocator: Allocator, program: Machine.Program, platform: Platform) Error!Image {
+pub fn encodeLinuxObject(allocator: Allocator, program: Machine.Program) Error!Image {
+    return encode(allocator, program, .linux, true);
+}
+
+pub fn encodeWindowsObject(allocator: Allocator, program: Machine.Program) Error!Image {
+    return encode(allocator, program, .windows, true);
+}
+
+fn encode(allocator: Allocator, program: Machine.Program, platform: Platform, linked: bool) Error!Image {
     try Machine.validate(program);
     const main_id = findMain(program) orelse return error.InvalidMachineProgram;
     const reachable = try Reachability.find(allocator, program, main_id);
@@ -65,29 +75,41 @@ fn encode(allocator: Allocator, program: Machine.Program, platform: Platform) Er
     defer global_fixups.deinit(allocator);
     var windows_import_sites: std.ArrayList(WindowsImports.X64Site) = .empty;
     defer windows_import_sites.deinit(allocator);
+    var external_call_sites: std.ArrayList(ExternalCalls.Site) = .empty;
+    defer external_call_sites.deinit(allocator);
 
     for (program.functions, 0..) |function, function_id| {
         if (!reachable[function_id]) continue;
         offsets[function_id] = @intCast(bytes.items.len);
-        try encodeFunction(allocator, &bytes, &calls, &function_addresses, &float_calls, &data_fixups, &global_fixups, &windows_import_sites, platform, program, function);
+        try encodeFunction(allocator, &bytes, &calls, &function_addresses, &float_calls, &data_fixups, &global_fixups, &windows_import_sites, &external_call_sites, platform, program, function);
     }
 
     const entry_offset: u32 = @intCast(bytes.items.len);
     switch (platform) {
         .linux => {
+            if (linked) try bytes.appendSlice(allocator, &.{ 0x53, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57 });
             try appendCall(allocator, &bytes, &calls, main_id);
-            try emitMoveRegister(allocator, &bytes, .rdi, .rdx);
-            try emitImmediate(allocator, &bytes, .rax, 60);
-            try bytes.appendSlice(allocator, &.{ 0x0f, 0x05 });
+            if (linked) {
+                try emitMoveRegister(allocator, &bytes, .rax, .rdx);
+                try bytes.appendSlice(allocator, &.{ 0x41, 0x5f, 0x41, 0x5e, 0x41, 0x5d, 0x41, 0x5c, 0x5b, 0xc3 });
+            } else {
+                try emitMoveRegister(allocator, &bytes, .rdi, .rdx);
+                try emitImmediate(allocator, &bytes, .rax, 60);
+                try bytes.appendSlice(allocator, &.{ 0x0f, 0x05 });
+            }
         },
         .windows => {
-            try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xec, 40 });
+            if (linked) {
+                try bytes.appendSlice(allocator, &.{ 0x53, 0x56, 0x57, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57 });
+            } else try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xec, 40 });
             if (program.mutex_global) |global| {
                 try emitAddressGlobal(allocator, &bytes, &global_fixups, global, 0, .rcx);
                 try ExternalCalls.emitWindowsImportCall(allocator, &bytes, &windows_import_sites, .initialize_critical_section);
             }
             try appendCall(allocator, &bytes, &calls, main_id);
-            try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xc4, 40, 0x89, 0xd0, 0xc3 });
+            if (linked) {
+                try bytes.appendSlice(allocator, &.{ 0x89, 0xd0, 0x41, 0x5f, 0x41, 0x5e, 0x41, 0x5d, 0x41, 0x5c, 0x5f, 0x5e, 0x5b, 0xc3 });
+            } else try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xc4, 40, 0x89, 0xd0, 0xc3 });
         },
     }
 
@@ -141,6 +163,7 @@ fn encode(allocator: Allocator, program: Machine.Program, platform: Platform) Er
         .code = try bytes.toOwnedSlice(allocator),
         .entry_offset = entry_offset,
         .windows_import_sites = try windows_import_sites.toOwnedSlice(allocator),
+        .external_call_sites = try external_call_sites.toOwnedSlice(allocator),
     };
 }
 
@@ -153,6 +176,7 @@ fn encodeFunction(
     data_fixups: *std.ArrayList(DataFixup),
     global_fixups: *std.ArrayList(GlobalFixup),
     windows_import_sites: *std.ArrayList(WindowsImports.X64Site),
+    external_call_sites: *std.ArrayList(ExternalCalls.Site),
     platform: Platform,
     program: Machine.Program,
     function: Machine.Function,
@@ -290,6 +314,13 @@ fn encodeFunction(
             },
             .reference_offset => |offset| {
                 try emitLoadStack(allocator, bytes, .rax, offset.reference);
+                try bytes.appendSlice(allocator, &.{ 0x48, 0x05 });
+                try appendInt(allocator, bytes, u32, offset.byte_offset);
+                try emitStoreStack(allocator, bytes, .rax, offset.result);
+            },
+            .reference_indirect_offset => |offset| {
+                try emitLoadStack(allocator, bytes, .rax, offset.reference);
+                try bytes.appendSlice(allocator, &.{ 0x48, 0x8b, 0x00 });
                 try bytes.appendSlice(allocator, &.{ 0x48, 0x05 });
                 try appendInt(allocator, bytes, u32, offset.byte_offset);
                 try emitStoreStack(allocator, bytes, .rax, offset.result);
@@ -473,7 +504,7 @@ fn encodeFunction(
                 try appendConditionalEpilogue(allocator, bytes, &epilogue_fixups, 0x85);
                 if (call.result) |result| if (!result.aggregate) try emitStoreStack(allocator, bytes, .rax, result.start);
             },
-            .external_call => |call| try ExternalCalls.emit(allocator, bytes, windows_import_sites, platform, program, function, call),
+            .external_call => |call| try ExternalCalls.emit(allocator, bytes, windows_import_sites, external_call_sites, platform, program, function, call),
             .mutex_lock => try emitMutexOperation(allocator, bytes, global_fixups, windows_import_sites, platform, program, true),
             .mutex_unlock => try emitMutexOperation(allocator, bytes, global_fixups, windows_import_sites, platform, program, false),
             .print => |value| switch (value.kind) {

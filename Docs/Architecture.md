@@ -30,7 +30,7 @@ bootstrap path after instruction encoding:
 ```text
 ARM64 encoded image
     -> relocatable Mach-O object
-    -> package-owned static archives and Apple frameworks
+    -> target-matched package archives, frameworks, and system libraries
     -> bootstrap system linker
     -> native executable
 ```
@@ -217,15 +217,17 @@ open Silex document
 - Without a package-native provider, the compiler writes the Mach-O headers,
   load commands, `__text`, entry wrapper, and ad-hoc SHA-256 code signature
   itself. It invokes neither an assembler, linker, nor `codesign` on that path.
-- For a referenced package-private provider on `macos-arm64`, the compiler can
-  instead write a relocatable ARM64 Mach-O object with section, symbol and
-  relocation tables. It then invokes the bootstrap linker with only the
-  resolved package's static archive and declared Apple frameworks. This path
-  does not compile foreign sources and does not define a stable Silex object
-  format or ABI.
+- For a referenced package-private provider, the compiler writes a relocatable
+  object for the selected target: ARM64 Mach-O, x64 ELF, or x64/ARM64 COFF. It
+  then invokes the bootstrap linker with only the resolved package archives,
+  declared Apple frameworks, and named system libraries. This path does not
+  compile foreign sources and does not define a stable Silex object format or
+  ABI.
 - The Linux X64 backend owns a distinct Silex call convention, encodes X64
   instructions directly and writes an ELF64 container without section headers
-  or an external linker. Its integer, control-flow, class, aggregate and
+  or an external linker when no package boundary is referenced. Boundary calls
+  instead use a relocatable ELF object and the bootstrap linker. Its integer,
+  control-flow, class, aggregate and
   `getrandom` vertical slice executes under Alpine; other machine operations
   remain explicit encoder errors until the differential corpus covers them.
   Mutable globals are currently appended to the bootstrap image, so its single
@@ -235,6 +237,8 @@ open Silex document
   import descriptors, lookup tables and IAT entries for `VirtualAlloc` and
   `ProcessPrng`. X64 uses the Win64 boundary registers and ARM64 shares the
   instruction encoder while substituting the Windows allocation boundary.
+  Package-boundary builds use COFF objects, Win64 or Windows ARM64 C ABI calls,
+  and the bootstrap linker with the selected archives and system libraries.
   The X64 bootstrap image likewise keeps its combined code/global section
   writable until PE emission gains a distinct data section. These PE paths are
   structurally tested but are not yet declared verified on Windows hosts.

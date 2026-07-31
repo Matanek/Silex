@@ -3,10 +3,10 @@ const Compiler = @import("../Project.zig").Compiler;
 const Types = @import("../Types.zig");
 
 fn writeBoundaryArchive(directory: std.Io.Dir) !void {
-    var archive = [_]u8{' '} ** (8 + 60 + 8);
+    var archive = [_]u8{' '} ** (8 + 60 + 20);
     @memcpy(archive[0..8], "!<arch>\n");
     @memcpy(archive[8..24], "probe.o/        ");
-    @memcpy(archive[8 + 48 .. 8 + 58], "8         ");
+    @memcpy(archive[8 + 48 .. 8 + 58], "20        ");
     @memcpy(archive[8 + 58 .. 8 + 60], "`\n");
     std.mem.writeInt(u32, archive[68..72], std.macho.MH_MAGIC_64, .little);
     std.mem.writeInt(u32, archive[72..76], @bitCast(std.macho.CPU_TYPE_ARM64), .little);

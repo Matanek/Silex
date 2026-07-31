@@ -22,17 +22,17 @@ test "compose chained public reexports without changing declaration identity" {
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Geometry.sx",
         .data =
-        \\public use Geometry.Middle.Vector as Vector
-        \\public use Geometry.Middle.sum as sum
-        \\public use Geometry.Middle.bump as bump
+        \\public use Geometry.Middle.Vector
+        \\public use Geometry.Middle.sum
+        \\public use Geometry.Middle.bump
         ,
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Geometry/Middle.sx",
         .data =
-        \\public use Geometry.Api.Vector as Vector
-        \\public use Geometry.Api.sum as sum
-        \\public use Geometry.Api.bump as bump
+        \\public use Geometry.Api.Vector
+        \\public use Geometry.Api.sum
+        \\public use Geometry.Api.bump
         ,
     });
     try temporary.dir.writeFile(std.testing.io, .{
@@ -100,7 +100,7 @@ test "compose public reexports through a package facade" {
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Geometry/Module/Facade.sx",
-        .data = "public use Geometry.Api.answer as answer\npublic use int as Integer",
+        .data = "public use Geometry.Api.answer\npublic use int as Integer",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Geometry/Module/Api.sx",
@@ -135,7 +135,7 @@ test "prefer a facade reexport over a homonymous principal type static call" {
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Facade.sx",
         .data =
-        \\public use Api.Settings as Settings
+        \\public use Api.Settings
         \\public struct Facade {}
         ,
     });
@@ -163,7 +163,7 @@ test "diagnose invalid public reexports and cycles" {
     defer temporary.cleanup();
 
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = "use Facade\nfunc main() {}" });
-    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Facade.sx", .data = "public use Api.hidden as hidden" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Facade.sx", .data = "public use Api.hidden" });
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Api.sx", .data = "func hidden() {}" });
 
     const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
@@ -174,13 +174,13 @@ test "diagnose invalid public reexports and cycles" {
         compiler.diagnostic.?.message,
     );
 
-    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Facade.sx", .data = "public use Api as Api" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Facade.sx", .data = "public use Api" });
     compiler = Project.Compiler.init(allocator, std.testing.io);
     try std.testing.expectError(error.InvalidSource, compiler.compile(input));
     try std.testing.expectEqualStrings("public use can only reexport a declaration", compiler.diagnostic.?.message);
 
-    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Facade.sx", .data = "public use Api.value as value" });
-    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Api.sx", .data = "public use Facade.value as value" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Facade.sx", .data = "public use Api.value" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Api.sx", .data = "public use Facade.value" });
     compiler = Project.Compiler.init(allocator, std.testing.io);
     try std.testing.expectError(error.InvalidSource, compiler.compile(input));
     try std.testing.expect(std.mem.startsWith(u8, compiler.diagnostic.?.message, "public use cycle reaches"));

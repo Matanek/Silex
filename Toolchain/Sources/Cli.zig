@@ -10,6 +10,8 @@ pub const Diagnostic = struct {
     pub const Kind = enum {
         missing_source,
         multiple_sources,
+        missing_package,
+        multiple_packages,
         missing_output,
         duplicate_output,
         missing_target,
@@ -42,6 +44,11 @@ pub const CompileOptions = struct {
     target: ?TargetModule.Target,
 };
 
+pub const InstallOptions = struct {
+    package_path: []const u8,
+    target: ?TargetModule.Target,
+};
+
 pub const RunResult = union(enum) {
     options: RunOptions,
     diagnostic: Diagnostic,
@@ -54,6 +61,11 @@ pub const CompileResult = union(enum) {
 
 pub const InterpretResult = union(enum) {
     options: InterpretOptions,
+    diagnostic: Diagnostic,
+};
+
+pub const InstallResult = union(enum) {
+    options: InstallOptions,
     diagnostic: Diagnostic,
 };
 
@@ -172,6 +184,36 @@ pub fn parseCompile(args: []const []const u8) CompileResult {
     } };
 }
 
+pub fn parseInstall(args: []const []const u8) InstallResult {
+    var package_path: ?[]const u8 = null;
+    var target: ?TargetModule.Target = null;
+    var index: usize = 0;
+
+    while (index < args.len) : (index += 1) {
+        const argument = args[index];
+        if (std.mem.eql(u8, argument, "--target")) {
+            if (target != null) return failure(InstallResult, .duplicate_target, argument);
+            index += 1;
+            if (index >= args.len or std.mem.startsWith(u8, args[index], "-")) {
+                return failure(InstallResult, .missing_target, argument);
+            }
+            target = TargetModule.Target.parse(args[index]) catch
+                return failure(InstallResult, .unknown_target, args[index]);
+        } else if (std.mem.startsWith(u8, argument, "-")) {
+            return failure(InstallResult, .unknown_option, argument);
+        } else if (package_path != null) {
+            return failure(InstallResult, .multiple_packages, argument);
+        } else {
+            package_path = argument;
+        }
+    }
+
+    return .{ .options = .{
+        .package_path = package_path orelse return failure(InstallResult, .missing_package, null),
+        .target = target,
+    } };
+}
+
 fn failure(comptime Result: type, kind: Diagnostic.Kind, argument: ?[]const u8) Result {
     return .{ .diagnostic = .{ .kind = kind, .argument = argument } };
 }
@@ -204,6 +246,19 @@ test "compile accepts short and long aliases in any order" {
     try std.testing.expectEqualStrings("Main.sx", long.source_path);
     try std.testing.expectEqualStrings("Application", long.output_path);
     try std.testing.expectEqual(Mode.debug, long.mode);
+}
+
+test "install accepts one package and an optional target" {
+    const local = parseInstall(&.{"Sandbox/GFX"}).options;
+    try std.testing.expectEqualStrings("Sandbox/GFX", local.package_path);
+    try std.testing.expect(local.target == null);
+
+    const cross = parseInstall(&.{ "--target", "windows-arm64", "Sandbox/GFX" }).options;
+    try std.testing.expect(cross.target.?.eql(.windows_arm64));
+    try expectInstallDiagnostic(parseInstall(&.{}), .missing_package, null);
+    try expectInstallDiagnostic(parseInstall(&.{ "A", "B" }), .multiple_packages, "B");
+    try expectInstallDiagnostic(parseInstall(&.{ "A", "--target" }), .missing_target, "--target");
+    try expectInstallDiagnostic(parseInstall(&.{ "A", "--target", "other" }), .unknown_target, "other");
 }
 
 test "compile accepts recognized targets and diagnoses invalid selections" {
@@ -278,6 +333,12 @@ fn expectRunDiagnostic(result: RunResult, kind: Diagnostic.Kind, argument: ?[]co
 }
 
 fn expectInterpretDiagnostic(result: InterpretResult, kind: Diagnostic.Kind, argument: ?[]const u8) !void {
+    const diagnostic = result.diagnostic;
+    try std.testing.expectEqual(kind, diagnostic.kind);
+    if (argument) |expected| try std.testing.expectEqualStrings(expected, diagnostic.argument.?);
+}
+
+fn expectInstallDiagnostic(result: InstallResult, kind: Diagnostic.Kind, argument: ?[]const u8) !void {
     const diagnostic = result.diagnostic;
     try std.testing.expectEqual(kind, diagnostic.kind);
     if (argument) |expected| try std.testing.expectEqualStrings(expected, diagnostic.argument.?);

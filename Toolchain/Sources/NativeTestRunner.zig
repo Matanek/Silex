@@ -217,6 +217,7 @@ test "link a package boundary provider into a native test" {
         .name = "Provider",
         .archive = archive,
         .frameworks = &.{},
+        .libraries = &.{},
     }};
     const result = try executeAt(
         allocator,
