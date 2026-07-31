@@ -1,9 +1,11 @@
 const std = @import("std");
+const Artifacts = @import("Artifacts.zig");
 const Boundary = @import("Boundary.zig");
 const Cli = @import("Cli.zig");
 const CompilationCache = @import("CompilationCache.zig");
 const Lower = @import("Arm64/Lower.zig");
 const Arm64Encoder = @import("Arm64/Encoder.zig");
+const Arm64Object = @import("Arm64/Object.zig");
 const Interpreter = @import("Interpreter.zig");
 const Ir = @import("Ir.zig");
 const Lsp = @import("Lsp/Server.zig");
@@ -12,8 +14,10 @@ const MachOObject = @import("MacOS/Object.zig");
 const MacOSLink = @import("MacOS/Link.zig");
 const Elf = @import("Linux/Elf.zig");
 const X64Encoder = @import("X64/Encoder.zig");
+const X64Object = @import("X64/Object.zig");
 const PE = @import("Windows/PE.zig");
 const WindowsImports = @import("Windows/Imports.zig");
+const NativeLink = @import("NativeLink.zig");
 const ReleaseOptimizer = @import("Optimize/Release.zig");
 const Project = @import("Project.zig");
 const Packages = @import("Packages.zig");
@@ -28,6 +32,7 @@ const usage =
     \\       silex interpret <source.sx> [-n|--nocache] [--emit-ir]
     \\       silex test <source.sx|directory> [-n|--nocache] [--emit-ir]
     \\       silex compile <source.sx> [--target <target>] [-d|--debug|-r|--release] [-n|--nocache] -o|--output <executable>
+    \\       silex install <package-directory> [--target <target>]
     \\       silex targets
     \\       silex lsp
     \\
@@ -37,8 +42,12 @@ const usage =
 ;
 
 test {
+    _ = Artifacts;
     _ = MachOObject;
+    _ = Arm64Object;
     _ = MacOSLink;
+    _ = X64Object;
+    _ = NativeLink;
 }
 
 pub fn main(init: std.process.Init) u8 {
@@ -59,10 +68,46 @@ fn runCli(init: std.process.Init) !u8 {
     if (std.mem.eql(u8, args[1], "interpret")) return interpretSource(init, allocator, args[2..]);
     if (std.mem.eql(u8, args[1], "test")) return testSource(init, allocator, args[2..]);
     if (std.mem.eql(u8, args[1], "compile")) return compileNative(init, allocator, args[2..]);
+    if (std.mem.eql(u8, args[1], "install")) return installPackage(init, allocator, args[2..]);
     if (std.mem.eql(u8, args[1], "targets")) return listTargets(init, allocator, args[2..]);
     if (std.mem.eql(u8, args[1], "lsp")) return runLanguageServer(init, args[2..]);
     std.debug.print("silex: unknown command '{s}'\n\n{s}", .{ args[1], usage });
     return 1;
+}
+
+fn installPackage(init: std.process.Init, allocator: std.mem.Allocator, args: []const []const u8) !u8 {
+    const options = switch (Cli.parseInstall(args)) {
+        .options => |options| options,
+        .diagnostic => |diagnostic| {
+            printCliDiagnostic("install", diagnostic);
+            return 1;
+        },
+    };
+    const target = options.target orelse TargetModule.Target.host() orelse {
+        std.debug.print("silex: 'install' requires --target on an unrecognized host\n", .{});
+        return 1;
+    };
+    var installer = Artifacts.Installer.init(allocator, init.gpa, init.io);
+    const summary = installer.install(options.package_path, target) catch |err| switch (err) {
+        error.InvalidManifest => {
+            std.debug.print(
+                "silex: cannot install package: {s}\n",
+                .{installer.diagnostic orelse "invalid artifact declaration"},
+            );
+            return 1;
+        },
+        else => return err,
+    };
+    if (summary.installed == 0) {
+        std.debug.print("silex: artifacts for {s} are already installed\n", .{target.name()});
+    } else {
+        std.debug.print("silex: installed {d} artifact{s} for {s}\n", .{
+            summary.installed,
+            if (summary.installed == 1) "" else "s",
+            target.name(),
+        });
+    }
+    return 0;
 }
 
 fn testSource(init: std.process.Init, allocator: std.mem.Allocator, args: []const []const u8) !u8 {
@@ -490,6 +535,55 @@ fn compileNativeOptions(
         };
         return 0;
     }
+    if ((target.eql(.linux_x64) or target.eql(.windows_x64)) and boundary_providers.len != 0) {
+        var image = (if (target.eql(.linux_x64))
+            X64Encoder.encodeLinuxObject(allocator, machine)
+        else
+            X64Encoder.encodeWindowsObject(allocator, machine)) catch |err| {
+            std.debug.print("silex: {s} encoder cannot emit a linked object: {t}\n", .{ target.name(), err });
+            return 1;
+        };
+        defer image.deinit(allocator);
+        const object = (if (target.eql(.linux_x64))
+            X64Object.emitElf(allocator, machine, image)
+        else
+            X64Object.emitCoff(allocator, machine, image)) catch |err| {
+            std.debug.print("silex: cannot emit a {s} relocatable object: {t}\n", .{ target.name(), err });
+            return 1;
+        };
+        const object_path = try linkedObjectPath(allocator, options, boundary_providers);
+        if (std.fs.path.dirname(object_path)) |directory| try Io.Dir.cwd().createDirPath(init.io, directory);
+        {
+            const file = try Io.Dir.cwd().createFile(init.io, object_path, .{});
+            defer file.close(init.io);
+            try file.writeStreamingAll(init.io, object);
+        }
+        if (std.fs.path.dirname(options.output_path)) |directory| try Io.Dir.cwd().createDirPath(init.io, directory);
+        NativeLink.executable(allocator, init.io, target, object_path, options.output_path, boundary_providers) catch |err| {
+            std.debug.print("silex: cannot link native package artifacts for {s}: {t}\n", .{ target.name(), err });
+            return 1;
+        };
+        return 0;
+    }
+    if (target.eql(.windows_arm64) and boundary_providers.len != 0) {
+        const object = Arm64Object.emitWindows(allocator, machine) catch |err| {
+            std.debug.print("silex: cannot emit a Windows ARM64 relocatable object: {t}\n", .{err});
+            return 1;
+        };
+        const object_path = try linkedObjectPath(allocator, options, boundary_providers);
+        if (std.fs.path.dirname(object_path)) |directory| try Io.Dir.cwd().createDirPath(init.io, directory);
+        {
+            const file = try Io.Dir.cwd().createFile(init.io, object_path, .{});
+            defer file.close(init.io);
+            try file.writeStreamingAll(init.io, object);
+        }
+        if (std.fs.path.dirname(options.output_path)) |directory| try Io.Dir.cwd().createDirPath(init.io, directory);
+        NativeLink.executable(allocator, init.io, target, object_path, options.output_path, boundary_providers) catch |err| {
+            std.debug.print("silex: cannot link native package artifacts for windows-arm64: {t}\n", .{err});
+            return 1;
+        };
+        return 0;
+    }
     const executable = executable: {
         if (target.eql(.macos_arm64)) break :executable MachO.emit(allocator, machine) catch |err| {
             std.debug.print("silex: cannot emit native executable: {t}\n", .{err});
@@ -761,6 +855,11 @@ fn printCliDiagnostic(command: []const u8, diagnostic: Cli.Diagnostic) void {
             std.debug.print("silex: 'test' accepts only one source file or directory, found '{s}'\n", .{diagnostic.argument.?})
         else
             std.debug.print("silex: '{s}' accepts only one source file, found '{s}'\n", .{ command, diagnostic.argument.? }),
+        .missing_package => std.debug.print("silex: 'install' expects one package directory\n", .{}),
+        .multiple_packages => std.debug.print(
+            "silex: 'install' accepts only one package directory, found '{s}'\n",
+            .{diagnostic.argument.?},
+        ),
         .missing_output => if (diagnostic.argument) |argument|
             std.debug.print("silex: option '{s}' expects an output path\n", .{argument})
         else

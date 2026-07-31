@@ -35,6 +35,17 @@ pub fn executable(
     };
     std.mem.sort([]const u8, frameworks.items, {}, stringLessThan);
     for (frameworks.items) |framework| try arguments.appendSlice(allocator, &.{ "-framework", framework });
+    var libraries: std.ArrayList([]const u8) = .empty;
+    for (providers) |provider| for (provider.libraries) |library| {
+        var duplicate = false;
+        for (libraries.items) |existing| if (std.mem.eql(u8, existing, library)) {
+            duplicate = true;
+            break;
+        };
+        if (!duplicate) try libraries.append(allocator, library);
+    };
+    std.mem.sort([]const u8, libraries.items, {}, stringLessThan);
+    for (libraries.items) |library| try arguments.append(allocator, try std.fmt.allocPrint(allocator, "-l{s}", .{library}));
 
     const result = try std.process.run(allocator, io, .{ .argv = arguments.items });
     switch (result.term) {
@@ -101,6 +112,7 @@ test "link and execute a symbol from a static ARM64 archive" {
         .name = "Provider",
         .archive = archive,
         .frameworks = &.{},
+        .libraries = &.{},
     }};
     try executable(allocator, std.testing.io, main_object, output, &providers);
     const executed = try std.process.run(allocator, std.testing.io, .{ .argv = &.{output} });

@@ -105,9 +105,11 @@ hide public child modules from callers.
 ## Reexport a declaration
 
 ```sx
-public use Geometry.Types.Vector as Vector
-public use Geometry.Operations.length as length
+public use Geometry.Types.Vector
+public use Geometry.Operations.length
+public use Geometry.Operations.distance as measure
 ```
 
-A public reexport needs an explicit alias. It exposes a declaration, not an
-entire module tree.
+A public reexport uses the declaration's current name by default. Add `as`
+only when the public API intentionally chooses another name. A reexport exposes
+one declaration, not an entire module tree.

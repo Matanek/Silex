@@ -6,7 +6,7 @@ const Blake3 = std.crypto.hash.Blake3;
 const Ir = @import("Ir.zig");
 const Ast = @import("Ast.zig");
 
-pub const format = "silex-cache-v3-control-flow-safety";
+pub const format = "silex-cache-v7-public-use-default-alias";
 const State = struct { files: []const []const u8 };
 
 pub fn loadIr(allocator: Allocator, io: Io, source_path: []const u8, target_name: []const u8) ?Ir.Program {

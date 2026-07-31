@@ -1242,13 +1242,17 @@ test "parse module uses aliases and qualified calls" {
     var parser = Parser.init(arena.allocator(),
         \\use Math.Operations
         \\use Math.Integer.Checked as Checked
+        \\public use Math.Geometry.Vector
+        \\public use Math.Geometry.length as magnitude
         \\func main() { Operations.add(Checked.value(), 2) }
     );
     const program = try parser.parse();
-    try std.testing.expectEqual(@as(usize, 2), program.uses.len);
+    try std.testing.expectEqual(@as(usize, 4), program.uses.len);
     try std.testing.expectEqualStrings("Math.Operations", program.uses[0].path);
     try std.testing.expect(program.uses[0].alias == null);
     try std.testing.expectEqualStrings("Checked", program.uses[1].alias.?);
+    try std.testing.expectEqualStrings("Vector", program.uses[2].alias.?);
+    try std.testing.expectEqualStrings("magnitude", program.uses[3].alias.?);
     const call = program.functions[0].statements[0].expression_statement.value.call;
     try std.testing.expectEqualStrings("add", call.name);
     try std.testing.expectEqualStrings("Operations", call.receiver.?.value.identifier);

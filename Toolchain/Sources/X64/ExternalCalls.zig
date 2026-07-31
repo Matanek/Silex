@@ -7,11 +7,13 @@ const Register = enum(u4) { rax = 0, rcx = 1, rdx = 2, rbx = 3, rsp = 4, rbp = 5
 
 pub const Platform = enum { linux, windows };
 pub const Error = Machine.Error || Allocator.Error || error{UnsupportedInstruction};
+pub const Site = struct { displacement_offset: u32, function: usize };
 
 pub fn emit(
     allocator: Allocator,
     bytes: *std.ArrayList(u8),
     import_sites: *std.ArrayList(WindowsImports.X64Site),
+    external_sites: *std.ArrayList(Site),
     platform: Platform,
     program: Machine.Program,
     function: Machine.Function,
@@ -19,6 +21,9 @@ pub fn emit(
 ) Error!void {
     if (call.function >= program.external_functions.len) return error.InvalidMachineProgram;
     const external = program.external_functions[call.function];
+    if (external.package_private) {
+        return emitBoundaryCall(allocator, bytes, external_sites, platform, external, call);
+    }
     switch (platform) {
         .linux => {
             if (!std.mem.eql(u8, external.provider, "Linux.kernel")) {
@@ -529,6 +534,133 @@ fn emitLinuxThreadJoin(
     try emitImmediate(allocator, bytes, .rax, 11);
     try bytes.appendSlice(allocator, &.{ 0x0f, 0x05 });
     try emitImmediate(allocator, bytes, .rax, 1);
+}
+
+fn emitBoundaryCall(
+    allocator: Allocator,
+    bytes: *std.ArrayList(u8),
+    sites: *std.ArrayList(Site),
+    platform: Platform,
+    external: Machine.ExternalFunction,
+    call: Machine.Instruction.ExternalCall,
+) Error!void {
+    if (external.signature.arguments.len != call.arguments.len or call.arguments.len > Machine.max_external_arguments) {
+        return error.InvalidMachineProgram;
+    }
+    switch (platform) {
+        .linux => try emitLinuxBoundaryArguments(allocator, bytes, external.signature.arguments, call.arguments),
+        .windows => try emitWindowsBoundaryArguments(allocator, bytes, external.signature.arguments, call.arguments),
+    }
+    try bytes.append(allocator, 0xe8);
+    const displacement_offset: u32 = @intCast(bytes.items.len);
+    try bytes.appendNTimes(allocator, 0, 4);
+    try sites.append(allocator, .{ .displacement_offset = displacement_offset, .function = call.function });
+    const stack_size = boundaryStackSize(platform, external.signature.arguments);
+    if (stack_size != 0) try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xc4, stack_size });
+    if (call.result) |result| {
+        if (external.signature.result) |kind| {
+            if (kind == .float32) {
+                try bytes.appendSlice(allocator, &.{ 0x66, 0x0f, 0x7e, 0xc0 });
+            } else if (kind == .float64) {
+                try bytes.appendSlice(allocator, &.{ 0x66, 0x48, 0x0f, 0x7e, 0xc0 });
+            }
+        }
+        try emitStoreStack(allocator, bytes, .rax, result);
+    }
+}
+
+fn emitLinuxBoundaryArguments(
+    allocator: Allocator,
+    bytes: *std.ArrayList(u8),
+    kinds: []const Machine.AbiValue,
+    arguments: []const Machine.Slot,
+) Allocator.Error!void {
+    const stack_size = boundaryStackSize(.linux, kinds);
+    if (stack_size != 0) try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xec, stack_size });
+    const integer_registers = [_]Register{ .rdi, .rsi, .rdx, .rcx, .r8, .r9 };
+    var integer_index: usize = 0;
+    var float_index: usize = 0;
+    var stack_index: usize = 0;
+    for (arguments, kinds) |argument, kind| {
+        if (isFloat(kind)) {
+            if (float_index < 8) {
+                try emitLoadFloatStack(allocator, bytes, @intCast(float_index), argument, kind == .float64);
+                float_index += 1;
+            } else {
+                try emitLoadStack(allocator, bytes, .rax, argument);
+                try emitStoreRsp(allocator, bytes, .rax, @intCast(stack_index * 8));
+                stack_index += 1;
+            }
+        } else if (integer_index < integer_registers.len) {
+            try emitLoadStack(allocator, bytes, integer_registers[integer_index], argument);
+            integer_index += 1;
+        } else {
+            try emitLoadStack(allocator, bytes, .rax, argument);
+            try emitStoreRsp(allocator, bytes, .rax, @intCast(stack_index * 8));
+            stack_index += 1;
+        }
+    }
+}
+
+fn emitWindowsBoundaryArguments(
+    allocator: Allocator,
+    bytes: *std.ArrayList(u8),
+    kinds: []const Machine.AbiValue,
+    arguments: []const Machine.Slot,
+) Allocator.Error!void {
+    const stack_size = boundaryStackSize(.windows, kinds);
+    try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xec, stack_size });
+    const registers = [_]Register{ .rcx, .rdx, .r8, .r9 };
+    for (arguments, kinds, 0..) |argument, kind, index| {
+        if (index < 4) {
+            if (isFloat(kind)) {
+                try emitLoadFloatStack(allocator, bytes, @intCast(index), argument, kind == .float64);
+            } else try emitLoadStack(allocator, bytes, registers[index], argument);
+        } else {
+            try emitLoadStack(allocator, bytes, .rax, argument);
+            try emitStoreRsp(allocator, bytes, .rax, @intCast(32 + (index - 4) * 8));
+        }
+    }
+}
+
+fn boundaryStackSize(platform: Platform, kinds: []const Machine.AbiValue) u8 {
+    var count: usize = 0;
+    switch (platform) {
+        .linux => {
+            var integers: usize = 0;
+            var floats: usize = 0;
+            for (kinds) |kind| if (isFloat(kind)) {
+                if (floats >= 8) count += 1;
+                floats += 1;
+            } else {
+                if (integers >= 6) count += 1;
+                integers += 1;
+            };
+            return @intCast(std.mem.alignForward(usize, count * 8, 16));
+        },
+        .windows => return @intCast(std.mem.alignForward(usize, 32 + @max(kinds.len, 4) * 8 - 32, 16)),
+    }
+}
+
+fn isFloat(kind: Machine.AbiValue) bool {
+    return kind == .float32 or kind == .float64;
+}
+
+fn emitLoadFloatStack(
+    allocator: Allocator,
+    bytes: *std.ArrayList(u8),
+    register: u3,
+    slot: Machine.Slot,
+    double: bool,
+) Allocator.Error!void {
+    try bytes.append(allocator, if (double) 0xf2 else 0xf3);
+    try bytes.appendSlice(allocator, &.{ 0x0f, 0x10, 0x85 | (@as(u8, register) << 3) });
+    try appendInt(allocator, bytes, i32, slotDisplacement(slot));
+}
+
+fn emitStoreRsp(allocator: Allocator, bytes: *std.ArrayList(u8), register: Register, offset: u8) Allocator.Error!void {
+    const rex: u8 = 0x48 | (if (@intFromEnum(register) >= 8) @as(u8, 4) else 0);
+    try bytes.appendSlice(allocator, &.{ rex, 0x89, 0x44 | ((@as(u8, @intFromEnum(register)) & 7) << 3), 0x24, offset });
 }
 
 pub fn emitWindowsImportCall(

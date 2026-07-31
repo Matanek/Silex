@@ -10,11 +10,15 @@ pub fn parse(parser: anytype, is_public: bool) !Ast.Use {
         return finishTypeAlias(parser, position, type_target, is_public);
     }
     if (parser.current.tag != .identifier) return parser.fail("expected module path after 'use'");
+    var implicit_alias = parser.current.lexeme;
+    var implicit_alias_position = parser.current.position;
     var path = parser.current.lexeme;
     try parser.advance();
     while (parser.current.tag == .dot) {
         try parser.advance();
         if (parser.current.tag != .identifier) return parser.fail("expected name after '.' in use path");
+        implicit_alias = parser.current.lexeme;
+        implicit_alias_position = parser.current.position;
         path = try std.fmt.allocPrint(parser.allocator, "{s}.{s}", .{ path, parser.current.lexeme });
         try parser.advance();
     }
@@ -37,11 +41,13 @@ pub fn parse(parser: anytype, is_public: bool) !Ast.Use {
         if (parser.current.tag != .identifier) return parser.fail("expected alias after 'as'");
         alias = parser.current.lexeme;
         alias_position = parser.current.position;
-        if (std.mem.eql(u8, alias.?, "Result")) return parser.failAt(alias_position.?, "'Result' is a reserved intrinsic type name");
-        if (std.mem.eql(u8, alias.?, "map_error")) return parser.failAt(alias_position.?, "'map_error' is a reserved intrinsic function name");
         try parser.advance();
     }
-    if (is_public and alias == null) return parser.failAt(position, "public use requires an explicit alias");
+    if (is_public and alias == null) {
+        alias = implicit_alias;
+        alias_position = implicit_alias_position;
+    }
+    if (alias) |name| try validateAlias(parser, alias_position.?, name);
     try parser.expectStatementTerminator();
     return .{
         .position = position,
@@ -57,8 +63,7 @@ fn finishTypeAlias(parser: anytype, position: @import("../Source.zig").Position,
     if (parser.current.tag != .identifier) return parser.fail("expected alias after 'as'");
     const alias = parser.current.lexeme;
     const alias_position = parser.current.position;
-    if (std.mem.eql(u8, alias, "Result")) return parser.failAt(alias_position, "'Result' is a reserved intrinsic type name");
-    if (std.mem.eql(u8, alias, "map_error")) return parser.failAt(alias_position, "'map_error' is a reserved intrinsic function name");
+    try validateAlias(parser, alias_position, alias);
     try parser.advance();
     try parser.expectStatementTerminator();
     return .{
@@ -69,6 +74,11 @@ fn finishTypeAlias(parser: anytype, position: @import("../Source.zig").Position,
         .alias_position = alias_position,
         .is_public = is_public,
     };
+}
+
+fn validateAlias(parser: anytype, position: @import("../Source.zig").Position, alias: []const u8) !void {
+    if (std.mem.eql(u8, alias, "Result")) return parser.failAt(position, "'Result' is a reserved intrinsic type name");
+    if (std.mem.eql(u8, alias, "map_error")) return parser.failAt(position, "'map_error' is a reserved intrinsic function name");
 }
 
 fn isTypeToken(tag: anytype) bool {
