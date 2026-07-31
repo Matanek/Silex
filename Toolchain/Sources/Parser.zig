@@ -68,12 +68,12 @@ pub const Parser = struct {
         while (self.current.tag != .end) {
             switch (self.current.tag) {
                 .keyword_use => try uses.append(self.allocator, try Uses.parse(self, false)),
-                .keyword_struct => try structures.append(self.allocator, try Nominals.parse(self, false, false, false)),
-                .keyword_class => try structures.append(self.allocator, try Nominals.parse(self, false, false, true)),
-                .keyword_static => try structures.append(self.allocator, try Nominals.parseStaticClass(self, false, false)),
-                .keyword_protocol => try structures.append(self.allocator, try Protocols.parse(self, false, false)),
-                .keyword_enum => try enums.append(self.allocator, try EnumParser.parse(self, false, false)),
-                .keyword_func => try functions.append(self.allocator, try self.parseFunction(false, false)),
+                .keyword_struct => try structures.append(self.allocator, try Nominals.parse(self, false, false, false, false)),
+                .keyword_class => try structures.append(self.allocator, try Nominals.parse(self, false, false, false, true)),
+                .keyword_static => try structures.append(self.allocator, try Nominals.parseStaticClass(self, false, false, false)),
+                .keyword_protocol => try structures.append(self.allocator, try Protocols.parse(self, false, false, false)),
+                .keyword_enum => try enums.append(self.allocator, try EnumParser.parse(self, false, false, false)),
+                .keyword_func => try functions.append(self.allocator, try self.parseFunction(false, false, false)),
                 .identifier => if (std.mem.eql(u8, self.current.lexeme, "test"))
                     try functions.appendSlice(self.allocator, try TestBlocks.parse(self))
                 else
@@ -84,25 +84,30 @@ pub const Parser = struct {
                     try self.advance();
                     switch (self.current.tag) {
                         .keyword_use => try uses.append(self.allocator, try Uses.parse(self, true)),
-                        .keyword_struct => try structures.append(self.allocator, try Nominals.parse(self, true, false, false)),
-                        .keyword_class => try structures.append(self.allocator, try Nominals.parse(self, true, false, true)),
-                        .keyword_static => try structures.append(self.allocator, try Nominals.parseStaticClass(self, true, false)),
-                        .keyword_enum => try enums.append(self.allocator, try EnumParser.parse(self, true, false)),
-                        .keyword_protocol => try structures.append(self.allocator, try Protocols.parse(self, true, false)),
-                        .keyword_func => try functions.append(self.allocator, try self.parseFunction(true, false)),
+                        .keyword_struct => try structures.append(self.allocator, try Nominals.parse(self, true, false, false, false)),
+                        .keyword_class => try structures.append(self.allocator, try Nominals.parse(self, true, false, false, true)),
+                        .keyword_static => try structures.append(self.allocator, try Nominals.parseStaticClass(self, true, false, false)),
+                        .keyword_enum => try enums.append(self.allocator, try EnumParser.parse(self, true, false, false)),
+                        .keyword_protocol => try structures.append(self.allocator, try Protocols.parse(self, true, false, false)),
+                        .keyword_func => try functions.append(self.allocator, try self.parseFunction(true, false, false)),
                         else => return self.fail("expected use, enum, struct, class, protocol, or function declaration after 'public'"),
                     }
                 },
-                .keyword_internal => {
+                .keyword_internal, .keyword_local => {
+                    const is_internal = self.current.tag == .keyword_internal;
+                    const is_local = self.current.tag == .keyword_local;
                     try self.advance();
                     switch (self.current.tag) {
-                        .keyword_struct => try structures.append(self.allocator, try Nominals.parse(self, false, true, false)),
-                        .keyword_class => try structures.append(self.allocator, try Nominals.parse(self, false, true, true)),
-                        .keyword_static => try structures.append(self.allocator, try Nominals.parseStaticClass(self, false, true)),
-                        .keyword_enum => try enums.append(self.allocator, try EnumParser.parse(self, false, true)),
-                        .keyword_protocol => try structures.append(self.allocator, try Protocols.parse(self, false, true)),
-                        .keyword_func => try functions.append(self.allocator, try self.parseFunction(false, true)),
-                        else => return self.fail("expected enum, struct, class, protocol, or function declaration after 'internal'"),
+                        .keyword_struct => try structures.append(self.allocator, try Nominals.parse(self, false, is_internal, is_local, false)),
+                        .keyword_class => try structures.append(self.allocator, try Nominals.parse(self, false, is_internal, is_local, true)),
+                        .keyword_static => try structures.append(self.allocator, try Nominals.parseStaticClass(self, false, is_internal, is_local)),
+                        .keyword_enum => try enums.append(self.allocator, try EnumParser.parse(self, false, is_internal, is_local)),
+                        .keyword_protocol => try structures.append(self.allocator, try Protocols.parse(self, false, is_internal, is_local)),
+                        .keyword_func => try functions.append(self.allocator, try self.parseFunction(false, is_internal, is_local)),
+                        else => return self.fail(if (is_internal)
+                            "expected enum, struct, class, protocol, or function declaration after 'internal'"
+                        else
+                            "expected enum, struct, class, protocol, or function declaration after 'local'"),
                     }
                 },
                 else => return self.fail("expected use, enum, struct, class, protocol, function, or test declaration"),
@@ -187,7 +192,7 @@ pub const Parser = struct {
         return true;
     }
 
-    pub fn parseFunction(self: *Parser, is_public: bool, is_internal: bool) ParseError!Ast.Function {
+    pub fn parseFunction(self: *Parser, is_public: bool, is_internal: bool, is_local: bool) ParseError!Ast.Function {
         const position = self.current.position;
         try self.expect(.keyword_func, "expected 'func'");
         if (self.current.tag != .identifier and self.current.tag != .keyword_copy) return self.fail("expected function name");
@@ -257,6 +262,7 @@ pub const Parser = struct {
             .test_source_name = if (self.test_prefix != null) source_name else null,
             .is_public = is_public,
             .is_internal = is_internal,
+            .is_local = is_local,
             .position = position,
             .name_position = name_position,
             .name = name,
@@ -295,7 +301,7 @@ pub const Parser = struct {
             .is_anonymous = true,
             .is_test = self.test_prefix != null,
             .test_owner = self.test_prefix,
-            .is_internal = true,
+            .is_local = true,
             .position = position,
             .name_position = position,
             .name = name,
@@ -1367,14 +1373,15 @@ test "parse public functions and keep functions private by default" {
     try std.testing.expect(!program.functions[1].is_public);
 }
 
-test "parse public default internal and private structure members" {
+test "parse public default internal local and private structure members" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     var parser = Parser.init(arena.allocator(),
         \\public struct Vec2 {
         \\    public var x:int
         \\    let y:int
-        \\    internal func fileOnly() {}
+        \\    internal func packageOnly() {}
+        \\    local func fileOnly() {}
         \\    private init() {}
         \\    private struct Storage {}
         \\}
@@ -1386,6 +1393,7 @@ test "parse public default internal and private structure members" {
     try std.testing.expect(program.structures[0].fields[0].is_public);
     try std.testing.expect(program.structures[0].fields[1].is_public);
     try std.testing.expect(program.structures[0].methods[0].is_internal);
+    try std.testing.expect(program.structures[0].methods[1].is_local);
     try std.testing.expect(program.structures[0].constructors[0].is_private);
     try std.testing.expect(program.structures[1].is_private);
     const type_index = program.functions[0].parameters[0].type.structureIndex().?;
@@ -1420,7 +1428,7 @@ test "apply optional and collection type suffixes from left to right" {
 test "reject protected structure members" {
     try expectParseError(
         "struct Value { protected var value:int } func main() {}",
-        "structures only support public, internal, or private members",
+        "structures only support public, internal, local, or private members",
     );
 }
 

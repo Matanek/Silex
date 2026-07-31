@@ -21,15 +21,17 @@ pub fn parse(self: anytype) !Ast.Extension {
         if (self.current.tag == .keyword_override) return self.fail("extension methods cannot declare override");
         var is_public = false;
         var is_internal = false;
+        var is_local = false;
         var is_private = false;
         var explicit = false;
-        if (self.current.tag == .keyword_public or self.current.tag == .keyword_internal or
+        if (self.current.tag == .keyword_public or self.current.tag == .keyword_internal or self.current.tag == .keyword_local or
             self.current.tag == .keyword_private or self.current.tag == .keyword_protected)
         {
             explicit = true;
             if (self.current.tag == .keyword_protected) return self.fail("extension methods cannot be protected");
             is_public = self.current.tag == .keyword_public;
             is_internal = self.current.tag == .keyword_internal;
+            is_local = self.current.tag == .keyword_local;
             is_private = self.current.tag == .keyword_private;
             try self.advance();
         }
@@ -39,7 +41,7 @@ pub fn parse(self: anytype) !Ast.Extension {
             try self.advance();
         }
         if (self.current.tag != .keyword_func) return self.fail("an extension may declare methods only");
-        var method = try self.parseFunction(is_public, is_internal);
+        var method = try self.parseFunction(is_public, is_internal, is_local);
         method.is_static = is_static;
         method.is_private = is_private;
         method.visibility_explicit = explicit;

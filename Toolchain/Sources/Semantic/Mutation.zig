@@ -124,11 +124,19 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
         if (source_structure.drop != null and !self.ownerStorageVisible(structure_index, target_field.name_position)) {
             return self.fail(target_field.name_position, "owner structure storage is private to its declaring file and direct module users");
         }
-        if (source_structure.is_internal and target_field.name_position.file != source_structure.position.file) {
+        if (source_structure.is_local and target_field.name_position.file != source_structure.position.file) {
             const message = try std.fmt.allocPrint(
                 self.allocator,
-                "members of internal structure '{s}' are unavailable outside its source file",
+                "members of local structure '{s}' are unavailable outside its source file",
                 .{structure.name},
+            );
+            return self.fail(target_field.name_position, message);
+        }
+        if (source_structure.is_internal and self.owner_context != source_structure.owner) {
+            const message = try std.fmt.allocPrint(
+                self.allocator,
+                "members of internal structure '{s}' are unavailable outside its package",
+                .{source_structure.name},
             );
             return self.fail(target_field.name_position, message);
         }
@@ -151,8 +159,8 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
         const inherited = Inheritance.fieldByIndex(self, structure_index, field_index) orelse return error.InvalidSource;
         const source_field = inherited.declaration;
         if (!Visibility.memberVisible(self, inherited.owner, source_field, target_field.name_position)) {
-            const message = if (source_field.is_internal)
-                try std.fmt.allocPrint(self.allocator, "field '{s}' is internal to its source file", .{field.name})
+            const message = if (source_field.is_local)
+                try std.fmt.allocPrint(self.allocator, "field '{s}' is local to its source file", .{field.name})
             else
                 try std.fmt.allocPrint(self.allocator, "field '{s}' is {s} and unavailable here", .{ field.name, Visibility.name(source_field) });
             return self.fail(target_field.name_position, message);

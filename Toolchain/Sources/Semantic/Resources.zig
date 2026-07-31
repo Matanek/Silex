@@ -107,6 +107,9 @@ fn containsView(self: anytype, type_value: Ast.Type) bool {
 
 pub fn analyzeDrop(self: anytype, structure_index: usize, declaration: Ast.Structure, drop: Ast.Drop) !Ir.Function {
     try validateDrop(self, drop);
+    const previous_owner_context = self.owner_context;
+    self.owner_context = declaration.owner;
+    defer self.owner_context = previous_owner_context;
     const previous_context = self.member_context;
     self.member_context = structure_index;
     defer self.member_context = previous_context;

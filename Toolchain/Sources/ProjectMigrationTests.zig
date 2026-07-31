@@ -270,7 +270,7 @@ test "compose public fundamental aliases and diagnose cycles and signature colli
     );
 }
 
-test "use internal declarations and members inside their source file" {
+test "use local declarations and members inside their source file" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -280,11 +280,11 @@ test "use internal declarations and members inside their source file" {
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Main.sx",
         .data =
-        \\internal func offset() int { return 2 }
-        \\internal struct Handle {
-        \\    internal var value:int
-        \\    internal init(value:int) { self.value = value }
-        \\    internal func read() int { return self.value }
+        \\local func offset() int { return 2 }
+        \\local struct Handle {
+        \\    local var value:int
+        \\    local init(value:int) { self.value = value }
+        \\    local func read() int { return self.value }
         \\}
         \\func main() {
         \\    var handle = Handle(40)
@@ -303,7 +303,7 @@ test "use internal declarations and members inside their source file" {
     try std.testing.expectEqual(@as(usize, 0), compilation.interfaces[0].functions.len);
 }
 
-test "reject internal functions and structures from sibling files and packages" {
+test "reject local functions and structures from sibling files and packages" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -316,12 +316,12 @@ test "reject internal functions and structures from sibling files and packages" 
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Api.sx",
-        .data = "internal func hidden() {}\ninternal struct Handle {}",
+        .data = "local func hidden() {}\nlocal struct Handle {}",
     });
     const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
     var compiler = Project.Compiler.init(allocator, std.testing.io);
     try std.testing.expectError(error.InvalidSource, compiler.compile(input));
-    try std.testing.expectEqualStrings("function 'Api.hidden' is internal to its source file", compiler.diagnostic.?.message);
+    try std.testing.expectEqualStrings("function 'Api.hidden' is local to its source file", compiler.diagnostic.?.message);
 
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Main.sx",
@@ -329,7 +329,7 @@ test "reject internal functions and structures from sibling files and packages" 
     });
     compiler = Project.Compiler.init(allocator, std.testing.io);
     try std.testing.expectError(error.InvalidSource, compiler.compile(input));
-    try std.testing.expectEqualStrings("structure 'Handle' is internal to its source file", compiler.diagnostic.?.message);
+    try std.testing.expectEqualStrings("structure 'Handle' is local to its source file", compiler.diagnostic.?.message);
 
     try temporary.dir.createDirPath(std.testing.io, "Library/Module");
     try temporary.dir.writeFile(std.testing.io, .{
@@ -342,7 +342,7 @@ test "reject internal functions and structures from sibling files and packages" 
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Library/Module/Api.sx",
-        .data = "internal func hidden() {}",
+        .data = "local func hidden() {}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Main.sx",
@@ -350,10 +350,85 @@ test "reject internal functions and structures from sibling files and packages" 
     });
     compiler = Project.Compiler.init(allocator, std.testing.io);
     try std.testing.expectError(error.InvalidSource, compiler.compile(input));
-    try std.testing.expectEqualStrings("function 'Library.Api.hidden' is internal to its source file", compiler.diagnostic.?.message);
+    try std.testing.expectEqualStrings("function 'Library.Api.hidden' is local to its source file", compiler.diagnostic.?.message);
 }
 
-test "keep internal return values opaque and reject public input leaks" {
+test "share internal declarations across one package without exporting them" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.createDirPath(std.testing.io, "Library/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Package.json",
+        .data = "{\"dependencies\":{\"Library\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Library/Package.json",
+        .data = "{\"name\":\"Library\",\"version\":\"1.0.0\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Library/Module/Internals.sx",
+        .data =
+        \\internal struct Token {
+        \\    internal var value:int
+        \\    internal init(value:int) { self.value = value }
+        \\    internal func read() int { return self.value }
+        \\}
+        \\internal func offset() int { return 2 }
+        \\public struct Box {
+        \\    internal var hidden:int
+        \\    public var value:int
+        \\    internal func secret() int { return self.hidden }
+        \\}
+        \\public func make() Box { return Box(hidden:20, value:22) }
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Library/Module/Bridge.sx",
+        .data =
+        \\use Library.Internals
+        \\public func answer() int {
+        \\    let token = Internals.Token(40)
+        \\    let box = Internals.make()
+        \\    return token.read() + Internals.offset() + box.secret() - box.hidden
+        \\}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "use Library.Bridge\nfunc main() { print(Bridge.answer()) }",
+    });
+
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(input);
+    const result = try @import("Interpreter.zig").runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("42\n", result.stdout);
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "use Library.Internals.offset as offset\nfunc main() { print(offset()) }",
+    });
+    compiler = Project.Compiler.init(allocator, std.testing.io);
+    try std.testing.expectError(error.InvalidSource, compiler.compile(input));
+    try std.testing.expectEqualStrings(
+        "function 'Library.Internals.offset' is internal to its package",
+        compiler.diagnostic.?.message,
+    );
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "use Library.Internals\nfunc main() { let box = Internals.make(); print(box.secret()) }",
+    });
+    compiler = Project.Compiler.init(allocator, std.testing.io);
+    try std.testing.expectError(error.InvalidSource, compiler.compile(input));
+    try std.testing.expectEqualStrings("method 'secret' is internal to its package", compiler.diagnostic.?.message);
+}
+
+test "keep local return values opaque and reject public input leaks" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -367,7 +442,7 @@ test "keep internal return values opaque and reject public input leaks" {
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Api.sx",
         .data =
-        \\internal struct Handle { var code:int }
+        \\local struct Handle { var code:int }
         \\public func make() Handle { return Handle(code:42) }
         ,
     });
@@ -385,19 +460,19 @@ test "keep internal return values opaque and reject public input leaks" {
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Api.sx",
         .data =
-        \\internal struct Handle { var code:int }
+        \\local struct Handle { var code:int }
         \\public func consume(value:Handle) {}
         ,
     });
     compiler = Project.Compiler.init(allocator, std.testing.io);
     try std.testing.expectError(error.InvalidSource, compiler.compile(input));
     try std.testing.expectEqualStrings(
-        "public function 'consume' exposes internal structure 'Handle'",
+        "public function 'consume' exposes local structure 'Handle'",
         compiler.diagnostic.?.message,
     );
 }
 
-test "enforce internal fields methods and constructors from other files" {
+test "enforce local fields methods and constructors from other files" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -408,10 +483,10 @@ test "enforce internal fields methods and constructors from other files" {
         .sub_path = "Api.sx",
         .data =
         \\public struct Box {
-        \\    internal var secret:int
+        \\    local var secret:int
         \\    var value:int
-        \\    internal init(secret:int, value:int) { self.secret = secret; self.value = value }
-        \\    internal func hidden() int { return self.secret }
+        \\    local init(secret:int, value:int) { self.secret = secret; self.value = value }
+        \\    local func hidden() int { return self.secret }
         \\}
         \\public func make() Box { return Box(20, 22) }
         ,
@@ -424,7 +499,7 @@ test "enforce internal fields methods and constructors from other files" {
     });
     var compiler = Project.Compiler.init(allocator, std.testing.io);
     try std.testing.expectError(error.InvalidSource, compiler.compile(input));
-    try std.testing.expectEqualStrings("field 'secret' is internal to its source file", compiler.diagnostic.?.message);
+    try std.testing.expectEqualStrings("field 'secret' is local to its source file", compiler.diagnostic.?.message);
 
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Main.sx",
@@ -432,7 +507,7 @@ test "enforce internal fields methods and constructors from other files" {
     });
     compiler = Project.Compiler.init(allocator, std.testing.io);
     try std.testing.expectError(error.InvalidSource, compiler.compile(input));
-    try std.testing.expectEqualStrings("method 'hidden' is internal to its source file", compiler.diagnostic.?.message);
+    try std.testing.expectEqualStrings("method 'hidden' is local to its source file", compiler.diagnostic.?.message);
 
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Main.sx",
@@ -440,5 +515,5 @@ test "enforce internal fields methods and constructors from other files" {
     });
     compiler = Project.Compiler.init(allocator, std.testing.io);
     try std.testing.expectError(error.InvalidSource, compiler.compile(input));
-    try std.testing.expect(std.mem.startsWith(u8, compiler.diagnostic.?.message, "constructor of 'Api.Box' is internal"));
+    try std.testing.expect(std.mem.startsWith(u8, compiler.diagnostic.?.message, "constructor of 'Api.Box' is local"));
 }

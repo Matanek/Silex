@@ -3,7 +3,7 @@ const Ast = @import("../Ast.zig");
 const Strings = @import("../Strings.zig");
 const Generics = @import("Generics.zig");
 
-pub fn parse(parser: anytype, is_public: bool, is_internal: bool) !Ast.Enum {
+pub fn parse(parser: anytype, is_public: bool, is_internal: bool, is_local: bool) !Ast.Enum {
     const position = parser.current.position;
     try parser.advance();
     if (parser.current.tag != .identifier) return parser.fail("expected enum name");
@@ -79,6 +79,7 @@ pub fn parse(parser: anytype, is_public: bool, is_internal: bool) !Ast.Enum {
     return .{
         .is_public = is_public,
         .is_internal = is_internal,
+        .is_local = is_local,
         .position = position,
         .name_position = name_position,
         .name = name,

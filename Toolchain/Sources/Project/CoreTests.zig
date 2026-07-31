@@ -34,7 +34,7 @@ test "compile only the explicit local module closure" {
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Math/Operations.sx",
-        .data = "func add(left:int, right:int) int { return left + right }",
+        .data = "internal func add(left:int, right:int) int { return left + right }",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Unused.sx",
@@ -169,7 +169,7 @@ test "resolve explicit module aliases direct declarations and grouping namespace
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Math/Operations.sx",
-        .data = "func add(left:int, right:int) int { return left + right }",
+        .data = "internal func add(left:int, right:int) int { return left + right }",
     });
 
     const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
@@ -227,11 +227,11 @@ test "allow dependency cycles under one logical parent" {
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Group/A.sx",
-        .data = "use Group.B\nfunc run() { B.touch() }",
+        .data = "use Group.B\ninternal func run() { B.touch() }",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Group/B.sx",
-        .data = "use Group.A\nfunc touch() {}",
+        .data = "use Group.A\ninternal func touch() {}",
     });
 
     const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
@@ -343,7 +343,7 @@ test "do not propagate private module access through a dependency" {
     const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
     var compiler = Compiler.init(allocator, std.testing.io);
     try std.testing.expectError(error.InvalidSource, compiler.compile(input));
-    try std.testing.expectEqualStrings("unknown function 'B.hidden'", compiler.diagnostic.?.message);
+    try std.testing.expectEqualStrings("function 'Layer.B.hidden' is private outside its module", compiler.diagnostic.?.message);
 }
 
 test "compose simple modules with an adjacent local package" {
@@ -366,7 +366,7 @@ test "compose simple modules with an adjacent local package" {
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Foo/Bar.sx",
-        .data = "func value() int { return 20 }",
+        .data = "internal func value() int { return 20 }",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "MonPackage/Package.json",
@@ -665,13 +665,13 @@ test "compose same-package module fragments across active roots" {
 
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Bridge/Platform/MacOS/Module/Combined.sx",
-        .data = "struct PlatformValue { let value:int }\ninternal func value() int { return 100 }",
+        .data = "struct PlatformValue { let value:int }\nlocal func value() int { return 100 }",
     });
     var internal_compiler = Compiler.init(allocator, std.testing.io);
     internal_compiler.target = .macos_arm64;
     try std.testing.expectError(error.InvalidSource, internal_compiler.compile(input));
     try std.testing.expectEqualStrings(
-        "function 'Bridge.Combined.$Platform.value' is internal to its source file",
+        "function 'Bridge.Combined.$Platform.value' is local to its source file",
         internal_compiler.diagnostic.?.message,
     );
     try std.testing.expect(std.mem.endsWith(
@@ -981,7 +981,7 @@ test "enforce public package interfaces and direct dependency visibility" {
     var compiler = Compiler.init(allocator, std.testing.io);
     try std.testing.expectError(error.InvalidSource, compiler.compile(input));
     try std.testing.expectEqualStrings(
-        "function 'A.Api.hidden' is private outside its package",
+        "function 'A.Api.hidden' is private outside its module",
         compiler.diagnostic.?.message,
     );
 
@@ -1093,7 +1093,7 @@ test "compose public associated enums across modules" {
 
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Api.sx",
-        .data = "internal enum Message { empty }",
+        .data = "local enum Message { empty }",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Main.sx",
@@ -1101,7 +1101,7 @@ test "compose public associated enums across modules" {
     });
     compiler = Compiler.init(allocator, std.testing.io);
     try std.testing.expectError(error.InvalidSource, compiler.compile(input));
-    try std.testing.expectEqualStrings("enum 'Message' is internal to its source file", compiler.diagnostic.?.message);
+    try std.testing.expectEqualStrings("enum 'Message' is local to its source file", compiler.diagnostic.?.message);
 }
 
 test "compose public raw enums across modules" {

@@ -41,12 +41,22 @@ pub fn findVisibleFunctionByName(program: Ast.Program, call: Ast.Expression.Call
 }
 
 pub fn functionVisible(call: Ast.Expression.Call, function: Ast.Function) bool {
-    if (function.is_internal) return call.name_position.file == function.position.file;
-    return call.owner == function.owner or function.is_public;
+    if (function.is_local) return call.name_position.file == function.position.file;
+    if (function.is_public) return true;
+    if (function.is_internal) return call.owner == function.owner;
+    if (call.name_position.file == function.position.file) return true;
+    const separator = std.mem.lastIndexOfScalar(u8, function.name, '.') orelse return false;
+    return std.mem.eql(u8, logicalModule(call.module), logicalModule(function.name[0..separator]));
 }
 
-pub fn memberVisible(position: @import("../Source.zig").Position, declaration_position: @import("../Source.zig").Position, is_internal: bool) bool {
-    return !is_internal or position.file == declaration_position.file;
+fn logicalModule(module: []const u8) []const u8 {
+    if (std.mem.endsWith(u8, module, ".$Platform")) return module[0 .. module.len - ".$Platform".len];
+    if (std.mem.endsWith(u8, module, ".$Target")) return module[0 .. module.len - ".$Target".len];
+    return module;
+}
+
+pub fn memberVisible(position: @import("../Source.zig").Position, declaration_position: @import("../Source.zig").Position, is_local: bool) bool {
+    return !is_local or position.file == declaration_position.file;
 }
 
 pub fn removeSeparators(allocator: Allocator, text: []const u8) Allocator.Error![]const u8 {

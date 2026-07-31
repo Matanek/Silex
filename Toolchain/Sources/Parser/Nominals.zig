@@ -2,20 +2,21 @@ const std = @import("std");
 const Ast = @import("../Ast.zig");
 const Generics = @import("Generics.zig");
 
-pub fn parse(self: anytype, is_public: bool, is_internal: bool, is_class: bool) !Ast.Structure {
-    return parseType(self, is_public, is_internal, false, false, is_class, false);
+pub fn parse(self: anytype, is_public: bool, is_internal: bool, is_local: bool, is_class: bool) !Ast.Structure {
+    return parseType(self, is_public, is_internal, is_local, false, false, is_class, false);
 }
 
-pub fn parseStaticClass(self: anytype, is_public: bool, is_internal: bool) !Ast.Structure {
+pub fn parseStaticClass(self: anytype, is_public: bool, is_internal: bool, is_local: bool) !Ast.Structure {
     try self.advance();
     if (self.current.tag != .keyword_class) return self.fail("expected 'class' after 'static'");
-    return parseType(self, is_public, is_internal, false, false, true, true);
+    return parseType(self, is_public, is_internal, is_local, false, false, true, true);
 }
 
 fn parseType(
     self: anytype,
     is_public: bool,
     is_internal: bool,
+    is_local: bool,
     is_private: bool,
     is_protected: bool,
     is_class: bool,
@@ -80,19 +81,21 @@ fn parseType(
         }
         var member_public = !is_class;
         var member_internal = false;
+        var member_local = false;
         var member_private = is_class;
         var member_protected = false;
         var member_visibility = false;
-        if (self.current.tag == .keyword_public or self.current.tag == .keyword_internal or
+        if (self.current.tag == .keyword_public or self.current.tag == .keyword_internal or self.current.tag == .keyword_local or
             self.current.tag == .keyword_private or self.current.tag == .keyword_protected)
         {
             member_visibility = true;
             member_public = self.current.tag == .keyword_public;
             member_internal = self.current.tag == .keyword_internal;
+            member_local = self.current.tag == .keyword_local;
             member_private = self.current.tag == .keyword_private;
             member_protected = self.current.tag == .keyword_protected;
             if (is_static_class and member_protected) return self.fail("static classes do not support protected members");
-            if (!is_class and member_protected) return self.fail("structures only support public, internal, or private members");
+            if (!is_class and member_protected) return self.fail("structures only support public, internal, local, or private members");
             try self.advance();
         }
         var member_static = false;
@@ -124,6 +127,7 @@ fn parseType(
                 self,
                 member_public,
                 member_internal,
+                member_local,
                 member_private,
                 member_protected,
                 nested_is_class,
@@ -136,8 +140,9 @@ fn parseType(
             if (is_static_class) return self.fail("static classes cannot declare constructors");
             if (member_static) return self.fail("constructors cannot be static");
             if (member_override) return self.fail("constructors cannot declare override");
-            var constructor = try parseConstructor(self, member_internal, base != null);
+            var constructor = try parseConstructor(self, member_internal, member_local, base != null);
             constructor.is_public = member_public;
+            constructor.is_internal = member_internal;
             constructor.is_private = member_private;
             constructor.is_protected = member_protected;
             try constructors.append(self.allocator, constructor);
@@ -146,7 +151,7 @@ fn parseType(
         if (self.current.tag == .keyword_func) {
             if (is_static_class and !member_static) return self.fail("static class methods must start with 'static func'");
             if (member_override and member_static) return self.fail("static methods cannot declare override");
-            var method = try self.parseFunction(member_public, member_internal);
+            var method = try self.parseFunction(member_public, member_internal, member_local);
             method.is_static = member_static;
             method.is_override = member_override;
             method.is_private = member_private;
@@ -197,6 +202,7 @@ fn parseType(
             .is_static = member_static,
             .is_public = member_public,
             .is_internal = member_internal,
+            .is_local = member_local,
             .is_private = member_private,
             .is_protected = member_protected,
             .position = field_position,
@@ -212,6 +218,7 @@ fn parseType(
     return .{
         .is_public = is_public,
         .is_internal = is_internal,
+        .is_local = is_local,
         .is_private = is_private,
         .is_protected = is_protected,
         .is_class = is_class,
@@ -232,7 +239,7 @@ fn parseType(
     };
 }
 
-fn parseConstructor(self: anytype, is_internal: bool, has_base: bool) !Ast.Constructor {
+fn parseConstructor(self: anytype, is_internal: bool, is_local: bool, has_base: bool) !Ast.Constructor {
     const position = self.current.position;
     try self.advance();
     if (self.current.tag == .less) return self.fail("constructors cannot declare type parameters");
@@ -265,8 +272,9 @@ fn parseConstructor(self: anytype, is_internal: bool, has_base: bool) !Ast.Const
         super_arguments = try arguments.toOwnedSlice(self.allocator);
     }
     return .{
-        .is_public = !is_internal,
+        .is_public = !is_internal and !is_local,
         .is_internal = is_internal,
+        .is_local = is_local,
         .position = position,
         .parameters = try parameters.toOwnedSlice(self.allocator),
         .super_arguments = super_arguments,

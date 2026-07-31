@@ -159,7 +159,7 @@ pub fn buildMappedGenerics(
         if (!structure.is_public or !publicOwners(program, structure)) continue;
         var fields: std.ArrayList(StructureField) = .empty;
         for (structure.fields) |field| {
-            if (!field.is_public or field.is_internal) continue;
+            if (!field.is_public or field.is_local) continue;
             try fields.append(allocator, .{
                 .name = field.name,
                 .type = mappedType(field.type, type_map, generic_map),
@@ -167,7 +167,7 @@ pub fn buildMappedGenerics(
             });
         }
         for (structure.static_fields) |field| {
-            if (!field.is_public or field.is_internal) continue;
+            if (!field.is_public or field.is_local) continue;
             try fields.append(allocator, .{
                 .is_static = true,
                 .name = field.name,
@@ -177,7 +177,7 @@ pub fn buildMappedGenerics(
         }
         var constructors: std.ArrayList(Constructor) = .empty;
         for (structure.constructors) |constructor| {
-            if (!constructor.is_public or constructor.is_internal) continue;
+            if (!constructor.is_public or constructor.is_local) continue;
             const parameters = try allocator.alloc(Types.Type, constructor.parameters.len);
             for (constructor.parameters, 0..) |parameter, parameter_index| {
                 parameters[parameter_index] = mappedType(parameter.type, type_map, generic_map);
@@ -189,7 +189,7 @@ pub fn buildMappedGenerics(
         }
         var methods: std.ArrayList(Method) = .empty;
         for (structure.methods) |method| {
-            if (!method.is_public or method.is_internal) continue;
+            if (!method.is_public or method.is_local) continue;
             const parameters = try allocator.alloc(Types.Type, method.parameters.len);
             for (method.parameters, 0..) |parameter, parameter_index| {
                 parameters[parameter_index] = mappedType(parameter.type, type_map, generic_map);

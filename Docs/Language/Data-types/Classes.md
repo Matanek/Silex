@@ -90,7 +90,7 @@ Class fields, constructors, and methods are private by default:
 ```sx
 public class Session {
     private let token:str
-    internal var requests:int
+    local var requests:int
 
     public init(token:str) {
         self.token = token
@@ -104,7 +104,8 @@ public class Session {
 
 - `public` exposes a member through the class API.
 - `protected` exposes it to the class and its descendants.
-- `internal` restricts it to the exact source file.
+- `internal` exposes it to the package implementation.
+- `local` restricts it to the exact source file.
 - `private` states the default explicitly.
 
 The class visibility always caps the visibility of its members.

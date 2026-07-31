@@ -440,7 +440,13 @@ pub const Compiler = struct {
         const program = self.units[nominal_target.module].program.?;
         if (findStructure(program, nominal_target.declaration)) |structure| {
             if (Reexports.structureExported(program, structure)) return;
-            const message = if (structure.is_internal)
+            const message = if (structure.is_local)
+                try std.fmt.allocPrint(
+                    self.allocator,
+                    "public type alias '{s}' exposes local structure '{s}'",
+                    .{ alias, structure.name },
+                )
+            else if (structure.is_internal)
                 try std.fmt.allocPrint(
                     self.allocator,
                     "public type alias '{s}' exposes internal structure '{s}'",
@@ -456,7 +462,13 @@ pub const Compiler = struct {
         }
         const enumeration = findEnum(program, nominal_target.declaration).?;
         if (enumeration.is_public) return;
-        const message = if (enumeration.is_internal)
+        const message = if (enumeration.is_local)
+            try std.fmt.allocPrint(
+                self.allocator,
+                "public type alias '{s}' exposes local enum '{s}'",
+                .{ alias, enumeration.name },
+            )
+        else if (enumeration.is_internal)
             try std.fmt.allocPrint(
                 self.allocator,
                 "public type alias '{s}' exposes internal enum '{s}'",
@@ -1121,21 +1133,21 @@ pub const Compiler = struct {
             };
             if (structure.base) |base| try self.requirePublicType(module, base, structure.base_position, "public class", structure.name);
             for (structure.fields) |field| {
-                if (field.is_internal or field.is_private or field.is_protected) continue;
+                if (field.is_internal or field.is_local or field.is_private or field.is_protected) continue;
                 try self.requirePublicType(module, field.type, field.name_position, "public structure", structure.name);
             }
             for (structure.static_fields) |field| {
-                if (field.is_internal or field.is_private or field.is_protected) continue;
+                if (field.is_internal or field.is_local or field.is_private or field.is_protected) continue;
                 try self.requirePublicType(module, field.type, field.name_position, "public structure", structure.name);
             }
             for (structure.constructors) |constructor| {
-                if (constructor.is_internal or constructor.is_private or constructor.is_protected) continue;
+                if (constructor.is_internal or constructor.is_local or constructor.is_private or constructor.is_protected) continue;
                 for (constructor.parameters) |parameter| {
                     try self.requirePublicType(module, parameter.type, parameter.position, "constructor of", structure.name);
                 }
             }
             for (structure.methods) |method| {
-                if (method.is_internal or method.is_private or method.is_protected) continue;
+                if (method.is_internal or method.is_local or method.is_private or method.is_protected) continue;
                 for (method.type_parameters) |parameter| if (parameter.constraint) |constraint| {
                     try self.requirePublicType(module, constraint, parameter.position, "method of", structure.name);
                 };
@@ -1174,8 +1186,11 @@ pub const Compiler = struct {
         const target = try self.structureTarget(module, name) orelse try self.enumTarget(module, name) orelse return;
         const target_program = self.units[target.module].program.?;
         if (findStructure(target_program, target.declaration)) |structure| {
-            if (structure.is_internal) return;
-        } else if (findEnum(target_program, target.declaration).?.is_internal) return;
+            if (structure.is_local or structure.is_internal) return;
+        } else {
+            const enumeration = findEnum(target_program, target.declaration).?;
+            if (enumeration.is_local or enumeration.is_internal) return;
+        }
         return self.requirePublicType(module, type_value, position, declaration_kind, declaration_name);
     }
 
@@ -1220,7 +1235,13 @@ pub const Compiler = struct {
                 return self.requirePublicType(module, collection.element, position, declaration_kind, declaration_name);
             }
             if (Reexports.structureExported(target_program, structure)) return;
-            const message = if (structure.is_internal)
+            const message = if (structure.is_local)
+                try std.fmt.allocPrint(
+                    self.allocator,
+                    "{s} '{s}' exposes local structure '{s}'",
+                    .{ declaration_kind, declaration_name, structure.name },
+                )
+            else if (structure.is_internal)
                 try std.fmt.allocPrint(
                     self.allocator,
                     "{s} '{s}' exposes internal structure '{s}'",
@@ -1236,7 +1257,13 @@ pub const Compiler = struct {
         }
         const enumeration = findEnum(target_program, target.declaration).?;
         if (enumeration.is_public) return;
-        const message = if (enumeration.is_internal)
+        const message = if (enumeration.is_local)
+            try std.fmt.allocPrint(
+                self.allocator,
+                "{s} '{s}' exposes local enum '{s}'",
+                .{ declaration_kind, declaration_name, enumeration.name },
+            )
+        else if (enumeration.is_internal)
             try std.fmt.allocPrint(
                 self.allocator,
                 "{s} '{s}' exposes internal enum '{s}'",
@@ -1276,6 +1303,7 @@ pub const Compiler = struct {
         switch (expression.value) {
             .call => |*call| {
                 call.owner = self.index.providers[module].owner;
+                call.module = self.index.providers[module].name;
                 const type_arguments = try self.allocator.alloc(Ast.Type, call.type_arguments.len);
                 for (call.type_arguments, 0..) |type_argument, index| {
                     type_arguments[index] = self.remapType(module, type_map, type_argument);

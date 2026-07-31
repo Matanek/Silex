@@ -59,6 +59,7 @@ pub const Analyzer = struct {
     extension_context: bool = false,
     specialization_file: ?usize = null,
     module_context: ?[]const u8 = null,
+    owner_context: ?usize = null,
     anonymous_function_context: bool = false,
     target: ?Target = null,
     packages: ?Packages.Graph = null,
@@ -296,6 +297,9 @@ pub const Analyzer = struct {
             .system_adapter => |adapter| return InjectedSystems.analyze(self, function, adapter),
             else => {},
         };
+        const previous_owner_context = self.owner_context;
+        self.owner_context = function.owner;
+        defer self.owner_context = previous_owner_context;
         const previous_module_context = self.module_context;
         self.module_context = if (std.mem.lastIndexOfScalar(u8, function.name, '.')) |separator|
             function.name[0..separator]
@@ -852,10 +856,18 @@ pub const Analyzer = struct {
         if (!structure.is_tuple and declaration.drop != null and !self.ownerStorageVisible(structure_index, access.name_position)) {
             return self.fail(access.name_position, "owner structure storage is private to its declaring file and direct module users");
         }
-        if (declaration.is_internal and access.name_position.file != declaration.position.file) {
+        if (declaration.is_local and access.name_position.file != declaration.position.file) {
             const message = try std.fmt.allocPrint(
                 self.allocator,
-                "members of internal structure '{s}' are unavailable outside its source file",
+                "members of local structure '{s}' are unavailable outside its source file",
+                .{structure.name},
+            );
+            return self.fail(access.name_position, message);
+        }
+        if (declaration.is_internal and self.owner_context != declaration.owner) {
+            const message = try std.fmt.allocPrint(
+                self.allocator,
+                "members of internal structure '{s}' are unavailable outside its package",
                 .{structure.name},
             );
             return self.fail(access.name_position, message);
@@ -865,8 +877,8 @@ pub const Analyzer = struct {
             const inherited = Inheritance.fieldByIndex(self, structure_index, field_index) orelse return error.InvalidSource;
             const source_field = inherited.declaration;
             if (!Visibility.memberVisible(self, inherited.owner, source_field, access.name_position)) {
-                const message = if (source_field.is_internal)
-                    try std.fmt.allocPrint(self.allocator, "field '{s}' is internal to its source file", .{field.name})
+                const message = if (source_field.is_local)
+                    try std.fmt.allocPrint(self.allocator, "field '{s}' is local to its source file", .{field.name})
                 else
                     try std.fmt.allocPrint(self.allocator, "field '{s}' is {s} and unavailable here", .{ field.name, Visibility.name(source_field) });
                 return self.fail(access.name_position, message);
@@ -927,8 +939,8 @@ pub const Analyzer = struct {
             var known = false;
             for (declaration.fields) |source_field| if (std.mem.eql(u8, source_field.name, argument.name)) {
                 if (!Visibility.memberVisible(self, structure_index, source_field, argument.position)) {
-                    const message = if (source_field.is_internal)
-                        try std.fmt.allocPrint(self.allocator, "field '{s}' is internal to its source file", .{source_field.name})
+                    const message = if (source_field.is_local)
+                        try std.fmt.allocPrint(self.allocator, "field '{s}' is local to its source file", .{source_field.name})
                     else
                         try std.fmt.allocPrint(self.allocator, "field '{s}' is {s} and unavailable here", .{ source_field.name, Visibility.name(source_field) });
                     return self.fail(argument.position, message);
@@ -1098,14 +1110,19 @@ pub const Analyzer = struct {
             return self.fail(call.name_position, message);
         }
         if (named_count == 0) {
+            var has_local = false;
             var has_internal = false;
             for (self.program.functions) |function| {
-                if (std.mem.eql(u8, function.name, call.name) and function.is_internal) has_internal = true;
+                if (!std.mem.eql(u8, function.name, call.name)) continue;
+                has_local = has_local or function.is_local;
+                has_internal = has_internal or function.is_internal;
             }
-            const message = if (has_internal)
-                try std.fmt.allocPrint(self.allocator, "function '{s}' is internal to its source file", .{call.name})
+            const message = if (has_local)
+                try std.fmt.allocPrint(self.allocator, "function '{s}' is local to its source file", .{call.name})
+            else if (has_internal)
+                try std.fmt.allocPrint(self.allocator, "function '{s}' is internal to its package", .{call.name})
             else
-                try std.fmt.allocPrint(self.allocator, "function '{s}' is private outside its package", .{call.name});
+                try std.fmt.allocPrint(self.allocator, "function '{s}' is private outside its module", .{call.name});
             return self.fail(call.name_position, message);
         }
         if (arity_count == 0) {

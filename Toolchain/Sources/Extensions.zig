@@ -86,7 +86,7 @@ pub const Merger = struct {
                     method.is_public = !target.is_class;
                     method.is_private = target.is_class;
                 } else if (!target.is_class and method.is_private) {
-                    return self.fail(method.name_position, "structure extension methods only support public or internal visibility");
+                    return self.fail(method.name_position, "structure extension methods only support public, internal, or local visibility");
                 }
                 method.extension = .{ .provider = extension.provider, .visible_files = visible_files };
                 for (methods.items) |existing| {
