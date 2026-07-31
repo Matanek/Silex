@@ -24,6 +24,7 @@ const Packages = @import("Packages.zig");
 const NativeTestRunner = @import("NativeTestRunner.zig");
 const TestDiscovery = @import("TestDiscovery.zig");
 const TargetModule = @import("Target.zig");
+const ToolchainSetup = @import("ToolchainSetup.zig");
 
 const Io = std.Io;
 
@@ -33,6 +34,7 @@ const usage =
     \\       silex test <source.sx|directory> [-n|--nocache] [--emit-ir]
     \\       silex compile <source.sx> [--target <target>] [-d|--debug|-r|--release] [-n|--nocache] -o|--output <executable>
     \\       silex install <package-directory> [--target <target>]
+    \\       silex setup
     \\       silex targets
     \\       silex lsp
     \\
@@ -48,6 +50,7 @@ test {
     _ = MacOSLink;
     _ = X64Object;
     _ = NativeLink;
+    _ = ToolchainSetup;
 }
 
 pub fn main(init: std.process.Init) u8 {
@@ -69,10 +72,43 @@ fn runCli(init: std.process.Init) !u8 {
     if (std.mem.eql(u8, args[1], "test")) return testSource(init, allocator, args[2..]);
     if (std.mem.eql(u8, args[1], "compile")) return compileNative(init, allocator, args[2..]);
     if (std.mem.eql(u8, args[1], "install")) return installPackage(init, allocator, args[2..]);
+    if (std.mem.eql(u8, args[1], "setup")) return setupToolchain(init, allocator, args[2..]);
     if (std.mem.eql(u8, args[1], "targets")) return listTargets(init, allocator, args[2..]);
     if (std.mem.eql(u8, args[1], "lsp")) return runLanguageServer(init, args[2..]);
     std.debug.print("silex: unknown command '{s}'\n\n{s}", .{ args[1], usage });
     return 1;
+}
+
+fn setupToolchain(init: std.process.Init, allocator: std.mem.Allocator, args: []const []const u8) !u8 {
+    if (args.len != 0) {
+        std.debug.print("silex: 'setup' does not accept arguments\n", .{});
+        return 1;
+    }
+    const host = TargetModule.Target.host() orelse {
+        std.debug.print("silex: Shadercross is unavailable for this host\n", .{});
+        return 1;
+    };
+    const root = try globalToolchainRoot(allocator, init.environ_map) orelse {
+        std.debug.print("silex: cannot locate the user home directory for toolchain setup\n", .{});
+        return 1;
+    };
+    var installer = Artifacts.Installer.init(allocator, init.gpa, init.io);
+    const summary = installer.installTool(root, ToolchainSetup.shadercross(host)) catch |err| switch (err) {
+        error.InvalidManifest => {
+            std.debug.print(
+                "silex: cannot install Shadercross: {s}\n",
+                .{installer.diagnostic orelse "invalid toolchain artifact"},
+            );
+            return 1;
+        },
+        else => return err,
+    };
+    if (summary.installed == 0) {
+        std.debug.print("silex: Shadercross is already installed for {s}\n", .{host.name()});
+    } else {
+        std.debug.print("silex: installed Shadercross for {s}\n", .{host.name()});
+    }
+    return 0;
 }
 
 fn installPackage(init: std.process.Init, allocator: std.mem.Allocator, args: []const []const u8) !u8 {
@@ -884,6 +920,14 @@ fn globalPackagesRoot(
 ) !?[]const u8 {
     const home = environment.get("HOME") orelse return null;
     return try std.fs.path.join(allocator, &.{ home, ".silex", "packages" });
+}
+
+fn globalToolchainRoot(
+    allocator: std.mem.Allocator,
+    environment: *const std.process.Environ.Map,
+) !?[]const u8 {
+    const home = environment.get("HOME") orelse environment.get("USERPROFILE") orelse return null;
+    return try std.fs.path.join(allocator, &.{ home, ".silex", "toolchain" });
 }
 
 test "run owns a stable mode-specific artifact below .silex" {

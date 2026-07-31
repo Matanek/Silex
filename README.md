@@ -32,6 +32,17 @@ cd Toolchain
 zig build run -- run /path/to/Main.sx
 ```
 
+The published Silex installer prepares its toolchain automatically. When
+building Silex from source, or repairing an incomplete installation, run:
+
+```sh
+silex setup
+```
+
+This installs the Shadercross build tool for the host under
+`~/.silex/toolchain/`. It is part of the Silex toolchain, not a GFX package
+dependency, and it is never linked into an application.
+
 `run` builds a private native executable under `.silex/run/`, executes it with
 the current terminal streams and returns its exit code. Debug is the default;
 pass `--release` to select the optimized pipeline. Add `--emit-ir` to inspect
