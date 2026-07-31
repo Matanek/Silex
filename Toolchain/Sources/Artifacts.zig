@@ -14,6 +14,24 @@ const Artifact = struct {
     path: []const u8,
     url: []const u8,
     sha256: [32]u8,
+    extraction: ?Archive = null,
+};
+
+pub const Archive = struct {
+    format: Format,
+    into: []const u8,
+    provides: []const u8,
+    strip_components: u32,
+
+    pub const Format = enum { tar_gz, zip };
+};
+
+pub const ToolSpec = struct {
+    name: []const u8,
+    path: []const u8,
+    url: []const u8,
+    sha256: []const u8,
+    archive: Archive,
 };
 
 pub const Installer = struct {
@@ -45,19 +63,58 @@ pub const Installer = struct {
         };
 
         var summary: Summary = .{};
-        for (artifacts) |artifact| {
-            const destination = try std.fs.path.join(self.allocator, &.{ package_root, artifact.path });
-            if (try matchesHash(self.io, destination, artifact.sha256)) {
-                summary.available += 1;
-                continue;
-            }
-            try self.download(artifact, destination);
-            summary.installed += 1;
-        }
+        for (artifacts) |artifact| try self.installOne(package_root, artifact, &summary);
         return summary;
     }
 
-    fn parse(self: *Installer, source: []const u8, target: TargetModule.Target) ![]const Artifact {
+    pub fn installTool(self: *Installer, root: []const u8, spec: ToolSpec) !Summary {
+        self.diagnostic = null;
+        if (!safeRelativePath(spec.path) or !safeRelativePath(spec.archive.into) or
+            !safeRelativePath(spec.archive.provides))
+        {
+            return self.failFmt("tool '{s}' declares an unsafe installation path", .{spec.name});
+        }
+        if (!std.mem.startsWith(u8, spec.url, "https://")) {
+            return self.failFmt("tool '{s}' must use an HTTPS URL", .{spec.name});
+        }
+        const artifact: Artifact = .{
+            .name = spec.name,
+            .path = spec.path,
+            .url = spec.url,
+            .sha256 = try self.parseDigest(spec.name, spec.sha256),
+            .extraction = spec.archive,
+        };
+        var summary: Summary = .{};
+        try self.installOne(root, artifact, &summary);
+        return summary;
+    }
+
+    fn installOne(self: *Installer, root: []const u8, artifact: Artifact, summary: *Summary) !void {
+        const destination = try std.fs.path.join(self.allocator, &.{ root, artifact.path });
+        if (try matchesHash(self.io, destination, artifact.sha256)) {
+            if (artifact.extraction) |extraction| {
+                const provided = try std.fs.path.join(self.allocator, &.{ root, extraction.into, extraction.provides });
+                if (!try pathExists(self.io, provided)) {
+                    try self.extract(artifact, destination, root, extraction);
+                    summary.installed += 1;
+                } else {
+                    summary.available += 1;
+                }
+            } else {
+                summary.available += 1;
+            }
+            return;
+        }
+        try self.download(artifact, destination);
+        if (artifact.extraction) |extraction| try self.extract(artifact, destination, root, extraction);
+        summary.installed += 1;
+    }
+
+    fn parse(
+        self: *Installer,
+        source: []const u8,
+        target: TargetModule.Target,
+    ) ![]const Artifact {
         const parsed = std.json.parseFromSliceLeaky(std.json.Value, self.allocator, source, .{
             .allocate = .alloc_always,
         }) catch return self.fail("invalid package manifest");
@@ -65,23 +122,36 @@ pub const Installer = struct {
             .object => |object| object,
             else => return self.fail("package manifest must be a JSON object"),
         };
-        const artifact_targets = switch (root.get("artifacts") orelse
-            return self.fail("package does not declare installable artifacts")) {
+        var result: std.ArrayList(Artifact) = .empty;
+        const target_artifacts = root.get("artifacts") orelse
+            return self.fail("package does not declare installable artifacts");
+        try self.appendPlatformEntries(&result, target_artifacts, "artifacts", target);
+        std.mem.sort(Artifact, result.items, {}, artifactLessThan);
+        return result.toOwnedSlice(self.allocator);
+    }
+
+    fn appendPlatformEntries(
+        self: *Installer,
+        result: *std.ArrayList(Artifact),
+        value: std.json.Value,
+        scope: []const u8,
+        platform: TargetModule.Target,
+    ) !void {
+        const platforms = switch (value) {
             .object => |object| object,
-            else => return self.fail("'artifacts' must be an object indexed by target"),
+            else => return self.failFmt("'{s}' must be an object indexed by platform", .{scope}),
         };
-        const target_value = artifact_targets.get(target.name()) orelse
-            return self.failFmt("package does not declare artifacts for target '{s}'", .{target.name()});
-        const target_artifacts = switch (target_value) {
+        const platform_value = platforms.get(platform.name()) orelse
+            return self.failFmt("package does not declare {s} for platform '{s}'", .{ scope, platform.name() });
+        const entries = switch (platform_value) {
             .object => |object| object,
-            else => return self.failFmt("artifacts for target '{s}' must be an object", .{target.name()}),
+            else => return self.failFmt("{s} for platform '{s}' must be an object", .{ scope, platform.name() }),
         };
-        if (target_artifacts.count() == 0) {
-            return self.failFmt("package declares no artifacts for target '{s}'", .{target.name()});
+        if (entries.count() == 0) {
+            return self.failFmt("package declares no {s} for platform '{s}'", .{ scope, platform.name() });
         }
 
-        var result: std.ArrayList(Artifact) = .empty;
-        var iterator = target_artifacts.iterator();
+        var iterator = entries.iterator();
         while (iterator.next()) |entry| {
             const object = switch (entry.value_ptr.*) {
                 .object => |object| object,
@@ -99,9 +169,7 @@ pub const Installer = struct {
             if (checksum.len != 64) {
                 return self.failFmt("artifact '{s}' has an invalid SHA-256 checksum", .{entry.key_ptr.*});
             }
-            var digest: [32]u8 = undefined;
-            _ = std.fmt.hexToBytes(&digest, checksum) catch
-                return self.failFmt("artifact '{s}' has an invalid SHA-256 checksum", .{entry.key_ptr.*});
+            const digest = try self.parseDigest(entry.key_ptr.*, checksum);
             try result.append(self.allocator, .{
                 .name = entry.key_ptr.*,
                 .path = path,
@@ -109,8 +177,16 @@ pub const Installer = struct {
                 .sha256 = digest,
             });
         }
-        std.mem.sort(Artifact, result.items, {}, artifactLessThan);
-        return result.toOwnedSlice(self.allocator);
+    }
+
+    fn parseDigest(self: *Installer, name: []const u8, checksum: []const u8) ![32]u8 {
+        if (checksum.len != 64) {
+            return self.failFmt("artifact '{s}' has an invalid SHA-256 checksum", .{name});
+        }
+        var result: [32]u8 = undefined;
+        _ = std.fmt.hexToBytes(&result, checksum) catch
+            return self.failFmt("artifact '{s}' has an invalid SHA-256 checksum", .{name});
+        return result;
     }
 
     fn requiredString(
@@ -179,6 +255,79 @@ pub const Installer = struct {
         keep_temporary = false;
     }
 
+    fn extract(
+        self: *Installer,
+        artifact: Artifact,
+        archive_path: []const u8,
+        package_root: []const u8,
+        extraction: Archive,
+    ) !void {
+        const destination = try std.fs.path.join(self.allocator, &.{ package_root, extraction.into });
+        const parent = std.fs.path.dirname(destination) orelse
+            return self.failFmt("archive '{s}' has no extraction directory", .{artifact.name});
+        Io.Dir.cwd().createDirPath(self.io, parent) catch |err| {
+            return self.failFmt("cannot create tool directory for '{s}': {t}", .{ artifact.name, err });
+        };
+        const temporary = try std.fmt.allocPrint(self.allocator, "{s}.silex-extract", .{destination});
+        Io.Dir.cwd().deleteTree(self.io, temporary) catch |err| {
+            return self.failFmt("cannot prepare extraction for '{s}': {t}", .{ artifact.name, err });
+        };
+        var keep_temporary = true;
+        defer if (keep_temporary) Io.Dir.cwd().deleteTree(self.io, temporary) catch {};
+        Io.Dir.cwd().createDirPath(self.io, temporary) catch |err| {
+            return self.failFmt("cannot create extraction directory for '{s}': {t}", .{ artifact.name, err });
+        };
+        var output = Io.Dir.cwd().openDir(self.io, temporary, .{}) catch |err| {
+            return self.failFmt("cannot open extraction directory for '{s}': {t}", .{ artifact.name, err });
+        };
+        defer output.close(self.io);
+        const archive = Io.Dir.cwd().openFile(self.io, archive_path, .{}) catch |err| {
+            return self.failFmt("cannot open downloaded archive '{s}': {t}", .{ artifact.name, err });
+        };
+        defer archive.close(self.io);
+        self.extractArchive(artifact, archive, output, extraction) catch |err| {
+            return self.failFmt("cannot extract archive '{s}': {t}", .{ artifact.name, err });
+        };
+        const provided = try std.fs.path.join(self.allocator, &.{ temporary, extraction.provides });
+        if (!try pathExists(self.io, provided)) {
+            return self.failFmt("archive '{s}' does not provide '{s}'", .{ artifact.name, extraction.provides });
+        }
+
+        Io.Dir.cwd().deleteTree(self.io, destination) catch |err| {
+            return self.failFmt("cannot replace installed tool '{s}': {t}", .{ artifact.name, err });
+        };
+        Io.Dir.cwd().rename(temporary, Io.Dir.cwd(), destination, self.io) catch |err| {
+            return self.failFmt("cannot install extracted tool '{s}': {t}", .{ artifact.name, err });
+        };
+        keep_temporary = false;
+    }
+
+    fn extractArchive(
+        self: *Installer,
+        artifact: Artifact,
+        archive: Io.File,
+        output: Io.Dir,
+        extraction: Archive,
+    ) !void {
+        var file_buffer: [64 * 1024]u8 = undefined;
+        var file_reader = archive.reader(self.io, &file_buffer);
+        switch (extraction.format) {
+            .tar_gz => {
+                var window: [std.compress.flate.max_window_len]u8 = undefined;
+                var decompress: std.compress.flate.Decompress = .init(&file_reader.interface, .gzip, &window);
+                try std.tar.extract(self.io, output, &decompress.reader, .{
+                    .strip_components = extraction.strip_components,
+                });
+            },
+            .zip => {
+                if (extraction.strip_components != 0) {
+                    return self.failFmt("zip archive '{s}' cannot strip path components", .{artifact.name});
+                }
+                try std.zip.extract(output, &file_reader, .{});
+            },
+        }
+    }
+
     fn fail(self: *Installer, message: []const u8) error{InvalidManifest} {
         self.diagnostic = message;
         return error.InvalidManifest;
@@ -207,6 +356,15 @@ fn matchesHash(io: Io, path: []const u8, expected: [32]u8) !bool {
     };
     defer file.close(io);
     return fileMatchesHash(io, file, expected);
+}
+
+fn pathExists(io: Io, path: []const u8) !bool {
+    const file = Io.Dir.cwd().openFile(io, path, .{}) catch |err| switch (err) {
+        error.FileNotFound, error.NotDir => return false,
+        else => return err,
+    };
+    file.close(io);
+    return true;
 }
 
 fn fileMatchesHash(io: Io, file: Io.File, expected: [32]u8) !bool {
