@@ -28,7 +28,7 @@ pub fn parse(self: anytype) ![]const Ast.Function {
     var statements: std.ArrayList(Ast.Statement) = .empty;
     while (self.current.tag != .right_brace and self.current.tag != .end) {
         if (self.current.tag == .keyword_func) {
-            try functions.append(self.allocator, try self.parseFunction(false, false));
+            try functions.append(self.allocator, try self.parseFunction(false, false, false));
         } else {
             try statements.append(self.allocator, try self.parseStatement());
         }
@@ -39,7 +39,7 @@ pub fn parse(self: anytype) ![]const Ast.Function {
         .is_test_entry = true,
         .test_name = test_name,
         .test_owner = prefix,
-        .is_internal = true,
+        .is_local = true,
         .position = position,
         .name_position = position,
         .name = prefix,

@@ -1,7 +1,7 @@
 const std = @import("std");
 const Ast = @import("../Ast.zig");
 
-pub fn parse(self: anytype, is_public: bool, is_internal: bool) !Ast.Structure {
+pub fn parse(self: anytype, is_public: bool, is_internal: bool, is_local: bool) !Ast.Structure {
     const position = self.current.position;
     try self.advance();
     if (self.current.tag != .identifier) return self.fail("expected protocol name");
@@ -22,6 +22,7 @@ pub fn parse(self: anytype, is_public: bool, is_internal: bool) !Ast.Structure {
     return .{
         .is_public = is_public,
         .is_internal = is_internal,
+        .is_local = is_local,
         .is_protocol = true,
         .position = position,
         .name_position = name_position,

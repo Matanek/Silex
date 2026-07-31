@@ -148,7 +148,7 @@ test "class constructors establish private invariants and overloads" {
         \\    public init(token:str) { self.token = token }
         \\    public init(code:int, suffix:str = "!") { self.token = "$(code)$(suffix)" }
         \\    public func text() str { return self.token }
-        \\    internal func mark() { self.uses++ }
+        \\    local func mark() { self.uses++ }
         \\}
         \\class Settings { var hidden:int = 1; public var visible:int }
         \\func main() {

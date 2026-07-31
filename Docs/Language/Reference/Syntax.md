@@ -20,7 +20,8 @@ constraints.
 | C function binding | `let name = C.function<func(...) Return>(...)` |
 | Alias | `use Existing.Type as LocalName` |
 | Public declaration | `public ...` |
-| File-local declaration | `internal ...` |
+| Package-internal declaration | `internal ...` |
+| File-local declaration | `local ...` |
 | Optional | `Type?` |
 | Named tuple | `(width:int, height:int)` |
 | Positional tuple | `(int, int)` |

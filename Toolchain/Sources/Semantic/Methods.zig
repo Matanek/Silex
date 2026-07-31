@@ -91,6 +91,9 @@ pub fn extendStructures(
 }
 
 pub fn analyze(self: anytype, structure_index: usize, method_index: usize, source_method: Ast.Function) !Ir.Function {
+    const previous_owner_context = self.owner_context;
+    self.owner_context = source_method.owner;
+    defer self.owner_context = previous_owner_context;
     const previous_specialization_file = self.specialization_file;
     self.specialization_file = source_method.specialization_file;
     defer self.specialization_file = previous_specialization_file;
@@ -328,10 +331,18 @@ fn analyzeCallWithReceiver(
     };
     if (receiver_structure_index >= self.program.structures.len) return error.InvalidSource;
     const receiver_structure = self.program.structures[receiver_structure_index];
-    if (receiver_structure.is_internal and call.name_position.file != receiver_structure.position.file) {
+    if (receiver_structure.is_local and call.name_position.file != receiver_structure.position.file) {
         const message = try std.fmt.allocPrint(
             self.allocator,
-            "members of internal structure '{s}' are unavailable outside its source file",
+            "members of local structure '{s}' are unavailable outside its source file",
+            .{receiver_structure.name},
+        );
+        return self.fail(call.name_position, message);
+    }
+    if (receiver_structure.is_internal and self.owner_context != receiver_structure.owner) {
+        const message = try std.fmt.allocPrint(
+            self.allocator,
+            "members of internal structure '{s}' are unavailable outside its package",
             .{receiver_structure.name},
         );
         return self.fail(call.name_position, message);
@@ -342,10 +353,12 @@ fn analyzeCallWithReceiver(
     var arity_count: usize = 0;
     var sole: ?usize = null;
     var inaccessible = false;
+    var inaccessible_local = false;
     var inaccessible_internal = false;
     for (candidates, 0..) |candidate, candidate_index| {
         if (!Visibility.memberVisible(self, candidate.owner, candidate.method, call.name_position)) {
             inaccessible = true;
+            inaccessible_local = inaccessible_local or candidate.method.is_local;
             inaccessible_internal = inaccessible_internal or candidate.method.is_internal;
             continue;
         }
@@ -356,8 +369,10 @@ fn analyzeCallWithReceiver(
     }
     if (arity_count == 0) {
         if (inaccessible) {
-            const message = if (inaccessible_internal)
-                try std.fmt.allocPrint(self.allocator, "method '{s}' is internal to its source file", .{call.name})
+            const message = if (inaccessible_local)
+                try std.fmt.allocPrint(self.allocator, "method '{s}' is local to its source file", .{call.name})
+            else if (inaccessible_internal)
+                try std.fmt.allocPrint(self.allocator, "method '{s}' is internal to its package", .{call.name})
             else
                 try std.fmt.allocPrint(self.allocator, "method '{s}' is private and unavailable here", .{call.name});
             return self.fail(call.name_position, message);

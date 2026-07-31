@@ -12,11 +12,17 @@ pub fn memberVisible(self: anytype, structure_index: usize, member: anytype, pos
                 break;
             };
             if (!active) return false;
-            return member.is_public or position.file == member.position.file;
+            if (member.is_public) return true;
+            if (member.is_local) return position.file == member.position.file;
+            if (member.is_internal) return self.owner_context != null and self.owner_context.? == member.owner;
+            return position.file == member.position.file;
         }
     }
     if (member.is_public) return true;
-    if (member.is_internal) return position.file == member.position.file;
+    if (member.is_local) return position.file == member.position.file;
+    if (member.is_internal) {
+        return self.owner_context != null and self.owner_context.? == self.program.structures[structure_index].owner;
+    }
     if (self.extension_context) return false;
     const context = self.member_context orelse return false;
     if (sameFamily(self, context, structure_index)) return true;
@@ -30,14 +36,16 @@ pub fn typeVisible(self: anytype, structure_index: usize, position: Source.Posit
         const owner = self.structureIndex(owner_name) orelse return false;
         if (!typeVisible(self, owner, position)) return false;
         if (declaration.is_public) return true;
-        if (declaration.is_internal) return position.file == declaration.position.file or active_file == declaration.position.file;
+        if (declaration.is_local) return position.file == declaration.position.file or active_file == declaration.position.file;
+        if (declaration.is_internal) return self.owner_context != null and self.owner_context.? == declaration.owner;
         const context = self.member_context orelse return false;
         if (sameFamily(self, context, structure_index)) return true;
         return declaration.is_protected and Inheritance.isDescendant(self, context, owner);
     }
     if (declaration.is_public) return true;
     if (position.file == declaration.position.file or active_file == declaration.position.file) return true;
-    if (declaration.is_internal) return false;
+    if (declaration.is_local) return false;
+    if (declaration.is_internal) return self.owner_context != null and self.owner_context.? == declaration.owner;
     return sameModule(self, structure_index);
 }
 
@@ -88,6 +96,7 @@ fn declarationAt(self: anytype, structure_index: usize) ?@import("../Ast.zig").S
 pub fn name(member: anytype) []const u8 {
     if (member.is_public) return "public";
     if (member.is_internal) return "internal";
+    if (member.is_local) return "local";
     if (member.is_protected) return "protected";
     return "private";
 }

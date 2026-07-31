@@ -479,7 +479,7 @@ test "project completion exposes module children before accessible declarations"
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Module1.sx",
-        .data = "func inside() int { return 1 }",
+        .data = "internal func inside() int { return 1 }",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Module1.SubModule.Foo.sx",

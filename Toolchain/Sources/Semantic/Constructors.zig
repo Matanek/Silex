@@ -37,6 +37,9 @@ pub fn analyze(
     constructor_index: usize,
     constructor: Ast.Constructor,
 ) !Ir.Function {
+    const previous_owner_context = self.owner_context;
+    self.owner_context = self.program.structures[structure_index].owner;
+    defer self.owner_context = previous_owner_context;
     const previous_specialization_file = self.specialization_file;
     self.specialization_file = constructor.specialization_file;
     defer self.specialization_file = previous_specialization_file;
@@ -177,10 +180,12 @@ pub fn analyzeCall(
     var arity_count: usize = 0;
     var sole: ?usize = null;
     var inaccessible = false;
+    var inaccessible_local = false;
     var inaccessible_internal = false;
     for (declaration.constructors, 0..) |constructor, constructor_index| {
         if (!Visibility.memberVisible(self, structure_index, constructor, call.name_position)) {
             inaccessible = true;
+            inaccessible_local = inaccessible_local or constructor.is_local;
             inaccessible_internal = inaccessible_internal or constructor.is_internal;
             continue;
         }
@@ -191,8 +196,10 @@ pub fn analyzeCall(
     }
     if (arity_count == 0) {
         if (inaccessible) {
-            const message = if (inaccessible_internal)
-                try std.fmt.allocPrint(self.allocator, "constructor of '{s}' is internal to its source file", .{declaration.name})
+            const message = if (inaccessible_local)
+                try std.fmt.allocPrint(self.allocator, "constructor of '{s}' is local to its source file", .{declaration.name})
+            else if (inaccessible_internal)
+                try std.fmt.allocPrint(self.allocator, "constructor of '{s}' is internal to its package", .{declaration.name})
             else
                 try std.fmt.allocPrint(self.allocator, "constructor of '{s}' is unavailable here", .{declaration.name});
             return self.fail(call.name_position, message);

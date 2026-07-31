@@ -67,9 +67,10 @@ let layout:Target.Layout = Target.layout()
 `Platform` and `Target` are contextual qualifiers derived from the package,
 logical module name, and selected compilation target. They require no `use`
 declaration and are not exported namespaces. Each file keeps its own `use` and
-`internal` declarations. Private specialized declarations are accessible only
-through their contextual qualifier; public declarations still contribute to
-the composed module interface.
+`local` declarations, while `internal` declarations remain available to the
+package. Private specialized declarations are accessible only through their
+contextual qualifier; public declarations still contribute to the composed
+module interface.
 
 This composition never crosses a package boundary. Packages with qualified
 names may share a namespace prefix, but they cannot contribute fragments to

@@ -70,6 +70,7 @@ pub const Expression = struct {
         type_arguments: []const Type = &.{},
         result_type: ?Type = null,
         owner: usize = 0,
+        module: []const u8 = "",
     };
 
     pub const Cascade = struct {
@@ -401,6 +402,7 @@ pub const StructureField = struct {
     is_static: bool = false,
     is_public: bool = true,
     is_internal: bool = false,
+    is_local: bool = false,
     is_private: bool = false,
     is_protected: bool = false,
     position: Source.Position,
@@ -414,6 +416,7 @@ pub const StructureField = struct {
 pub const Constructor = struct {
     is_public: bool = true,
     is_internal: bool = false,
+    is_local: bool = false,
     is_private: bool = false,
     is_protected: bool = false,
     specialization_file: ?usize = null,
@@ -427,6 +430,7 @@ pub const Structure = struct {
     is_test: bool = false,
     is_public: bool = false,
     is_internal: bool = false,
+    is_local: bool = false,
     is_private: bool = false,
     is_protected: bool = false,
     is_class: bool = false,
@@ -475,6 +479,7 @@ pub const EnumRawValue = union(enum) {
 pub const Enum = struct {
     is_public: bool = false,
     is_internal: bool = false,
+    is_local: bool = false,
     owner: usize = 0,
     position: Source.Position,
     name_position: Source.Position,
@@ -504,6 +509,7 @@ pub const Function = struct {
     is_override: bool = false,
     is_public: bool = false,
     is_internal: bool = false,
+    is_local: bool = false,
     is_private: bool = false,
     is_protected: bool = false,
     visibility_explicit: bool = false,

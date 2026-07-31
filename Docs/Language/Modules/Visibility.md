@@ -18,18 +18,28 @@ public struct Position {
 }
 ```
 
-Use `internal` for a declaration restricted to its exact source file:
+Use `internal` for implementation shared by the modules of one package without
+exposing it to package consumers:
 
 ```sx
-internal struct ParserState {}
-internal func advance() {}
+internal struct DecodeState {}
+internal func decode() {}
 ```
 
-Neighboring modules cannot name an `internal` declaration.
-Fragments of one logical module are still distinct source files, so an
-`internal` declaration is not visible from another fragment. An ordinary
-private declaration in a specialized fragment is accessible from portable code
-through `Platform.name` or `Target.name`, never as an unqualified name.
+Use `local` for a declaration restricted to its exact source file:
+
+```sx
+local struct ParserState {}
+local func advance() {}
+```
+
+The visibility order is `public`, `internal`, `private`, then `local`.
+Neighboring modules in the same package can name an `internal` declaration but
+not a private one. Fragments of one logical module remain distinct source
+files, so a `local` declaration is unavailable from another fragment. An
+ordinary private declaration in a specialized fragment is accessible from
+portable code through `Platform.name` or `Target.name`, never as an unqualified
+name. Packages sharing a namespace prefix never share internal visibility.
 
 ## Class members
 
@@ -46,15 +56,15 @@ public class Session {
 ```
 
 `protected` makes a member available to the class and its descendants.
-`internal` keeps it in the source file. The containing type always caps member
-visibility.
+`internal` makes it available throughout the package, while `local` keeps it in
+the source file. The containing type always caps member visibility.
 
 ## Structure members
 
 Structure members are public by default. Explicit `public` is accepted when it
-makes the API easier to scan. Use `internal` to restrict a member to the exact
-source file, or `private` to restrict it to the structure and its nested type
-family:
+makes the API easier to scan. Use `internal` to share a member throughout the
+package, `local` to restrict it to the exact source file, or `private` to
+restrict it to the structure and its nested type family:
 
 ```sx
 public struct Iterator<T> {
@@ -67,5 +77,5 @@ public struct Iterator<T> {
 ```
 
 Fields, constructors, methods, static members, and nested types accept
-`public`, `internal`, or `private`. Structures do not support `protected`,
-which is reserved for class inheritance.
+`public`, `internal`, `local`, or `private`. Structures do not support
+`protected`, which is reserved for class inheritance.

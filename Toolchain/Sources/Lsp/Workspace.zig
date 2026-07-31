@@ -251,9 +251,10 @@ pub fn scopeItemsAtForTarget(
                         for (loaded.program.structures) |structure| {
                             if (!structure.is_public or !std.mem.eql(u8, structure.name, target.declaration)) continue;
                             for (structure.fields) |field| {
-                                if (field.is_internal or field.is_private or field.is_protected or
+                                if (field.is_local or field.is_private or field.is_protected or
                                     Completion.suppliedAggregateField(context, field.name) or
                                     !matchesPrefix(field.name, prefix)) continue;
+                                if (field.is_internal and provider.owner != project.current_owner) continue;
                                 try appendRanked(allocator, &ranked, .{
                                     .label = field.name,
                                     .kind = CompletionKind.field,
@@ -342,8 +343,10 @@ pub fn scopeItemsAtForTarget(
             }
             if (!type_only) for (loaded.program.functions) |function| {
                 if (!std.mem.eql(u8, function.name, target.declaration)) continue;
-                if (function.is_internal) continue;
-                if (provider.owner != project.current_owner and !function.is_public) continue;
+                if (function.is_local) continue;
+                if (function.is_internal) {
+                    if (provider.owner != project.current_owner) continue;
+                } else if (!function.is_public) continue;
                 if (!Completion.callAcceptsParameters(source, cursor, loaded.program, function.parameters)) continue;
                 try appendRanked(allocator, &ranked, .{
                     .label = label,
@@ -678,8 +681,10 @@ fn appendPathItems(
         if (!project.graph.canAccess(project.current_owner, provider.owner, provider.name)) continue;
         const loaded = try loadProgram(allocator, io, documents, provider) orelse continue;
         for (loaded.program.structures) |structure| {
-            if (structure.is_internal) continue;
-            if (contextual_provider == null and !structure.is_public) continue;
+            if (structure.is_local) continue;
+            if (structure.is_internal) {
+                if (provider.owner != project.current_owner) continue;
+            } else if (contextual_provider == null and !structure.is_public) continue;
             if (!matchesPrefix(structure.name, query.prefix)) continue;
             if (query.type_only or call_source == null) {
                 try appendRanked(allocator, ranked, .{
@@ -720,8 +725,10 @@ fn appendPathItems(
             }
         }
         for (loaded.program.enums) |enumeration| {
-            if (enumeration.is_internal or !matchesPrefix(enumeration.name, query.prefix)) continue;
-            if (contextual_provider == null and !enumeration.is_public) continue;
+            if (enumeration.is_local or !matchesPrefix(enumeration.name, query.prefix)) continue;
+            if (enumeration.is_internal) {
+                if (provider.owner != project.current_owner) continue;
+            } else if (contextual_provider == null and !enumeration.is_public) continue;
             try appendRanked(allocator, ranked, .{
                 .label = enumeration.name,
                 .kind = CompletionKind.enum_type,
@@ -730,8 +737,10 @@ fn appendPathItems(
         }
         if (!query.type_only) {
             for (loaded.program.functions) |function| {
-                if (function.is_internal) continue;
-                if (provider.owner != project.current_owner and !function.is_public) continue;
+                if (function.is_local) continue;
+                if (function.is_internal) {
+                    if (provider.owner != project.current_owner) continue;
+                } else if (contextual_provider == null and !function.is_public) continue;
                 if (call_source) |text| if (!Completion.callAcceptsParameters(
                     text,
                     call_cursor,
@@ -1052,7 +1061,8 @@ fn appendImportedMembers(
         if (!structure.is_public) return;
         if (query.static_receiver) {
             for (structure.static_fields) |field| {
-                if (field.is_internal or field.is_private or field.is_protected) continue;
+                if (field.is_local or field.is_private or field.is_protected) continue;
+                if (field.is_internal and provider.owner != project.current_owner) continue;
                 if (!std.mem.startsWith(u8, field.name, query.prefix)) continue;
                 try appendRanked(allocator, ranked, .{
                     .label = field.name,
@@ -1064,7 +1074,8 @@ fn appendImportedMembers(
                 }, 0, false);
             }
             for (structure.methods) |method| {
-                if (!method.is_static or method.is_internal or method.is_private or method.is_protected) continue;
+                if (!method.is_static or method.is_local or method.is_private or method.is_protected) continue;
+                if (method.is_internal and provider.owner != project.current_owner) continue;
                 if (!std.mem.startsWith(u8, method.name, query.prefix)) continue;
                 if (!Completion.callAcceptsParameters(
                     current_source,
@@ -1081,7 +1092,8 @@ fn appendImportedMembers(
             return;
         }
         for (structure.fields) |field| {
-            if (field.is_internal or field.is_private or field.is_protected) continue;
+            if (field.is_local or field.is_private or field.is_protected) continue;
+            if (field.is_internal and provider.owner != project.current_owner) continue;
             if (!std.mem.startsWith(u8, field.name, query.prefix)) continue;
             try appendRanked(allocator, ranked, .{
                 .label = field.name,
@@ -1093,7 +1105,8 @@ fn appendImportedMembers(
             }, 0, false);
         }
         for (structure.methods) |method| {
-            if (method.is_static or method.is_internal or method.is_private or method.is_protected) continue;
+            if (method.is_static or method.is_local or method.is_private or method.is_protected) continue;
+            if (method.is_internal and provider.owner != project.current_owner) continue;
             if (!std.mem.startsWith(u8, method.name, query.prefix)) continue;
             if (!Completion.callAcceptsParameters(
                 current_source,
@@ -1165,6 +1178,7 @@ fn appendProviderExtensionMethods(
         if (!matches_imported_target) continue;
         for (extension.methods) |method| {
             if (method.is_static or method.is_private or method.is_protected) continue;
+            if (method.is_local) continue;
             if (method.is_internal and provider_owner != project.current_owner) continue;
             if (target.is_class and !method.visibility_explicit) continue;
             if (!std.mem.startsWith(u8, method.name, query.prefix)) continue;
@@ -1424,8 +1438,10 @@ fn importedConstructorCallTypePath(
             !std.mem.eql(u8, structure.name, target.declaration)) continue;
         if (structure.constructors.len == 0) return if (call.arity == 0) use.path else null;
         for (structure.constructors) |constructor| {
-            if (constructor.is_internal or constructor.is_private or constructor.is_protected) continue;
-            if (provider.owner != project.current_owner and !constructor.is_public) continue;
+            if (constructor.is_local or constructor.is_private or constructor.is_protected) continue;
+            if (constructor.is_internal) {
+                if (provider.owner != project.current_owner) continue;
+            } else if (!constructor.is_public) continue;
             if (parametersAcceptArity(constructor.parameters, call.arity)) return use.path;
         }
         return null;
@@ -1514,9 +1530,11 @@ fn importedQualifiedCallReturnTypePath(
     var return_name: ?[]const u8 = null;
 
     for (loaded.program.functions) |function| {
-        if (function.is_internal or !std.mem.eql(u8, function.name, call.name) or
+        if (function.is_local or !std.mem.eql(u8, function.name, call.name) or
             !parametersAcceptArity(function.parameters, call.arity)) continue;
-        if (provider.owner != project.current_owner and !function.is_public) continue;
+        if (function.is_internal) {
+            if (provider.owner != project.current_owner) continue;
+        } else if (!function.is_public) continue;
         const candidate = returnTypeName(loaded.program, function.return_type) orelse continue;
         if (return_name != null and !std.mem.eql(u8, return_name.?, candidate)) return null;
         return_name = candidate;
@@ -1524,9 +1542,10 @@ fn importedQualifiedCallReturnTypePath(
     for (loaded.program.structures) |structure| {
         if (!std.mem.eql(u8, structure.name, target.declaration) or !structure.is_public) continue;
         for (structure.methods) |method| {
-            if (!method.is_static or method.is_internal or method.is_private or method.is_protected or
+            if (!method.is_static or method.is_local or method.is_private or method.is_protected or
                 !std.mem.eql(u8, method.name, call.name) or
                 !parametersAcceptArity(method.parameters, call.arity)) continue;
+            if (method.is_internal and provider.owner != project.current_owner) continue;
             const candidate = returnTypeName(loaded.program, method.return_type) orelse continue;
             if (return_name != null and !std.mem.eql(u8, return_name.?, candidate)) return null;
             return_name = candidate;
@@ -1544,8 +1563,10 @@ fn importedQualifiedCallReturnTypePath(
                 !std.mem.eql(u8, structure.name, exported_target.declaration)) continue;
             if (structure.constructors.len == 0) return if (call.arity == 0) exported.path else null;
             for (structure.constructors) |constructor| {
-                if (constructor.is_internal or constructor.is_private or constructor.is_protected) continue;
-                if (exported_provider.owner != project.current_owner and !constructor.is_public) continue;
+                if (constructor.is_local or constructor.is_private or constructor.is_protected) continue;
+                if (constructor.is_internal) {
+                    if (exported_provider.owner != project.current_owner) continue;
+                } else if (!constructor.is_public) continue;
                 if (parametersAcceptArity(constructor.parameters, call.arity)) return exported.path;
             }
         }
@@ -1789,7 +1810,7 @@ test "complete simple modules before declarations in a use path" {
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Module1.sx",
-        .data = "struct Hidden {} public struct Visible {} func inside() int { return 1 }",
+        .data = "struct Hidden {} public struct Visible {} internal func inside() int { return 1 }",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Module1.SubModule.Foo.sx",
@@ -1926,10 +1947,12 @@ test "complete public package APIs module aliases members and overlays" {
     });
     const operations_source =
         \\public struct Vector {
-        \\    internal var hidden_value:int
+        \\    local var hidden_value:int
+        \\    internal var package_value:int
         \\    var value:int
         \\    init(value:int) { self.value = value }
-        \\    internal func hidden_method() int { return self.hidden_value }
+        \\    local func hidden_method() int { return self.hidden_value }
+        \\    internal func package_method() int { return self.package_value }
         \\    func to_str() str { return "vector" }
         \\}
         \\public protocol Task { func execute() }
@@ -1947,7 +1970,8 @@ test "complete public package APIs module aliases members and overlays" {
         \\public func add(left:int, right:int = 1) int { return left + right }
         \\public func add(value:str) str { return value }
         \\func hidden() int { return 0 }
-        \\internal func file_only() int { return 0 }
+        \\internal func package_only() int { return 0 }
+        \\local func file_only() int { return 0 }
     ;
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Math/Module/Operations.sx",
@@ -1995,6 +2019,7 @@ test "complete public package APIs module aliases members and overlays" {
     try std.testing.expect(hasLabel(import_items, "Visible"));
     try std.testing.expect(!hasLabel(import_items, "Platform"));
     try std.testing.expect(!hasLabel(import_items, "hidden"));
+    try std.testing.expect(!hasLabel(import_items, "package_only"));
     try std.testing.expect(!hasLabel(import_items, "file_only"));
     const task_item = import_items[labelIndex(import_items, "Task").?];
     try std.testing.expectEqual(CompletionKind.interface, task_item.kind);
@@ -2033,6 +2058,7 @@ test "complete public package APIs module aliases members and overlays" {
     )).?;
     try std.testing.expect(hasLabel(qualifier_items, "add"));
     try std.testing.expect(!hasLabel(qualifier_items, "hidden"));
+    try std.testing.expect(!hasLabel(qualifier_items, "package_only"));
     try std.testing.expectEqual(@as(usize, 1), labelCount(qualifier_items, "add"));
     try std.testing.expect(std.mem.indexOf(
         u8,
@@ -2081,6 +2107,8 @@ test "complete public package APIs module aliases members and overlays" {
     try std.testing.expect(!hasLabel(member_items, "add"));
     try std.testing.expect(!hasLabel(member_items, "hidden_value"));
     try std.testing.expect(!hasLabel(member_items, "hidden_method"));
+    try std.testing.expect(!hasLabel(member_items, "package_value"));
+    try std.testing.expect(!hasLabel(member_items, "package_method"));
 
     const cascade_source =
         \\use Math.Operations
@@ -2787,7 +2815,7 @@ test "workspace indexes the selected package platform root" {
     )).?;
     try std.testing.expect(hasLabel(contextual_platform_items, "macos_fragment"));
     try std.testing.expect(hasLabel(contextual_platform_items, "platform_private"));
-    try std.testing.expect(!hasLabel(contextual_platform_items, "platform_internal"));
+    try std.testing.expect(hasLabel(contextual_platform_items, "platform_internal"));
     try std.testing.expect(!hasLabel(contextual_platform_items, "portable"));
 
     const contextual_target_source = "func portable() { Target. }";

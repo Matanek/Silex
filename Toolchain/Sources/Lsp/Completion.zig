@@ -148,7 +148,8 @@ pub fn itemsAt(
         .module_declaration => try appendKeywords(allocator, &candidates, context, &.{
             .{ "use", "Silex module import" },
             .{ "public", "Silex visibility" },
-            .{ "internal", "Silex file visibility" },
+            .{ "internal", "Silex package visibility" },
+            .{ "local", "Silex file visibility" },
             .{ "struct", "Silex value type declaration" },
             .{ "class", "Silex reference type declaration" },
             .{ "static", "Silex static class declaration" },
@@ -160,7 +161,8 @@ pub fn itemsAt(
         }, 70),
         .structure_declaration => try appendKeywords(allocator, &candidates, context, &.{
             .{ "public", "Silex visibility" },
-            .{ "internal", "Silex file visibility" },
+            .{ "internal", "Silex package visibility" },
+            .{ "local", "Silex file visibility" },
             .{ "private", "Silex type visibility" },
             .{ "let", "Silex immutable field" },
             .{ "var", "Silex mutable field" },
@@ -176,7 +178,7 @@ pub fn itemsAt(
             for (parsed.structures) |structure| {
                 if (!std.mem.eql(u8, structure.name, aggregate.type_name)) continue;
                 for (structure.fields) |field| {
-                    if (field.is_internal or field.is_private or field.is_protected or
+                    if (field.is_local or field.is_private or field.is_protected or
                         suppliedAggregateField(aggregate, field.name)) continue;
                     try appendCandidate(allocator, &candidates, context, .{
                         .label = field.name,
@@ -2484,15 +2486,15 @@ test "complete self and fundamental string members exclusively" {
     try std.testing.expectEqualStrings("count", string_items[0].label);
 }
 
-test "complete internal declarations and members inside their file" {
+test "complete local declarations and members inside their file" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const source =
-        \\internal struct Handle {
-        \\    internal var value:int
-        \\    internal func read() int { return self.value }
+        \\local struct Handle {
+        \\    local var value:int
+        \\    local func read() int { return self.value }
         \\}
-        \\internal func helper() int { return 1 }
+        \\local func helper() int { return 1 }
         \\func main() {
         \\    let handle = Handle(value:1)
         \\    print(handle.read() + helper())
@@ -2506,8 +2508,10 @@ test "complete internal declarations and members inside their file" {
     const helper_items = try itemsAt(arena.allocator(), source, helper_cursor, .invoked);
     try std.testing.expect(contains(helper_items, "helper"));
 
-    const keyword_items = try itemsAt(arena.allocator(), "inte", "inte".len, .invoked);
-    try std.testing.expect(contains(keyword_items, "internal"));
+    const internal_items = try itemsAt(arena.allocator(), "inte", "inte".len, .invoked);
+    try std.testing.expect(contains(internal_items, "internal"));
+    const local_items = try itemsAt(arena.allocator(), "loc", "loc".len, .invoked);
+    try std.testing.expect(contains(local_items, "local"));
 }
 
 test "offer branch continuations only after a conditional block" {

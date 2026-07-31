@@ -77,7 +77,7 @@ pub fn rewriteRegistration(self: anytype, call: *Ast.Expression.Call, locals: an
 
     const adapter_name = try std.fmt.allocPrint(self.allocator, "__silex_system_adapter_{d}", .{self.functions.items.len});
     try self.functions.append(self.allocator, .{
-        .is_internal = true,
+        .is_local = true,
         .specialization_file = callback.position.file,
         .position = callback.position,
         .name_position = callback.position,

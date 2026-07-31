@@ -162,10 +162,11 @@ open Silex document
   façade name to these identities without copying declarations or creating
   backend symbols. Transparent type aliases are normalized to the same portable
   type before signatures and IR are built; interfaces retain only their visible
-  source name and canonical target. `internal` is checked against preserved
-  source-file provenance and is removed from interfaces; opaque internal return
-  types remain typed without exposing their declarations or members. `public`
-  is checked during composition and semantic resolution; neither visibility is
+  source name and canonical target. `internal` is checked against package
+  identity, while `local` is checked against preserved source-file provenance;
+  both are removed from public interfaces. Opaque non-public return types remain
+  typed without exposing their declarations or members. `public` is checked
+  during composition and semantic resolution; none of these visibilities is
   related to Mach-O symbol export or native layout.
 - The composer resolves all calls and assigns deterministic `FunctionId`
   values before native lowering. The backend receives one portable IR program

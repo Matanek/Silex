@@ -1820,13 +1820,23 @@ fn parametersAcceptArity(parameters: []const Ast.Parameter, arity: usize) bool {
 }
 
 fn functionVisible(call: Ast.Expression.Call, function: Ast.Function) bool {
-    if (function.is_internal) return call.name_position.file == function.position.file;
-    return call.owner == function.owner or function.is_public;
+    if (function.is_local) return call.name_position.file == function.position.file;
+    if (function.is_public) return true;
+    if (function.is_internal) return call.owner == function.owner;
+    if (call.name_position.file == function.position.file) return true;
+    const separator = std.mem.lastIndexOfScalar(u8, function.name, '.') orelse return false;
+    return std.mem.eql(u8, logicalModule(call.module), logicalModule(function.name[0..separator]));
 }
 
 fn methodVisible(call: Ast.Expression.Call, method: Ast.Function) bool {
-    if (method.is_internal) return call.name_position.file == method.position.file;
-    return call.owner == method.owner or method.is_public;
+    if (method.is_local) return call.name_position.file == method.position.file;
+    return method.is_public or call.owner == method.owner;
+}
+
+fn logicalModule(module: []const u8) []const u8 {
+    if (std.mem.endsWith(u8, module, ".$Platform")) return module[0 .. module.len - ".$Platform".len];
+    if (std.mem.endsWith(u8, module, ".$Target")) return module[0 .. module.len - ".$Target".len];
+    return module;
 }
 
 fn samePosition(left: Source.Position, right: Source.Position) bool {

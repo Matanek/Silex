@@ -47,8 +47,12 @@ pub fn findByType(self: anytype, type_value: Ast.Type) ?usize {
 
 pub fn analyzeInitializer(self: anytype, builder: anytype, call: Ast.Expression.Call, enum_index: usize) !Model.TypedValue {
     const enumeration = self.program.enums[enum_index];
-    if (enumeration.is_internal and call.name_position.file != enumeration.position.file) {
-        const message = try std.fmt.allocPrint(self.allocator, "enum '{s}' is internal to its source file", .{enumeration.name});
+    if (enumeration.is_local and call.name_position.file != enumeration.position.file) {
+        const message = try std.fmt.allocPrint(self.allocator, "enum '{s}' is local to its source file", .{enumeration.name});
+        return self.fail(call.name_position, message);
+    }
+    if (enumeration.is_internal and self.owner_context != enumeration.owner) {
+        const message = try std.fmt.allocPrint(self.allocator, "enum '{s}' is internal to its package", .{enumeration.name});
         return self.fail(call.name_position, message);
     }
     var selected: ?usize = null;
@@ -100,8 +104,12 @@ pub fn analyzeValue(
     enum_index: usize,
 ) !Model.TypedValue {
     const enumeration = self.program.enums[enum_index];
-    if (enumeration.is_internal and position.file != enumeration.position.file) {
-        const message = try std.fmt.allocPrint(self.allocator, "enum '{s}' is internal to its source file", .{enumeration.name});
+    if (enumeration.is_local and position.file != enumeration.position.file) {
+        const message = try std.fmt.allocPrint(self.allocator, "enum '{s}' is local to its source file", .{enumeration.name});
+        return self.fail(position, message);
+    }
+    if (enumeration.is_internal and self.owner_context != enumeration.owner) {
+        const message = try std.fmt.allocPrint(self.allocator, "enum '{s}' is internal to its package", .{enumeration.name});
         return self.fail(position, message);
     }
     var selected: ?usize = null;

@@ -152,10 +152,17 @@ pub fn requirePublicStructure(self: anytype, source_module: usize, target: Targe
     if (source_module == target.module) return;
     const target_program = self.units[target.module].program.?;
     const structure = Names.findStructure(target_program, target.declaration).?;
-    if (Fragments.same(self.index, source_module, target.module) and !structure.is_internal) return;
+    if (structure.is_internal and samePackage(self, source_module, target.module)) return;
+    if (!structure.is_local and !structure.is_internal and Fragments.same(self.index, source_module, target.module)) return;
     if (Reexports.structureExported(target_program, structure)) return;
-    const message = if (structure.is_internal)
-        try std.fmt.allocPrint(self.allocator, "structure '{s}' is internal to its source file", .{target.declaration})
+    const message = if (structure.is_local)
+        try std.fmt.allocPrint(self.allocator, "structure '{s}' is local to its source file", .{target.declaration})
+    else if (structure.is_internal)
+        try std.fmt.allocPrint(
+            self.allocator,
+            "structure '{s}' is internal to package '{s}'",
+            .{ target.declaration, self.packages.label(self.index.providers[target.module].owner) },
+        )
     else
         try std.fmt.allocPrint(self.allocator, "structure '{s}' is private outside its module", .{target.declaration});
     return self.fail(position, message);
@@ -164,13 +171,24 @@ pub fn requirePublicStructure(self: anytype, source_module: usize, target: Targe
 pub fn requirePublicEnum(self: anytype, source_module: usize, target: Target, position: Source.Position) !void {
     if (source_module == target.module) return;
     const enumeration = Names.findEnum(self.units[target.module].program.?, target.declaration).?;
-    if (Fragments.same(self.index, source_module, target.module) and !enumeration.is_internal) return;
+    if (enumeration.is_internal and samePackage(self, source_module, target.module)) return;
+    if (!enumeration.is_local and !enumeration.is_internal and Fragments.same(self.index, source_module, target.module)) return;
     if (enumeration.is_public) return;
-    const message = if (enumeration.is_internal)
-        try std.fmt.allocPrint(self.allocator, "enum '{s}' is internal to its source file", .{target.declaration})
+    const message = if (enumeration.is_local)
+        try std.fmt.allocPrint(self.allocator, "enum '{s}' is local to its source file", .{target.declaration})
+    else if (enumeration.is_internal)
+        try std.fmt.allocPrint(
+            self.allocator,
+            "enum '{s}' is internal to package '{s}'",
+            .{ target.declaration, self.packages.label(self.index.providers[target.module].owner) },
+        )
     else
         try std.fmt.allocPrint(self.allocator, "enum '{s}' is private outside its module", .{target.declaration});
     return self.fail(position, message);
+}
+
+fn samePackage(self: anytype, left: usize, right: usize) bool {
+    return self.index.providers[left].owner == self.index.providers[right].owner;
 }
 
 pub fn functionModule(self: anytype, target: Target) ![]const u8 {

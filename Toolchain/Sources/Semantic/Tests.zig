@@ -58,8 +58,8 @@ test "enforce boolean conditions lexical branches and path-complete returns" {
         "if condition expects 'bool'",
     );
     try expectSemanticError(
-        "func main() { if true { let local = 1 } print(local) }",
-        "unknown variable 'local'",
+        "func main() { if true { let scoped = 1 } print(scoped) }",
+        "unknown variable 'scoped'",
     );
     try expectSemanticError(
         "func main() { let value = 1; if true { let value = 2 } }",
@@ -422,8 +422,8 @@ test "enforce loop conditions controls and lexical bodies" {
         "'continue' is only valid inside a loop",
     );
     try expectSemanticError(
-        "func main() { while false { let local = 1 } print(local) }",
-        "unknown variable 'local'",
+        "func main() { while false { let scoped = 1 } print(scoped) }",
+        "unknown variable 'scoped'",
     );
 }
 

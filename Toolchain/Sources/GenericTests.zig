@@ -115,7 +115,7 @@ test "reuse one generic function specialization through modules aliases and reex
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Left.sx",
-        .data = "use Facade.keep as local\npublic func answer() int { return local(20) }",
+        .data = "use Facade.keep as keep\npublic func answer() int { return keep(20) }",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Right.sx",
