@@ -48,6 +48,13 @@ the current terminal streams and returns its exit code. Debug is the default;
 pass `--release` to select the optimized pipeline. Add `--emit-ir` to inspect
 the portable typed IR before native lowering:
 
+In an interactive terminal, `compile` and `run` announce the active work:
+source and shader analysis, target preparation, executable construction,
+platform linkage, output publication, and application launch. Redirected and
+CI executions remain quiet on success so their machine-readable output does
+not change. On an ANSI-capable terminal, successful progress is erased when
+the build finishes; failed progress remains visible above its diagnostic.
+
 ```sh
 zig build run -- run /path/to/Main.sx --emit-ir
 ```
@@ -95,10 +102,12 @@ silex compile Sandbox/Main.sx -r -n -o Application
 For `run`, `--nocache` forces a rebuild but the executable still belongs under
 `.silex/run/`; cache policy does not change the command's output location.
 
-The cache persists per-module ASTs, the composed portable IR and native Mach-O
-outputs. Entries are keyed by exact source content and compilation mode,
-validated before use and published atomically. Removing `.silex/cache` is
-always safe.
+The cache persists per-module ASTs, the complete native input assembled from
+packages and boundaries, and linked Mach-O, ELF or PE executables. Entries are
+keyed by exact source and boundary-archive contents, target and compilation
+mode. They are validated before use and published atomically, so an unchanged
+GPU application can skip Shadercross, native emission and external linkage.
+Removing `.silex/cache` is always safe.
 
 Run the reproducible Apple Silicon comparison against an equivalent C++23
 workload compiled by `clang++ -O2`:

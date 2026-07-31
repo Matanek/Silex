@@ -8,6 +8,7 @@ pub const Position = struct {
 pub const Diagnostic = struct {
     position: Position,
     message: []const u8,
+    path: ?[]const u8 = null,
 };
 
 pub const Error = error{InvalidSource};

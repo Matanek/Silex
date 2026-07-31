@@ -70,6 +70,7 @@ pub const Compiler = struct {
     cache_modules: bool = false,
     include_tests: bool = false,
     target: TargetModule.Target,
+    shadercross_path: ?[]const u8 = null,
 
     pub fn init(allocator: Allocator, io: Io) Compiler {
         return .{ .allocator = allocator, .io = io, .target = TargetModule.Target.host() orelse .macos_arm64 };
@@ -165,10 +166,19 @@ pub const Compiler = struct {
         var analyzer = Semantic.Analyzer.init(self.allocator);
         analyzer.target = self.target;
         analyzer.packages = self.packages;
+        analyzer.io = self.io;
+        analyzer.source_files = self.files;
+        analyzer.shadercross_path = self.shadercross_path;
         var ir = (if (self.include_tests) analyzer.analyzeUnit(ast) else analyzer.analyze(ast)) catch |err| {
             self.diagnostic = analyzer.diagnostic;
             return err;
         };
+        if (analyzer.shader_files.items.len != 0) {
+            const all_files = try self.allocator.alloc([]const u8, self.files.len + analyzer.shader_files.items.len);
+            @memcpy(all_files[0..self.files.len], self.files);
+            @memcpy(all_files[self.files.len..], analyzer.shader_files.items);
+            self.files = all_files;
+        }
         ir.files = self.files;
 
         var tests: std.ArrayList(TestCase) = .empty;
@@ -194,6 +204,7 @@ pub const Compiler = struct {
 
     pub fn diagnosticPath(self: Compiler, fallback: []const u8) []const u8 {
         const diagnostic = self.diagnostic orelse return fallback;
+        if (diagnostic.path) |path| return path;
         if (diagnostic.position.file >= self.files.len) return fallback;
         return self.files[diagnostic.position.file];
     }

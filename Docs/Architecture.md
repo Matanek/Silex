@@ -258,6 +258,12 @@ open Silex document
   execute most platform boundaries. `silex compile <source.sx>
   [--target <target>] [-d|--debug|-r|--release] [-n|--nocache]
   -o|--output <executable>` emits at a caller-selected path without running it.
+- In an interactive terminal, native compilation reports intention-level
+  progress through analysis, target preparation, executable construction,
+  platform linkage, output publication, and launch. The progress channel is
+  disabled when standard error is not a terminal, preserving quiet successful
+  execution for scripts and CI. An ANSI-capable terminal clears successful
+  progress when the operation completes but retains it when compilation fails.
 - Release propagates constants and copies through straight-line functions,
   folds checked scalar operations, removes dead constants, and inlines functions proven constant,
   identity-only or scalar-binary. ARM64 lowering then performs deterministic
@@ -267,11 +273,13 @@ open Silex document
   lowering.
 - Source-compiling commands root their private cache at
   `<invocation-cwd>/.silex/cache`. Content-addressed, versioned entries persist
-  module ASTs, portable typed IR, Release and machine functions that are safe
-  to reuse independently, and mode-specific Mach-O images. Exact source
-  contents are re-hashed before reuse; corrupt or unavailable entries are
-  misses, and atomic publication prevents readers from observing partial data.
-  Native images use target-specific Mach-O, ELF or PE cache kinds.
+  module ASTs, portable typed IR, complete native inputs with their boundary
+  providers, Release and machine functions that are safe to reuse
+  independently, and mode-specific linked executables. Exact source and
+  boundary-archive contents are re-hashed before reuse; corrupt or unavailable
+  entries are misses, and atomic publication prevents readers from observing
+  partial data. Native images use target-specific Mach-O, ELF or PE cache
+  kinds.
   `-n` and `--nocache` bypass reusable compilation entries. `run` still writes
   its private executable under `.silex/run/`; the option forces rebuilding it
   and does not change the command's output location.

@@ -2,6 +2,7 @@ const std = @import("std");
 const Artifacts = @import("Artifacts.zig");
 const Boundary = @import("Boundary.zig");
 const Cli = @import("Cli.zig");
+const CliProgress = @import("CliProgress.zig");
 const CompilationCache = @import("CompilationCache.zig");
 const Lower = @import("Arm64/Lower.zig");
 const Arm64Encoder = @import("Arm64/Encoder.zig");
@@ -25,6 +26,7 @@ const NativeTestRunner = @import("NativeTestRunner.zig");
 const TestDiscovery = @import("TestDiscovery.zig");
 const TargetModule = @import("Target.zig");
 const ToolchainSetup = @import("ToolchainSetup.zig");
+const ShaderAssets = @import("ShaderAssets.zig");
 
 const Io = std.Io;
 
@@ -51,6 +53,8 @@ test {
     _ = X64Object;
     _ = NativeLink;
     _ = ToolchainSetup;
+    _ = ShaderAssets;
+    _ = CliProgress;
 }
 
 pub fn main(init: std.process.Init) u8 {
@@ -180,6 +184,7 @@ fn testSource(init: std.process.Init, allocator: std.mem.Allocator, args: []cons
         const source_allocator = source_arena.allocator();
         var compiler = Project.Compiler.initWithPackagesAndCache(source_allocator, init.io, packages_root, options.cache);
         compiler.target = target;
+        try configureShaderCompiler(&compiler, source_allocator, init.environ_map);
         const compilation = compiler.compileTests(source_path) catch |err| switch (err) {
             error.InvalidSource => {
                 printSourceDiagnostic(compiler, source_path);
@@ -378,6 +383,9 @@ fn runSource(init: std.process.Init, allocator: std.mem.Allocator, args: []const
         .target = target,
     }, options.emit_ir);
     if (status != 0) return status;
+    var progress = CliProgress.Build.init(init.io);
+    progress.source(.run, options.source_path);
+    progress.finish();
     return executeNative(init, output_path);
 }
 
@@ -405,6 +413,7 @@ fn interpretSource(init: std.process.Init, allocator: std.mem.Allocator, args: [
             options.cache,
         );
         compiler.target = target;
+        try configureShaderCompiler(&compiler, allocator, init.environ_map);
         const compilation = compiler.compile(options.source_path) catch |err| switch (err) {
             error.InvalidSource => {
                 printSourceDiagnostic(compiler, options.source_path);
@@ -480,10 +489,19 @@ fn compileNativeOptions(
         std.debug.print("silex: 'compile' requires --target on this host\n", .{});
         return 1;
     };
+    var progress = CliProgress.Build.init(init.io);
+    progress.source(.analyze, options.source_path);
     var boundaries: []const Boundary.Function = &.{};
-    var package_graph: ?Packages.Graph = null;
-    const portable_ir = if (options.cache) CompilationCache.loadIr(allocator, init.io, options.source_path, target.name()) else null;
-    const program = portable_ir orelse program: {
+    var boundary_providers: []const Packages.BoundaryProvider = &.{};
+    const cached_input = if (options.cache)
+        CompilationCache.loadNativeInput(allocator, init.io, options.source_path, target.name())
+    else
+        null;
+    const program = if (cached_input) |cached| program: {
+        boundaries = cached.boundaries;
+        boundary_providers = cached.providers;
+        break :program cached.program;
+    } else program: {
         var compiler = Project.Compiler.initWithPackagesAndCache(
             allocator,
             init.io,
@@ -491,6 +509,7 @@ fn compileNativeOptions(
             options.cache,
         );
         compiler.target = target;
+        try configureShaderCompiler(&compiler, allocator, init.environ_map);
         const compilation = compiler.compile(options.source_path) catch |err| switch (err) {
             error.InvalidSource => {
                 printSourceDiagnostic(compiler, options.source_path);
@@ -499,13 +518,22 @@ fn compileNativeOptions(
             else => return err,
         };
         boundaries = compilation.boundaries;
-        package_graph = compilation.packages;
-        // A portable-IR cache entry deliberately contains no target provider or ABI
-        // information. Boundary-bearing programs are therefore cached only after
-        // target lowering, where their complete native contract is represented.
+        boundary_providers = try requiredBoundaryProviders(allocator, boundaries, compilation.packages);
         if (options.cache and boundaries.len == 0) {
             CompilationCache.storeIr(allocator, init.io, options.source_path, target.name(), compilation.files, compilation.ir);
         }
+        if (options.cache) CompilationCache.storeNativeInput(
+            allocator,
+            init.io,
+            options.source_path,
+            target.name(),
+            compilation.files,
+            .{
+                .program = compilation.ir,
+                .boundaries = boundaries,
+                .providers = boundary_providers,
+            },
+        );
         break :program compilation.ir;
     };
 
@@ -519,16 +547,24 @@ fn compileNativeOptions(
         return 1;
     }
 
-    const boundary_providers = try requiredBoundaryProviders(allocator, boundaries, package_graph);
+    progress.target(target.name(), @tagName(options.mode));
 
     const native_variant = try std.fmt.allocPrint(allocator, "{s}:{s}:{s}", .{ target.name(), @tagName(options.mode), options.source_path });
-    const cache_key = if (options.cache and boundary_providers.len == 0)
-        CompilationCache.key(allocator, init.io, program.files, "compile", native_variant) catch null
+    const cache_files = try nativeCacheFiles(allocator, program.files, boundary_providers);
+    const cache_key = if (options.cache)
+        CompilationCache.key(allocator, init.io, cache_files, "compile", native_variant) catch null
     else
         null;
     const executable_kind = if (target.eql(.macos_arm64)) "macho" else if (target.eql(.linux_x64)) "elf" else "pe";
     if (cache_key) |digest| if (CompilationCache.load(allocator, init.io, digest, executable_kind)) |cached| {
-        return writeExecutable(init, options.output_path, cached);
+        progress.stage(.cache);
+        progress.source(.write, options.output_path);
+        const status = writeExecutable(init, options.output_path, cached);
+        if (status == 0) {
+            progress.source(.ready, options.output_path);
+            progress.finish();
+        }
+        return status;
     };
 
     const native_ir = switch (options.mode) {
@@ -552,6 +588,7 @@ fn compileNativeOptions(
         std.debug.print("silex: native backend cannot lower this program: {t}\n", .{err});
         return 1;
     };
+    progress.stage(.emit);
     if (target.eql(.macos_arm64) and boundary_providers.len != 0) {
         const object = MachOObject.emit(allocator, machine) catch |err| {
             std.debug.print("silex: cannot emit relocatable native object: {t}\n", .{err});
@@ -565,10 +602,14 @@ fn compileNativeOptions(
             try file.writeStreamingAll(init.io, object);
         }
         if (std.fs.path.dirname(options.output_path)) |directory| try Io.Dir.cwd().createDirPath(init.io, directory);
+        progress.stage(.link);
         MacOSLink.executable(allocator, init.io, object_path, options.output_path, boundary_providers) catch |err| {
             std.debug.print("silex: cannot link native package artifacts: {t}\n", .{err});
             return 1;
         };
+        if (cache_key) |digest| storeLinkedExecutable(allocator, init.io, digest, executable_kind, options.output_path);
+        progress.source(.ready, options.output_path);
+        progress.finish();
         return 0;
     }
     if ((target.eql(.linux_x64) or target.eql(.windows_x64)) and boundary_providers.len != 0) {
@@ -595,10 +636,14 @@ fn compileNativeOptions(
             try file.writeStreamingAll(init.io, object);
         }
         if (std.fs.path.dirname(options.output_path)) |directory| try Io.Dir.cwd().createDirPath(init.io, directory);
+        progress.stage(.link);
         NativeLink.executable(allocator, init.io, target, object_path, options.output_path, boundary_providers) catch |err| {
             std.debug.print("silex: cannot link native package artifacts for {s}: {t}\n", .{ target.name(), err });
             return 1;
         };
+        if (cache_key) |digest| storeLinkedExecutable(allocator, init.io, digest, executable_kind, options.output_path);
+        progress.source(.ready, options.output_path);
+        progress.finish();
         return 0;
     }
     if (target.eql(.windows_arm64) and boundary_providers.len != 0) {
@@ -614,10 +659,14 @@ fn compileNativeOptions(
             try file.writeStreamingAll(init.io, object);
         }
         if (std.fs.path.dirname(options.output_path)) |directory| try Io.Dir.cwd().createDirPath(init.io, directory);
+        progress.stage(.link);
         NativeLink.executable(allocator, init.io, target, object_path, options.output_path, boundary_providers) catch |err| {
             std.debug.print("silex: cannot link native package artifacts for windows-arm64: {t}\n", .{err});
             return 1;
         };
+        if (cache_key) |digest| storeLinkedExecutable(allocator, init.io, digest, executable_kind, options.output_path);
+        progress.source(.ready, options.output_path);
+        progress.finish();
         return 0;
     }
     const executable = executable: {
@@ -767,7 +816,35 @@ fn compileNativeOptions(
     };
 
     if (cache_key) |digest| CompilationCache.store(allocator, init.io, digest, executable_kind, executable);
-    return writeExecutable(init, options.output_path, executable);
+    progress.source(.write, options.output_path);
+    const status = writeExecutable(init, options.output_path, executable);
+    if (status == 0) {
+        progress.source(.ready, options.output_path);
+        progress.finish();
+    }
+    return status;
+}
+
+fn nativeCacheFiles(
+    allocator: std.mem.Allocator,
+    source_files: []const []const u8,
+    providers: []const Packages.BoundaryProvider,
+) ![]const []const u8 {
+    const files = try allocator.alloc([]const u8, source_files.len + providers.len);
+    @memcpy(files[0..source_files.len], source_files);
+    for (providers, source_files.len..) |provider, index| files[index] = provider.archive;
+    return files;
+}
+
+fn storeLinkedExecutable(
+    allocator: std.mem.Allocator,
+    io: Io,
+    digest: [std.crypto.hash.Blake3.digest_length]u8,
+    executable_kind: []const u8,
+    output_path: []const u8,
+) void {
+    const executable = Io.Dir.cwd().readFileAlloc(io, output_path, allocator, .limited(512 * 1024 * 1024)) catch return;
+    CompilationCache.store(allocator, io, digest, executable_kind, executable);
 }
 
 fn requiredBoundaryProviders(
@@ -928,6 +1005,16 @@ fn globalToolchainRoot(
 ) !?[]const u8 {
     const home = environment.get("HOME") orelse environment.get("USERPROFILE") orelse return null;
     return try std.fs.path.join(allocator, &.{ home, ".silex", "toolchain" });
+}
+
+fn configureShaderCompiler(
+    compiler: *Project.Compiler,
+    allocator: std.mem.Allocator,
+    environment: *const std.process.Environ.Map,
+) !void {
+    const root = try globalToolchainRoot(allocator, environment) orelse return;
+    const host = TargetModule.Target.host() orelse return;
+    compiler.shadercross_path = try ToolchainSetup.executablePath(allocator, root, host);
 }
 
 test "run owns a stable mode-specific artifact below .silex" {
