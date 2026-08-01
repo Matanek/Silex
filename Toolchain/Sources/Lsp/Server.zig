@@ -551,6 +551,20 @@ test "inheritance completion merges local imported types and module aliases" {
     try std.testing.expect(std.mem.indexOf(u8, response, "\"label\":\"Task\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"label\":\"Threading\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"label\":\"return\"") == null);
+
+    const qualified_source =
+        \\use Threading
+        \\struct MyTask : Threading.
+    ;
+    try server.setDocument(.{ .uri = main_uri, .text = qualified_source, .version = 2 });
+    const qualified_request = try std.fmt.allocPrint(
+        allocator,
+        "{{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"textDocument/completion\",\"params\":{{\"textDocument\":{{\"uri\":\"{s}\"}},\"position\":{{\"line\":1,\"character\":{d}}},\"context\":{{\"triggerKind\":2,\"triggerCharacter\":\".\"}}}}}}",
+        .{ main_uri, "struct MyTask : Threading.".len },
+    );
+    const qualified_response = (try server.handleBody(allocator, qualified_request)).?;
+    try std.testing.expect(std.mem.indexOf(u8, qualified_response, "\"label\":\"Task\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, qualified_response, "\"label\":\"return\"") == null);
 }
 
 test "use completion is strictly limited to accessible modules and packages" {
