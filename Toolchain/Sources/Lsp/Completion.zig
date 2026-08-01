@@ -397,7 +397,7 @@ fn scopeAt(tokens: []const Token) Scope {
                 pending = .callable;
                 pending_callable = true;
             },
-            .keyword_while => pending = .loop,
+            .keyword_while, .keyword_for => pending = .loop,
             .left_brace => {
                 if (count < blocks.len) {
                     blocks[count] = pending;
@@ -497,7 +497,7 @@ fn lineIsExpression(tokens: []const Token) bool {
         return false;
     }
     return switch (first) {
-        .keyword_return, .keyword_if, .keyword_while => true,
+        .keyword_return, .keyword_if, .keyword_while, .keyword_for => true,
         .keyword_print, .keyword_assert, .keyword_panic => true,
         .identifier, .keyword_self, .integer, .floating, .keyword_true, .keyword_false, .string, .string_start => true,
         else => false,
@@ -984,6 +984,20 @@ fn visibleLocals(allocator: Allocator, source: []const u8, start: usize, cursor:
                     .depth = depth,
                 });
             },
+            .keyword_for => {
+                var binding = index + 1;
+                if (binding < tokens.len and (tokens[binding].tag == .keyword_let or tokens[binding].tag == .keyword_var)) {
+                    binding += 1;
+                }
+                if (binding >= tokens.len or tokens[binding].tag != .identifier) continue;
+                try locals.append(allocator, .{
+                    .name = tokens[binding].lexeme,
+                    .type_name = null,
+                    // A for binding starts at the loop body, whose opening brace
+                    // has not yet been consumed at this point.
+                    .depth = depth + 1,
+                });
+            },
             else => {},
         }
     }
@@ -1218,6 +1232,8 @@ fn parseForCompletion(
     else
         0;
     const before_prefix = std.mem.trim(u8, source[line_start..context.prefix_start], " \t\r");
+    const for_source = isForSourceLine(before_prefix);
+    const for_body_follows = for_source and blockFollowsCompletion(source, cursor);
     const placeholder: []const u8 = switch (context.kind) {
         .member => if (callFollows(source, cursor))
             if (context.prefix.len == 0) "__completion" else ""
@@ -1225,12 +1241,19 @@ fn parseForCompletion(
             "()"
         else if (memberFollowedByAssignment(source, cursor))
             "__completion"
+        else if (for_source and !for_body_follows)
+            "__completion() {}"
         else
             "__completion()",
         .type_name => "int",
         .aggregate_field => "__completion:true",
         .statement => "print(true)",
-        .expression => if (before_prefix.len == 0) "print(true)" else "true",
+        .expression => if (for_source and !for_body_follows)
+            "true {}"
+        else if (before_prefix.len == 0)
+            "print(true)"
+        else
+            "true",
         else => return null,
     };
     const replacement_start = if (context.kind == .member or context.prefix.len == 0)
@@ -1257,6 +1280,23 @@ fn parseForCompletion(
         break :blk parser.parse() catch return null;
     };
     return mergeExtensionsForCompletion(allocator, program);
+}
+
+fn isForSourceLine(line: []const u8) bool {
+    var lexer = LexerModule.Lexer.init(line);
+    const first = lexer.next() catch return false;
+    if (first.tag != .keyword_for) return false;
+    while (true) {
+        const token = lexer.next() catch return false;
+        if (token.tag == .end) return false;
+        if (token.tag == .keyword_in) return true;
+    }
+}
+
+fn blockFollowsCompletion(source: []const u8, cursor: usize) bool {
+    var index = cursor;
+    while (index < source.len and (source[index] == ' ' or source[index] == '\t' or source[index] == '\r')) index += 1;
+    return index < source.len and source[index] == '{';
 }
 
 pub fn aggregateContextAt(allocator: Allocator, source: []const u8, cursor: usize) !?AggregateContext {
@@ -1522,7 +1562,17 @@ pub fn memberReceiver(source: []const u8, dot: usize) ?[]const u8 {
             }
         }
     }
-    while (start != 0 and (isIdentifierContinue(source[start - 1]) or source[start - 1] == '.')) start -= 1;
+    while (start != 0) {
+        if (isIdentifierContinue(source[start - 1])) {
+            start -= 1;
+            continue;
+        }
+        if (source[start - 1] != '.') break;
+        // A range boundary is not part of the member receiver. Without this
+        // guard, `0...self.` resolves the receiver as `0...self`.
+        if (start >= 3 and std.mem.eql(u8, source[start - 3 .. start], "...")) break;
+        start -= 1;
+    }
     return source[start..dot];
 }
 
@@ -2330,6 +2380,55 @@ test "complete local relations in partial structure and class declarations" {
         .invoked,
     );
     try std.testing.expect(contains(conformance_items, "Runnable"));
+}
+
+test "complete a for source expression and self members" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source =
+        \\struct Node {
+        \\    var level:int
+        \\    var children:Node[]
+        \\    func build() {
+        \\        for i in 0...s {
+        \\        }
+        \\    }
+        \\}
+    ;
+
+    const source_cursor = std.mem.indexOf(u8, source, "0...s").? + "0...s".len;
+    const source_items = try itemsAt(arena.allocator(), source, source_cursor, .invoked);
+    try std.testing.expect(contains(source_items, "self"));
+    try std.testing.expect(!contains(source_items, "return"));
+
+    const member_source =
+        \\struct Node {
+        \\    var level:int
+        \\    var children:Node[]
+        \\    func build() {
+        \\        for i in 0...self. {
+        \\        }
+        \\    }
+        \\}
+    ;
+    const member_cursor = std.mem.indexOf(u8, member_source, "self.").? + "self.".len;
+    const member_items = try itemsAt(arena.allocator(), member_source, member_cursor, .trigger_character);
+    try std.testing.expect(contains(member_items, "level"));
+}
+
+test "keep for bindings inside their loop body" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source =
+        \\func build(values:int[]) {
+        \\    for child in values {
+        \\        child
+        \\    }
+        \\}
+    ;
+    const cursor = std.mem.indexOf(u8, source, "        child").? + "        child".len;
+    const items = try itemsAt(arena.allocator(), source, cursor, .invoked);
+    try std.testing.expect(contains(items, "child"));
 }
 
 test "match visible symbols containing the typed text inside a function" {
