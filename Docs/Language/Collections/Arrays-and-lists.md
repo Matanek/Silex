@@ -45,6 +45,18 @@ Arrays and lists support `swap`, `reverse`, and `replace`. Lists also support
 `append`, `prepend`, `insert`, `take`, `take_first`, `take_last`, and `clear`.
 Every mutating operation requires a `var` receiver.
 
+Fields of stored structures can be changed directly through an index. The
+mutation rebuilds the value path inside the collection while preserving the
+collection's value semantics:
+
+```sx
+vertices[index].position = vertices[index].position.add(offset)
+vertices[index].color.a = 0.5
+```
+
+Every traversed field must be mutable, and the collection must be reachable
+through a mutable binding or mutable reference.
+
 ## Copy a slice
 
 ```sx

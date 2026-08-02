@@ -44,6 +44,23 @@ test "construct and transport associated enum variants" {
     try std.testing.expect(std.mem.indexOf(u8, text, "enum.init @Other.waiting()") != null);
 }
 
+test "use the first payload-free enum variant as an intrinsic field value" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\enum Mode { none; configured(int) }
+        \\struct State {
+        \\    var mode:Mode
+        \\    init(value:Mode) { self.mode = value }
+        \\}
+        \\func main() { let state = State(Mode.configured(7)); print(state.mode == Mode.configured(7)) }
+    );
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("true\n", result.stdout);
+}
+
 test "diagnose invalid associated enum construction" {
     try expectCompileError(
         "enum Choice { empty; value(int) } func main() { Choice.empty(1) }",

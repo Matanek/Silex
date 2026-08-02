@@ -534,6 +534,7 @@ pub const Parser = struct {
     fn assignmentTarget(self: *Parser, expression: *Ast.Expression) ParseError!Ast.AssignmentTarget {
         var fields: std.ArrayList(Ast.AssignmentTarget.Field) = .empty;
         var indices: std.ArrayList(Ast.AssignmentTarget.Index) = .empty;
+        var indexed_fields: []const Ast.AssignmentTarget.Field = &.{};
         var current = expression;
         while (true) switch (current.value) {
             .identifier => |name| {
@@ -544,6 +545,7 @@ pub const Parser = struct {
                     .name = name,
                     .fields = try fields.toOwnedSlice(self.allocator),
                     .indices = try indices.toOwnedSlice(self.allocator),
+                    .indexed_fields = indexed_fields,
                 };
             },
             .generic_reference => |reference| {
@@ -555,6 +557,7 @@ pub const Parser = struct {
                     .type_arguments = reference.type_arguments,
                     .fields = try fields.toOwnedSlice(self.allocator),
                     .indices = try indices.toOwnedSlice(self.allocator),
+                    .indexed_fields = indexed_fields,
                 };
             },
             .field_access => |access| {
@@ -565,7 +568,11 @@ pub const Parser = struct {
                 current = access.base;
             },
             .index_access => |access| {
-                if (fields.items.len != 0) return self.failAt(access.bracket_position, "field assignment after collection indexing is not supported yet");
+                if (fields.items.len != 0) {
+                    if (indexed_fields.len != 0) return self.failAt(access.bracket_position, "assignment paths cannot alternate collection and field access more than once");
+                    std.mem.reverse(Ast.AssignmentTarget.Field, fields.items);
+                    indexed_fields = try fields.toOwnedSlice(self.allocator);
+                }
                 try indices.append(self.allocator, .{ .position = access.bracket_position, .value = access.index });
                 current = access.base;
             },
@@ -1214,6 +1221,23 @@ test "parse simple and nested field assignment targets" {
     try std.testing.expectEqualStrings("position", assignment.target.fields[0].name);
     try std.testing.expectEqualStrings("x", assignment.target.fields[1].name);
     try std.testing.expectEqual(Ast.AssignmentOperator.add, assignment.operator);
+}
+
+test "parse field assignment after collection indexing" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(),
+        \\func main() {
+        \\    var vertices:int[] = []
+        \\    vertices[0].position.x = 2
+        \\}
+    );
+    const assignment = (try parser.parse()).functions[0].statements[1].assignment_statement;
+    try std.testing.expectEqualStrings("vertices", assignment.target.name);
+    try std.testing.expectEqual(@as(usize, 1), assignment.target.indices.len);
+    try std.testing.expectEqual(@as(usize, 2), assignment.target.indexed_fields.len);
+    try std.testing.expectEqualStrings("position", assignment.target.indexed_fields[0].name);
+    try std.testing.expectEqualStrings("x", assignment.target.indexed_fields[1].name);
 }
 
 test "parse while loops and their control statements" {

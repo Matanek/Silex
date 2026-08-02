@@ -113,3 +113,15 @@ public use Geometry.Operations.distance as measure
 A public reexport uses the declaration's current name by default. Add `as`
 only when the public API intentionally chooses another name. A reexport exposes
 one declaration, not an entire module tree.
+
+When a module contains a public declaration with the same name as its final
+segment, the repeated declaration name may be omitted:
+
+```sx
+// Rendering.Renderer.sx declares `public class Renderer`.
+public use Rendering.Renderer
+```
+
+This is equivalent to `public use Rendering.Renderer.Renderer`. It reexports
+only the homonymous `Renderer` declaration, not the `Rendering.Renderer` module
+tree.

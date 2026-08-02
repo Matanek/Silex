@@ -114,6 +114,33 @@ test "compose public reexports through a package facade" {
     try std.testing.expectEqualStrings("42\n", result.stdout);
 }
 
+test "reexport the homonymous principal declaration of a module" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "use Rendering\nfunc main() { let renderer = Rendering.Renderer(42); print(renderer.value) }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Rendering.sx",
+        .data = "public use Rendering.Renderer",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Rendering.Renderer.sx",
+        .data = "public struct Renderer { let value:int; public init(value:int) { self.value = value } }",
+    });
+
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(input);
+    const result = try @import("Interpreter.zig").runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("42\n", result.stdout);
+}
+
 test "prefer a facade reexport over a homonymous principal type static call" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -177,7 +204,10 @@ test "diagnose invalid public reexports and cycles" {
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Facade.sx", .data = "public use Api" });
     compiler = Project.Compiler.init(allocator, std.testing.io);
     try std.testing.expectError(error.InvalidSource, compiler.compile(input));
-    try std.testing.expectEqualStrings("public use can only reexport a declaration", compiler.diagnostic.?.message);
+    try std.testing.expectEqualStrings(
+        "public use cannot expose inaccessible declaration 'Api'",
+        compiler.diagnostic.?.message,
+    );
 
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Facade.sx", .data = "public use Api.value" });
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Api.sx", .data = "public use Facade.value" });

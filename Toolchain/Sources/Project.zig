@@ -91,11 +91,16 @@ pub const Compiler = struct {
         global_packages_root: ?[]const u8,
         cache_modules: bool,
     ) Compiler {
+        // The serialized module AST currently loses extension activation
+        // context across package facades. Keep complete IR and native caches
+        // enabled at the command layer, but parse modules until that format
+        // carries the full public-use contract.
+        _ = cache_modules;
         return .{
             .allocator = allocator,
             .io = io,
             .global_packages_root = global_packages_root,
-            .cache_modules = cache_modules,
+            .cache_modules = false,
             .target = TargetModule.Target.host() orelse .macos_arm64,
         };
     }
@@ -246,7 +251,7 @@ pub const Compiler = struct {
                 .alias = use.alias orelse lastSegment(use.path),
                 .path = use.path,
                 .module = module,
-                .declaration = null,
+                .declaration = if (use.is_public) lastSegment(use.path) else null,
                 .is_public = use.is_public,
                 .position = use.position,
             };

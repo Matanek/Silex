@@ -1019,6 +1019,13 @@ pub const Analyzer = struct {
 
     pub fn emitIntrinsic(self: *Analyzer, builder: *FunctionBuilder, type_value: Types.Type, position: Source.Position) AnalyzeError!TypedValue {
         if (try Optionals.intrinsic(self, builder, type_value)) |value| return value;
+        if (Enums.findByType(self, type_value)) |enum_index| {
+            const enumeration = self.program.enums[enum_index];
+            for (enumeration.variants) |variant| if (variant.associated_types.len == 0) {
+                return Enums.analyzeValue(self, builder, variant.name, position, enum_index);
+            };
+            return self.fail(position, "an enum without a payload-free variant has no intrinsic value");
+        }
         if (type_value.functionIndex() != null) {
             const result = try self.newValue(builder, type_value);
             try self.emit(builder, .{ .constant_int = .{ .result = result, .bits = 0 } });
