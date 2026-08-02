@@ -181,7 +181,7 @@ test "load qualified package modules without use through principal module files"
         .data = "public func answer() int { return 100 }",
     });
     try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "Math/Module/Geometry/@module.sx",
+        .sub_path = "Math/Module/Geometry/@Module.sx",
         .data = "public func bump() int { return 1 }",
     });
     try temporary.dir.writeFile(std.testing.io, .{
