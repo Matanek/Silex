@@ -146,10 +146,11 @@ pub fn itemsAtForTarget(
         result[index].insertText = try Completion.insertTextForAt(allocator, entry.item, source, cursor);
         result[index].insertTextFormat = Completion.insertTextFormatForAt(entry.item, source, cursor);
     }
+    Completion.disambiguateCallableLabels(result);
     return result;
 }
 
-pub fn hasContextualReferenceForTarget(
+pub fn hasProjectReferenceForTarget(
     allocator: Allocator,
     io: Io,
     global_packages_root: ?[]const u8,
@@ -158,34 +159,43 @@ pub fn hasContextualReferenceForTarget(
     document_uri: []const u8,
     source: []const u8,
 ) !bool {
+    if (root_uri == null) return false;
     const program = try parseCurrent(allocator, source) orelse return false;
-    const references_platform = hasQualifiedIdentifier(source, "Platform");
-    const references_target = hasQualifiedIdentifier(source, "Target");
-    if (!references_platform and !references_target) return false;
     const document_path = try pathFromUri(allocator, document_uri);
     const root_hint = if (root_uri) |uri| try pathFromUri(allocator, uri) else null;
     const root = try projectRoot(allocator, io, document_path, root_hint);
     const project = try indexProject(allocator, io, global_packages_root, selected_target, root, document_path);
-    for ([_][]const u8{ "Platform", "Target" }) |qualifier| {
-        if (std.mem.eql(u8, qualifier, "Platform") and !references_platform) continue;
-        if (std.mem.eql(u8, qualifier, "Target") and !references_target) continue;
-        if (hasLocalNominal(program, qualifier)) continue;
-        if (contextualProvider(project, qualifier) == null) continue;
-        return true;
-    }
-    return false;
-}
-
-fn hasQualifiedIdentifier(source: []const u8, qualifier: []const u8) bool {
     var lexer = LexerModule.Lexer.init(source);
     while (true) {
         const token = lexer.next() catch return false;
         if (token.tag == .end) return false;
-        if (token.tag != .identifier or !std.mem.eql(u8, token.lexeme, qualifier)) continue;
+        if (token.tag != .identifier) continue;
         const separator = lexer.next() catch return false;
-        if (separator.tag == .dot) return true;
-        if (separator.tag == .end) return false;
+        if (separator.tag != .dot) {
+            const incomplete_expression = switch (separator.tag) {
+                .end, .right_brace, .right_parenthesis, .comma, .semicolon => true,
+                else => false,
+            };
+            if (incomplete_expression and try accessibleRootMatches(allocator, io, project, token.lexeme)) return true;
+            continue;
+        }
+        if (hasLocalNominal(program, token.lexeme)) continue;
+        if (contextualProvider(project, token.lexeme) != null) return true;
+        if ((findProvider(project.index, token.lexeme) != null or project.index.isNamespace(token.lexeme)) and
+            try modulePathVisible(allocator, io, &.{}, project, token.lexeme)) return true;
     }
+}
+
+fn accessibleRootMatches(allocator: Allocator, io: Io, project: IndexedProject, prefix: []const u8) !bool {
+    if (prefix.len == 0) return false;
+    for (project.index.providers) |provider| {
+        if (!project.graph.canAccess(project.current_owner, provider.owner, provider.name)) continue;
+        const separator = std.mem.indexOfScalar(u8, provider.name, '.') orelse provider.name.len;
+        const root = provider.name[0..separator];
+        if (!std.mem.startsWith(u8, root, prefix)) continue;
+        if (try modulePathVisible(allocator, io, &.{}, project, root)) return true;
+    }
+    return false;
 }
 
 pub fn scopeItemsAt(
@@ -234,7 +244,10 @@ pub fn scopeItemsAtForTarget(
         !hasLocalNominal(program, "Platform") and findUseByAlias(program, "Platform") == null;
     const wants_target = !type_only and matchesPrefix("Target", prefix) and
         !hasLocalNominal(program, "Target") and findUseByAlias(program, "Target") == null;
-    if (program.uses.len == 0 and !wants_platform and !wants_target and !type_only and !return_expression) {
+    const wants_direct_path = prefix.len != 0;
+    if (program.uses.len == 0 and !wants_platform and !wants_target and !type_only and !return_expression and
+        !wants_direct_path)
+    {
         return allocator.alloc(Types.CompletionItem, 0);
     }
     const document_path = try pathFromUri(allocator, document_uri);
@@ -289,6 +302,7 @@ pub fn scopeItemsAtForTarget(
                 result[index].filterText = entry.item.label;
                 result[index].insertText = entry.item.label;
             }
+            Completion.disambiguateCallableLabels(result);
             return result;
         }
     }
@@ -323,6 +337,16 @@ pub fn scopeItemsAtForTarget(
         project,
         .{ .qualifier = "", .prefix = prefix },
         null,
+        cursor,
+        &ranked,
+    );
+    if (wants_direct_path and !type_only and !return_expression) try appendPathItems(
+        allocator,
+        io,
+        documents,
+        project,
+        .{ .qualifier = "", .prefix = prefix },
+        source,
         cursor,
         &ranked,
     );
@@ -436,6 +460,7 @@ pub fn scopeItemsAtForTarget(
         result[index].insertText = try Completion.insertTextForAt(allocator, entry.item, source, cursor);
         result[index].insertTextFormat = Completion.insertTextFormatForAt(entry.item, source, cursor);
     }
+    Completion.disambiguateCallableLabels(result);
     return result;
 }
 
@@ -1713,6 +1738,11 @@ fn appendRanked(
 ) !void {
     for (ranked.items, 0..) |existing, index| {
         if (!std.mem.eql(u8, existing.item.label, item.label)) continue;
+        if (existing.item.kind == CompletionKind.module and item.kind != CompletionKind.module) {
+            ranked.items[index] = .{ .item = item, .priority = priority };
+            return;
+        }
+        if (existing.item.kind != CompletionKind.module and item.kind == CompletionKind.module) return;
         if (overloaded and existing.item.kind == item.kind and !std.mem.eql(u8, existing.item.detail, item.detail)) continue;
         if (priority < existing.priority) ranked.items[index] = .{ .item = item, .priority = priority };
         return;
@@ -2637,6 +2667,7 @@ test "complete a module facade together with its child namespace" {
     defer temporary.cleanup();
 
     try temporary.dir.createDirPath(std.testing.io, "STD/Module/Math");
+    try temporary.dir.createDirPath(std.testing.io, "STD/Platform/MacOS/Module");
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Package.json",
         .data = "{\"dependencies\":{\"STD\":\"=0.1.0\"}}",
@@ -2661,6 +2692,19 @@ test "complete a module facade together with its child namespace" {
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "STD/Module/Math/Vec3.sx",
         .data = "public struct Vec3 { var value:int }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "STD/Module/Randomizer.sx",
+        .data =
+        \\public class Randomizer {
+        \\    public init() {}
+        \\    public init(seed:int) {}
+        \\}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "STD/Platform/MacOS/Module/Randomizer.sx",
+        .data = "func system_seed() int { return 1 }",
     });
 
     const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
@@ -2702,10 +2746,26 @@ test "complete a module facade together with its child namespace" {
     )).?;
     try std.testing.expect(hasLabel(root_items, "root"));
     try std.testing.expect(hasLabel(root_items, "Math"));
+    try std.testing.expect(hasLabel(root_items, "Randomizer()"));
+    try std.testing.expect(hasLabel(root_items, "Randomizer(seed:int)"));
+
+    const package_prefix_source = "func main() { var value = S }";
+    const package_prefix_cursor = std.mem.indexOf(u8, package_prefix_source, "S }").? + 1;
+    const package_prefix_items = try scopeItemsAt(
+        allocator,
+        std.testing.io,
+        null,
+        root_uri,
+        uri,
+        &.{},
+        package_prefix_source,
+        package_prefix_cursor,
+    );
+    try std.testing.expect(hasLabel(package_prefix_items, "STD"));
 }
 
 fn hasLabel(items: []const Types.CompletionItem, label: []const u8) bool {
-    for (items) |item| if (std.mem.eql(u8, item.label, label)) return true;
+    for (items) |item| if (completionNameMatches(item, label)) return true;
     return false;
 }
 
@@ -2831,7 +2891,7 @@ test "workspace indexes the selected package platform root" {
 
     const combined_path = try std.fs.path.join(allocator, &.{ root, "Bridge", "Module", "Combined.sx" });
     const combined_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{combined_path});
-    try std.testing.expect(try hasContextualReferenceForTarget(
+    try std.testing.expect(try hasProjectReferenceForTarget(
         allocator,
         std.testing.io,
         null,
@@ -2840,7 +2900,7 @@ test "workspace indexes the selected package platform root" {
         combined_uri,
         "func portable() { Platform.macos_fragment() }",
     ));
-    try std.testing.expect(!try hasContextualReferenceForTarget(
+    try std.testing.expect(!try hasProjectReferenceForTarget(
         allocator,
         std.testing.io,
         null,
@@ -2848,6 +2908,24 @@ test "workspace indexes the selected package platform root" {
         root_uri,
         combined_uri,
         "struct Platform {}\nfunc portable() { Platform.missing() }",
+    ));
+    try std.testing.expect(try hasProjectReferenceForTarget(
+        allocator,
+        std.testing.io,
+        null,
+        .macos_arm64,
+        root_uri,
+        uri,
+        "func main() { Bridge.Combined.portable() }",
+    ));
+    try std.testing.expect(try hasProjectReferenceForTarget(
+        allocator,
+        std.testing.io,
+        null,
+        .macos_arm64,
+        root_uri,
+        uri,
+        "func main() { var value = B }",
     ));
     const contextual_scope_source = "func portable() {\n    Pla\n}";
     const contextual_scope_cursor = std.mem.indexOf(u8, contextual_scope_source, "\n}").?;
@@ -2901,13 +2979,41 @@ test "workspace indexes the selected package platform root" {
 
 fn labelCount(items: []const Types.CompletionItem, label: []const u8) usize {
     var count: usize = 0;
-    for (items) |item| if (std.mem.eql(u8, item.label, label)) {
+    for (items) |item| if (completionNameMatches(item, label)) {
         count += 1;
     };
     return count;
 }
 
 fn labelIndex(items: []const Types.CompletionItem, label: []const u8) ?usize {
-    for (items, 0..) |item, index| if (std.mem.eql(u8, item.label, label)) return index;
+    for (items, 0..) |item, index| if (completionNameMatches(item, label)) return index;
     return null;
+}
+
+fn completionNameMatches(item: Types.CompletionItem, label: []const u8) bool {
+    return std.mem.eql(u8, item.label, label) or
+        (item.filterText != null and std.mem.eql(u8, item.filterText.?, label));
+}
+
+test "prefer every callable overload over a homonymous module" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const module: Types.CompletionItem = .{ .label = "Randomizer", .kind = CompletionKind.module, .detail = "Silex module" };
+    const empty: Types.CompletionItem = .{ .label = "Randomizer", .kind = CompletionKind.class, .detail = "Randomizer() Randomizer" };
+    const seeded: Types.CompletionItem = .{ .label = "Randomizer", .kind = CompletionKind.class, .detail = "Randomizer(seed:int) Randomizer" };
+
+    var module_first: std.ArrayList(RankedItem) = .empty;
+    try appendRanked(allocator, &module_first, module, 0, false);
+    try appendRanked(allocator, &module_first, empty, 5, true);
+    try appendRanked(allocator, &module_first, seeded, 5, true);
+    try std.testing.expectEqual(@as(usize, 2), module_first.items.len);
+    for (module_first.items) |item| try std.testing.expect(item.item.kind == CompletionKind.class);
+
+    var module_last: std.ArrayList(RankedItem) = .empty;
+    try appendRanked(allocator, &module_last, empty, 5, true);
+    try appendRanked(allocator, &module_last, seeded, 5, true);
+    try appendRanked(allocator, &module_last, module, 0, false);
+    try std.testing.expectEqual(@as(usize, 2), module_last.items.len);
+    for (module_last.items) |item| try std.testing.expect(item.item.kind == CompletionKind.class);
 }

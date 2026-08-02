@@ -210,7 +210,8 @@ pub fn expectEqualItems(
 
 fn itemWithLabel(items: []const Types.CompletionItem, label: []const u8) ?Types.CompletionItem {
     for (items) |item| {
-        if (std.mem.eql(u8, item.label, label)) return item;
+        if (std.mem.eql(u8, item.label, label) or
+            (item.filterText != null and std.mem.eql(u8, item.filterText.?, label))) return item;
     }
     return null;
 }

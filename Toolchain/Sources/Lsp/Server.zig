@@ -160,7 +160,8 @@ pub const Server = struct {
                     .items = &[_]Types.CompletionItem{},
                 });
             }
-            const needs_workspace = needsWorkspaceCompletion(allocator, source, cursor);
+            const needs_workspace = self.workspace_root_uri != null and
+                needsWorkspaceCompletion(allocator, source, cursor);
             if (needs_workspace) {
                 const project_items = Workspace.itemsAtForTarget(
                     allocator,
@@ -210,7 +211,7 @@ pub const Server = struct {
 
     fn diagnosticsNotification(self: *Server, allocator: Allocator, uri: []const u8) ![]const u8 {
         const source = self.documentText(uri).?;
-        const has_project_context = Workspace.hasContextualReferenceForTarget(
+        const has_project_context = Workspace.hasProjectReferenceForTarget(
             allocator,
             self.io,
             self.global_packages_root,
@@ -330,6 +331,7 @@ fn mergeCompletionItems(
         }
         if (!duplicate) try result.append(allocator, candidate);
     }
+    Completion.disambiguateCallableLabels(result.items);
     std.mem.sort(Types.CompletionItem, result.items, {}, completionItemLessThan);
     return result.toOwnedSlice(allocator);
 }
@@ -353,14 +355,12 @@ fn needsWorkspaceCompletion(allocator: Allocator, source: []const u8, cursor: us
     }
     if (Completion.isTypePositionAt(allocator, source, prefix_start) catch false) return true;
     if (prefix_start != 0 and source[prefix_start - 1] == '.' and
+        (prefix_start < 2 or source[prefix_start - 2] != '.')) return true;
+    if (prefix_start != 0 and source[prefix_start - 1] == '.' and
         (Completion.isQualifiedTypePositionAt(allocator, source, prefix_start) catch false)) return true;
     if (Completion.isReturnExpressionAt(allocator, source, cursor) catch false) return true;
     const prefix = source[prefix_start..cursor];
-    if (prefix.len != 0 and
-        (std.mem.startsWith(u8, "Platform", prefix) or std.mem.startsWith(u8, "Target", prefix)))
-    {
-        return true;
-    }
+    if (prefix.len != 0 and std.ascii.isUpper(prefix[0])) return true;
     const before = source[0..prefix_start];
     return std.mem.endsWith(u8, before, "Platform.") or std.mem.endsWith(u8, before, "Target.");
 }
@@ -372,6 +372,11 @@ test "contextual qualifiers request workspace completion without an import" {
     try std.testing.expect(needsWorkspaceCompletion(allocator, "func seed() { Pla }", 17));
     try std.testing.expect(needsWorkspaceCompletion(allocator, "func seed() { Platform. }", 23));
     try std.testing.expect(needsWorkspaceCompletion(allocator, "func seed() { Target. }", 21));
+    try std.testing.expect(needsWorkspaceCompletion(allocator, "func main() { STD. }", 18));
+    try std.testing.expect(needsWorkspaceCompletion(allocator, "func main() { STD.Math. }", 23));
+    const package_prefix_source = "func main() { var value = S }";
+    const package_prefix_cursor = std.mem.indexOf(u8, package_prefix_source, "S }").? + 1;
+    try std.testing.expect(needsWorkspaceCompletion(allocator, package_prefix_source, package_prefix_cursor));
     try std.testing.expect(needsWorkspaceCompletion(allocator, "func test() Res", 15));
     const return_source =
         \\func test() Result<int, str> {

@@ -97,3 +97,15 @@ test "do not diagnose a contextual platform qualifier as a local variable" {
     );
     try std.testing.expectEqual(@as(usize, 0), diagnostics.len);
 }
+
+test "do not diagnose a directly qualified package as a local variable" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const diagnostics = try analyze(
+        arena.allocator(),
+        "func main() { let value = STD.Math.Vec3() }",
+        .utf16,
+        true,
+    );
+    try std.testing.expectEqual(@as(usize, 0), diagnostics.len);
+}
