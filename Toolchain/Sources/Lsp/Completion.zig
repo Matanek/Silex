@@ -610,6 +610,10 @@ fn appendMembers(
         return;
     }
     const structure = findStructure(program, type_name) orelse return;
+    if (structure.collection) |collection| {
+        try appendCollectionMembers(allocator, candidates, source, cursor, context, collection);
+        return;
+    }
     if (structure.is_tuple and !structure.tuple_named) return;
     if (std.mem.eql(u8, std.mem.trim(u8, receiver, " \t\r\n"), structure.name)) {
         for (program.structures) |nested| {
@@ -650,6 +654,32 @@ fn appendMembers(
             .detail = try functionSignature(allocator, source, program, method),
         }, 0, true);
     }
+}
+
+fn appendCollectionMembers(
+    allocator: Allocator,
+    candidates: *std.ArrayList(Candidate),
+    source: []const u8,
+    cursor: usize,
+    context: Context,
+    collection: Ast.Collection,
+) !void {
+    try appendCandidate(allocator, candidates, context, .{
+        .label = "count",
+        .kind = CompletionKind.method,
+        .detail = "count() int",
+    }, 0, true);
+    try appendCandidate(allocator, candidates, context, .{
+        .label = "is_empty",
+        .kind = CompletionKind.method,
+        .detail = "is_empty() bool",
+    }, 0, true);
+    const line_start = if (std.mem.lastIndexOfScalar(u8, source[0..cursor], '\n')) |newline| newline + 1 else 0;
+    if (!collection.view and isForSourceLine(source[line_start..cursor])) try appendCandidate(allocator, candidates, context, .{
+        .label = "indexed",
+        .kind = CompletionKind.method,
+        .detail = "indexed() indexed collection traversal",
+    }, 0, true);
 }
 
 fn appendExpressionSymbols(
@@ -980,7 +1010,7 @@ fn visibleLocals(allocator: Allocator, source: []const u8, start: usize, cursor:
                 if (!completed and lineAtOffset(source, cursor) <= declaration_line) continue;
                 try locals.append(allocator, .{
                     .name = name,
-                    .type_name = inferDeclarationType(tokens[index..end]),
+                    .type_name = inferDeclarationType(source, tokens[index..end]),
                     .depth = depth,
                 });
             },
@@ -1004,9 +1034,17 @@ fn visibleLocals(allocator: Allocator, source: []const u8, start: usize, cursor:
     return locals.toOwnedSlice(allocator);
 }
 
-fn inferDeclarationType(tokens: []const Token) ?[]const u8 {
+fn inferDeclarationType(source: []const u8, tokens: []const Token) ?[]const u8 {
     for (tokens, 0..) |token, index| {
-        if (token.tag == .colon and index + 1 < tokens.len) return tokens[index + 1].lexeme;
+        if (token.tag == .colon and index + 1 < tokens.len) {
+            var end = tokens.len;
+            for (tokens[index + 1 ..], index + 1..) |candidate, candidate_index| if (candidate.tag == .equal) {
+                end = candidate_index;
+                break;
+            };
+            if (end == index + 1) return null;
+            return std.mem.trim(u8, source[tokens[index + 1].start..tokens[end - 1].end], " \t\r\n");
+        }
         if (token.tag != .equal or index + 1 >= tokens.len) continue;
         const value = tokens[index + 1];
         return switch (value.tag) {
@@ -1859,6 +1897,54 @@ test "complete an instance with only its own members" {
     try std.testing.expect(!contains(items, "if"));
     try std.testing.expect(!contains(items, "float"));
     try std.testing.expect(!contains(items, "ignore"));
+}
+
+test "complete indexed collection traversal while writing a for source" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source =
+        \\func main() {
+        \\    var list:str[] = ["foo", "bar"]
+        \\    for index, value in list.
+        \\}
+    ;
+    const cursor = std.mem.indexOf(u8, source, "list.\n").? + "list.".len;
+    const items = try itemsAt(arena.allocator(), source, cursor, .trigger_character);
+    try std.testing.expect(contains(items, "count"));
+    try std.testing.expect(contains(items, "is_empty"));
+    const indexed = items[indexOf(items, "indexed").?];
+    try std.testing.expectEqual(CompletionKind.method, indexed.kind);
+    try std.testing.expectEqualStrings("indexed() indexed collection traversal", indexed.detail);
+    try std.testing.expectEqualStrings("indexed()", indexed.insertText.?);
+    try std.testing.expect(indexed.insertTextFormat == null);
+
+    const fixed_source =
+        \\func main() {
+        \\    let values:int[2] = [1, 2]
+        \\    for index, value in values.
+        \\}
+    ;
+    const fixed_cursor = std.mem.indexOf(u8, fixed_source, "values.\n").? + "values.".len;
+    try std.testing.expect(contains(
+        try itemsAt(arena.allocator(), fixed_source, fixed_cursor, .trigger_character),
+        "indexed",
+    ));
+}
+
+test "offer indexed only in the collection traversal context" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source =
+        \\func main() {
+        \\    let values:int[] = [1, 2]
+        \\    print(values.)
+        \\}
+    ;
+    const cursor = std.mem.indexOf(u8, source, "values.").? + "values.".len;
+    const items = try itemsAt(arena.allocator(), source, cursor, .trigger_character);
+    try std.testing.expect(contains(items, "count"));
+    try std.testing.expect(contains(items, "is_empty"));
+    try std.testing.expect(!contains(items, "indexed"));
 }
 
 test "complete members of the original receiver in a cascade" {

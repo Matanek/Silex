@@ -60,6 +60,9 @@ while condition {
 for value in collection {
 }
 
+for index, value in collection.indexed() {
+}
+
 for value in start...end {
 }
 

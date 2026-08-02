@@ -6,7 +6,7 @@ pub fn parseFor(self: anytype) !Ast.Statement {
     try self.advance();
     const parenthesized = self.current.tag == .left_parenthesis and !try tupleBindingFollows(self);
     if (parenthesized) try self.advance();
-    const mode: Ast.ForStatement.Mode = switch (self.current.tag) {
+    var mode: Ast.ForStatement.Mode = switch (self.current.tag) {
         .keyword_let => .copy,
         .keyword_var => .mutable,
         else => .read,
@@ -37,9 +37,27 @@ pub fn parseFor(self: anytype) !Ast.Statement {
         if (self.current.tag != .identifier) return self.fail("expected for binding name");
         try bindings.append(self.allocator, .{ .position = self.current.position, .name = self.current.lexeme });
         try self.advance();
+        if (self.current.tag == .comma) {
+            if (mode != .read) return self.failAt(bindings.items[0].position, "indexed for binding mode belongs before the element");
+            try self.advance();
+            mode = switch (self.current.tag) {
+                .keyword_let => .copy,
+                .keyword_var => .mutable,
+                else => .read,
+            };
+            if (mode != .read) try self.advance();
+            if (self.current.tag != .identifier) return self.fail("expected indexed for element binding name");
+            if (std.mem.eql(u8, bindings.items[0].name, self.current.lexeme)) {
+                return self.failAt(self.current.position, "for binding is duplicated");
+            }
+            try bindings.append(self.allocator, .{ .position = self.current.position, .name = self.current.lexeme });
+            try self.advance();
+        }
     }
-    const name = if (destructuring) "" else bindings.items[0].name;
-    const name_position = bindings.items[0].position;
+    const indexed = !destructuring and bindings.items.len == 2;
+    const element_binding = if (indexed) bindings.items[1] else bindings.items[0];
+    const name = if (destructuring) "" else element_binding.name;
+    const name_position = element_binding.position;
     try self.expect(.keyword_in, "expected 'in' after for binding");
     const source: Ast.ForStatement.SourceValue = if (self.current.tag == .keyword_range) range: {
         try self.advance();
@@ -62,6 +80,8 @@ pub fn parseFor(self: anytype) !Ast.Statement {
         .position = position,
         .name_position = name_position,
         .name = name,
+        .index_position = if (indexed) bindings.items[0].position else null,
+        .index_name = if (indexed) bindings.items[0].name else null,
         .bindings = if (destructuring) try bindings.toOwnedSlice(self.allocator) else &.{},
         .mode = mode,
         .source = source,

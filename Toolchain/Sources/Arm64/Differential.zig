@@ -121,6 +121,28 @@ test "native ARM64 agrees with the reference interpreter on fundamental values" 
     try compare(allocator, compilation.ir, machine, "exactRemainder", &.{});
 }
 
+test "native ARM64 agrees with indexed array and list iteration" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\func indexed_total() int {
+        \\    let fixed:int[3] = [1, 2, 3]
+        \\    let values = [4, 5]
+        \\    var total = 0
+        \\    for index, item in fixed.indexed() { total += index * 10 + item }
+        \\    for index, item in values.indexed() { total += index * 10 + item }
+        \\    return total
+        \\}
+        \\func main() {}
+    );
+    const machine = try Lower.lower(allocator, compilation.ir);
+    try compare(allocator, compilation.ir, machine, "indexed_total", &.{});
+}
+
 test "native ARM64 agrees with checked arithmetic failures" {
     if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
