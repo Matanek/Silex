@@ -503,6 +503,16 @@ fn queryAt(
                 .type_only = isQualifiedTypePrefix(source, prefix_start),
             } };
         }
+        if ((findProvider(project.index, receiver) != null or project.index.isNamespace(receiver)) and
+            try modulePathVisible(allocator, io, documents, project, receiver))
+        {
+            return .{ .qualifier = .{
+                .path = receiver,
+                .prefix = prefix,
+                .cursor = cursor,
+                .type_only = isQualifiedTypePrefix(source, prefix_start),
+            } };
+        }
         if (Completion.qualifiedCall(receiver)) |call| {
             if (try importedQualifiedCallReturnTypePath(
                 allocator,
@@ -2602,7 +2612,11 @@ test "complete a module facade together with its child namespace" {
     });
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = "func main() {}" });
     try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "STD/Module/Math.sx",
+        .sub_path = "STD/Module/@module.sx",
+        .data = "public func root() int { return 1 }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "STD/Module/Math/@module.sx",
         .data = "public func answer() int { return 42 }\npublic func Vec3() int { return 0 }",
     });
     try temporary.dir.writeFile(std.testing.io, .{
@@ -2618,8 +2632,8 @@ test "complete a module facade together with its child namespace" {
     const main_path = try std.fs.path.join(allocator, &.{ root, "Main.sx" });
     const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
     const uri = try std.fmt.allocPrint(allocator, "file://{s}", .{main_path});
-    const source = "use STD.Math\nfunc main() { Math. }";
-    const cursor = std.mem.indexOf(u8, source, "Math. }").? + "Math.".len;
+    const source = "func main() { STD.Math. }";
+    const cursor = std.mem.indexOf(u8, source, "STD.Math. }").? + "STD.Math.".len;
     const items = (try itemsAt(
         allocator,
         std.testing.io,
@@ -2638,6 +2652,21 @@ test "complete a module facade together with its child namespace" {
     try std.testing.expectEqual(@as(usize, 1), labelCount(items, "Vec3"));
     const vec3 = items[labelIndex(items, "Vec3").?];
     try std.testing.expectEqual(@as(u8, 3), vec3.kind);
+
+    const root_source = "func main() { STD. }";
+    const root_cursor = std.mem.indexOf(u8, root_source, "STD. }").? + "STD.".len;
+    const root_items = (try itemsAt(
+        allocator,
+        std.testing.io,
+        null,
+        root_uri,
+        uri,
+        &.{},
+        root_source,
+        root_cursor,
+    )).?;
+    try std.testing.expect(hasLabel(root_items, "root"));
+    try std.testing.expect(hasLabel(root_items, "Math"));
 }
 
 fn hasLabel(items: []const Types.CompletionItem, label: []const u8) bool {

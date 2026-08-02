@@ -560,6 +560,7 @@ pub const Compiler = struct {
             const message = try std.fmt.allocPrint(self.allocator, "unknown qualified path '{s}'", .{canonical});
             return self.fail(expressionPosition(module), message);
         }
+        if (self.longestModulePrefix(call_name, self.index.providers[module].owner)) |target| return target;
         return null;
     }
 

@@ -23,6 +23,8 @@ pub const Provider = struct {
     origin: Origin = .portable,
 };
 
+pub const principal_file = "@module.sx";
+
 pub const Index = struct {
     providers: []const Provider,
 
@@ -122,11 +124,16 @@ pub fn discoverOwnedExcludingAs(
             try std.fs.path.join(allocator, &.{ root_path, relative_path });
         if (insideAny(full_path, excluded_roots)) continue;
 
-        const relative_name = try moduleName(allocator, relative_path);
+        const relative_name = try relativeModuleName(allocator, relative_path);
         const module_name = if (prefix) |name|
-            try std.fmt.allocPrint(allocator, "{s}.{s}", .{ name, relative_name })
+            if (relative_name.len == 0)
+                try allocator.dupe(u8, name)
+            else
+                try std.fmt.allocPrint(allocator, "{s}.{s}", .{ name, relative_name })
+        else if (relative_name.len != 0)
+            relative_name
         else
-            relative_name;
+            return error.InvalidModulePath;
         try providers.append(allocator, .{
             .name = module_name,
             .path = full_path,
@@ -171,9 +178,18 @@ pub fn combine(allocator: Allocator, indexes: []const Index) (Allocator.Error ||
 }
 
 pub fn moduleName(allocator: Allocator, relative_path: []const u8) Error![]const u8 {
+    const name = try relativeModuleName(allocator, relative_path);
+    if (name.len == 0) return error.InvalidModulePath;
+    return name;
+}
+
+fn relativeModuleName(allocator: Allocator, relative_path: []const u8) Error![]const u8 {
     if (!std.mem.endsWith(u8, relative_path, ".sx")) return error.InvalidModulePath;
-    const stem = relative_path[0 .. relative_path.len - ".sx".len];
-    if (stem.len == 0) return error.InvalidModulePath;
+    const stem = if (std.mem.eql(u8, std.fs.path.basename(relative_path), principal_file))
+        std.fs.path.dirname(relative_path) orelse ""
+    else
+        relative_path[0 .. relative_path.len - ".sx".len];
+    if (stem.len == 0) return allocator.dupe(u8, "");
 
     const result = try allocator.dupe(u8, stem);
     for (result) |*character| {
@@ -217,7 +233,42 @@ test "derive canonical module names from nested and dotted paths" {
 
     try std.testing.expectEqualStrings("Math.Operations", try moduleName(allocator, "Math/Operations.sx"));
     try std.testing.expectEqualStrings("Math.Integer.Checked", try moduleName(allocator, "Math/Integer.Checked.sx"));
+    try std.testing.expectEqualStrings("Math.Integer", try moduleName(allocator, "Math/Integer/@module.sx"));
+    try std.testing.expectError(error.InvalidModulePath, moduleName(allocator, "@module.sx"));
     try std.testing.expectError(error.InvalidModulePath, moduleName(allocator, "Math/2D.sx"));
+}
+
+test "discover package and nested principal modules" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.createDirPath(std.testing.io, "GPU");
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "@module.sx", .data = "public func root() {}" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "GPU/@module.sx", .data = "public func device() {}" });
+    const root_path = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const index = try discoverOwned(allocator, std.testing.io, root_path, "GFX", 0);
+
+    try std.testing.expect(index.find("GFX") != null);
+    try std.testing.expect(index.find("GFX.GPU") != null);
+    try std.testing.expect(index.find("GFX.@module") == null);
+    try std.testing.expect(index.find("GFX.GPU.@module") == null);
+}
+
+test "reject flat and principal files for the same module" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.createDirPath(std.testing.io, "GPU");
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "GPU.sx", .data = "public func first() {}" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "GPU/@module.sx", .data = "public func second() {}" });
+    const root_path = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    try std.testing.expectError(error.DuplicateModule, discover(allocator, std.testing.io, root_path));
 }
 
 test "discover modules deterministically and skip infrastructure" {

@@ -22,6 +22,19 @@ use Math.Vec3 as Vector
 let position = Vector(x:2, y:10, z:5)
 ```
 
+`use` is a naming convenience, not a prerequisite for loading a module. A
+fully qualified path loads the longest accessible module prefix on demand:
+
+```sx
+let position = STD.Math.Vec3(x:2, y:10, z:5)
+let device = GFX.GPU.Device()
+```
+
+The leading package must be directly accessible from the consuming package.
+Qualified access does not bypass package dependencies, target selection or
+declaration visibility. It also introduces no local alias, so two packages may
+both contain an `ECS` module without colliding.
+
 ## Use a principal type
 
 When a public top-level type has the same name as its module's last segment,
@@ -43,6 +56,38 @@ let position:Math.Vec3 = Math.Vec3(x:2, y:10, z:5)
 ```
 
 You do not write `Math.Vec3.Vec3()`.
+
+This principal-type rule also applies to fully qualified paths. If
+`STD.Math.Vec3` contains a public `Vec3`, `STD.Math.Vec3()` constructs it
+directly.
+
+## Give a folder a principal module file
+
+An optional `@module.sx` contributes directly to the logical module represented
+by its folder. Its name is structural and never appears in source paths:
+
+```text
+GFX/Module/@module.sx          -> GFX
+GFX/Module/GPU/@module.sx      -> GFX.GPU
+GFX/Module/GPU/Device.sx       -> GFX.GPU.Device
+```
+
+The file follows ordinary declaration and visibility rules. It may define a
+module facade with explicit public reexports, private helpers and ordinary
+`use` declarations. Importing or qualifying its logical module loads it:
+
+```sx
+use GFX
+use GFX.GPU
+
+let device = GPU.Device()
+```
+
+A flat module file and a principal file cannot provide the same logical module
+inside one source root. For example, `GPU.sx` and `GPU/@module.sx` together are
+rejected as duplicate providers. Portable, platform and exact-target roots may
+still contribute their corresponding `@module.sx` fragments to one logical
+module under the existing composition rules.
 
 ## Compose package-local module fragments
 

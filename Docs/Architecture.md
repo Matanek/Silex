@@ -6,7 +6,7 @@ The shared frontend and reference path are:
 Silex source
     -> lexer
     -> parser and AST
-    -> module index and explicit use closure
+    -> module index and referenced module closure
     -> package graph and typed module interfaces
     -> semantic composition and typed lowering
     -> typed Silex IR
