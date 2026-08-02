@@ -24,6 +24,7 @@ pub const Provider = struct {
 };
 
 pub const principal_file = "@module.sx";
+pub const principal_file_capitalized = "@Module.sx";
 
 pub const Index = struct {
     providers: []const Provider,
@@ -185,7 +186,7 @@ pub fn moduleName(allocator: Allocator, relative_path: []const u8) Error![]const
 
 fn relativeModuleName(allocator: Allocator, relative_path: []const u8) Error![]const u8 {
     if (!std.mem.endsWith(u8, relative_path, ".sx")) return error.InvalidModulePath;
-    const stem = if (std.mem.eql(u8, std.fs.path.basename(relative_path), principal_file))
+    const stem = if (isPrincipalFile(std.fs.path.basename(relative_path)))
         std.fs.path.dirname(relative_path) orelse ""
     else
         relative_path[0 .. relative_path.len - ".sx".len];
@@ -197,6 +198,11 @@ fn relativeModuleName(allocator: Allocator, relative_path: []const u8) Error![]c
     }
     if (!validName(result)) return error.InvalidModulePath;
     return result;
+}
+
+fn isPrincipalFile(basename: []const u8) bool {
+    return std.mem.eql(u8, basename, principal_file) or
+        std.mem.eql(u8, basename, principal_file_capitalized);
 }
 
 pub fn validName(name: []const u8) bool {
@@ -234,8 +240,26 @@ test "derive canonical module names from nested and dotted paths" {
     try std.testing.expectEqualStrings("Math.Operations", try moduleName(allocator, "Math/Operations.sx"));
     try std.testing.expectEqualStrings("Math.Integer.Checked", try moduleName(allocator, "Math/Integer.Checked.sx"));
     try std.testing.expectEqualStrings("Math.Integer", try moduleName(allocator, "Math/Integer/@module.sx"));
+    try std.testing.expectEqualStrings("Math.Integer", try moduleName(allocator, "Math/Integer/@Module.sx"));
     try std.testing.expectError(error.InvalidModulePath, moduleName(allocator, "@module.sx"));
+    try std.testing.expectError(error.InvalidModulePath, moduleName(allocator, "@Module.sx"));
     try std.testing.expectError(error.InvalidModulePath, moduleName(allocator, "Math/2D.sx"));
+}
+
+test "discover capitalized principal module files" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.createDirPath(std.testing.io, "GPU");
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "GPU/@Module.sx", .data = "public func device() {}" });
+    const root_path = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const index = try discoverOwned(allocator, std.testing.io, root_path, "GFX", 0);
+
+    try std.testing.expect(index.find("GFX.GPU") != null);
+    try std.testing.expect(index.find("GFX.GPU.@Module") == null);
 }
 
 test "discover package and nested principal modules" {

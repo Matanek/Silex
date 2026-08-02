@@ -63,13 +63,15 @@ directly.
 
 ## Give a folder a principal module file
 
-An optional `@module.sx` contributes directly to the logical module represented
-by its folder. Its name is structural and never appears in source paths:
+An optional `@module.sx` or `@Module.sx` contributes directly to the logical
+module represented by its folder. Both spellings have the same meaning; their
+name is structural and never appears in source paths:
 
 ```text
-GFX/Module/@module.sx          -> GFX
-GFX/Module/GPU/@module.sx      -> GFX.GPU
-GFX/Module/GPU/Device.sx       -> GFX.GPU.Device
+GFX/Module/@module.sx                 -> GFX
+GFX/Module/GPU/@module.sx             -> GFX.GPU
+GFX/Module/GPU/@Module.sx             -> GFX.GPU (equivalent spelling)
+GFX/Module/GPU/Device.sx              -> GFX.GPU.Device
 ```
 
 The file follows ordinary declaration and visibility rules. It may define a
@@ -85,9 +87,11 @@ let device = GPU.Device()
 
 A flat module file and a principal file cannot provide the same logical module
 inside one source root. For example, `GPU.sx` and `GPU/@module.sx` together are
-rejected as duplicate providers. Portable, platform and exact-target roots may
-still contribute their corresponding `@module.sx` fragments to one logical
-module under the existing composition rules.
+rejected as duplicate providers. Likewise, a folder cannot contain both
+`@module.sx` and `@Module.sx`: they are two spellings of the same provider.
+Portable, platform and exact-target roots may still contribute their
+corresponding principal-module fragments to one logical module under the
+existing composition rules.
 
 ## Compose package-local module fragments
 

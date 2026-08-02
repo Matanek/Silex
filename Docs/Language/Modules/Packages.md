@@ -10,8 +10,9 @@ Math/
     Vec3.sx
 ```
 
-`Module/@module.sx` is the optional principal module of a named package. For a
-package named `Math`, it provides `Math`; a nested
+`Module/@module.sx` is the optional principal module of a named package. The
+capitalized spelling `Module/@Module.sx` is also accepted with exactly the same
+meaning. For a package named `Math`, either spelling provides `Math`; a nested
 `Module/Geometry/@module.sx` provides `Math.Geometry`.
 
 A named package may also provide modules selected for the current platform and
