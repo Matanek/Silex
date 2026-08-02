@@ -297,7 +297,31 @@ pub fn itemsAt(
         else
             null;
     }
+    disambiguateCallableLabels(result);
     return result;
+}
+
+pub fn disambiguateCallableLabels(items: []CompletionItem) void {
+    for (items) |*item| {
+        const filter = item.filterText orelse item.label;
+        const display = callableDisplayLabel(item.*, filter) orelse continue;
+        var signatures: usize = 0;
+        for (items) |other| {
+            const other_filter = other.filterText orelse other.label;
+            if (!std.mem.eql(u8, filter, other_filter)) continue;
+            if (callableDisplayLabel(other, other_filter) != null) signatures += 1;
+        }
+        if (signatures > 1) item.label = display;
+    }
+}
+
+fn callableDisplayLabel(item: CompletionItem, filter: []const u8) ?[]const u8 {
+    if (item.kind != CompletionKind.method and item.kind != CompletionKind.function and item.kind != CompletionKind.enum_member and
+        item.kind != CompletionKind.structure and item.kind != CompletionKind.class) return null;
+    if (!std.mem.startsWith(u8, item.detail, filter) or item.detail.len <= filter.len or item.detail[filter.len] != '(') return null;
+    const closing = std.mem.lastIndexOf(u8, item.detail, ") ") orelse return null;
+    if (closing < filter.len) return null;
+    return item.detail[0 .. closing + 1];
 }
 
 pub fn insertTextFor(allocator: Allocator, item: CompletionItem) ![]const u8 {
@@ -2201,13 +2225,18 @@ fn cursorAllowsCode(source: []const u8, cursor: usize) bool {
 }
 
 fn contains(items: []const CompletionItem, label: []const u8) bool {
-    for (items) |item| if (std.mem.eql(u8, item.label, label)) return true;
+    for (items) |item| if (completionNameMatches(item, label)) return true;
     return false;
 }
 
 fn indexOf(items: []const CompletionItem, label: []const u8) ?usize {
-    for (items, 0..) |item, index| if (std.mem.eql(u8, item.label, label)) return index;
+    for (items, 0..) |item, index| if (completionNameMatches(item, label)) return index;
     return null;
+}
+
+fn completionNameMatches(item: CompletionItem, label: []const u8) bool {
+    return std.mem.eql(u8, item.label, label) or
+        (item.filterText != null and std.mem.eql(u8, item.filterText.?, label));
 }
 
 test "complete remaining fields in a local structure aggregate" {
@@ -3193,11 +3222,13 @@ test "keep overload signatures and default values distinct" {
     const cursor = std.mem.indexOf(u8, source, "convert)").? + 3;
     const items = try itemsAt(arena.allocator(), source, cursor, .invoked);
     var signatures: usize = 0;
-    for (items) |item| if (std.mem.eql(u8, item.label, "convert")) {
+    for (items) |item| if (item.filterText != null and std.mem.eql(u8, item.filterText.?, "convert")) {
         signatures += 1;
         try std.testing.expect(item.insertText != null);
     };
     try std.testing.expectEqual(@as(usize, 2), signatures);
+    try std.testing.expect(contains(items, "convert(value:int, radix:int = 10)"));
+    try std.testing.expect(contains(items, "convert(value:str)"));
     try std.testing.expect(std.mem.indexOf(u8, items[indexOf(items, "convert").?].detail, "radix:int = 10") != null);
 }
 

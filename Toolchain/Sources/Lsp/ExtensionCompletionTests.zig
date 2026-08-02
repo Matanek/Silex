@@ -762,11 +762,16 @@ test "complete an imported module in a function return type" {
 }
 
 fn hasLabel(items: []const Types.CompletionItem, label: []const u8) bool {
-    for (items) |item| if (std.mem.eql(u8, item.label, label)) return true;
+    for (items) |item| if (completionNameMatches(item, label)) return true;
     return false;
 }
 
 fn itemWithLabel(items: []const Types.CompletionItem, label: []const u8) ?Types.CompletionItem {
-    for (items) |item| if (std.mem.eql(u8, item.label, label)) return item;
+    for (items) |item| if (completionNameMatches(item, label)) return item;
     return null;
+}
+
+fn completionNameMatches(item: Types.CompletionItem, label: []const u8) bool {
+    return std.mem.eql(u8, item.label, label) or
+        (item.filterText != null and std.mem.eql(u8, item.filterText.?, label));
 }
