@@ -86,9 +86,13 @@ fn parseType(self: anytype) !Ast.ExternalType {
         try self.advance();
         return .float32;
     }
-    if (self.current.tag == .keyword_float) {
+    if (self.current.tag == .keyword_float64) {
         try self.advance();
         return .float64;
+    }
+    if (self.current.tag == .keyword_float) {
+        try self.advance();
+        return .float32;
     }
     try expectIdentifier(self, "C", "foreign signatures currently require void, a scalar, or a C type");
     try self.expect(.dot, "expected C type name after 'C'");

@@ -116,6 +116,12 @@ For a public callable, parameter names are part of its source-level interface:
 renaming one can break named callers even though it does not change overload
 identity.
 
+Resolution prefers the overload requiring the least costly implicit
+conversions. When an integer argument can be converted to either floating
+precision, `float` (`float32`) is preferred over `float64`; a value already
+typed `float64` selects the `float64` overload. This applies equally to
+positional and named calls.
+
 ## Return every path
 
 ```sx

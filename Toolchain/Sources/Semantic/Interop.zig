@@ -6,6 +6,7 @@ const Model = @import("Model.zig");
 const Types = @import("../Types.zig");
 const Collections = @import("Collections.zig");
 const Support = @import("Support.zig");
+const MathBoundary = @import("../Math/Boundary.zig");
 
 pub fn prepare(self: anytype) ![]const Boundary.Function {
     var result: std.ArrayList(Boundary.Function) = .empty;
@@ -672,6 +673,9 @@ pub fn prepare(self: anytype) ![]const Boundary.Function {
             if (parameters.len != 6 or parameters[0] != .int or parameters[1] != .address or parameters[2] != .int32 or parameters[3] != .int32 or parameters[4] != .address or parameters[5] != .address or return_type != .int32) {
                 return self.fail(external.position, "recvfrom expects func(int, C.MutablePointer<uint8>, int32, int32, C.MutablePointer<int>, C.MutablePointer<int32>) int32");
             }
+        } else if (mathFunctionAvailable(external.library, external.source_name, parameters, return_type)) {
+            // Math is a typed toolchain boundary used internally by STD. The
+            // public package API remains independent from platform symbols.
         } else {
             package_private = try customProviderAvailable(self, external);
             if (!package_private) return self.fail(external.position, "interop library or function is not supported yet");
@@ -687,6 +691,18 @@ pub fn prepare(self: anytype) ![]const Boundary.Function {
         });
     }
     return result.toOwnedSlice(self.allocator);
+}
+
+fn mathFunctionAvailable(library: []const u8, name: []const u8, parameters: []const Types.Type, return_type: Types.Type) bool {
+    const provider = std.mem.eql(u8, library, "MacOS.lib_system") or
+        std.mem.eql(u8, library, "Linux.kernel") or std.mem.eql(u8, library, "Windows.ucrtbase");
+    if (!provider) return false;
+    const function = MathBoundary.identify(name) orelse return false;
+    const expected: Types.Type = if (function.precision == .float32) .float32 else .float64;
+    const count: usize = if (function.arity == .unary) 1 else 2;
+    if (parameters.len != count or return_type != expected) return false;
+    for (parameters) |parameter| if (parameter != expected) return false;
+    return true;
 }
 
 fn customProviderAvailable(self: anytype, external: Ast.ExternalFunction) !bool {

@@ -1,4 +1,5 @@
 const std = @import("std");
+const MathBoundary = @import("../Math/Boundary.zig");
 const Types = @import("../Types.zig");
 
 const Allocator = std.mem.Allocator;
@@ -919,6 +920,7 @@ pub fn validate(program: Program) Error!void {
 
 fn supportedExternal(function: ExternalFunction) bool {
     if (function.package_private) return true;
+    if (supportedMathExternal(function)) return true;
     if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and
         std.mem.eql(u8, function.source_name, "os_unfair_recursive_lock_lock_with_options"))
     {
@@ -1537,6 +1539,18 @@ fn supportedExternal(function: ExternalFunction) bool {
         return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
     }
     return false;
+}
+
+fn supportedMathExternal(function: ExternalFunction) bool {
+    if (!std.mem.eql(u8, function.provider, "Darwin.lib_system") and
+        !std.mem.eql(u8, function.provider, "Linux.kernel") and
+        !std.mem.eql(u8, function.provider, "Windows.ucrtbase")) return false;
+    const math = MathBoundary.identify(function.source_name) orelse return false;
+    const expected: AbiValue = if (math.precision == .float32) .float32 else .float64;
+    const count: usize = if (math.arity == .unary) 1 else 2;
+    if (function.signature.arguments.len != count or function.signature.result != expected) return false;
+    for (function.signature.arguments) |argument| if (argument != expected) return false;
+    return true;
 }
 
 fn requireSlot(function: Function, slot: Slot) Error!void {

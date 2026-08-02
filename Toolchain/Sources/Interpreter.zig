@@ -10,6 +10,7 @@ const Classes = @import("Interpreter/Classes.zig");
 const Protocols = @import("Interpreter/Protocols.zig");
 const Output = @import("Interpreter/Output.zig");
 const SnapshotGate = @import("Runtime/SnapshotGate.zig");
+const MathBoundary = @import("Math/Boundary.zig");
 
 const Allocator = std.mem.Allocator;
 const max_call_depth = 512;
@@ -615,6 +616,7 @@ fn executeInstruction(
 }
 
 pub fn supportsBoundary(boundary: Boundary.Function) bool {
+    if (supportsMathBoundary(boundary)) return true;
     return std.mem.eql(u8, boundary.provider, "MacOS.lib_system") and
         std.mem.eql(u8, boundary.source_name, "arc4random") and
         boundary.parameters.len == 0 and boundary.return_type == .uint32;
@@ -628,7 +630,34 @@ fn executeBoundary(
 ) Error!void {
     if (call.function >= session.boundaries.len) return error.UnsupportedBoundary;
     const boundary = session.boundaries[call.function];
-    if (!supportsBoundary(boundary) or call.arguments.len != 0) return error.UnsupportedBoundary;
+    if (!supportsBoundary(boundary)) return error.UnsupportedBoundary;
+    if (mathBoundary(boundary)) |math| {
+        const result_id = call.result orelse return error.InvalidProgram;
+        if (call.arguments.len == 1) {
+            const operand = try load(values, call.arguments[0]);
+            const result: Value = if (operand.typeOf() == .float32)
+                .{ .float32 = MathBoundary.unary32(math.operation, operand.float32) orelse return error.UnsupportedBoundary }
+            else if (operand.typeOf() == .float64)
+                .{ .float64 = MathBoundary.unary64(math.operation, operand.float64) orelse return error.UnsupportedBoundary }
+            else return error.InvalidProgram;
+            try store(function, values, result_id, result);
+            return;
+        }
+        if (call.arguments.len == 2) {
+            const left = try load(values, call.arguments[0]);
+            const right = try load(values, call.arguments[1]);
+            if (left.typeOf() != right.typeOf()) return error.InvalidProgram;
+            const result: Value = if (left.typeOf() == .float32)
+                .{ .float32 = MathBoundary.binary32(math.operation, left.float32, right.float32) orelse return error.UnsupportedBoundary }
+            else if (left.typeOf() == .float64)
+                .{ .float64 = MathBoundary.binary64(math.operation, left.float64, right.float64) orelse return error.UnsupportedBoundary }
+            else return error.InvalidProgram;
+            try store(function, values, result_id, result);
+            return;
+        }
+        return error.InvalidProgram;
+    }
+    if (call.arguments.len != 0) return error.UnsupportedBoundary;
     const io = session.io orelse return error.UnsupportedBoundary;
     const result = call.result orelse return error.InvalidProgram;
     var bits: u32 = undefined;
@@ -636,6 +665,22 @@ fn executeBoundary(
     try store(function, values, result, .{
         .typed_integer = .{ .type = .uint32, .bits = bits },
     });
+}
+
+fn supportsMathBoundary(boundary: Boundary.Function) bool {
+    return mathBoundary(boundary) != null;
+}
+
+fn mathBoundary(boundary: Boundary.Function) ?MathBoundary.Function {
+    const provider = std.mem.eql(u8, boundary.provider, "MacOS.lib_system") or
+        std.mem.eql(u8, boundary.provider, "Linux.kernel") or std.mem.eql(u8, boundary.provider, "Windows.ucrtbase");
+    if (!provider) return null;
+    const math = MathBoundary.identify(boundary.source_name) orelse return null;
+    const expected: Ir.Type = if (math.precision == .float32) .float32 else .float64;
+    const count: usize = if (math.arity == .unary) 1 else 2;
+    if (boundary.parameters.len != count or boundary.return_type != expected) return null;
+    for (boundary.parameters) |parameter| if (parameter != expected) return null;
+    return math;
 }
 
 fn store(function: Ir.Function, values: []?Value, id: Ir.ValueId, value: Value) Error!void {

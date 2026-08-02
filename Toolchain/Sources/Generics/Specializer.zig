@@ -1388,6 +1388,16 @@ pub const Specializer = struct {
             if (!parametersAcceptArity(function.parameters, actual.len)) continue;
             if (self.argumentsMatch(function.parameters, actual, &.{})) return true;
         }
+        // A concrete sibling may not have been copied into `functions` yet
+        // when modules are specialized in dependency order. It still wins for
+        // a call without explicit type arguments; the generic sibling remains
+        // available through `name<T>(...)`.
+        for (self.source.functions) |function| {
+            if (function.type_parameters.len != 0 or !std.mem.eql(u8, function.name, call.name) or
+                !functionVisible(call, function)) continue;
+            if (!parametersAcceptArity(function.parameters, actual.len)) continue;
+            if (self.argumentsMatch(function.parameters, actual, &.{})) return true;
+        }
         return false;
     }
 
