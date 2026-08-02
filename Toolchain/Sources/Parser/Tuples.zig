@@ -22,11 +22,23 @@ pub fn parseType(self: anytype, position: Source.Position) !Ast.Type {
             try self.expect(.colon, "expected ':' after tuple element name");
             break :name value;
         } else try std.fmt.allocPrint(self.allocator, "{d}", .{fields.items.len});
+        const access_mode: Ast.Parameter.Mode = switch (self.current.tag) {
+            .at => mode: {
+                try self.advance();
+                break :mode .read;
+            },
+            .amp => mode: {
+                try self.advance();
+                break :mode .mutable;
+            },
+            else => .value,
+        };
         try fields.append(self.allocator, .{
             .position = field_position,
             .name_position = field_position,
             .name = field_name,
             .mutable = false,
+            .access_mode = access_mode,
             .type = try self.parseType(),
             .default = null,
         });
@@ -154,10 +166,15 @@ fn internPlaceholder(
 fn internType(self: anytype, position: Source.Position, named: bool, fields: []const Ast.StructureField) !Ast.Type {
     var name = try self.allocator.dupe(u8, "(");
     for (fields, 0..) |field, index| {
-        name = try std.fmt.allocPrint(self.allocator, "{s}{s}{s}{s}", .{
+        name = try std.fmt.allocPrint(self.allocator, "{s}{s}{s}{s}{s}", .{
             name,
             if (index == 0) "" else ", ",
             if (named) try std.fmt.allocPrint(self.allocator, "{s}:", .{field.name}) else "",
+            switch (field.access_mode) {
+                .value => "",
+                .read => "@",
+                .mutable => "&",
+            },
             typeName(self, field.type),
         });
     }

@@ -278,11 +278,14 @@ fn lowerInstruction(
             } };
         },
         .copy => |copy| lowerCopy(layout.values[copy.result], layout.values[copy.operand]),
-        .deep_copy => |copy| .{ .deep_copy = .{
-            .result = layout.values[copy.result],
-            .operand = layout.values[copy.operand],
-            .type = function.value_types[copy.result],
-        } },
+        .deep_copy => |copy| if (try requiresDeepCopy(program, function.value_types[copy.result]))
+            .{ .deep_copy = .{
+                .result = layout.values[copy.result],
+                .operand = layout.values[copy.operand],
+                .type = function.value_types[copy.result],
+            } }
+        else
+            lowerCopy(layout.values[copy.result], layout.values[copy.operand]),
         .class_cast => |cast| lowerCopy(layout.values[cast.result], layout.values[cast.operand]),
         .class_retain => |retain| .{ .class_retain = .{ .operand = layout.values[retain.operand].start } },
         .class_drop => |drop| finalize: {
@@ -725,6 +728,26 @@ fn lowerTerminator(
 fn lowerCopy(result: Machine.Span, operand: Machine.Span) Machine.Instruction {
     if (!result.aggregate and result.width == 1) return .{ .copy = .{ .result = result.start, .operand = operand.start } };
     return .{ .copy_range = .{ .result = result, .operand = operand } };
+}
+
+fn requiresDeepCopy(program: Ir.Program, type_value: Ir.Type) Machine.Error!bool {
+    if (type_value.optionalChild()) |child| return requiresDeepCopy(program, child);
+    if (enumByType(program, type_value)) |enumeration| {
+        for (enumeration.variants) |variant| {
+            for (variant.associated_types) |associated| if (try requiresDeepCopy(program, associated)) return true;
+        }
+        return false;
+    }
+    const structure_index = type_value.structureIndex() orelse return false;
+    if (structure_index >= program.structures.len) return error.InvalidMachineProgram;
+    const structure = program.structures[structure_index];
+    if (structure.is_class or structure.is_protocol) return true;
+    if (structure.collection) |collection| {
+        if (collection.length == null) return !collection.view;
+        return requiresDeepCopy(program, collection.element);
+    }
+    for (structure.fields) |field| if (try requiresDeepCopy(program, field.type)) return true;
+    return false;
 }
 
 fn buildLayout(allocator: Allocator, program: Ir.Program, function: Ir.Function) Machine.Error!Layout {
@@ -1204,4 +1227,28 @@ test "lower abstract mutable locals after value slots" {
     try std.testing.expectEqual(@as(Machine.Slot, 3), function.instructions[1].copy.result);
     try std.testing.expectEqual(@as(Machine.Slot, 3), function.instructions[3].copy.result);
     try std.testing.expectEqual(@as(Machine.Slot, 3), function.instructions[4].copy.operand);
+}
+
+test "lower trivial aggregate copies without the deep-copy runtime" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const program = try compile(arena.allocator(),
+        \\struct Quaternion { public let x:float; public let y:float; public let z:float; public let w:float }
+        \\class State { public var value:int }
+        \\func main() {
+        \\    let rotation = Quaternion(x:0.0, y:0.0, z:0.0, w:1.0)
+        \\    let rotation_copy = copy rotation
+        \\    var state = State(value:1)
+        \\    var state_copy = copy state
+        \\}
+    );
+    var found_range = false;
+    var found_deep = false;
+    for (program.functions[0].instructions) |instruction| switch (instruction) {
+        .copy_range => found_range = true,
+        .deep_copy => found_deep = true,
+        else => {},
+    };
+    try std.testing.expect(found_range);
+    try std.testing.expect(found_deep);
 }

@@ -1,4 +1,5 @@
 const std = @import("std");
+const Ast = @import("Ast.zig");
 const Frontend = @import("Frontend.zig");
 const Interpreter = @import("Interpreter.zig");
 const Parser = @import("Parser.zig").Parser;
@@ -22,6 +23,34 @@ test "parse generic function declarations and explicit calls" {
     const program = try parser.parse();
     try std.testing.expectEqual(@as(usize, 1), program.functions[0].type_parameters.len);
     try std.testing.expectEqual(@as(usize, 1), program.functions[1].statements[0].expression_statement.value.call.type_arguments.len);
+}
+
+test "parse borrowed tuple patterns as generic type arguments" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(),
+        \\struct Query<Pattern> {}
+        \\struct Position { var x:int }
+        \\struct Velocity { let x:int }
+        \\func visit(query:Query<(@Position, &Velocity)>) {}
+    );
+    const program = try parser.parse();
+    const query_type = program.functions[0].parameters[0].type;
+    const query = program.generic_types[query_type.genericInstantiationIndex().?];
+    const pattern = program.structures[query.arguments[0].structureIndex().?];
+    try std.testing.expectEqual(Ast.Parameter.Mode.read, pattern.fields[0].access_mode);
+    try std.testing.expectEqual(Ast.Parameter.Mode.mutable, pattern.fields[1].access_mode);
+}
+
+test "borrowed tuple patterns cannot escape generic arguments as runtime values" {
+    try expectCompileError(
+        "func visit(value:(@int, &int)) {} func main() {}",
+        "borrowed access tuples are non-runtime generic patterns",
+    );
+    try expectCompileError(
+        "struct Stored { let value:(@int, &int) } func main() {}",
+        "borrowed access tuples cannot be stored in structure fields",
+    );
 }
 
 test "specialize inferred and explicit generic functions once" {

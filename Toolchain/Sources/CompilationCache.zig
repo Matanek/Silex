@@ -8,7 +8,7 @@ const Ast = @import("Ast.zig");
 const Boundary = @import("Boundary.zig");
 const Packages = @import("Packages.zig");
 
-pub const format = "silex-cache-v10-public-use-extensions";
+pub const format = "silex-cache-v11-trivial-native-copy";
 const State = struct { files: []const []const u8 };
 
 pub const NativeInput = struct {

@@ -25,6 +25,7 @@ constraints.
 | Optional | `Type?` |
 | Named tuple | `(width:int, height:int)` |
 | Positional tuple | `(int, int)` |
+| Borrowed access tuple pattern | `(@Velocity, &Transform)` |
 | Tuple destructuring | `let (first, second) = value` |
 | Fixed array | `Type[3]` |
 | Dynamic list | `Type[]` |

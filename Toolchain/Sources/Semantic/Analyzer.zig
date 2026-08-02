@@ -138,6 +138,9 @@ pub const Analyzer = struct {
                 main = function;
             }
             for (function.parameters, 0..) |parameter, index| {
+                if (self.isAccessPattern(parameter.type)) {
+                    return self.fail(parameter.position, "borrowed access tuples are non-runtime generic patterns");
+                }
                 try Resources.validateParameter(self, parameter);
                 for (function.parameters[0..index]) |previous| {
                     if (std.mem.eql(u8, parameter.name, previous.name)) {
@@ -145,6 +148,9 @@ pub const Analyzer = struct {
                         return self.fail(parameter.position, message);
                     }
                 }
+            }
+            if (self.isAccessPattern(function.return_type)) {
+                return self.fail(function.name_position, "borrowed access tuples cannot be returned as values");
             }
             if (function.return_mode != .value) {
                 const provenance = function.return_provenance orelse return self.fail(function.name_position, "borrowed return provenance is ambiguous; qualify it with a parameter name");
@@ -185,6 +191,9 @@ pub const Analyzer = struct {
             if (structure.drop) |drop| try Resources.validateDrop(self, drop);
             for (structure.constructors, 0..) |constructor, index| {
                 for (constructor.parameters, 0..) |parameter, parameter_index| {
+                    if (self.isAccessPattern(parameter.type)) {
+                        return self.fail(parameter.position, "borrowed access tuples are non-runtime generic patterns");
+                    }
                     try Resources.validateParameter(self, parameter);
                     for (constructor.parameters[0..parameter_index]) |previous| {
                         if (std.mem.eql(u8, parameter.name, previous.name)) {
@@ -217,6 +226,9 @@ pub const Analyzer = struct {
             }
             for (structure.methods, 0..) |method, index| {
                 for (method.parameters, 0..) |parameter, parameter_index| {
+                    if (self.isAccessPattern(parameter.type)) {
+                        return self.fail(parameter.position, "borrowed access tuples are non-runtime generic patterns");
+                    }
                     try Resources.validateParameter(self, parameter);
                     for (method.parameters[0..parameter_index]) |previous| {
                         if (std.mem.eql(u8, parameter.name, previous.name)) {
@@ -224,6 +236,9 @@ pub const Analyzer = struct {
                             return self.fail(parameter.position, message);
                         }
                     }
+                }
+                if (self.isAccessPattern(method.return_type)) {
+                    return self.fail(method.name_position, "borrowed access tuples cannot be returned as values");
                 }
                 for (structure.methods[0..index]) |previous| {
                     if (method.is_static != previous.is_static) continue;
@@ -256,6 +271,15 @@ pub const Analyzer = struct {
         };
         if (entry.parameters.len != 0) return self.fail(entry.name_position, "'main' must have no parameters");
         if (entry.return_type != .void and !MainBoundary.accepts(self.enums, entry.return_type)) return self.fail(entry.name_position, "'main' must return 'void' or 'Result<void,str>'");
+    }
+
+    fn isAccessPattern(self: *Analyzer, type_value: Ast.Type) bool {
+        const index = type_value.structureIndex() orelse return false;
+        if (index >= self.program.structures.len) return false;
+        const structure = self.program.structures[index];
+        if (!structure.is_tuple) return false;
+        for (structure.fields) |field| if (field.access_mode != .value) return true;
+        return false;
     }
 
     fn validateParameterDefaults(self: *Analyzer) AnalyzeError!void {
