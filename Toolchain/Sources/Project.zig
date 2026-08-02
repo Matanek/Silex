@@ -257,6 +257,17 @@ pub const Compiler = struct {
             };
         }
 
+        if (Lookup.isAccessibleNamespace(self, use.path, owner)) {
+            return .{
+                .alias = use.alias orelse lastSegment(use.path),
+                .path = use.path,
+                .module = null,
+                .declaration = null,
+                .is_public = use.is_public,
+                .position = use.position,
+            };
+        }
+
         var separator = std.mem.lastIndexOfScalar(u8, use.path, '.');
         while (separator) |at| {
             const prefix = use.path[0..at];
@@ -271,17 +282,6 @@ pub const Compiler = struct {
                 };
             }
             separator = std.mem.lastIndexOfScalar(u8, prefix, '.');
-        }
-
-        if (Lookup.isAccessibleNamespace(self, use.path, owner)) {
-            return .{
-                .alias = use.alias orelse lastSegment(use.path),
-                .path = use.path,
-                .module = null,
-                .declaration = null,
-                .is_public = use.is_public,
-                .position = use.position,
-            };
         }
 
         if (use.alias != null) {
