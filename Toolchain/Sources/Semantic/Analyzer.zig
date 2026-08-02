@@ -61,6 +61,7 @@ pub const Analyzer = struct {
     module_context: ?[]const u8 = null,
     owner_context: ?usize = null,
     anonymous_function_context: bool = false,
+    function_context: ?Ast.Function = null,
     target: ?Target = null,
     packages: ?Packages.Graph = null,
     io: ?std.Io = null,
@@ -340,6 +341,9 @@ pub const Analyzer = struct {
         const previous_specialization_file = self.specialization_file;
         self.specialization_file = function.specialization_file;
         defer self.specialization_file = previous_specialization_file;
+        const previous_function_context = self.function_context;
+        self.function_context = function;
+        defer self.function_context = previous_function_context;
         var builder: FunctionBuilder = .{ .return_type = function.return_type };
         try builder.blocks.append(self.allocator, .{});
         var parameter_types: std.ArrayList(Types.Type) = .empty;

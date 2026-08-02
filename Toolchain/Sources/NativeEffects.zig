@@ -111,6 +111,42 @@ test "native effects match the reference output" {
     try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
 }
 
+test "native try failure alternatives match the reference interpreter" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const source =
+        \\enum ReadError { denied(int) }
+        \\func read(allowed:bool) Result<int,ReadError> {
+        \\    print("read")
+        \\    if allowed { return Result<int,ReadError>.success(40) }
+        \\    return Result<int,ReadError>.failure(ReadError.denied(7))
+        \\}
+        \\func load(allowed:bool) Result<int,str> {
+        \\    let value = try read(allowed) else error {
+        \\        match error { denied(code) => { return Result<int,str>.failure("denied: $(code)") } }
+        \\    }
+        \\    return Result<int,str>.success(value + 2)
+        \\}
+        \\func contextual(allowed:bool) Result<int,str> {
+        \\    let value = try read(allowed) else error "context"
+        \\    return Result<int,str>.success(value)
+        \\}
+        \\func main() {
+        \\    match load(true) { success(value) => { print(value) }; failure(error) => { print(error) } }
+        \\    match load(false) { success(value) => { print(value) }; failure(error) => { print(error) } }
+        \\    match contextual(false) { success(value) => { print(value) }; failure(error) => { print(error) } }
+        \\}
+    ;
+    var frontend = Frontend.Frontend.init(allocator);
+    const reference = try Interpreter.runCapture(allocator, (try frontend.compile(source)).ir);
+    const native = try compileAndRun(allocator, source);
+    try std.testing.expectEqual(reference.exit_code, exitCode(native));
+    try std.testing.expectEqualSlices(u8, reference.stdout, native.stdout);
+    try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
+}
+
 test "native for iteration matches the reference interpreter" {
     if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);

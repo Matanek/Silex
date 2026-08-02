@@ -1548,7 +1548,13 @@ pub const Compiler = struct {
                     argument.* = self.remapType(module, type_map, argument.*);
                 }
             },
-            .unary => |unary| try self.rewriteExpression(module, unary.operand, type_map),
+            .unary => |*unary| {
+                try self.rewriteExpression(module, unary.operand, type_map);
+                if (unary.try_alternative) |*alternative| {
+                    if (alternative.statements) |statements| alternative.statements = try self.rewriteStatements(module, statements, type_map);
+                    if (alternative.message) |message| try self.rewriteExpression(module, message, type_map);
+                }
+            },
             .binary => |binary| {
                 try self.rewriteExpression(module, binary.left, type_map);
                 try self.rewriteExpression(module, binary.right, type_map);

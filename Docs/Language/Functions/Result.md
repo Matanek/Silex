@@ -43,6 +43,37 @@ exception.
 For `Result<void,E>`, use `success()` and write `try operation()` as a
 statement.
 
+## Handle a failure locally
+
+Add an `else` block when the failure must leave the current flow in another
+way. Bind `error` only when the branch needs the original value:
+
+```sx
+func load(text:str) Result<int,AppError> {
+    let value = try parse(text) else error {
+        return Result<int,AppError>.failure(AppError.input(error))
+    }
+    return Result<int,AppError>.success(value)
+}
+```
+
+Write `else { ... }` to ignore the error intentionally. Every path through a
+local `else` block must exit with `return`, `break`, `continue`, or another
+guaranteed control-flow exit; the block does not provide a fallback value.
+
+For command-line boundaries, the short form replaces any error type with a
+`str` failure and returns it immediately:
+
+```sx
+func load_for_cli(text:str) Result<int,str> {
+    let value = try parse(text) else error "cannot parse: $(text)"
+    return Result<int,str>.success(value)
+}
+```
+
+The message is evaluated once on failure and never on success. The original
+error is intentionally not available in this short form.
+
 ## Change the error type
 
 ```sx
