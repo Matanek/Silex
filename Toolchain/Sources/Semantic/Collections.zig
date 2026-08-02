@@ -387,8 +387,15 @@ fn analyzeElementReference(self: anytype, builder: anytype, unary: Ast.Expressio
 pub fn analyzeCall(self: anytype, builder: anytype, call: Ast.Expression.Call) !?Model.TypedValue {
     const receiver_expression = call.receiver orelse return null;
     const receiver_type = inferReceiverType(self.structures, builder, receiver_expression) orelse return null;
-    const collection = collectionForType(self.structures, receiver_type) orelse return null;
+    const collection = collectionForType(self.structures, receiver_type) orelse {
+        if (std.mem.eql(u8, call.name, "indexed")) return self.fail(call.name_position, "indexed() expects an array or list");
+        return null;
+    };
     if (call.safe or call.arguments.len != 0 or call.named_arguments.len != 0 or call.type_arguments.len != 0) return null;
+    if (std.mem.eql(u8, call.name, "indexed")) {
+        if (collection.view) return self.fail(call.name_position, "indexed() expects an array or list");
+        return self.fail(call.name_position, "indexed() is available only as a for source with two bindings");
+    }
     const source = try self.analyzeExpression(builder, receiver_expression);
     if (std.mem.eql(u8, call.name, "count")) {
         const result = try self.newValue(builder, .int);

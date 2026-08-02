@@ -316,6 +316,8 @@ pub const ForStatement = struct {
     position: Source.Position,
     name_position: Source.Position,
     name: []const u8,
+    index_position: ?Source.Position = null,
+    index_name: ?[]const u8 = null,
     bindings: []const VariableDeclaration.DestructuredBinding = &.{},
     mode: Mode,
     source: SourceValue,

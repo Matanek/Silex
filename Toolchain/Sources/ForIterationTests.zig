@@ -1,6 +1,8 @@
 const std = @import("std");
 const Frontend = @import("Frontend.zig");
 const Interpreter = @import("Interpreter.zig");
+const Ir = @import("Ir.zig");
+const Project = @import("Project.zig");
 
 fn run(source: []const u8) ![]const u8 {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
@@ -10,6 +12,14 @@ fn run(source: []const u8) ![]const u8 {
     const compilation = try frontend.compile(source);
     const result = try Interpreter.runCapture(allocator, compilation.ir);
     return std.testing.allocator.dupe(u8, result.stdout);
+}
+
+fn expectCompileError(source: []const u8, message: []const u8) !void {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var frontend = Frontend.Frontend.init(arena.allocator());
+    try std.testing.expectError(error.InvalidSource, frontend.compile(source));
+    try std.testing.expectEqualStrings(message, frontend.diagnostic.?.message);
 }
 
 test "iterate arrays and lists with read and copied bindings" {
@@ -95,6 +105,123 @@ test "evaluate collection source and range bounds once from left to right" {
     );
     defer std.testing.allocator.free(output);
     try std.testing.expectEqualStrings("V\n7\n8\nS\nE\n0\n1\n", output);
+}
+
+test "iterate fixed arrays and dynamic lists with zero-origin indices" {
+    const output = try run(
+        \\func values() int[] { print("source"); return [7, 8, 9] }
+        \\func main() {
+        \\    let fixed:int[3] = [3, 4, 5]
+        \\    for index, item in fixed.indexed() {
+        \\        if index == 1 { continue }
+        \\        print(index, ":", item)
+        \\    }
+        \\    for position, let item in values().indexed() {
+        \\        print(position, ":", item)
+        \\        if position == 1 { break }
+        \\    }
+        \\    let empty:int[0] = []
+        \\    for index, item in empty.indexed() { print(index, item) }
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("0:3\n2:5\nsource\n0:7\n1:8\n", output);
+}
+
+test "mutable indexed element bindings write through on continue and break" {
+    const output = try run(
+        \\func main() {
+        \\    var values = [10, 20, 30, 40]
+        \\    for index, var item in values.indexed() {
+        \\        item += index
+        \\        if index == 1 { continue }
+        \\        if index == 2 { break }
+        \\    }
+        \\    print(values[0], " ", values[1], " ", values[2], " ", values[3])
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("10 21 32 40\n", output);
+}
+
+test "indexed bindings are scoped immutable and require indexed collections" {
+    try expectCompileError(
+        "func main() { for index, item in [1].indexed() { index = 2 } }",
+        "cannot assign to immutable variable 'index'",
+    );
+    try expectCompileError(
+        "func main() { for index, item in [1].indexed() {} print(index) }",
+        "unknown variable 'index'",
+    );
+    try expectCompileError(
+        "func main() { for index, item in 42.indexed() { print(index, item) } }",
+        "indexed() expects an array or list",
+    );
+    try expectCompileError(
+        "func main() { for index, item in [1] { print(index, item) } }",
+        "double for binding requires an indexed() array or list source",
+    );
+    try expectCompileError(
+        "func main() { for index, item in 0...2 { print(index, item) } }",
+        "double for binding requires an indexed() array or list source",
+    );
+    try expectCompileError(
+        "func main() { for var index, item in [1].indexed() {} }",
+        "indexed for binding mode belongs before the element",
+    );
+    try expectCompileError(
+        "func main() { for item in [1].indexed() { print(item) } }",
+        "indexed() traversal requires two for bindings",
+    );
+    try expectCompileError(
+        "func main() { let values = [1]; for index, var item in values.indexed() {} }",
+        "for var requires a var collection binding",
+    );
+    try expectCompileError(
+        "func main() { let values = [1]; let view = @values[0:1]; for index, item in view.indexed() {} }",
+        "indexed() expects an array or list",
+    );
+}
+
+test "indexed iteration emits deterministic typed IR" {
+    const source = "func main() { let values = [4, 5]; for index, item in values.indexed() { print(index, item) } }";
+    var first_arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer first_arena.deinit();
+    var first_frontend = Frontend.Frontend.init(first_arena.allocator());
+    const first = try Ir.writeText(first_arena.allocator(), (try first_frontend.compile(source)).ir);
+
+    var second_arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer second_arena.deinit();
+    var second_frontend = Frontend.Frontend.init(second_arena.allocator());
+    const second = try Ir.writeText(second_arena.allocator(), (try second_frontend.compile(source)).ir);
+    try std.testing.expectEqualStrings(first, second);
+    try std.testing.expect(std.mem.indexOf(u8, first, "collection.load") != null);
+}
+
+test "compose indexed iteration through a public module function" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Indexed.sx",
+        .data =
+        \\public func weighted(values:int[]) int {
+        \\    var total = 0
+        \\    for index, item in values.indexed() { total += index * item }
+        \\    return total
+        \\}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "use Indexed\nfunc main() { print(Indexed.weighted([3, 4, 5])) }",
+    });
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    const result = try Interpreter.runCapture(allocator, (try compiler.compile(input)).ir);
+    try std.testing.expectEqualStrings("14\n", result.stdout);
 }
 
 test "for bindings are scoped and read bindings cannot be reassigned" {

@@ -158,6 +158,12 @@ pub fn analyzeWhile(self: anytype, builder: anytype, function: Ast.Function, loo
 }
 
 pub fn analyzeFor(self: anytype, builder: anytype, function: Ast.Function, loop: Ast.ForStatement) !bool {
+    if (loop.index_name) |name| {
+        if (Support.findBinding(builder.bindings.items, name) != null) {
+            const message = try std.fmt.allocPrint(self.allocator, "variable '{s}' is already declared in this scope", .{name});
+            return self.fail(loop.index_position.?, message);
+        }
+    }
     const bindings = if (loop.bindings.len == 0)
         &[_]Ast.VariableDeclaration.DestructuredBinding{.{ .position = loop.name_position, .name = loop.name }}
     else
@@ -168,29 +174,53 @@ pub fn analyzeFor(self: anytype, builder: anytype, function: Ast.Function, loop:
     };
     return switch (loop.source) {
         .collection => |source| analyzeCollectionFor(self, builder, function, loop, source),
-        .range => |range| analyzeRangeFor(self, builder, function, loop, range),
+        .range => |range| if (loop.index_name != null)
+            self.fail(loop.index_position.?, "double for binding requires an indexed() array or list source")
+        else
+            analyzeRangeFor(self, builder, function, loop, range),
     };
 }
 
 fn analyzeCollectionFor(self: anytype, builder: anytype, function: Ast.Function, loop: Ast.ForStatement, source_expression: *Ast.Expression) !bool {
-    const source = try self.analyzeExpression(builder, source_expression);
-    if (source.type.structureIndex()) |structure_index| {
-        const structure = self.program.structures[structure_index];
-        if (structure.query_pattern != null) return analyzeQueryFor(self, builder, function, loop, source_expression, source, structure);
+    const indexed_call: ?Ast.Expression.Call = if (source_expression.value == .call and
+        std.mem.eql(u8, source_expression.value.call.name, "indexed"))
+        source_expression.value.call
+    else
+        null;
+    const collection_expression = if (loop.index_name != null) indexed: {
+        const call = indexed_call orelse return self.fail(loop.index_position.?, "double for binding requires an indexed() array or list source");
+        if (call.receiver == null or call.safe or call.arguments.len != 0 or call.named_arguments.len != 0 or call.type_arguments.len != 0) {
+            return self.fail(call.name_position, "indexed() expects no arguments and a direct collection receiver");
+        }
+        break :indexed call.receiver.?;
+    } else ordinary: {
+        if (indexed_call) |call| return self.fail(call.name_position, "indexed() traversal requires two for bindings");
+        break :ordinary source_expression;
+    };
+    const source = try self.analyzeExpression(builder, collection_expression);
+    if (loop.index_name == null) {
+        if (source.type.structureIndex()) |structure_index| {
+            const structure = self.program.structures[structure_index];
+            if (structure.query_pattern != null) return analyzeQueryFor(self, builder, function, loop, source_expression, source, structure);
+        }
     }
-    const collection = Collections.collectionForType(self.structures, source.type) orelse return self.fail(source_expression.position, "for source expects an array or list");
-    const source_root: ?[]const u8 = switch (source_expression.value) {
+    const collection = Collections.collectionForType(self.structures, source.type) orelse return self.fail(
+        collection_expression.position,
+        if (loop.index_name != null) "indexed() expects an array or list" else "for source expects an array or list",
+    );
+    if (loop.index_name != null and collection.view) return self.fail(collection_expression.position, "indexed() expects an array or list");
+    const source_root: ?[]const u8 = switch (collection_expression.value) {
         .identifier => |name| name,
         else => null,
     };
     const outer_binding_count = builder.bindings.items.len;
     const collection_local: Ir.LocalId = if (loop.mode == .mutable) mutable: {
-        const name = switch (source_expression.value) {
+        const name = switch (collection_expression.value) {
             .identifier => |value| value,
-            else => return self.fail(source_expression.position, "for var requires a var collection binding"),
+            else => return self.fail(collection_expression.position, "for var requires a var collection binding"),
         };
-        const binding = Support.findBinding(builder.bindings.items, name) orelse return self.fail(source_expression.position, "unknown collection variable");
-        if (!binding.mutable or binding.local == null) return self.fail(source_expression.position, "for var requires a var collection binding");
+        const binding = Support.findBinding(builder.bindings.items, name) orelse return self.fail(collection_expression.position, "unknown collection variable");
+        if (!binding.mutable or binding.local == null) return self.fail(collection_expression.position, "for var requires a var collection binding");
         break :mutable binding.local.?;
     } else local: {
         const value = builder.local_types.items.len;
@@ -233,6 +263,11 @@ fn analyzeCollectionFor(self: anytype, builder: anytype, function: Ast.Function,
     const element = try self.newValue(builder, collection.element);
     try self.emit(builder, .{ .collection_load = .{ .result = element, .collection = collection_value, .index = index, .position = loop.position } });
     const binding_count = builder.bindings.items.len;
+    if (loop.index_name) |name| try builder.bindings.append(self.allocator, .{
+        .name = name,
+        .type = .int,
+        .value = index,
+    });
     var element_local: ?Ir.LocalId = null;
     if (loop.mode == .mutable) {
         element_local = builder.local_types.items.len;
@@ -253,7 +288,7 @@ fn analyzeCollectionFor(self: anytype, builder: anytype, function: Ast.Function,
         .continue_block = update_block,
         .break_block = if (loop.mode == .mutable) break_update_block else exit_block,
         .availability_count = availability_count,
-        .drop_binding_count = if (loop.mode == .mutable) binding_count + 1 else binding_count,
+        .drop_binding_count = if (loop.mode == .mutable) binding_count + 1 + @as(usize, @intFromBool(loop.index_name != null)) else binding_count,
         .header_availability = header_availability,
         .mutex_depth = builder.mutex_depth,
     });
