@@ -104,6 +104,11 @@ pub fn completionTriggerKind(params: std.json.Value) Types.CompletionTriggerKind
     };
 }
 
+pub fn completionTriggerCharacter(params: std.json.Value) ?[]const u8 {
+    const context = objectMember(params, "context") orelse return null;
+    return stringMember(context, "triggerCharacter");
+}
+
 pub fn negotiatedPositionEncoding(params: ?std.json.Value) Types.PositionEncoding {
     const capabilities = objectMember(params orelse return .utf16, "capabilities") orelse return .utf16;
     const general = objectMember(capabilities, "general") orelse return .utf16;
@@ -219,4 +224,8 @@ test "read completion trigger kinds without trusting unknown values" {
         \\{"context":{"triggerKind":2}}
     , .{});
     try std.testing.expectEqual(Types.CompletionTriggerKind.trigger_character, completionTriggerKind(parsed));
+    const with_character = try std.json.parseFromSliceLeaky(std.json.Value, arena.allocator(),
+        \\{"context":{"triggerKind":2,"triggerCharacter":" "}}
+    , .{});
+    try std.testing.expectEqualStrings(" ", completionTriggerCharacter(with_character).?);
 }

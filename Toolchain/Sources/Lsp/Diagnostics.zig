@@ -36,6 +36,19 @@ test "clear diagnostics for a valid current program" {
     try std.testing.expectEqual(@as(usize, 0), diagnostics.len);
 }
 
+test "diagnose transient unknown field types without terminating the server" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    for ([_][]const u8{ "s", "st" }) |partial_type| {
+        const source = try std.fmt.allocPrint(allocator, "struct Error {{ let message:{s} }}", .{partial_type});
+        const diagnostics = try analyze(allocator, source, .utf16, false);
+        try std.testing.expectEqual(@as(usize, 1), diagnostics.len);
+        const expected = try std.fmt.allocPrint(allocator, "unknown nominal type '{s}'", .{partial_type});
+        try std.testing.expectEqualStrings(expected, diagnostics[0].message);
+    }
+}
+
 test "clear diagnostics for valid cascades owned by the frontend" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

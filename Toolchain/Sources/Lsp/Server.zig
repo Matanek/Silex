@@ -50,10 +50,26 @@ pub const Server = struct {
             defer arena.deinit();
             const allocator = arena.allocator();
             const body = try Protocol.readMessage(allocator, &reader.interface) orelse return;
-            const response = try self.handleBody(allocator, body) orelse continue;
+            const response = try self.handleBodySafely(allocator, body) orelse continue;
             const framed = try Protocol.frameMessage(allocator, response);
             try Io.File.stdout().writeStreamingAll(self.io, framed);
         }
+    }
+
+    pub fn handleBodySafely(self: *Server, allocator: Allocator, body: []const u8) !?[]const u8 {
+        return self.handleBody(allocator, body) catch |err| {
+            std.log.err("LSP request failed: {s}", .{@errorName(err)});
+            const request = std.json.parseFromSliceLeaky(Types.Request, allocator, body, .{
+                .ignore_unknown_fields = true,
+            }) catch return null;
+            const id = request.id orelse return null;
+            return @as(?[]const u8, try self.errorReply(
+                allocator,
+                id,
+                -32603,
+                "internal language server error",
+            ));
+        };
     }
 
     pub fn handleBody(self: *Server, allocator: Allocator, body: []const u8) !?[]const u8 {
@@ -131,6 +147,19 @@ pub const Server = struct {
                 return try self.replyInvalidParams(allocator, id, "invalid completion position");
             };
             const trigger_kind = Protocol.completionTriggerKind(params);
+            const trigger_character = Protocol.completionTriggerCharacter(params) orelse "";
+            const completing_try_error = Completion.isTryErrorBindingPositionAt(allocator, source, cursor) catch false;
+            const completing_try_alternative = Completion.isTryAlternativePositionAt(allocator, source, cursor) catch false;
+            if (trigger_kind == .trigger_character and
+                (std.mem.eql(u8, trigger_character, " ") or std.mem.eql(u8, trigger_character, ")")) and
+                !completing_try_error and
+                !completing_try_alternative)
+            {
+                return try self.reply(allocator, id, .{
+                    .isIncomplete = false,
+                    .items = &[_]Types.CompletionItem{},
+                });
+            }
             const needs_workspace = needsWorkspaceCompletion(allocator, source, cursor);
             if (needs_workspace) {
                 const project_items = Workspace.itemsAtForTarget(
@@ -198,6 +227,7 @@ pub const Server = struct {
         );
         return self.notification(allocator, "textDocument/publishDiagnostics", .{
             .uri = uri,
+            .version = self.documentVersion(uri).?,
             .diagnostics = diagnostics,
         });
     }
@@ -274,6 +304,13 @@ pub const Server = struct {
         }
         return null;
     }
+
+    fn documentVersion(self: *const Server, uri: []const u8) ?i64 {
+        for (self.documents.items) |document| {
+            if (std.mem.eql(u8, document.uri, uri)) return document.version;
+        }
+        return null;
+    }
 };
 
 fn mergeCompletionItems(
@@ -315,6 +352,8 @@ fn needsWorkspaceCompletion(allocator: Allocator, source: []const u8, cursor: us
         prefix_start -= 1;
     }
     if (Completion.isTypePositionAt(allocator, source, prefix_start) catch false) return true;
+    if (prefix_start != 0 and source[prefix_start - 1] == '.' and
+        (Completion.isQualifiedTypePositionAt(allocator, source, prefix_start) catch false)) return true;
     if (Completion.isReturnExpressionAt(allocator, source, cursor) catch false) return true;
     const prefix = source[prefix_start..cursor];
     if (prefix.len != 0 and
@@ -352,6 +391,14 @@ test "contextual qualifiers request workspace completion without an import" {
     try std.testing.expect(!needsWorkspaceCompletion(allocator, "func seed() { local }", 19));
 }
 
+test "qualified type paths request workspace completion inside generic arguments" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source = "func test() Result<Math.>";
+    const cursor = std.mem.indexOf(u8, source, "Math.").? + "Math.".len;
+    try std.testing.expect(needsWorkspaceCompletion(arena.allocator(), source, cursor));
+}
+
 test "initialize advertises completion and document colors" {
     var server = Server.init(std.testing.allocator, std.testing.io);
     defer server.deinit();
@@ -361,9 +408,122 @@ test "initialize advertises completion and document colors" {
         \\{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{"general":{"positionEncodings":["utf-8","utf-16"]}}}}
     )).?;
     try std.testing.expect(std.mem.indexOf(u8, response, "\"positionEncoding\":\"utf-8\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, response, "\"completionProvider\":{\"resolveProvider\":false,\"triggerCharacters\":[\".\"]}") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"completionProvider\":{\"resolveProvider\":false,\"triggerCharacters\":[\".\",\":\",\"<\",\",\",\" \",\")\",\"e\"]}") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"colorProvider\":true") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "hoverProvider") == null);
+}
+
+test "space triggers only contextual try completions" {
+    var server = Server.init(std.testing.allocator, std.testing.io);
+    defer server.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const uri = "file:///Main.sx";
+    const alternative_source =
+        "struct Error {} " ++
+        "func test() Result<int, Error> { return Result<int, Error>.success(42) } " ++
+        "func main() { var value = try test() }";
+    try server.setDocument(.{ .uri = uri, .text = alternative_source, .version = 1 });
+    const alternative_cursor = std.mem.indexOf(u8, alternative_source, "test() }").? + "test() ".len;
+    const alternative_position = Protocol.positionAtByteOffset(alternative_source, alternative_cursor, .utf16).?;
+    const alternative_request = try std.json.Stringify.valueAlloc(allocator, .{
+        .jsonrpc = Types.protocol_version,
+        .id = 19,
+        .method = "textDocument/completion",
+        .params = .{
+            .textDocument = .{ .uri = uri },
+            .position = alternative_position,
+            .context = .{ .triggerKind = 2, .triggerCharacter = " " },
+        },
+    }, .{});
+    const alternative_response = (try server.handleBody(allocator, alternative_request)).?;
+    try std.testing.expect(std.mem.indexOf(u8, alternative_response, "\"label\":\"else\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, alternative_response, "\"insertText\":\"else {$0}\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, alternative_response, "\"label\":\"else error\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, alternative_response, "\"insertText\":\"else error {$0}\"") != null);
+
+    const closing_cursor = std.mem.indexOf(u8, alternative_source, "test() }").? + "test()".len;
+    const closing_position = Protocol.positionAtByteOffset(alternative_source, closing_cursor, .utf16).?;
+    const closing_request = try std.json.Stringify.valueAlloc(allocator, .{
+        .jsonrpc = Types.protocol_version,
+        .id = 18,
+        .method = "textDocument/completion",
+        .params = .{
+            .textDocument = .{ .uri = uri },
+            .position = closing_position,
+            .context = .{ .triggerKind = 2, .triggerCharacter = ")" },
+        },
+    }, .{});
+    const closing_response = (try server.handleBody(allocator, closing_request)).?;
+    try std.testing.expect(std.mem.indexOf(u8, closing_response, "\"label\":\"else\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, closing_response, "\"label\":\"else error\"") != null);
+
+    const prefixed_source =
+        "struct Error {} " ++
+        "func test() Result<int, Error> { return Result<int, Error>.success(42) } " ++
+        "func main() { var value = try test() e }";
+    try server.setDocument(.{ .uri = uri, .text = prefixed_source, .version = 2 });
+    const prefixed_cursor = std.mem.indexOf(u8, prefixed_source, "test() e").? + "test() e".len;
+    const prefixed_position = Protocol.positionAtByteOffset(prefixed_source, prefixed_cursor, .utf16).?;
+    const prefixed_request = try std.json.Stringify.valueAlloc(allocator, .{
+        .jsonrpc = Types.protocol_version,
+        .id = 17,
+        .method = "textDocument/completion",
+        .params = .{
+            .textDocument = .{ .uri = uri },
+            .position = prefixed_position,
+            .context = .{ .triggerKind = 2, .triggerCharacter = "e" },
+        },
+    }, .{});
+    const prefixed_response = (try server.handleBody(allocator, prefixed_request)).?;
+    try std.testing.expect(std.mem.indexOf(u8, prefixed_response, "\"label\":\"else\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, prefixed_response, "\"label\":\"else error\"") != null);
+
+    const source =
+        "struct Error {} " ++
+        "func test() Result<int, Error> { return Result<int, Error>.success(42) } " ++
+        "func main() { var value = try test() else { return } }";
+    try server.setDocument(.{ .uri = uri, .text = source, .version = 3 });
+    const cursor = std.mem.indexOf(u8, source, "else ").? + "else ".len;
+    const position = Protocol.positionAtByteOffset(source, cursor, .utf16).?;
+    const request = try std.json.Stringify.valueAlloc(allocator, .{
+        .jsonrpc = Types.protocol_version,
+        .id = 20,
+        .method = "textDocument/completion",
+        .params = .{
+            .textDocument = .{ .uri = uri },
+            .position = position,
+            .context = .{ .triggerKind = 2, .triggerCharacter = " " },
+        },
+    }, .{});
+    const response = (try server.handleBody(allocator, request)).?;
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"label\":\"error\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"detail\":\"error:Error\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"insertText\":\"error {$0}\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"label\":\"{}\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"insertText\":\"{$0}\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"sortText\":\"000-") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"label\":\"message\"") == null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"label\":\"value\"") == null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"label\":\"main\"") == null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"label\":\"test\"") == null);
+
+    const ordinary = "func main() { let ";
+    try server.setDocument(.{ .uri = uri, .text = ordinary, .version = 4 });
+    const ordinary_position = Protocol.positionAtByteOffset(ordinary, ordinary.len, .utf16).?;
+    const ordinary_request = try std.json.Stringify.valueAlloc(allocator, .{
+        .jsonrpc = Types.protocol_version,
+        .id = 21,
+        .method = "textDocument/completion",
+        .params = .{
+            .textDocument = .{ .uri = uri },
+            .position = ordinary_position,
+            .context = .{ .triggerKind = 2, .triggerCharacter = " " },
+        },
+    }, .{});
+    const ordinary_response = (try server.handleBody(allocator, ordinary_request)).?;
+    try std.testing.expect(std.mem.indexOf(u8, ordinary_response, "\"items\":[]") != null);
 }
 
 test "document colors expose literal and named GFX colors" {
@@ -392,10 +552,102 @@ test "document changes publish and clear current frontend diagnostics" {
         \\{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///Main.sx","version":1,"text":"func main() { let value:int = }"}}}
     )).?;
     try std.testing.expect(std.mem.indexOf(u8, invalid, "expected expression") != null);
+    try std.testing.expect(std.mem.indexOf(u8, invalid, "\"version\":1") != null);
     const valid = (try server.handleBody(arena.allocator(),
         \\{"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":"file:///Main.sx","version":2},"contentChanges":[{"text":"func main() { let value:int = 42 }"}]}}
     )).?;
     try std.testing.expect(std.mem.indexOf(u8, valid, "\"diagnostics\":[]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, valid, "\"version\":2") != null);
+}
+
+test "completing a field type clears the versioned incomplete-type diagnostic" {
+    var server = Server.init(std.testing.allocator, std.testing.io);
+    defer server.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const invalid = (try server.handleBody(arena.allocator(),
+        \\{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///Main.sx","version":1,"text":"struct Error {\n    let message:\n}"}}}
+    )).?;
+    try std.testing.expect(std.mem.indexOf(u8, invalid, "expected type name") != null);
+    try std.testing.expect(std.mem.indexOf(u8, invalid, "\"version\":1") != null);
+
+    const partial = (try server.handleBody(arena.allocator(),
+        \\{"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":"file:///Main.sx","version":2},"contentChanges":[{"text":"struct Error {\n    let message:s\n}"}]}}
+    )).?;
+    try std.testing.expect(std.mem.indexOf(u8, partial, "unknown nominal type 's'") != null);
+    try std.testing.expect(std.mem.indexOf(u8, partial, "\"version\":2") != null);
+
+    const longer_partial = (try server.handleBody(arena.allocator(),
+        \\{"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":"file:///Main.sx","version":3},"contentChanges":[{"text":"struct Error {\n    let message:st\n}"}]}}
+    )).?;
+    try std.testing.expect(std.mem.indexOf(u8, longer_partial, "unknown nominal type 'st'") != null);
+    try std.testing.expect(std.mem.indexOf(u8, longer_partial, "\"version\":3") != null);
+
+    const valid = (try server.handleBody(arena.allocator(),
+        \\{"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":"file:///Main.sx","version":4},"contentChanges":[{"text":"struct Error {\n    let message:str\n}"}]}}
+    )).?;
+    try std.testing.expect(std.mem.indexOf(u8, valid, "\"diagnostics\":[]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, valid, "\"version\":4") != null);
+}
+
+test "field completion recovers after deleting and recreating an invalid annotation" {
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "struct Error {}",
+    });
+    var server = Server.init(std.testing.allocator, std.testing.io);
+    defer server.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const uri = try std.fmt.allocPrint(allocator, "file://{s}/Main.sx", .{root});
+    server.workspace_root_uri = try std.testing.allocator.dupe(u8, try std.fmt.allocPrint(
+        allocator,
+        "file://{s}",
+        .{root},
+    ));
+
+    const invalid_source = "struct Error {\n    let message:\n}";
+    const invalid = (try server.handleBody(allocator, try std.fmt.allocPrint(
+        allocator,
+        "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{{\"textDocument\":{{\"uri\":\"{s}\",\"version\":1,\"text\":\"struct Error {{\\n    let message:\\n}}\"}}}}}}",
+        .{uri},
+    ))).?;
+    try std.testing.expect(std.mem.indexOf(u8, invalid, "expected type name") != null);
+
+    const cleared = (try server.handleBody(allocator, try std.fmt.allocPrint(
+        allocator,
+        "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didChange\",\"params\":{{\"textDocument\":{{\"uri\":\"{s}\",\"version\":2}},\"contentChanges\":[{{\"text\":\"struct Error {{\\n\\n}}\"}}]}}}}",
+        .{uri},
+    ))).?;
+    try std.testing.expect(std.mem.indexOf(u8, cleared, "\"diagnostics\":[]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cleared, "\"version\":2") != null);
+
+    const recreated = (try server.handleBody(allocator, try std.fmt.allocPrint(
+        allocator,
+        "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didChange\",\"params\":{{\"textDocument\":{{\"uri\":\"{s}\",\"version\":3}},\"contentChanges\":[{{\"text\":\"struct Error {{\\n    let message:\\n}}\"}}]}}}}",
+        .{uri},
+    ))).?;
+    try std.testing.expect(std.mem.indexOf(u8, recreated, "expected type name") != null);
+    try std.testing.expect(std.mem.indexOf(u8, recreated, "\"version\":3") != null);
+
+    const cursor = Protocol.positionAtByteOffset(invalid_source, std.mem.indexOf(u8, invalid_source, "message:").? + "message:".len, .utf16).?;
+    const request = try std.json.Stringify.valueAlloc(allocator, .{
+        .jsonrpc = Types.protocol_version,
+        .id = 8,
+        .method = "textDocument/completion",
+        .params = .{
+            .textDocument = .{ .uri = uri },
+            .position = cursor,
+            .context = .{ .triggerKind = 2, .triggerCharacter = ":" },
+        },
+    }, .{});
+    const completion = (try server.handleBody(allocator, request)).?;
+    try std.testing.expect(std.mem.indexOf(u8, completion, "\"label\":\"str\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, completion, "\"label\":\"if\"") == null);
 }
 
 test "completion exposes an interpolation binding without historical types" {

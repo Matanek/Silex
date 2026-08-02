@@ -94,7 +94,10 @@ Its directory name and manifest identity match:
 }
 ```
 
-Use `^` for a compatible version range or `=` for one exact version.
+Use `^` for a compatible version range or `=` for one exact version. A caret
+accepts the requested version and every newer version with the same major
+number, including during the `0.x` development series. For example, `^0.7.0`
+accepts `0.8.0` but rejects `1.0.0`.
 
 Silex first checks a compatible sibling package, then installed packages under
 `~/.silex/packages/Name@MAJOR.MINOR.PATCH/`.

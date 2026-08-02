@@ -50,13 +50,17 @@ pub const Constraint = struct {
     pub fn accepts(self: Constraint, candidate: Version) bool {
         if (self.kind == .exact) return self.version.eql(candidate);
         if (candidate.order(self.version) == .lt) return false;
-        if (self.version.major != 0) return candidate.major == self.version.major;
-        if (self.version.minor != 0) {
-            return candidate.major == 0 and candidate.minor == self.version.minor;
-        }
-        return candidate.major == 0 and candidate.minor == 0 and candidate.patch == self.version.patch;
+        return candidate.major == self.version.major;
     }
 };
+
+fn constraintSymbol(constraint: Constraint) u8 {
+    return if (constraint.kind == .exact) '=' else '^';
+}
+
+fn newest(current: ?Version, candidate: Version) Version {
+    return if (current == null or candidate.order(current.?) == .gt) candidate else current.?;
+}
 
 pub const Dependency = struct {
     name: []const u8,
@@ -287,7 +291,7 @@ pub const Resolver = struct {
 
     fn resolveDependencies(self: *Resolver, owner: usize, dependencies: []const RequestedDependency) anyerror!void {
         for (dependencies) |request| {
-            const package = try self.resolveRequest(request);
+            const package = try self.resolveRequest(owner, request);
             try self.builders.items[owner].dependencies.append(self.allocator, .{
                 .name = request.name,
                 .package = package,
@@ -296,16 +300,17 @@ pub const Resolver = struct {
         }
     }
 
-    fn resolveRequest(self: *Resolver, request: RequestedDependency) anyerror!usize {
+    fn resolveRequest(self: *Resolver, owner: usize, request: RequestedDependency) anyerror!usize {
         if (self.find(request.name)) |existing| {
             const builder = &self.builders.items[existing];
             if (!request.constraint.accepts(builder.package.version.?)) {
-                return self.fail("package dependency constraints have no common selected version");
+                return self.fail(try self.selectedVersionDiagnostic(owner, request, builder.package.version.?));
             }
             if (builder.state == .visiting) return self.fail("package dependency cycle");
             return existing;
         }
 
+        var available: ?Version = null;
         const local_root = try std.fs.path.join(self.allocator, &.{ self.local_root, request.name });
         try self.rejectLegacy(local_root);
         const local_manifest_path = try std.fs.path.join(self.allocator, &.{ local_root, "Package.json" });
@@ -313,6 +318,7 @@ pub const Resolver = struct {
             const manifest = try self.loadRequired(local_root);
             const version = try self.validateSelected(manifest, request.name, local_root, false);
             if (request.constraint.accepts(version)) return self.resolveSelected(local_root, manifest, request.name, version);
+            available = newest(available, version);
         }
 
         const shared_root = try std.fs.path.join(self.allocator, &.{ self.shared_root, request.name });
@@ -322,12 +328,13 @@ pub const Resolver = struct {
             const manifest = try self.loadRequired(shared_root);
             const version = try self.validateSelected(manifest, request.name, shared_root, false);
             if (request.constraint.accepts(version)) return self.resolveSelected(shared_root, manifest, request.name, version);
+            available = newest(available, version);
         }
 
-        if (try self.bestGlobal(request)) |selected| {
+        if (try self.bestGlobal(request, &available)) |selected| {
             return self.resolveSelected(selected.root, selected.manifest, request.name, selected.version);
         }
-        return self.fail("package dependency is absent or has no compatible version");
+        return self.fail(try self.unresolvedDependencyDiagnostic(owner, request, available));
     }
 
     const Selected = struct {
@@ -336,7 +343,7 @@ pub const Resolver = struct {
         version: Version,
     };
 
-    fn bestGlobal(self: *Resolver, request: RequestedDependency) !?Selected {
+    fn bestGlobal(self: *Resolver, request: RequestedDependency, available: *?Version) !?Selected {
         const global_root = self.global_root orelse return null;
         var directory = Io.Dir.cwd().openDir(self.io, global_root, .{ .iterate = true }) catch |err| switch (err) {
             error.FileNotFound, error.NotDir => return null,
@@ -354,12 +361,75 @@ pub const Resolver = struct {
             const manifest = try self.loadRequired(root);
             const version = try self.validateSelected(manifest, request.name, root, true);
             if (!folder_version.eql(version)) return self.fail("global package folder and manifest version differ");
+            available.* = newest(available.*, version);
             if (!request.constraint.accepts(version)) continue;
             if (best == null or version.order(best.?.version) == .gt) {
                 best = .{ .root = root, .manifest = manifest, .version = version };
             }
         }
         return best;
+    }
+
+    fn selectedVersionDiagnostic(self: *Resolver, owner: usize, request: RequestedDependency, selected: Version) ![]const u8 {
+        return std.fmt.allocPrint(
+            self.allocator,
+            "package '{s}' requires '{s}' {c}{d}.{d}.{d}, but version {d}.{d}.{d} is already selected",
+            .{
+                try self.ownerLabel(owner),
+                request.name,
+                constraintSymbol(request.constraint),
+                request.constraint.version.major,
+                request.constraint.version.minor,
+                request.constraint.version.patch,
+                selected.major,
+                selected.minor,
+                selected.patch,
+            },
+        );
+    }
+
+    fn unresolvedDependencyDiagnostic(
+        self: *Resolver,
+        owner: usize,
+        request: RequestedDependency,
+        available: ?Version,
+    ) ![]const u8 {
+        const owner_label = try self.ownerLabel(owner);
+        if (available) |version| return std.fmt.allocPrint(
+            self.allocator,
+            "package '{s}' requires '{s}' {c}{d}.{d}.{d}, but available version {d}.{d}.{d} is incompatible",
+            .{
+                owner_label,
+                request.name,
+                constraintSymbol(request.constraint),
+                request.constraint.version.major,
+                request.constraint.version.minor,
+                request.constraint.version.patch,
+                version.major,
+                version.minor,
+                version.patch,
+            },
+        );
+        return std.fmt.allocPrint(
+            self.allocator,
+            "package '{s}' requires '{s}' {c}{d}.{d}.{d}, but no package named '{s}' is available",
+            .{
+                owner_label,
+                request.name,
+                constraintSymbol(request.constraint),
+                request.constraint.version.major,
+                request.constraint.version.minor,
+                request.constraint.version.patch,
+                request.name,
+            },
+        );
+    }
+
+    fn ownerLabel(self: *Resolver, owner: usize) ![]const u8 {
+        const package = self.builders.items[owner].package;
+        const name = package.name orelse return "application";
+        const version = package.version orelse return name;
+        return std.fmt.allocPrint(self.allocator, "{s}@{d}.{d}.{d}", .{ name, version.major, version.minor, version.patch });
     }
 
     fn resolveSelected(
@@ -788,7 +858,8 @@ test "parse exact and caret stable versions" {
     try std.testing.expect((try Constraint.parse("^1.4.0")).accepts(try Version.parse("1.9.0")));
     try std.testing.expect(!(try Constraint.parse("^1.4.0")).accepts(try Version.parse("2.0.0")));
     try std.testing.expect((try Constraint.parse("^0.2.1")).accepts(try Version.parse("0.2.9")));
-    try std.testing.expect(!(try Constraint.parse("^0.2.1")).accepts(try Version.parse("0.3.0")));
+    try std.testing.expect((try Constraint.parse("^0.2.1")).accepts(try Version.parse("0.3.0")));
+    try std.testing.expect(!(try Constraint.parse("^0.2.1")).accepts(try Version.parse("1.0.0")));
     try std.testing.expectError(error.InvalidVersion, Version.parse("1.2.3-beta"));
 }
 
@@ -970,11 +1041,11 @@ test "discover packages beside the source directory parent" {
     try temporary.dir.createDirPath(std.testing.io, "Packages/STD/Module");
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Packages/GFX/Package.json",
-        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"dependencies\":{\"STD\":\"=1.0.0\"}}",
+        .data = "{\"name\":\"GFX\",\"version\":\"0.11.0\",\"dependencies\":{\"STD\":\"^0.7.0\"}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Packages/STD/Package.json",
-        .data = "{\"name\":\"STD\",\"version\":\"1.0.0\"}",
+        .data = "{\"name\":\"STD\",\"version\":\"0.8.0\"}",
     });
     const base = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
     const sandbox = try std.fs.path.join(allocator, &.{ base, "Sandbox" });
@@ -1083,7 +1154,26 @@ test "reject incompatible graph constraints missing packages and legacy manifest
     });
     var resolver = Resolver.init(allocator, std.testing.io, null);
     try std.testing.expectError(error.InvalidPackageGraph, resolver.resolve(base));
-    try std.testing.expectEqualStrings("package dependency is absent or has no compatible version", resolver.diagnostic.?);
+    try std.testing.expectEqualStrings(
+        "package 'application' requires 'Missing' =1.0.0, but no package named 'Missing' is available",
+        resolver.diagnostic.?,
+    );
+
+    try temporary.dir.createDirPath(std.testing.io, "Missing/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Missing/Package.json",
+        .data = "{\"name\":\"Missing\",\"version\":\"1.5.0\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Package.json",
+        .data = "{\"dependencies\":{\"Missing\":\"=2.0.0\"}}",
+    });
+    resolver = Resolver.init(allocator, std.testing.io, null);
+    try std.testing.expectError(error.InvalidPackageGraph, resolver.resolve(base));
+    try std.testing.expectEqualStrings(
+        "package 'application' requires 'Missing' =2.0.0, but available version 1.5.0 is incompatible",
+        resolver.diagnostic.?,
+    );
 
     try temporary.dir.createDirPath(std.testing.io, "A/Module");
     try temporary.dir.createDirPath(std.testing.io, "B/Module");
@@ -1107,7 +1197,7 @@ test "reject incompatible graph constraints missing packages and legacy manifest
     resolver = Resolver.init(allocator, std.testing.io, null);
     try std.testing.expectError(error.InvalidPackageGraph, resolver.resolve(base));
     try std.testing.expectEqualStrings(
-        "package dependency constraints have no common selected version",
+        "package 'B@1.0.0' requires 'Common' =2.0.0, but version 1.5.0 is already selected",
         resolver.diagnostic.?,
     );
 
