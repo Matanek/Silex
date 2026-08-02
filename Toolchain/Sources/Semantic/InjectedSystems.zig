@@ -2,6 +2,7 @@ const std = @import("std");
 const Ast = @import("../Ast.zig");
 const Ir = @import("../Ir.zig");
 const Model = @import("Model.zig");
+const Ownership = @import("Resources.zig");
 
 const application_name = "GFX.Bootstrap.Application";
 const resources_name = "GFX.Bootstrap.Resources";
@@ -45,7 +46,7 @@ pub fn analyze(self: anytype, function: Ast.Function, adapter: Ast.SystemAdapter
             .value = try std.fmt.allocPrint(
                 self.allocator,
                 "system '{s}' requires resource '{s}'",
-                .{ displayName(adapter.target), self.typeName(dependency.type) },
+                .{ displayName(adapter.target), self.typeName(dependency.source_type) },
             ),
         } });
         self.terminate(&builder, .{ .panic = .{ .message = message, .position = adapter.target_position } });
@@ -63,13 +64,23 @@ pub fn analyze(self: anytype, function: Ast.Function, adapter: Ast.SystemAdapter
             } });
             try arguments.append(self.allocator, value);
         } else {
-            const value = try self.newValue(&builder, dependency.type);
+            const value = try self.newValue(&builder, dependency.source_type);
             try self.emit(&builder, .{ .call = .{
                 .result = value,
                 .function = methodFunctionId(self.program, resources, getter),
                 .arguments = try self.allocator.dupe(Ir.ValueId, &.{current}),
             } });
-            try arguments.append(self.allocator, value);
+            if (dependency.kind == .query) {
+                try Ownership.retainValue(self, &builder, dependency.source_type, value);
+                const query_structure = dependency.type.structureIndex() orelse return error.InvalidSource;
+                const query = try self.newValue(&builder, dependency.type);
+                try self.emit(&builder, .{ .structure_init = .{
+                    .result = query,
+                    .structure = query_structure,
+                    .fields = try self.allocator.dupe(Ir.ValueId, &.{value}),
+                } });
+                try arguments.append(self.allocator, query);
+            } else try arguments.append(self.allocator, value);
         }
     }
 

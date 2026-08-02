@@ -22,6 +22,7 @@ pub fn prepareStructures(self: anytype) ![]const Ir.Structure {
         };
         for (structure.fields, 0..) |field, field_index| {
             if (field.type == .void and !structure.tuple_placeholder) return self.fail(field.name_position, "a structure field cannot have type 'void'");
+            if (isAccessPattern(self.program, field.type)) return self.fail(field.name_position, "borrowed access tuples cannot be stored in structure fields");
             for (structure.fields[0..field_index]) |previous| if (std.mem.eql(u8, field.name, previous.name)) {
                 const message = try std.fmt.allocPrint(self.allocator, "field '{s}' is already declared in this structure", .{field.name});
                 return self.fail(field.name_position, message);
@@ -88,6 +89,13 @@ pub fn prepareStructures(self: anytype) ![]const Ir.Structure {
         }
     };
     return structures;
+}
+
+fn isAccessPattern(program: Ast.Program, type_value: Ast.Type) bool {
+    const index = type_value.structureIndex() orelse return false;
+    if (index >= program.structures.len or !program.structures[index].is_tuple) return false;
+    for (program.structures[index].fields) |field| if (field.access_mode != .value) return true;
+    return false;
 }
 
 fn resolvedConformances(self: anytype, declaration: Ast.Structure) ![]const usize {

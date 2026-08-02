@@ -158,10 +158,14 @@ pub fn analyzeWhile(self: anytype, builder: anytype, function: Ast.Function, loo
 }
 
 pub fn analyzeFor(self: anytype, builder: anytype, function: Ast.Function, loop: Ast.ForStatement) !bool {
-    if (Support.findBinding(builder.bindings.items, loop.name) != null) {
-        const message = try std.fmt.allocPrint(self.allocator, "variable '{s}' is already declared in this scope", .{loop.name});
-        return self.fail(loop.name_position, message);
-    }
+    const bindings = if (loop.bindings.len == 0)
+        &[_]Ast.VariableDeclaration.DestructuredBinding{.{ .position = loop.name_position, .name = loop.name }}
+    else
+        loop.bindings;
+    for (bindings) |binding| if (Support.findBinding(builder.bindings.items, binding.name) != null) {
+        const message = try std.fmt.allocPrint(self.allocator, "variable '{s}' is already declared in this scope", .{binding.name});
+        return self.fail(binding.position, message);
+    };
     return switch (loop.source) {
         .collection => |source| analyzeCollectionFor(self, builder, function, loop, source),
         .range => |range| analyzeRangeFor(self, builder, function, loop, range),
@@ -170,6 +174,10 @@ pub fn analyzeFor(self: anytype, builder: anytype, function: Ast.Function, loop:
 
 fn analyzeCollectionFor(self: anytype, builder: anytype, function: Ast.Function, loop: Ast.ForStatement, source_expression: *Ast.Expression) !bool {
     const source = try self.analyzeExpression(builder, source_expression);
+    if (source.type.structureIndex()) |structure_index| {
+        const structure = self.program.structures[structure_index];
+        if (structure.query_pattern != null) return analyzeQueryFor(self, builder, function, loop, source_expression, source, structure);
+    }
     const collection = Collections.collectionForType(self.structures, source.type) orelse return self.fail(source_expression.position, "for source expects an array or list");
     const source_root: ?[]const u8 = switch (source_expression.value) {
         .identifier => |name| name,
@@ -287,6 +295,223 @@ fn analyzeCollectionFor(self: anytype, builder: anytype, function: Ast.Function,
         builder.bindings.shrinkRetainingCapacity(outer_binding_count);
     }
     return false;
+}
+
+fn analyzeQueryFor(
+    self: anytype,
+    builder: anytype,
+    function: Ast.Function,
+    loop: Ast.ForStatement,
+    source_expression: *Ast.Expression,
+    source: Model.TypedValue,
+    query: Ast.Structure,
+) !bool {
+    if (loop.bindings.len == 0) return self.fail(loop.name_position, "ECS.Query iteration requires tuple destructuring");
+    const pattern_type = query.query_pattern.?;
+    const pattern_index = pattern_type.structureIndex() orelse return error.InvalidSource;
+    const pattern = self.program.structures[pattern_index];
+    if (!pattern.is_tuple or pattern.fields.len != loop.bindings.len) {
+        return self.fail(loop.name_position, "ECS.Query bindings must match its component access pattern");
+    }
+    if (query.fields.len != 1) return error.InvalidSource;
+    const world_type = query.fields[0].type;
+    const world_index = world_type.structureIndex() orelse return error.InvalidSource;
+    const world = self.program.structures[world_index];
+    const world_value = try self.newValue(builder, world_type);
+    try self.emit(builder, .{ .field_load = .{ .result = world_value, .base = source.value, .field = 0 } });
+    const records_field = fieldNamed(world, "records") orelse return error.InvalidSource;
+    const records_type = world.fields[records_field].type;
+    const records_collection = Collections.collectionForType(self.structures, records_type) orelse return error.InvalidSource;
+    const record_type = records_collection.element;
+    const record_index = record_type.structureIndex() orelse return error.InvalidSource;
+    const record = self.program.structures[record_index];
+    const generation_field = fieldNamed(record, "current_generation") orelse return error.InvalidSource;
+    const alive_field = fieldNamed(record, "alive") orelse return error.InvalidSource;
+    const components_field = fieldNamed(record, "component_store") orelse return error.InvalidSource;
+    const resources_type = record.fields[components_field].type;
+    const resources_index = resources_type.structureIndex() orelse return error.InvalidSource;
+    const resources = self.program.structures[resources_index];
+    const records_value = try self.newValue(builder, records_type);
+    try self.emit(builder, .{ .field_load = .{ .result = records_value, .base = world_value, .field = records_field } });
+    const records_local = builder.local_types.items.len;
+    try builder.local_types.append(self.allocator, records_type);
+    try self.emit(builder, .{ .local_store = .{ .local = records_local, .operand = records_value } });
+
+    const index_local = builder.local_types.items.len;
+    try builder.local_types.append(self.allocator, .int);
+    try self.emit(builder, .{ .local_store = .{ .local = index_local, .operand = try emitInt(self, builder, 0) } });
+    const availability_count = builder.bindings.items.len;
+    const header_availability = try Availability.snapshot(self.allocator, builder.bindings.items, availability_count);
+    const condition_block = try self.newBlock(builder);
+    const candidate_block = try self.newBlock(builder);
+    const components_block = try self.newBlock(builder);
+    const matched_block = try self.newBlock(builder);
+    const update_block = try self.newBlock(builder);
+    const exit_block = try self.newBlock(builder);
+    self.terminate(builder, .{ .jump = condition_block });
+
+    builder.current_block = condition_block;
+    const index = try loadLocalValue(self, builder, index_local, .int);
+    const records = try loadLocalValue(self, builder, records_local, records_type);
+    const count = try self.newValue(builder, .int);
+    try self.emit(builder, .{ .collection_count = .{ .result = count, .collection = records } });
+    const has_entity = try emitBinary(self, builder, .less, index, count, .bool);
+    self.terminate(builder, .{ .branch = .{ .condition = has_entity, .then_block = candidate_block, .else_block = exit_block } });
+
+    builder.current_block = candidate_block;
+    const record_value = try self.newValue(builder, record_type);
+    try self.emit(builder, .{ .collection_load = .{
+        .result = record_value,
+        .collection = records,
+        .index = index,
+        .position = loop.position,
+    } });
+    const alive = try self.newValue(builder, .bool);
+    try self.emit(builder, .{ .field_load = .{ .result = alive, .base = record_value, .field = alive_field } });
+    self.terminate(builder, .{ .branch = .{ .condition = alive, .then_block = components_block, .else_block = update_block } });
+
+    builder.current_block = components_block;
+    const components = try self.newValue(builder, resources_type);
+    try self.emit(builder, .{ .field_load = .{ .result = components, .base = record_value, .field = components_field } });
+    const components_local = builder.local_types.items.len;
+    try builder.local_types.append(self.allocator, resources_type);
+    try self.emit(builder, .{ .local_store = .{ .local = components_local, .operand = components } });
+    var component_count: usize = 0;
+    for (pattern.fields) |field| {
+        if (!isEntityType(self, field.type)) component_count += 1;
+    }
+    if (component_count == 0) self.terminate(builder, .{ .jump = matched_block });
+    var component_index: usize = 0;
+    for (pattern.fields) |field| {
+        if (isEntityType(self, field.type)) continue;
+        const has_name = try std.fmt.allocPrint(self.allocator, "has<{s}>", .{self.typeName(field.type)});
+        const has_method = methodNamed(resources, has_name) orelse return error.InvalidSource;
+        const current_components = try loadLocalValue(self, builder, components_local, resources_type);
+        const present = try self.newValue(builder, .bool);
+        try self.emit(builder, .{ .call = .{
+            .result = present,
+            .function = methodFunctionId(self.program, resources_index, has_method),
+            .arguments = try self.allocator.dupe(Ir.ValueId, &.{current_components}),
+        } });
+        component_index += 1;
+        const next_match = if (component_index == component_count) matched_block else try self.newBlock(builder);
+        self.terminate(builder, .{ .branch = .{ .condition = present, .then_block = next_match, .else_block = update_block } });
+        builder.current_block = next_match;
+    }
+    const binding_count = builder.bindings.items.len;
+    const root = switch (source_expression.value) {
+        .identifier => |name| name,
+        else => "$query",
+    };
+    for (pattern.fields, loop.bindings) |field, binding| {
+        if (isEntityType(self, field.type)) {
+            const generation = try self.newValue(builder, .int);
+            try self.emit(builder, .{ .field_load = .{ .result = generation, .base = record_value, .field = generation_field } });
+            const entity = try self.newValue(builder, field.type);
+            try self.emit(builder, .{ .structure_init = .{
+                .result = entity,
+                .structure = field.type.structureIndex().?,
+                .fields = try self.allocator.dupe(Ir.ValueId, &.{ index, generation }),
+            } });
+            try builder.bindings.append(self.allocator, .{ .name = binding.name, .type = field.type, .value = entity });
+            continue;
+        }
+        const getter_name = try std.fmt.allocPrint(
+            self.allocator,
+            "{s}<{s}>",
+            .{ if (field.access_mode == .mutable) "get_mut" else "get", self.typeName(field.type) },
+        );
+        if (field.access_mode == .mutable) {
+            const getter_index = methodNamed(resources, getter_name) orelse return error.InvalidSource;
+            const components_reference = try self.newValue(builder, .address);
+            try self.emit(builder, .{ .local_address = .{ .result = components_reference, .local = components_local } });
+            const reference = try self.newValue(builder, .address);
+            try self.emit(builder, .{ .call = .{
+                .result = reference,
+                .function = methodFunctionId(self.program, resources_index, getter_index),
+                .arguments = try self.allocator.dupe(Ir.ValueId, &.{components_reference}),
+            } });
+            try builder.bindings.append(self.allocator, .{
+                .name = binding.name,
+                .type = field.type,
+                .reference = reference,
+                .mutable = true,
+                .borrowed_root = root,
+                .borrowed_mode = .mutable,
+            });
+        } else {
+            const getter_index = methodNamed(resources, getter_name) orelse return error.InvalidSource;
+            const current_components = try loadLocalValue(self, builder, components_local, resources_type);
+            const value = try self.newValue(builder, field.type);
+            try self.emit(builder, .{ .call = .{
+                .result = value,
+                .function = methodFunctionId(self.program, resources_index, getter_index),
+                .arguments = try self.allocator.dupe(Ir.ValueId, &.{current_components}),
+            } });
+            try builder.bindings.append(self.allocator, .{
+                .name = binding.name,
+                .type = field.type,
+                .value = value,
+                .borrowed_root = root,
+                .borrowed_mode = .read,
+            });
+        }
+    }
+    try builder.loops.append(self.allocator, .{
+        .continue_block = update_block,
+        .break_block = exit_block,
+        .availability_count = availability_count,
+        .drop_binding_count = binding_count,
+        .header_availability = header_availability,
+        .mutex_depth = builder.mutex_depth,
+    });
+    const loop_index = builder.loops.items.len - 1;
+    const terminated = try self.analyzeStatements(builder, function, loop.statements);
+    const loop_context = builder.loops.items[loop_index];
+    builder.loops.items.len -= 1;
+    if (!terminated) try Resources.emitActiveDrops(self, builder, binding_count);
+    builder.bindings.shrinkRetainingCapacity(binding_count);
+    if (!terminated) self.terminate(builder, .{ .jump = update_block });
+
+    builder.current_block = update_block;
+    const next = try emitBinary(
+        self,
+        builder,
+        .add,
+        try loadLocalValue(self, builder, index_local, .int),
+        try emitInt(self, builder, 1),
+        .int,
+    );
+    try self.emit(builder, .{ .local_store = .{ .local = index_local, .operand = next } });
+    self.terminate(builder, .{ .jump = condition_block });
+    builder.current_block = exit_block;
+    const exit_availability = try self.allocator.dupe(bool, header_availability);
+    for (loop_context.break_availabilities.items) |state| Availability.merge(exit_availability, state);
+    Availability.restore(builder.bindings.items, exit_availability);
+    return false;
+}
+
+fn fieldNamed(structure: Ast.Structure, name: []const u8) ?usize {
+    for (structure.fields, 0..) |field, index| if (std.mem.eql(u8, field.name, name)) return index;
+    return null;
+}
+
+fn isEntityType(self: anytype, type_value: Ast.Type) bool {
+    return std.mem.eql(u8, self.typeName(type_value), "GFX.ECS.Entity");
+}
+
+fn methodNamed(structure: Ast.Structure, name: []const u8) ?usize {
+    for (structure.methods, 0..) |method, index| if (std.mem.eql(u8, method.name, name)) return index;
+    return null;
+}
+
+fn methodFunctionId(program: Ast.Program, structure_index: usize, method_index: usize) Ir.FunctionId {
+    var result = program.functions.len;
+    for (program.structures) |structure| result += structure.constructors.len;
+    for (program.structures[0..structure_index]) |structure| {
+        if (!structure.is_protocol) result += structure.methods.len;
+    }
+    return result + method_index;
 }
 
 fn analyzeRangeFor(self: anytype, builder: anytype, function: Ast.Function, loop: Ast.ForStatement, range: Ast.ForStatement.Range) !bool {

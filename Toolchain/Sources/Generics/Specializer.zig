@@ -155,6 +155,7 @@ pub const Specializer = struct {
             for (@constCast(structure.conformances)) |*conformance| conformance.* = Remap.concreteType(conformance.*, map);
             for (@constCast(structure.extension_conformances)) |*conformance| conformance.protocol = Remap.concreteType(conformance.protocol, map);
             if (structure.collection) |collection| structure.collection.?.element = Remap.concreteType(collection.element, map);
+            if (structure.query_pattern) |pattern| structure.query_pattern = Remap.concreteType(pattern, map);
             for (@constCast(structure.fields)) |*field| {
                 field.type = Remap.concreteType(field.type, map);
                 if (field.default) |value| Remap.expressionTypes(value, map);
@@ -181,6 +182,7 @@ pub const Specializer = struct {
             if (function.intrinsic) |*intrinsic| switch (intrinsic.*) {
                 .system_adapter => |*adapter| for (@constCast(adapter.dependencies)) |*dependency| {
                     dependency.type = Remap.concreteType(dependency.type, map);
+                    dependency.source_type = Remap.concreteType(dependency.source_type, map);
                 },
                 else => {},
             };
@@ -221,6 +223,9 @@ pub const Specializer = struct {
     fn rewriteStructureAt(self: *Specializer, structure_index: usize, arguments: []const Ast.Type, specialization_file: ?usize) SpecializeError!void {
         var structure = self.structures.items[structure_index];
         structure.type_parameters = &.{};
+        if (std.mem.startsWith(u8, structure.name, "GFX.ECS.Query<") and arguments.len == 1) {
+            structure.query_pattern = arguments[0];
+        }
         const self_type = self.typeForName(structure.name) orelse return error.InvalidSource;
         if (structure.base) |base| structure.base = try self.rewriteType(base, arguments, structure.base_position);
         const conformances = try self.allocator.alloc(Ast.Type, structure.conformances.len);
@@ -426,12 +431,22 @@ pub const Specializer = struct {
             },
             .for_statement => |loop| value: {
                 var copy = loop;
+                const local_count = locals.items.len;
                 const element_type: ?Ast.Type = switch (loop.source) {
                     .collection => |source| element: {
                         const rewritten_source = try self.rewriteExpression(source, arguments, locals);
                         copy.source = .{ .collection = rewritten_source };
                         const source_type = self.inferExpressionType(rewritten_source, locals.items) orelse break :element null;
                         const structure = self.structureForType(source_type) orelse break :element null;
+                        if (structure.query_pattern) |pattern_type| {
+                            const pattern = self.structureForType(pattern_type) orelse break :element null;
+                            if (loop.bindings.len == pattern.fields.len) {
+                                for (loop.bindings, pattern.fields) |binding, field| {
+                                    try locals.append(self.allocator, .{ .name = binding.name, .type = field.type });
+                                }
+                            }
+                            break :element null;
+                        }
                         break :element if (structure.collection) |collection| collection.element else null;
                     },
                     .range => |range| range_value: {
@@ -442,7 +457,6 @@ pub const Specializer = struct {
                         break :range_value .int;
                     },
                 };
-                const local_count = locals.items.len;
                 if (element_type) |type_value| try locals.append(self.allocator, .{ .name = loop.name, .type = type_value });
                 copy.statements = try self.rewriteStatements(loop.statements, arguments, locals);
                 locals.shrinkRetainingCapacity(local_count);
@@ -1166,10 +1180,15 @@ pub const Specializer = struct {
         for (template.fields, 0..) |field, index| {
             fields[index] = field;
             fields[index].type = try self.rewriteType(field.type, arguments, position);
-            name = try std.fmt.allocPrint(self.allocator, "{s}{s}{s}{s}", .{
+            name = try std.fmt.allocPrint(self.allocator, "{s}{s}{s}{s}{s}", .{
                 name,
                 if (index == 0) "" else ", ",
                 if (template.tuple_named) try std.fmt.allocPrint(self.allocator, "{s}:", .{field.name}) else "",
+                switch (field.access_mode) {
+                    .value => "",
+                    .read => "@",
+                    .mutable => "&",
+                },
                 self.typeName(fields[index].type),
             });
         }

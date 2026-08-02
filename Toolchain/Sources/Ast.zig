@@ -316,6 +316,7 @@ pub const ForStatement = struct {
     position: Source.Position,
     name_position: Source.Position,
     name: []const u8,
+    bindings: []const VariableDeclaration.DestructuredBinding = &.{},
     mode: Mode,
     source: SourceValue,
     statements: []const Statement,
@@ -410,6 +411,9 @@ pub const StructureField = struct {
     name_position: Source.Position,
     name: []const u8,
     mutable: bool,
+    /// Access intent carried by non-runtime structural patterns such as an
+    /// ECS query tuple. Ordinary structure and tuple fields remain values.
+    access_mode: Parameter.Mode = .value,
     type: Type,
     default: ?*Expression,
 };
@@ -440,6 +444,9 @@ pub const Structure = struct {
     is_tuple: bool = false,
     tuple_named: bool = false,
     tuple_placeholder: bool = false,
+    /// Compiler-derived ECS query access pattern. This is metadata only and
+    /// never contributes to the runtime layout of the specialized structure.
+    query_pattern: ?Type = null,
     enclosing: ?[]const u8 = null,
     owner: usize = 0,
     position: Source.Position,
@@ -548,7 +555,9 @@ pub const SystemAdapter = struct {
 };
 
 pub const SystemDependency = struct {
+    kind: enum { resource, query } = .resource,
     type: Type,
+    source_type: Type,
     mode: Parameter.Mode,
     has_method: []const u8,
     get_method: []const u8,

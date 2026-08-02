@@ -57,3 +57,18 @@ but tuples do not introduce a separate multiple-return mechanism.
 
 Tuple layout, alignment, and return convention are compiler details. They are
 not a stable ABI and are unavailable in C interop declarations.
+
+## Describe borrowed access patterns
+
+`@` and `&` may annotate tuple elements when a generic API explicitly consumes
+the tuple as a non-runtime access pattern. For example, GFX uses this form for
+typed ECS queries:
+
+```sx
+ECS.Query<(@Velocity, &Transform)>
+```
+
+Such a pattern is not a tuple value and cannot be constructed, stored, returned
+or destructured independently. The consuming API creates lexical borrows for
+each iteration; the annotations remain read and mutable borrow intent rather
+than becoming storable reference types.

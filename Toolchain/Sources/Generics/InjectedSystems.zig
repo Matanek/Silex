@@ -4,6 +4,7 @@ const Source = @import("../Source.zig");
 
 const application_name = "GFX.Bootstrap.Application";
 const resources_name = "GFX.Bootstrap.Resources";
+const world_name = "GFX.ECS.World";
 
 pub fn rewriteRegistration(self: anytype, call: *Ast.Expression.Call, locals: anytype) !bool {
     if (call.receiver == null or call.arguments.len != 2 or call.named_arguments.len != 0) return false;
@@ -45,13 +46,18 @@ pub fn rewriteRegistration(self: anytype, call: *Ast.Expression.Call, locals: an
     const dependencies = try self.allocator.alloc(Ast.SystemDependency, signature.parameters.len);
     for (signature.parameters, 0..) |parameter, index| {
         const dependency_type = try self.rewriteType(parameter.type, &.{}, callback.position);
-        if (parameter.mode == .value) {
+        const dependency_structure = self.structureForType(dependency_type);
+        const is_query = dependency_structure != null and dependency_structure.?.query_pattern != null;
+        if (parameter.mode == .value and !is_query) {
             const message = try std.fmt.allocPrint(
                 self.allocator,
                 "system parameter {d} must use '@{s}' or '&{s}'",
                 .{ index + 1, self.typeName(dependency_type), self.typeName(dependency_type) },
             );
             return self.fail(callback.position, message);
+        }
+        if (is_query and parameter.mode != .value) {
+            return self.fail(callback.position, "ECS.Query is a derived value parameter and does not use '@' or '&'");
         }
         for (signature.parameters[0..index]) |previous| {
             const previous_type = try self.rewriteType(previous.type, &.{}, callback.position);
@@ -65,13 +71,60 @@ pub fn rewriteRegistration(self: anytype, call: *Ast.Expression.Call, locals: an
                 return self.fail(callback.position, message);
             }
         }
+        const source_type = if (is_query)
+            self.typeForName(world_name) orelse return error.InvalidSource
+        else
+            dependency_type;
+        for (dependencies[0..index]) |previous| {
+            if ((is_query and previous.source_type == source_type and previous.mode == .mutable) or
+                (!is_query and parameter.mode == .mutable and previous.kind == .query and previous.source_type == dependency_type))
+            {
+                return self.fail(callback.position, "a system cannot combine an ECS.Query with mutable World access");
+            }
+            if (is_query and previous.kind == .query and try queryPatternsConflict(self, previous.type, dependency_type)) {
+                return self.fail(callback.position, "system ECS queries have conflicting mutable component access");
+            }
+        }
+        if (is_query) {
+            const pattern_type = dependency_structure.?.query_pattern.?;
+            const pattern = self.structureForType(pattern_type) orelse return error.InvalidSource;
+            if (!pattern.is_tuple) return self.fail(callback.position, "ECS.Query expects a tuple access pattern");
+            const has_component = findGenericMethod(resource_source, "has") orelse return error.InvalidSource;
+            const get_component = findGenericMethod(resource_source, "get") orelse return error.InvalidSource;
+            const get_mut_component = findGenericMethod(resource_source, "get_mut") orelse return error.InvalidSource;
+            for (pattern.fields, 0..) |field, field_index| {
+                const is_entity = std.mem.eql(u8, self.typeName(field.type), "GFX.ECS.Entity");
+                if (is_entity) {
+                    if (field.access_mode != .value) return self.fail(field.name_position, "ECS.Entity query access does not use '@' or '&'");
+                    continue;
+                }
+                if (field.access_mode == .value) {
+                    return self.fail(field.name_position, "ECS.Query components must use '@' or '&'");
+                }
+                for (pattern.fields[0..field_index]) |previous| if (previous.type == field.type and
+                    (previous.access_mode == .mutable or field.access_mode == .mutable))
+                {
+                    const message = try std.fmt.allocPrint(self.allocator, "ECS.Query has conflicting mutable access to component '{s}'", .{self.typeName(field.type)});
+                    return self.fail(field.name_position, message);
+                };
+                _ = try self.instantiateMethod(resources_type, has_component, &.{field.type}, callback.position);
+                _ = try self.instantiateMethod(
+                    resources_type,
+                    if (field.access_mode == .mutable) get_mut_component else get_component,
+                    &.{field.type},
+                    callback.position,
+                );
+            }
+        }
         const has_template = findGenericMethod(resource_source, "has") orelse return error.InvalidSource;
         const get_template = findGenericMethod(resource_source, if (parameter.mode == .mutable) "get_mut" else "get") orelse return error.InvalidSource;
         dependencies[index] = .{
+            .kind = if (is_query) .query else .resource,
             .type = dependency_type,
+            .source_type = source_type,
             .mode = parameter.mode,
-            .has_method = try self.instantiateMethod(resources_type, has_template, &.{dependency_type}, callback.position),
-            .get_method = try self.instantiateMethod(resources_type, get_template, &.{dependency_type}, callback.position),
+            .has_method = try self.instantiateMethod(resources_type, has_template, &.{source_type}, callback.position),
+            .get_method = try self.instantiateMethod(resources_type, get_template, &.{source_type}, callback.position),
         };
     }
 
@@ -104,4 +157,16 @@ fn findGenericMethod(structure: Ast.Structure, name: []const u8) ?Ast.Function {
         if (method.type_parameters.len == 1 and std.mem.eql(u8, method.name, name)) return method;
     }
     return null;
+}
+
+fn queryPatternsConflict(self: anytype, left_type: Ast.Type, right_type: Ast.Type) !bool {
+    const left_query = self.structureForType(left_type) orelse return error.InvalidSource;
+    const right_query = self.structureForType(right_type) orelse return error.InvalidSource;
+    const left = self.structureForType(left_query.query_pattern orelse return error.InvalidSource) orelse return error.InvalidSource;
+    const right = self.structureForType(right_query.query_pattern orelse return error.InvalidSource) orelse return error.InvalidSource;
+    for (left.fields) |left_field| for (right.fields) |right_field| {
+        if (left_field.type == right_field.type and
+            (left_field.access_mode == .mutable or right_field.access_mode == .mutable)) return true;
+    };
+    return false;
 }
