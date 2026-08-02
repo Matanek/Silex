@@ -142,6 +142,66 @@ test "compile a named package entry with sibling dependencies" {
     try std.testing.expectEqual(@as(i64, 42), answer.integer);
 }
 
+test "load qualified package modules without use through principal module files" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.createDirPath(std.testing.io, "Math/Module/Geometry");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Package.json",
+        .data = "{\"dependencies\":{\"Math\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data =
+        \\func calculate() int {
+        \\    let vector = Math.Vec2(20, 22)
+        \\    let mode = Math.Mode.ready
+        \\    if mode == Math.Mode.ready {
+        \\        return vector.x + vector.y + Math.Geometry.bump() + Math.answer() + 1
+        \\    }
+        \\    return 0
+        \\}
+        \\func main() {}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Math/Package.json",
+        .data = "{\"name\":\"Math\",\"version\":\"1.0.0\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Math/Module/@module.sx",
+        .data = "public use Math.Values.answer",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Math/Module/Values.sx",
+        .data = "public func answer() int { return 100 }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Math/Module/Geometry/@module.sx",
+        .data = "public func bump() int { return 1 }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Math/Module/Vec2.sx",
+        .data = "public struct Vec2 { let x:int; let y:int; public init(x:int, y:int) { self.x = x; self.y = y } }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Math/Module/Mode.sx",
+        .data = "public enum Mode { ready }",
+    });
+
+    const input = try inputPath(allocator, &temporary.sub_path);
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(input);
+    const value = try Interpreter.invoke(allocator, compilation.ir, functionId(compilation.ir, "Main.calculate").?, &.{});
+    try std.testing.expectEqual(@as(i64, 144), value.integer);
+    try std.testing.expect(compiler.index.find("Math") != null);
+    try std.testing.expect(compiler.index.find("Math.Geometry") != null);
+}
+
 fn inputPath(allocator: std.mem.Allocator, sub_path: []const u8) ![]const u8 {
     return std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", sub_path, "Main.sx" });
 }

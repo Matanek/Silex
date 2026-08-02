@@ -987,11 +987,30 @@ test "enforce public package interfaces and direct dependency visibility" {
 
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Main.sx",
+        .data = "func main() { A.Api.hidden() }",
+    });
+    compiler = Compiler.init(allocator, std.testing.io);
+    try std.testing.expectError(error.InvalidSource, compiler.compile(input));
+    try std.testing.expectEqualStrings(
+        "function 'A.Api.hidden' is private outside its module",
+        compiler.diagnostic.?.message,
+    );
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
         .data = "use B.Private\nfunc main() {}",
     });
     compiler = Compiler.init(allocator, std.testing.io);
     try std.testing.expectError(error.InvalidSource, compiler.compile(input));
     try std.testing.expectEqualStrings("unknown module or declaration 'B.Private'", compiler.diagnostic.?.message);
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "func main() { B.Private.value() }",
+    });
+    compiler = Compiler.init(allocator, std.testing.io);
+    try std.testing.expectError(error.InvalidSource, compiler.compile(input));
+    try std.testing.expectEqualStrings("unknown function 'B.Private.value'", compiler.diagnostic.?.message);
 }
 
 test "compose and execute structures inside their declaring module" {

@@ -136,7 +136,13 @@ pub fn activateExpression(self: anytype, module: usize, expression: *Ast.Express
                 .field_assignment => |field| try self.activateExpression(module, field.value),
             };
         },
-        .field_access => |access| try self.activateExpression(module, access.base),
+        .field_access => |access| {
+            if (try expressionName(self.allocator, expression)) |name| {
+                if (try self.targetForCall(module, name)) |target| {
+                    try self.loadModule(target.module, module);
+                } else try self.activateExpression(module, access.base);
+            } else try self.activateExpression(module, access.base);
+        },
         .unary => |unary| try self.activateExpression(module, unary.operand),
         .binary => |binary| {
             try self.activateExpression(module, binary.left);

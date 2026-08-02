@@ -6,8 +6,13 @@ A source package keeps its modules under `Module/`:
 Math/
   Package.json
   Module/
+    @module.sx
     Vec3.sx
 ```
+
+`Module/@module.sx` is the optional principal module of a named package. For a
+package named `Math`, it provides `Math`; a nested
+`Module/Geometry/@module.sx` provides `Math.Geometry`.
 
 A named package may also provide modules selected for the current platform and
 exact compilation target:

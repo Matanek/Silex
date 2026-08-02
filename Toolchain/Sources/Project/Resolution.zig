@@ -107,6 +107,7 @@ pub fn enumReceiverTarget(self: anytype, module: usize, name: []const u8) !?Targ
     const separator = std.mem.indexOfScalar(u8, name, '.');
     if (separator == null) return enumTarget(self, module, name);
     if (try self.targetForCall(module, name)) |target| {
+        if (self.units[target.module].state != .loaded) return null;
         if (try enumTarget(self, target.module, target.declaration)) |enumeration| return enumeration;
     }
     for (self.index.providers, 0..) |_, target_module| {
