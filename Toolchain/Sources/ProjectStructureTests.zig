@@ -260,3 +260,39 @@ test "compose a public structure from a direct local package dependency" {
     try std.testing.expectEqualStrings("42\n", result.stdout);
     try std.testing.expect(compilation.interfaces[1].structures[0].id.owner.eql(.{ .package = "Vectors" }));
 }
+
+test "use a package child namespace without a principal module" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.createDirPath(std.testing.io, "GFX/Module/Geometry");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Package.json",
+        .data = "{\"dependencies\":{\"GFX\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Package.json",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/@Module.sx",
+        .data = "public func version() int { return 1 }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/Geometry/Cube.sx",
+        .data = "public struct Cube { public static func corners() int { return 8 } }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "use GFX.Geometry\nfunc main() { print(Geometry.Cube.corners()) }",
+    });
+
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(input);
+    const result = try @import("Interpreter.zig").runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("8\n", result.stdout);
+}
