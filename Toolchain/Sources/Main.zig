@@ -1096,12 +1096,7 @@ test {
     _ = @import("RecursiveResourceTests.zig");
     _ = @import("ResourceTests.zig");
     _ = @import("Lexer.zig");
-    _ = @import("Lsp/Completion.zig");
-    _ = @import("Lsp/Diagnostics.zig");
-    _ = @import("Lsp/ExtensionCompletionTests.zig");
-    _ = @import("Lsp/Protocol.zig");
-    _ = @import("Lsp/Server.zig");
-    _ = @import("Lsp/Workspace.zig");
+    _ = @import("LspTests.zig");
     _ = @import("MacOS/ExternalCallTests.zig");
     _ = @import("Parser.zig");
     _ = @import("Project.zig");

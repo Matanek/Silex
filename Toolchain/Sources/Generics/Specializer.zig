@@ -17,6 +17,12 @@ const Binding = struct {
     type: Ast.Type,
 };
 
+fn nestedNameMatches(candidate: []const u8, short_name: []const u8) bool {
+    return candidate.len > short_name.len and
+        std.mem.endsWith(u8, candidate, short_name) and
+        candidate[candidate.len - short_name.len - 1] == '.';
+}
+
 const FunctionSpecialization = struct {
     template_position: Source.Position,
     arguments: []const Ast.Type,
@@ -1130,7 +1136,26 @@ pub const Specializer = struct {
             );
             return self.fail(position, message);
         }
+        if (type_value.structureIndex()) |index| {
+            if (index >= self.type_names.items.len) return self.fail(position, "nominal type is unavailable");
+            const name = self.type_names.items[index];
+            const declared = self.sourceStructureForType(type_value) != null or
+                self.structureTemplateForType(type_value) != null or
+                self.enumForType(type_value) != null or
+                self.enumTemplateForType(type_value) != null or
+                self.hasNestedTypeNamed(name);
+            if (!declared) {
+                const message = try std.fmt.allocPrint(self.allocator, "unknown nominal type '{s}'", .{name});
+                return self.fail(position, message);
+            }
+        }
         return type_value;
+    }
+
+    fn hasNestedTypeNamed(self: *Specializer, name: []const u8) bool {
+        for (self.source.structures) |structure| if (nestedNameMatches(structure.name, name)) return true;
+        for (self.source.enums) |enumeration| if (nestedNameMatches(enumeration.name, name)) return true;
+        return false;
     }
 
     fn specializeStructureCall(self: *Specializer, call: Ast.Expression.Call) SpecializeError!?[]const u8 {

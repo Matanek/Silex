@@ -169,7 +169,21 @@ fn validateStructureCycle(self: anytype, index: usize, states: []StructureState)
     states[index] = .visiting;
     for (self.structures[index].fields) |field| {
         const field_type = field.type.optionalChild() orelse field.type;
-        if (field_type.structureIndex()) |nested| try validateStructureCycle(self, nested, states);
+        if (field_type.structureIndex()) |nested| {
+            if (nested >= self.structures.len or nested >= states.len) {
+                const declaration = findAstStructure(self, self.structures[index].name) orelse return self.fail(
+                    .{ .offset = 0, .line = 1, .column = 1 },
+                    "structure field references an unavailable type",
+                );
+                var position = declaration.name_position;
+                for (declaration.fields) |source_field| if (std.mem.eql(u8, source_field.name, field.name)) {
+                    position = source_field.name_position;
+                    break;
+                };
+                return self.fail(position, "structure field references an unavailable type");
+            }
+            try validateStructureCycle(self, nested, states);
+        }
     }
     states[index] = .complete;
 }

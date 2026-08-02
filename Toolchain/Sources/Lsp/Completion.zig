@@ -88,10 +88,58 @@ pub fn itemsAt(
     if (context.kind == .none or context.kind == .use_path) return allocator.alloc(CompletionItem, 0);
 
     var candidates: std.ArrayList(Candidate) = .empty;
+    const completing_try_alternative = try isTryAlternativePositionAt(allocator, source, context.prefix_start);
     const program = try parseForCompletion(allocator, source, cursor, context);
     const expected_type = if (program) |parsed| expectedTypeAt(source, parsed, cursor, context) else null;
+    const completing_try_error = try isTryErrorBindingPositionAt(allocator, source, context.prefix_start);
 
-    switch (context.kind) {
+    if (completing_try_error) {
+        const error_type: ?[]const u8 = if (program) |parsed|
+            try tryErrorTypeAt(allocator, source, parsed, context.prefix_start)
+        else
+            null;
+        try appendCandidate(allocator, &candidates, context, .{
+            .label = "error",
+            .kind = CompletionKind.variable,
+            .detail = if (error_type) |name|
+                try std.fmt.allocPrint(allocator, "error:{s}", .{name})
+            else
+                "Silex implicit error binding",
+            .insertText = "error {$0}",
+            .insertTextFormat = 2,
+        }, 0, false);
+        try appendCandidate(allocator, &candidates, context, .{
+            .label = "{}",
+            // This is a language construct whose insertion uses snippet syntax. Reporting
+            // CompletionItemKind.Snippet would let editors hide it with user snippets.
+            .kind = CompletionKind.keyword,
+            .detail = "Silex fallback block",
+            .insertText = "{$0}",
+            .insertTextFormat = 2,
+        }, 1, false);
+    }
+
+    const contextual_try_alternative = completing_try_alternative and program != null;
+    if (contextual_try_alternative) {
+        try appendCandidate(allocator, &candidates, context, .{
+            .label = "else",
+            // Keep the semantic kind independent from InsertTextFormat.Snippet: Zed may
+            // disable user snippets while language keywords must remain available.
+            .kind = CompletionKind.keyword,
+            .detail = "Silex fallback branch",
+            .insertText = "else {$0}",
+            .insertTextFormat = 2,
+        }, 0, false);
+        try appendCandidate(allocator, &candidates, context, .{
+            .label = "else error",
+            .kind = CompletionKind.keyword,
+            .detail = "Silex fallback branch with implicit error binding",
+            .insertText = "else error {$0}",
+            .insertTextFormat = 2,
+        }, 1, false);
+    }
+
+    if (!contextual_try_alternative and !completing_try_error) switch (context.kind) {
         .member => if (program) |parsed| try appendMembers(
             allocator,
             &candidates,
@@ -224,12 +272,15 @@ pub fn itemsAt(
                 expected_type,
             );
             if (context.kind == .statement) try appendStatementKeywords(allocator, &candidates, context);
+            if (context.kind == .expression) try appendKeywords(allocator, &candidates, context, &.{
+                .{ "try", "Silex result propagation" },
+            }, 50);
             if (context.allow_conversion) try appendKeywords(allocator, &candidates, context, &.{
                 .{ "as", "Silex explicit conversion" },
             }, 65);
         } else try appendLexicalSymbols(allocator, &candidates, source, cursor, context),
         else => {},
-    }
+    };
 
     std.mem.sort(Candidate, candidates.items, {}, candidateLessThan);
     const result = try allocator.alloc(CompletionItem, candidates.items.len);
@@ -237,11 +288,11 @@ pub fn itemsAt(
         result[index] = candidate.item;
         result[index].sortText = try std.fmt.allocPrint(allocator, "{d:0>3}-{d:0>6}", .{ candidate.priority, index });
         result[index].filterText = candidate.item.label;
-        result[index].insertText = if (candidate.callable)
+        result[index].insertText = candidate.item.insertText orelse if (candidate.callable)
             try insertTextForAt(allocator, candidate.item, source, cursor)
         else
             candidate.item.label;
-        result[index].insertTextFormat = if (candidate.callable)
+        result[index].insertTextFormat = candidate.item.insertTextFormat orelse if (candidate.callable)
             insertTextFormatForAt(candidate.item, source, cursor)
         else
             null;
@@ -418,6 +469,20 @@ pub fn isTypePositionAt(allocator: Allocator, source: []const u8, prefix_start: 
         scope.pending_callable,
         isNominalRelationPosition(line_tokens),
     ) or isTypeArgumentPrefix(source, prefix_start);
+}
+
+pub fn isQualifiedTypePositionAt(
+    allocator: Allocator,
+    source: []const u8,
+    prefix_start: usize,
+) !bool {
+    var start = prefix_start;
+    while (start != 0) {
+        const character = source[start - 1];
+        if (!std.ascii.isAlphanumeric(character) and character != '_' and character != '.') break;
+        start -= 1;
+    }
+    return isTypePositionAt(allocator, source, start);
 }
 
 pub fn isReturnExpressionAt(allocator: Allocator, source: []const u8, cursor: usize) !bool {
@@ -1012,18 +1077,27 @@ fn appendCandidate(
     priority: u8,
     callable: bool,
 ) !void {
-    const matches = if (item.kind == CompletionKind.keyword or item.kind == CompletionKind.value)
-        std.mem.startsWith(u8, item.label, context.prefix)
-    else
-        std.mem.indexOf(u8, item.label, context.prefix) != null;
+    const prefix_match = std.mem.startsWith(u8, item.label, context.prefix);
+    const matches = prefix_match or
+        (item.kind != CompletionKind.keyword and item.kind != CompletionKind.value and
+            std.mem.indexOf(u8, item.label, context.prefix) != null);
     if (!matches) return;
+    const ranked_priority = if (prefix_match) priority else priority +| 80;
     for (candidates.items, 0..) |existing, index| {
         if (!std.mem.eql(u8, existing.item.label, item.label)) continue;
         if (callable and existing.callable and !std.mem.eql(u8, existing.item.detail, item.detail)) continue;
-        if (priority < existing.priority) candidates.items[index] = .{ .item = item, .priority = priority, .callable = callable };
+        if (ranked_priority < existing.priority) candidates.items[index] = .{
+            .item = item,
+            .priority = ranked_priority,
+            .callable = callable,
+        };
         return;
     }
-    try candidates.append(allocator, .{ .item = item, .priority = priority, .callable = callable });
+    try candidates.append(allocator, .{
+        .item = item,
+        .priority = ranked_priority,
+        .callable = callable,
+    });
 }
 
 fn candidateLessThan(_: void, left: Candidate, right: Candidate) bool {
@@ -1208,6 +1282,59 @@ fn tryErrorLocal(program: Ast.Program, tokens: []const Token, else_index: usize,
         else
             null;
         return .{ .name = "error", .type_name = type_name, .depth = depth + 1 };
+    }
+    return null;
+}
+
+pub fn isTryErrorBindingPositionAt(allocator: Allocator, source: []const u8, prefix_start: usize) !bool {
+    const tokens = try tokensUntil(allocator, source, prefix_start);
+    if (tokens.len == 0 or tokens[tokens.len - 1].tag != .keyword_else) return false;
+    var index = tokens.len - 1;
+    while (index != 0) {
+        index -= 1;
+        switch (tokens[index].tag) {
+            .semicolon, .left_brace, .right_brace => return false,
+            .keyword_try => return true,
+            else => {},
+        }
+    }
+    return false;
+}
+
+pub fn isTryAlternativePositionAt(allocator: Allocator, source: []const u8, prefix_start: usize) !bool {
+    const tokens = try tokensUntil(allocator, source, prefix_start);
+    if (tokens.len == 0 or tokens[tokens.len - 1].tag != .right_parenthesis) return false;
+    const trailing = source[tokens[tokens.len - 1].end..prefix_start];
+    if (std.mem.trim(u8, trailing, " \t\r\n").len != 0) return false;
+    var index = tokens.len - 1;
+    while (index != 0) {
+        index -= 1;
+        switch (tokens[index].tag) {
+            .keyword_try => return true,
+            .keyword_else, .semicolon, .left_brace, .right_brace => return false,
+            else => {},
+        }
+    }
+    return false;
+}
+
+fn tryErrorTypeAt(
+    allocator: Allocator,
+    source: []const u8,
+    program: Ast.Program,
+    prefix_start: usize,
+) !?[]const u8 {
+    const tokens = try tokensUntil(allocator, source, prefix_start);
+    if (tokens.len == 0 or tokens[tokens.len - 1].tag != .keyword_else) return null;
+    var index = tokens.len - 1;
+    while (index != 0) {
+        index -= 1;
+        const token = tokens[index];
+        if (token.tag == .semicolon or token.tag == .left_brace or token.tag == .right_brace) return null;
+        if (token.tag != .keyword_try) continue;
+        if (index + 2 >= tokens.len or tokens[index + 1].tag != .identifier or
+            tokens[index + 2].tag != .left_parenthesis) return null;
+        return tryCallErrorType(program, tokens[index + 1].lexeme);
     }
     return null;
 }
@@ -1492,7 +1619,13 @@ fn parseForCompletion(
     const before_prefix = std.mem.trim(u8, source[line_start..context.prefix_start], " \t\r");
     const for_source = isForSourceLine(before_prefix);
     const for_body_follows = for_source and blockFollowsCompletion(source, cursor);
-    const placeholder: []const u8 = switch (context.kind) {
+    const completing_try_error = try isTryErrorBindingPositionAt(allocator, source, context.prefix_start);
+    const completing_try_alternative = try isTryAlternativePositionAt(allocator, source, context.prefix_start);
+    const placeholder: []const u8 = if (completing_try_error)
+        "error"
+    else if (completing_try_alternative)
+        "else {}"
+    else switch (context.kind) {
         .member => if (callFollows(source, cursor))
             if (context.prefix.len == 0) "__completion" else ""
         else if (context.prefix.len != 0)

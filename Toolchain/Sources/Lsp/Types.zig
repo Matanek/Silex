@@ -64,7 +64,7 @@ pub const CompletionItem = struct {
 
 pub const CompletionOptions = struct {
     resolveProvider: bool = false,
-    triggerCharacters: []const []const u8 = &.{"."},
+    triggerCharacters: []const []const u8 = &.{ ".", ":", "<", ",", " ", ")", "e" },
 };
 
 pub const CompletionTriggerKind = enum(u8) {

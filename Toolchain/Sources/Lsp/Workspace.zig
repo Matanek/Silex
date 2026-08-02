@@ -445,20 +445,6 @@ fn hasLocalNominal(program: Ast.Program, name: []const u8) bool {
     return false;
 }
 
-fn isNominalRelationLine(line: []const u8) bool {
-    var lexer = LexerModule.Lexer.init(line);
-    var declaration = false;
-    while (true) {
-        const token = lexer.next() catch return false;
-        if (token.tag == .end) return false;
-        switch (token.tag) {
-            .keyword_struct, .keyword_class, .keyword_extend => declaration = true,
-            .colon => if (declaration) return true,
-            else => {},
-        }
-    }
-}
-
 fn queryAt(
     allocator: Allocator,
     source: []const u8,
@@ -487,7 +473,7 @@ fn queryAt(
         Completion.cascadeReceiver(source, prefix_start - 2)
     else
         Completion.memberReceiver(source, prefix_start - 1)) orelse return null;
-    const qualified_type = try isQualifiedTypePrefix(allocator, source, prefix_start);
+    const qualified_type = try Completion.isQualifiedTypePositionAt(allocator, source, prefix_start);
     const current_program = try parseCurrentAtCompletion(
         allocator,
         source,
@@ -1319,7 +1305,6 @@ fn parseCurrentAtCompletion(
         newline + 1
     else
         0;
-    if (!isNominalRelationLine(source[line_start..prefix_start])) return null;
 
     const line_end = if (std.mem.indexOfScalarPos(u8, source, cursor, '\n')) |newline|
         newline + 1
@@ -1771,16 +1756,6 @@ fn prefixStart(source: []const u8, cursor: usize) usize {
 
 fn matchesPrefix(label: []const u8, prefix: []const u8) bool {
     return std.mem.indexOf(u8, label, prefix) != null;
-}
-
-fn isQualifiedTypePrefix(allocator: Allocator, source: []const u8, prefix_start: usize) !bool {
-    var start = prefix_start;
-    while (start != 0) {
-        const character = source[start - 1];
-        if (!std.ascii.isAlphanumeric(character) and character != '_' and character != '.') break;
-        start -= 1;
-    }
-    return Completion.isTypePositionAt(allocator, source, start);
 }
 
 fn lastSegment(path: []const u8) []const u8 {

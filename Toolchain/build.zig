@@ -98,6 +98,16 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run compiler tests");
     test_step.dependOn(&test_command.step);
 
+    const lsp_test_module = b.createModule(.{
+        .root_source_file = b.path("Sources/LspTests.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const lsp_tests = b.addTest(.{ .root_module = lsp_test_module });
+    const lsp_test_command = b.addRunArtifact(lsp_tests);
+    const lsp_test_step = b.step("test-lsp", "Run the language-server contract tests");
+    lsp_test_step.dependOn(&lsp_test_command.step);
+
     const check_step = b.step("check", "Build and test the toolchain");
     check_step.dependOn(b.getInstallStep());
     check_step.dependOn(&test_command.step);
