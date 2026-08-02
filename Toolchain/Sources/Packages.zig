@@ -196,10 +196,7 @@ pub const Resolver = struct {
             std.fs.path.dirname(project_root) orelse project_root
         else
             project_root;
-        self.shared_root = try std.fs.path.join(self.allocator, &.{
-            std.fs.path.dirname(project_root) orelse ".",
-            "Packages",
-        });
+        self.shared_root = try self.findSharedRoot(project_root);
         const named_root = root_manifest != null and root_manifest.?.name != null;
         const roots = try self.moduleRoots(project_root, named_root);
         try self.builders.append(self.allocator, .{
@@ -228,6 +225,21 @@ pub const Resolver = struct {
             packages[index] = builder.package;
         }
         return .{ .packages = packages, .explicit = root_manifest != null };
+    }
+
+    fn findSharedRoot(self: *Resolver, project_root: []const u8) ![]const u8 {
+        const parent = std.fs.path.dirname(project_root) orelse ".";
+        var directory = parent;
+        while (true) {
+            const candidate = try std.fs.path.join(self.allocator, &.{ directory, "Packages" });
+            if (try exists(self.io, candidate)) return candidate;
+
+            if (std.mem.eql(u8, directory, ".")) break;
+            const next = std.fs.path.dirname(directory) orelse ".";
+            if (std.mem.eql(u8, next, directory)) break;
+            directory = next;
+        }
+        return std.fs.path.join(self.allocator, &.{ parent, "Packages" });
     }
 
     fn resolveAdjacent(self: *Resolver) !void {
@@ -973,6 +985,28 @@ test "discover packages beside the source directory parent" {
     try std.testing.expect(std.mem.endsWith(u8, graph.packages[1].root, "Packages/GFX"));
     try std.testing.expectEqualStrings("STD", graph.packages[2].name.?);
     try std.testing.expectEqual(@as(usize, 2), graph.packages[0].dependencies.len);
+}
+
+test "discover shared packages above a nested application" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.createDirPath(std.testing.io, "Sandbox/Lighting");
+    try temporary.dir.createDirPath(std.testing.io, "Packages/GFX/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Packages/GFX/Package.json",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\"}",
+    });
+    const base = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const application = try std.fs.path.join(allocator, &.{ base, "Sandbox", "Lighting" });
+    var resolver = Resolver.init(allocator, std.testing.io, null);
+    const graph = try resolver.resolve(application);
+    try std.testing.expectEqual(@as(usize, 2), graph.packages.len);
+    try std.testing.expectEqualStrings("GFX", graph.packages[1].name.?);
+    try std.testing.expect(std.mem.endsWith(u8, graph.packages[1].root, "Packages/GFX"));
 }
 
 test "reject path fields conflicts and package cycles" {

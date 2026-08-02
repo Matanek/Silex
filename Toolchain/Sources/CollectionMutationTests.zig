@@ -75,3 +75,22 @@ test "mutate a dynamic list stored in a mutable field" {
     const result = try Interpreter.runCapture(allocator, compilation.ir);
     try std.testing.expectEqualStrings("42\n", result.stdout);
 }
+
+test "mutate fields of collection elements in place" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\struct Position { var x:int; var y:int }
+        \\struct Vertex { var position:Position }
+        \\func main() {
+        \\    var vertices:Vertex[] = [Vertex(position:Position(x:1, y:2))]
+        \\    vertices[0].position.x = 7
+        \\    vertices[0].position.y += 3
+        \\    print(vertices[0].position.x, " ", vertices[0].position.y)
+        \\}
+    );
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("7 5\n", result.stdout);
+}

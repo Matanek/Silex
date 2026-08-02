@@ -27,7 +27,6 @@ const loadStack = A64.loadStack;
 const storeByte = A64.storeByte;
 const store64 = A64.store64;
 const load64 = A64.load64;
-const addressRelative = A64.addressRelative;
 const serviceCall = A64.serviceCall;
 const addSetFlags = A64.addSetFlags;
 const subtractSetFlags = A64.subtractSetFlags;
@@ -235,7 +234,11 @@ fn encodeForPlatform(allocator: Allocator, program: Machine.Program, entry: Entr
             std.debug.print("invalid address fixup function={d} offsets={d}\n", .{ fixup.function, offsets.len });
             return error.InvalidMachineProgram;
         }
-        try patchAdr(words.items, fixup.at, offsets[fixup.function]);
+        try patchPageAddress(words.items, fixup.at, offsets[fixup.function]);
+        try address_sites.append(allocator, .{
+            .instruction_offset = @intCast(fixup.at * @sizeOf(u32)),
+            .target_offset = offsets[fixup.function],
+        });
     }
 
     const machine_code_size = words.items.len * 4;
@@ -708,7 +711,7 @@ fn encodeFunction(
             .binary => |binary| try encodeBinary(allocator, words, &fixups, function, binary),
             .function_address => |address| {
                 try function_addresses.append(allocator, .{ .at = words.items.len, .function = address.function });
-                try words.append(allocator, addressRelative(.x9));
+                try appendRelocatableAddress(allocator, words, .x9);
                 try words.append(allocator, storeStack(.x9, address.result));
             },
             .call => |call| {
@@ -1875,6 +1878,21 @@ test "form large stack addresses from sp" {
     try std.testing.expectEqual(
         addRegisters(.x10, .x10, .x14),
         words.items[words.items.len - 1],
+    );
+}
+
+test "form function addresses beyond the ADR range" {
+    var words = [_]u32{
+        A64.addressPage(.x9),
+        A64.addSubtractImmediate(.x9, .x9, 0, true),
+    };
+
+    try patchPageAddress(&words, 0, 2 * 1024 * 1024);
+
+    try std.testing.expect(words[0] != A64.addressPage(.x9));
+    try std.testing.expectEqual(
+        A64.addSubtractImmediate(.x9, .x9, 0, true),
+        words[1],
     );
 }
 

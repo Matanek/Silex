@@ -233,6 +233,7 @@ pub const AssignmentTarget = struct {
     type_arguments: []const Type = &.{},
     fields: []const Field = &.{},
     indices: []const Index = &.{},
+    indexed_fields: []const Field = &.{},
 
     pub const Field = struct {
         name_position: Source.Position,

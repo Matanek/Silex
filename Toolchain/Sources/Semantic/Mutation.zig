@@ -20,7 +20,7 @@ const PathStep = union(enum) {
 
 pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.AssignmentStatement) !void {
     const target = assignment.target;
-    if (StaticMembers.ownerIndex(self, target.name)) |structure_index| if (target.fields.len == 1 and target.indices.len == 0) {
+    if (StaticMembers.ownerIndex(self, target.name)) |structure_index| if (target.fields.len == 1 and target.indices.len == 0 and target.indexed_fields.len == 0) {
         if (StaticMembers.find(self, structure_index, target.fields[0].name)) |field| {
             if (!Visibility.memberVisible(self, field.owner, field.declaration, target.fields[0].name_position)) return self.fail(target.fields[0].name_position, "static field is unavailable here");
             if (!field.declaration.mutable) return self.fail(target.fields[0].name_position, "cannot assign to immutable static field");
@@ -45,16 +45,16 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
         return self.fail(target.name_position, message);
     };
     const binding_index = Support.findBindingIndex(builder.bindings.items, target.name).?;
-    if (Collections.isViewType(self.structures, binding.type) and target.fields.len == 0 and target.indices.len == 0) {
+    if (Collections.isViewType(self.structures, binding.type) and target.fields.len == 0 and target.indices.len == 0 and target.indexed_fields.len == 0) {
         return self.fail(target.name_position, "a view binding cannot be replaced as a whole");
     }
     if (binding.borrowed_root == null) try Borrowing.ensureRootUnborrowed(self, builder, target.name, target.name_position);
-    const complete_assignment = target.fields.len == 0 and target.indices.len == 0 and assignment.operator == .assign;
+    const complete_assignment = target.fields.len == 0 and target.indices.len == 0 and target.indexed_fields.len == 0 and assignment.operator == .assign;
     if (!binding.available and !(binding.mutable and complete_assignment)) {
         const message = try std.fmt.allocPrint(self.allocator, "value '{s}' was moved and is unavailable", .{target.name});
         return self.fail(target.name_position, message);
     }
-    const has_path = target.fields.len != 0 or target.indices.len != 0;
+    const has_path = target.fields.len != 0 or target.indices.len != 0 or target.indexed_fields.len != 0;
     if (!binding.mutable and !has_path) return failImmutableBinding(self, assignment, binding.parameter, target.name, target.name_position);
     const read_only_path = binding.parameter_mode == .read or binding.borrowed_mode == .read;
     if (has_path and read_only_path) {
@@ -65,7 +65,7 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
         return failImmutableBinding(self, assignment, binding.parameter, target.name, target.name_position);
     }
 
-    if (target.fields.len == 0 and target.indices.len == 0) {
+    if (target.fields.len == 0 and target.indices.len == 0 and target.indexed_fields.len == 0) {
         if (assignment.value) |value| if (Moves.isSelfMove(value, target.name)) {
             const message = try std.fmt.allocPrint(self.allocator, "cannot move value '{s}' into itself", .{target.name});
             return self.fail(value.position, message);
@@ -89,104 +89,15 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
     var current_type = binding.type;
     var current_value = root;
     var mutable_path = binding.mutable;
-    for (target.fields) |target_field| {
-        const structure_index = current_type.structureIndex() orelse {
-            const message = try std.fmt.allocPrint(self.allocator, "type '{s}' has no fields", .{self.typeName(current_type)});
-            return self.fail(target_field.name_position, message);
-        };
-        if (Enums.findByType(self, current_type) != null) {
-            if (std.mem.eql(u8, target_field.name, "raw_value")) {
-                return self.fail(target_field.name_position, "enum property 'raw_value' is read-only");
-            }
-            const message = try std.fmt.allocPrint(self.allocator, "type '{s}' has no assignable fields", .{self.typeName(current_type)});
-            return self.fail(target_field.name_position, message);
-        }
-        const structure = self.structures[structure_index];
-        if (structure.is_tuple) {
-            for (structure.fields) |field| {
-                if (!std.mem.eql(u8, field.name, target_field.name)) continue;
-                const message = try std.fmt.allocPrint(
-                    self.allocator,
-                    "cannot assign through immutable field '{s}'",
-                    .{field.name},
-                );
-                return self.fail(target_field.name_position, message);
-            }
-            const message = try std.fmt.allocPrint(
-                self.allocator,
-                "tuple '{s}' has no field named '{s}'",
-                .{ structure.name, target_field.name },
-            );
-            return self.fail(target_field.name_position, message);
-        }
-        if (structure.is_class) mutable_path = true;
-        const source_structure = self.program.structures[structure_index];
-        if (source_structure.drop != null and !self.ownerStorageVisible(structure_index, target_field.name_position)) {
-            return self.fail(target_field.name_position, "owner structure storage is private to its declaring file and direct module users");
-        }
-        if (source_structure.is_local and target_field.name_position.file != source_structure.position.file) {
-            const message = try std.fmt.allocPrint(
-                self.allocator,
-                "members of local structure '{s}' are unavailable outside its source file",
-                .{structure.name},
-            );
-            return self.fail(target_field.name_position, message);
-        }
-        if (source_structure.is_internal and self.owner_context != source_structure.owner) {
-            const message = try std.fmt.allocPrint(
-                self.allocator,
-                "members of internal structure '{s}' are unavailable outside its package",
-                .{source_structure.name},
-            );
-            return self.fail(target_field.name_position, message);
-        }
-        var selected: ?usize = null;
-        for (structure.fields, 0..) |field, field_index| {
-            if (std.mem.eql(u8, field.name, target_field.name)) {
-                selected = field_index;
-                break;
-            }
-        }
-        const field_index = selected orelse {
-            const message = try std.fmt.allocPrint(
-                self.allocator,
-                "structure '{s}' has no field named '{s}'",
-                .{ structure.name, target_field.name },
-            );
-            return self.fail(target_field.name_position, message);
-        };
-        const field = structure.fields[field_index];
-        const inherited = Inheritance.fieldByIndex(self, structure_index, field_index) orelse return error.InvalidSource;
-        const source_field = inherited.declaration;
-        if (!Visibility.memberVisible(self, inherited.owner, source_field, target_field.name_position)) {
-            const message = if (source_field.is_local)
-                try std.fmt.allocPrint(self.allocator, "field '{s}' is local to its source file", .{field.name})
-            else
-                try std.fmt.allocPrint(self.allocator, "field '{s}' is {s} and unavailable here", .{ field.name, Visibility.name(source_field) });
-            return self.fail(target_field.name_position, message);
-        }
-        if (!field.mutable) {
-            const message = try std.fmt.allocPrint(
-                self.allocator,
-                "cannot assign through immutable field '{s}'",
-                .{field.name},
-            );
-            return self.fail(target_field.name_position, message);
-        }
-        try steps.append(self.allocator, .{ .field = .{
-            .base = current_value,
-            .structure = structure_index,
-            .field = field_index,
-        } });
-        const field_value = try self.newValue(builder, field.type);
-        try self.emit(builder, .{ .field_load = .{
-            .result = field_value,
-            .base = current_value,
-            .field = field_index,
-        } });
-        current_type = field.type;
-        current_value = field_value;
-    }
+    for (target.fields) |target_field| try analyzeFieldStep(
+        self,
+        builder,
+        &steps,
+        &current_type,
+        &current_value,
+        &mutable_path,
+        target_field,
+    );
 
     for (target.indices) |target_index| {
         const collection = Collections.collectionForType(self.structures, current_type) orelse {
@@ -215,10 +126,33 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
         current_value = element;
     }
 
+    for (target.indexed_fields) |target_field| try analyzeFieldStep(
+        self,
+        builder,
+        &steps,
+        &current_type,
+        &current_value,
+        &mutable_path,
+        target_field,
+    );
+
     if (!mutable_path) return failImmutableBinding(self, assignment, binding.parameter, target.name, target.name_position);
 
-    const final_name = if (target.indices.len != 0) "collection element" else target.fields[target.fields.len - 1].name;
-    var replacement = try analyzeReplacement(self, builder, assignment, current_type, current_value, final_name, target.indices.len == 0);
+    const final_name = if (target.indexed_fields.len != 0)
+        target.indexed_fields[target.indexed_fields.len - 1].name
+    else if (target.indices.len != 0)
+        "collection element"
+    else
+        target.fields[target.fields.len - 1].name;
+    var replacement = try analyzeReplacement(
+        self,
+        builder,
+        assignment,
+        current_type,
+        current_value,
+        final_name,
+        target.indices.len == 0 or target.indexed_fields.len != 0,
+    );
     if (assignment.operator == .assign) {
         const class_owned_field = if (steps.items.len != 0) switch (steps.items[steps.items.len - 1]) {
             .field => |step| self.structures[step.structure].is_class,
@@ -275,6 +209,113 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
     if (binding.local != null or binding.reference != null) {
         try storeBinding(self, builder, binding, replacement);
     }
+}
+
+fn analyzeFieldStep(
+    self: anytype,
+    builder: anytype,
+    steps: *std.ArrayList(PathStep),
+    current_type: *Ast.Type,
+    current_value: *Ir.ValueId,
+    mutable_path: *bool,
+    target_field: Ast.AssignmentTarget.Field,
+) !void {
+    const structure_index = current_type.*.structureIndex() orelse {
+        const message = try std.fmt.allocPrint(self.allocator, "type '{s}' has no fields", .{self.typeName(current_type.*)});
+        return self.fail(target_field.name_position, message);
+    };
+    if (Enums.findByType(self, current_type.*) != null) {
+        if (std.mem.eql(u8, target_field.name, "raw_value")) {
+            return self.fail(target_field.name_position, "enum property 'raw_value' is read-only");
+        }
+        const message = try std.fmt.allocPrint(self.allocator, "type '{s}' has no assignable fields", .{self.typeName(current_type.*)});
+        return self.fail(target_field.name_position, message);
+    }
+    const structure = self.structures[structure_index];
+    if (structure.is_tuple) {
+        for (structure.fields) |field| {
+            if (!std.mem.eql(u8, field.name, target_field.name)) continue;
+            const message = try std.fmt.allocPrint(
+                self.allocator,
+                "cannot assign through immutable field '{s}'",
+                .{field.name},
+            );
+            return self.fail(target_field.name_position, message);
+        }
+        const message = try std.fmt.allocPrint(
+            self.allocator,
+            "tuple '{s}' has no field named '{s}'",
+            .{ structure.name, target_field.name },
+        );
+        return self.fail(target_field.name_position, message);
+    }
+    if (structure.is_class) mutable_path.* = true;
+    const source_structure = self.program.structures[structure_index];
+    if (source_structure.drop != null and !self.ownerStorageVisible(structure_index, target_field.name_position)) {
+        return self.fail(target_field.name_position, "owner structure storage is private to its declaring file and direct module users");
+    }
+    if (source_structure.is_local and target_field.name_position.file != source_structure.position.file) {
+        const message = try std.fmt.allocPrint(
+            self.allocator,
+            "members of local structure '{s}' are unavailable outside its source file",
+            .{structure.name},
+        );
+        return self.fail(target_field.name_position, message);
+    }
+    if (source_structure.is_internal and self.owner_context != source_structure.owner) {
+        const message = try std.fmt.allocPrint(
+            self.allocator,
+            "members of internal structure '{s}' are unavailable outside its package",
+            .{source_structure.name},
+        );
+        return self.fail(target_field.name_position, message);
+    }
+    var selected: ?usize = null;
+    for (structure.fields, 0..) |field, field_index| {
+        if (std.mem.eql(u8, field.name, target_field.name)) {
+            selected = field_index;
+            break;
+        }
+    }
+    const field_index = selected orelse {
+        const message = try std.fmt.allocPrint(
+            self.allocator,
+            "structure '{s}' has no field named '{s}'",
+            .{ structure.name, target_field.name },
+        );
+        return self.fail(target_field.name_position, message);
+    };
+    const field = structure.fields[field_index];
+    const inherited = Inheritance.fieldByIndex(self, structure_index, field_index) orelse return error.InvalidSource;
+    const source_field = inherited.declaration;
+    if (!Visibility.memberVisible(self, inherited.owner, source_field, target_field.name_position)) {
+        const message = if (source_field.is_local)
+            try std.fmt.allocPrint(self.allocator, "field '{s}' is local to its source file", .{field.name})
+        else
+            try std.fmt.allocPrint(self.allocator, "field '{s}' is {s} and unavailable here", .{ field.name, Visibility.name(source_field) });
+        return self.fail(target_field.name_position, message);
+    }
+    if (!field.mutable) {
+        const message = try std.fmt.allocPrint(
+            self.allocator,
+            "cannot assign through immutable field '{s}'",
+            .{field.name},
+        );
+        return self.fail(target_field.name_position, message);
+    }
+    try steps.append(self.allocator, .{ .field = .{
+        .base = current_value.*,
+        .structure = structure_index,
+        .field = field_index,
+    } });
+    const field_value = try self.newValue(builder, field.type);
+    try self.emit(builder, .{ .field_load = .{
+        .result = field_value,
+        .base = current_value.*,
+        .field = field_index,
+    } });
+    current_type.* = field.type;
+    current_value.* = field_value;
 }
 
 fn loadBinding(self: anytype, builder: anytype, binding: anytype) !Ir.ValueId {
