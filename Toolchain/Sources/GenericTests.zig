@@ -97,6 +97,20 @@ test "prefer concrete overloads and specialize defaults and stable recursion" {
     try std.testing.expectEqualStrings("100\ngeneric\n9\n8\n", result.stdout);
 }
 
+test "prefer a concrete zero-argument overload while keeping explicit specialization" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\func constant() float { return 1.0 }
+        \\func constant<T>() T { return 2 as T }
+        \\func main() { print(constant()); print(constant<int>()) }
+    );
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("1.0\n2\n", result.stdout);
+}
+
 test "diagnose generic function arity inference conflicts and divergent recursion" {
     try expectCompileError(
         "func create<T>() T { panic(\"no value\") } func main() { create() }",

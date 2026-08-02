@@ -43,7 +43,13 @@ pub fn cost(self: anytype, source: Types.Type, target: Types.Type) ?u8 {
     if (Inheritance.canUpcast(self, source, target) or ProtocolValues.canErase(self, source, target)) return 1;
     if (target.optionalChild()) |child| if (Inheritance.canUpcast(self, source, child) or ProtocolValues.canErase(self, source, child)) return 2;
     if (!Numeric.canWiden(source, target)) return null;
-    return if (source.isInteger() and target.isFloat()) 2 else 1;
+    if (source.isInteger() and target.isFloat()) {
+        // `float` is the language's canonical floating type. Prefer it when an
+        // integer argument can feed otherwise identical float/float64
+        // overloads, while keeping an explicit float64 value exact.
+        return if (target == .float32) 2 else 3;
+    }
+    return 1;
 }
 
 fn sameFunctionType(self: anytype, left: Types.Type, right: Types.Type) bool {

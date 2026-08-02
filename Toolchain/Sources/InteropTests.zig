@@ -92,6 +92,42 @@ test "compose a C.function declaration into a deterministic boundary call" {
     try std.testing.expect(std.mem.indexOf(u8, text, "_write") == null);
 }
 
+test "compose and interpret exact float32 and float64 math signatures" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data =
+        \\use Interop.C
+        \\use Interop.MacOS
+        \\let sqrt32 = C.function<func(float32) float32>(library:MacOS.lib_system, name:"sqrtf")
+        \\let sqrt64 = C.function<func(float64) float64>(library:MacOS.lib_system, name:"sqrt")
+        \\func main() {
+        \\    assert(sqrt32(4.0) == 2.0)
+        \\    assert(sqrt64(4.0 as float64) == 2.0 as float64)
+        \\}
+        ,
+    });
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(input);
+    try std.testing.expectEqual(@as(usize, 2), compilation.boundaries.len);
+    try std.testing.expectEqual(Ir.Type.float32, compilation.boundaries[0].return_type);
+    try std.testing.expectEqual(Ir.Type.float64, compilation.boundaries[1].return_type);
+    try std.testing.expect(Interpreter.supportsBoundary(compilation.boundaries[0]));
+    try std.testing.expect(Interpreter.supportsBoundary(compilation.boundaries[1]));
+    const result = try Interpreter.runCaptureWithBoundaries(
+        allocator,
+        std.testing.io,
+        compilation.ir,
+        compilation.boundaries,
+    );
+    try std.testing.expectEqual(@as(u8, 0), result.exit_code);
+}
+
 test "compose typed loads and stores from explicit interop address bits" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

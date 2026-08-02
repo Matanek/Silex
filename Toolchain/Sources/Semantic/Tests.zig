@@ -789,3 +789,23 @@ test "numeric aliases domains widening and overload ambiguity" {
         "function 'same' with these parameter types is already declared",
     );
 }
+
+test "prefer canonical float overload for integer arguments" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var parser = Parser.init(allocator,
+        \\func choose(value:float) int { return 32 }
+        \\func choose(value:float64) int { return 64 }
+        \\func main() {
+        \\    print(choose(1))
+        \\    print(choose(value:1))
+        \\    let precise:float64 = 1.0
+        \\    print(choose(value:precise))
+        \\}
+    );
+    var analyzer = Analyzer.init(allocator);
+    const program = try analyzer.analyze(try parser.parse());
+    const result = try @import("../Interpreter.zig").runCapture(allocator, program);
+    try std.testing.expectEqualStrings("32\n32\n64\n", result.stdout);
+}
