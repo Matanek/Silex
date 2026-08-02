@@ -132,7 +132,10 @@ pub fn activateExpression(self: anytype, module: usize, expression: *Ast.Express
         .cascade => |cascade| {
             try self.activateExpression(module, cascade.receiver);
             for (cascade.operations) |operation| switch (operation) {
-                .method_call => |method| for (method.arguments) |argument| try self.activateExpression(module, argument),
+                .method_call => |method| {
+                    for (method.arguments) |argument| try self.activateExpression(module, argument);
+                    for (method.named_arguments) |argument| try self.activateExpression(module, argument.value);
+                },
                 .field_assignment => |field| try self.activateExpression(module, field.value),
             };
         },

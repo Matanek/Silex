@@ -122,7 +122,7 @@ test "native ARM64 executes a temporary cascade like the interpreter" {
         \\    func shift(value:int) { self.x += value; self.y += value }
         \\    func total() int { return self.x + self.y }
         \\}
-        \\func answer() int { return Point(x:1, y:2)..y = 10..shift(3).total() }
+        \\func answer() int { return Point(x:1, y:2)..y = 10..shift(value:3).total() }
         \\func main() {}
     );
     var answer: ?usize = null;

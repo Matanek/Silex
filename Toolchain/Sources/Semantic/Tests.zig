@@ -266,11 +266,11 @@ test "lower overloaded constructors with complete branched self initialization" 
         \\struct Choice {
         \\    let value:int
         \\    let tag:int = 7
-        \\    init(input:int, positive:bool) {
-        \\        if positive { self.value = input } else { self.value = -input }
+        \\    init(value:int, positive:bool) {
+        \\        if positive { self.value = value } else { self.value = -value }
         \\    }
-        \\    init(enabled:bool) {
-        \\        if enabled { self.value = 1 } else { self.value = 0 }
+        \\    init(value:bool) {
+        \\        if value { self.value = 1 } else { self.value = 0 }
         \\    }
         \\}
         \\func main() {
@@ -306,10 +306,6 @@ test "diagnose invalid constructor initialization and calls" {
     try expectSemanticError(
         "struct Value { let number:int; init() { observe(self); self.number = 1 } } func observe(value:Value) {} func main() {}",
         "self cannot be used before all fields are initialized",
-    );
-    try expectSemanticError(
-        "struct Value { let number:int; init(number:int) { self.number = number } } func main() { Value(number:1) }",
-        "structure 'Value' has constructors and does not accept named fields",
     );
     try expectSemanticError(
         "struct Value { let number:int; init(number:int) { self.number = number } } func main() { Value(true) }",
@@ -662,19 +658,80 @@ test "reject an incompatible or context-dependent parameter default" {
     );
 }
 
-test "keep ordinary callable arguments positional" {
+test "associate named callable arguments in declaration order" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var parser = Parser.init(allocator,
+        \\func combine(first:int = 1, second:int = 2, third:int = 3) int { return first + second + third }
+        \\struct Box {
+        \\    var value:int
+        \\    init(value:int, scale:int = 2) { self.value = value * scale }
+        \\    func add(left:int, right:int = 1) int { return self.value + left + right }
+        \\}
+        \\func main() {
+        \\    print(combine(third:30, first:10))
+        \\    print(combine(10, third:30))
+        \\    print(Box(scale:3, value:4).add(right:2, left:1))
+        \\}
+    );
+    var analyzer = Analyzer.init(allocator);
+    const program = try analyzer.analyze(try parser.parse());
+    const result = try @import("../Interpreter.zig").runCapture(allocator, program);
+    try std.testing.expectEqualStrings("42\n42\n15\n", result.stdout);
+    const text = try Ir.writeText(allocator, program);
+    try std.testing.expect(std.mem.indexOf(u8, text, "call @combine(") != null);
+}
+
+test "diagnose invalid named callable arguments and overload labels" {
     try expectSemanticError(
-        "func compute(value:int = 1) int { return value } func main() { compute(value:2) }",
-        "named fields require a structure initializer",
+        "func compute(value:int) {} func main() { compute(other:2) }",
+        "unknown parameter label 'other'",
     );
     try expectSemanticError(
-        "struct Box { var value:int; init(value:int = 1) { self.value = value } } func main() { Box(value:2) }",
-        "structure 'Box' has constructors and does not accept named fields",
+        "func compute(value:int) {} func main() { compute(1, value:2) }",
+        "parameter 'value' is provided more than once",
     );
     try expectSemanticError(
-        "struct Box { var value:int; func read(offset:int = 0) int { return self.value + offset } } func main() { Box().read(offset:1) }",
-        "methods use positional arguments",
+        "func compute(value:int) {} func main() { compute(value:1, value:2) }",
+        "parameter 'value' is provided more than once",
     );
+    try expectSemanticError(
+        "func compute(value:int, other:int) {} func main() { compute(value:1) }",
+        "required parameter 'other' is missing",
+    );
+    try expectSemanticError(
+        "func choose(value:int) {} func choose(enabled:bool) {} func main() {}",
+        "overloads of function 'choose' must use the same parameter labels",
+    );
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(), "func compute(first:int, second:int) {} func main() { compute(first:1, 2) }");
+    try std.testing.expectError(error.InvalidSource, parser.parse());
+    try std.testing.expectEqualStrings("a positional argument cannot follow a named argument", parser.diagnostic.?.message);
+}
+
+test "allow distinct overload labels when accepted arities are disjoint" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var parser = Parser.init(allocator,
+        \\struct Vector {
+        \\    init(value:int) {}
+        \\    init(x:int, y:int, z:int) {}
+        \\}
+        \\func select(value:int) {}
+        \\func select(x:int, y:int, z:int) {}
+        \\func main() {
+        \\    Vector(1)
+        \\    Vector(z:3, y:2, x:1)
+        \\    select(1)
+        \\    select(1, 2, 3)
+        \\}
+    );
+    var analyzer = Analyzer.init(allocator);
+    _ = try analyzer.analyze(try parser.parse());
 }
 
 test "report fundamental type and return errors" {

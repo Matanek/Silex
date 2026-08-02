@@ -89,6 +89,47 @@ pub fn validateReadArguments(self: anytype, parameters: []const Ast.Parameter, a
     }
 }
 
+pub fn validateMappedReadArguments(self: anytype, parameters: []const Ast.Parameter, arguments: []const ?*Ast.Expression) !void {
+    for (parameters, arguments, 0..) |parameter, maybe_argument, index| {
+        const argument = maybe_argument orelse continue;
+        if (parameter.mode == .value) continue;
+        const root = rootName(argument) orelse continue;
+        for (parameters, arguments, 0..) |other_parameter, maybe_other, other_index| {
+            const other = maybe_other orelse continue;
+            if (index == other_index or other_parameter.mode == .value or parameter.mode == other_parameter.mode) continue;
+            if (sameRoot(other, root)) {
+                const message = try std.fmt.allocPrint(self.allocator, "cannot borrow '{s}' as both '@' and '&' in the same call", .{root});
+                return self.fail(other.position, message);
+            }
+        }
+    }
+    for (parameters, arguments, 0..) |parameter, maybe_argument, index| {
+        const argument = maybe_argument orelse continue;
+        if (parameter.mode != .read) continue;
+        const root = rootName(argument) orelse continue;
+        for (parameters, arguments, 0..) |other_parameter, maybe_other, other_index| {
+            const other = maybe_other orelse continue;
+            if (index == other_index or other_parameter.mode != .value or !Resources.containsClass(self, other_parameter.type)) continue;
+            if (sameRoot(other, root)) {
+                const message = try std.fmt.allocPrint(self.allocator, "cannot pass '{s}' as both a read reference and a mutation-capable class value", .{root});
+                return self.fail(other.position, message);
+            }
+        }
+    }
+    for (parameters, arguments, 0..) |parameter, maybe_argument, index| {
+        const argument = maybe_argument orelse continue;
+        if (parameter.mode != .read) continue;
+        const root = rootName(argument) orelse continue;
+        for (arguments[index + 1 ..]) |maybe_later| {
+            const later = maybe_later orelse continue;
+            if (conflictsWithRead(later, root)) {
+                const message = try std.fmt.allocPrint(self.allocator, "cannot move or mutate '{s}' while it is passed as '@{s}'", .{ root, parameter.type.name() });
+                return self.fail(later.position, message);
+            }
+        }
+    }
+}
+
 pub fn ensureRootUnborrowed(self: anytype, builder: anytype, root: []const u8, position: @import("../Source.zig").Position) !void {
     for (builder.bindings.items) |binding| {
         const borrowed_root = binding.borrowed_root orelse continue;
@@ -132,8 +173,9 @@ fn conflictsWithRead(expression: *const Ast.Expression, root: []const u8) bool {
         .cascade => |cascade| cascade_conflict: {
             if (conflictsWithRead(cascade.receiver, root)) break :cascade_conflict true;
             for (cascade.operations) |operation| switch (operation) {
-                .method_call => |method| for (method.arguments) |argument| {
-                    if (conflictsWithRead(argument, root)) break :cascade_conflict true;
+                .method_call => |method| {
+                    for (method.arguments) |argument| if (conflictsWithRead(argument, root)) break :cascade_conflict true;
+                    for (method.named_arguments) |argument| if (conflictsWithRead(argument.value, root)) break :cascade_conflict true;
                 },
                 .field_assignment => |field| if (conflictsWithRead(field.value, root)) break :cascade_conflict true,
             };

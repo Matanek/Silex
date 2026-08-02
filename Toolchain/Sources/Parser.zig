@@ -921,7 +921,6 @@ pub const Parser = struct {
         if (self.current.tag != .right_parenthesis) {
             while (true) {
                 if (try self.startsNamedArgument()) {
-                    if (arguments.items.len != 0) return self.fail("named fields cannot follow positional arguments");
                     const position = self.current.position;
                     const field_name = self.current.lexeme;
                     try self.advance();
@@ -932,7 +931,7 @@ pub const Parser = struct {
                         .value = try self.parseExpression(true),
                     });
                 } else {
-                    if (named_arguments.items.len != 0) return self.fail("positional arguments cannot follow named fields");
+                    if (named_arguments.items.len != 0) return self.fail("a positional argument cannot follow a named argument");
                     try arguments.append(self.allocator, try self.parseExpression(true));
                 }
                 if (self.current.tag == .right_parenthesis) break;
@@ -959,7 +958,7 @@ pub const Parser = struct {
         });
     }
 
-    fn startsNamedArgument(self: *Parser) ParseError!bool {
+    pub fn startsNamedArgument(self: *Parser) ParseError!bool {
         if (self.current.tag != .identifier) return false;
         var lexer = self.lexer;
         const next = lexer.next() catch |err| {

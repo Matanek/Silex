@@ -556,13 +556,15 @@ fn expressionHasTry(expression: *const Ast.Expression) bool {
         .call => |value| call: {
             if (value.receiver) |receiver| if (expressionHasTry(receiver)) break :call true;
             for (value.arguments) |argument| if (expressionHasTry(argument)) break :call true;
+            for (value.named_arguments) |argument| if (expressionHasTry(argument.value)) break :call true;
             break :call false;
         },
         .cascade => |cascade| cascade_try: {
             if (expressionHasTry(cascade.receiver)) break :cascade_try true;
             for (cascade.operations) |operation| switch (operation) {
-                .method_call => |method| for (method.arguments) |argument| {
-                    if (expressionHasTry(argument)) break :cascade_try true;
+                .method_call => |method| {
+                    for (method.arguments) |argument| if (expressionHasTry(argument)) break :cascade_try true;
+                    for (method.named_arguments) |argument| if (expressionHasTry(argument.value)) break :cascade_try true;
                 },
                 .field_assignment => |field| if (expressionHasTry(field.value)) break :cascade_try true,
             };

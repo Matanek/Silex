@@ -1,5 +1,6 @@
 const std = @import("std");
 const Ast = @import("../Ast.zig");
+const Arguments = @import("Arguments.zig");
 const Ir = @import("../Ir.zig");
 const Numeric = @import("../Numeric.zig");
 const Support = @import("Support.zig");
@@ -68,6 +69,7 @@ pub fn analyzeLoad(self: anytype, builder: anytype, structure_index: usize, name
 pub fn analyzeCall(self: anytype, builder: anytype, structure_index: usize, call: Ast.Expression.Call) !?Model.TypedValue {
     const structure = self.program.structures[structure_index];
     if (try ShaderAssets.analyze(self, builder, structure_index, call)) |value| return value;
+    if (call.named_arguments.len != 0) return analyzeNamedCall(self, builder, structure_index, call);
     var candidates: std.ArrayList(usize) = .empty;
     for (structure.methods, 0..) |method, index| {
         if (!method.is_static or !std.mem.eql(u8, method.name, call.name)) continue;
@@ -110,6 +112,83 @@ pub fn analyzeCall(self: anytype, builder: anytype, structure_index: usize, call
         .function = methodFunctionId(self.program, structure_index, method_index),
         .arguments = try ids.toOwnedSlice(self.allocator),
     } });
+    return if (result) |value| .{ .type = method.return_type, .value = value } else null;
+}
+
+fn analyzeNamedCall(self: anytype, builder: anytype, structure_index: usize, call: Ast.Expression.Call) !?Model.TypedValue {
+    const structure = self.program.structures[structure_index];
+    var candidates: std.ArrayList(usize) = .empty;
+    var first_problem: ?Arguments.Problem = null;
+    var template: ?[]const ?*Ast.Expression = null;
+    for (structure.methods, 0..) |method, index| {
+        if (!method.is_static or !std.mem.eql(u8, method.name, call.name)) continue;
+        if (!Visibility.memberVisible(self, structure_index, method, call.name_position)) continue;
+        switch (try Arguments.map(self.allocator, method.parameters, call.arguments, call.named_arguments)) {
+            .arguments => |mapped| {
+                try candidates.append(self.allocator, index);
+                if (template == null) template = mapped;
+            },
+            .problem => |problem| {
+                if (first_problem == null) first_problem = problem;
+            },
+        }
+    }
+    if (candidates.items.len == 0) {
+        const problem = first_problem orelse .too_many;
+        const message = switch (problem) {
+            .too_many => "type has no visible static method accepting these arguments",
+            .unknown => |argument| try std.fmt.allocPrint(self.allocator, "unknown parameter label '{s}'", .{argument.name}),
+            .duplicate => |argument| try std.fmt.allocPrint(self.allocator, "parameter '{s}' is provided more than once", .{argument.name}),
+            .missing => |parameter| try std.fmt.allocPrint(self.allocator, "required parameter '{s}' is missing", .{parameter.name}),
+        };
+        const position = switch (problem) {
+            .unknown => |a| a.position,
+            .duplicate => |a| a.position,
+            else => call.name_position,
+        };
+        return self.fail(position, message);
+    }
+    const sources = template.?;
+    const typed = try self.allocator.alloc(?Model.TypedValue, sources.len);
+    @memset(typed, null);
+    for (sources, 0..) |maybe_source, index| {
+        const source = maybe_source orelse continue;
+        const expected = if (candidates.items.len == 1) Optionals.expectedContext(structure.methods[candidates.items[0]].parameters[index].type, source) else null;
+        typed[index] = try self.analyzeExpressionExpected(builder, source, expected);
+    }
+    var selected: ?usize = null;
+    var best_cost: usize = std.math.maxInt(usize);
+    var ambiguous = false;
+    for (candidates.items) |index| {
+        const method = structure.methods[index];
+        const mapped = (try Arguments.map(self.allocator, method.parameters, call.arguments, call.named_arguments)).arguments;
+        var cost: usize = 0;
+        for (mapped, 0..) |maybe_source, parameter_index| {
+            if (maybe_source == null) continue;
+            const argument = typed[parameter_index].?;
+            if (!self.canImplicitlyConvert(argument.type, method.parameters[parameter_index].type)) break;
+            if (argument.type != method.parameters[parameter_index].type) cost += 1;
+        } else if (cost < best_cost) {
+            selected = index;
+            best_cost = cost;
+            ambiguous = false;
+        } else if (cost == best_cost) ambiguous = true;
+    }
+    if (ambiguous) return self.fail(call.name_position, "call to static method is ambiguous");
+    const method_index = selected orelse return self.fail(call.name_position, "no static method overload matches the argument types");
+    const method = structure.methods[method_index];
+    const mapped = (try Arguments.map(self.allocator, method.parameters, call.arguments, call.named_arguments)).arguments;
+    var ids: std.ArrayList(Ir.ValueId) = .empty;
+    for (method.parameters, mapped, 0..) |parameter, maybe_source, index| {
+        const source = maybe_source orelse {
+            try ids.append(self.allocator, (try self.analyzeParameterDefault(builder, parameter)).value);
+            continue;
+        };
+        if (parameter.mode != .value) return self.fail(source.position, "borrowed static method parameters are not supported yet");
+        try ids.append(self.allocator, (try self.coerce(builder, typed[index].?, parameter.type, source.position)).value);
+    }
+    const result = if (method.return_type == .void) null else try self.newValue(builder, method.return_type);
+    try self.emit(builder, .{ .call = .{ .result = result, .function = methodFunctionId(self.program, structure_index, method_index), .arguments = try ids.toOwnedSlice(self.allocator) } });
     return if (result) |value| .{ .type = method.return_type, .value = value } else null;
 }
 

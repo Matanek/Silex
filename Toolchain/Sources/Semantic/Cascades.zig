@@ -46,6 +46,7 @@ pub fn analyze(
                 .name_position = method.name_position,
                 .receiver = target,
                 .arguments = method.arguments,
+                .named_arguments = method.named_arguments,
                 .type_arguments = method.type_arguments,
             };
             if (try self.analyzeCall(builder, call)) |ignored| {

@@ -18,7 +18,22 @@ func greet(name:str) {
 }
 ```
 
-Arguments are positional and evaluated from left to right.
+Calls may be positional or use the parameter names as labels:
+
+```sx
+func draw(sprite:Sprite, at:Vec2, opacity:float = 1.0) {
+}
+
+draw(hero, position)
+draw(at:position, sprite:hero)
+draw(hero, opacity:0.8, at:position)
+```
+
+Named arguments may appear in any order. A positional prefix may come first,
+but no positional argument may follow a named one. Each parameter is supplied
+at most once. After labels are associated, argument expressions are evaluated
+and passed in declaration order. Calls through function values and callbacks
+remain positional.
 
 ## Pass functions as callbacks
 
@@ -81,8 +96,9 @@ greet("Bonjour")
 greet("Salut", 2)
 ```
 
-Defaults form one trailing suffix. You cannot skip an argument in the middle.
-Each omitted expression is evaluated at the call site.
+Defaults form one trailing suffix in the declaration. A named call may omit any
+defaulted parameter while supplying a later one, such as
+`greet(repetitions:2)`. Each omitted expression is evaluated at the call site.
 
 ## Overloads
 
@@ -93,6 +109,12 @@ func describe(value:str) str { return "string" }
 
 Parameter types distinguish overloads. Return types and parameter names do
 not. Two declarations cannot expose the same callable prefix through defaults.
+Corresponding parameters in an overload family must nevertheless use the same
+names, so labels never become an overload-selection mechanism.
+
+For a public callable, parameter names are part of its source-level interface:
+renaming one can break named callers even though it does not change overload
+identity.
 
 ## Return every path
 

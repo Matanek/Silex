@@ -28,7 +28,7 @@ test "compile only the explicit local module closure" {
         .sub_path = "Main.sx",
         .data =
         \\use Math.Operations
-        \\func answer() int { return Operations.add(20, 22) }
+        \\func answer() int { return Operations.add(right:22, left:20) }
         \\func main() { answer() }
         ,
     });
@@ -315,8 +315,11 @@ test "compose public parameter defaults in their declaring module" {
     const answer = try @import("../Interpreter.zig").invoke(allocator, compilation.ir, 0, &.{});
     try std.testing.expectEqual(@as(i64, 42), answer.integer);
     try std.testing.expectEqual(@as(usize, 0), compilation.interfaces[1].functions[0].required_parameters);
+    try std.testing.expectEqualStrings("input", compilation.interfaces[1].functions[0].parameter_names[0]);
     try std.testing.expectEqual(@as(usize, 0), compilation.interfaces[1].structures[0].constructors[0].required_parameters);
+    try std.testing.expectEqualStrings("value", compilation.interfaces[1].structures[0].constructors[0].parameter_names[0]);
     try std.testing.expectEqual(@as(usize, 0), compilation.interfaces[1].structures[0].methods[0].required_parameters);
+    try std.testing.expectEqualStrings("amount", compilation.interfaces[1].structures[0].methods[0].parameter_names[0]);
 }
 
 test "do not propagate private module access through a dependency" {
@@ -360,7 +363,7 @@ test "compose simple modules with an adjacent local package" {
         .data =
         \\use Foo.Bar
         \\use MonPackage.Class1
-        \\func answer() int { return Bar.value() + Class1.value() }
+        \\func answer() int { return Bar.value() + Class1.value(right:2, left:20) }
         \\func main() {}
         ,
     });
@@ -374,7 +377,7 @@ test "compose simple modules with an adjacent local package" {
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "MonPackage/Module/Class1.sx",
-        .data = "public func value() int { return 22 }",
+        .data = "public func value(left:int, right:int) int { return left + right }",
     });
 
     const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });

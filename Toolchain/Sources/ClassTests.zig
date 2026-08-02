@@ -145,8 +145,8 @@ test "class constructors establish private invariants and overloads" {
         \\class Session {
         \\    let token:str
         \\    private var uses:int = 0
-        \\    public init(token:str) { self.token = token }
-        \\    public init(code:int, suffix:str = "!") { self.token = "$(code)$(suffix)" }
+        \\    public init(value:str) { self.token = value }
+        \\    public init(value:int, suffix:str = "!") { self.token = "$(value)$(suffix)" }
         \\    public func text() str { return self.token }
         \\    local func mark() { self.uses++ }
         \\}
@@ -189,10 +189,6 @@ test "class constructor parameters survive when retained by the new instance" {
 }
 
 test "class visibility closes construction and private state" {
-    try expectCompileError(
-        "class Session { let token:str; public init(token:str) { self.token = token } } func main() { var value = Session(token:\"x\") }",
-        "structure 'Session' has constructors and does not accept named fields",
-    );
     try expectCompileError(
         "class Vault { init() {} } func main() { var value = Vault() }",
         "constructor of 'Vault' is unavailable here",

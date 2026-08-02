@@ -225,7 +225,8 @@ pub fn scopeItemsAtForTarget(
     if (cursor > source.len) return allocator.alloc(Types.CompletionItem, 0);
     const prefix_start = prefixStart(source, cursor);
     const prefix = source[prefix_start..cursor];
-    const type_only = isTypePrefix(source, prefix_start);
+    const type_only = try Completion.isTypePositionAt(allocator, source, prefix_start);
+    const return_expression = try Completion.isReturnExpressionAt(allocator, source, cursor);
     const aggregate = try Completion.aggregateContextAt(allocator, source, cursor);
     const program = try parseCurrentAtScope(allocator, source, cursor, prefix_start, type_only, aggregate != null) orelse
         return allocator.alloc(Types.CompletionItem, 0);
@@ -233,7 +234,7 @@ pub fn scopeItemsAtForTarget(
         !hasLocalNominal(program, "Platform") and findUseByAlias(program, "Platform") == null;
     const wants_target = !type_only and matchesPrefix("Target", prefix) and
         !hasLocalNominal(program, "Target") and findUseByAlias(program, "Target") == null;
-    if (program.uses.len == 0 and !wants_platform and !wants_target) {
+    if (program.uses.len == 0 and !wants_platform and !wants_target and !type_only and !return_expression) {
         return allocator.alloc(Types.CompletionItem, 0);
     }
     const document_path = try pathFromUri(allocator, document_uri);
@@ -243,13 +244,22 @@ pub fn scopeItemsAtForTarget(
 
     var ranked: std.ArrayList(RankedItem) = .empty;
     if (aggregate) |context| {
+        var native_initializer = false;
+        for (program.structures) |structure| if (std.mem.eql(u8, structure.name, context.type_name) and
+            structure.constructors.len == 0)
+        {
+            native_initializer = true;
+            break;
+        };
         if (findUseByAlias(program, context.type_name)) |use| {
             if (declarationTarget(project.index, use.path)) |target| {
                 const provider = project.index.providers[target.provider];
                 if (project.graph.canAccess(project.current_owner, provider.owner, provider.name)) {
                     if (try loadProgram(allocator, io, documents, provider)) |loaded| {
                         for (loaded.program.structures) |structure| {
-                            if (!structure.is_public or !std.mem.eql(u8, structure.name, target.declaration)) continue;
+                            if (!structure.is_public or !std.mem.eql(u8, structure.name, target.declaration) or
+                                structure.constructors.len != 0) continue;
+                            native_initializer = true;
                             for (structure.fields) |field| {
                                 if (field.is_local or field.is_private or field.is_protected or
                                     Completion.suppliedAggregateField(context, field.name) or
@@ -270,15 +280,17 @@ pub fn scopeItemsAtForTarget(
                 }
             }
         }
-        std.mem.sort(RankedItem, ranked.items, {}, rankedLessThan);
-        const result = try allocator.alloc(Types.CompletionItem, ranked.items.len);
-        for (ranked.items, 0..) |entry, index| {
-            result[index] = entry.item;
-            result[index].sortText = try std.fmt.allocPrint(allocator, "{d:0>3}-{d:0>6}", .{ entry.priority, index });
-            result[index].filterText = entry.item.label;
-            result[index].insertText = entry.item.label;
+        if (native_initializer) {
+            std.mem.sort(RankedItem, ranked.items, {}, rankedLessThan);
+            const result = try allocator.alloc(Types.CompletionItem, ranked.items.len);
+            for (ranked.items, 0..) |entry, index| {
+                result[index] = entry.item;
+                result[index].sortText = try std.fmt.allocPrint(allocator, "{d:0>3}-{d:0>6}", .{ entry.priority, index });
+                result[index].filterText = entry.item.label;
+                result[index].insertText = entry.item.label;
+            }
+            return result;
         }
-        return result;
     }
     if (wants_platform and contextualProvider(project, "Platform") != null) {
         try appendRanked(allocator, &ranked, .{
@@ -294,6 +306,26 @@ pub fn scopeItemsAtForTarget(
             .detail = "Silex contextual target fragment",
         }, 16, false);
     }
+    if (type_only) try appendPathItems(
+        allocator,
+        io,
+        documents,
+        project,
+        .{ .qualifier = "", .prefix = prefix, .type_only = true },
+        source,
+        cursor,
+        &ranked,
+    );
+    if (return_expression) try appendPathItems(
+        allocator,
+        io,
+        documents,
+        project,
+        .{ .qualifier = "", .prefix = prefix },
+        null,
+        cursor,
+        &ranked,
+    );
     for (program.uses) |use| {
         const label = use.alias orelse lastSegment(use.path);
         if (!matchesPrefix(label, prefix)) continue;
@@ -413,20 +445,6 @@ fn hasLocalNominal(program: Ast.Program, name: []const u8) bool {
     return false;
 }
 
-fn isTypePrefix(source: []const u8, prefix_start: usize) bool {
-    if (Completion.isTypeArgumentPrefix(source, prefix_start)) return true;
-    const before = std.mem.trimEnd(u8, source[0..prefix_start], " \t\r\n");
-    if (before.len == 0) return false;
-    if (before[before.len - 1] == ':') return true;
-    if (before[before.len - 1] == ',') {
-        const line_start = if (std.mem.lastIndexOfScalar(u8, before, '\n')) |newline| newline + 1 else 0;
-        if (isNominalRelationLine(before[line_start..])) return true;
-    }
-    const word_start = prefixStart(before, before.len);
-    const owner = before[word_start..];
-    return std.mem.eql(u8, owner, "as") or std.mem.eql(u8, owner, "extend");
-}
-
 fn isNominalRelationLine(line: []const u8) bool {
     var lexer = LexerModule.Lexer.init(line);
     var declaration = false;
@@ -469,12 +487,13 @@ fn queryAt(
         Completion.cascadeReceiver(source, prefix_start - 2)
     else
         Completion.memberReceiver(source, prefix_start - 1)) orelse return null;
+    const qualified_type = try isQualifiedTypePrefix(allocator, source, prefix_start);
     const current_program = try parseCurrentAtCompletion(
         allocator,
         source,
         cursor,
         prefix,
-        isQualifiedTypePrefix(source, prefix_start),
+        qualified_type,
     );
     if (current_program) |program| {
         if (findUseByAlias(program, receiver)) |use| {
@@ -490,7 +509,7 @@ fn queryAt(
                 .path = use.path,
                 .prefix = prefix,
                 .cursor = cursor,
-                .type_only = isQualifiedTypePrefix(source, prefix_start),
+                .type_only = qualified_type,
             } };
         }
         if ((std.mem.eql(u8, receiver, "Platform") or std.mem.eql(u8, receiver, "Target")) and
@@ -500,7 +519,7 @@ fn queryAt(
                 .path = receiver,
                 .prefix = prefix,
                 .cursor = cursor,
-                .type_only = isQualifiedTypePrefix(source, prefix_start),
+                .type_only = qualified_type,
             } };
         }
         if ((findProvider(project.index, receiver) != null or project.index.isNamespace(receiver)) and
@@ -510,7 +529,7 @@ fn queryAt(
                 .path = receiver,
                 .prefix = prefix,
                 .cursor = cursor,
-                .type_only = isQualifiedTypePrefix(source, prefix_start),
+                .type_only = qualified_type,
             } };
         }
         if (Completion.qualifiedCall(receiver)) |call| {
@@ -663,7 +682,7 @@ fn appendPathItems(
         else
             try std.fmt.allocPrint(allocator, "{s}.{s}", .{ query.qualifier, child });
         if (!try modulePathVisible(allocator, io, documents, project, child_path)) continue;
-        if (call_source != null and end == remainder.len and
+        if ((query.type_only or call_source != null) and end == remainder.len and
             (exact_loaded == null or !hasPublicDeclaration(exact_loaded.?.program, child)) and
             try appendPrincipalType(
                 allocator,
@@ -671,10 +690,11 @@ fn appendPathItems(
                 documents,
                 provider,
                 child,
-                call_source.?,
+                call_source,
                 call_cursor,
                 ranked,
                 type_priority,
+                query.type_only,
             )) continue;
         try appendRanked(allocator, ranked, .{
             .label = child,
@@ -890,15 +910,16 @@ fn appendPrincipalType(
     documents: []const Types.Document,
     provider: Modules.Provider,
     name: []const u8,
-    call_source: []const u8,
+    call_source: ?[]const u8,
     call_cursor: usize,
     ranked: *std.ArrayList(RankedItem),
     priority: u8,
+    type_only: bool,
 ) !bool {
     const loaded = try loadProgram(allocator, io, documents, provider) orelse return false;
     for (loaded.program.structures) |structure| {
         if (!structure.is_public or !std.mem.eql(u8, structure.name, name)) continue;
-        if (structure.is_protocol or structure.is_static) {
+        if (type_only or structure.is_protocol or structure.is_static) {
             try appendRanked(allocator, ranked, .{
                 .label = name,
                 .kind = nominalCompletionKind(structure),
@@ -911,7 +932,7 @@ fn appendPrincipalType(
                 .detail = try std.fmt.allocPrint(allocator, "{s}() {s}", .{ name, name }),
             }, priority, false);
         } else for (structure.constructors) |constructor| {
-            if (!Completion.callAcceptsParameters(call_source, call_cursor, loaded.program, constructor.parameters)) continue;
+            if (!Completion.callAcceptsParameters(call_source.?, call_cursor, loaded.program, constructor.parameters)) continue;
             try appendRanked(allocator, ranked, .{
                 .label = name,
                 .kind = nominalCompletionKind(structure),
@@ -1339,7 +1360,7 @@ fn parseCurrentAtScope(
         source[cursor..],
     });
     if (try parseCurrent(allocator, recovered)) |program| return program;
-    if (!type_only or !isNominalRelationLine(source[line_start..prefix_start])) return null;
+    if (!type_only) return null;
     const line_end = if (std.mem.indexOfScalarPos(u8, source, cursor, '\n')) |newline|
         newline + 1
     else
@@ -1477,40 +1498,35 @@ fn declaredCallReturnTypePath(
         try tokens.append(allocator, token);
     }
     var index: usize = 0;
-    while (index + 6 < tokens.items.len) : (index += 1) {
+    while (index + 4 < tokens.items.len) : (index += 1) {
         if (tokens.items[index].tag != .keyword_let and tokens.items[index].tag != .keyword_var) continue;
         if (tokens.items[index + 1].tag != .identifier or
             !std.mem.eql(u8, tokens.items[index + 1].lexeme, receiver) or
             tokens.items[index + 2].tag != .equal or
-            tokens.items[index + 3].tag != .identifier or
+            tokens.items[index + 3].tag != .identifier) continue;
+
+        if (tokens.items[index + 4].tag == .left_parenthesis) {
+            const arity = callArity(tokens.items, index + 4) orelse continue;
+            var result: ?[]const u8 = null;
+            for (current.functions) |function| {
+                if (!std.mem.eql(u8, function.name, tokens.items[index + 3].lexeme) or
+                    !parametersAcceptArity(function.parameters, arity)) continue;
+                const local_type = returnTypeName(current, function.return_type) orelse continue;
+                const resolved = try importedTypePath(allocator, current, project, local_type) orelse continue;
+                if (result != null and !std.mem.eql(u8, result.?, resolved)) return null;
+                result = resolved;
+            }
+            return result;
+        }
+
+        if (index + 6 >= tokens.items.len or
             tokens.items[index + 4].tag != .dot or
             tokens.items[index + 5].tag != .identifier or
             tokens.items[index + 6].tag != .left_parenthesis) continue;
 
         const owner_alias = tokens.items[index + 3].lexeme;
         const method_name = tokens.items[index + 5].lexeme;
-        var depth: usize = 1;
-        var arguments: usize = 0;
-        var has_argument = false;
-        var end = index + 7;
-        while (end < tokens.items.len) : (end += 1) switch (tokens.items[end].tag) {
-            .left_parenthesis => {
-                if (depth == 1) has_argument = true;
-                depth += 1;
-            },
-            .right_parenthesis => {
-                depth -|= 1;
-                if (depth == 0) break;
-            },
-            .comma => if (depth == 1) {
-                arguments += 1;
-            },
-            else => {
-                if (depth == 1) has_argument = true;
-            },
-        };
-        if (depth != 0) continue;
-        if (has_argument) arguments += 1;
+        const arguments = callArity(tokens.items, index + 6) orelse continue;
 
         return importedQualifiedCallReturnTypePath(
             allocator,
@@ -1521,6 +1537,30 @@ fn declaredCallReturnTypePath(
             .{ .owner = owner_alias, .name = method_name, .arity = arguments },
         );
     }
+    return null;
+}
+
+fn callArity(tokens: []const LexerModule.Token, opening: usize) ?usize {
+    var depth: usize = 1;
+    var arguments: usize = 0;
+    var has_argument = false;
+    var index = opening + 1;
+    while (index < tokens.len) : (index += 1) switch (tokens[index].tag) {
+        .left_parenthesis => {
+            if (depth == 1) has_argument = true;
+            depth += 1;
+        },
+        .right_parenthesis => {
+            depth -|= 1;
+            if (depth == 0) return arguments + @intFromBool(has_argument);
+        },
+        .comma => if (depth == 1) {
+            arguments += 1;
+        },
+        else => {
+            if (depth == 1) has_argument = true;
+        },
+    };
     return null;
 }
 
@@ -1733,14 +1773,14 @@ fn matchesPrefix(label: []const u8, prefix: []const u8) bool {
     return std.mem.indexOf(u8, label, prefix) != null;
 }
 
-fn isQualifiedTypePrefix(source: []const u8, prefix_start: usize) bool {
+fn isQualifiedTypePrefix(allocator: Allocator, source: []const u8, prefix_start: usize) !bool {
     var start = prefix_start;
     while (start != 0) {
         const character = source[start - 1];
         if (!std.ascii.isAlphanumeric(character) and character != '_' and character != '.') break;
         start -= 1;
     }
-    return isTypePrefix(source, start);
+    return Completion.isTypePositionAt(allocator, source, start);
 }
 
 fn lastSegment(path: []const u8) []const u8 {
@@ -2460,6 +2500,26 @@ test "complete remaining fields of an imported aggregate inside a cascade" {
     try std.testing.expect(!hasLabel(items, "height"));
     try std.testing.expect(hasLabel(items, "fullscreen"));
     try std.testing.expect(!hasLabel(items, "hidden"));
+
+    const first_source =
+        \\use GFX.Window.Settings as WindowSettings
+        \\func main() {
+        \\    let settings = WindowSettings(re)
+        \\}
+    ;
+    const first_cursor = std.mem.indexOf(u8, first_source, "WindowSettings(re)").? + "WindowSettings(re".len;
+    const first_items = try scopeItemsAt(
+        allocator,
+        std.testing.io,
+        null,
+        root_uri,
+        uri,
+        &.{},
+        first_source,
+        first_cursor,
+    );
+    try std.testing.expect(hasLabel(first_items, "resizable"));
+    try std.testing.expect(!hasLabel(first_items, "hidden"));
 }
 
 test "complete imported settings fields from a nested constructor cascade" {
