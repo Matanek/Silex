@@ -106,6 +106,9 @@ pub fn analyze(self: anytype, structure_index: usize, method_index: usize, sourc
     self.extension_context = source_method.extension != null;
     defer self.extension_context = previous_extension_context;
     var method = source_method;
+    const previous_function_context = self.function_context;
+    self.function_context = method;
+    defer self.function_context = previous_function_context;
     if (method.return_mode != .value and method.return_provenance == null) {
         var compatible: usize = 0;
         for (method.parameters) |parameter| {
@@ -1088,7 +1091,14 @@ fn expressionCallsMutatingSelf(program: Ast.Program, structure_index: usize, exp
             break :calls false;
         },
         .field_access => |access| expressionCallsMutatingSelf(program, structure_index, access.base, mutating),
-        .unary => |unary| expressionCallsMutatingSelf(program, structure_index, unary.operand, mutating),
+        .unary => |unary| calls: {
+            if (expressionCallsMutatingSelf(program, structure_index, unary.operand, mutating)) break :calls true;
+            if (unary.try_alternative) |alternative| {
+                if (alternative.statements) |statements| if (statementsCallMutatingSelf(program, structure_index, statements, mutating)) break :calls true;
+                if (alternative.message) |message| if (expressionCallsMutatingSelf(program, structure_index, message, mutating)) break :calls true;
+            }
+            break :calls false;
+        },
         .binary => |binary| expressionCallsMutatingSelf(program, structure_index, binary.left, mutating) or expressionCallsMutatingSelf(program, structure_index, binary.right, mutating),
         .conversion => |conversion| expressionCallsMutatingSelf(program, structure_index, conversion.operand, mutating),
         .string_count => |operand| expressionCallsMutatingSelf(program, structure_index, operand, mutating),

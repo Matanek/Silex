@@ -689,6 +689,34 @@ pub const Parser = struct {
         if (self.current.tag != .minus and self.current.tag != .bang and self.current.tag != .keyword_try and self.current.tag != .keyword_move and self.current.tag != .keyword_copy and self.current.tag != .at and self.current.tag != .amp) return self.parseConversion();
         const operator = self.current;
         try self.advance();
+        const operand = try self.parseUnary(allow_line_breaks);
+        var alternative: ?Ast.Expression.TryAlternative = null;
+        if (operator.tag == .keyword_try and self.current.tag == .keyword_else) {
+            const else_token = self.current;
+            try self.advance();
+            if (self.current.tag == .left_brace) {
+                alternative = .{ .position = else_token.position, .statements = try self.parseBlock() };
+            } else {
+                const error_token = self.current;
+                if (error_token.tag != .identifier or !std.mem.eql(u8, error_token.lexeme, "error")) {
+                    return self.fail("expected '{' or 'error' after 'else'");
+                }
+                try self.advance();
+                if (self.current.tag == .left_brace) {
+                    alternative = .{
+                        .position = else_token.position,
+                        .error_position = error_token.position,
+                        .statements = try self.parseBlock(),
+                    };
+                } else {
+                    alternative = .{
+                        .position = else_token.position,
+                        .error_position = error_token.position,
+                        .message = try self.parseExpression(allow_line_breaks),
+                    };
+                }
+            }
+        }
         return self.newExpression(.{
             .position = operator.position,
             .value = .{ .unary = .{
@@ -703,7 +731,8 @@ pub const Parser = struct {
                     else => unreachable,
                 },
                 .operator_position = operator.position,
-                .operand = try self.parseUnary(allow_line_breaks),
+                .operand = operand,
+                .try_alternative = alternative,
             } },
         });
     }

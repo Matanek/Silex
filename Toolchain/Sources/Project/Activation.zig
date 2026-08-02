@@ -143,7 +143,13 @@ pub fn activateExpression(self: anytype, module: usize, expression: *Ast.Express
                 } else try self.activateExpression(module, access.base);
             } else try self.activateExpression(module, access.base);
         },
-        .unary => |unary| try self.activateExpression(module, unary.operand),
+        .unary => |unary| {
+            try self.activateExpression(module, unary.operand);
+            if (unary.try_alternative) |alternative| {
+                if (alternative.statements) |statements| for (statements) |statement| try self.activateStatement(module, statement);
+                if (alternative.message) |message| try self.activateExpression(module, message);
+            }
+        },
         .binary => |binary| {
             try self.activateExpression(module, binary.left);
             try self.activateExpression(module, binary.right);

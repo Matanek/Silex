@@ -637,6 +637,18 @@ pub const Specializer = struct {
             .unary => |unary| value: {
                 var copy = unary;
                 copy.operand = try self.rewriteExpression(unary.operand, arguments, locals);
+                if (unary.try_alternative) |alternative| {
+                    var alternative_copy = alternative;
+                    const local_count = locals.items.len;
+                    if (alternative.statements) |statements| {
+                        alternative_copy.statements = try self.rewriteStatements(statements, arguments, locals);
+                    }
+                    if (alternative.message) |message| {
+                        alternative_copy.message = try self.rewriteExpression(message, arguments, locals);
+                    }
+                    locals.shrinkRetainingCapacity(local_count);
+                    copy.try_alternative = alternative_copy;
+                }
                 break :value .{ .unary = copy };
             },
             .binary => |binary| value: {

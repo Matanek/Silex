@@ -74,7 +74,13 @@ pub fn expressionTypes(expression: *Ast.Expression, map: []const ?Ast.Type) void
         .generic_reference => |reference| for (@constCast(reference.type_arguments)) |*argument| {
             argument.* = concreteType(argument.*, map);
         },
-        .unary => |unary| expressionTypes(unary.operand, map),
+        .unary => |unary| {
+            expressionTypes(unary.operand, map);
+            if (unary.try_alternative) |alternative| {
+                if (alternative.statements) |statements| statementTypes(statements, map);
+                if (alternative.message) |message| expressionTypes(message, map);
+            }
+        },
         .binary => |binary| {
             expressionTypes(binary.left, map);
             expressionTypes(binary.right, map);

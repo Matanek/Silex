@@ -139,6 +139,14 @@ pub const Expression = struct {
         operator: UnaryOperator,
         operator_position: Source.Position,
         operand: *Expression,
+        try_alternative: ?TryAlternative = null,
+    };
+
+    pub const TryAlternative = struct {
+        position: Source.Position,
+        error_position: ?Source.Position = null,
+        statements: ?[]const Statement = null,
+        message: ?*Expression = null,
     };
 
     pub const Binary = struct {
