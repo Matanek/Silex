@@ -66,6 +66,7 @@ pub fn expressionTypes(expression: *Ast.Expression, map: []const ?Ast.Type) void
                 .method_call => |method| {
                     for (@constCast(method.type_arguments)) |*argument| argument.* = concreteType(argument.*, map);
                     for (method.arguments) |argument| expressionTypes(argument, map);
+                    for (method.named_arguments) |argument| expressionTypes(argument.value, map);
                 },
                 .field_assignment => |field| expressionTypes(field.value, map),
             };

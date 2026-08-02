@@ -19,18 +19,32 @@ pub fn parse(self: anytype, receiver: *Ast.Expression) !*Ast.Expression {
         if (self.current.tag == .left_parenthesis) {
             try self.advance();
             var arguments: std.ArrayList(*Ast.Expression) = .empty;
+            var named_arguments: std.ArrayList(Ast.Expression.NamedArgument) = .empty;
             if (self.current.tag != .right_parenthesis) while (true) {
-                try arguments.append(self.allocator, try self.parseExpression(true));
+                if (try self.startsNamedArgument()) {
+                    const position = self.current.position;
+                    const name = self.current.lexeme;
+                    try self.advance();
+                    try self.expect(.colon, "expected ':' after parameter label");
+                    try named_arguments.append(self.allocator, .{ .position = position, .name = name, .value = try self.parseExpression(true) });
+                } else {
+                    if (named_arguments.items.len != 0) return self.fail("a positional argument cannot follow a named argument");
+                    try arguments.append(self.allocator, try self.parseExpression(true));
+                }
                 if (self.current.tag == .right_parenthesis) break;
                 if (self.current.tag != .comma) return self.fail("expected ',' or ')' after cascade method argument");
                 try self.advance();
-                if (self.current.tag == .right_parenthesis) return self.fail("expected cascade method argument after ','");
+                if (self.current.tag == .right_parenthesis) {
+                    if (named_arguments.items.len == 0) return self.fail("expected cascade method argument after ','");
+                    break;
+                }
             };
             try self.expect(.right_parenthesis, "expected ')' after cascade method arguments");
             try operations.append(self.allocator, .{ .method_call = .{
                 .name = member.lexeme,
                 .name_position = member.position,
                 .arguments = try arguments.toOwnedSlice(self.allocator),
+                .named_arguments = try named_arguments.toOwnedSlice(self.allocator),
                 .type_arguments = type_arguments,
             } });
             continue;

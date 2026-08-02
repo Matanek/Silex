@@ -1,5 +1,7 @@
 const std = @import("std");
 const Ast = @import("../Ast.zig");
+const Arguments = @import("Arguments.zig");
+const NamedCalls = @import("NamedCalls.zig");
 const Boundary = @import("../Boundary.zig");
 const Ir = @import("../Ir.zig");
 const MainBoundary = @import("../MainBoundary.zig");
@@ -167,25 +169,24 @@ pub const Analyzer = struct {
         for (self.program.functions, 0..) |function, index| {
             for (self.program.functions[0..index]) |previous| {
                 if (!std.mem.eql(u8, function.name, previous.name)) continue;
-                const arity = Support.effectiveSignatureCollision(function.parameters, previous.parameters) orelse continue;
-                if (Support.sameParameterTypes(function.parameters, previous.parameters) and
-                    Support.requiredParameterCount(function.parameters) == function.parameters.len and
-                    Support.requiredParameterCount(previous.parameters) == previous.parameters.len)
-                {
-                    const message = try std.fmt.allocPrint(
-                        self.allocator,
-                        "function '{s}' with these parameter types is already declared",
-                        .{function.name},
-                    );
+                if (Support.effectiveSignatureCollision(function.parameters, previous.parameters)) |arity| {
+                    if (Support.sameParameterTypes(function.parameters, previous.parameters) and
+                        Support.requiredParameterCount(function.parameters) == function.parameters.len and
+                        Support.requiredParameterCount(previous.parameters) == previous.parameters.len)
+                    {
+                        const message = try std.fmt.allocPrint(self.allocator, "function '{s}' with these parameter types is already declared", .{function.name});
+                        return self.fail(function.name_position, message);
+                    }
+                    const signature = try self.effectiveSignature(function.name, function.parameters, arity);
+                    const message = try std.fmt.allocPrint(self.allocator, "function '{s}' is already exposed by the declaration at {d}:{d}", .{ signature, previous.name_position.line, previous.name_position.column });
                     return self.fail(function.name_position, message);
                 }
-                const signature = try self.effectiveSignature(function.name, function.parameters, arity);
-                const message = try std.fmt.allocPrint(
-                    self.allocator,
-                    "function '{s}' is already exposed by the declaration at {d}:{d}",
-                    .{ signature, previous.name_position.line, previous.name_position.column },
-                );
-                return self.fail(function.name_position, message);
+                if (Arguments.arityRangesOverlap(function.parameters, previous.parameters) and
+                    !Arguments.labelsCompatible(function.parameters, previous.parameters))
+                {
+                    const message = try std.fmt.allocPrint(self.allocator, "overloads of function '{s}' must use the same parameter labels", .{function.name});
+                    return self.fail(function.name_position, message);
+                }
             }
         }
         for (self.program.structures) |structure| {
@@ -204,25 +205,24 @@ pub const Analyzer = struct {
                     }
                 }
                 for (structure.constructors[0..index]) |previous| {
-                    const arity = Support.effectiveSignatureCollision(constructor.parameters, previous.parameters) orelse continue;
-                    if (Support.sameParameterTypes(constructor.parameters, previous.parameters) and
-                        Support.requiredParameterCount(constructor.parameters) == constructor.parameters.len and
-                        Support.requiredParameterCount(previous.parameters) == previous.parameters.len)
-                    {
-                        const message = try std.fmt.allocPrint(
-                            self.allocator,
-                            "constructor for '{s}' with these parameter types is already declared",
-                            .{structure.name},
-                        );
+                    if (Support.effectiveSignatureCollision(constructor.parameters, previous.parameters)) |arity| {
+                        if (Support.sameParameterTypes(constructor.parameters, previous.parameters) and
+                            Support.requiredParameterCount(constructor.parameters) == constructor.parameters.len and
+                            Support.requiredParameterCount(previous.parameters) == previous.parameters.len)
+                        {
+                            const message = try std.fmt.allocPrint(self.allocator, "constructor for '{s}' with these parameter types is already declared", .{structure.name});
+                            return self.fail(constructor.position, message);
+                        }
+                        const signature = try self.effectiveSignature("init", constructor.parameters, arity);
+                        const message = try std.fmt.allocPrint(self.allocator, "constructor '{s}' is already exposed by the declaration at {d}:{d}", .{ signature, previous.position.line, previous.position.column });
                         return self.fail(constructor.position, message);
                     }
-                    const signature = try self.effectiveSignature("init", constructor.parameters, arity);
-                    const message = try std.fmt.allocPrint(
-                        self.allocator,
-                        "constructor '{s}' is already exposed by the declaration at {d}:{d}",
-                        .{ signature, previous.position.line, previous.position.column },
-                    );
-                    return self.fail(constructor.position, message);
+                    if (Arguments.arityRangesOverlap(constructor.parameters, previous.parameters) and
+                        !Arguments.labelsCompatible(constructor.parameters, previous.parameters))
+                    {
+                        const message = try std.fmt.allocPrint(self.allocator, "constructors of '{s}' must use the same parameter labels", .{structure.name});
+                        return self.fail(constructor.position, message);
+                    }
                 }
             }
             for (structure.methods, 0..) |method, index| {
@@ -244,25 +244,24 @@ pub const Analyzer = struct {
                 for (structure.methods[0..index]) |previous| {
                     if (method.is_static != previous.is_static) continue;
                     if (!std.mem.eql(u8, method.name, previous.name)) continue;
-                    const arity = Support.effectiveSignatureCollision(method.parameters, previous.parameters) orelse continue;
-                    if (Support.sameParameterTypes(method.parameters, previous.parameters) and
-                        Support.requiredParameterCount(method.parameters) == method.parameters.len and
-                        Support.requiredParameterCount(previous.parameters) == previous.parameters.len)
-                    {
-                        const message = try std.fmt.allocPrint(
-                            self.allocator,
-                            "method '{s}' with these parameter types is already declared in '{s}'",
-                            .{ method.name, structure.name },
-                        );
+                    if (Support.effectiveSignatureCollision(method.parameters, previous.parameters)) |arity| {
+                        if (Support.sameParameterTypes(method.parameters, previous.parameters) and
+                            Support.requiredParameterCount(method.parameters) == method.parameters.len and
+                            Support.requiredParameterCount(previous.parameters) == previous.parameters.len)
+                        {
+                            const message = try std.fmt.allocPrint(self.allocator, "method '{s}' with these parameter types is already declared in '{s}'", .{ method.name, structure.name });
+                            return self.fail(method.name_position, message);
+                        }
+                        const signature = try self.effectiveSignature(method.name, method.parameters, arity);
+                        const message = try std.fmt.allocPrint(self.allocator, "method '{s}' is already exposed in '{s}' by the declaration at {d}:{d}", .{ signature, structure.name, previous.name_position.line, previous.name_position.column });
                         return self.fail(method.name_position, message);
                     }
-                    const signature = try self.effectiveSignature(method.name, method.parameters, arity);
-                    const message = try std.fmt.allocPrint(
-                        self.allocator,
-                        "method '{s}' is already exposed in '{s}' by the declaration at {d}:{d}",
-                        .{ signature, structure.name, previous.name_position.line, previous.name_position.column },
-                    );
-                    return self.fail(method.name_position, message);
+                    if (Arguments.arityRangesOverlap(method.parameters, previous.parameters) and
+                        !Arguments.labelsCompatible(method.parameters, previous.parameters))
+                    {
+                        const message = try std.fmt.allocPrint(self.allocator, "overloads of method '{s}' in '{s}' must use the same parameter labels", .{ method.name, structure.name });
+                        return self.fail(method.name_position, message);
+                    }
                 }
             }
         }
@@ -1118,9 +1117,6 @@ pub const Analyzer = struct {
         if (self.resolveStructureIndex(call.name)) |structure_index| {
             return try self.analyzeStructureInitializer(builder, call, structure_index);
         }
-        if (call.named_arguments.len != 0) {
-            return self.fail(call.name_position, "named fields require a structure initializer");
-        }
         if (std.mem.endsWith(u8, call.name, ".count") and call.arguments.len == 0) {
             const receiver_name = call.name[0 .. call.name.len - ".count".len];
             if (Support.findBinding(builder.bindings.items, receiver_name)) |binding| {
@@ -1134,6 +1130,7 @@ pub const Analyzer = struct {
             }
         }
         if (Interop.hasFunction(self, call.name)) return Interop.analyzeCall(self, builder, call);
+        if (call.named_arguments.len != 0) return NamedCalls.analyzeFunction(self, builder, call);
         var total_named: usize = 0;
         var named_count: usize = 0;
         var arity_count: usize = 0;

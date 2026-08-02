@@ -1,7 +1,6 @@
 # Silex native compiler experiment
 
-Silex is a native language and compiler experiment. Its source model does not
-depend on generated C or C++.
+Silex is a native language and compiler experiment.
 
 ```sx
 func answer() int {

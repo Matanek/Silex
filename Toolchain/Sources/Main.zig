@@ -1072,6 +1072,7 @@ test {
     _ = @import("MapErrorTests.zig");
     _ = @import("MainResultTests.zig");
     _ = @import("MoveTests.zig");
+    _ = @import("NamedArgumentTests.zig");
     _ = @import("MutexTests.zig");
     _ = @import("MutableReferenceTests.zig");
     _ = @import("DropCollectionTests.zig");

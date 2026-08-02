@@ -40,6 +40,7 @@ pub const Function = struct {
     type_parameters: []const []const u8 = &.{},
     type_parameter_constraints: []const ?Types.Type = &.{},
     return_type: Types.Type,
+    parameter_names: []const []const u8 = &.{},
     position: Source.Position,
     required_parameters: usize = 0,
 };
@@ -65,6 +66,7 @@ pub const StructureField = struct {
 
 pub const Constructor = struct {
     parameter_types: []const Types.Type,
+    parameter_names: []const []const u8 = &.{},
     required_parameters: usize = 0,
 };
 
@@ -74,6 +76,7 @@ pub const Method = struct {
     type_parameters: []const []const u8 = &.{},
     type_parameter_constraints: []const ?Types.Type = &.{},
     parameter_types: []const Types.Type,
+    parameter_names: []const []const u8 = &.{},
     return_type: Types.Type,
     required_parameters: usize = 0,
 };
@@ -179,11 +182,14 @@ pub fn buildMappedGenerics(
         for (structure.constructors) |constructor| {
             if (!constructor.is_public or constructor.is_local) continue;
             const parameters = try allocator.alloc(Types.Type, constructor.parameters.len);
+            const parameter_names = try allocator.alloc([]const u8, constructor.parameters.len);
             for (constructor.parameters, 0..) |parameter, parameter_index| {
                 parameters[parameter_index] = mappedType(parameter.type, type_map, generic_map);
+                parameter_names[parameter_index] = parameter.name;
             }
             try constructors.append(allocator, .{
                 .parameter_types = parameters,
+                .parameter_names = parameter_names,
                 .required_parameters = requiredParameterCount(constructor.parameters),
             });
         }
@@ -191,8 +197,10 @@ pub fn buildMappedGenerics(
         for (structure.methods) |method| {
             if (!method.is_public or method.is_local) continue;
             const parameters = try allocator.alloc(Types.Type, method.parameters.len);
+            const parameter_names = try allocator.alloc([]const u8, method.parameters.len);
             for (method.parameters, 0..) |parameter, parameter_index| {
                 parameters[parameter_index] = mappedType(parameter.type, type_map, generic_map);
+                parameter_names[parameter_index] = parameter.name;
             }
             const method_type_parameters = try allocator.alloc([]const u8, method.type_parameters.len);
             const method_constraints = try allocator.alloc(?Types.Type, method.type_parameters.len);
@@ -206,6 +214,7 @@ pub fn buildMappedGenerics(
                 .type_parameters = method_type_parameters,
                 .type_parameter_constraints = method_constraints,
                 .parameter_types = parameters,
+                .parameter_names = parameter_names,
                 .return_type = mappedType(method.return_type, type_map, generic_map),
                 .required_parameters = requiredParameterCount(method.parameters),
             });
@@ -262,7 +271,11 @@ pub fn buildMappedGenerics(
     for (program.functions) |function| {
         if (function.is_test or !function.is_public or std.mem.eql(u8, function.name, "main")) continue;
         const parameter_types = try allocator.alloc(Types.Type, function.parameters.len);
-        for (function.parameters, 0..) |parameter, index| parameter_types[index] = mappedType(parameter.type, type_map, generic_map);
+        const parameter_names = try allocator.alloc([]const u8, function.parameters.len);
+        for (function.parameters, 0..) |parameter, index| {
+            parameter_types[index] = mappedType(parameter.type, type_map, generic_map);
+            parameter_names[index] = parameter.name;
+        }
         const type_parameters = try allocator.alloc([]const u8, function.type_parameters.len);
         const type_parameter_constraints = try allocator.alloc(?Types.Type, function.type_parameters.len);
         for (function.type_parameters, 0..) |parameter, index| type_parameters[index] = parameter.name;
@@ -280,6 +293,7 @@ pub fn buildMappedGenerics(
             .type_parameters = type_parameters,
             .type_parameter_constraints = type_parameter_constraints,
             .return_type = mappedType(function.return_type, type_map, generic_map),
+            .parameter_names = parameter_names,
             .position = function.position,
             .required_parameters = requiredParameterCount(function.parameters),
         });
@@ -362,11 +376,15 @@ test "build stable typed identities from public declarations only" {
     };
     const interface = try build(std.testing.allocator, .project, "Math.Convert", .{ .functions = &functions });
     defer {
-        for (interface.functions) |function| std.testing.allocator.free(function.id.parameter_types);
+        for (interface.functions) |function| {
+            std.testing.allocator.free(function.id.parameter_types);
+            std.testing.allocator.free(function.parameter_names);
+        }
         std.testing.allocator.free(interface.functions);
     }
 
     try std.testing.expectEqual(@as(usize, 2), interface.functions.len);
+    try std.testing.expectEqualStrings("value", interface.functions[0].parameter_names[0]);
     try std.testing.expect(interface.functions[0].id.eql(.{
         .owner = .project,
         .module = "Math.Convert",

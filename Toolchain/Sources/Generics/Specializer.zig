@@ -605,15 +605,23 @@ pub const Specializer = struct {
                             method_arguments[argument_index] = try self.rewriteExpression(argument, arguments, locals);
                         }
                         method_copy.arguments = method_arguments;
+                        const method_named_arguments = try self.allocator.alloc(Ast.Expression.NamedArgument, method.named_arguments.len);
+                        for (method.named_arguments, 0..) |argument, argument_index| {
+                            method_named_arguments[argument_index] = argument;
+                            method_named_arguments[argument_index].value = try self.rewriteExpression(argument.value, arguments, locals);
+                        }
+                        method_copy.named_arguments = method_named_arguments;
                         var call: Ast.Expression.Call = .{
                             .name = method_copy.name,
                             .name_position = method_copy.name_position,
                             .receiver = copy.receiver,
                             .arguments = method_copy.arguments,
+                            .named_arguments = method_copy.named_arguments,
                             .type_arguments = method_copy.type_arguments,
                         };
                         _ = try InjectedSystems.rewriteRegistration(self, &call, locals.items);
                         method_copy.arguments = call.arguments;
+                        method_copy.named_arguments = call.named_arguments;
                         if (try self.specializeMethodCall(call, locals.items)) |name| {
                             method_copy.name = name;
                             method_copy.type_arguments = &.{};

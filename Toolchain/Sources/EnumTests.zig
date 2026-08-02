@@ -123,8 +123,8 @@ test "use enum values in overloaded constructors" {
     _ = try frontend.compile(
         \\enum Choice { empty; value(int) }
         \\struct Box {
-        \\    init(selected:Choice) {}
-        \\    init(number:int) {}
+        \\    init(value:Choice) {}
+        \\    init(value:int) {}
         \\}
         \\func main() {
         \\    Box(Choice.empty())

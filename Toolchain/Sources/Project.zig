@@ -1500,6 +1500,7 @@ pub const Compiler = struct {
                         }
                         method.type_arguments = type_arguments;
                         for (method.arguments) |argument| try self.rewriteExpression(module, argument, type_map);
+                        for (method.named_arguments) |argument| try self.rewriteExpression(module, argument.value, type_map);
                     },
                     .field_assignment => |field| try self.rewriteExpression(module, field.value, type_map),
                 };

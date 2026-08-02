@@ -86,6 +86,7 @@ pub const Expression = struct {
             name: []const u8,
             name_position: Source.Position,
             arguments: []const *Expression,
+            named_arguments: []const NamedArgument = &.{},
             type_arguments: []const Type = &.{},
         };
 

@@ -1,5 +1,6 @@
 const std = @import("std");
 const Ast = @import("../Ast.zig");
+const Arguments = @import("Arguments.zig");
 const Ir = @import("../Ir.zig");
 const Model = @import("Model.zig");
 const Numeric = @import("../Numeric.zig");
@@ -350,7 +351,10 @@ fn analyzeCallWithReceiver(
         );
         return self.fail(call.name_position, message);
     }
-    if (call.named_arguments.len != 0) return self.fail(call.name_position, "methods use positional arguments");
+    if (call.named_arguments.len != 0) {
+        if (receiver_structure.is_protocol) return self.fail(call.name_position, "dynamic protocol calls use positional arguments");
+        return analyzeNamedCall(self, builder, call, receiver_expression, receiver, resolved_receiver, receiver_structure_index, safe_receiver_type, super_call);
+    }
     const candidates = try Inheritance.methodCandidates(self, self.allocator, receiver_structure_index, call.name);
 
     var arity_count: usize = 0;
@@ -569,6 +573,205 @@ fn analyzeCallWithReceiver(
         .value = value,
         .transferred = Resources.containsClass(self, method.return_type),
     };
+}
+
+fn analyzeNamedCall(
+    self: anytype,
+    builder: anytype,
+    call: Ast.Expression.Call,
+    receiver_expression: *Ast.Expression,
+    receiver: Model.TypedValue,
+    resolved_receiver: Model.TypedValue,
+    receiver_structure_index: usize,
+    safe_receiver_type: ?Ast.Type,
+    super_call: bool,
+) !?Model.TypedValue {
+    const all_candidates = try Inheritance.methodCandidates(self, self.allocator, receiver_structure_index, call.name);
+    var candidates: std.ArrayList(usize) = .empty;
+    var first_problem: ?Arguments.Problem = null;
+    var template: ?[]const ?*Ast.Expression = null;
+    for (all_candidates, 0..) |candidate, index| {
+        if (!Visibility.memberVisible(self, candidate.owner, candidate.method, call.name_position)) continue;
+        switch (try Arguments.map(self.allocator, candidate.method.parameters, call.arguments, call.named_arguments)) {
+            .arguments => |mapped| {
+                try candidates.append(self.allocator, index);
+                if (template == null) template = mapped;
+            },
+            .problem => |problem| if (first_problem == null) {
+                first_problem = problem;
+            },
+        }
+    }
+    if (candidates.items.len == 0) {
+        try failArgumentProblem(self, call, first_problem orelse .too_many);
+        unreachable;
+    }
+    const sources = template.?;
+    const typed = try self.allocator.alloc(?Model.TypedValue, sources.len);
+    @memset(typed, null);
+    for (sources, 0..) |maybe_source, index| {
+        const source = maybe_source orelse continue;
+        const expected = if (candidates.items.len == 1)
+            Optionals.expectedContext(all_candidates[candidates.items[0]].method.parameters[index].type, source)
+        else
+            null;
+        typed[index] = try self.analyzeExpressionExpected(builder, source, expected);
+    }
+    var selected: ?usize = null;
+    var best_cost: usize = std.math.maxInt(usize);
+    var ambiguous = false;
+    for (candidates.items) |candidate_index| {
+        const candidate = all_candidates[candidate_index];
+        const mapped = (try Arguments.map(self.allocator, candidate.method.parameters, call.arguments, call.named_arguments)).arguments;
+        var cost: usize = 0;
+        var viable = true;
+        for (mapped, 0..) |maybe_source, index| {
+            if (maybe_source == null) continue;
+            const argument = typed[index].?;
+            if (!self.canImplicitlyConvert(argument.type, candidate.method.parameters[index].type)) {
+                viable = false;
+                break;
+            }
+            if (argument.type != candidate.method.parameters[index].type) cost += 1;
+        }
+        if (!viable) continue;
+        if (cost < best_cost) {
+            selected = candidate_index;
+            best_cost = cost;
+            ambiguous = false;
+        } else if (cost == best_cost) ambiguous = true;
+    }
+    if (ambiguous) {
+        const message = try std.fmt.allocPrint(self.allocator, "call to method '{s}' is ambiguous", .{call.name});
+        return self.fail(call.name_position, message);
+    }
+    const selected_candidate = all_candidates[
+        selected orelse {
+            const message = try std.fmt.allocPrint(self.allocator, "no overload of method '{s}' matches the argument types", .{call.name});
+            return self.fail(call.name_position, message);
+        }
+    ];
+    const structure_index = selected_candidate.owner;
+    const method_index = selected_candidate.index;
+    const method = selected_candidate.method;
+    const mapped = (try Arguments.map(self.allocator, method.parameters, call.arguments, call.named_arguments)).arguments;
+    try Borrowing.validateMappedReadArguments(self, method.parameters, mapped);
+    const flat = flatMethodIndex(self.program, structure_index, method_index);
+    const mutating = self.method_mutability[flat];
+    const class_receiver = self.structures[receiver_structure_index].is_class;
+    const borrowed_mutable = method.return_mode == .mutable;
+    if (mutating) if (Borrowing.rootName(receiver_expression)) |root| try Borrowing.ensureRootUnborrowed(self, builder, root, receiver_expression.position);
+    if (mutating and receiver.borrowed_mode == .read) {
+        const message = try std.fmt.allocPrint(self.allocator, "mutating method '{s}' cannot be called through a read reference", .{call.name});
+        return self.fail(call.name_position, message);
+    }
+    const place = if (mutating and !borrowed_mutable and !class_receiver)
+        try requireMutablePlace(self, builder, receiver_expression, call.name)
+    else
+        null;
+    const borrowed_receiver = if (borrowed_mutable) try MutableReferences.prepare(self, builder, receiver_expression, receiver.type) else null;
+    const method_receiver = if (receiver_structure_index != structure_index and borrowed_receiver == null)
+        try self.coerce(builder, resolved_receiver, .structure(structure_index), call.name_position)
+    else
+        resolved_receiver;
+    var ids: std.ArrayList(Ir.ValueId) = .empty;
+    try ids.append(self.allocator, if (borrowed_receiver) |prepared| prepared.reference else method_receiver.value);
+    var mutable_arguments: std.ArrayList(MutableReferences.Prepared) = .empty;
+    for (method.parameters, mapped, 0..) |parameter, maybe_source, index| {
+        const source = maybe_source orelse {
+            try ids.append(self.allocator, (try self.analyzeParameterDefault(builder, parameter)).value);
+            continue;
+        };
+        const argument = typed[index].?;
+        if (parameter.mode == .mutable) {
+            const prepared = try MutableReferences.prepare(self, builder, source, parameter.type);
+            try mutable_arguments.append(self.allocator, prepared);
+            try ids.append(self.allocator, prepared.reference);
+            continue;
+        }
+        if (parameter.mode != .read) try Borrowing.requireOwned(self, argument, source.position, "passed by value");
+        const converted = try self.coerce(builder, argument, parameter.type, source.position);
+        if (parameter.mode == .value and Resources.containsClass(self, parameter.type)) try Resources.retainValue(self, builder, parameter.type, converted.value);
+        try ids.append(self.allocator, converted.value);
+    }
+    const ir_return_type = methodIrReturnType(self, structure_index, flat, method);
+    const call_result: ?Ir.ValueId = if (ir_return_type == .void) null else try self.newValue(builder, ir_return_type);
+    const arguments_slice = try ids.toOwnedSlice(self.allocator);
+    const implementations = if (method.extension == null and class_receiver and !super_call and
+        !(self.constructor_context != null and receiver_expression.value == .identifier and std.mem.eql(u8, receiver_expression.value.identifier, "self")) and
+        (method.is_public or method.is_protected))
+        try Inheritance.implementations(self, self.allocator, structure_index, method_index)
+    else
+        &.{};
+    if (implementations.len == 0) try self.emit(builder, .{ .call = .{
+        .result = call_result,
+        .function = methodFunctionId(self.program, structure_index, method_index),
+        .arguments = arguments_slice,
+    } }) else try self.emit(builder, .{ .dynamic_call = .{
+        .result = call_result,
+        .function = methodFunctionId(self.program, structure_index, method_index),
+        .receiver = method_receiver.value,
+        .arguments = arguments_slice,
+        .implementations = implementations,
+    } });
+    for (mutable_arguments.items) |prepared| try MutableReferences.writeBack(self, builder, prepared);
+    if (receiver.transferred and Resources.containsClass(self, receiver.type)) try Resources.emitDrop(self, builder, receiver.type, receiver.value);
+    if (borrowed_mutable) {
+        try MutableReferences.writeBack(self, builder, borrowed_receiver.?);
+        const root = receiver.borrowed_root orelse Borrowing.rootName(receiver_expression) orelse return self.fail(receiver_expression.position, "borrowed return cannot originate from a temporary");
+        const loaded = try self.newValue(builder, method.return_type);
+        try self.emit(builder, .{ .reference_load = .{ .result = loaded, .reference = call_result.? } });
+        return .{ .type = method.return_type, .value = loaded, .borrowed_root = root, .borrowed_mode = .mutable, .reference = call_result.? };
+    }
+    if (!mutating) {
+        if (call_result) |value| return .{
+            .type = method.return_type,
+            .value = value,
+            .borrowed_root = if (method.return_mode == .read) receiver.borrowed_root orelse Borrowing.rootName(receiver_expression) else null,
+            .borrowed_mode = method.return_mode,
+            .transferred = method.return_mode == .value and Resources.containsClass(self, method.return_type),
+        };
+        return null;
+    }
+    if (method.return_type == .void) {
+        if (class_receiver) return null;
+        const replacement = if (safe_receiver_type) |optional_type|
+            (try Optionals.promote(self, builder, .{ .type = receiver.type, .value = call_result.? }, optional_type)).?.value
+        else
+            call_result.?;
+        try writePlace(self, builder, place.?, replacement);
+        return null;
+    }
+    if (class_receiver) {
+        const value = try self.newValue(builder, method.return_type);
+        try self.emit(builder, .{ .field_load = .{ .result = value, .base = call_result.?, .field = 1 } });
+        return .{ .type = method.return_type, .value = value, .transferred = Resources.containsClass(self, method.return_type) };
+    }
+    const updated_receiver = try self.newValue(builder, receiver.type);
+    try self.emit(builder, .{ .field_load = .{ .result = updated_receiver, .base = call_result.?, .field = 0 } });
+    const replacement = if (safe_receiver_type) |optional_type|
+        (try Optionals.promote(self, builder, .{ .type = receiver.type, .value = updated_receiver }, optional_type)).?.value
+    else
+        updated_receiver;
+    try writePlace(self, builder, place.?, replacement);
+    const value = try self.newValue(builder, method.return_type);
+    try self.emit(builder, .{ .field_load = .{ .result = value, .base = call_result.?, .field = 1 } });
+    return .{ .type = method.return_type, .value = value, .transferred = Resources.containsClass(self, method.return_type) };
+}
+
+fn failArgumentProblem(self: anytype, call: Ast.Expression.Call, problem: Arguments.Problem) !void {
+    const message = switch (problem) {
+        .too_many => try std.fmt.allocPrint(self.allocator, "too many arguments for method '{s}'", .{call.name}),
+        .unknown => |argument| try std.fmt.allocPrint(self.allocator, "unknown parameter label '{s}'", .{argument.name}),
+        .duplicate => |argument| try std.fmt.allocPrint(self.allocator, "parameter '{s}' is provided more than once", .{argument.name}),
+        .missing => |parameter| try std.fmt.allocPrint(self.allocator, "required parameter '{s}' is missing", .{parameter.name}),
+    };
+    const position = switch (problem) {
+        .unknown => |argument| argument.position,
+        .duplicate => |argument| argument.position,
+        else => call.name_position,
+    };
+    return self.fail(position, message);
 }
 
 fn analyzeProtocolCall(
@@ -1080,8 +1283,9 @@ fn expressionCallsMutatingSelf(program: Ast.Program, structure_index: usize, exp
             const receiver_structure = receiverStructure(program, structure_index, cascade.receiver);
             for (cascade.operations) |operation| switch (operation) {
                 .method_call => |method| {
-                    if (receiver_structure) |target| if (mutatingMethodInStructure(program, target, method.name, method.arguments.len, mutating)) break :calls true;
+                    if (receiver_structure) |target| if (mutatingMethodInStructure(program, target, method.name, method.arguments.len + method.named_arguments.len, mutating)) break :calls true;
                     for (method.arguments) |argument| if (expressionCallsMutatingSelf(program, structure_index, argument, mutating)) break :calls true;
+                    for (method.named_arguments) |argument| if (expressionCallsMutatingSelf(program, structure_index, argument.value, mutating)) break :calls true;
                 },
                 .field_assignment => |field| {
                     if (receiver_structure == structure_index) break :calls true;

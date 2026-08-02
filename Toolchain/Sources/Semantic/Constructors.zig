@@ -1,5 +1,6 @@
 const std = @import("std");
 const Ast = @import("../Ast.zig");
+const Arguments = @import("Arguments.zig");
 const Ir = @import("../Ir.zig");
 const Numeric = @import("../Numeric.zig");
 const Support = @import("Support.zig");
@@ -168,14 +169,7 @@ pub fn analyzeCall(
     declaration: Ast.Structure,
     call: Ast.Expression.Call,
 ) !Model.TypedValue {
-    if (call.named_arguments.len != 0) {
-        const message = try std.fmt.allocPrint(
-            self.allocator,
-            "structure '{s}' has constructors and does not accept named fields",
-            .{declaration.name},
-        );
-        return self.fail(call.name_position, message);
-    }
+    if (call.named_arguments.len != 0) return analyzeNamedCall(self, builder, structure_index, declaration, call);
 
     var arity_count: usize = 0;
     var sole: ?usize = null;
@@ -287,6 +281,120 @@ pub fn analyzeCall(
     } });
     for (mutable_arguments.items) |prepared| try MutableReferences.writeBack(self, builder, prepared);
     return .{ .type = result_type, .value = result };
+}
+
+fn analyzeNamedCall(
+    self: anytype,
+    builder: anytype,
+    structure_index: usize,
+    declaration: Ast.Structure,
+    call: Ast.Expression.Call,
+) !Model.TypedValue {
+    var candidates: std.ArrayList(usize) = .empty;
+    var first_problem: ?Arguments.Problem = null;
+    var template: ?[]const ?*Ast.Expression = null;
+    for (declaration.constructors, 0..) |constructor, index| {
+        if (!Visibility.memberVisible(self, structure_index, constructor, call.name_position)) continue;
+        switch (try Arguments.map(self.allocator, constructor.parameters, call.arguments, call.named_arguments)) {
+            .arguments => |mapped| {
+                try candidates.append(self.allocator, index);
+                if (template == null) template = mapped;
+            },
+            .problem => |problem| if (first_problem == null) {
+                first_problem = problem;
+            },
+        }
+    }
+    if (candidates.items.len == 0) {
+        try failArgumentProblem(self, call, declaration.name, first_problem orelse .too_many);
+        unreachable;
+    }
+    const sources = template.?;
+    const typed = try self.allocator.alloc(?Model.TypedValue, sources.len);
+    @memset(typed, null);
+    for (sources, 0..) |maybe_source, index| {
+        const source = maybe_source orelse continue;
+        const expected = if (candidates.items.len == 1)
+            Optionals.expectedContext(declaration.constructors[candidates.items[0]].parameters[index].type, source)
+        else
+            null;
+        typed[index] = try self.analyzeExpressionExpected(builder, source, expected);
+    }
+
+    var selected: ?usize = null;
+    var best_cost: usize = std.math.maxInt(usize);
+    var ambiguous = false;
+    for (candidates.items) |index| {
+        const constructor = declaration.constructors[index];
+        const mapped = (try Arguments.map(self.allocator, constructor.parameters, call.arguments, call.named_arguments)).arguments;
+        var cost: usize = 0;
+        var viable = true;
+        for (mapped, 0..) |maybe_source, parameter_index| {
+            if (maybe_source == null) continue;
+            const argument = typed[parameter_index].?;
+            if (!self.canImplicitlyConvert(argument.type, constructor.parameters[parameter_index].type)) {
+                viable = false;
+                break;
+            }
+            if (argument.type != constructor.parameters[parameter_index].type) cost += 1;
+        }
+        if (!viable) continue;
+        if (cost < best_cost) {
+            selected = index;
+            best_cost = cost;
+            ambiguous = false;
+        } else if (cost == best_cost) ambiguous = true;
+    }
+    if (ambiguous) {
+        const message = try std.fmt.allocPrint(self.allocator, "call to constructor of '{s}' is ambiguous", .{declaration.name});
+        return self.fail(call.name_position, message);
+    }
+    const constructor_index = selected orelse {
+        const message = try std.fmt.allocPrint(self.allocator, "no constructor of '{s}' matches the argument types", .{declaration.name});
+        return self.fail(call.name_position, message);
+    };
+    const constructor = declaration.constructors[constructor_index];
+    const mapped = (try Arguments.map(self.allocator, constructor.parameters, call.arguments, call.named_arguments)).arguments;
+    try Borrowing.validateMappedReadArguments(self, constructor.parameters, mapped);
+    var ids: std.ArrayList(Ir.ValueId) = .empty;
+    var mutable_arguments: std.ArrayList(MutableReferences.Prepared) = .empty;
+    for (constructor.parameters, mapped, 0..) |parameter, maybe_source, index| {
+        const source = maybe_source orelse {
+            try ids.append(self.allocator, (try self.analyzeParameterDefault(builder, parameter)).value);
+            continue;
+        };
+        const argument = typed[index].?;
+        if (parameter.mode == .mutable) {
+            const prepared = try MutableReferences.prepare(self, builder, source, parameter.type);
+            try mutable_arguments.append(self.allocator, prepared);
+            try ids.append(self.allocator, prepared.reference);
+            continue;
+        }
+        if (parameter.mode != .read) try Borrowing.requireOwned(self, argument, source.position, "passed by value");
+        const converted = try self.coerce(builder, argument, parameter.type, source.position);
+        if (parameter.mode == .value and Resources.containsClass(self, parameter.type)) try Resources.retainValue(self, builder, parameter.type, converted.value);
+        try ids.append(self.allocator, converted.value);
+    }
+    const result_type = Ast.Type.structure(structure_index);
+    const result = try self.newValue(builder, result_type);
+    try self.emit(builder, .{ .call = .{ .result = result, .function = constructorFunctionId(self.program, declaration.name, constructor_index), .arguments = try ids.toOwnedSlice(self.allocator) } });
+    for (mutable_arguments.items) |prepared| try MutableReferences.writeBack(self, builder, prepared);
+    return .{ .type = result_type, .value = result };
+}
+
+fn failArgumentProblem(self: anytype, call: Ast.Expression.Call, structure_name: []const u8, problem: Arguments.Problem) !void {
+    const message = switch (problem) {
+        .too_many => try std.fmt.allocPrint(self.allocator, "too many arguments for constructor of '{s}'", .{structure_name}),
+        .unknown => |argument| try std.fmt.allocPrint(self.allocator, "unknown parameter label '{s}'", .{argument.name}),
+        .duplicate => |argument| try std.fmt.allocPrint(self.allocator, "parameter '{s}' is provided more than once", .{argument.name}),
+        .missing => |parameter| try std.fmt.allocPrint(self.allocator, "required parameter '{s}' is missing", .{parameter.name}),
+    };
+    const position = switch (problem) {
+        .unknown => |argument| argument.position,
+        .duplicate => |argument| argument.position,
+        else => call.name_position,
+    };
+    return self.fail(position, message);
 }
 
 fn constructorFunctionId(program: Ast.Program, structure_name: []const u8, constructor_index: usize) Ir.FunctionId {
@@ -567,7 +675,10 @@ fn validateExpressionReads(self: anytype, structure: Ast.Structure, expression: 
         .cascade => |cascade| {
             try validateExpressionReads(self, structure, cascade.receiver, initialized);
             for (cascade.operations) |operation| switch (operation) {
-                .method_call => |method| for (method.arguments) |argument| try validateExpressionReads(self, structure, argument, initialized),
+                .method_call => |method| {
+                    for (method.arguments) |argument| try validateExpressionReads(self, structure, argument, initialized);
+                    for (method.named_arguments) |argument| try validateExpressionReads(self, structure, argument.value, initialized);
+                },
                 .field_assignment => |field| try validateExpressionReads(self, structure, field.value, initialized),
             };
         },

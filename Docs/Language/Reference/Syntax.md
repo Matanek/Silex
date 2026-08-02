@@ -8,6 +8,8 @@ constraints.
 | Immutable variable | `let name:type = value` |
 | Mutable variable | `var name:type = value` |
 | Function | `func name(value:type) ReturnType { ... }` |
+| Named call | `name(value:expression)` |
+| Mixed call | `name(expression, other:expression)` |
 | Structure | `struct Name { ... }` |
 | Class | `class Name { ... }` |
 | Protocol | `protocol Name { ... }` |

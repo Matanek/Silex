@@ -309,12 +309,12 @@ test "insert calls and place the cursor inside parameterized functions and metho
     const members = try Completion.itemsAt(arena.allocator(), source, member_cursor, .trigger_character);
     try std.testing.expectEqualStrings("reset()", itemWithLabel(members, "reset").?.insertText.?);
     try std.testing.expect(itemWithLabel(members, "reset").?.insertTextFormat == null);
-    try std.testing.expectEqualStrings("add($0)", itemWithLabel(members, "add").?.insertText.?);
+    try std.testing.expectEqualStrings("add(value:${1:value})$0", itemWithLabel(members, "add").?.insertText.?);
     try std.testing.expectEqual(@as(?u8, 2), itemWithLabel(members, "add").?.insertTextFormat);
 
     const function_source =
         "func answer() int { return 42 }\n" ++
-        "func consume(value:int) {}\n" ++
+        "func consume(value:int, count:int = 1) {}\n" ++
         "func main() {\n" ++
         "    \n" ++
         "    print(true)\n" ++
@@ -323,7 +323,7 @@ test "insert calls and place the cursor inside parameterized functions and metho
     const functions = try Completion.itemsAt(arena.allocator(), function_source, function_cursor, .invoked);
     try std.testing.expectEqualStrings("answer()", itemWithLabel(functions, "answer").?.insertText.?);
     try std.testing.expect(itemWithLabel(functions, "answer").?.insertTextFormat == null);
-    try std.testing.expectEqualStrings("consume($0)", itemWithLabel(functions, "consume").?.insertText.?);
+    try std.testing.expectEqualStrings("consume(value:${1:value}, count:${2:count})$0", itemWithLabel(functions, "consume").?.insertText.?);
     try std.testing.expectEqual(@as(?u8, 2), itemWithLabel(functions, "consume").?.insertTextFormat);
 }
 
@@ -414,7 +414,7 @@ test "reuse an existing call when completing an imported module function" {
         new_call_cursor,
     )).?;
     const new_call = itemWithLabel(new_call_items, "sha256").?;
-    try std.testing.expectEqualStrings("sha256($0)", new_call.insertText.?);
+    try std.testing.expectEqualStrings("sha256(value:${1:value})$0", new_call.insertText.?);
     try std.testing.expectEqual(@as(?u8, 2), new_call.insertTextFormat);
 }
 
@@ -547,8 +547,218 @@ test "insert calls for structure and class constructors" {
 
     const entity_cursor = std.mem.indexOf(u8, source, "En\n").? + "En".len;
     const entities = try Completion.itemsAt(arena.allocator(), source, entity_cursor, .invoked);
-    try std.testing.expectEqualStrings("Entity($0)", itemWithLabel(entities, "Entity").?.insertText.?);
+    try std.testing.expectEqualStrings("Entity(name:${1:name})$0", itemWithLabel(entities, "Entity").?.insertText.?);
     try std.testing.expectEqual(@as(?u8, 2), itemWithLabel(entities, "Entity").?.insertTextFormat);
+}
+
+test "complete imported members through a local function return" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "STD/Module/Math");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "func main() {}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "STD/Package.json",
+        .data = "{\"name\":\"STD\",\"version\":\"0.1.0\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "STD/Module/Math/Vec3.sx",
+        .data =
+        \\public struct Vec3 {
+        \\    var x:float
+        \\    func length() float { return x }
+        \\}
+        ,
+    });
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const main_path = try std.fs.path.join(allocator, &.{ root, "Main.sx" });
+    const uri = try std.fmt.allocPrint(allocator, "file://{s}", .{main_path});
+    const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
+    const source =
+        \\use STD.Math
+        \\func make_vec3(x:float, y:float, z:float) Math.Vec3 {
+        \\    return Math.Vec3(z:z, y:y, x:x)
+        \\}
+        \\func main() {
+        \\    var v = make_vec3(0, 1, 2)
+        \\    print(v.)
+        \\}
+    ;
+    const cursor = std.mem.indexOf(u8, source, "v.)").? + "v.".len;
+    const items = (try Workspace.itemsAt(
+        allocator,
+        std.testing.io,
+        null,
+        root_uri,
+        uri,
+        &.{},
+        source,
+        cursor,
+    )).?;
+    try std.testing.expect(hasLabel(items, "x"));
+    try std.testing.expect(hasLabel(items, "length"));
+}
+
+test "complete an imported module in a function return type" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "STD/Module/Math");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "func main() {}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "STD/Package.json",
+        .data = "{\"name\":\"STD\",\"version\":\"0.1.0\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "STD/Module/Math/Vec3.sx",
+        .data =
+        \\public struct Vec3 {
+        \\    public init(value:float) {}
+        \\}
+        \\public func scalar(value:float) float { return value }
+        ,
+    });
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const main_path = try std.fs.path.join(allocator, &.{ root, "Main.sx" });
+    const uri = try std.fmt.allocPrint(allocator, "file://{s}", .{main_path});
+    const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
+
+    const module_source =
+        \\use STD.Math
+        \\func make_vec3(x:float, y:float, z:float) Mat {
+        \\    return Math.Vec3()
+        \\}
+        \\func main() {}
+    ;
+    const module_cursor = std.mem.indexOf(u8, module_source, "Mat {").? + "Mat".len;
+    const modules = try Workspace.scopeItemsAt(
+        allocator,
+        std.testing.io,
+        null,
+        root_uri,
+        uri,
+        &.{},
+        module_source,
+        module_cursor,
+    );
+    try std.testing.expect(hasLabel(modules, "Math"));
+
+    const type_source =
+        \\use STD.Math
+        \\func make_vec3(x:float, y:float, z:float) Math. {
+        \\    return Math.Vec3(0)
+        \\}
+        \\func main() {}
+    ;
+    const type_cursor = std.mem.indexOf(u8, type_source, "Math. {").? + "Math.".len;
+    const types = (try Workspace.itemsAt(
+        allocator,
+        std.testing.io,
+        null,
+        root_uri,
+        uri,
+        &.{},
+        type_source,
+        type_cursor,
+    )).?;
+    try std.testing.expectEqual(@as(usize, 1), types.len);
+    const vec3 = itemWithLabel(types, "Vec3").?;
+    try std.testing.expectEqual(@as(u8, 22), vec3.kind);
+    try std.testing.expectEqualStrings("struct Vec3", vec3.detail);
+    try std.testing.expectEqualStrings("Vec3", vec3.insertText.?);
+    try std.testing.expect(vec3.insertTextFormat == null);
+    try std.testing.expect(!hasLabel(types, "scalar"));
+
+    const package_source =
+        \\struct Error { let message:str }
+        \\func test() ST
+        \\func main() {}
+    ;
+    const package_cursor = std.mem.indexOf(u8, package_source, "ST\n").? + "ST".len;
+    const packages = try Workspace.scopeItemsAt(
+        allocator,
+        std.testing.io,
+        null,
+        root_uri,
+        uri,
+        &.{},
+        package_source,
+        package_cursor,
+    );
+    const std_package = itemWithLabel(packages, "STD").?;
+    try std.testing.expectEqual(@as(u8, 9), std_package.kind);
+    try std.testing.expectEqualStrings("STD", std_package.insertText.?);
+
+    const return_source =
+        "struct Error { let message:str }\n" ++
+        "func test() Result<int, Error> {\n" ++
+        "    return \n" ++
+        "}\n";
+    const return_cursor = std.mem.indexOf(u8, return_source, "return \n").? + "return ".len;
+    const return_modules = try Workspace.scopeItemsAt(
+        allocator,
+        std.testing.io,
+        null,
+        root_uri,
+        uri,
+        &.{},
+        return_source,
+        return_cursor,
+    );
+    const std_return_module = itemWithLabel(return_modules, "STD").?;
+    try std.testing.expectEqual(@as(u8, 9), std_return_module.kind);
+    try std.testing.expectEqualStrings("STD", std_return_module.insertText.?);
+
+    const result_argument_source =
+        "struct Error { let message:str }\n" ++
+        "func test() Result<int, Error> {\n" ++
+        "    return Result<int, Error>.failure()\n" ++
+        "}\n";
+    const result_argument_cursor = std.mem.indexOf(u8, result_argument_source, "failure(").? + "failure(".len;
+    const result_argument_modules = try Workspace.scopeItemsAt(
+        allocator,
+        std.testing.io,
+        null,
+        root_uri,
+        uri,
+        &.{},
+        result_argument_source,
+        result_argument_cursor,
+    );
+    try std.testing.expect(hasLabel(result_argument_modules, "STD"));
+
+    const absolute_source =
+        \\func test() STD.Math. {
+        \\    return STD.Math.Vec3(0)
+        \\}
+        \\func main() {}
+    ;
+    const absolute_cursor = std.mem.indexOf(u8, absolute_source, "STD.Math. {").? + "STD.Math.".len;
+    const absolute_types = (try Workspace.itemsAt(
+        allocator,
+        std.testing.io,
+        null,
+        root_uri,
+        uri,
+        &.{},
+        absolute_source,
+        absolute_cursor,
+    )).?;
+    const absolute_vec3 = itemWithLabel(absolute_types, "Vec3").?;
+    try std.testing.expectEqual(@as(u8, 22), absolute_vec3.kind);
+    try std.testing.expectEqualStrings("struct Vec3", absolute_vec3.detail);
+    try std.testing.expectEqualStrings("Vec3", absolute_vec3.insertText.?);
+    try std.testing.expect(!hasLabel(absolute_types, "scalar"));
 }
 
 fn hasLabel(items: []const Types.CompletionItem, label: []const u8) bool {

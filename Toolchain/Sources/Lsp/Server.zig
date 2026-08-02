@@ -131,7 +131,7 @@ pub const Server = struct {
                 return try self.replyInvalidParams(allocator, id, "invalid completion position");
             };
             const trigger_kind = Protocol.completionTriggerKind(params);
-            const needs_workspace = needsWorkspaceCompletion(source, cursor);
+            const needs_workspace = needsWorkspaceCompletion(allocator, source, cursor);
             if (needs_workspace) {
                 const project_items = Workspace.itemsAtForTarget(
                     allocator,
@@ -305,7 +305,7 @@ fn completionItemLessThan(_: void, left: Types.CompletionItem, right: Types.Comp
     return std.mem.lessThan(u8, left.label, right.label);
 }
 
-fn needsWorkspaceCompletion(source: []const u8, cursor: usize) bool {
+fn needsWorkspaceCompletion(allocator: Allocator, source: []const u8, cursor: usize) bool {
     if (std.mem.indexOf(u8, source, "use ") != null) return true;
     if (cursor > source.len) return false;
     var prefix_start = cursor;
@@ -314,6 +314,8 @@ fn needsWorkspaceCompletion(source: []const u8, cursor: usize) bool {
     {
         prefix_start -= 1;
     }
+    if (Completion.isTypePositionAt(allocator, source, prefix_start) catch false) return true;
+    if (Completion.isReturnExpressionAt(allocator, source, cursor) catch false) return true;
     const prefix = source[prefix_start..cursor];
     if (prefix.len != 0 and
         (std.mem.startsWith(u8, "Platform", prefix) or std.mem.startsWith(u8, "Target", prefix)))
@@ -325,10 +327,29 @@ fn needsWorkspaceCompletion(source: []const u8, cursor: usize) bool {
 }
 
 test "contextual qualifiers request workspace completion without an import" {
-    try std.testing.expect(needsWorkspaceCompletion("func seed() { Pla }", 17));
-    try std.testing.expect(needsWorkspaceCompletion("func seed() { Platform. }", 23));
-    try std.testing.expect(needsWorkspaceCompletion("func seed() { Target. }", 21));
-    try std.testing.expect(!needsWorkspaceCompletion("func seed() { local }", 19));
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    try std.testing.expect(needsWorkspaceCompletion(allocator, "func seed() { Pla }", 17));
+    try std.testing.expect(needsWorkspaceCompletion(allocator, "func seed() { Platform. }", 23));
+    try std.testing.expect(needsWorkspaceCompletion(allocator, "func seed() { Target. }", 21));
+    try std.testing.expect(needsWorkspaceCompletion(allocator, "func test() Res", 15));
+    const return_source =
+        \\func test() Result<int, str> {
+        \\    return Re
+        \\}
+    ;
+    const return_cursor = std.mem.indexOf(u8, return_source, "return Re").? + "return Re".len;
+    try std.testing.expect(needsWorkspaceCompletion(allocator, return_source, return_cursor));
+    const result_argument_source =
+        \\struct Error {}
+        \\func test() Result<int, Error> {
+        \\    return Result<int, Error>.failure(Er)
+        \\}
+    ;
+    const result_argument_cursor = std.mem.indexOf(u8, result_argument_source, "failure(Er").? + "failure(Er".len;
+    try std.testing.expect(needsWorkspaceCompletion(allocator, result_argument_source, result_argument_cursor));
+    try std.testing.expect(!needsWorkspaceCompletion(allocator, "func seed() { local }", 19));
 }
 
 test "initialize advertises completion and document colors" {

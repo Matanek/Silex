@@ -1523,8 +1523,8 @@ test "execute overloaded value constructors and implicit self return" {
         \\    let y:int
         \\    var label:str = "point"
         \\    init(x:int, y:int) { self.x = x; self.y = y }
-        \\    init(enabled:bool) {
-        \\        if enabled { self.x = 20 } else { self.x = 0 }
+        \\    init(x:bool) {
+        \\        if x { self.x = 20 } else { self.x = 0 }
         \\        self.y = 22
         \\    }
         \\}
@@ -1549,8 +1549,8 @@ test "execute mutating nonmutating overloaded and chained methods" {
         \\    func increment() { self.value++ }
         \\    func forward() { self.increment() }
         \\    func add(amount:int) int { self.value += amount; return self.value }
-        \\    func choose(amount:int) { self.value += amount }
-        \\    func choose(enabled:bool) { if enabled { self.increment() } }
+        \\    func choose(value:int) { self.value += value }
+        \\    func choose(value:bool) { if value { self.increment() } }
         \\    func current() int { return self.value }
         \\    func duplicate() Counter { return self }
         \\}
