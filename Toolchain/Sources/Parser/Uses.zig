@@ -80,6 +80,7 @@ fn validateAlias(parser: anytype, position: @import("../Source.zig").Position, a
     if (std.mem.eql(u8, alias, "Result")) return parser.failAt(position, "'Result' is a reserved intrinsic type name");
     if (std.mem.eql(u8, alias, "map_error")) return parser.failAt(position, "'map_error' is a reserved intrinsic function name");
     if (std.mem.eql(u8, alias, "embed_text")) return parser.failAt(position, "'embed_text' is a reserved intrinsic function name");
+    if (std.mem.eql(u8, alias, "embed_bytes")) return parser.failAt(position, "'embed_bytes' is a reserved intrinsic function name");
 }
 
 fn isTypeToken(tag: anytype) bool {

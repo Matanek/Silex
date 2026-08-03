@@ -152,10 +152,27 @@ pub const Server = struct {
             const trigger_character = Protocol.completionTriggerCharacter(params) orelse "";
             const completing_try_error = Completion.isTryErrorBindingPositionAt(allocator, source, cursor) catch false;
             const completing_try_alternative = Completion.isTryAlternativePositionAt(allocator, source, cursor) catch false;
+            const local_parameters = try Completion.parameterItemsAt(allocator, source, cursor);
+            const imported_parameters = if (self.workspace_root_uri != null)
+                Workspace.parameterItemsAtForTarget(
+                    allocator,
+                    self.io,
+                    self.global_packages_root,
+                    self.target,
+                    self.workspace_root_uri,
+                    uri,
+                    self.documents.items,
+                    source,
+                    cursor,
+                ) catch &.{}
+            else
+                &.{};
+            const parameters = try mergeCompletionItems(allocator, local_parameters, imported_parameters);
             if (trigger_kind == .trigger_character and
                 (std.mem.eql(u8, trigger_character, " ") or std.mem.eql(u8, trigger_character, ")")) and
                 !completing_try_error and
-                !completing_try_alternative)
+                !completing_try_alternative and
+                parameters.len == 0)
             {
                 return try self.reply(allocator, id, .{
                     .isIncomplete = false,
@@ -177,7 +194,8 @@ pub const Server = struct {
                     cursor,
                 ) catch null;
                 if (project_items) |items| {
-                    return try self.reply(allocator, id, .{ .isIncomplete = false, .items = items });
+                    const merged = try mergeCompletionItems(allocator, parameters, items);
+                    return try self.reply(allocator, id, .{ .isIncomplete = false, .items = merged });
                 }
             }
             const items = try Completion.itemsAt(allocator, source, cursor, trigger_kind);
@@ -193,10 +211,12 @@ pub const Server = struct {
                     source,
                     cursor,
                 ) catch &.{};
-                const merged = try mergeCompletionItems(allocator, items, imported);
+                const scoped = try mergeCompletionItems(allocator, items, imported);
+                const merged = try mergeCompletionItems(allocator, parameters, scoped);
                 return try self.reply(allocator, id, .{ .isIncomplete = false, .items = merged });
             }
-            return try self.reply(allocator, id, .{ .isIncomplete = false, .items = items });
+            const merged = try mergeCompletionItems(allocator, parameters, items);
+            return try self.reply(allocator, id, .{ .isIncomplete = false, .items = merged });
         }
         if (std.mem.eql(u8, request.method, "textDocument/documentColor")) {
             const id = request.id orelse return null;

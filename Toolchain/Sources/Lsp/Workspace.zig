@@ -145,6 +145,34 @@ pub fn itemsAtForTarget(
     return result;
 }
 
+pub fn parameterItemsAtForTarget(
+    allocator: Allocator,
+    io: Io,
+    global_packages_root: ?[]const u8,
+    selected_target: TargetModule.Target,
+    root_uri: ?[]const u8,
+    document_uri: []const u8,
+    documents: []const Types.Document,
+    source: []const u8,
+    cursor: usize,
+) ![]const Types.CompletionItem {
+    const call = try Completion.activeCallAt(allocator, source, cursor) orelse
+        return allocator.alloc(Types.CompletionItem, 0);
+    const lookup_source = try Completion.sourceForParameterLookup(allocator, source, cursor, call);
+    const callables = (try itemsAtForTarget(
+        allocator,
+        io,
+        global_packages_root,
+        selected_target,
+        root_uri,
+        document_uri,
+        documents,
+        lookup_source,
+        call.callee_end,
+    )) orelse return allocator.alloc(Types.CompletionItem, 0);
+    return Completion.parameterItemsFromCallables(allocator, callables, call);
+}
+
 pub fn hasProjectReferenceForTarget(
     allocator: Allocator,
     io: Io,

@@ -178,14 +178,14 @@ pub const Compiler = struct {
             self.diagnostic = analyzer.diagnostic;
             return err;
         };
-        if (analyzer.shader_files.items.len != 0 or analyzer.embedded_text_files.items.len != 0) {
+        if (analyzer.shader_files.items.len != 0 or analyzer.embedded_files.items.len != 0) {
             const all_files = try self.allocator.alloc(
                 []const u8,
-                self.files.len + analyzer.shader_files.items.len + analyzer.embedded_text_files.items.len,
+                self.files.len + analyzer.shader_files.items.len + analyzer.embedded_files.items.len,
             );
             @memcpy(all_files[0..self.files.len], self.files);
             @memcpy(all_files[self.files.len..][0..analyzer.shader_files.items.len], analyzer.shader_files.items);
-            @memcpy(all_files[self.files.len + analyzer.shader_files.items.len ..], analyzer.embedded_text_files.items);
+            @memcpy(all_files[self.files.len + analyzer.shader_files.items.len ..], analyzer.embedded_files.items);
             self.files = all_files;
         }
         ir.files = self.files;
@@ -1445,7 +1445,8 @@ pub const Compiler = struct {
                         }
                     } else try self.rewriteExpression(module, receiver, type_map);
                 }
-                if (call.receiver == null and std.mem.eql(u8, call.name, "embed_text")) return;
+                if (call.receiver == null and
+                    (std.mem.eql(u8, call.name, "embed_text") or std.mem.eql(u8, call.name, "embed_bytes"))) return;
                 if (call.receiver == null and std.mem.eql(u8, call.name, "map_error")) {
                     if (call.arguments.len == 2 and call.arguments[1].value == .identifier) {
                         try self.qualifyFunctionReference(module, &call.arguments[1].value.identifier);

@@ -34,7 +34,7 @@ const Visibility = @import("Visibility.zig");
 const Declarations = @import("Declarations.zig");
 const Inheritance = @import("Inheritance.zig");
 const Interop = @import("Interop.zig");
-const EmbeddedText = @import("../EmbeddedText.zig");
+const EmbeddedFiles = @import("../EmbeddedFiles.zig");
 const StaticMembers = @import("StaticMembers.zig");
 const Protocols = @import("Protocols.zig");
 const Conversions = @import("Conversions.zig");
@@ -71,7 +71,7 @@ pub const Analyzer = struct {
     source_files: []const []const u8 = &.{},
     shadercross_path: ?[]const u8 = null,
     shader_files: std.ArrayList([]const u8) = .empty,
-    embedded_text_files: std.ArrayList([]const u8) = .empty,
+    embedded_files: std.ArrayList([]const u8) = .empty,
     pub fn init(allocator: Allocator) Analyzer {
         return .{ .allocator = allocator };
     }
@@ -1089,7 +1089,7 @@ pub const Analyzer = struct {
     pub fn analyzeCall(self: *Analyzer, builder: *FunctionBuilder, call: Ast.Expression.Call) AnalyzeError!?TypedValue {
         if (try Callbacks.call(self, builder, call)) |result| return result.value;
         if (call.receiver == null and std.mem.eql(u8, call.name, "map_error")) return try MapError.analyze(self, builder, call);
-        if (try EmbeddedText.analyze(self, builder, call)) |value| return value;
+        if (try EmbeddedFiles.analyze(self, builder, call)) |value| return value;
         if (try Interop.analyzeIntrinsic(self, builder, call)) |value| return value;
         if (call.receiver) |receiver_expression| {
             if (Collections.isMutation(call.name) and Collections.receiverIsCollection(self.structures, builder, receiver_expression)) {

@@ -26,7 +26,7 @@ const NativeTestRunner = @import("NativeTestRunner.zig");
 const TestDiscovery = @import("TestDiscovery.zig");
 const TargetModule = @import("Target.zig");
 const ToolchainSetup = @import("ToolchainSetup.zig");
-const EmbeddedText = @import("EmbeddedText.zig");
+const EmbeddedFiles = @import("EmbeddedFiles.zig");
 const ShaderAssets = @import("ShaderAssets.zig");
 
 const Io = std.Io;
@@ -54,7 +54,7 @@ test {
     _ = X64Object;
     _ = NativeLink;
     _ = ToolchainSetup;
-    _ = EmbeddedText;
+    _ = EmbeddedFiles;
     _ = ShaderAssets;
     _ = CliProgress;
 }
@@ -1078,7 +1078,7 @@ test {
     _ = @import("FixedArrayTests.zig");
     _ = @import("TupleTests.zig");
     _ = @import("DynamicListTests.zig");
-    _ = @import("EmbeddedTextTests.zig");
+    _ = @import("EmbeddedFilesTests.zig");
     _ = @import("CollectionMutationTests.zig");
     _ = @import("CollectionSliceTests.zig");
     _ = @import("ForIterationTests.zig");

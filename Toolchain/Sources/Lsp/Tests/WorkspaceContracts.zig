@@ -271,6 +271,50 @@ test "server preserves prefix ranking in the response consumed by Zed" {
     try Support.expectNoDuplicates(items);
 }
 
+test "server ranks imported method parameter labels before scope symbols" {
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "use WebView\nfunc main() {}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "WebView.sx",
+        .data =
+        \\public static class Asset {
+        \\    public static func javascript(source:str, path:str) str { return source }
+        \\}
+        ,
+    });
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const uri = try std.fmt.allocPrint(allocator, "file://{s}/Main.sx", .{root});
+    const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
+
+    var server = ServerModule.Server.init(std.testing.allocator, std.testing.io);
+    defer server.deinit();
+    try Support.initializeServer(&server, allocator, root_uri);
+    const items = try Support.serverCompletion(&server, allocator, uri,
+        \\use WebView
+        \\func wrap(value:str) str { return value }
+        \\func main() {
+        \\    let asset = WebView.Asset.javascript(wrap("app.js"), <|>)
+        \\}
+    );
+    try Support.expectFirst("path", items);
+    try Support.expectItem(.{
+        .label = "path",
+        .kind = 6,
+        .detail = "path:str",
+        .insert_text = "path:",
+        .insert_text_format = null,
+    }, items);
+    try Support.expectNoDuplicates(items);
+}
+
 test "server resolves a UTF-16 completion position after non-ASCII text" {
     var temporary = std.testing.tmpDir(.{});
     defer temporary.cleanup();

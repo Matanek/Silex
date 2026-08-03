@@ -1,4 +1,4 @@
-# Embed a text file
+# Embed files
 
 `embed_text` reads a UTF-8 file while Silex compiles the program and produces
 an ordinary `str` stored in the executable:
@@ -17,5 +17,17 @@ rejects invalid UTF-8, and currently limits one file to 16 MiB. Packages can
 interpret the resulting string as HTML, a shader, configuration, or any other
 textual format without requiring a package-specific compiler intrinsic.
 
-`embed_text` is a reserved language function and cannot be redeclared or used
-as a binding or import alias.
+Use `embed_bytes` when the file is binary or when its exact bytes matter:
+
+```sx
+let image:uint8[] = embed_bytes("Web/logo.png")
+```
+
+`embed_bytes` accepts arbitrary byte values, including zero and invalid UTF-8,
+and returns an ordinary owned `uint8[]`. Each evaluation produces independent
+list storage, so normal list mutations do not modify the executable image or
+another evaluation. The same relative-path, compile-time, cache-dependency,
+and 16 MiB rules apply to both functions.
+
+`embed_text` and `embed_bytes` are reserved language functions and cannot be
+redeclared or used as bindings or import aliases.

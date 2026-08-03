@@ -31,6 +31,48 @@ pub fn emitInit(allocator: Allocator, words: *std.ArrayList(u32), epilogue: *std
     try Fixups.patch26(words.items, done, words.items.len);
 }
 
+pub fn emitBytesLiteral(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    data_fixups: *std.ArrayList(Fixups.Data),
+    epilogue: *std.ArrayList(Fixups.Local),
+    sites: *std.ArrayList(ExternalCalls.Site),
+    platform: Allocation.Platform,
+    program: Machine.Program,
+    value: Machine.Instruction.ConstantBytes,
+) Error!void {
+    if (value.string >= program.strings.len) return error.InvalidMachineProgram;
+    const count = program.strings[value.string].len;
+    const bytes = 8 + @as(u64, count) * Machine.slot_size;
+    try allocate(allocator, words, sites, platform, bytes);
+    const failed = words.items.len;
+    try words.append(allocator, Allocation.failureBranch(platform));
+    try words.append(allocator, A64.moveRegister(.x15, .x0));
+    try immediate(allocator, words, .x11, count);
+    try words.append(allocator, A64.store64(.x11, .x15, 0));
+    if (count != 0) {
+        try StringRuntime.emitLiteral(allocator, words, data_fixups, value.string, value.result);
+        try words.append(allocator, A64.loadStack(.x10, value.result));
+        try words.append(allocator, A64.addSubtractImmediate(.x10, .x10, 8, true));
+        try words.append(allocator, A64.addSubtractImmediate(.x14, .x15, 8, true));
+        const loop = words.items.len;
+        try words.append(allocator, A64.loadByte(.x9, .x10));
+        try words.append(allocator, A64.store64(.x9, .x14, 0));
+        try words.append(allocator, A64.addSubtractImmediate(.x10, .x10, 1, true));
+        try words.append(allocator, A64.addSubtractImmediate(.x14, .x14, Machine.slot_size, true));
+        try words.append(allocator, A64.addSubtractImmediate(.x11, .x11, 1, false));
+        const repeat = words.items.len;
+        try words.append(allocator, A64.compareBranchNonZero64(.x11));
+        try Fixups.patch19(words.items, repeat, loop);
+    }
+    try words.append(allocator, A64.storeStack(.x15, value.result));
+    const done = words.items.len;
+    try words.append(allocator, A64.branch());
+    try Fixups.patch19(words.items, failed, words.items.len);
+    try fail(allocator, words, epilogue);
+    try Fixups.patch26(words.items, done, words.items.len);
+}
+
 pub fn emitCount(allocator: Allocator, words: *std.ArrayList(u32), value: Machine.Instruction.CollectionCount) Error!void {
     if (value.view) {
         try words.append(allocator, A64.loadStack(.x10, @intCast(@as(usize, value.collection.start) + 1)));

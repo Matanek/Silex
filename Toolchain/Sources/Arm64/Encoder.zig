@@ -467,6 +467,16 @@ fn encodeFunction(
             .constant_str => |constant| {
                 try StringRuntime.emitLiteral(allocator, words, data_fixups, constant.string, constant.result);
             },
+            .constant_bytes => |constant| try ListRuntime.emitBytesLiteral(
+                allocator,
+                words,
+                data_fixups,
+                &fixups.epilogue,
+                external_call_sites,
+                @enumFromInt(@intFromEnum(platform)),
+                program,
+                constant,
+            ),
             .constant_float32 => |constant| {
                 try emitImmediate64(allocator, words, .x9, constant.bits);
                 try storeValue(allocator, words, function, .x9, constant.result);
