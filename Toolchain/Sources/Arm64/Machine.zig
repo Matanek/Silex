@@ -1138,6 +1138,29 @@ fn supportedExternal(function: ExternalFunction) bool {
         const arguments = [_]AbiValue{ .uint64, .read_address };
         return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
     }
+    if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and std.mem.eql(u8, function.source_name, "pthread_self")) {
+        return function.signature.arguments.len == 0 and function.signature.result == .uint64;
+    }
+    if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and std.mem.eql(u8, function.source_name, "dispatch_semaphore_create")) {
+        const arguments = [_]AbiValue{.int64};
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .uint64;
+    }
+    if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and std.mem.eql(u8, function.source_name, "dispatch_semaphore_wait")) {
+        const arguments = [_]AbiValue{ .uint64, .uint64 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int64;
+    }
+    if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and std.mem.eql(u8, function.source_name, "dispatch_semaphore_signal")) {
+        const arguments = [_]AbiValue{.uint64};
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int64;
+    }
+    if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and std.mem.eql(u8, function.source_name, "dispatch_release")) {
+        const arguments = [_]AbiValue{.uint64};
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == null;
+    }
+    if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and std.mem.eql(u8, function.source_name, "sysconf")) {
+        const arguments = [_]AbiValue{.int32};
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int64;
+    }
     if (std.mem.eql(u8, function.provider, "Linux.kernel") and
         (std.mem.eql(u8, function.source_name, "read") or std.mem.eql(u8, function.source_name, "write")))
     {

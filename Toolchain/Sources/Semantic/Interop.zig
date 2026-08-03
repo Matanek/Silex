@@ -5,6 +5,7 @@ const Ir = @import("../Ir.zig");
 const Model = @import("Model.zig");
 const Types = @import("../Types.zig");
 const Collections = @import("Collections.zig");
+const Resources = @import("Resources.zig");
 const Support = @import("Support.zig");
 const MathBoundary = @import("../Math/Boundary.zig");
 
@@ -269,6 +270,18 @@ pub fn prepare(self: anytype) ![]const Boundary.Function {
             if (parameters.len != 4 or parameters[0] != .address or parameters[1] != .address or parameters[2] != .address or parameters[3] != .address or return_type != .int32) return self.fail(external.position, "pthread_create expects four pointer parameters and int32 result");
         } else if (std.mem.eql(u8, external.library, "MacOS.lib_system") and std.mem.eql(u8, external.source_name, "pthread_join")) {
             if (parameters.len != 2 or parameters[0] != .uint or parameters[1] != .address or return_type != .int32) return self.fail(external.position, "pthread_join expects func(uint, C.Pointer<uint8>) int32");
+        } else if (std.mem.eql(u8, external.library, "MacOS.lib_system") and std.mem.eql(u8, external.source_name, "pthread_self")) {
+            if (parameters.len != 0 or return_type != .uint) return self.fail(external.position, "pthread_self expects func() uint");
+        } else if (std.mem.eql(u8, external.library, "MacOS.lib_system") and std.mem.eql(u8, external.source_name, "dispatch_semaphore_create")) {
+            if (parameters.len != 1 or parameters[0] != .int or return_type != .uint) return self.fail(external.position, "dispatch_semaphore_create expects func(int) uint");
+        } else if (std.mem.eql(u8, external.library, "MacOS.lib_system") and std.mem.eql(u8, external.source_name, "dispatch_semaphore_wait")) {
+            if (parameters.len != 2 or parameters[0] != .uint or parameters[1] != .uint or return_type != .int) return self.fail(external.position, "dispatch_semaphore_wait expects func(uint, uint) int");
+        } else if (std.mem.eql(u8, external.library, "MacOS.lib_system") and std.mem.eql(u8, external.source_name, "dispatch_semaphore_signal")) {
+            if (parameters.len != 1 or parameters[0] != .uint or return_type != .int) return self.fail(external.position, "dispatch_semaphore_signal expects func(uint) int");
+        } else if (std.mem.eql(u8, external.library, "MacOS.lib_system") and std.mem.eql(u8, external.source_name, "dispatch_release")) {
+            if (parameters.len != 1 or parameters[0] != .uint or return_type != .void) return self.fail(external.position, "dispatch_release expects func(uint) void");
+        } else if (std.mem.eql(u8, external.library, "MacOS.lib_system") and std.mem.eql(u8, external.source_name, "sysconf")) {
+            if (parameters.len != 1 or parameters[0] != .int32 or return_type != .int) return self.fail(external.position, "sysconf expects func(int32) int");
         } else if (std.mem.eql(u8, external.library, "Linux.kernel") and std.mem.eql(u8, external.source_name, "write")) {
             if (parameters.len != 3 or parameters[0] != .int32 or parameters[1] != .address or
                 parameters[2] != .uint or return_type != .int)
@@ -862,7 +875,11 @@ pub fn analyzeIntrinsic(self: anytype, builder: anytype, call: Ast.Expression.Ca
         if (address.type != .uint) return self.fail(call.arguments[0].position, "C.object_from_address<T> expects uint address bits");
         const result = try self.newValue(builder, target);
         try self.emit(builder, .{ .copy = .{ .result = result, .operand = address.value } });
-        return .{ .type = target, .value = result };
+        // The address itself is unowned. Reconstructing a Silex class value
+        // establishes an owned callback-local root which is released normally
+        // when that callback returns.
+        try Resources.retainValue(self, builder, target, result);
+        return .{ .type = target, .value = result, .transferred = true };
     }
     if (call.receiver == null and (std.mem.eql(u8, call.name, "C.pointer") or std.mem.eql(u8, call.name, "C.terminated_pointer"))) {
         if (call.type_arguments.len != 0 or call.named_arguments.len != 0 or call.arguments.len != 1) {

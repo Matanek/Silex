@@ -31,6 +31,8 @@ pub fn analyze(self: anytype, structure_index: usize, method_index: usize, metho
         .resource_try_get_mut => |field| try emitTryGet(self, &builder, structure_index, field, true),
         .resource_remove => |field| try emitRemove(self, &builder, structure_index, field, flat),
         .resource_clear => try emitClear(self, &builder, structure_index),
+        .component_get_mut => return error.InvalidSource,
+        .world_component_get_mut => return error.InvalidSource,
         .system_adapter => return error.InvalidSource,
     }
 

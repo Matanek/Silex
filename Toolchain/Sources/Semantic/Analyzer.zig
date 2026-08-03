@@ -1339,6 +1339,9 @@ pub const Analyzer = struct {
             .arguments = try argument_ids.toOwnedSlice(self.allocator),
         } });
         for (mutable_arguments.items) |argument| try MutableReferences.writeBack(self, builder, argument.prepared);
+        for (arguments.items) |argument| if (argument.transferred and Resources.containsClass(self, argument.type)) {
+            try Resources.emitDrop(self, builder, argument.type, argument.value);
+        };
         if (result == null) return null;
         if (function.return_mode == .value) return .{
             .type = function.return_type,

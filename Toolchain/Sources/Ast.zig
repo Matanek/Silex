@@ -64,6 +64,9 @@ pub const Expression = struct {
         name: []const u8,
         name_position: Source.Position,
         receiver: ?*Expression = null,
+        /// Set only by compiler rewrites that deliberately target an internal
+        /// runtime hook. Source calls never receive this privilege.
+        compiler_generated: bool = false,
         safe: bool = false,
         arguments: []const *Expression,
         named_arguments: []const NamedArgument = &.{},
@@ -85,6 +88,7 @@ pub const Expression = struct {
         pub const MethodCall = struct {
             name: []const u8,
             name_position: Source.Position,
+            compiler_generated: bool = false,
             arguments: []const *Expression,
             named_arguments: []const NamedArgument = &.{},
             type_arguments: []const Type = &.{},
@@ -556,6 +560,8 @@ pub const FunctionIntrinsic = union(enum) {
     resource_try_get_mut: usize,
     resource_remove: usize,
     resource_clear,
+    component_get_mut,
+    world_component_get_mut,
     system_adapter: SystemAdapter,
 };
 
@@ -563,6 +569,22 @@ pub const SystemAdapter = struct {
     target: []const u8,
     target_position: Source.Position,
     dependencies: []const SystemDependency,
+    mode: Mode = .direct,
+
+    pub const Mode = union(enum) {
+        direct,
+        query_dispatch: QueryDispatch,
+        query_range: QueryRange,
+    };
+
+    pub const QueryDispatch = struct {
+        dependency: usize,
+        worker: []const u8,
+    };
+
+    pub const QueryRange = struct {
+        dependency: usize,
+    };
 };
 
 pub const SystemDependency = struct {

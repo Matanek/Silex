@@ -1,6 +1,8 @@
 const std = @import("std");
 const Ast = @import("../Ast.zig");
 const Source = @import("../Source.zig");
+const WorkerSafety = @import("WorkerSafety.zig");
+const QueryParallel = @import("QueryParallel.zig");
 
 const application_name = "GFX.Bootstrap.Application";
 const resources_name = "GFX.Bootstrap.Resources";
@@ -48,6 +50,8 @@ pub fn rewriteRegistration(self: anytype, call: *Ast.Expression.Call, locals: an
         const dependency_type = try self.rewriteType(parameter.type, &.{}, callback.position);
         const dependency_structure = self.structureForType(dependency_type);
         const is_query = dependency_structure != null and dependency_structure.?.query_pattern != null;
+        const world_type = if (is_query) self.typeForName(world_name) orelse return error.InvalidSource else null;
+        const world_source = if (world_type) |value| self.sourceStructureForType(value) orelse return error.InvalidSource else null;
         if (parameter.mode == .value and !is_query) {
             const message = try std.fmt.allocPrint(
                 self.allocator,
@@ -71,10 +75,7 @@ pub fn rewriteRegistration(self: anytype, call: *Ast.Expression.Call, locals: an
                 return self.fail(callback.position, message);
             }
         }
-        const source_type = if (is_query)
-            self.typeForName(world_name) orelse return error.InvalidSource
-        else
-            dependency_type;
+        const source_type = world_type orelse dependency_type;
         for (dependencies[0..index]) |previous| {
             if ((is_query and previous.source_type == source_type and previous.mode == .mutable) or
                 (!is_query and parameter.mode == .mutable and previous.kind == .query and previous.source_type == dependency_type))
@@ -114,6 +115,13 @@ pub fn rewriteRegistration(self: anytype, call: *Ast.Expression.Call, locals: an
                     &.{field.type},
                     callback.position,
                 );
+                const type_id_template = findGenericMethod(world_source.?, "query_component_id") orelse return error.InvalidSource;
+                const query_get_template = findGenericMethod(
+                    world_source.?,
+                    if (field.access_mode == .mutable) "query_get_mut" else "query_get",
+                ) orelse return error.InvalidSource;
+                _ = try self.instantiateMethod(world_type.?, type_id_template, &.{field.type}, callback.position);
+                _ = try self.instantiateMethod(world_type.?, query_get_template, &.{field.type}, callback.position);
             }
         }
         const has_template = findGenericMethod(resource_source, "has") orelse return error.InvalidSource;
@@ -128,28 +136,175 @@ pub fn rewriteRegistration(self: anytype, call: *Ast.Expression.Call, locals: an
         };
     }
 
+    var resource_reads: std.ArrayList([]const u8) = .empty;
+    var resource_writes: std.ArrayList([]const u8) = .empty;
+    var component_reads: std.ArrayList([]const u8) = .empty;
+    var component_writes: std.ArrayList([]const u8) = .empty;
+    var ecs_access = false;
+    var world_mutable = false;
+    var platform_access = false;
+    for (dependencies) |dependency| switch (dependency.kind) {
+        .resource => {
+            const name = self.typeName(dependency.source_type);
+            if (mainThreadType(name)) platform_access = true;
+            if (std.mem.eql(u8, name, "GFX.ECS.Commands") and dependency.mode == .mutable) continue;
+            if (dependency.mode == .mutable) {
+                try appendUnique(self.allocator, &resource_writes, name);
+                if (std.mem.eql(u8, name, world_name)) world_mutable = true;
+            } else try appendUnique(self.allocator, &resource_reads, name);
+        },
+        .query => {
+            ecs_access = true;
+            const query = self.structureForType(dependency.type) orelse return error.InvalidSource;
+            const pattern = self.structureForType(query.query_pattern orelse return error.InvalidSource) orelse return error.InvalidSource;
+            for (pattern.fields) |field| {
+                const name = self.typeName(field.type);
+                if (mainThreadType(name)) platform_access = true;
+                if (std.mem.eql(u8, name, "GFX.ECS.Entity")) continue;
+                if (field.access_mode == .mutable)
+                    try appendUnique(self.allocator, &component_writes, name)
+                else
+                    try appendUnique(self.allocator, &component_reads, name);
+            }
+        },
+    };
+
+    const worker_safe = !platform_access and
+        try WorkerSafety.systemIsWorkerSafe(self, callback.value.identifier, callback.position);
+
+    const parallel_dependency = QueryParallel.independentQuery(self, callback.value.identifier, dependencies);
     const adapter_name = try std.fmt.allocPrint(self.allocator, "__silex_system_adapter_{d}", .{self.functions.items.len});
+    const worker_name = if (parallel_dependency != null)
+        try std.fmt.allocPrint(self.allocator, "{s}_range", .{adapter_name})
+    else
+        "";
     try self.functions.append(self.allocator, .{
         .is_local = true,
         .specialization_file = callback.position.file,
         .position = callback.position,
         .name_position = callback.position,
         .name = adapter_name,
-        .parameters = try self.allocator.dupe(Ast.Parameter, &.{.{
-            .position = callback.position,
-            .name = "application",
-            .type = application_type,
-        }}),
+        .parameters = try adapterParameters(self, callback.position, application_type, false),
+        .return_type = .void,
+        .intrinsic = .{ .system_adapter = .{
+            .target = callback.value.identifier,
+            .target_position = callback.position,
+            .dependencies = try self.allocator.dupe(Ast.SystemDependency, dependencies),
+            .mode = if (parallel_dependency) |dependency| .{ .query_dispatch = .{
+                .dependency = dependency,
+                .worker = worker_name,
+            } } else .direct,
+        } },
+        .statements = &.{},
+    });
+    if (parallel_dependency) |dependency| try self.functions.append(self.allocator, .{
+        .is_local = true,
+        .specialization_file = callback.position.file,
+        .position = callback.position,
+        .name_position = callback.position,
+        .name = worker_name,
+        .parameters = try adapterParameters(self, callback.position, application_type, true),
         .return_type = .void,
         .intrinsic = .{ .system_adapter = .{
             .target = callback.value.identifier,
             .target_position = callback.position,
             .dependencies = dependencies,
+            .mode = .{ .query_range = .{ .dependency = dependency } },
         } },
         .statements = &.{},
     });
     call.arguments[1].value.identifier = adapter_name;
+    if (world_mutable) ecs_access = true;
+    const arguments = try self.allocator.alloc(*Ast.Expression, 6);
+    arguments[0] = call.arguments[0];
+    arguments[1] = call.arguments[1];
+    arguments[2] = try booleanExpression(self, std.mem.eql(u8, call.name, "add_after_system"), callback.position);
+    arguments[3] = try accessSequence(self, resource_reads.items, component_reads.items, callback.position);
+    arguments[4] = try accessSequence(self, resource_writes.items, component_writes.items, callback.position);
+    const flags: usize = (if (ecs_access) @as(usize, 1) else 0) |
+        (if (world_mutable) @as(usize, 2) else 0) |
+        (if (worker_safe) @as(usize, 4) else 0) |
+        (if (parallel_dependency != null) @as(usize, 32) else 0);
+    arguments[5] = try integerExpression(self, flags, callback.position);
+    call.name = "__silex_add_system";
+    call.compiler_generated = true;
+    call.arguments = arguments;
     return true;
+}
+
+fn adapterParameters(self: anytype, position: Source.Position, application_type: Ast.Type, range: bool) ![]const Ast.Parameter {
+    const count: usize = if (range) 5 else 2;
+    const parameters = try self.allocator.alloc(Ast.Parameter, count);
+    parameters[0] = .{ .position = position, .name = "application", .type = application_type };
+    parameters[1] = .{ .position = position, .name = "system_order", .type = .int };
+    if (range) {
+        parameters[2] = .{ .position = position, .name = "range_start", .type = .int };
+        parameters[3] = .{ .position = position, .name = "range_end", .type = .int };
+        parameters[4] = .{ .position = position, .name = "commands_address", .type = .uint };
+    }
+    return parameters;
+}
+
+fn appendUnique(allocator: std.mem.Allocator, values: *std.ArrayList([]const u8), value: []const u8) !void {
+    for (values.items) |existing| if (std.mem.eql(u8, existing, value)) return;
+    try values.append(allocator, value);
+}
+
+fn mainThreadType(name: []const u8) bool {
+    return std.mem.eql(u8, name, "GFX.Window") or
+        std.mem.eql(u8, name, "GFX.GPU") or
+        std.mem.startsWith(u8, name, "GFX.Window.") or
+        std.mem.startsWith(u8, name, "GFX.GPU.");
+}
+
+fn stringSequence(self: anytype, values: []const []const u8, position: Source.Position) !*Ast.Expression {
+    const expressions = try self.allocator.alloc(*Ast.Expression, values.len);
+    for (values, 0..) |value, index| {
+        expressions[index] = try self.allocator.create(Ast.Expression);
+        expressions[index].* = .{ .position = position, .value = .{ .string = value } };
+    }
+    const collection_type = for (self.structures.items, 0..) |structure, index| {
+        if (structure.collection) |collection| if (collection.element == .str and collection.length == null and !collection.view) {
+            break Ast.Type.structure(index);
+        };
+    } else return error.InvalidSource;
+    const expression = try self.allocator.create(Ast.Expression);
+    expression.* = .{ .position = position, .value = .{ .sequence_literal = .{
+        .values = expressions,
+        .inferred_type = collection_type,
+    } } };
+    return expression;
+}
+
+fn accessSequence(
+    self: anytype,
+    resources: []const []const u8,
+    components: []const []const u8,
+    position: Source.Position,
+) !*Ast.Expression {
+    const values = try self.allocator.alloc([]const u8, resources.len + components.len);
+    for (resources, 0..) |value, index| {
+        values[index] = try std.fmt.allocPrint(self.allocator, "resource:{s}", .{value});
+    }
+    for (components, 0..) |value, index| {
+        values[resources.len + index] = try std.fmt.allocPrint(self.allocator, "component:{s}", .{value});
+    }
+    return stringSequence(self, values, position);
+}
+
+fn booleanExpression(self: anytype, value: bool, position: Source.Position) !*Ast.Expression {
+    const expression = try self.allocator.create(Ast.Expression);
+    expression.* = .{ .position = position, .value = .{ .boolean = value } };
+    return expression;
+}
+
+fn integerExpression(self: anytype, value: usize, position: Source.Position) !*Ast.Expression {
+    const expression = try self.allocator.create(Ast.Expression);
+    expression.* = .{
+        .position = position,
+        .value = .{ .integer = try std.fmt.allocPrint(self.allocator, "{d}", .{value}) },
+    };
+    return expression;
 }
 
 fn findGenericMethod(structure: Ast.Structure, name: []const u8) ?Ast.Function {

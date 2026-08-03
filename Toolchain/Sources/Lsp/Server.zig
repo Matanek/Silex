@@ -798,7 +798,7 @@ test "inheritance completion merges local imported types and module aliases" {
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Threading.sx",
-        .data = "public protocol Task { func run() }",
+        .data = "public protocol Job { func run() }",
     });
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
@@ -810,9 +810,9 @@ test "inheritance completion merges local imported types and module aliases" {
     const main_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{main_path});
     const source =
         \\use Threading
-        \\use Threading.Task
+        \\use Threading.Job
         \\protocol Local { func run() }
-        \\struct MyTask :
+        \\struct MyJob :
     ;
 
     var server = Server.init(std.testing.allocator, std.testing.io);
@@ -822,26 +822,26 @@ test "inheritance completion merges local imported types and module aliases" {
     const request = try std.fmt.allocPrint(
         allocator,
         "{{\"jsonrpc\":\"2.0\",\"id\":8,\"method\":\"textDocument/completion\",\"params\":{{\"textDocument\":{{\"uri\":\"{s}\"}},\"position\":{{\"line\":3,\"character\":{d}}}}}}}",
-        .{ main_uri, "struct MyTask :".len },
+        .{ main_uri, "struct MyJob :".len },
     );
     const response = (try server.handleBody(allocator, request)).?;
     try std.testing.expect(std.mem.indexOf(u8, response, "\"label\":\"Local\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, response, "\"label\":\"Task\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"label\":\"Job\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"label\":\"Threading\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"label\":\"return\"") == null);
 
     const qualified_source =
         \\use Threading
-        \\struct MyTask : Threading.
+        \\struct MyJob : Threading.
     ;
     try server.setDocument(.{ .uri = main_uri, .text = qualified_source, .version = 2 });
     const qualified_request = try std.fmt.allocPrint(
         allocator,
         "{{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"textDocument/completion\",\"params\":{{\"textDocument\":{{\"uri\":\"{s}\"}},\"position\":{{\"line\":1,\"character\":{d}}},\"context\":{{\"triggerKind\":2,\"triggerCharacter\":\".\"}}}}}}",
-        .{ main_uri, "struct MyTask : Threading.".len },
+        .{ main_uri, "struct MyJob : Threading.".len },
     );
     const qualified_response = (try server.handleBody(allocator, qualified_request)).?;
-    try std.testing.expect(std.mem.indexOf(u8, qualified_response, "\"label\":\"Task\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, qualified_response, "\"label\":\"Job\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, qualified_response, "\"label\":\"return\"") == null);
 }
 

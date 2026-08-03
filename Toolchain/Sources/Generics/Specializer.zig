@@ -8,6 +8,8 @@ const Remap = @import("Remap.zig");
 const Conformances = @import("Conformances.zig");
 const TypedResources = @import("TypedResources.zig");
 const InjectedSystems = @import("InjectedSystems.zig");
+const EcsComponents = @import("EcsComponents.zig");
+const WorkerSafety = @import("WorkerSafety.zig");
 
 const Allocator = std.mem.Allocator;
 const SpecializeError = Source.Error || Allocator.Error;
@@ -54,6 +56,7 @@ const SpecializedType = struct {
 const MethodSpecialization = struct {
     structure: Ast.Type,
     template_position: Source.Position,
+    template_parameters: []const Ast.Parameter,
     arguments: []const Ast.Type,
     name: []const u8,
     visiting: bool = true,
@@ -572,7 +575,7 @@ pub const Specializer = struct {
                     copy.type_arguments = &.{};
                     break :value .{ .call = copy };
                 }
-                if (copy.receiver != null and copy.named_arguments.len == 0) {
+                if (copy.receiver != null) {
                     _ = try InjectedSystems.rewriteRegistration(self, &copy, locals.items);
                     if (try self.specializeMethodCall(copy, locals.items)) |name| {
                         copy.name = name;
@@ -621,11 +624,14 @@ pub const Specializer = struct {
                             .name = method_copy.name,
                             .name_position = method_copy.name_position,
                             .receiver = copy.receiver,
+                            .compiler_generated = method_copy.compiler_generated,
                             .arguments = method_copy.arguments,
                             .named_arguments = method_copy.named_arguments,
                             .type_arguments = method_copy.type_arguments,
                         };
                         _ = try InjectedSystems.rewriteRegistration(self, &call, locals.items);
+                        method_copy.name = call.name;
+                        method_copy.compiler_generated = call.compiler_generated;
                         method_copy.arguments = call.arguments;
                         method_copy.named_arguments = call.named_arguments;
                         if (try self.specializeMethodCall(call, locals.items)) |name| {
@@ -912,17 +918,24 @@ pub const Specializer = struct {
         const concrete_receiver = receiver_type.optionalChild() orelse receiver_type;
         const structure = self.structureForType(concrete_receiver) orelse return null;
         const source_structure = self.sourceStructureForType(concrete_receiver) orelse return null;
-        const actual_types = try self.allocator.alloc(Ast.Type, call.arguments.len);
+        const actual_types = try self.allocator.alloc(Ast.Type, call.arguments.len + call.named_arguments.len);
         for (call.arguments, 0..) |argument, index| {
             actual_types[index] = self.inferExpressionType(argument, locals) orelse {
                 if (call.type_arguments.len == 0) return null;
                 return self.fail(call.arguments[index].position, "cannot determine argument type for generic method specialization");
             };
         }
+        for (call.named_arguments, 0..) |argument, index| {
+            actual_types[call.arguments.len + index] = self.inferExpressionType(argument.value, locals) orelse {
+                if (call.type_arguments.len == 0) return null;
+                return self.fail(argument.value.position, "cannot determine named argument type for generic method specialization");
+            };
+        }
         if (call.type_arguments.len == 0) {
             for (structure.methods) |method| {
                 if (!std.mem.eql(u8, method.name, call.name) or !methodVisible(call, method)) continue;
-                if (self.argumentsMatch(method.parameters, actual_types, &.{})) return null;
+                const ordered = try self.orderNamedMethodArguments(method.parameters, call, actual_types) orelse continue;
+                if (self.argumentsMatch(method.parameters, ordered, &.{})) return null;
             }
         }
 
@@ -933,18 +946,19 @@ pub const Specializer = struct {
         for (source_structure.methods) |method| {
             if (method.type_parameters.len == 0 or !std.mem.eql(u8, method.name, call.name) or !methodVisible(call, method)) continue;
             saw_generic = true;
+            const ordered = try self.orderNamedMethodArguments(method.parameters, call, actual_types) orelse continue;
             if (call.type_arguments.len != 0) {
                 if (call.type_arguments.len != method.type_parameters.len) continue;
                 saw_type_arity = true;
-                if (!parametersAcceptArity(method.parameters, actual_types.len) or
-                    !self.argumentsMatch(method.parameters, actual_types, call.type_arguments)) continue;
+                if (!parametersAcceptArity(method.parameters, ordered.len) or
+                    !self.argumentsMatch(method.parameters, ordered, call.type_arguments)) continue;
                 if (selected != null) return self.ambiguousMethod(call.name_position, call.name);
                 selected = method;
                 selected_arguments = call.type_arguments;
             } else {
-                if (!parametersAcceptArity(method.parameters, actual_types.len)) continue;
+                if (!parametersAcceptArity(method.parameters, ordered.len)) continue;
                 saw_type_arity = true;
-                const inferred = try self.inferTypeArguments(method, actual_types) orelse continue;
+                const inferred = try self.inferTypeArguments(method, ordered) orelse continue;
                 if (selected != null) return self.ambiguousMethod(call.name_position, call.name);
                 selected = method;
                 selected_arguments = inferred;
@@ -972,6 +986,28 @@ pub const Specializer = struct {
         return self.fail(call.name_position, message);
     }
 
+    fn orderNamedMethodArguments(
+        self: *Specializer,
+        parameters: []const Ast.Parameter,
+        call: Ast.Expression.Call,
+        actual_types: []const Ast.Type,
+    ) SpecializeError!?[]const Ast.Type {
+        if (call.named_arguments.len == 0) return actual_types;
+        if (actual_types.len > parameters.len) return null;
+        const ordered = try self.allocator.alloc(Ast.Type, actual_types.len);
+        @memset(ordered, .void);
+        for (call.arguments, 0..) |_, index| ordered[index] = actual_types[index];
+        for (call.named_arguments, 0..) |argument, named_index| {
+            const parameter_index = for (parameters, 0..) |parameter, index| {
+                if (std.mem.eql(u8, parameter.name, argument.name)) break index;
+            } else return null;
+            if (parameter_index < call.arguments.len or parameter_index >= actual_types.len) return null;
+            ordered[parameter_index] = actual_types[call.arguments.len + named_index];
+        }
+        for (ordered) |type_value| if (type_value == .void) return null;
+        return ordered;
+    }
+
     pub fn instantiateMethod(
         self: *Specializer,
         structure_type: Ast.Type,
@@ -984,8 +1020,15 @@ pub const Specializer = struct {
         defer self.specialization_file = previous_specialization_file;
         for (arguments) |argument| if (argument == .void) return self.fail(position, "'void' is not a generic type argument");
         try self.validateArguments(template.type_parameters, arguments, position);
+        WorkerSafety.validateSubmission(self, structure_type, template, arguments, position) catch |err| switch (err) {
+            error.WorkerUnsafe => return error.InvalidSource,
+            error.InvalidSource => return error.InvalidSource,
+            error.OutOfMemory => return error.OutOfMemory,
+        };
         for (self.method_specializations.items) |specialization| {
-            if (specialization.structure != structure_type or !samePosition(specialization.template_position, template.name_position)) continue;
+            if (specialization.structure != structure_type or
+                !samePosition(specialization.template_position, template.name_position) or
+                !sameTemplateParameters(specialization.template_parameters, template.parameters)) continue;
             if (std.mem.eql(Ast.Type, specialization.arguments, arguments)) return specialization.name;
             if (specialization.visiting) {
                 const message = try std.fmt.allocPrint(
@@ -996,11 +1039,20 @@ pub const Specializer = struct {
                 return self.fail(position, message);
             }
         }
-        const name = try self.specializationName(template.name, arguments);
+        var name = try self.specializationName(template.name, arguments);
+        var overload_index: usize = 0;
+        for (self.method_specializations.items) |specialization| {
+            if (specialization.structure != structure_type or !std.mem.eql(Ast.Type, specialization.arguments, arguments)) continue;
+            if (std.mem.eql(u8, specialization.name, name) or
+                (specialization.name.len > name.len and std.mem.startsWith(u8, specialization.name, name) and
+                    specialization.name[name.len] == '#')) overload_index += 1;
+        }
+        if (overload_index != 0) name = try std.fmt.allocPrint(self.allocator, "{s}#{d}", .{ name, overload_index });
         const specialization_index = self.method_specializations.items.len;
         try self.method_specializations.append(self.allocator, .{
             .structure = structure_type,
             .template_position = template.name_position,
+            .template_parameters = template.parameters,
             .arguments = try self.allocator.dupe(Ast.Type, arguments),
             .name = name,
         });
@@ -1019,6 +1071,9 @@ pub const Specializer = struct {
             arguments,
             position,
         );
+        if (concrete.intrinsic == null) {
+            concrete.intrinsic = EcsComponents.intrinsicForSpecialization(self, structure_type, template.name, arguments);
+        }
         const structure_index = self.structureIndexForType(structure_type) orelse return error.InvalidSource;
         const method_index = try self.appendMethod(structure_index, concrete);
         concrete.statements = try self.rewriteStatements(template.statements, arguments, &locals);
@@ -1140,6 +1195,7 @@ pub const Specializer = struct {
             if (index >= self.type_names.items.len) return self.fail(position, "nominal type is unavailable");
             const name = self.type_names.items[index];
             const declared = self.sourceStructureForType(type_value) != null or
+                self.structureForType(type_value) != null or
                 self.structureTemplateForType(type_value) != null or
                 self.enumForType(type_value) != null or
                 self.enumTemplateForType(type_value) != null or
@@ -1296,8 +1352,11 @@ pub const Specializer = struct {
         }
 
         const name = try self.specializationName(template.name, arguments);
-        const type_value: Ast.Type = .structure(self.type_names.items.len);
-        try self.type_names.append(self.allocator, name);
+        const type_value: Ast.Type = self.typeForName(name) orelse new_type: {
+            const value: Ast.Type = .structure(self.type_names.items.len);
+            try self.type_names.append(self.allocator, name);
+            break :new_type value;
+        };
         const specialization_index = self.structure_specializations.items.len;
         try self.structure_specializations.append(self.allocator, .{
             .template_position = template.name_position,
@@ -1351,8 +1410,11 @@ pub const Specializer = struct {
             }
         }
         const name = try self.specializationName(template.name, arguments);
-        const type_value: Ast.Type = .structure(self.type_names.items.len);
-        try self.type_names.append(self.allocator, name);
+        const type_value: Ast.Type = self.typeForName(name) orelse new_type: {
+            const value: Ast.Type = .structure(self.type_names.items.len);
+            try self.type_names.append(self.allocator, name);
+            break :new_type value;
+        };
         const specialization_index = self.enum_specializations.items.len;
         try self.enum_specializations.append(self.allocator, .{
             .template_position = template.name_position,
@@ -1630,7 +1692,7 @@ pub const Specializer = struct {
             },
             .conversion => |conversion| conversion.target,
             .string_count => .int,
-            .sequence_literal => |literal| literal.inferred_type,
+            .sequence_literal => |literal| literal.inferred_type orelse self.inferSequenceLiteralType(literal.values, locals),
             .tuple_literal => |literal| literal.placeholder_type,
             .index_access => |access| index_type: {
                 const base = self.inferExpressionType(access.base, locals) orelse break :index_type null;
@@ -1645,6 +1707,23 @@ pub const Specializer = struct {
                 break :match_type null;
             },
         };
+    }
+
+    fn inferSequenceLiteralType(self: *Specializer, values: []const *Ast.Expression, locals: []const Binding) ?Ast.Type {
+        if (values.len == 0) return null;
+        const element = self.inferExpressionType(values[0], locals) orelse return null;
+        for (values[1..]) |value| if (self.inferExpressionType(value, locals) != element) return null;
+        for (self.structures.items) |structure| if (structure.collection) |collection| {
+            if (collection.element == element and collection.length == null and !collection.view) {
+                return self.typeForName(structure.name);
+            }
+        };
+        for (self.source.structures) |structure| if (structure.collection) |collection| {
+            if (collection.element == element and collection.length == null and !collection.view) {
+                return self.typeForName(structure.name);
+            }
+        };
+        return null;
     }
 
     pub fn structureForType(self: *Specializer, type_value: Ast.Type) ?Ast.Structure {
@@ -1878,6 +1957,15 @@ fn functionTypeMatchesDeclaration(function_type: Ast.FunctionType, function: Ast
     return true;
 }
 
+fn sameTemplateParameters(left: []const Ast.Parameter, right: []const Ast.Parameter) bool {
+    if (left.len != right.len) return false;
+    for (left, right) |left_parameter, right_parameter| {
+        if (left_parameter.type != right_parameter.type or left_parameter.mode != right_parameter.mode or
+            !std.mem.eql(u8, left_parameter.name, right_parameter.name)) return false;
+    }
+    return true;
+}
+
 fn functionNameMatches(candidate: []const u8, requested: []const u8) bool {
     if (std.mem.eql(u8, candidate, requested)) return true;
     if (!std.mem.endsWith(u8, candidate, requested) or candidate.len == requested.len) return false;
@@ -1903,6 +1991,7 @@ fn functionVisible(call: Ast.Expression.Call, function: Ast.Function) bool {
 }
 
 fn methodVisible(call: Ast.Expression.Call, method: Ast.Function) bool {
+    if (call.compiler_generated and method.is_internal) return true;
     if (method.is_local) return call.name_position.file == method.position.file;
     return method.is_public or call.owner == method.owner;
 }

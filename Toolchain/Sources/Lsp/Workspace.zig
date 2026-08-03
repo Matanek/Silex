@@ -2010,17 +2010,17 @@ test "complete public package APIs module aliases members and overlays" {
         \\    internal func package_method() int { return self.package_value }
         \\    func to_str() str { return "vector" }
         \\}
-        \\public protocol Task { func execute() }
-        \\public class TaskHandle<T> {
+        \\public protocol Operation { func execute() }
+        \\public class BuildHandle<T> {
         \\    public func complete() T { panic("unused") }
         \\    public func complete(callback:func(T)) {}
         \\}
-        \\public class TaskWaitHandle<T> {
+        \\public class BuildWaitHandle<T> {
         \\    public func complete() {}
         \\}
-        \\public static class TaskManager {
-        \\    public static func submit<T>(value:T) TaskHandle<T> { panic("unused") }
-        \\    public static func submit<T>(value:T, callback:func(T)) TaskWaitHandle<T> { panic("unused") }
+        \\public static class Builder {
+        \\    public static func build<T>(value:T) BuildHandle<T> { panic("unused") }
+        \\    public static func build<T>(value:T, callback:func(T)) BuildWaitHandle<T> { panic("unused") }
         \\}
         \\public func add(left:int, right:int = 1) int { return left + right }
         \\public func add(value:str) str { return value }
@@ -2069,16 +2069,16 @@ test "complete public package APIs module aliases members and overlays" {
         import_source.len,
     )).?;
     try std.testing.expect(hasLabel(import_items, "Vector"));
-    try std.testing.expect(hasLabel(import_items, "Task"));
+    try std.testing.expect(hasLabel(import_items, "Operation"));
     try std.testing.expect(hasLabel(import_items, "add"));
     try std.testing.expect(hasLabel(import_items, "Visible"));
     try std.testing.expect(!hasLabel(import_items, "Platform"));
     try std.testing.expect(!hasLabel(import_items, "hidden"));
     try std.testing.expect(!hasLabel(import_items, "package_only"));
     try std.testing.expect(!hasLabel(import_items, "file_only"));
-    const task_item = import_items[labelIndex(import_items, "Task").?];
-    try std.testing.expectEqual(CompletionKind.interface, task_item.kind);
-    try std.testing.expectEqualStrings("protocol Task", task_item.detail);
+    const operation_item = import_items[labelIndex(import_items, "Operation").?];
+    try std.testing.expectEqual(CompletionKind.interface, operation_item.kind);
+    try std.testing.expectEqualStrings("protocol Operation", operation_item.detail);
 
     const facade_source = "use Math.Facade.";
     const facade_items = (try itemsAt(
@@ -2188,10 +2188,10 @@ test "complete public package APIs module aliases members and overlays" {
     try std.testing.expect(!hasLabel(cascade_items, "if"));
 
     const static_source =
-        \\use Math.Operations.TaskManager
-        \\func main() { TaskManager. }
+        \\use Math.Operations.Builder
+        \\func main() { Builder. }
     ;
-    const static_cursor = std.mem.indexOf(u8, static_source, "TaskManager.").? + "TaskManager.".len;
+    const static_cursor = std.mem.indexOf(u8, static_source, "Builder.").? + "Builder.".len;
     const static_items = (try itemsAt(
         allocator,
         std.testing.io,
@@ -2202,14 +2202,14 @@ test "complete public package APIs module aliases members and overlays" {
         static_source,
         static_cursor,
     )).?;
-    try std.testing.expectEqual(@as(usize, 2), labelCount(static_items, "submit"));
+    try std.testing.expectEqual(@as(usize, 2), labelCount(static_items, "build"));
     try std.testing.expect(!hasLabel(static_items, "to_str"));
 
     const wait_handle_source =
-        \\use Math.Operations.TaskManager
+        \\use Math.Operations.Builder
         \\struct Work {}
         \\func main() {
-        \\    var handle = TaskManager.submit(Work(), func(task:Work) {})
+        \\    var handle = Builder.build(Work(), func(value:Work) {})
         \\    handle.
         \\}
     ;
@@ -2227,10 +2227,10 @@ test "complete public package APIs module aliases members and overlays" {
     try std.testing.expect(hasLabel(wait_handle_items, "complete"));
 
     const task_handle_source =
-        \\use Math.Operations.TaskManager
+        \\use Math.Operations.Builder
         \\struct Work {}
         \\func main() {
-        \\    var handle = TaskManager.submit(Work())
+        \\    var handle = Builder.build(Work())
         \\    handle.
         \\}
     ;

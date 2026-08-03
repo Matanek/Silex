@@ -45,6 +45,7 @@ pub fn analyze(
                 .name = method.name,
                 .name_position = method.name_position,
                 .receiver = target,
+                .compiler_generated = method.compiler_generated,
                 .arguments = method.arguments,
                 .named_arguments = method.named_arguments,
                 .type_arguments = method.type_arguments,

@@ -13,6 +13,122 @@ fn expectCompileError(source: []const u8, message: []const u8) !void {
     try std.testing.expectEqualStrings(message, frontend.diagnostic.?.message);
 }
 
+const worker_job_prelude =
+    \\protocol Job { func execute() }
+    \\class Executor { public func submit<T:Job>(job:T) {} }
+;
+
+const parallel_job_prelude =
+    \\protocol ParallelJob { func execute(start:int, end:int) }
+    \\class Fence { public func complete() {} }
+    \\class Executor { public func submit_parallel<T:ParallelJob>(count:int, job:T) Fence { return Fence() } }
+;
+
+test "parallel jobs accept fixed indexed writes and reject structural collection mutation" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var frontend = Frontend.Frontend.init(arena.allocator());
+    _ = try frontend.compile(parallel_job_prelude ++
+        \\class Values { public var items:int[] }
+        \\struct Fill:ParallelJob {
+        \\    var values:Values
+        \\    func execute(start:int, end:int) { var index = start; while index < end { self.values.items[index] = index; index++ } }
+        \\}
+        \\func main() { var executor = Executor(); executor.submit_parallel(8, Fill(values:Values(items:[0, 0, 0, 0, 0, 0, 0, 0]))) }
+    );
+    try expectCompileError(
+        parallel_job_prelude ++
+            \\class Values { public var items:int[]; public func grow() { self.items.append(1) } }
+            \\struct Grow:ParallelJob { var values:Values; func execute(start:int, end:int) { self.values.grow() } }
+            \\func main() { var executor = Executor(); executor.submit_parallel(8, Grow(values:Values(items:[]))) }
+        ,
+        "job 'Grow' is not worker-safe: cannot mutate collection structure from a ParallelJob",
+    );
+}
+
+test "worker-safe jobs preserve the submit surface and follow pure call graphs" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var frontend = Frontend.Frontend.init(arena.allocator());
+    _ = try frontend.compile(worker_job_prelude ++
+        \\func increment(value:int) int { return value + 1 }
+        \\struct Safe:Job {
+        \\    var value:int
+        \\    func execute() { mutex { self.value = increment(self.value) } }
+        \\}
+        \\func main() { var executor = Executor(); executor.submit(Safe(value:0)) }
+    );
+}
+
+test "worker-safe jobs may wait on fences but not consume job handles" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var frontend = Frontend.Frontend.init(arena.allocator());
+    _ = try frontend.compile(worker_job_prelude ++
+        \\class Fence { public func complete() {} }
+        \\struct Waits:Job { var fence:Fence; func execute() { self.fence.complete() } }
+        \\func main() { var executor = Executor(); executor.submit(Waits(fence:Fence())) }
+    );
+    try expectCompileError(
+        worker_job_prelude ++
+            \\class JobHandle { public func complete() {} }
+            \\struct Consumes:Job { var handle:JobHandle; func execute() { self.handle.complete() } }
+            \\func main() { var executor = Executor(); executor.submit(Consumes(handle:JobHandle())) }
+        ,
+        "job 'Consumes' is not worker-safe: cannot call an Executor or JobHandle operation",
+    );
+}
+
+test "worker-safe job analysis rejects main-thread static and executor effects" {
+    try expectCompileError(
+        worker_job_prelude ++
+            \\struct MainThread:Job { func execute() { print("worker") } }
+            \\func main() { var executor = Executor(); executor.submit(MainThread()) }
+        ,
+        "job 'MainThread' is not worker-safe: print requires the main thread",
+    );
+    try expectCompileError(
+        worker_job_prelude ++
+            \\struct Globals { public static var count:int = 0 }
+            \\struct GlobalWrite:Job { func execute() { Globals.count++ } }
+            \\func main() { var executor = Executor(); executor.submit(GlobalWrite()) }
+        ,
+        "job 'GlobalWrite' is not worker-safe: static mutation 'Globals.count' is unsynchronized",
+    );
+    try expectCompileError(
+        worker_job_prelude ++
+            \\struct CapturesExecutor:Job { let executor:Executor; func execute() {} }
+            \\func main() { var executor = Executor(); executor.submit(CapturesExecutor(executor:executor)) }
+        ,
+        "job 'CapturesExecutor' cannot own or capture 'Executor'",
+    );
+    try expectCompileError(
+        worker_job_prelude ++
+            \\struct Reentrant:Job { func execute() { var nested = Executor(); nested.submit(Reentrant()) } }
+            \\func main() { var executor = Executor(); executor.submit(Reentrant()) }
+        ,
+        "job 'Reentrant' is not worker-safe: cannot construct an Executor on a worker",
+    );
+}
+
+test "worker-safe job analysis rejects unknown dynamic callbacks and unsafe destruction" {
+    try expectCompileError(
+        worker_job_prelude ++
+            \\struct Dynamic:Job { let callback:func(); func execute() { callback() } }
+            \\func ready() {}
+            \\func main() { var executor = Executor(); executor.submit(Dynamic(callback:ready)) }
+        ,
+        "job 'Dynamic' is not worker-safe: cannot use a callback or call target that cannot be proven worker-safe",
+    );
+    try expectCompileError(
+        worker_job_prelude ++
+            \\struct UnsafeDrop:Job { func execute() {} drop { print("drop") } }
+            \\func main() { var executor = Executor(); executor.submit(UnsafeDrop()) }
+        ,
+        "job 'UnsafeDrop' is not worker-safe: print requires the main thread",
+    );
+}
+
 test "parse generic function declarations and explicit calls" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -71,6 +187,29 @@ test "specialize inferred and explicit generic functions once" {
     try std.testing.expectEqual(@as(usize, 4), compilation.ir.functions.len);
     const result = try Interpreter.runCapture(allocator, compilation.ir);
     try std.testing.expectEqualStrings("42\n7\nSilex\nready\n", result.stdout);
+}
+
+test "reuse a generic nominal type already named by a collection" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\protocol Value { func read() int }
+        \\struct Number:Value { let value:int; func read() int { return self.value } }
+        \\struct Box<T:Value> { let value:T }
+        \\class Maker {
+        \\    public func make<T:Value>(value:T) Box<T> { return Box<T>(value:value) }
+        \\}
+        \\func main() {
+        \\    var pending:Box<Number>[] = []
+        \\    var maker = Maker()
+        \\    pending.append(maker.make(Number(value:42)))
+        \\    print(pending[0].value.read())
+        \\}
+    );
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("42\n", result.stdout);
 }
 
 test "prefer concrete overloads and specialize defaults and stable recursion" {
@@ -472,6 +611,27 @@ test "specialize inferred explicit overloaded mutating and recursive generic met
     );
     const result = try Interpreter.runCapture(allocator, compilation.ir);
     try std.testing.expectEqualStrings("42\nSilex\n100\ngeneric\n7\n1\n8\n", result.stdout);
+}
+
+test "specialize overloaded generic methods with named arguments" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\struct Scheduler {
+        \\    func submit<T>(value:T) int { return 1 }
+        \\    func submit<T>(value:T, after:int) int { return 2 }
+        \\    func submit<T>(value:T, after:@int[]) int { return 3 }
+        \\}
+        \\func main() {
+        \\    var scheduler = Scheduler()
+        \\    print(scheduler.submit("one", after:7))
+        \\    print(scheduler.submit("many", after:[1, 2]))
+        \\}
+    );
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("2\n3\n", result.stdout);
 }
 
 test "specialize nested types with owner arguments before child arguments" {

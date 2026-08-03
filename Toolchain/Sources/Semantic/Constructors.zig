@@ -280,7 +280,14 @@ pub fn analyzeCall(
         .arguments = try argument_ids.toOwnedSlice(self.allocator),
     } });
     for (mutable_arguments.items) |prepared| try MutableReferences.writeBack(self, builder, prepared);
-    return .{ .type = result_type, .value = result };
+    for (arguments.items) |argument| if (argument.transferred and Resources.containsClass(self, argument.type)) {
+        try Resources.emitDrop(self, builder, argument.type, argument.value);
+    };
+    return .{
+        .type = result_type,
+        .value = result,
+        .transferred = Resources.containsClass(self, result_type) and !Resources.isClassType(self, result_type),
+    };
 }
 
 fn analyzeNamedCall(
@@ -379,7 +386,16 @@ fn analyzeNamedCall(
     const result = try self.newValue(builder, result_type);
     try self.emit(builder, .{ .call = .{ .result = result, .function = constructorFunctionId(self.program, declaration.name, constructor_index), .arguments = try ids.toOwnedSlice(self.allocator) } });
     for (mutable_arguments.items) |prepared| try MutableReferences.writeBack(self, builder, prepared);
-    return .{ .type = result_type, .value = result };
+    for (typed) |maybe_argument| if (maybe_argument) |argument| {
+        if (argument.transferred and Resources.containsClass(self, argument.type)) {
+            try Resources.emitDrop(self, builder, argument.type, argument.value);
+        }
+    };
+    return .{
+        .type = result_type,
+        .value = result,
+        .transferred = Resources.containsClass(self, result_type) and !Resources.isClassType(self, result_type),
+    };
 }
 
 fn failArgumentProblem(self: anytype, call: Ast.Expression.Call, structure_name: []const u8, problem: Arguments.Problem) !void {

@@ -201,7 +201,10 @@ fn analyzeCollectionFor(self: anytype, builder: anytype, function: Ast.Function,
     if (loop.index_name == null) {
         if (source.type.structureIndex()) |structure_index| {
             const structure = self.program.structures[structure_index];
-            if (structure.query_pattern != null) return analyzeQueryFor(self, builder, function, loop, source_expression, source, structure);
+            if (structure.query_pattern != null) return analyzeQueryFor(self, builder, function, loop, source_expression, source, structure) catch |err| {
+                if (self.diagnostic == null) return self.fail(loop.position, "internal ECS query lowering failed");
+                return err;
+            };
         }
     }
     const collection = Collections.collectionForType(self.structures, source.type) orelse return self.fail(
@@ -348,91 +351,165 @@ fn analyzeQueryFor(
     if (!pattern.is_tuple or pattern.fields.len != loop.bindings.len) {
         return self.fail(loop.name_position, "ECS.Query bindings must match its component access pattern");
     }
-    if (query.fields.len != 1) return error.InvalidSource;
+    if (query.fields.len != 3) return error.InvalidSource;
     const world_type = query.fields[0].type;
     const world_index = world_type.structureIndex() orelse return error.InvalidSource;
     const world = self.program.structures[world_index];
     const world_value = try self.newValue(builder, world_type);
     try self.emit(builder, .{ .field_load = .{ .result = world_value, .base = source.value, .field = 0 } });
-    const records_field = fieldNamed(world, "records") orelse return error.InvalidSource;
-    const records_type = world.fields[records_field].type;
-    const records_collection = Collections.collectionForType(self.structures, records_type) orelse return error.InvalidSource;
-    const record_type = records_collection.element;
-    const record_index = record_type.structureIndex() orelse return error.InvalidSource;
-    const record = self.program.structures[record_index];
-    const generation_field = fieldNamed(record, "current_generation") orelse return error.InvalidSource;
-    const alive_field = fieldNamed(record, "alive") orelse return error.InvalidSource;
-    const components_field = fieldNamed(record, "component_store") orelse return error.InvalidSource;
-    const resources_type = record.fields[components_field].type;
-    const resources_index = resources_type.structureIndex() orelse return error.InvalidSource;
-    const resources = self.program.structures[resources_index];
-    const records_value = try self.newValue(builder, records_type);
-    try self.emit(builder, .{ .field_load = .{ .result = records_value, .base = world_value, .field = records_field } });
-    const records_local = builder.local_types.items.len;
-    try builder.local_types.append(self.allocator, records_type);
-    try self.emit(builder, .{ .local_store = .{ .local = records_local, .operand = records_value } });
-
-    const index_local = builder.local_types.items.len;
+    const world_local = builder.local_types.items.len;
+    try builder.local_types.append(self.allocator, world_type);
+    try self.emit(builder, .{ .local_store = .{ .local = world_local, .operand = world_value } });
+    const range_start = try self.newValue(builder, .int);
+    try self.emit(builder, .{ .field_load = .{ .result = range_start, .base = source.value, .field = 1 } });
+    const range_start_local = builder.local_types.items.len;
     try builder.local_types.append(self.allocator, .int);
-    try self.emit(builder, .{ .local_store = .{ .local = index_local, .operand = try emitInt(self, builder, 0) } });
-    const availability_count = builder.bindings.items.len;
-    const header_availability = try Availability.snapshot(self.allocator, builder.bindings.items, availability_count);
-    const condition_block = try self.newBlock(builder);
-    const candidate_block = try self.newBlock(builder);
-    const components_block = try self.newBlock(builder);
-    const matched_block = try self.newBlock(builder);
-    const update_block = try self.newBlock(builder);
-    const exit_block = try self.newBlock(builder);
-    self.terminate(builder, .{ .jump = condition_block });
+    try self.emit(builder, .{ .local_store = .{ .local = range_start_local, .operand = range_start } });
+    const range_end = try self.newValue(builder, .int);
+    try self.emit(builder, .{ .field_load = .{ .result = range_end, .base = source.value, .field = 2 } });
+    const range_end_local = builder.local_types.items.len;
+    try builder.local_types.append(self.allocator, .int);
+    try self.emit(builder, .{ .local_store = .{ .local = range_end_local, .operand = range_end } });
 
-    builder.current_block = condition_block;
-    const index = try loadLocalValue(self, builder, index_local, .int);
-    const records = try loadLocalValue(self, builder, records_local, records_type);
-    const count = try self.newValue(builder, .int);
-    try self.emit(builder, .{ .collection_count = .{ .result = count, .collection = records } });
-    const has_entity = try emitBinary(self, builder, .less, index, count, .bool);
-    self.terminate(builder, .{ .branch = .{ .condition = has_entity, .then_block = candidate_block, .else_block = exit_block } });
-
-    builder.current_block = candidate_block;
-    const record_value = try self.newValue(builder, record_type);
-    try self.emit(builder, .{ .collection_load = .{
-        .result = record_value,
-        .collection = records,
-        .index = index,
-        .position = loop.position,
-    } });
-    const alive = try self.newValue(builder, .bool);
-    try self.emit(builder, .{ .field_load = .{ .result = alive, .base = record_value, .field = alive_field } });
-    self.terminate(builder, .{ .branch = .{ .condition = alive, .then_block = components_block, .else_block = update_block } });
-
-    builder.current_block = components_block;
-    const components = try self.newValue(builder, resources_type);
-    try self.emit(builder, .{ .field_load = .{ .result = components, .base = record_value, .field = components_field } });
-    const components_local = builder.local_types.items.len;
-    try builder.local_types.append(self.allocator, resources_type);
-    try self.emit(builder, .{ .local_store = .{ .local = components_local, .operand = components } });
-    var component_count: usize = 0;
-    for (pattern.fields) |field| {
-        if (!isEntityType(self, field.type)) component_count += 1;
-    }
-    if (component_count == 0) self.terminate(builder, .{ .jump = matched_block });
-    var component_index: usize = 0;
+    const archetype_count_method = methodNamed(world, "query_archetype_count") orelse
+        return missingQueryRegistration(self, loop.name_position);
+    const matches_method = methodNamed(world, "query_matches") orelse
+        return missingQueryRegistration(self, loop.name_position);
+    const entity_method = methodNamed(world, "query_entity") orelse
+        return missingQueryRegistration(self, loop.name_position);
+    const row_start_method = methodNamed(world, "query_row_start") orelse
+        return missingQueryRegistration(self, loop.name_position);
+    const row_end_method = methodNamed(world, "query_row_end") orelse
+        return missingQueryRegistration(self, loop.name_position);
+    const required_type = world.methods[matches_method].parameters[1].type;
+    var required_ids: std.ArrayList(Ir.ValueId) = .empty;
     for (pattern.fields) |field| {
         if (isEntityType(self, field.type)) continue;
-        const has_name = try std.fmt.allocPrint(self.allocator, "has<{s}>", .{self.typeName(field.type)});
-        const has_method = methodNamed(resources, has_name) orelse return error.InvalidSource;
-        const current_components = try loadLocalValue(self, builder, components_local, resources_type);
-        const present = try self.newValue(builder, .bool);
+        const method_name = try std.fmt.allocPrint(self.allocator, "query_component_id<{s}>", .{self.typeName(field.type)});
+        const method_index = methodNamed(world, method_name) orelse
+            return missingQueryRegistration(self, loop.name_position);
+        const current_world = try loadLocalValue(self, builder, world_local, world_type);
+        const component_id = try self.newValue(builder, .int);
         try self.emit(builder, .{ .call = .{
-            .result = present,
-            .function = methodFunctionId(self.program, resources_index, has_method),
-            .arguments = try self.allocator.dupe(Ir.ValueId, &.{current_components}),
+            .result = component_id,
+            .function = methodFunctionId(self.program, world_index, method_index),
+            .arguments = try self.allocator.dupe(Ir.ValueId, &.{current_world}),
         } });
-        component_index += 1;
-        const next_match = if (component_index == component_count) matched_block else try self.newBlock(builder);
-        self.terminate(builder, .{ .branch = .{ .condition = present, .then_block = next_match, .else_block = update_block } });
-        builder.current_block = next_match;
+        try required_ids.append(self.allocator, component_id);
     }
+    const required = try self.newValue(builder, required_type);
+    try self.emit(builder, .{ .list_init = .{
+        .result = required,
+        .values = try required_ids.toOwnedSlice(self.allocator),
+    } });
+    const required_local = builder.local_types.items.len;
+    try builder.local_types.append(self.allocator, required_type);
+    try self.emit(builder, .{ .local_store = .{ .local = required_local, .operand = required } });
+
+    const archetype_local = builder.local_types.items.len;
+    try builder.local_types.append(self.allocator, .int);
+    try self.emit(builder, .{ .local_store = .{ .local = archetype_local, .operand = try emitInt(self, builder, 0) } });
+    const row_local = builder.local_types.items.len;
+    try builder.local_types.append(self.allocator, .int);
+    try self.emit(builder, .{ .local_store = .{ .local = row_local, .operand = try emitInt(self, builder, 0) } });
+    const row_end_local = builder.local_types.items.len;
+    try builder.local_types.append(self.allocator, .int);
+    try self.emit(builder, .{ .local_store = .{ .local = row_end_local, .operand = try emitInt(self, builder, 0) } });
+
+    const availability_count = builder.bindings.items.len;
+    const header_availability = try Availability.snapshot(self.allocator, builder.bindings.items, availability_count);
+    const archetype_condition = try self.newBlock(builder);
+    const archetype_candidate = try self.newBlock(builder);
+    const row_initialize = try self.newBlock(builder);
+    const row_condition = try self.newBlock(builder);
+    const matched_block = try self.newBlock(builder);
+    const row_update = try self.newBlock(builder);
+    const archetype_update = try self.newBlock(builder);
+    const exit_block = try self.newBlock(builder);
+    self.terminate(builder, .{ .jump = archetype_condition });
+
+    builder.current_block = archetype_condition;
+    const current_world = try loadLocalValue(self, builder, world_local, world_type);
+    const archetype_count = try self.newValue(builder, .int);
+    try self.emit(builder, .{ .call = .{
+        .result = archetype_count,
+        .function = methodFunctionId(self.program, world_index, archetype_count_method),
+        .arguments = try self.allocator.dupe(Ir.ValueId, &.{current_world}),
+    } });
+    const has_archetype = try emitBinary(
+        self,
+        builder,
+        .less,
+        try loadLocalValue(self, builder, archetype_local, .int),
+        archetype_count,
+        .bool,
+    );
+    self.terminate(builder, .{ .branch = .{ .condition = has_archetype, .then_block = archetype_candidate, .else_block = exit_block } });
+
+    builder.current_block = archetype_candidate;
+    const candidate_world = try loadLocalValue(self, builder, world_local, world_type);
+    const candidate_archetype = try loadLocalValue(self, builder, archetype_local, .int);
+    const current_required = try loadLocalValue(self, builder, required_local, required_type);
+    const matches = try self.newValue(builder, .bool);
+    try self.emit(builder, .{ .call = .{
+        .result = matches,
+        .function = methodFunctionId(self.program, world_index, matches_method),
+        .arguments = try self.allocator.dupe(Ir.ValueId, &.{ candidate_world, candidate_archetype, current_required }),
+    } });
+    self.terminate(builder, .{ .branch = .{ .condition = matches, .then_block = row_initialize, .else_block = archetype_update } });
+
+    builder.current_block = row_initialize;
+    const interval_world = try loadLocalValue(self, builder, world_local, world_type);
+    const interval_archetype = try loadLocalValue(self, builder, archetype_local, .int);
+    const first_row = try self.newValue(builder, .int);
+    try self.emit(builder, .{ .call = .{
+        .result = first_row,
+        .function = methodFunctionId(self.program, world_index, row_start_method),
+        .arguments = try self.allocator.dupe(Ir.ValueId, &.{
+            interval_world,
+            interval_archetype,
+            try loadLocalValue(self, builder, required_local, required_type),
+            try loadLocalValue(self, builder, range_start_local, .int),
+        }),
+    } });
+    try self.emit(builder, .{ .local_store = .{ .local = row_local, .operand = first_row } });
+    const last_row = try self.newValue(builder, .int);
+    try self.emit(builder, .{ .call = .{
+        .result = last_row,
+        .function = methodFunctionId(self.program, world_index, row_end_method),
+        .arguments = try self.allocator.dupe(Ir.ValueId, &.{
+            try loadLocalValue(self, builder, world_local, world_type),
+            try loadLocalValue(self, builder, archetype_local, .int),
+            try loadLocalValue(self, builder, required_local, required_type),
+            try loadLocalValue(self, builder, range_end_local, .int),
+        }),
+    } });
+    try self.emit(builder, .{ .local_store = .{ .local = row_end_local, .operand = last_row } });
+    self.terminate(builder, .{ .jump = row_condition });
+
+    builder.current_block = row_condition;
+    const has_entity = try emitBinary(
+        self,
+        builder,
+        .less,
+        try loadLocalValue(self, builder, row_local, .int),
+        try loadLocalValue(self, builder, row_end_local, .int),
+        .bool,
+    );
+    self.terminate(builder, .{ .branch = .{ .condition = has_entity, .then_block = matched_block, .else_block = archetype_update } });
+
+    builder.current_block = matched_block;
+    const entity_type = world.methods[entity_method].return_type;
+    const entity = try self.newValue(builder, entity_type);
+    try self.emit(builder, .{ .call = .{
+        .result = entity,
+        .function = methodFunctionId(self.program, world_index, entity_method),
+        .arguments = try self.allocator.dupe(Ir.ValueId, &.{
+            try loadLocalValue(self, builder, world_local, world_type),
+            try loadLocalValue(self, builder, archetype_local, .int),
+            try loadLocalValue(self, builder, row_local, .int),
+        }),
+    } });
     const binding_count = builder.bindings.items.len;
     const root = switch (source_expression.value) {
         .identifier => |name| name,
@@ -440,31 +517,23 @@ fn analyzeQueryFor(
     };
     for (pattern.fields, loop.bindings) |field, binding| {
         if (isEntityType(self, field.type)) {
-            const generation = try self.newValue(builder, .int);
-            try self.emit(builder, .{ .field_load = .{ .result = generation, .base = record_value, .field = generation_field } });
-            const entity = try self.newValue(builder, field.type);
-            try self.emit(builder, .{ .structure_init = .{
-                .result = entity,
-                .structure = field.type.structureIndex().?,
-                .fields = try self.allocator.dupe(Ir.ValueId, &.{ index, generation }),
-            } });
             try builder.bindings.append(self.allocator, .{ .name = binding.name, .type = field.type, .value = entity });
             continue;
         }
         const getter_name = try std.fmt.allocPrint(
             self.allocator,
-            "{s}<{s}>",
+            "query_{s}<{s}>",
             .{ if (field.access_mode == .mutable) "get_mut" else "get", self.typeName(field.type) },
         );
+        const getter_index = methodNamed(world, getter_name) orelse return error.InvalidSource;
         if (field.access_mode == .mutable) {
-            const getter_index = methodNamed(resources, getter_name) orelse return error.InvalidSource;
-            const components_reference = try self.newValue(builder, .address);
-            try self.emit(builder, .{ .local_address = .{ .result = components_reference, .local = components_local } });
+            const world_reference = try self.newValue(builder, .address);
+            try self.emit(builder, .{ .local_address = .{ .result = world_reference, .local = world_local } });
             const reference = try self.newValue(builder, .address);
             try self.emit(builder, .{ .call = .{
                 .result = reference,
-                .function = methodFunctionId(self.program, resources_index, getter_index),
-                .arguments = try self.allocator.dupe(Ir.ValueId, &.{components_reference}),
+                .function = methodFunctionId(self.program, world_index, getter_index),
+                .arguments = try self.allocator.dupe(Ir.ValueId, &.{ world_reference, entity }),
             } });
             try builder.bindings.append(self.allocator, .{
                 .name = binding.name,
@@ -475,13 +544,14 @@ fn analyzeQueryFor(
                 .borrowed_mode = .mutable,
             });
         } else {
-            const getter_index = methodNamed(resources, getter_name) orelse return error.InvalidSource;
-            const current_components = try loadLocalValue(self, builder, components_local, resources_type);
             const value = try self.newValue(builder, field.type);
             try self.emit(builder, .{ .call = .{
                 .result = value,
-                .function = methodFunctionId(self.program, resources_index, getter_index),
-                .arguments = try self.allocator.dupe(Ir.ValueId, &.{current_components}),
+                .function = methodFunctionId(self.program, world_index, getter_index),
+                .arguments = try self.allocator.dupe(Ir.ValueId, &.{
+                    try loadLocalValue(self, builder, world_local, world_type),
+                    entity,
+                }),
             } });
             try builder.bindings.append(self.allocator, .{
                 .name = binding.name,
@@ -493,7 +563,7 @@ fn analyzeQueryFor(
         }
     }
     try builder.loops.append(self.allocator, .{
-        .continue_block = update_block,
+        .continue_block = row_update,
         .break_block = exit_block,
         .availability_count = availability_count,
         .drop_binding_count = binding_count,
@@ -506,24 +576,41 @@ fn analyzeQueryFor(
     builder.loops.items.len -= 1;
     if (!terminated) try Resources.emitActiveDrops(self, builder, binding_count);
     builder.bindings.shrinkRetainingCapacity(binding_count);
-    if (!terminated) self.terminate(builder, .{ .jump = update_block });
+    if (!terminated) self.terminate(builder, .{ .jump = row_update });
 
-    builder.current_block = update_block;
-    const next = try emitBinary(
+    builder.current_block = row_update;
+    const next_row = try emitBinary(
         self,
         builder,
         .add,
-        try loadLocalValue(self, builder, index_local, .int),
+        try loadLocalValue(self, builder, row_local, .int),
         try emitInt(self, builder, 1),
         .int,
     );
-    try self.emit(builder, .{ .local_store = .{ .local = index_local, .operand = next } });
-    self.terminate(builder, .{ .jump = condition_block });
+    try self.emit(builder, .{ .local_store = .{ .local = row_local, .operand = next_row } });
+    self.terminate(builder, .{ .jump = row_condition });
+
+    builder.current_block = archetype_update;
+    const next_archetype = try emitBinary(
+        self,
+        builder,
+        .add,
+        try loadLocalValue(self, builder, archetype_local, .int),
+        try emitInt(self, builder, 1),
+        .int,
+    );
+    try self.emit(builder, .{ .local_store = .{ .local = archetype_local, .operand = next_archetype } });
+    self.terminate(builder, .{ .jump = archetype_condition });
+
     builder.current_block = exit_block;
     const exit_availability = try self.allocator.dupe(bool, header_availability);
     for (loop_context.break_availabilities.items) |state| Availability.merge(exit_availability, state);
     Availability.restore(builder.bindings.items, exit_availability);
     return false;
+}
+
+fn missingQueryRegistration(self: anytype, position: Source.Position) !bool {
+    return self.fail(position, "ECS.Query iteration requires registration through Application.add_system");
 }
 
 fn fieldNamed(structure: Ast.Structure, name: []const u8) ?usize {
@@ -696,6 +783,9 @@ pub fn analyzeCondition(self: anytype, builder: anytype, condition: Ast.Conditio
 pub fn enterBinding(self: anytype, builder: anytype, binding: BindingValue) !void {
     const value = try self.newValue(builder, binding.child_type);
     try self.emit(builder, .{ .optional_unwrap = .{ .result = value, .operand = binding.source.value } });
+    if (Resources.containsClass(self, binding.child_type)) {
+        try Resources.retainValue(self, builder, binding.child_type, value);
+    }
     if (binding.declaration.mutable) {
         const local = builder.local_types.items.len;
         try builder.local_types.append(self.allocator, binding.child_type);

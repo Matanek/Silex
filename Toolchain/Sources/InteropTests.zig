@@ -474,6 +474,20 @@ test "reject incomplete and invalid C.function declarations" {
     );
 }
 
+test "worker-safe job analysis rejects an unclassified external boundary" {
+    try expectError(
+        \\use Interop.C
+        \\use Interop.MacOS
+        \\let process_id = C.function<func() int32>(library:MacOS.lib_system, name:"getpid")
+        \\protocol Job { func execute() }
+        \\class Executor { public func submit<T:Job>(job:T) {} }
+        \\struct ExternalJob:Job { func execute() { process_id() } }
+        \\func main() { var executor = Executor(); executor.submit(ExternalJob()) }
+    ,
+        "job 'ExternalJob' is not worker-safe: external call 'getpid' is not classified",
+    );
+}
+
 fn expectError(input_source: []const u8, message: []const u8) !void {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
