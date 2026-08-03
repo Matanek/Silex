@@ -1,11 +1,11 @@
 const std = @import("std");
 const Ast = @import("../Ast.zig");
 const Modules = @import("../Modules.zig");
-const Packages = @import("../Packages.zig");
 const TargetModule = @import("../Target.zig");
 const ParserModule = @import("../Parser.zig");
 const Completion = @import("Completion.zig");
 const LexerModule = @import("../Lexer.zig");
+const ProjectIndex = @import("ProjectIndex.zig");
 const Types = @import("Types.zig");
 
 const Allocator = std.mem.Allocator;
@@ -50,12 +50,7 @@ const ImportedMemberQuery = struct {
     inside_extension: bool = false,
 };
 
-const IndexedProject = struct {
-    graph: Packages.Graph,
-    index: Modules.Index,
-    current_owner: usize,
-    current_path: []const u8,
-};
+const IndexedProject = ProjectIndex.IndexedProject;
 
 const RankedItem = struct {
     item: Types.CompletionItem,
@@ -184,6 +179,21 @@ pub fn hasProjectReferenceForTarget(
         if ((findProvider(project.index, token.lexeme) != null or project.index.isNamespace(token.lexeme)) and
             try modulePathVisible(allocator, io, &.{}, project, token.lexeme)) return true;
     }
+}
+
+pub fn importedReceiverTypeAt(
+    allocator: Allocator,
+    io: Io,
+    documents: []const Types.Document,
+    project: IndexedProject,
+    source: []const u8,
+    cursor: usize,
+) !?[]const u8 {
+    const query = try queryAt(allocator, source, cursor, project, io, documents) orelse return null;
+    return switch (query) {
+        .imported_member => |member| member.type_path,
+        else => null,
+    };
 }
 
 fn accessibleRootMatches(allocator: Allocator, io: Io, project: IndexedProject, prefix: []const u8) !bool {
@@ -593,6 +603,20 @@ fn queryAt(
             .prefix = prefix,
             .cursor = cursor,
         } };
+        if (try importedFieldReceiverTypePath(
+            allocator,
+            io,
+            documents,
+            project,
+            program,
+            source,
+            cursor,
+            receiver,
+        )) |type_path| return .{ .imported_member = .{
+            .type_path = type_path,
+            .prefix = prefix,
+            .cursor = cursor,
+        } };
         if (parameterTypePathAt(source, program, cursor, receiver)) |type_path| {
             if (try importedTypePath(allocator, program, project, type_path)) |resolved| {
                 return .{ .imported_member = .{ .type_path = resolved, .prefix = prefix, .cursor = cursor } };
@@ -627,27 +651,7 @@ fn indexProject(
     root: []const u8,
     document_path: []const u8,
 ) !IndexedProject {
-    var resolver = Packages.Resolver.initForTarget(allocator, io, global_packages_root, target);
-    const graph = try resolver.resolve(root);
-    var indexes: std.ArrayList(Modules.Index) = .empty;
-    const excluded_roots = try allocator.alloc([]const u8, graph.packages.len - 1);
-    for (graph.packages[1..], excluded_roots) |package, *package_root| package_root.* = package.root;
-    for (graph.packages, 0..) |package, owner| {
-        for (package.module_roots) |module_root| {
-            const discovered = if (owner == 0)
-                try Modules.discoverOwnedExcludingAs(allocator, io, module_root.path, package.name, owner, excluded_roots, module_root.origin)
-            else
-                try Modules.discoverOwnedAs(allocator, io, module_root.path, package.name, owner, module_root.origin);
-            try indexes.append(allocator, discovered);
-        }
-    }
-    const index = try Modules.combine(allocator, indexes.items);
-    var current_owner: usize = 0;
-    for (index.providers) |provider| if (samePath(provider.path, document_path)) {
-        current_owner = provider.owner;
-        break;
-    };
-    return .{ .graph = graph, .index = index, .current_owner = current_owner, .current_path = document_path };
+    return ProjectIndex.index(allocator, io, global_packages_root, target, root, document_path);
 }
 
 fn appendPathItems(
@@ -1267,7 +1271,7 @@ fn appendCurrentExtensionMethods(
     }
 }
 
-const LoadedProgram = struct { source: []const u8, program: Ast.Program };
+const LoadedProgram = ProjectIndex.LoadedProgram;
 
 fn loadProgram(
     allocator: Allocator,
@@ -1275,22 +1279,7 @@ fn loadProgram(
     documents: []const Types.Document,
     provider: Modules.Provider,
 ) !?LoadedProgram {
-    var source: ?[]const u8 = null;
-    for (documents) |document| {
-        const path = pathFromUri(allocator, document.uri) catch continue;
-        if (samePath(path, provider.path)) {
-            source = document.text;
-            break;
-        }
-    }
-    if (source) |overlay| {
-        var parser = ParserModule.Parser.init(allocator, overlay);
-        if (parser.parse()) |program| return .{ .source = overlay, .program = program } else |_| {}
-    }
-    const disk = Io.Dir.cwd().readFileAlloc(io, provider.path, allocator, .limited(1024 * 1024)) catch return null;
-    var parser = ParserModule.Parser.init(allocator, disk);
-    const program = parser.parse() catch return null;
-    return .{ .source = disk, .program = program };
+    return ProjectIndex.loadProgram(allocator, io, documents, provider);
 }
 
 fn parseCurrent(allocator: Allocator, source: []const u8) !?Ast.Program {
@@ -1461,6 +1450,195 @@ fn parameterTypePath(program: Ast.Program, parameters: []const Ast.Parameter, re
     return null;
 }
 
+fn importedFieldReceiverTypePath(
+    allocator: Allocator,
+    io: Io,
+    documents: []const Types.Document,
+    project: IndexedProject,
+    program: Ast.Program,
+    source: []const u8,
+    cursor: usize,
+    receiver: []const u8,
+) !?[]const u8 {
+    const separator = std.mem.indexOfScalar(u8, receiver, '.') orelse receiver.len;
+    const root = receiver[0..separator];
+    const local_type = parameterTypePathAt(source, program, cursor, root) orelse
+        loopBindingTypePathAt(source, program, cursor, root) orelse
+        try declaredTypePath(allocator, source, cursor, root) orelse return null;
+    var resolved = try importedTypePath(allocator, program, project, local_type) orelse return null;
+    var field_start = separator;
+    while (field_start < receiver.len) {
+        field_start += 1;
+        const field_end = std.mem.indexOfScalarPos(u8, receiver, field_start, '.') orelse receiver.len;
+        resolved = try importedFieldTypePath(
+            allocator,
+            io,
+            documents,
+            project,
+            resolved,
+            receiver[field_start..field_end],
+        ) orelse return null;
+        field_start = field_end;
+    }
+    return resolved;
+}
+
+fn importedFieldTypePath(
+    allocator: Allocator,
+    io: Io,
+    documents: []const Types.Document,
+    project: IndexedProject,
+    type_path: []const u8,
+    field_name: []const u8,
+) !?[]const u8 {
+    const target = declarationTarget(project.index, type_path) orelse return null;
+    const provider = project.index.providers[target.provider];
+    if (!project.graph.canAccess(project.current_owner, provider.owner, provider.name)) return null;
+    const loaded = try loadProgram(allocator, io, documents, provider) orelse return null;
+    for (loaded.program.structures) |structure| {
+        if (!std.mem.eql(u8, structure.name, target.declaration)) continue;
+        for (structure.fields) |field| {
+            if (!std.mem.eql(u8, field.name, field_name)) continue;
+            const local_type = Completion.typeName(loaded.program, field.type);
+            return importedTypePath(allocator, loaded.program, project, local_type);
+        }
+        return null;
+    }
+    return null;
+}
+
+fn loopBindingTypePathAt(
+    source: []const u8,
+    program: Ast.Program,
+    cursor: usize,
+    receiver: []const u8,
+) ?[]const u8 {
+    for (program.functions) |function| {
+        if (!bodyContainsCursor(source, function.position.offset, cursor)) continue;
+        return loopBindingTypeInStatements(
+            source,
+            program,
+            cursor,
+            receiver,
+            function.parameters,
+            function.statements,
+        );
+    }
+    return null;
+}
+
+fn loopBindingTypeInStatements(
+    source: []const u8,
+    program: Ast.Program,
+    cursor: usize,
+    receiver: []const u8,
+    parameters: []const Ast.Parameter,
+    statements: []const Ast.Statement,
+) ?[]const u8 {
+    for (statements) |statement| switch (statement) {
+        .for_statement => |loop| {
+            if (!bodyContainsCursor(source, loop.position.offset, cursor)) continue;
+            const collection = switch (loop.source) {
+                .collection => |value| value,
+                .range => null,
+            };
+            const collection_name = if (collection) |value| switch (value.value) {
+                .identifier => |name| name,
+                else => null,
+            } else null;
+            if (collection_name) |name| {
+                for (parameters) |parameter| {
+                    if (!std.mem.eql(u8, parameter.name, name)) continue;
+                    for (loop.bindings, 0..) |binding, binding_index| {
+                        if (!std.mem.eql(u8, binding.name, receiver)) continue;
+                        return queryBindingTypeName(program, parameter.type, binding_index);
+                    }
+                }
+            }
+            if (loopBindingTypeInStatements(
+                source,
+                program,
+                cursor,
+                receiver,
+                parameters,
+                loop.statements,
+            )) |type_name| return type_name;
+        },
+        .if_statement => |conditional| {
+            for (conditional.branches) |branch| if (loopBindingTypeInStatements(
+                source,
+                program,
+                cursor,
+                receiver,
+                parameters,
+                branch.statements,
+            )) |type_name| return type_name;
+            if (conditional.else_statements) |alternative| if (loopBindingTypeInStatements(
+                source,
+                program,
+                cursor,
+                receiver,
+                parameters,
+                alternative,
+            )) |type_name| return type_name;
+        },
+        .while_statement => |loop| if (loopBindingTypeInStatements(
+            source,
+            program,
+            cursor,
+            receiver,
+            parameters,
+            loop.statements,
+        )) |type_name| return type_name,
+        .mutex_statement => |mutex| if (loopBindingTypeInStatements(
+            source,
+            program,
+            cursor,
+            receiver,
+            parameters,
+            mutex.statements,
+        )) |type_name| return type_name,
+        else => {},
+    };
+    return null;
+}
+
+fn queryBindingTypeName(program: Ast.Program, query_type: Ast.Type, binding_index: usize) ?[]const u8 {
+    const query_index = query_type.genericInstantiationIndex() orelse return null;
+    if (query_index >= program.generic_types.len) return null;
+    const query = program.generic_types[query_index];
+    if (query.arguments.len == 0) return null;
+    const pattern_name = Completion.typeName(program, query.arguments[0]);
+    for (program.structures) |pattern| {
+        if (!pattern.is_tuple or !std.mem.eql(u8, pattern.name, pattern_name)) continue;
+        if (binding_index >= pattern.fields.len) return null;
+        return Completion.typeName(program, pattern.fields[binding_index].type);
+    }
+    return null;
+}
+
+test "infer destructured ECS query binding types for member navigation" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source =
+        \\use GFX.ECS
+        \\struct Rotator {}
+        \\func rotate(rotators:ECS.Query<(@Rotator, &GFX.Transform.Transform3D)>) {
+        \\    for (rotator, transform) in rotators {
+        \\        print(transform.rotation)
+        \\    }
+        \\}
+    ;
+    const program = (try parseCurrent(arena.allocator(), source)).?;
+    const cursor = std.mem.indexOf(u8, source, "transform.rotation").? + "transform".len;
+    const inferred = loopBindingTypePathAt(source, program, cursor, "transform");
+    try std.testing.expect(inferred != null);
+    try std.testing.expectEqualStrings(
+        "GFX.Transform.Transform3D",
+        inferred.?,
+    );
+}
+
 fn importedConstructorCallTypePath(
     allocator: Allocator,
     io: Io,
@@ -1582,8 +1760,8 @@ fn importedQualifiedCallReturnTypePath(
     current: Ast.Program,
     call: Completion.QualifiedCall,
 ) !?[]const u8 {
-    const use = findUseByAlias(current, call.owner) orelse return null;
-    const target = declarationTarget(project.index, use.path) orelse return null;
+    const owner_path = try importedTypePath(allocator, current, project, call.owner) orelse return null;
+    const target = declarationTarget(project.index, owner_path) orelse return null;
     const provider = project.index.providers[target.provider];
     if (!project.graph.canAccess(project.current_owner, provider.owner, provider.name)) return null;
     const loaded = try loadProgram(allocator, io, documents, provider) orelse return null;
@@ -1632,8 +1810,9 @@ fn importedQualifiedCallReturnTypePath(
         }
     };
     const name = return_name orelse return null;
-    if (std.mem.indexOfScalar(u8, name, '.') != null) return name;
-    if (std.mem.eql(u8, name, target.declaration)) return use.path;
+    if (try importedTypePath(allocator, loaded.program, project, name)) |resolved| return resolved;
+    if (std.mem.indexOfScalar(u8, name, '.') != null and declarationTarget(project.index, name) != null) return name;
+    if (std.mem.eql(u8, name, target.declaration)) return owner_path;
     const qualified: []const u8 = try std.fmt.allocPrint(allocator, "{s}.{s}", .{ provider.name, name });
     return qualified;
 }
@@ -1662,6 +1841,10 @@ fn importedTypePath(
     project: IndexedProject,
     local_path: []const u8,
 ) !?[]const u8 {
+    if (declarationTarget(project.index, local_path)) |target| {
+        const provider = project.index.providers[target.provider];
+        if (project.graph.canAccess(project.current_owner, provider.owner, provider.name)) return local_path;
+    }
     const separator = std.mem.indexOfScalar(u8, local_path, '.');
     const first = if (separator) |index| local_path[0..index] else local_path;
     const use = findUseByAlias(program, first) orelse return null;
@@ -1794,62 +1977,15 @@ fn lastSegment(path: []const u8) []const u8 {
 }
 
 fn projectRoot(allocator: Allocator, io: Io, document_path: []const u8, root_hint: ?[]const u8) ![]const u8 {
-    var directory = std.fs.path.dirname(document_path) orelse ".";
-    const document_directory = directory;
-    const boundary = root_hint orelse directory;
-    while (true) {
-        const manifest = try std.fs.path.join(allocator, &.{ directory, "Package.json" });
-        if (fileExists(io, manifest)) return directory;
-        if (samePath(directory, boundary)) return document_directory;
-        const next = std.fs.path.dirname(directory) orelse return document_directory;
-        if (!pathInside(directory, boundary) or std.mem.eql(u8, next, directory)) return document_directory;
-        directory = next;
-    }
+    return ProjectIndex.projectRoot(allocator, io, document_path, root_hint);
 }
 
 pub fn pathFromUri(allocator: Allocator, uri: []const u8) ![]const u8 {
-    const prefix = "file://";
-    if (!std.mem.startsWith(u8, uri, prefix)) return allocator.dupe(u8, uri);
-    const encoded = uri[prefix.len..];
-    var decoded: std.ArrayList(u8) = .empty;
-    var index: usize = 0;
-    while (index < encoded.len) {
-        if (encoded[index] == '%' and index + 2 < encoded.len) {
-            const high = hex(encoded[index + 1]);
-            const low = hex(encoded[index + 2]);
-            if (high != null and low != null) {
-                try decoded.append(allocator, high.? * 16 + low.?);
-                index += 3;
-                continue;
-            }
-        }
-        try decoded.append(allocator, encoded[index]);
-        index += 1;
-    }
-    return decoded.toOwnedSlice(allocator);
-}
-
-fn hex(character: u8) ?u8 {
-    return switch (character) {
-        '0'...'9' => character - '0',
-        'a'...'f' => character - 'a' + 10,
-        'A'...'F' => character - 'A' + 10,
-        else => null,
-    };
-}
-
-fn pathInside(path: []const u8, directory: []const u8) bool {
-    if (!std.mem.startsWith(u8, path, directory) or path.len <= directory.len) return false;
-    return path[directory.len] == std.fs.path.sep;
+    return ProjectIndex.pathFromUri(allocator, uri);
 }
 
 fn samePath(left: []const u8, right: []const u8) bool {
     return std.mem.eql(u8, std.mem.trimEnd(u8, left, "/"), std.mem.trimEnd(u8, right, "/"));
-}
-
-fn fileExists(io: Io, path: []const u8) bool {
-    _ = Io.Dir.cwd().statFile(io, path, .{}) catch return false;
-    return true;
 }
 
 test "complete simple modules before declarations in a use path" {

@@ -2161,8 +2161,12 @@ pub fn qualifiedCall(receiver: []const u8) ?QualifiedCall {
         }
     }
     const opening = open orelse return null;
-    if (opening != 3 or tokens[0].tag != .identifier or tokens[1].tag != .dot or
-        tokens[2].tag != .identifier) return null;
+    if (opening < 3 or tokens[opening - 2].tag != .dot or tokens[opening - 1].tag != .identifier) return null;
+    for (tokens[0 .. opening - 2], 0..) |token, owner_index| {
+        if (owner_index % 2 == 0) {
+            if (token.tag != .identifier) return null;
+        } else if (token.tag != .dot) return null;
+    }
 
     var nesting: usize = 0;
     var arguments: usize = 0;
@@ -2182,8 +2186,8 @@ pub fn qualifiedCall(receiver: []const u8) ?QualifiedCall {
     };
     if (has_argument) arguments += 1;
     return .{
-        .owner = tokens[0].lexeme,
-        .name = tokens[2].lexeme,
+        .owner = receiver[tokens[0].start..tokens[opening - 2].start],
+        .name = tokens[opening - 1].lexeme,
         .arity = arguments,
     };
 }

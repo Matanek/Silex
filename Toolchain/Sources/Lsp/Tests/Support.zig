@@ -26,6 +26,10 @@ const CompletionResponse = struct {
     },
 };
 
+const DefinitionResponse = struct {
+    result: ?Types.Location,
+};
+
 pub fn removeMarker(allocator: std.mem.Allocator, source: []const u8) !MarkedSource {
     const cursor = std.mem.indexOf(u8, source, marker) orelse return error.MissingCompletionMarker;
     if (std.mem.indexOf(u8, source[cursor + marker.len ..], marker) != null) {
@@ -136,6 +140,32 @@ pub fn serverCompletionInOpenDocument(
     });
     try std.testing.expect(!parsed.result.isIncomplete);
     return parsed.result.items;
+}
+
+pub fn serverDefinition(
+    server: *ServerModule.Server,
+    allocator: std.mem.Allocator,
+    uri: []const u8,
+    marked_source: []const u8,
+) !?Types.Location {
+    const source = try removeMarker(allocator, marked_source);
+    try openDocument(server, allocator, uri, 1, source.text);
+    const position = Protocol.positionAtByteOffset(source.text, source.cursor, .utf16) orelse
+        return error.InvalidDefinitionPosition;
+    const request = try std.json.Stringify.valueAlloc(allocator, .{
+        .jsonrpc = Types.protocol_version,
+        .id = 3,
+        .method = "textDocument/definition",
+        .params = .{
+            .textDocument = .{ .uri = uri },
+            .position = position,
+        },
+    }, .{});
+    const response = (try server.handleBody(allocator, request)) orelse return error.MissingLspResponse;
+    const parsed = try std.json.parseFromSliceLeaky(DefinitionResponse, allocator, response, .{
+        .ignore_unknown_fields = true,
+    });
+    return parsed.result;
 }
 
 pub fn expectExactLabels(

@@ -50,6 +50,7 @@ open Silex document
     -> context and inferred syntactic intention
     -> typed frontend declarations and package graph
     -> prioritized completion from visible declarations
+    -> definition navigation to module and package sources
     -> inline colors for direct GFX.Color expressions
 ```
 
@@ -321,13 +322,20 @@ open Silex document
 - LSP syntax diagnostics always analyze the open buffer; semantic diagnostics
   currently run only when the unit has no `use`. Completion independently
   resolves the project module index and direct package graph, with open buffers
-  masking their disk providers. The bootstrap rebuilds that completion view for
-  each request; an incremental cache remains a performance optimization and
-  must preserve the same observable results. Document colors recognize direct
+  masking their disk providers. Definition navigation uses the same target and
+  overlay-aware project view for imported or directly qualified module and
+  package declarations. It follows methods declared by extensions, qualified
+  call return types, destructured query bindings, field chains and cascades
+  when their imported receiver type can be inferred. Bare function values
+  resolve to declarations in the current source or through explicit imports,
+  so callbacks navigate like direct calls. The bootstrap rebuilds that editor
+  view for each request; an
+  incremental cache remains a performance optimization and must preserve the
+  same observable results. Document colors recognize direct
   `Color.bytes`, `Color.rgb`, `Color.rgba` and named GFX palette expressions
   whose components are literals in the displayable `[0.0, 1.0]` range. This
   bootstrap recognition is intentionally syntactic; semantic constant
   evaluation should eventually replace its local palette knowledge so aliases
   and computed colors work without coupling the language server to one package
-  API. Navigation, rename, hover, formatting, semantic tokens and project-wide
+  API. References, rename, hover, formatting, semantic tokens and project-wide
   semantic diagnostics are not implemented yet.

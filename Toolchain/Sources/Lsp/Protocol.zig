@@ -168,6 +168,20 @@ pub fn positionAtByteOffset(
     return position;
 }
 
+pub fn uriFromPath(allocator: Allocator, path: []const u8) ![]const u8 {
+    var uri: std.ArrayList(u8) = .empty;
+    try uri.appendSlice(allocator, "file://");
+    for (path) |character| {
+        if (std.ascii.isAlphanumeric(character) or std.mem.indexOfScalar(u8, "-._~/:", character) != null) {
+            try uri.append(allocator, character);
+        } else {
+            const digits = "0123456789ABCDEF";
+            try uri.appendSlice(allocator, &.{ '%', digits[character >> 4], digits[character & 0x0f] });
+        }
+    }
+    return uri.toOwnedSlice(allocator);
+}
+
 pub fn diagnosticFromSource(
     source: []const u8,
     diagnostic: Source.Diagnostic,
@@ -215,6 +229,12 @@ test "convert Unicode positions according to the negotiated encoding" {
     try std.testing.expectEqual(@as(?usize, 6), byteOffsetAtPosition(source, .{ .line = 0, .character = 3 }, .utf16));
     try std.testing.expectEqual(Types.Position{ .line = 0, .character = 6 }, positionAtByteOffset(source, 6, .utf8).?);
     try std.testing.expectEqual(Types.Position{ .line = 0, .character = 2 }, positionAtByteOffset(source, 6, .utf32).?);
+}
+
+test "encode source paths as file URIs" {
+    const uri = try uriFromPath(std.testing.allocator, "/tmp/Silex Package/Color#Tone.sx");
+    defer std.testing.allocator.free(uri);
+    try std.testing.expectEqualStrings("file:///tmp/Silex%20Package/Color%23Tone.sx", uri);
 }
 
 test "read completion trigger kinds without trusting unknown values" {
