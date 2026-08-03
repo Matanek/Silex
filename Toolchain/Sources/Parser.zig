@@ -201,6 +201,7 @@ pub const Parser = struct {
         const name_position = self.current.position;
         if (std.mem.eql(u8, source_name, "Result")) return self.failAt(name_position, "'Result' is a reserved intrinsic type name");
         if (std.mem.eql(u8, source_name, "map_error")) return self.failAt(name_position, "'map_error' is a reserved intrinsic function name");
+        if (std.mem.eql(u8, source_name, "embed_text")) return self.failAt(name_position, "'embed_text' is a reserved intrinsic function name");
         try self.advance();
         const type_parameters = try Generics.parseTypeParameters(self);
         const enclosing_type_parameters = self.type_parameters;
@@ -450,6 +451,7 @@ pub const Parser = struct {
         const name = self.current.lexeme;
         const name_position = self.current.position;
         if (std.mem.eql(u8, name, "map_error")) return self.failAt(name_position, "'map_error' is a reserved intrinsic function name");
+        if (std.mem.eql(u8, name, "embed_text")) return self.failAt(name_position, "'embed_text' is a reserved intrinsic function name");
         try self.advance();
 
         var annotation: ?Ast.Type = null;

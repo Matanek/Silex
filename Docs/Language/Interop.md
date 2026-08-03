@@ -4,12 +4,13 @@
 code should normally depend on a portable package such as `STD` instead.
 
 The current native backends expose a closed set of typed system contracts used
-by the platform parts of `STD`: entropy, monotonic time, console and terminal
-I/O, files, processes, filesystem operations, and name resolution. macOS calls
-fixed libSystem symbols, Linux X64 uses kernel syscalls, and Windows PE32+
-imports the selected system DLL functions. A named package may additionally
-own a private `macos-arm64` static provider declared in its manifest; that
-provider is unavailable to application code and to other packages.
+by platform package fragments: entropy, monotonic time, console and terminal
+I/O, files, processes, filesystem operations, name resolution, and the initial
+macOS WebKit integration. macOS calls fixed libSystem or Objective-C runtime
+symbols, Linux X64 uses kernel syscalls, and Windows PE32+ imports the selected
+system DLL functions. A named package may additionally own a private static
+provider declared in its manifest; that provider is unavailable to application
+code and to other packages.
 
 ```sx
 use Interop.C
@@ -101,14 +102,15 @@ The implemented surface is deliberately narrow:
 
 - composed targets: `macos-arm64`, `linux-x64`, `windows-x64`, and
   `windows-arm64` for the implemented STD slices;
-- validated providers: `MacOS.lib_system`, `Linux.kernel`,
+- validated providers: `MacOS.lib_system`, `MacOS.web_kit`, `Linux.kernel`,
   `Windows.kernel32`, `Windows.bcrypt_primitives`, `Windows.ucrtbase`, and
 `Windows.ws2_32`, plus target-selected package-private static providers named
 as `Boundary.<Provider>` and authorized by the owning manifest for
 `macos-arm64`;
 - implemented capabilities: random seeding, monotonic clocks, byte console
   I/O, terminal sessions, files, process metadata, subprocesses, filesystem
-  operations, sockets, name resolution, and operating-system threads;
+  operations, sockets, name resolution, operating-system threads, and the
+  typed Objective-C messages needed by the macOS system WebView;
 - Windows console bindings cover UCRT byte I/O, console modes, UTF-8 input code
   pages, handle waits and screen-buffer dimensions. Their PE imports are
   verified on X64 and ARM64 but execution still awaits the Windows CI matrix;
