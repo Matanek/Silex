@@ -16,6 +16,7 @@ const Inheritance = @import("Inheritance.zig");
 const ProtocolValues = @import("ProtocolValues.zig");
 const Matches = @import("Matches.zig");
 const TypedResources = @import("TypedResources.zig");
+const EcsComponents = @import("EcsComponents.zig");
 
 const AnalyzeError = error{ InvalidSource, OutOfMemory };
 
@@ -99,7 +100,10 @@ pub fn analyze(self: anytype, structure_index: usize, method_index: usize, sourc
     self.specialization_file = source_method.specialization_file;
     defer self.specialization_file = previous_specialization_file;
     if (source_method.is_static) return analyzeStatic(self, structure_index, method_index, source_method);
-    if (source_method.intrinsic != null) return TypedResources.analyze(self, structure_index, method_index, source_method);
+    if (source_method.intrinsic) |intrinsic| return switch (intrinsic) {
+        .component_get_mut, .world_component_get_mut => EcsComponents.analyze(self, structure_index, source_method),
+        else => TypedResources.analyze(self, structure_index, method_index, source_method),
+    };
     const previous_context = self.member_context;
     self.member_context = structure_index;
     defer self.member_context = previous_context;
@@ -363,7 +367,7 @@ fn analyzeCallWithReceiver(
     var inaccessible_local = false;
     var inaccessible_internal = false;
     for (candidates, 0..) |candidate, candidate_index| {
-        if (!Visibility.memberVisible(self, candidate.owner, candidate.method, call.name_position)) {
+        if (!call.compiler_generated and !Visibility.memberVisible(self, candidate.owner, candidate.method, call.name_position)) {
             inaccessible = true;
             inaccessible_local = inaccessible_local or candidate.method.is_local;
             inaccessible_internal = inaccessible_internal or candidate.method.is_internal;
@@ -407,7 +411,7 @@ fn analyzeCallWithReceiver(
     for (candidates, 0..) |candidate, candidate_index| {
         const method = candidate.method;
         if (!Support.acceptsArity(method.parameters, arguments.items.len)) continue;
-        if (!Visibility.memberVisible(self, candidate.owner, method, call.name_position)) continue;
+        if (!call.compiler_generated and !Visibility.memberVisible(self, candidate.owner, method, call.name_position)) continue;
         var cost: usize = 0;
         var viable = true;
         for (method.parameters[0..arguments.items.len], arguments.items) |parameter, argument| {
@@ -459,8 +463,11 @@ fn analyzeCallWithReceiver(
         const message = try std.fmt.allocPrint(self.allocator, "mutating method '{s}' cannot be called through a read reference", .{call.name});
         return self.fail(call.name_position, message);
     }
-    const place = if (mutating and !borrowed_mutable and !class_receiver)
-        try requireMutablePlace(self, builder, receiver_expression, call.name)
+    const place = if (mutating and !borrowed_mutable)
+        if (class_receiver and receiver.borrowed_mode != .mutable)
+            try findMutablePlace(self, builder, receiver_expression)
+        else
+            try requireMutablePlace(self, builder, receiver_expression, call.name)
     else
         null;
     const borrowed_receiver = if (borrowed_mutable)
@@ -517,6 +524,9 @@ fn analyzeCallWithReceiver(
         .implementations = implementations,
     } });
     for (mutable_arguments.items) |prepared| try MutableReferences.writeBack(self, builder, prepared);
+    for (arguments.items) |argument| if (argument.transferred and Resources.containsClass(self, argument.type)) {
+        try Resources.emitDrop(self, builder, argument.type, argument.value);
+    };
     if (receiver.transferred and Resources.containsClass(self, receiver.type)) {
         try Resources.emitDrop(self, builder, receiver.type, receiver.value);
     }
@@ -539,7 +549,10 @@ fn analyzeCallWithReceiver(
         return null;
     }
     if (method.return_type == .void) {
-        if (class_receiver) return null;
+        if (class_receiver) {
+            if (place) |target| try writePlace(self, builder, target, call_result.?);
+            return null;
+        }
         const replacement = if (safe_receiver_type) |optional_type|
             (try Optionals.promote(self, builder, .{ .type = receiver.type, .value = call_result.? }, optional_type)).?.value
         else
@@ -548,6 +561,11 @@ fn analyzeCallWithReceiver(
         return null;
     }
     if (class_receiver) {
+        if (place) |target| {
+            const updated_receiver = try self.newValue(builder, receiver.type);
+            try self.emit(builder, .{ .field_load = .{ .result = updated_receiver, .base = call_result.?, .field = 0 } });
+            try writePlace(self, builder, target, updated_receiver);
+        }
         const value = try self.newValue(builder, method.return_type);
         try self.emit(builder, .{ .field_load = .{ .result = value, .base = call_result.?, .field = 1 } });
         return .{
@@ -591,7 +609,7 @@ fn analyzeNamedCall(
     var first_problem: ?Arguments.Problem = null;
     var template: ?[]const ?*Ast.Expression = null;
     for (all_candidates, 0..) |candidate, index| {
-        if (!Visibility.memberVisible(self, candidate.owner, candidate.method, call.name_position)) continue;
+        if (!call.compiler_generated and !Visibility.memberVisible(self, candidate.owner, candidate.method, call.name_position)) continue;
         switch (try Arguments.map(self.allocator, candidate.method.parameters, call.arguments, call.named_arguments)) {
             .arguments => |mapped| {
                 try candidates.append(self.allocator, index);
@@ -665,8 +683,11 @@ fn analyzeNamedCall(
         const message = try std.fmt.allocPrint(self.allocator, "mutating method '{s}' cannot be called through a read reference", .{call.name});
         return self.fail(call.name_position, message);
     }
-    const place = if (mutating and !borrowed_mutable and !class_receiver)
-        try requireMutablePlace(self, builder, receiver_expression, call.name)
+    const place = if (mutating and !borrowed_mutable)
+        if (class_receiver and receiver.borrowed_mode != .mutable)
+            try findMutablePlace(self, builder, receiver_expression)
+        else
+            try requireMutablePlace(self, builder, receiver_expression, call.name)
     else
         null;
     const borrowed_receiver = if (borrowed_mutable) try MutableReferences.prepare(self, builder, receiver_expression, receiver.type) else null;
@@ -715,6 +736,11 @@ fn analyzeNamedCall(
         .implementations = implementations,
     } });
     for (mutable_arguments.items) |prepared| try MutableReferences.writeBack(self, builder, prepared);
+    for (typed) |maybe_argument| if (maybe_argument) |argument| {
+        if (argument.transferred and Resources.containsClass(self, argument.type)) {
+            try Resources.emitDrop(self, builder, argument.type, argument.value);
+        }
+    };
     if (receiver.transferred and Resources.containsClass(self, receiver.type)) try Resources.emitDrop(self, builder, receiver.type, receiver.value);
     if (borrowed_mutable) {
         try MutableReferences.writeBack(self, builder, borrowed_receiver.?);
@@ -734,7 +760,10 @@ fn analyzeNamedCall(
         return null;
     }
     if (method.return_type == .void) {
-        if (class_receiver) return null;
+        if (class_receiver) {
+            if (place) |target| try writePlace(self, builder, target, call_result.?);
+            return null;
+        }
         const replacement = if (safe_receiver_type) |optional_type|
             (try Optionals.promote(self, builder, .{ .type = receiver.type, .value = call_result.? }, optional_type)).?.value
         else
@@ -743,6 +772,11 @@ fn analyzeNamedCall(
         return null;
     }
     if (class_receiver) {
+        if (place) |target| {
+            const updated_receiver = try self.newValue(builder, receiver.type);
+            try self.emit(builder, .{ .field_load = .{ .result = updated_receiver, .base = call_result.?, .field = 0 } });
+            try writePlace(self, builder, target, updated_receiver);
+        }
         const value = try self.newValue(builder, method.return_type);
         try self.emit(builder, .{ .field_load = .{ .result = value, .base = call_result.?, .field = 1 } });
         return .{ .type = method.return_type, .value = value, .transferred = Resources.containsClass(self, method.return_type) };
@@ -805,7 +839,12 @@ fn analyzeProtocolCall(
 
     const protocol_index = ProtocolValues.index(self, receiver.type) orelse return error.InvalidSource;
     const conformers = try ProtocolValues.conformers(self, protocol_index);
-    if (conformers.len == 0) return self.fail(call.name_position, "dynamic protocol has no concrete conforming type in this program");
+    if (conformers.len == 0) {
+        if (requirement.return_type != .void) {
+            return self.fail(call.name_position, "dynamic protocol has no concrete conforming type in this program");
+        }
+        return null;
+    }
     const updated = try self.newValue(builder, receiver.type);
     const result = if (requirement.return_type == .void) null else try self.newValue(builder, requirement.return_type);
     const merge_block = try self.newBlock(builder);
@@ -912,6 +951,41 @@ fn requireMutablePlace(self: anytype, builder: anytype, expression: *const Ast.E
             const message = try std.fmt.allocPrint(self.allocator, "mutating method '{s}' requires a var receiver", .{method_name});
             return self.fail(expression.position, message);
         },
+    };
+}
+
+fn findMutablePlace(self: anytype, builder: anytype, expression: *const Ast.Expression) !?Place {
+    var names: std.ArrayList([]const u8) = .empty;
+    var current = expression;
+    while (true) switch (current.value) {
+        .identifier => |name| {
+            const binding = Support.findBinding(builder.bindings.items, name) orelse return null;
+            if (!binding.mutable or (binding.local == null and binding.reference == null)) return null;
+            std.mem.reverse([]const u8, names.items);
+            const field_indices = try self.allocator.alloc(usize, names.items.len);
+            var type_value = binding.type;
+            for (names.items, 0..) |field_name, path_index| {
+                const structure_index = type_value.structureIndex() orelse return null;
+                const structure = self.structures[structure_index];
+                var selected: ?usize = null;
+                for (structure.fields, 0..) |field, field_index| {
+                    if (std.mem.eql(u8, field.name, field_name)) {
+                        selected = field_index;
+                        break;
+                    }
+                }
+                const field_index = selected orelse return null;
+                if (!structure.fields[field_index].mutable) return null;
+                field_indices[path_index] = field_index;
+                type_value = structure.fields[field_index].type;
+            }
+            return .{ .local = binding.local, .reference = binding.reference, .root_type = binding.type, .fields = field_indices };
+        },
+        .field_access => |access| {
+            try names.append(self.allocator, access.name);
+            current = access.base;
+        },
+        else => return null,
     };
 }
 
@@ -1205,7 +1279,7 @@ fn methodCount(program: Ast.Program) usize {
 fn intrinsicMutates(intrinsic: ?Ast.FunctionIntrinsic) bool {
     const value = intrinsic orelse return false;
     return switch (value) {
-        .resource_insert, .resource_get_mut, .resource_try_get_mut, .resource_remove, .resource_clear => true,
+        .resource_insert, .resource_get_mut, .resource_try_get_mut, .resource_remove, .resource_clear, .component_get_mut, .world_component_get_mut => true,
         .resource_has, .resource_get, .resource_try_get, .system_adapter => false,
     };
 }

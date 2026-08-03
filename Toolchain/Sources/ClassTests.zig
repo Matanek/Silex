@@ -188,6 +188,30 @@ test "class constructor parameters survive when retained by the new instance" {
     try std.testing.expectEqualStrings("alive\ndrop alive\n", output);
 }
 
+test "constructed values transfer nested class roots through bindings returns and arguments" {
+    const output = try run(
+        \\class Token {
+        \\    public let label:str
+        \\    drop { print("drop ", self.label) }
+        \\}
+        \\struct Holder { var token:Token }
+        \\class Sink { public func accept(holder:Holder) {} }
+        \\func wrap(token:Token) Holder { return Holder(token:token) }
+        \\func accept(holder:Holder) {}
+        \\func main() {
+        \\    var token = Token(label:"owned")
+        \\    var sink = Sink()
+        \\    sink.accept(Holder(token:token))
+        \\    sink.accept(holder:Holder(token:token))
+        \\    accept(Holder(token:token))
+        \\    var holder = wrap(token)
+        \\    print("alive ", holder.token.label)
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("alive owned\ndrop owned\n", output);
+}
+
 test "class visibility closes construction and private state" {
     try expectCompileError(
         "class Vault { init() {} } func main() { var value = Vault() }",

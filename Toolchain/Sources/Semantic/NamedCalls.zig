@@ -127,6 +127,11 @@ pub fn analyzeFunction(self: anytype, builder: anytype, call: Ast.Expression.Cal
     const result: ?Ir.ValueId = if (function.return_type == .void) null else try self.newValue(builder, result_type);
     try self.emit(builder, .{ .call = .{ .result = result, .function = function_id, .arguments = try ids.toOwnedSlice(self.allocator) } });
     for (mutable.items) |argument| try MutableReferences.writeBack(self, builder, argument.prepared);
+    for (typed) |maybe_argument| if (maybe_argument) |argument| {
+        if (argument.transferred and Resources.containsClass(self, argument.type)) {
+            try Resources.emitDrop(self, builder, argument.type, argument.value);
+        }
+    };
     if (result == null) return null;
     if (function.return_mode == .value) return .{ .type = function.return_type, .value = result.?, .transferred = Resources.containsClass(self, function.return_type) };
     const provenance = function.return_provenance.?;

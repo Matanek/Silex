@@ -47,6 +47,36 @@ test "two mutable references may alias and preserve body order" {
     try std.testing.expectEqualStrings("15\n", output);
 }
 
+test "mutating class methods write reconstructed state through a mutable reference" {
+    const output = try run(
+        \\class Counter {
+        \\    private var value:int
+        \\    public init() { self.value = 0 }
+        \\    public func increment() { self.value += 1 }
+        \\    public func add(amount:int) int { self.value += amount; return self.value }
+        \\}
+        \\class Bucket {
+        \\    private var values:int[]
+        \\    public init() { self.values = [] }
+        \\    public func append(value:int) { self.values.append(value) }
+        \\    public func append_twice(value:int) { self.append(value); self.append(value) }
+        \\    public func count() int { return self.values.count() }
+        \\}
+        \\func update(counter:&Counter) { counter.increment() }
+        \\func add(counter:&Counter, amount:int) int { return counter.add(amount) }
+        \\func main() {
+        \\    var counter = Counter()
+        \\    update(counter)
+        \\    print(add(counter, 2))
+        \\    var bucket = Bucket()
+        \\    bucket.append_twice(7)
+        \\    print(bucket.count())
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("3\n2\n", output);
+}
+
 test "mutable references reject immutable places and escaping values" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

@@ -194,6 +194,24 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
                 try self.emit(builder, .{ .structure_init = .{ .result = replacement, .structure = step.structure, .fields = fields } });
             },
             .collection => |step| {
+                if (index != 0 and Collections.collectionForType(self.structures, step.type).?.length == null) switch (steps.items[index - 1]) {
+                    .field => |owner| if (self.structures[owner.structure].is_class) {
+                        const reference = try self.newValue(builder, .address);
+                        try self.emit(builder, .{ .collection_reference = .{
+                            .result = reference,
+                            .collection = step.base,
+                            .reference = null,
+                            .index = step.index,
+                            .position = step.position,
+                        } });
+                        try self.emit(builder, .{ .reference_store = .{
+                            .reference = reference,
+                            .operand = replacement,
+                        } });
+                        return;
+                    },
+                    else => {},
+                };
                 const result = try self.newValue(builder, step.type);
                 try self.emit(builder, .{ .collection_replace = .{
                     .result = result,

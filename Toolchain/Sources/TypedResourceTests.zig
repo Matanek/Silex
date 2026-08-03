@@ -24,6 +24,7 @@ const bootstrap_source =
     \\    public func add_system<System>(schedule:int, callback:System) { panic("unspecialized system") }
     \\    public func add_after_system(schedule:int, callback:func(Application)) { callback(self) }
     \\    public func add_after_system<System>(schedule:int, callback:System) { panic("unspecialized system") }
+    \\    internal func __silex_add_system(schedule:int, callback:func(Application, int), after:bool, reads:str[], writes:str[], flags:uint) { callback(self, 0) }
     \\    drop { self.store.clear() }
     \\}
 ;

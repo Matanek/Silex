@@ -101,6 +101,19 @@ test "transport dynamic protocol values through language containers" {
     try std.testing.expectEqualStrings("4 5\n7\n", output);
 }
 
+test "call a void protocol requirement while its dynamic collection is empty" {
+    const output = try run(
+        \\protocol Job { func execute() }
+        \\func execute_all(jobs:Job[]) {
+        \\    var pending = jobs
+        \\    for var job in pending { job.execute() }
+        \\}
+        \\func main() { execute_all([]); print("empty") }
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("empty\n", output);
+}
+
 test "dynamic protocol values expose only requirements and require mutable storage" {
     try expectCompileError(
         "protocol Readable { func read() int } struct Number : Readable { func read() int { return 1 } func hidden() {} } func main() { var value:Readable = Number(); value.hidden() }",

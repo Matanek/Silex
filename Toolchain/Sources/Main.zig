@@ -887,7 +887,10 @@ fn findMachineMain(program: @import("Arm64/Machine.zig").Program) ?usize {
 }
 
 fn printSourceDiagnostic(compiler: Project.Compiler, source_path: []const u8) void {
-    const diagnostic = compiler.diagnostic.?;
+    const diagnostic = compiler.diagnostic orelse {
+        std.debug.print("{s}: error: compilation failed without a source diagnostic\n", .{source_path});
+        return;
+    };
     std.debug.print("{s}:{d}:{d}: error: {s}\n", .{
         compiler.diagnosticPath(source_path),
         diagnostic.position.line,

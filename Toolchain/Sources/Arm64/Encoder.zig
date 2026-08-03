@@ -360,6 +360,57 @@ fn emitSnapshotRelease(allocator: Allocator, words: *std.ArrayList(u32), data_fi
     try words.append(allocator, A64.storeRelease64(.zero_or_sp, .x14));
 }
 
+fn emitClassRetain(allocator: Allocator, words: *std.ArrayList(u32)) Error!void {
+    try words.append(allocator, addSubtractImmediate(.x14, .x10, Machine.slot_size, true));
+    const retry = words.items.len;
+    try words.append(allocator, A64.loadAcquireExclusive64(.x9, .x14));
+    try words.append(allocator, addSubtractImmediate(.x9, .x9, 1, true));
+    try words.append(allocator, A64.storeReleaseExclusive64(.x11, .x9, .x14));
+    const conflicted = words.items.len;
+    try words.append(allocator, compareBranchNonZero(.x11));
+    try Fixups.patch19(words.items, conflicted, retry);
+}
+
+/// Decrements a class root atomically and claims destruction exactly once.
+const ClassDropBranches = struct {
+    still_referenced: usize,
+    already_dropped: usize,
+};
+
+/// Returns the branches that skip finalization when another root remains or a
+/// concurrent drop has already claimed the instance.
+fn emitClassDrop(allocator: Allocator, words: *std.ArrayList(u32)) Error!ClassDropBranches {
+    try words.append(allocator, addSubtractImmediate(.x14, .x10, Machine.slot_size, true));
+    const release_retry = words.items.len;
+    try words.append(allocator, A64.loadAcquireExclusive64(.x9, .x14));
+    const unrooted = words.items.len;
+    try words.append(allocator, compareBranchZero64(.x9));
+    try words.append(allocator, addSubtractImmediate(.x9, .x9, 1, false));
+    try words.append(allocator, A64.storeReleaseExclusive64(.x11, .x9, .x14));
+    const release_conflicted = words.items.len;
+    try words.append(allocator, compareBranchNonZero(.x11));
+    try Fixups.patch19(words.items, release_conflicted, release_retry);
+    const still_referenced = words.items.len;
+    try words.append(allocator, compareBranchNonZero64(.x9));
+
+    try words.append(allocator, addSubtractImmediate(.x14, .x10, 2 * Machine.slot_size, true));
+    const claim_retry = words.items.len;
+    try Fixups.patch19(words.items, unrooted, claim_retry);
+    try words.append(allocator, A64.loadAcquireExclusive64(.x9, .x14));
+    const already_dropped = words.items.len;
+    try words.append(allocator, compareBranchNonZero64(.x9));
+    try words.append(allocator, moveWideZero64(.x9, 1, 0));
+    try words.append(allocator, A64.storeReleaseExclusive64(.x11, .x9, .x14));
+    const claim_conflicted = words.items.len;
+    try words.append(allocator, compareBranchNonZero(.x11));
+    try Fixups.patch19(words.items, claim_conflicted, claim_retry);
+
+    return .{
+        .still_referenced = still_referenced,
+        .already_dropped = already_dropped,
+    };
+}
+
 fn findString(program: Machine.Program, value: []const u8) ?usize {
     for (program.strings, 0..) |candidate, index| {
         if (std.mem.eql(u8, candidate, value)) return index;
@@ -556,25 +607,11 @@ fn encodeFunction(
             .class_store => |store| try ClassRuntime.emitStore(allocator, words, store),
             .class_retain => |retain| {
                 try words.append(allocator, loadStack(.x10, retain.operand));
-                try words.append(allocator, load64(.x9, .x10, Machine.slot_size));
-                try words.append(allocator, addSubtractImmediate(.x9, .x9, 1, true));
-                try words.append(allocator, store64(.x9, .x10, Machine.slot_size));
+                try emitClassRetain(allocator, words);
             },
             .class_drop => |drop| {
                 try words.append(allocator, loadStack(.x10, drop.operand));
-                try words.append(allocator, load64(.x9, .x10, Machine.slot_size));
-                const unrooted = words.items.len;
-                try words.append(allocator, compareBranchZero(.x9));
-                try words.append(allocator, addSubtractImmediate(.x9, .x9, 1, false));
-                try words.append(allocator, store64(.x9, .x10, Machine.slot_size));
-                const still_referenced = words.items.len;
-                try words.append(allocator, compareBranchNonZero64(.x9));
-                try Fixups.patch19(words.items, unrooted, words.items.len);
-                try words.append(allocator, load64(.x9, .x10, 2 * Machine.slot_size));
-                const already_dropped = words.items.len;
-                try words.append(allocator, compareBranchNonZero64(.x9));
-                try words.append(allocator, moveWideZero64(.x9, 1, 0));
-                try words.append(allocator, store64(.x9, .x10, 2 * Machine.slot_size));
+                const skip_finalization = try emitClassDrop(allocator, words);
                 try words.append(allocator, load64(.x9, .x10, 0));
                 var finalized: std.ArrayList(usize) = .empty;
                 for (drop.plans) |plan| {
@@ -592,9 +629,10 @@ fn encodeFunction(
                     try words.append(allocator, branch());
                     try Fixups.patch19(words.items, skip, words.items.len);
                 }
-                for (finalized.items) |at| try Fixups.patch26(words.items, at, words.items.len);
-                try Fixups.patch19(words.items, still_referenced, words.items.len);
-                try Fixups.patch19(words.items, already_dropped, words.items.len);
+                const done = words.items.len;
+                for (finalized.items) |at| try Fixups.patch26(words.items, at, done);
+                try Fixups.patch19(words.items, skip_finalization.still_referenced, done);
+                try Fixups.patch19(words.items, skip_finalization.already_dropped, done);
             },
             .list_init => |initialization| try ListRuntime.emitInit(allocator, words, &fixups.epilogue, external_call_sites, @enumFromInt(@intFromEnum(platform)), initialization),
             .enum_init => |initialization| {

@@ -70,9 +70,9 @@ let found = any<int>([-1, 2], func(value:@int) bool {
 Omit the return type when the anonymous function returns `void`:
 
 ```sx
-TaskManager.submit(task, func(completed:Task) {
-    print("completed")
-})
+func visit(value:int, callback:func(int)) { callback(value) }
+
+visit(42, func(value:int) { print(value) })
 ```
 
 Anonymous functions currently cannot capture values from their surrounding
