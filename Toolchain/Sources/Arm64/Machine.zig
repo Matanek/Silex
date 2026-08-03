@@ -920,6 +920,7 @@ pub fn validate(program: Program) Error!void {
 
 fn supportedExternal(function: ExternalFunction) bool {
     if (function.package_private) return true;
+    if (supportedMacOSWebKitExternal(function)) return true;
     if (supportedMathExternal(function)) return true;
     if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and
         std.mem.eql(u8, function.source_name, "os_unfair_recursive_lock_lock_with_options"))
@@ -1560,6 +1561,57 @@ fn supportedExternal(function: ExternalFunction) bool {
     if (std.mem.eql(u8, function.provider, "Windows.ws2_32") and std.mem.eql(u8, function.source_name, "recvfrom")) {
         const arguments = [_]AbiValue{ .int64, .read_address, .int32, .int32, .read_address, .read_address };
         return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    return false;
+}
+
+fn supportedMacOSWebKitExternal(function: ExternalFunction) bool {
+    if (!std.mem.eql(u8, function.provider, "MacOS.web_kit")) return false;
+    if (std.mem.eql(u8, function.source_name, "objc_getClass") or
+        std.mem.eql(u8, function.source_name, "sel_registerName"))
+    {
+        const arguments = [_]AbiValue{.read_address};
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .read_address;
+    }
+    if (std.mem.eql(u8, function.source_name, "objc_getProtocol")) {
+        const arguments = [_]AbiValue{.read_address};
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .read_address;
+    }
+    if (std.mem.eql(u8, function.source_name, "objc_registerClassPair")) {
+        const arguments = [_]AbiValue{.read_address};
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == null;
+    }
+    if (std.mem.eql(u8, function.source_name, "objc_allocateClassPair")) {
+        const arguments = [_]AbiValue{ .read_address, .read_address, .uint64 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .read_address;
+    }
+    if (std.mem.eql(u8, function.source_name, "class_addProtocol")) {
+        const arguments = [_]AbiValue{ .read_address, .read_address };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.source_name, "class_addMethod")) {
+        const arguments = [_]AbiValue{ .read_address, .read_address, .read_address, .read_address };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int32;
+    }
+    if (std.mem.eql(u8, function.source_name, "objc_setAssociatedObject")) {
+        const arguments = [_]AbiValue{ .read_address, .read_address, .read_address, .uint64 };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == null;
+    }
+    if (std.mem.eql(u8, function.source_name, "objc_getAssociatedObject")) {
+        const arguments = [_]AbiValue{ .read_address, .read_address };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .read_address;
+    }
+    if (!std.mem.eql(u8, function.source_name, "objc_msgSend") or function.signature.arguments.len < 2 or
+        function.signature.arguments[0] != .read_address or function.signature.arguments[1] != .read_address) return false;
+    const arguments = function.signature.arguments;
+    if (arguments.len == 2) return function.signature.result == .read_address or function.signature.result == .int32 or function.signature.result == null;
+    if (arguments.len == 3 and arguments[2] == .read_address) return function.signature.result == .read_address or function.signature.result == null;
+    if (arguments.len == 3 and arguments[2] == .int32) return function.signature.result == null;
+    if (arguments.len == 4 and arguments[2] == .read_address and arguments[3] == .read_address) return function.signature.result == .read_address or function.signature.result == null;
+    if (arguments.len == 4 and arguments[2] == .read_address and arguments[3] == .uint64) return function.signature.result == .read_address;
+    if (arguments.len == 6 and function.signature.result == .read_address) {
+        for (arguments[2..]) |argument| if (argument != .float64) return false;
+        return true;
     }
     return false;
 }

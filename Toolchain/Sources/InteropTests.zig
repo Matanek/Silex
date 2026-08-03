@@ -92,6 +92,33 @@ test "compose a C.function declaration into a deterministic boundary call" {
     try std.testing.expect(std.mem.indexOf(u8, text, "_write") == null);
 }
 
+test "compose the typed macOS WebKit Objective-C system surface" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data =
+        \\use Interop.C
+        \\use Interop.MacOS
+        \\let get_class = C.function<func(C.Pointer<uint8>) C.Pointer<uint8> >(library:MacOS.web_kit, name:"objc_getClass")
+        \\let selector = C.function<func(C.Pointer<uint8>) C.Pointer<uint8> >(library:MacOS.web_kit, name:"sel_registerName")
+        \\let message = C.function<func(C.Pointer<uint8>, C.Pointer<uint8>) C.Pointer<uint8> >(library:MacOS.web_kit, name:"objc_msgSend")
+        \\func main() {}
+        ,
+    });
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    compiler.target = .macos_arm64;
+    const compilation = try compiler.compile(input);
+    try std.testing.expectEqual(@as(usize, 3), compilation.boundaries.len);
+    for (compilation.boundaries) |boundary| try std.testing.expectEqualStrings("MacOS.web_kit", boundary.provider);
+    const machine = try Lower.lowerBoundaries(allocator, compilation.ir, compilation.boundaries);
+    try std.testing.expectEqualStrings("MacOS.web_kit", machine.external_functions[2].provider);
+}
+
 test "compose and interpret exact float32 and float64 math signatures" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -426,6 +453,14 @@ test "lower Windows ProcessPrng through the shared ARM64 machine contract" {
 }
 
 test "reject incomplete and invalid C.function declarations" {
+    try expectError(
+        \\use Interop.C
+        \\use Interop.MacOS
+        \\let message = C.function<func(int32) int32>(library:MacOS.web_kit, name:"objc_msgSend")
+        \\func main() {}
+    ,
+        "interop library or function is not supported yet",
+    );
     try expectError(
         \\use Interop.C
         \\let native = C.function<func() int32>(library:Boundary.Native, name:"answer")

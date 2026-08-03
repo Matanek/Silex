@@ -36,7 +36,7 @@ pub fn execute(
     cache: bool,
 ) !std.process.RunResult {
     const function_text = try std.fmt.allocPrint(allocator, "{d}", .{function});
-    const reusable = cache and providers.len == 0;
+    const reusable = cache and providers.len == 0 and !MacOSLink.requiresSystemLink(program.external_functions);
     const digest = if (reusable)
         try CompilationCache.key(
             allocator,
@@ -61,7 +61,7 @@ fn executeAt(
     providers: []const Packages.BoundaryProvider,
 ) !std.process.RunResult {
     try Io.Dir.cwd().createDirPath(io, std.fs.path.dirname(executable).?);
-    if (providers.len != 0) {
+    if (providers.len != 0 or MacOSLink.requiresSystemLink(program.external_functions)) {
         const object = try MachOObject.emitFunction(allocator, program, function);
         const object_path = try std.fmt.allocPrint(allocator, "{s}.o", .{executable});
         {
@@ -69,7 +69,7 @@ fn executeAt(
             defer file.close(io);
             try file.writeStreamingAll(io, object);
         }
-        try MacOSLink.executable(allocator, io, object_path, executable, providers);
+        try MacOSLink.executable(allocator, io, object_path, executable, providers, program.external_functions);
         return run(allocator, io, executable);
     }
     const bytes = try MachO.emitFunction(allocator, program, function);

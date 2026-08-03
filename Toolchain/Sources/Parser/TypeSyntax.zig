@@ -9,6 +9,7 @@ pub fn parseParameter(self: anytype) !Ast.Parameter {
     const position = self.current.position;
     const name = self.current.lexeme;
     if (std.mem.eql(u8, name, "map_error")) return self.failAt(position, "'map_error' is a reserved intrinsic function name");
+    if (std.mem.eql(u8, name, "embed_text")) return self.failAt(position, "'embed_text' is a reserved intrinsic function name");
     try self.advance();
     try self.expect(.colon, "expected ':' after parameter name");
     const mode: Ast.Parameter.Mode = switch (self.current.tag) {

@@ -686,6 +686,9 @@ pub fn prepare(self: anytype) ![]const Boundary.Function {
             if (parameters.len != 6 or parameters[0] != .int or parameters[1] != .address or parameters[2] != .int32 or parameters[3] != .int32 or parameters[4] != .address or parameters[5] != .address or return_type != .int32) {
                 return self.fail(external.position, "recvfrom expects func(int, C.MutablePointer<uint8>, int32, int32, C.MutablePointer<int>, C.MutablePointer<int32>) int32");
             }
+        } else if (macOSWebKitFunctionAvailable(external.library, external.source_name, parameters, return_type)) {
+            // GFX.WebView reaches the system Objective-C runtime from its selected
+            // macOS platform fragment. Cocoa and WebKit stay linker concerns.
         } else if (mathFunctionAvailable(external.library, external.source_name, parameters, return_type)) {
             // Math is a typed toolchain boundary used internally by STD. The
             // public package API remains independent from platform symbols.
@@ -704,6 +707,51 @@ pub fn prepare(self: anytype) ![]const Boundary.Function {
         });
     }
     return result.toOwnedSlice(self.allocator);
+}
+
+fn macOSWebKitFunctionAvailable(
+    library: []const u8,
+    name: []const u8,
+    parameters: []const Types.Type,
+    return_type: Types.Type,
+) bool {
+    if (!std.mem.eql(u8, library, "MacOS.web_kit")) return false;
+    if (std.mem.eql(u8, name, "objc_getClass") or std.mem.eql(u8, name, "sel_registerName")) {
+        return std.mem.eql(Types.Type, parameters, &.{.address}) and return_type == .address;
+    }
+    if (std.mem.eql(u8, name, "objc_getProtocol")) {
+        return std.mem.eql(Types.Type, parameters, &.{.address}) and return_type == .address;
+    }
+    if (std.mem.eql(u8, name, "objc_registerClassPair")) {
+        return std.mem.eql(Types.Type, parameters, &.{.address}) and return_type == .void;
+    }
+    if (std.mem.eql(u8, name, "objc_allocateClassPair")) {
+        return std.mem.eql(Types.Type, parameters, &.{ .address, .address, .uint }) and return_type == .address;
+    }
+    if (std.mem.eql(u8, name, "class_addProtocol")) {
+        return std.mem.eql(Types.Type, parameters, &.{ .address, .address }) and return_type == .int32;
+    }
+    if (std.mem.eql(u8, name, "class_addMethod")) {
+        return std.mem.eql(Types.Type, parameters, &.{ .address, .address, .address, .address }) and return_type == .int32;
+    }
+    if (std.mem.eql(u8, name, "objc_setAssociatedObject")) {
+        return std.mem.eql(Types.Type, parameters, &.{ .address, .address, .address, .uint }) and return_type == .void;
+    }
+    if (std.mem.eql(u8, name, "objc_getAssociatedObject")) {
+        return std.mem.eql(Types.Type, parameters, &.{ .address, .address }) and return_type == .address;
+    }
+    if (!std.mem.eql(u8, name, "objc_msgSend") or parameters.len < 2 or
+        parameters[0] != .address or parameters[1] != .address) return false;
+    if (parameters.len == 2) return return_type == .address or return_type == .int32 or return_type == .void;
+    if (parameters.len == 3 and parameters[2] == .address) return return_type == .address or return_type == .void;
+    if (parameters.len == 3 and parameters[2] == .int32) return return_type == .void;
+    if (parameters.len == 4 and parameters[2] == .address and parameters[3] == .address) return return_type == .address or return_type == .void;
+    if (parameters.len == 4 and parameters[2] == .address and parameters[3] == .uint) return return_type == .address;
+    if (parameters.len == 6 and return_type == .address) {
+        for (parameters[2..]) |parameter| if (parameter != .float64) return false;
+        return true;
+    }
+    return false;
 }
 
 fn mathFunctionAvailable(library: []const u8, name: []const u8, parameters: []const Types.Type, return_type: Types.Type) bool {

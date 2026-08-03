@@ -1,4 +1,5 @@
 const std = @import("std");
+const Machine = @import("../Arm64/Machine.zig");
 const Packages = @import("../Packages.zig");
 
 const Allocator = std.mem.Allocator;
@@ -12,6 +13,7 @@ pub fn executable(
     object_path: []const u8,
     output_path: []const u8,
     providers: []const Packages.BoundaryProvider,
+    functions: []const Machine.ExternalFunction,
 ) !void {
     const sdk_path = try sdkPath(allocator, io);
     const framework_path = try std.fs.path.join(allocator, &.{ sdk_path, "System/Library/Frameworks" });
@@ -34,6 +36,15 @@ pub fn executable(
         if (!duplicate) try frameworks.append(allocator, framework);
     };
     std.mem.sort([]const u8, frameworks.items, {}, stringLessThan);
+    if (usesWebKit(functions)) for ([_][]const u8{ "Cocoa", "WebKit" }) |framework| {
+        var duplicate = false;
+        for (frameworks.items) |existing| if (std.mem.eql(u8, existing, framework)) {
+            duplicate = true;
+            break;
+        };
+        if (!duplicate) try frameworks.append(allocator, framework);
+    };
+    std.mem.sort([]const u8, frameworks.items, {}, stringLessThan);
     for (frameworks.items) |framework| try arguments.appendSlice(allocator, &.{ "-framework", framework });
     var libraries: std.ArrayList([]const u8) = .empty;
     for (providers) |provider| for (provider.libraries) |library| {
@@ -46,6 +57,7 @@ pub fn executable(
     };
     std.mem.sort([]const u8, libraries.items, {}, stringLessThan);
     for (libraries.items) |library| try arguments.append(allocator, try std.fmt.allocPrint(allocator, "-l{s}", .{library}));
+    if (usesWebKit(functions)) try arguments.append(allocator, "-lobjc");
 
     const result = try std.process.run(allocator, io, .{ .argv = arguments.items });
     switch (result.term) {
@@ -54,6 +66,15 @@ pub fn executable(
     }
     if (result.stderr.len != 0) std.debug.print("{s}", .{result.stderr});
     return error.LinkFailed;
+}
+
+pub fn requiresSystemLink(functions: []const Machine.ExternalFunction) bool {
+    return usesWebKit(functions);
+}
+
+fn usesWebKit(functions: []const Machine.ExternalFunction) bool {
+    for (functions) |function| if (std.mem.eql(u8, function.provider, "MacOS.web_kit")) return true;
+    return false;
 }
 
 fn sdkPath(allocator: Allocator, io: Io) ![]const u8 {
@@ -114,7 +135,7 @@ test "link and execute a symbol from a static ARM64 archive" {
         .frameworks = &.{},
         .libraries = &.{},
     }};
-    try executable(allocator, std.testing.io, main_object, output, &providers);
+    try executable(allocator, std.testing.io, main_object, output, &providers, &.{});
     const executed = try std.process.run(allocator, std.testing.io, .{ .argv = &.{output} });
     try std.testing.expectEqual(@as(u8, 0), exitCode(executed.term));
 }

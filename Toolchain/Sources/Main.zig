@@ -26,6 +26,7 @@ const NativeTestRunner = @import("NativeTestRunner.zig");
 const TestDiscovery = @import("TestDiscovery.zig");
 const TargetModule = @import("Target.zig");
 const ToolchainSetup = @import("ToolchainSetup.zig");
+const EmbeddedText = @import("EmbeddedText.zig");
 const ShaderAssets = @import("ShaderAssets.zig");
 
 const Io = std.Io;
@@ -53,6 +54,7 @@ test {
     _ = X64Object;
     _ = NativeLink;
     _ = ToolchainSetup;
+    _ = EmbeddedText;
     _ = ShaderAssets;
     _ = CliProgress;
 }
@@ -589,7 +591,9 @@ fn compileNativeOptions(
         return 1;
     };
     progress.stage(.emit);
-    if (target.eql(.macos_arm64) and boundary_providers.len != 0) {
+    if (target.eql(.macos_arm64) and
+        (boundary_providers.len != 0 or MacOSLink.requiresSystemLink(machine.external_functions)))
+    {
         const object = MachOObject.emit(allocator, machine) catch |err| {
             std.debug.print("silex: cannot emit relocatable native object: {t}\n", .{err});
             return 1;
@@ -603,7 +607,14 @@ fn compileNativeOptions(
         }
         if (std.fs.path.dirname(options.output_path)) |directory| try Io.Dir.cwd().createDirPath(init.io, directory);
         progress.stage(.link);
-        MacOSLink.executable(allocator, init.io, object_path, options.output_path, boundary_providers) catch |err| {
+        MacOSLink.executable(
+            allocator,
+            init.io,
+            object_path,
+            options.output_path,
+            boundary_providers,
+            machine.external_functions,
+        ) catch |err| {
             std.debug.print("silex: cannot link native package artifacts: {t}\n", .{err});
             return 1;
         };
@@ -1067,6 +1078,7 @@ test {
     _ = @import("FixedArrayTests.zig");
     _ = @import("TupleTests.zig");
     _ = @import("DynamicListTests.zig");
+    _ = @import("EmbeddedTextTests.zig");
     _ = @import("CollectionMutationTests.zig");
     _ = @import("CollectionSliceTests.zig");
     _ = @import("ForIterationTests.zig");
