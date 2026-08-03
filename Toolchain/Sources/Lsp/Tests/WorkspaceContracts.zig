@@ -2,6 +2,247 @@ const std = @import("std");
 const ServerModule = @import("../Server.zig");
 const Support = @import("Support.zig");
 
+test "server navigates local and imported function values" {
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "Systems/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Systems/Package.json",
+        .data = "{\"name\":\"Systems\",\"version\":\"1.0.0\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Systems/Module/Frame.sx",
+        .data = "public func imported_system() {}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = "func main() {}" });
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const main_uri = try std.fmt.allocPrint(allocator, "file://{s}/Main.sx", .{root});
+    const imported_uri = try std.fmt.allocPrint(allocator, "file://{s}/Systems/Module/Frame.sx", .{root});
+    const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
+
+    var server = ServerModule.Server.init(std.testing.allocator, std.testing.io);
+    defer server.deinit();
+    try Support.initializeServer(&server, allocator, root_uri);
+
+    const local = (try Support.serverDefinition(&server, allocator, main_uri,
+        \\func create_geometry() {}
+        \\func rotate_entities() {}
+        \\func add_system(system:func()) {}
+        \\func main() {
+        \\    add_system(create_geo<|>metry)
+        \\    add_system(rotate_entities)
+        \\}
+    )).?;
+    try std.testing.expectEqualStrings(main_uri, local.uri);
+    try std.testing.expectEqual(@as(usize, 0), local.range.start.line);
+
+    const second_local = (try Support.serverDefinition(&server, allocator, main_uri,
+        \\func create_geometry() {}
+        \\func rotate_entities() {}
+        \\func add_system(system:func()) {}
+        \\func main() {
+        \\    add_system(create_geometry)
+        \\    add_system(rotate_ent<|>ities)
+        \\}
+    )).?;
+    try std.testing.expectEqualStrings(main_uri, second_local.uri);
+    try std.testing.expectEqual(@as(usize, 1), second_local.range.start.line);
+
+    const imported = (try Support.serverDefinition(&server, allocator, main_uri,
+        \\use Systems.Frame.imported_system as frame_system
+        \\func add_system(system:func()) {}
+        \\func main() { add_system(frame_<|>system) }
+    )).?;
+    try std.testing.expectEqualStrings(imported_uri, imported.uri);
+    try std.testing.expectEqual(@as(usize, 0), imported.range.start.line);
+}
+
+test "server navigates imported package declarations to their exact sources" {
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "Math/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "func main() {}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Math/Package.json",
+        .data = "{\"name\":\"Math\",\"version\":\"1.0.0\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Math/Module/Operations.sx",
+        .data =
+        \\public struct Vector {
+        \\    func length() int { return 0 }
+        \\}
+        \\public func add(left:int, right:int) int { return left + right }
+        ,
+    });
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const main_uri = try std.fmt.allocPrint(allocator, "file://{s}/Main.sx", .{root});
+    const operations_uri = try std.fmt.allocPrint(allocator, "file://{s}/Math/Module/Operations.sx", .{root});
+    const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
+
+    var server = ServerModule.Server.init(std.testing.allocator, std.testing.io);
+    defer server.deinit();
+    try Support.initializeServer(&server, allocator, root_uri);
+    try Support.openDocument(&server, allocator, operations_uri, 2,
+        \\// unsaved editor overlay
+        \\public struct Vector {
+        \\    func length() int { return 0 }
+        \\}
+        \\public func add(left:int, right:int) int { return left + right }
+    );
+
+    const vector = (try Support.serverDefinition(&server, allocator, main_uri,
+        \\use Math.Operations
+        \\func main() { let value = Operations.Vec<|>tor() }
+    )).?;
+    try std.testing.expectEqualStrings(operations_uri, vector.uri);
+    try std.testing.expectEqual(@as(usize, 1), vector.range.start.line);
+    try std.testing.expectEqual(@as(usize, 14), vector.range.start.character);
+    try std.testing.expectEqual(@as(usize, 20), vector.range.end.character);
+
+    const add = (try Support.serverDefinition(&server, allocator, main_uri,
+        \\use Math.Operations
+        \\func main() { print(Operations.ad<|>d(1, 2)) }
+    )).?;
+    try std.testing.expectEqualStrings(operations_uri, add.uri);
+    try std.testing.expectEqual(@as(usize, 4), add.range.start.line);
+    try std.testing.expectEqual(@as(usize, 12), add.range.start.character);
+    try std.testing.expectEqual(@as(usize, 15), add.range.end.character);
+
+    const method = (try Support.serverDefinition(&server, allocator, main_uri,
+        \\use Math.Operations
+        \\func main() {
+        \\    let value = Operations.Vector()
+        \\    print(value.len<|>gth())
+        \\}
+    )).?;
+    try std.testing.expectEqualStrings(operations_uri, method.uri);
+    try std.testing.expectEqual(@as(usize, 2), method.range.start.line);
+    try std.testing.expectEqual(@as(usize, 9), method.range.start.character);
+    try std.testing.expectEqual(@as(usize, 15), method.range.end.character);
+}
+
+test "server navigates package extensions call chains fields and cascades" {
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    const files = [_]struct { path: []const u8, source: []const u8 }{
+        .{ .path = "Kit/Package.json", .source = "{\"name\":\"Kit\",\"version\":\"1.0.0\"}" },
+        .{ .path = "Kit/Module/Math/Vec3.sx", .source =
+        \\public struct Vec3 {}
+        \\extend Vec3 { static func zero() Vec3 { return Vec3() } }
+        },
+        .{ .path = "Kit/Module/Math/Quat.sx", .source =
+        \\public struct Quat { func multiply(other:Quat) Quat { return self } }
+        \\extend Quat {
+        \\    static func identity() Quat { return Quat() }
+        \\    static func angle_axis() Quat { return Quat() }
+        \\}
+        },
+        .{ .path = "Kit/Module/Transform/Transform3D.sx", .source =
+        \\use Kit.Math
+        \\public struct Transform3D { var rotation:Math.Quat }
+        },
+        .{ .path = "Kit/Module/Geometry/Cube.sx", .source =
+        \\use Kit.Geometry.Mesh as Mesh
+        \\public struct Cube { public static func make() Mesh { return Mesh() } }
+        },
+        .{ .path = "Kit/Module/Geometry/Mesh.sx", .source =
+        \\use Kit.Math
+        \\public struct Mesh { public func translated(offset:Math.Vec3) Mesh { return self } }
+        },
+        .{ .path = "Kit/Module/ECS/EntityRecipe.sx", .source =
+        \\public class EntityRecipe { public func with<T>(component:T) EntityRecipe { return self } }
+        },
+        .{ .path = "Kit/Module/ECS/Query.sx", .source = "public class Query<T> {}" },
+    };
+    for (files) |file| {
+        const directory = std.fs.path.dirname(file.path).?;
+        try temporary.dir.createDirPath(std.testing.io, directory);
+        try temporary.dir.writeFile(std.testing.io, .{ .sub_path = file.path, .data = file.source });
+    }
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = "func main() {}" });
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const main_uri = try std.fmt.allocPrint(allocator, "file://{s}/Main.sx", .{root});
+    const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
+
+    var server = ServerModule.Server.init(std.testing.allocator, std.testing.io);
+    defer server.deinit();
+    try Support.initializeServer(&server, allocator, root_uri);
+
+    const static_source =
+        \\use Kit.Math
+        \\func main() {
+        \\    print(Math.Vec3.ze<|>ro())
+        \\    print(Math.Quat.identity())
+        \\    print(Math.Quat.angle_axis())
+        \\}
+    ;
+    const zero = (try Support.serverDefinition(&server, allocator, main_uri, static_source)).?;
+    try std.testing.expect(std.mem.endsWith(u8, zero.uri, "/Kit/Module/Math/Vec3.sx"));
+    const identity = (try Support.serverDefinition(&server, allocator, main_uri,
+        \\use Kit.Math
+        \\func main() { print(Math.Quat.ident<|>ity()) }
+    )).?;
+    try std.testing.expect(std.mem.endsWith(u8, identity.uri, "/Kit/Module/Math/Quat.sx"));
+    const angle_axis = (try Support.serverDefinition(&server, allocator, main_uri,
+        \\use Kit.Math
+        \\func main() { print(Math.Quat.angle_<|>axis()) }
+    )).?;
+    try std.testing.expect(std.mem.endsWith(u8, angle_axis.uri, "/Kit/Module/Math/Quat.sx"));
+
+    const translated = (try Support.serverDefinition(&server, allocator, main_uri,
+        \\use Kit.Geometry
+        \\use Kit.Math
+        \\func main() { print(Geometry.Cube.make().trans<|>lated(Math.Vec3())) }
+    )).?;
+    try std.testing.expect(std.mem.endsWith(u8, translated.uri, "/Kit/Module/Geometry/Mesh.sx"));
+
+    const field_chain_source =
+        \\use Kit.ECS
+        \\struct Rotator {}
+        \\func rotate(rotators:ECS.Query<(@Rotator, &Kit.Transform.Transform3D)>) {
+        \\    for (rotator, transform) in rotators {
+        \\        print(transform.rotation.mul<|>tiply(transform.rotation))
+        \\    }
+        \\}
+    ;
+    const multiply = (try Support.serverDefinition(&server, allocator, main_uri, field_chain_source)).?;
+    try std.testing.expect(std.mem.endsWith(u8, multiply.uri, "/Kit/Module/Math/Quat.sx"));
+
+    const rotation = (try Support.serverDefinition(&server, allocator, main_uri,
+        \\use Kit.ECS
+        \\struct Rotator {}
+        \\func rotate(rotators:ECS.Query<(@Rotator, &Kit.Transform.Transform3D)>) {
+        \\    for (rotator, transform) in rotators { print(transform.rot<|>ation) }
+        \\}
+    )).?;
+    try std.testing.expect(std.mem.endsWith(u8, rotation.uri, "/Kit/Module/Transform/Transform3D.sx"));
+
+    const cascade = (try Support.serverDefinition(&server, allocator, main_uri,
+        \\use Kit.ECS
+        \\func main() {
+        \\    var recipe = ECS.EntityRecipe()
+        \\        ..wi<|>th(1)
+        \\}
+    )).?;
+    try std.testing.expect(std.mem.endsWith(u8, cascade.uri, "/Kit/Module/ECS/EntityRecipe.sx"));
+}
+
 test "server preserves prefix ranking in the response consumed by Zed" {
     var temporary = std.testing.tmpDir(.{});
     defer temporary.cleanup();

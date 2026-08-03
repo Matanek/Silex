@@ -19,6 +19,11 @@ pub const Range = struct {
     end: Position,
 };
 
+pub const Location = struct {
+    uri: []const u8,
+    range: Range,
+};
+
 pub const Color = struct {
     red: f64,
     green: f64,

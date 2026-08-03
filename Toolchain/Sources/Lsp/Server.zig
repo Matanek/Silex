@@ -2,6 +2,7 @@ const std = @import("std");
 const Completion = @import("Completion.zig");
 const Diagnostics = @import("Diagnostics.zig");
 const DocumentColors = @import("DocumentColors.zig");
+const Navigation = @import("Navigation.zig");
 const Protocol = @import("Protocol.zig");
 const Types = @import("Types.zig");
 const Workspace = @import("Workspace.zig");
@@ -97,6 +98,7 @@ pub const Server = struct {
                     },
                     .completionProvider = Types.CompletionOptions{},
                     .colorProvider = true,
+                    .definitionProvider = true,
                 },
                 .serverInfo = .{ .name = "Silex" },
             });
@@ -203,6 +205,29 @@ pub const Server = struct {
             const source = self.documentText(uri) orelse return try self.reply(allocator, id, &[_]Types.ColorInformation{});
             const colors = try DocumentColors.inSource(allocator, source, self.position_encoding);
             return try self.reply(allocator, id, colors);
+        }
+        if (std.mem.eql(u8, request.method, "textDocument/definition")) {
+            const id = request.id orelse return null;
+            const params = request.params orelse return try self.replyInvalidParams(allocator, id, "missing definition parameters");
+            const uri = Protocol.textDocumentUri(params) orelse return try self.replyInvalidParams(allocator, id, "missing text document URI");
+            const position = Protocol.requestPosition(params) orelse return try self.replyInvalidParams(allocator, id, "missing definition position");
+            const source = self.documentText(uri) orelse return try self.reply(allocator, id, @as(?Types.Location, null));
+            const cursor = Protocol.byteOffsetAtPosition(source, position, self.position_encoding) orelse {
+                return try self.replyInvalidParams(allocator, id, "invalid definition position");
+            };
+            const definition = Navigation.definitionAtForTarget(
+                allocator,
+                self.io,
+                self.global_packages_root,
+                self.target,
+                self.workspace_root_uri,
+                uri,
+                self.documents.items,
+                source,
+                cursor,
+                self.position_encoding,
+            ) catch null;
+            return try self.reply(allocator, id, definition);
         }
 
         if (request.id) |id| return try self.errorReply(allocator, id, -32601, "method not found");
@@ -404,7 +429,7 @@ test "qualified type paths request workspace completion inside generic arguments
     try std.testing.expect(needsWorkspaceCompletion(arena.allocator(), source, cursor));
 }
 
-test "initialize advertises completion and document colors" {
+test "initialize advertises completion colors and definition navigation" {
     var server = Server.init(std.testing.allocator, std.testing.io);
     defer server.deinit();
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
@@ -415,6 +440,7 @@ test "initialize advertises completion and document colors" {
     try std.testing.expect(std.mem.indexOf(u8, response, "\"positionEncoding\":\"utf-8\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"completionProvider\":{\"resolveProvider\":false,\"triggerCharacters\":[\".\",\":\",\"<\",\",\",\" \",\")\",\"e\"]}") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"colorProvider\":true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, response, "\"definitionProvider\":true") != null);
     try std.testing.expect(std.mem.indexOf(u8, response, "hoverProvider") == null);
 }
 
