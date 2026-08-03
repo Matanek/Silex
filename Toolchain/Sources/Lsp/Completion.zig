@@ -301,6 +301,176 @@ pub fn itemsAt(
     return result;
 }
 
+pub fn parameterItemsAt(
+    allocator: Allocator,
+    source: []const u8,
+    cursor: usize,
+) ![]const CompletionItem {
+    const call = try activeCallAt(allocator, source, cursor) orelse
+        return allocator.alloc(CompletionItem, 0);
+    const lookup_source = try sourceForParameterLookup(allocator, source, cursor, call);
+    const callables = try itemsAt(allocator, lookup_source, call.callee_end, .invoked);
+    return parameterItemsFromCallables(allocator, callables, call);
+}
+
+pub fn parameterItemsFromCallables(
+    allocator: Allocator,
+    callables: []const CompletionItem,
+    call: ActiveCall,
+) ![]const CompletionItem {
+    var result: std.ArrayList(CompletionItem) = .empty;
+    for (callables) |item| {
+        const name = item.filterText orelse item.label;
+        if (!std.mem.eql(u8, name, call.callee_name)) continue;
+        const signature = signatureParameters(item.detail, name) orelse continue;
+        var start: usize = 0;
+        var depth: usize = 0;
+        var parameter_index: usize = 0;
+        var index: usize = 0;
+        while (index <= signature.len) : (index += 1) {
+            const at_end = index == signature.len;
+            if (!at_end) switch (signature[index]) {
+                '(', '[', '<' => depth += 1,
+                ')', ']', '>' => depth -|= 1,
+                else => {},
+            };
+            if (!at_end and (signature[index] != ',' or depth != 0)) continue;
+            const parameter = std.mem.trim(u8, signature[start..index], " \t\r\n");
+            start = index + 1;
+            defer parameter_index += 1;
+            const colon = std.mem.indexOfScalar(u8, parameter, ':') orelse continue;
+            const parameter_name = std.mem.trim(u8, parameter[0..colon], " \t\r\n");
+            if (parameter_index < call.positional_count or suppliedParameter(call, parameter_name) or
+                !std.mem.startsWith(u8, parameter_name, call.prefix)) continue;
+            var duplicate = false;
+            for (result.items) |existing| if (std.mem.eql(u8, existing.label, parameter_name)) {
+                duplicate = true;
+                break;
+            };
+            if (duplicate) continue;
+            try result.append(allocator, .{
+                .label = parameter_name,
+                .kind = CompletionKind.variable,
+                .detail = parameter,
+                .sortText = try std.fmt.allocPrint(allocator, "000-{d:0>6}", .{parameter_index}),
+                .filterText = parameter_name,
+                .insertText = try std.fmt.allocPrint(allocator, "{s}:", .{parameter_name}),
+            });
+        }
+    }
+    std.mem.sort(CompletionItem, result.items, {}, parameterItemLessThan);
+    return result.toOwnedSlice(allocator);
+}
+
+pub const ActiveCall = struct {
+    callee_name: []const u8,
+    callee_end: usize,
+    prefix: []const u8,
+    prefix_start: usize,
+    positional_count: usize,
+    supplied_parameters: []const []const u8,
+    named_mode: bool,
+};
+
+pub fn sourceForParameterLookup(
+    allocator: Allocator,
+    source: []const u8,
+    cursor: usize,
+    call: ActiveCall,
+) ![]const u8 {
+    return std.fmt.allocPrint(allocator, "{s}{s}{s}", .{
+        source[0..call.prefix_start],
+        if (call.named_mode) "__parameter_completion:true" else "__parameter_completion",
+        source[cursor..],
+    });
+}
+
+pub fn activeCallAt(allocator: Allocator, source: []const u8, cursor: usize) !?ActiveCall {
+    if (cursor > source.len) return null;
+    const tokens = try tokensUntil(allocator, source, cursor);
+    var openings: std.ArrayList(usize) = .empty;
+    for (tokens, 0..) |token, index| switch (token.tag) {
+        .left_parenthesis => try openings.append(allocator, index),
+        .right_parenthesis => {
+            if (openings.items.len != 0) _ = openings.pop();
+        },
+        else => {},
+    };
+    const opening_index = if (openings.items.len != 0) openings.items[openings.items.len - 1] else return null;
+    if (opening_index == 0 or tokens[opening_index - 1].tag != .identifier) return null;
+
+    var supplied: std.ArrayList([]const u8) = .empty;
+    var segment_start = opening_index + 1;
+    var positional_count: usize = 0;
+    var saw_named = false;
+    var parenthesis_depth: usize = 0;
+    var bracket_depth: usize = 0;
+    for (tokens[opening_index + 1 ..], opening_index + 1..) |token, index| {
+        switch (token.tag) {
+            .left_parenthesis => parenthesis_depth += 1,
+            .right_parenthesis => parenthesis_depth -|= 1,
+            .left_bracket => bracket_depth += 1,
+            .right_bracket => bracket_depth -|= 1,
+            .comma => if (parenthesis_depth == 0 and bracket_depth == 0) {
+                const named = try appendSuppliedParameter(&supplied, allocator, tokens[segment_start..index]);
+                saw_named = saw_named or named;
+                if (!named and !saw_named and index != segment_start) positional_count += 1;
+                segment_start = index + 1;
+            },
+            else => {},
+        }
+    }
+    const current = tokens[segment_start..];
+    if (current.len > 1 or (current.len == 1 and current[0].tag != .identifier)) return null;
+    const prefix = if (current.len == 1) current[0].lexeme else "";
+    const prefix_start = if (current.len == 1) current[0].start else cursor;
+    const callee = tokens[opening_index - 1];
+    return .{
+        .callee_name = callee.lexeme,
+        .callee_end = callee.end,
+        .prefix = prefix,
+        .prefix_start = prefix_start,
+        .positional_count = positional_count,
+        .supplied_parameters = try supplied.toOwnedSlice(allocator),
+        .named_mode = saw_named,
+    };
+}
+
+fn appendSuppliedParameter(
+    supplied: *std.ArrayList([]const u8),
+    allocator: Allocator,
+    tokens: []const Token,
+) !bool {
+    if (tokens.len < 2 or tokens[0].tag != .identifier or tokens[1].tag != .colon) return false;
+    try supplied.append(allocator, tokens[0].lexeme);
+    return true;
+}
+
+fn suppliedParameter(call: ActiveCall, name: []const u8) bool {
+    for (call.supplied_parameters) |supplied| if (std.mem.eql(u8, supplied, name)) return true;
+    return false;
+}
+
+fn signatureParameters(detail: []const u8, name: []const u8) ?[]const u8 {
+    if (!std.mem.startsWith(u8, detail, name) or detail.len <= name.len or detail[name.len] != '(') return null;
+    var depth: usize = 0;
+    for (detail[name.len + 1 ..], name.len + 1..) |character, index| switch (character) {
+        '(' => depth += 1,
+        ')' => {
+            if (depth == 0) return detail[name.len + 1 .. index];
+            depth -= 1;
+        },
+        else => {},
+    };
+    return null;
+}
+
+fn parameterItemLessThan(_: void, left: CompletionItem, right: CompletionItem) bool {
+    const order = std.mem.order(u8, left.sortText.?, right.sortText.?);
+    if (order != .eq) return order == .lt;
+    return std.mem.lessThan(u8, left.label, right.label);
+}
+
 pub fn disambiguateCallableLabels(items: []CompletionItem) void {
     for (items) |*item| {
         const filter = item.filterText orelse item.label;
@@ -709,6 +879,7 @@ pub fn callAcceptsParameters(
     var argument_index: usize = 0;
     var has_argument = false;
     var has_token = false;
+    var incomplete = false;
     while (true) {
         const token = lexer.next() catch return true;
         if (token.tag == .end) return true;
@@ -723,7 +894,7 @@ pub fn callAcceptsParameters(
             .right_parenthesis => {
                 if (depth == 1) {
                     const arity = if (has_argument) argument_index + 1 else 0;
-                    return acceptsArity(parameters, arity);
+                    return if (incomplete) arity <= parameters.len else acceptsArity(parameters, arity);
                 }
                 depth -|= 1;
             },
@@ -735,6 +906,8 @@ pub fn callAcceptsParameters(
             else => if (depth == 1 and !has_token) {
                 has_argument = true;
                 has_token = true;
+                incomplete = token.tag == .identifier and
+                    std.mem.eql(u8, token.lexeme, "__parameter_completion");
                 if (argument_index >= parameters.len or
                     !literalAcceptsType(token.tag, parameters[argument_index].type, program)) return false;
             },
@@ -922,6 +1095,7 @@ fn appendExpressionSymbols(
     context: Context,
     expected_type: ?ExpectedType,
 ) !void {
+    try appendEmbeddedFileIntrinsics(allocator, candidates, context, expected_type);
     if (matchesExpectedType(expected_type, "Result")) try appendCandidate(
         allocator,
         candidates,
@@ -1030,6 +1204,24 @@ fn appendExpressionSymbols(
             .detail = "false:bool",
         }, typedPriority(55, expected_type, "bool"), false);
     }
+}
+
+fn appendEmbeddedFileIntrinsics(
+    allocator: Allocator,
+    candidates: *std.ArrayList(Candidate),
+    context: Context,
+    expected_type: ?ExpectedType,
+) !void {
+    if (matchesExpectedType(expected_type, "str")) try appendCandidate(allocator, candidates, context, .{
+        .label = "embed_text",
+        .kind = CompletionKind.function,
+        .detail = "embed_text(file:str) str",
+    }, typedPriority(18, expected_type, "str"), true);
+    if (matchesExpectedType(expected_type, "uint8[]")) try appendCandidate(allocator, candidates, context, .{
+        .label = "embed_bytes",
+        .kind = CompletionKind.function,
+        .detail = "embed_bytes(file:str) uint8[]",
+    }, typedPriority(18, expected_type, "uint8[]"), true);
 }
 
 fn appendStatementKeywords(allocator: Allocator, candidates: *std.ArrayList(Candidate), context: Context) !void {
@@ -3213,6 +3405,16 @@ test "complete an untyped initializer with expressions and no statement keywords
     try std.testing.expect(!contains(items, "as"));
 }
 
+test "complete embedded file intrinsics in expressions" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source = "func main() { let value = emb }";
+    const cursor = std.mem.indexOf(u8, source, "emb").? + "emb".len;
+    const items = try itemsAt(arena.allocator(), source, cursor, .invoked);
+    try std.testing.expect(contains(items, "embed_text"));
+    try std.testing.expect(contains(items, "embed_bytes"));
+}
+
 test "keep overload signatures and default values distinct" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -3254,6 +3456,46 @@ test "filter overload signatures with arguments already present" {
         try std.testing.expect(std.mem.indexOf(u8, item.detail, "radix:int = 10") != null);
     };
     try std.testing.expectEqual(@as(usize, 1), signatures);
+}
+
+test "complete remaining call parameter labels before expression symbols" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source =
+        \\struct Vec3 {
+        \\    init(x:float, y:float, z:float) {}
+        \\}
+        \\func main() {
+        \\    let value = Vec3(x:0, )
+        \\}
+    ;
+    const cursor = std.mem.indexOf(u8, source, "x:0, ").? + "x:0, ".len;
+    const items = try parameterItemsAt(arena.allocator(), source, cursor);
+    try std.testing.expectEqual(@as(usize, 2), items.len);
+    try std.testing.expectEqualStrings("y", items[0].label);
+    try std.testing.expectEqualStrings("y:float", items[0].detail);
+    try std.testing.expectEqualStrings("y:", items[0].insertText.?);
+    try std.testing.expectEqualStrings("z", items[1].label);
+}
+
+test "complete the next method parameter after a nested positional argument" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source =
+        \\static class Asset {
+        \\    static func javascript(source:str, path:str) Asset { return Asset() }
+        \\}
+        \\func wrap(value:str) str { return value }
+        \\func main() {
+        \\    let asset = Asset.javascript(wrap("app.js"), )
+        \\}
+    ;
+    const cursor = std.mem.indexOf(u8, source, "wrap(\"app.js\"), ").? + "wrap(\"app.js\"), ".len;
+    const items = try parameterItemsAt(arena.allocator(), source, cursor);
+    try std.testing.expectEqual(@as(usize, 1), items.len);
+    try std.testing.expectEqualStrings("path", items[0].label);
+    try std.testing.expectEqualStrings("path:str", items[0].detail);
+    try std.testing.expectEqualStrings("path:", items[0].insertText.?);
 }
 
 test "complete self and fundamental string members exclusively" {

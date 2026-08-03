@@ -256,6 +256,16 @@ fn encodeFunction(
             },
             .optional_unwrap => |optional| try emitCopyRange(allocator, bytes, optional.result, optional.operand),
             .constant_str => |value| try emitStringAddress(allocator, bytes, data_fixups, value.string, value.result),
+            .constant_bytes => |value| try emitBytesLiteral(
+                allocator,
+                bytes,
+                data_fixups,
+                windows_import_sites,
+                platform,
+                &epilogue_fixups,
+                program,
+                value,
+            ),
             .copy => |copy| {
                 try emitLoadStack(allocator, bytes, .rax, copy.operand);
                 try emitStoreStack(allocator, bytes, .rax, copy.result);
@@ -908,6 +918,41 @@ fn emitListInit(
         offset += Machine.slot_size;
     };
     try emitStoreStack(allocator, bytes, .r10, value.result);
+}
+
+fn emitBytesLiteral(
+    allocator: Allocator,
+    bytes: *std.ArrayList(u8),
+    data_fixups: *std.ArrayList(DataFixup),
+    import_sites: *std.ArrayList(WindowsImports.X64Site),
+    platform: Platform,
+    epilogue: *std.ArrayList(EpilogueFixup),
+    program: Machine.Program,
+    value: Machine.Instruction.ConstantBytes,
+) Error!void {
+    if (value.string >= program.strings.len) return error.InvalidMachineProgram;
+    const count = program.strings[value.string].len;
+    try emitImmediate(allocator, bytes, .rsi, 8 + @as(u64, count) * Machine.slot_size);
+    try emitAllocation(allocator, bytes, import_sites, platform, epilogue);
+    try emitMoveRegister(allocator, bytes, .r15, .rax);
+    try emitImmediate(allocator, bytes, .rax, count);
+    try emitStoreMemory(allocator, bytes, .r15, 0, .rax);
+    if (count != 0) {
+        try emitStringAddress(allocator, bytes, data_fixups, value.string, value.result);
+        try emitLoadStack(allocator, bytes, .rbx, value.result);
+        try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xc3, 8 });
+        try emitMoveRegister(allocator, bytes, .r14, .r15);
+        try bytes.appendSlice(allocator, &.{ 0x49, 0x83, 0xc6, 8 });
+        try emitImmediate(allocator, bytes, .rsi, count);
+        const loop = bytes.items.len;
+        try bytes.appendSlice(allocator, &.{ 0x48, 0x0f, 0xb6, 0x03 });
+        try emitStoreMemory(allocator, bytes, .r14, 0, .rax);
+        try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xc3, 1, 0x49, 0x83, 0xc6, 8, 0x48, 0x83, 0xee, 1, 0x0f, 0x85 });
+        const repeat = bytes.items.len;
+        try bytes.appendNTimes(allocator, 0, 4);
+        try patchRelative(bytes.items, repeat, loop);
+    }
+    try emitStoreStack(allocator, bytes, .r15, value.result);
 }
 
 fn emitCollectionCount(

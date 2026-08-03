@@ -202,6 +202,7 @@ pub const Parser = struct {
         if (std.mem.eql(u8, source_name, "Result")) return self.failAt(name_position, "'Result' is a reserved intrinsic type name");
         if (std.mem.eql(u8, source_name, "map_error")) return self.failAt(name_position, "'map_error' is a reserved intrinsic function name");
         if (std.mem.eql(u8, source_name, "embed_text")) return self.failAt(name_position, "'embed_text' is a reserved intrinsic function name");
+        if (std.mem.eql(u8, source_name, "embed_bytes")) return self.failAt(name_position, "'embed_bytes' is a reserved intrinsic function name");
         try self.advance();
         const type_parameters = try Generics.parseTypeParameters(self);
         const enclosing_type_parameters = self.type_parameters;
@@ -452,6 +453,7 @@ pub const Parser = struct {
         const name_position = self.current.position;
         if (std.mem.eql(u8, name, "map_error")) return self.failAt(name_position, "'map_error' is a reserved intrinsic function name");
         if (std.mem.eql(u8, name, "embed_text")) return self.failAt(name_position, "'embed_text' is a reserved intrinsic function name");
+        if (std.mem.eql(u8, name, "embed_bytes")) return self.failAt(name_position, "'embed_bytes' is a reserved intrinsic function name");
         try self.advance();
 
         var annotation: ?Ast.Type = null;
@@ -873,6 +875,9 @@ pub const Parser = struct {
             },
             .string_start => return self.parseInterpolatedString(token),
             .identifier, .keyword_self, .keyword_super => {
+                if (std.mem.eql(u8, token.lexeme, "embed_bytes")) {
+                    _ = try Collections.internDynamicType(self, token.position, .uint8);
+                }
                 try self.advance();
                 return self.newExpression(.{
                     .position = token.position,

@@ -18,7 +18,7 @@ The guide is grouped by the part of the language you are using.
 - [Calculate and compare values](Getting-started/Operators.md)
 - [Branch and repeat](Getting-started/Control-flow.md)
 - [Build strings](Getting-started/Strings.md)
-- [Embed text files](Getting-started/Embedded-text.md)
+- [Embed files](Getting-started/Embedded-files.md)
 - [Print and stop a program](Getting-started/Output.md)
 - [Test one source](Getting-started/Tests.md)
 

@@ -265,6 +265,14 @@ fn executeInstruction(
         },
         .constant_bool => |constant| try store(function, values, constant.result, .{ .boolean = constant.value }),
         .constant_str => |constant| try store(function, values, constant.result, .{ .string = constant.value }),
+        .constant_bytes => |constant| {
+            const fields = try allocator.alloc(Value, constant.value.len);
+            for (constant.value, 0..) |byte, index| fields[index] = .{ .typed_integer = .{ .type = .uint8, .bits = byte } };
+            try store(function, values, constant.result, .{ .structure = .{
+                .type = function.value_types[constant.result],
+                .fields = fields,
+            } });
+        },
         .constant_float32 => |constant| try store(function, values, constant.result, .{ .float32 = @bitCast(constant.bits) }),
         .constant_float64 => |constant| try store(function, values, constant.result, .{ .float64 = @bitCast(constant.bits) }),
         .function_reference => |reference| {
@@ -639,7 +647,8 @@ fn executeBoundary(
                 .{ .float32 = MathBoundary.unary32(math.operation, operand.float32) orelse return error.UnsupportedBoundary }
             else if (operand.typeOf() == .float64)
                 .{ .float64 = MathBoundary.unary64(math.operation, operand.float64) orelse return error.UnsupportedBoundary }
-            else return error.InvalidProgram;
+            else
+                return error.InvalidProgram;
             try store(function, values, result_id, result);
             return;
         }
@@ -651,7 +660,8 @@ fn executeBoundary(
                 .{ .float32 = MathBoundary.binary32(math.operation, left.float32, right.float32) orelse return error.UnsupportedBoundary }
             else if (left.typeOf() == .float64)
                 .{ .float64 = MathBoundary.binary64(math.operation, left.float64, right.float64) orelse return error.UnsupportedBoundary }
-            else return error.InvalidProgram;
+            else
+                return error.InvalidProgram;
             try store(function, values, result_id, result);
             return;
         }

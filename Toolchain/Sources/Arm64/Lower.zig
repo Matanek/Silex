@@ -250,6 +250,10 @@ fn lowerInstruction(
             .result = layout.values[constant.result].start,
             .string = try internString(allocator, strings, constant.value),
         } },
+        .constant_bytes => |constant| .{ .constant_bytes = .{
+            .result = layout.values[constant.result].start,
+            .string = try internString(allocator, strings, constant.value),
+        } },
         .constant_float32 => |constant| .{ .constant_float32 = .{
             .result = layout.values[constant.result].start,
             .bits = constant.bits,

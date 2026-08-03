@@ -64,6 +64,7 @@ pub const Instruction = union(enum) {
     constant_int: ConstantInt,
     constant_bool: ConstantBool,
     constant_str: ConstantStr,
+    constant_bytes: ConstantBytes,
     constant_float32: ConstantFloat32,
     constant_float64: ConstantFloat64,
     optional_null: OptionalNull,
@@ -134,6 +135,11 @@ pub const Instruction = union(enum) {
     };
 
     pub const ConstantStr = struct {
+        result: ValueId,
+        value: []const u8,
+    };
+
+    pub const ConstantBytes = struct {
         result: ValueId,
         value: []const u8,
     };
@@ -648,6 +654,23 @@ fn writeInstruction(
             try appendResult(output, allocator, program, function, constant.result);
             try output.appendSlice(allocator, "const ");
             try Strings.appendQuoted(output, allocator, constant.value);
+        },
+        .constant_bytes => |constant| {
+            const type_value = if (constant.result < function.value_types.len)
+                function.value_types[constant.result]
+            else
+                return error.InvalidProgram;
+            const structure = type_value.structureIndex() orelse return error.InvalidProgram;
+            if (structure >= program.structures.len) return error.InvalidProgram;
+            const collection = program.structures[structure].collection orelse return error.InvalidProgram;
+            if (collection.element != .uint8 or collection.length != null or collection.view) return error.InvalidProgram;
+            try appendResult(output, allocator, program, function, constant.result);
+            try output.appendSlice(allocator, "const.bytes 0x");
+            const digits = "0123456789abcdef";
+            for (constant.value) |byte| {
+                try output.append(allocator, digits[byte >> 4]);
+                try output.append(allocator, digits[byte & 0x0f]);
+            }
         },
         .constant_float32 => |constant| {
             try appendResult(output, allocator, program, function, constant.result);

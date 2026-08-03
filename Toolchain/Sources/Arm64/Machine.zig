@@ -58,6 +58,7 @@ pub const Instruction = union(enum) {
     constant_int: ConstantInt,
     constant_bool: ConstantBool,
     constant_str: ConstantStr,
+    constant_bytes: ConstantBytes,
     constant_float32: ConstantFloat32,
     constant_float64: ConstantFloat64,
     optional_null: OptionalNull,
@@ -130,6 +131,11 @@ pub const Instruction = union(enum) {
     };
 
     pub const ConstantStr = struct {
+        result: Slot,
+        string: usize,
+    };
+
+    pub const ConstantBytes = struct {
         result: Slot,
         string: usize,
     };
@@ -578,6 +584,10 @@ pub fn validate(program: Program) Error!void {
                 .constant_int => |value| try requireSlot(function, value.result),
                 .constant_bool => |value| try requireSlot(function, value.result),
                 .constant_str => |value| {
+                    try requireSlot(function, value.result);
+                    if (value.string >= program.strings.len) return error.InvalidMachineProgram;
+                },
+                .constant_bytes => |value| {
                     try requireSlot(function, value.result);
                     if (value.string >= program.strings.len) return error.InvalidMachineProgram;
                 },
