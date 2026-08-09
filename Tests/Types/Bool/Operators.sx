@@ -1,0 +1,21 @@
+func bool_mark(counter:&int) bool {
+    counter++
+    return true
+}
+
+test "bool logical operators and equality" {
+    if !(true && true) { panic("logical and") }
+    if true && false { panic("logical and false") }
+    if !(false || true) { panic("logical or") }
+    if !true { panic("logical not") }
+    if true == false || true != true { panic("bool equality") }
+}
+
+test "bool logical operators short circuit" {
+    var calls = 0
+    let left_false = false && bool_mark(calls)
+    let left_true = true || bool_mark(calls)
+
+    if left_false || !left_true { panic("short circuit values") }
+    if calls != 0 { panic("short circuit evaluated its right operand") }
+}

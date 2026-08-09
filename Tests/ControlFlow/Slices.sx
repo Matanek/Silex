@@ -1,0 +1,61 @@
+func sum(values:@int[..]) int {
+    var total = 0
+    for value in values { total += value }
+    return total
+}
+
+func increment_middle(values:&int[]) {
+    var middle = &values[1:4]
+    for var value in middle { value += 1 }
+}
+
+test "copied slice is independent and fully iterable" {
+    var values = [10, 20, 30, 40, 50]
+    let middle = values[1:4]
+    values[2] = 300
+
+    var total = 0
+    for value in middle { total += value }
+    if middle.count() != 3 || middle[0] != 20 || middle[-1] != 40 || total != 90 {
+        panic("copied slice iteration or independence")
+    }
+}
+
+test "slice bounds normalize before control flow" {
+    let values = [10, 20, 30, 40, 50]
+    let negative = values[-4:-1]
+    let clamped = values[-99:99]
+    let inverse = values[4:2]
+
+    var visited = false
+    for value in inverse {
+        visited = true
+        print(value)
+    }
+
+    var negative_total = 0
+    for value in negative { negative_total += value }
+    var clamped_total = 0
+    for value in clamped { clamped_total += value }
+
+    if negative_total != 90 || clamped_total != 150 || !inverse.is_empty() || visited {
+        panic("normalized slice bounds")
+    }
+}
+
+test "shared slice view reads its source and crosses a parameter" {
+    var values = [10, 20, 30, 40, 50]
+    values[2] = 300
+    let middle = @values[1:4]
+
+    if sum(middle) != 360 { panic("shared slice view") }
+}
+
+test "mutable slice view writes through a complete iteration" {
+    var values:int[] = [10, 20, 30, 40, 50]
+    increment_middle(values)
+
+    if values[0] != 10 || values[1] != 21 || values[2] != 31 || values[3] != 41 || values[4] != 50 {
+        panic("mutable slice view iteration")
+    }
+}

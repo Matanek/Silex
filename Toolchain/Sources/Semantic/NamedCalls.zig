@@ -120,7 +120,7 @@ pub fn analyzeFunction(self: anytype, builder: anytype, call: Ast.Expression.Cal
         }
         if (parameter.mode != .read) try Borrowing.requireOwned(self, argument, source.position, "passed by value");
         const converted = try self.coerce(builder, argument, parameter.type, source.position);
-        if (parameter.mode == .value and Resources.containsClass(self, parameter.type)) try Resources.retainValue(self, builder, parameter.type, converted.value);
+        if (parameter.mode == .value and Resources.requiresRetain(self, parameter.type)) try Resources.retainValue(self, builder, parameter.type, converted.value);
         try ids.append(self.allocator, converted.value);
     }
     const result_type = Collections.loweredBorrowType(self.structures, function.return_mode, function.return_type);
@@ -128,12 +128,12 @@ pub fn analyzeFunction(self: anytype, builder: anytype, call: Ast.Expression.Cal
     try self.emit(builder, .{ .call = .{ .result = result, .function = function_id, .arguments = try ids.toOwnedSlice(self.allocator) } });
     for (mutable.items) |argument| try MutableReferences.writeBack(self, builder, argument.prepared);
     for (typed) |maybe_argument| if (maybe_argument) |argument| {
-        if (argument.transferred and Resources.containsClass(self, argument.type)) {
+        if (argument.transferred and Resources.requiresRetain(self, argument.type)) {
             try Resources.emitDrop(self, builder, argument.type, argument.value);
         }
     };
     if (result == null) return null;
-    if (function.return_mode == .value) return .{ .type = function.return_type, .value = result.?, .transferred = Resources.containsClass(self, function.return_type) };
+    if (function.return_mode == .value) return .{ .type = function.return_type, .value = result.?, .transferred = Resources.requiresRetain(self, function.return_type) };
     const provenance = function.return_provenance.?;
     var parameter_index: ?usize = null;
     for (function.parameters, 0..) |parameter, index| if (std.mem.eql(u8, parameter.name, provenance)) {

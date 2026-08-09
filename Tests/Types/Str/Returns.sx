@@ -1,0 +1,43 @@
+struct Message {
+    let text:str
+}
+
+class Source {
+    public let text:str
+}
+
+func literal_value() str { return "literal" }
+
+func local_value() str {
+    let value = "local"
+    return value
+}
+
+func parameter(value:str) str { return value }
+
+func borrowed_parameter(value:@str) str { return value }
+
+func structure_field(value:Message) str { return value.text }
+
+func class_field(value:Source) str { return value.text }
+
+func temporary(left:str, right:str) str { return left + right }
+
+func conditional(condition:bool) str {
+    if condition { return "true" }
+    return "false"
+}
+
+test "str return positions" {
+    let observed = "borrowed"
+
+    assert(literal_value() == "literal")
+    assert(local_value() == "local")
+    assert(parameter("parameter") == "parameter")
+    assert(borrowed_parameter(observed) == "borrowed")
+    assert(structure_field(Message(text:"structure")) == "structure")
+    assert(class_field(Source(text:"class")) == "class")
+    assert(temporary("tem", "porary") == "temporary")
+    assert(conditional(true) == "true")
+    assert(conditional(false) == "false")
+}

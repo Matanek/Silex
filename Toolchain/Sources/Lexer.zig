@@ -82,6 +82,7 @@ pub const TokenTag = enum {
     slash,
     slash_equal,
     percent,
+    percent_equal,
     bang,
     equal,
     equal_equal,
@@ -192,10 +193,7 @@ pub const Lexer = struct {
         if (character == '-') return self.arithmeticToken(start, position, '-', .minus, .minus_minus, .minus_equal);
         if (character == '*') return self.arithmeticToken(start, position, 0, .star, .star, .star_equal);
         if (character == '/') return self.arithmeticToken(start, position, 0, .slash, .slash, .slash_equal);
-        if (character == '%') {
-            self.advance();
-            return self.token(.percent, start, position);
-        }
+        if (character == '%') return self.optionalDoubleToken(start, position, '=', .percent, .percent_equal);
         if (character == '.') return self.dotToken(start, position);
         if (character == '?') {
             self.advance();
@@ -853,7 +851,7 @@ test "recognize optional tokens and reserve null" {
 }
 
 test "recognize compound and update operators" {
-    var lexer = Lexer.init("++ -- += -= *= /= %");
+    var lexer = Lexer.init("++ -- += -= *= /= %= %");
     const expected = [_]TokenTag{
         .plus_plus,
         .minus_minus,
@@ -861,6 +859,7 @@ test "recognize compound and update operators" {
         .minus_equal,
         .star_equal,
         .slash_equal,
+        .percent_equal,
         .percent,
     };
     for (expected) |tag| try std.testing.expectEqual(tag, (try lexer.next()).tag);

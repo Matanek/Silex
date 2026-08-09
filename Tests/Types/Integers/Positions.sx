@@ -1,0 +1,39 @@
+struct IntegerFields {
+    var count:int
+}
+
+class IntegerState {
+    public var count:int
+}
+
+struct IntegerTransform {
+    let callback:func(int) int
+}
+
+func integer_value(value:int) int { return value }
+func integer_read(value:@int) int { return value }
+func integer_write(value:&int) { value += 10 }
+func integer_apply(value:int, callback:func(int) int) int { return callback(value) }
+
+test "integer field parameter and return positions" {
+    var fields = IntegerFields(count:1)
+    var state = IntegerState(count:2)
+
+    integer_write(fields.count)
+    integer_write(state.count)
+
+    if integer_value(fields.count) != 11 { panic("structure field value position") }
+    if integer_read(state.count) != 12 { panic("class field read position") }
+}
+
+test "integer collection and callback positions" {
+    var values = [1, 2, 3]
+    integer_write(values[1])
+    var sum = 0
+    for value in values { sum += value }
+    if sum != 16 { panic("integer collection positions") }
+
+    let double = func(value:int) int { return value * 2 }
+    let transform = IntegerTransform(callback:double)
+    if integer_apply(7, transform.callback) != 14 { panic("integer callback field") }
+}

@@ -586,6 +586,61 @@ test "native collection mutations match the reference" {
     try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
 }
 
+test "native field list iteration retains storage until replacement" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const source =
+        \\class Values {
+        \\    public var items:int[]
+        \\    public init() { self.items = [1, 2, 3] }
+        \\    public func consume() {
+        \\        for item in self.items { print(item) }
+        \\        for item in self.items { print(item) }
+        \\        self.items = []
+        \\        print(self.items.count())
+        \\    }
+        \\}
+        \\func main() { var values = Values(); values.consume() }
+    ;
+    var frontend = Frontend.Frontend.init(allocator);
+    var compilation = try frontend.compile(source);
+    compilation.ir.files = &.{"Main.sx"};
+    const reference = try Interpreter.runCapture(allocator, compilation.ir);
+    const native = try runMachine(allocator, try Lower.lower(allocator, compilation.ir));
+    try std.testing.expectEqual(reference.exit_code, exitCode(native));
+    try std.testing.expectEqualSlices(u8, reference.stdout, native.stdout);
+    try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
+}
+
+test "native list append and clear reuse bounded storage" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const source =
+        \\func main() {
+        \\    var values:int[] = []
+        \\    var index = 0
+        \\    while index < 10_000 {
+        \\        values.append(index)
+        \\        values.clear()
+        \\        index++
+        \\    }
+        \\    print(index, " ", values.count())
+        \\}
+    ;
+    var frontend = Frontend.Frontend.init(allocator);
+    var compilation = try frontend.compile(source);
+    compilation.ir.files = &.{"Main.sx"};
+    const reference = try Interpreter.runCapture(allocator, compilation.ir);
+    const native = try runMachine(allocator, try Lower.lower(allocator, compilation.ir));
+    try std.testing.expectEqual(reference.exit_code, exitCode(native));
+    try std.testing.expectEqualSlices(u8, reference.stdout, native.stdout);
+    try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
+}
+
 test "native copied slices match the reference" {
     if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);

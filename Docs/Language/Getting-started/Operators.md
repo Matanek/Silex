@@ -62,6 +62,22 @@ of its left operand.
 let full_name = first + " " + last
 ```
 
+## Update a numeric value
+
+```sx
+value += added
+value -= removed
+value *= factor
+value /= divisor
+value %= modulus
+value++
+value--
+```
+
+Compound assignments perform the corresponding checked arithmetic operation
+and store the result back into the mutable variable, field, or indexed element.
+`%=` accepts integers only, consistently with `%`.
+
 ## Apply several operations to one value
 
 The cascade operator `..` applies every segment to the same receiver. The

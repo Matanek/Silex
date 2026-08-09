@@ -20,10 +20,10 @@ pub fn analyze(
     else target: {
         const receiver = try self.analyzeExpressionExpected(builder, cascade.receiver, expected);
         if (receiver.type == .void) return self.fail(cascade.receiver.position, "cascade receiver cannot have type 'void'");
-        if (Resources.containsClass(self, receiver.type) and !receiver.transferred) {
+        if (Resources.requiresRetain(self, receiver.type) and !receiver.transferred) {
             try Resources.retainValue(self, builder, receiver.type, receiver.value);
         }
-        transfers_temporary_class = Resources.containsClass(self, receiver.type);
+        transfers_temporary_class = Resources.requiresRetain(self, receiver.type);
         const local = builder.local_types.items.len;
         try builder.local_types.append(self.allocator, receiver.type);
         try self.emit(builder, .{ .local_store = .{ .local = local, .operand = receiver.value } });

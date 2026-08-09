@@ -1,0 +1,51 @@
+func direct(value:int, callback:func(int) int) int { return callback(value) }
+func forwarded(value:int, callback:func(int) int) int { return direct(value, callback) }
+func routed(value:int, callback:func(int) int) int { return forwarded(value, callback) }
+
+struct Processor {
+    func process(value:int, callback:func(int) int) int {
+        return routed(value, callback)
+    }
+}
+
+func with_transform(
+    value:int,
+    transform:func(int) int,
+    consume:func(int)
+) {
+    consume(transform(value))
+}
+
+test "callback crosses several synchronous call levels" {
+    let offset = 2
+    let result = routed(40, func(value:int) int { return value + offset })
+    if result != 42 { panic("multi-level callback forwarding") }
+}
+
+test "method forwards a capturing callback through helpers" {
+    let multiplier = 6
+    let processor = Processor()
+    let result = processor.process(7, func(value:int) int { return value * multiplier })
+    if result != 42 { panic("method callback forwarding") }
+}
+
+test "callbacks form a complete transformation pipeline" {
+    var consumed = 0
+    with_transform(
+        20,
+        func(value:int) int { return value * 2 },
+        func(value:int) { consumed = value + 2 }
+    )
+    if consumed != 42 { panic("callback transformation pipeline") }
+}
+
+test "nested anonymous callbacks capture both lexical levels" {
+    let base = 30
+    let result = direct(5, func(outer:int) int {
+        let offset = 2
+        return direct(outer, func(inner:int) int {
+            return base + inner + offset + outer
+        })
+    })
+    if result != 42 { panic("nested callback captures") }
+}

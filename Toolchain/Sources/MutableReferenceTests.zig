@@ -77,10 +77,17 @@ test "mutating class methods write reconstructed state through a mutable referen
     try std.testing.expectEqualStrings("3\n2\n", output);
 }
 
-test "mutable references reject immutable places and escaping values" {
+test "mutable references copy value returns and reject immutable places and escaping capabilities" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
-    var frontend = Frontend.Frontend.init(arena.allocator());
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const result = try Interpreter.runCapture(allocator, (try frontend.compile(
+        "func copied(value:&int) int { value += 1; return value } func main() { var value = 1; print(copied(value)); print(value) }",
+    )).ir);
+    try std.testing.expectEqualStrings("2\n2\n", result.stdout);
+
+    frontend.diagnostic = null;
     try std.testing.expectError(error.InvalidSource, frontend.compile(
         \\func change(value:&int) { value += 1 }
         \\func main() { let fixed = 1; change(fixed) }
@@ -89,8 +96,7 @@ test "mutable references reject immutable places and escaping values" {
 
     frontend.diagnostic = null;
     try std.testing.expectError(error.InvalidSource, frontend.compile(
-        \\func leak(value:&int) int { return value }
-        \\func main() { var value = 1; print(leak(value)) }
+        "class State { public var value:int } func leak(value:&State) State { return value } func main() {}",
     ));
     try std.testing.expectEqualStrings("mutable-reference parameter 'value' cannot be returned", frontend.diagnostic.?.message);
 

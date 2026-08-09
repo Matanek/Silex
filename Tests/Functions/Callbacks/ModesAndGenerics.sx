@@ -1,0 +1,31 @@
+struct Number {
+    var value:int
+}
+
+func read_number(value:@Number) int { return value.value }
+func edit_number(value:&Number) { value.value += 10 }
+func inspect(value:@Number, callback:func(@Number) int) int { return callback(value) }
+func mutate(value:&Number, callback:func(&Number)) { callback(value) }
+func map<T, U>(value:T, callback:func(T) U) U { return callback(value) }
+func visit_pair(left:int, right:int, callback:func(int, int)) { callback(left, right) }
+
+test "callback signatures preserve value read and mutable modes" {
+    var number = Number(value:2)
+    if inspect(number, read_number) != 2 { panic("read callback mode") }
+    mutate(number, edit_number)
+    if number.value != 12 { panic("mutable callback mode") }
+}
+
+test "generic callbacks infer input and output types" {
+    let text = map<int,str>(42, func(value:int) str { return "$(value)" })
+    let number = map<str,int>(text, func(value:str) int { return value.count() })
+    if text != "42" || number != 2 { panic("generic callback specialization") }
+}
+
+test "void callback accepts several parameters and captures context" {
+    var result = 0
+    visit_pair(20, 22, func(left:int, right:int) {
+        result = left + right
+    })
+    if result != 42 { panic("multi-parameter void callback") }
+}

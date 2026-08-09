@@ -8,6 +8,7 @@ pub const Platform = enum { darwin, windows };
 pub const Error = Allocator.Error;
 
 const macos_mmap = 197;
+const macos_munmap = 73;
 const protection_read_write = 3;
 const map_private_anonymous = 0x1002;
 
@@ -48,6 +49,32 @@ pub fn failureBranch(platform: Platform) u32 {
         .darwin => A64.conditionalBranch(.carry_set),
         .windows => A64.compareBranchZero(.x0),
     };
+}
+
+pub fn emitFree(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    sites: *std.ArrayList(ExternalCalls.Site),
+    platform: Platform,
+) Error!void {
+    switch (platform) {
+        .darwin => {
+            try words.append(allocator, A64.moveWideZero32(.x16, macos_munmap));
+            try words.append(allocator, A64.serviceCall());
+        },
+        .windows => {
+            try words.append(allocator, A64.moveWideZero32(.x1, 0));
+            try immediate(allocator, words, .x2, 0x8000);
+            try sites.append(allocator, .{
+                .instruction_offset = @intCast(words.items.len * @sizeOf(u32)),
+                .function = 0,
+                .windows_symbol = WindowsImports.Symbol.virtual_free,
+            });
+            try words.append(allocator, A64.addressPage(.x16));
+            try words.append(allocator, A64.load64(.x16, .x16, 0));
+            try words.append(allocator, A64.branchLinkRegister(.x16));
+        },
+    }
 }
 
 fn immediate(allocator: Allocator, words: *std.ArrayList(u32), register: A64.Register, value: u64) Error!void {

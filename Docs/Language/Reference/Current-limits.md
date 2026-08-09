@@ -12,6 +12,12 @@ Not implemented yet:
 - safe optional assignment, forced extraction, and `??`;
 - wildcard or guarded `match` branches.
 
+List literal inference is currently syntactic. A non-empty list whose first
+element is a variable or another expression without an immediately visible
+type needs a collection annotation, for example
+`let values:Pair<int>[] = [first, second]`. Removing this annotation requires
+moving collection-type creation out of the parser and into typed analysis.
+
 The complete, host-executed native backend currently targets Apple Silicon
 macOS. Linux x64, Windows x64, and Windows ARM64 also emit native executables;
 their output is cross-linked and structurally validated on macOS but still

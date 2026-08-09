@@ -1,0 +1,39 @@
+struct FloatFields {
+    var ratio:float64
+}
+
+class FloatState {
+    public var ratio:float64
+}
+
+struct FloatTransform {
+    let callback:func(float64) float64
+}
+
+func float_value(value:float64) float64 { return value }
+func float_read(value:@float64) float64 { return value }
+func float_write(value:&float64) { value += 0.5 }
+func float_apply(value:float64, callback:func(float64) float64) float64 { return callback(value) }
+
+test "float field parameter and return positions" {
+    var fields = FloatFields(ratio:1.0)
+    var state = FloatState(ratio:2.0)
+
+    float_write(fields.ratio)
+    float_write(state.ratio)
+
+    if float_value(fields.ratio) != 1.5 { panic("structure field value position") }
+    if float_read(state.ratio) != 2.5 { panic("class field read position") }
+}
+
+test "float collection and callback positions" {
+    var values:float64[] = [1.0, 2.0, 3.0]
+    float_write(values[1])
+    var total:float64 = 0.0
+    for value in values { total += value }
+    if total != 6.5 { panic("float collection positions") }
+
+    let half = func(value:float64) float64 { return value / 2.0 }
+    let transform = FloatTransform(callback:half)
+    if float_apply(5.0, transform.callback) != 2.5 { panic("float callback field") }
+}

@@ -1,0 +1,54 @@
+struct Transformer {
+    let apply:func(int) int
+}
+
+class Pipeline {
+    public let transform:func(int) int
+}
+
+func double(value:int) int { return value * 2 }
+func increment(value:int) int { return value + 1 }
+func invoke(value:int, callback:func(int) int) int { return callback(value) }
+func selected(doubled:bool) func(int) int {
+    if doubled { return double }
+    return increment
+}
+
+func independent() func() int {
+    let shadowed = 1
+    return func() int {
+        let shadowed = 42
+        return shadowed
+    }
+}
+
+test "callback variables parameters and returns" {
+    let callback:func(int) int = double
+    let returned = selected(false)
+
+    if callback(6) != 12 { panic("callback variable") }
+    if invoke(7, callback) != 14 { panic("callback parameter") }
+    if returned(7) != 8 { panic("callback return") }
+}
+
+test "callbacks stored in structure and class fields" {
+    let transformer = Transformer(apply:double)
+    var pipeline = Pipeline(transform:increment)
+
+    if transformer.apply(5) != 10 { panic("structure callback field") }
+    if pipeline.transform(transformer.apply(5)) != 11 { panic("nested callback fields") }
+}
+
+test "callback copies remain callable values" {
+    var first:func(int) int = double
+    var second = first
+    first = increment
+
+    if first(4) != 5 { panic("reassigned callback") }
+    if second(4) != 8 { panic("copied callback") }
+}
+
+test "callback locals shadow outer bindings without creating captures" {
+    let callback = independent()
+    if callback() != 42 { panic("callback local shadowing") }
+}

@@ -1,0 +1,19 @@
+func describe(value:int) str { return "integer $(value)" }
+func describe(value:bool) str {
+    if value { return "true" }
+    return "false"
+}
+func surround(value:str, prefix:str = "[", suffix:str = "]") str { return prefix + value + suffix }
+func identity<T>(value:T) T { return value }
+
+test "function overload named and default arguments" {
+    if describe(7) != "integer 7" || describe(true) != "true" { panic("function overloads") }
+    if surround("value") != "[value]" { panic("default arguments") }
+    if surround(suffix:">", value:"value", prefix:"<") != "<value>" { panic("named arguments") }
+}
+
+test "generic function inference and explicit specialization" {
+    let inferred = identity(42)
+    let explicit = identity<str>("Silex")
+    if inferred != 42 || explicit != "Silex" { panic("generic calls") }
+}

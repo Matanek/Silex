@@ -143,6 +143,23 @@ test "copies of a closure share the same captured var" {
     try std.testing.expectEqualStrings("2\n", output);
 }
 
+test "nested anonymous callbacks capture transitive lexical context" {
+    const output = try run(
+        \\func apply(value:int, callback:func(int) int) int { return callback(value) }
+        \\func main() {
+        \\    let base = 30
+        \\    print(apply(5, func(outer:int) int {
+        \\        let offset = 2
+        \\        return apply(outer, func(inner:int) int {
+        \\            return base + outer + offset + inner
+        \\        })
+        \\    }))
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("42\n", output);
+}
+
 test "anonymous callbacks survive generic handle specialization" {
     const output = try run(
         \\protocol Task { func execute() }

@@ -1,0 +1,36 @@
+test "str concatenation operand positions" {
+    let left = "left"
+    let right = "right"
+
+    assert(left + right == "leftright")
+    assert(left + " literal" == "left literal")
+    assert("literal " + right == "literal right")
+    assert("a" + "b" + "c" == "abc")
+    assert((left + "-") + right == "left-right")
+}
+
+test "str compound concatenation" {
+    var value = "Silex"
+
+    value += " "
+    value += "language"
+
+    assert(value == "Silex language")
+}
+
+test "str equality and interpolation" {
+    let name = "Silex"
+    let version = 2
+
+    assert(name == "Silex")
+    assert(name != "silex")
+    assert("$(name) $(version)" == "Silex 2")
+    assert("$$(name)" == "$" + "(name)")
+}
+
+test "str unicode scalar count" {
+    let value = "A🙂é"
+
+    assert(value.count() == 3)
+    assert("".count() == 0)
+}

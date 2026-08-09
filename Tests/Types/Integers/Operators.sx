@@ -1,0 +1,34 @@
+test "signed integer arithmetic and comparisons" {
+    let left = 17
+    let right = 5
+
+    if left + right != 22 { panic("integer addition") }
+    if left - right != 12 { panic("integer subtraction") }
+    if left * right != 85 { panic("integer multiplication") }
+    if left / right != 3 { panic("integer division") }
+    if left % right != 2 { panic("integer remainder") }
+    if !(left > right && left >= 17 && right < left && right <= 5) { panic("integer ordering") }
+}
+
+test "integer compound assignments increment and decrement" {
+    var value = 10
+    value += 5
+    value -= 3
+    value *= 2
+    value /= 4
+    value %= 5
+    value++
+    value--
+
+    if value != 1 { panic("integer compound assignments") }
+}
+
+test "unsigned integer bitwise operators" {
+    let value:uint8 = 0b1010
+    let mask:uint8 = 0b1100
+
+    if (value & mask) != 0b1000 { panic("bitwise and") }
+    if (value ^ mask) != 0b0110 { panic("bitwise xor") }
+    if (value << 1) != 0b10100 { panic("left shift") }
+    if (value >> 1) != 0b0101 { panic("right shift") }
+}

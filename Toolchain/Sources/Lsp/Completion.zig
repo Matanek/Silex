@@ -1371,7 +1371,9 @@ fn appendExpressionSymbols(
     );
     const callable = containingCallable(source, program, cursor);
     if (callable) |current| {
-        const locals = try visibleLocals(allocator, source, program, current.position, cursor);
+        const lexical_callables = try containingCallables(allocator, source, program, cursor);
+        const lexical_start = if (lexical_callables.len == 0) current.position else lexical_callables[0].position;
+        const locals = try visibleLocals(allocator, source, program, lexical_start, cursor);
         var index = locals.len;
         while (index != 0) {
             index -= 1;
@@ -1386,7 +1388,7 @@ fn appendExpressionSymbols(
                     "Silex local binding",
             }, typedPriority(10, expected_type, local.type_name), false);
         }
-        for (current.parameters) |parameter| {
+        for (lexical_callables) |scope| for (scope.parameters) |parameter| {
             const parameter_type = typeName(program, parameter.type);
             if (!matchesExpectedType(expected_type, parameter_type)) continue;
             try appendCandidate(allocator, candidates, context, .{
@@ -1394,7 +1396,7 @@ fn appendExpressionSymbols(
                 .kind = CompletionKind.variable,
                 .detail = try std.fmt.allocPrint(allocator, "{s}:{s}", .{ parameter.name, parameter_type }),
             }, typedPriority(12, expected_type, parameter_type), false);
-        }
+        };
         if (current.structure_name) |name| if (matchesExpectedType(expected_type, name)) try appendCandidate(
             allocator,
             candidates,
@@ -1653,6 +1655,53 @@ fn containingCallable(source: []const u8, program: Ast.Program, cursor: usize) ?
         }
     }
     return result;
+}
+
+fn containingCallables(allocator: Allocator, source: []const u8, program: Ast.Program, cursor: usize) ![]const Callable {
+    var result: std.ArrayList(Callable) = .empty;
+    for (program.functions) |function| if (bodyContainsCursor(source, function.position.offset, cursor)) {
+        try result.append(allocator, .{
+            .position = function.position.offset,
+            .parameters = function.parameters,
+            .return_type = function.return_type,
+            .test_owner = function.test_owner,
+        });
+    };
+    for (program.structures) |structure| {
+        for (structure.methods) |method| if (bodyContainsCursor(source, method.position.offset, cursor)) {
+            try result.append(allocator, .{
+                .position = method.position.offset,
+                .parameters = method.parameters,
+                .return_type = method.return_type,
+                .structure_name = structure.name,
+            });
+        };
+        for (structure.constructors) |constructor| if (bodyContainsCursor(source, constructor.position.offset, cursor)) {
+            try result.append(allocator, .{
+                .position = constructor.position.offset,
+                .parameters = constructor.parameters,
+                .return_type = .structure(findStructureIndex(program, structure.name) orelse 0),
+                .structure_name = structure.name,
+            });
+        };
+    }
+    for (program.extensions) |extension| {
+        const target_name = typeName(program, extension.target);
+        for (extension.methods) |method| if (bodyContainsCursor(source, method.position.offset, cursor)) {
+            try result.append(allocator, .{
+                .position = method.position.offset,
+                .parameters = method.parameters,
+                .return_type = method.return_type,
+                .structure_name = target_name,
+            });
+        };
+    }
+    std.mem.sort(Callable, result.items, {}, struct {
+        fn lessThan(_: void, left: Callable, right: Callable) bool {
+            return left.position < right.position;
+        }
+    }.lessThan);
+    return result.toOwnedSlice(allocator);
 }
 
 fn bodyContainsCursor(source: []const u8, start: usize, cursor: usize) bool {
@@ -2075,7 +2124,6 @@ fn resolveReceiverType(
 
 fn expectedTypeAt(source: []const u8, program: Ast.Program, cursor: usize, context: Context) ?ExpectedType {
     if (context.kind != .expression and context.kind != .statement) return null;
-    if (expectedCallArgumentType(source[0..context.prefix_start], program)) |expected| return expected;
     const callable = containingCallable(source, program, cursor);
     const line = lineAtOffset(source, cursor);
     var lexer = LexerModule.Lexer.init(source[0..context.prefix_start]);
@@ -2092,13 +2140,14 @@ fn expectedTypeAt(source: []const u8, program: Ast.Program, cursor: usize, conte
     const tokens = line_tokens[0..count];
     if (tokens.len == 0) return null;
     if (tokens[0].tag == .keyword_if or tokens[0].tag == .keyword_while) return .{ .name = "bool" };
-    if (tokens[0].tag == .keyword_return) return if (callable) |current|
-        .{
+    if (tokens[0].tag == .keyword_return) {
+        if (expectedCallArgumentType(source[tokens[0].end..context.prefix_start], program)) |expected| return expected;
+        return if (callable) |current| .{
             .name = baseTypeName(program, current.return_type),
             .strict = true,
-        }
-    else
-        null;
+        } else null;
+    }
+    if (expectedCallArgumentType(source[0..context.prefix_start], program)) |expected| return expected;
     if (tokens[0].tag == .keyword_panic) return .{ .name = "str" };
     var annotation: ?[]const u8 = null;
     var has_equal = false;
@@ -3134,6 +3183,35 @@ test "complete anonymous function parameters without exposing synthetic function
     const items = try itemsAt(arena.allocator(), source, cursor, .invoked);
     try std.testing.expect(contains(items, "value"));
     for (items) |item| try std.testing.expect(!std.mem.startsWith(u8, item.label, "__silex_anonymous_"));
+}
+
+test "nested anonymous functions retain outer lexical completion scopes" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source =
+        \\func apply(value:int, callback:func(int) int) int { return callback(value) }
+        \\func main() {
+        \\    let base = 30
+        \\    apply(5, func(outer:int) int {
+        \\        let offset = 2
+        \\        return apply(outer, func(inner:int) int {
+        \\            return ba
+        \\        })
+        \\    })
+        \\}
+    ;
+    const cursor = std.mem.indexOf(u8, source, "return ba").? + "return ba".len;
+    const context = try classifyContext(arena.allocator(), source, cursor);
+    const parsed = (try parseForCompletion(arena.allocator(), source, cursor, context)).?;
+    const expected = expectedTypeAt(source, parsed, cursor, context);
+    try std.testing.expectEqualStrings("int", expected.?.name);
+    const callables = try containingCallables(arena.allocator(), source, parsed, cursor);
+    try std.testing.expectEqual(@as(usize, 3), callables.len);
+    try std.testing.expectEqualStrings("outer", callables[1].parameters[0].name);
+    try std.testing.expectEqualStrings("inner", callables[2].parameters[0].name);
+    const locals = try visibleLocals(arena.allocator(), source, parsed, callables[0].position, cursor);
+    try std.testing.expectEqualStrings("base", locals[0].name);
+    try std.testing.expectEqualStrings("offset", locals[1].name);
 }
 
 test "complete loop element members inside string interpolation" {

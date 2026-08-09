@@ -229,6 +229,11 @@ fn rewriteInstruction(allocator: Allocator, instruction: Ir.Instruction, aliases
         .class_cast => |value| .{ .class_cast = .{ .result = value.result, .operand = canonical(aliases, value.operand) } },
         .class_retain => |value| .{ .class_retain = .{ .operand = canonical(aliases, value.operand) } },
         .class_drop => |value| .{ .class_drop = .{ .operand = canonical(aliases, value.operand), .plans = value.plans } },
+        .list_retain => |value| .{ .list_retain = .{ .operand = canonical(aliases, value.operand) } },
+        .list_drop => |value| .{ .list_drop = .{
+            .operand = canonical(aliases, value.operand),
+            .deallocate = value.deallocate,
+        } },
         .global_store => |value| .{ .global_store = .{ .global = value.global, .operand = canonical(aliases, value.operand) } },
         .structure_init => |value| .{ .structure_init = .{
             .result = value.result,
@@ -319,6 +324,7 @@ fn rewriteInstruction(allocator: Allocator, instruction: Ir.Instruction, aliases
             .kind = value.kind,
             .index = rewriteOptional(value.index, aliases),
             .argument = rewriteOptional(value.argument, aliases),
+            .argument_transferred = value.argument_transferred,
             .removed = value.removed,
             .position = value.position,
         } },
@@ -699,6 +705,7 @@ fn countUses(instruction: Ir.Instruction, uses: []usize) void {
         .class_cast => |value| useValue(uses, value.operand),
         .class_retain => |value| useValue(uses, value.operand),
         .class_drop => |value| useValue(uses, value.operand),
+        .list_retain, .list_drop => |value| useValue(uses, value.operand),
         .global_store => |value| useValue(uses, value.operand),
         .structure_init => |value| useValues(uses, value.fields),
         .protocol_init => |value| useValue(uses, value.operand),

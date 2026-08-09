@@ -263,7 +263,7 @@ pub fn analyzeCall(
         }
         if (parameter.mode != .read) try Borrowing.requireOwned(self, argument, call.arguments[index].position, "passed by value");
         const converted = try self.coerce(builder, argument, parameter.type, call.arguments[index].position);
-        if (parameter.mode == .value and Resources.containsClass(self, parameter.type)) {
+        if (parameter.mode == .value and Resources.requiresRetain(self, parameter.type)) {
             try Resources.retainValue(self, builder, parameter.type, converted.value);
         }
         try argument_ids.append(self.allocator, converted.value);
@@ -280,13 +280,13 @@ pub fn analyzeCall(
         .arguments = try argument_ids.toOwnedSlice(self.allocator),
     } });
     for (mutable_arguments.items) |prepared| try MutableReferences.writeBack(self, builder, prepared);
-    for (arguments.items) |argument| if (argument.transferred and Resources.containsClass(self, argument.type)) {
+    for (arguments.items) |argument| if (argument.transferred and Resources.requiresRetain(self, argument.type)) {
         try Resources.emitDrop(self, builder, argument.type, argument.value);
     };
     return .{
         .type = result_type,
         .value = result,
-        .transferred = Resources.containsClass(self, result_type) and !Resources.isClassType(self, result_type),
+        .transferred = Resources.requiresRetain(self, result_type) and !Resources.isClassType(self, result_type),
     };
 }
 
@@ -379,7 +379,7 @@ fn analyzeNamedCall(
         }
         if (parameter.mode != .read) try Borrowing.requireOwned(self, argument, source.position, "passed by value");
         const converted = try self.coerce(builder, argument, parameter.type, source.position);
-        if (parameter.mode == .value and Resources.containsClass(self, parameter.type)) try Resources.retainValue(self, builder, parameter.type, converted.value);
+        if (parameter.mode == .value and Resources.requiresRetain(self, parameter.type)) try Resources.retainValue(self, builder, parameter.type, converted.value);
         try ids.append(self.allocator, converted.value);
     }
     const result_type = Ast.Type.structure(structure_index);
@@ -387,14 +387,14 @@ fn analyzeNamedCall(
     try self.emit(builder, .{ .call = .{ .result = result, .function = constructorFunctionId(self.program, declaration.name, constructor_index), .arguments = try ids.toOwnedSlice(self.allocator) } });
     for (mutable_arguments.items) |prepared| try MutableReferences.writeBack(self, builder, prepared);
     for (typed) |maybe_argument| if (maybe_argument) |argument| {
-        if (argument.transferred and Resources.containsClass(self, argument.type)) {
+        if (argument.transferred and Resources.requiresRetain(self, argument.type)) {
             try Resources.emitDrop(self, builder, argument.type, argument.value);
         }
     };
     return .{
         .type = result_type,
         .value = result,
-        .transferred = Resources.containsClass(self, result_type) and !Resources.isClassType(self, result_type),
+        .transferred = Resources.requiresRetain(self, result_type) and !Resources.isClassType(self, result_type),
     };
 }
 
@@ -612,7 +612,7 @@ fn analyzeSelfAssignment(
         );
         return self.fail(assignment.value.?.position, message);
     }
-    if (Resources.containsClass(self, field.type)) {
+    if (Resources.requiresRetain(self, field.type)) {
         try Resources.retainValue(self, builder, field.type, value.value);
     }
 

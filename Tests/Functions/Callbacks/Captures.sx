@@ -1,0 +1,47 @@
+struct Action {
+    let run:func(int) int
+}
+
+func apply(value:int, callback:func(int) int) int { return callback(value) }
+
+test "anonymous callback captures immutable context" {
+    let base = 10
+    let multiplier = 3
+    let result = apply(4, func(value:int) int {
+        return base + value * multiplier
+    })
+
+    if result != 22 { panic("immutable callback captures") }
+}
+
+test "anonymous callback mutates surrounding context" {
+    var calls = 0
+    var total = 5
+    let result = apply(7, func(value:int) int {
+        calls++
+        total += value
+        return total
+    })
+
+    if result != 12 || total != 12 || calls != 1 { panic("mutable callback captures") }
+}
+
+test "copies of a closure share captured variables" {
+    var count = 0
+    var first = func(value:int) int {
+        count += value
+        return count
+    }
+    var second = first
+
+    if first(2) != 2 { panic("first closure call") }
+    if second(3) != 5 { panic("copied closure did not share capture") }
+    if count != 5 { panic("captured variable did not retain mutations") }
+}
+
+test "capturing callback stored in a local structure" {
+    let prefix = 40
+    let action = Action(run:func(value:int) int { return prefix + value })
+
+    if action.run(2) != 42 { panic("stored capturing callback") }
+}

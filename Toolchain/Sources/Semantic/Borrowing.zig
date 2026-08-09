@@ -43,6 +43,11 @@ pub fn analyzeIdentifier(self: anytype, builder: anytype, position: @import("../
 
 pub fn requireOwned(self: anytype, value: Model.TypedValue, position: @import("../Source.zig").Position, action: []const u8) !void {
     const root = value.borrowed_root orelse return;
+    // Reading a value through @T or &T already materializes its ordinary
+    // value representation. That copy is safe to store when it cannot carry
+    // a class identity or a borrowed view out of the reference capability.
+    if (!Resources.requiresRetain(self, value.type) and
+        !@import("Collections.zig").isViewType(self.structures, value.type)) return;
     const message = if (value.borrowed_mode == .read)
         try std.fmt.allocPrint(self.allocator, "read-reference parameter '{s}' cannot be {s}", .{ root, action })
     else

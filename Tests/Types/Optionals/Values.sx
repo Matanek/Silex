@@ -1,0 +1,41 @@
+struct OptionalPoint {
+    var x:int
+    func translate(amount:int) { self.x += amount }
+}
+
+func optional_value(present:bool) int? {
+    if present { return 42 }
+    return null
+}
+
+test "optional intrinsic promotion comparison and binding" {
+    let missing:int?
+    let present:int? = 7
+    if missing != null || present == null { panic("optional states") }
+
+    if value = optional_value(true) {
+        if value != 42 { panic("optional payload binding") }
+    } else { panic("present optional did not bind") }
+
+    if value = optional_value(false) { panic("missing optional bound as present") }
+}
+
+test "optional refinement and safe mutation" {
+    var point:OptionalPoint? = OptionalPoint(x:10)
+    if point != null {
+        if point.x != 10 { panic("optional refinement") }
+    }
+    point?.translate(5)
+    if point != null {
+        if point.x != 15 { panic("safe optional mutation") }
+    }
+}
+
+test "optionals compose with collections" {
+    let values:int?[] = [1, null, 3]
+    var total = 0
+    for value in values {
+        if item = value { total += item }
+    }
+    if total != 4 { panic("optional collection iteration") }
+}

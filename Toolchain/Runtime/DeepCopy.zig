@@ -2,6 +2,7 @@ const optional_flag: u64 = 0x80000000;
 const structure_base: u64 = 0x100;
 const scalar_limit: u64 = 13;
 const entry_words: usize = 4;
+const list_header_words: usize = 3;
 
 const Kind = enum(u64) {
     value,
@@ -119,11 +120,14 @@ fn cloneList(context: Context, source: [*]const u64, destination: [*]u64, elemen
     const original: [*]const u64 = @ptrFromInt(source[0]);
     const count: usize = @intCast(original[0]);
     const element_width = context.width(element_type);
-    const clone = allocate((1 + count * element_width) * @sizeOf(u64)) orelse return false;
+    const byte_count = (list_header_words + count * element_width) * @sizeOf(u64);
+    const clone = allocate(byte_count) orelse return false;
     clone[0] = count;
+    clone[1] = 1;
+    clone[2] = byte_count;
     destination[0] = @intFromPtr(clone);
     for (0..count) |index| {
-        const offset = 1 + index * element_width;
+        const offset = list_header_words + index * element_width;
         if (!cloneValue(context, original + offset, clone + offset, element_type)) return false;
     }
     return true;
@@ -213,7 +217,7 @@ fn cleanupProtocol(context: Context, value: [*]u64, data: [*]const u64) void {
 fn cleanupList(context: Context, value: [*]u64, element_type: u64) void {
     const list: [*]u64 = @ptrFromInt(value[0]);
     const width = context.width(element_type);
-    for (0..@as(usize, @intCast(list[0]))) |index| cleanupValue(context, list + 1 + index * width, element_type);
+    for (0..@as(usize, @intCast(list[0]))) |index| cleanupValue(context, list + list_header_words + index * width, element_type);
 }
 
 fn cleanupArray(context: Context, value: [*]u64, element_type: u64, count: usize) void {

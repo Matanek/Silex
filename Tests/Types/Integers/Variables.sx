@@ -1,0 +1,32 @@
+test "signed integer local variables" {
+    let a:int8 = -8
+    let b:int16 = -16
+    let c:int32 = -32
+    let d:int64 = -64
+    let e:int = -1
+    let intrinsic:int
+
+    if a as int != -8 || b as int != -16 || c as int != -32 { panic("narrow signed integers") }
+    if d != -64 || e != -1 || intrinsic != 0 { panic("wide signed integers") }
+}
+
+test "unsigned integer local variables" {
+    let a:uint8 = 8
+    let b:uint16 = 16
+    let c:uint32 = 32
+    let d:uint64 = 64
+    let e:uint = 1
+    let intrinsic:uint
+
+    if a as uint != 8 || b as uint != 16 || c as uint != 32 { panic("narrow unsigned integers") }
+    if d != 64 || e != 1 || intrinsic != 0 { panic("wide unsigned integers") }
+}
+
+test "integer literal forms and separators" {
+    let decimal = 1_000
+    let binary = 0b1010
+    let octal = 0o12
+    let hexadecimal = 0xFF
+
+    if decimal != 1000 || binary != 10 || octal != 10 || hexadecimal != 255 { panic("integer literal forms") }
+}

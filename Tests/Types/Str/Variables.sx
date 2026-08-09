@@ -1,0 +1,24 @@
+test "str local variables" {
+    let inferred = "Silex"
+    let explicit:str = "language"
+    var mutable = "solid"
+    var empty:str
+
+    mutable = "trusted"
+    empty = "ready"
+
+    assert(inferred == "Silex")
+    assert(explicit == "language")
+    assert(mutable == "trusted")
+    assert(empty == "ready")
+}
+
+test "str assignments preserve independent values" {
+    var first = "first"
+    var second = first
+
+    second = "second"
+
+    assert(first == "first")
+    assert(second == "second")
+}

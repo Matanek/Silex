@@ -232,6 +232,9 @@ fn analyzeCollectionFor(self: anytype, builder: anytype, function: Ast.Function,
         break :local value;
     };
     const owns_source = source_root == null and (Resources.needsDrop(self, source.type) or Resources.containsClass(self, source.type));
+    if (owns_source and Resources.requiresRetain(self, source.type) and !source.transferred) {
+        try Resources.retainValue(self, builder, source.type, source.value);
+    }
     if (owns_source) try builder.bindings.append(self.allocator, .{
         .name = "$for-source",
         .type = source.type,
@@ -268,7 +271,7 @@ fn analyzeCollectionFor(self: anytype, builder: anytype, function: Ast.Function,
     // A for binding is a value copy of the collection element. Dynamic list
     // loads only copy the stored bits, so class roots nested anywhere in that
     // value must be retained before the binding is dropped or written back.
-    if (Resources.containsClass(self, collection.element)) try Resources.retainValue(self, builder, collection.element, element);
+    if (Resources.requiresRetain(self, collection.element)) try Resources.retainValue(self, builder, collection.element, element);
     const binding_count = builder.bindings.items.len;
     if (loop.index_name) |name| try builder.bindings.append(self.allocator, .{
         .name = name,
@@ -712,7 +715,7 @@ fn writeCollectionElement(self: anytype, builder: anytype, collection_local: Ir.
     const collection = try loadLocalValue(self, builder, collection_local, collection_type);
     const index = try loadLocalValue(self, builder, index_local, .int);
     const element = try loadLocalValue(self, builder, element_local, element_type);
-    if (Resources.containsClass(self, element_type)) try Resources.retainValue(self, builder, element_type, element);
+    if (Resources.requiresRetain(self, element_type)) try Resources.retainValue(self, builder, element_type, element);
     if (Resources.needsDrop(self, element_type) or Resources.containsClass(self, element_type)) {
         const previous = try self.newValue(builder, element_type);
         try self.emit(builder, .{ .collection_load = .{ .result = previous, .collection = collection, .index = index, .position = position } });
@@ -787,7 +790,7 @@ pub fn analyzeCondition(self: anytype, builder: anytype, condition: Ast.Conditio
 pub fn enterBinding(self: anytype, builder: anytype, binding: BindingValue) !void {
     const value = try self.newValue(builder, binding.child_type);
     try self.emit(builder, .{ .optional_unwrap = .{ .result = value, .operand = binding.source.value } });
-    if (Resources.containsClass(self, binding.child_type)) {
+    if (Resources.requiresRetain(self, binding.child_type)) {
         try Resources.retainValue(self, builder, binding.child_type, value);
     }
     if (binding.declaration.mutable) {

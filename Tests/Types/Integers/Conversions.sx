@@ -1,0 +1,17 @@
+test "integer widening within one signedness family" {
+    let small:int8 = 10
+    let wide:int64 = small
+    let unsigned_small:uint8 = 20
+    let unsigned_wide:uint64 = unsigned_small
+
+    if wide != 10 || unsigned_wide != 20 { panic("integer widening") }
+}
+
+test "checked explicit integer conversions" {
+    let signed:int = 255
+    let byte = signed as uint8
+    let unsigned:uint = 127
+    let narrow = unsigned as int8
+
+    if byte != 255 || narrow != 127 { panic("explicit integer conversions") }
+}

@@ -301,6 +301,11 @@ fn lowerInstruction(
             lowerCopy(layout.values[copy.result], layout.values[copy.operand]),
         .class_cast => |cast| lowerCopy(layout.values[cast.result], layout.values[cast.operand]),
         .class_retain => |retain| .{ .class_retain = .{ .operand = layout.values[retain.operand].start } },
+        .list_retain => |retain| .{ .list_retain = .{ .operand = layout.values[retain.operand].start } },
+        .list_drop => |drop| .{ .list_drop = .{
+            .operand = layout.values[drop.operand].start,
+            .deallocate = drop.deallocate,
+        } },
         .class_drop => |drop| finalize: {
             const plans = try allocator.alloc(Machine.Instruction.ClassDrop.Plan, drop.plans.len);
             for (drop.plans, 0..) |plan, plan_index| {
@@ -428,6 +433,7 @@ fn lowerInstruction(
                 .index = if (edit.index) |index| layout.values[index].start else null,
                 .argument = if (edit.argument) |argument| layout.values[argument] else null,
                 .argument_dynamic = if (argument_collection) |argument| argument.length == null else false,
+                .argument_transferred = edit.argument_transferred,
                 .argument_count = if (argument_collection) |argument| @intCast(argument.length orelse 0) else 0,
                 .removed = if (edit.removed) |removed| layout.values[removed] else null,
                 .element_width = @intCast(try leafCount(program, collection.element)),

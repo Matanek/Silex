@@ -1,0 +1,45 @@
+func identity(value:str) str { return value }
+
+func matches(value:@str, expected:str) bool { return value == expected }
+
+func replace(value:&str, replacement:str) {
+    value = replacement
+}
+
+func append(value:&str, suffix:str = "!") {
+    value += suffix
+}
+
+func surround(value:str, prefix:str = "[", suffix:str = "]") str {
+    return prefix + value + suffix
+}
+
+test "str value and read parameters" {
+    var source = "source"
+    let copied = identity(source)
+    let observed = matches(source, "source")
+
+    source = "changed"
+
+    assert(copied == "source")
+    assert(observed)
+    assert(source == "changed")
+}
+
+test "str mutable parameters replace the caller value" {
+    var value = "before"
+
+    replace(value, "after")
+    assert(value == "after")
+
+    append(value)
+    assert(value == "after!")
+
+    append(value, "?")
+    assert(value == "after!?")
+}
+
+test "str named and default arguments" {
+    assert(surround("value") == "[value]")
+    assert(surround("value", suffix:">", prefix:"<") == "<value>")
+}

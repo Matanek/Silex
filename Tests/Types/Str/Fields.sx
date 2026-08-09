@@ -1,0 +1,46 @@
+struct Label {
+    var text:str
+}
+
+struct Panel {
+    var title:Label
+}
+
+class Configuration {
+    public var text:str
+}
+
+func read(value:str) str { return value }
+
+func edit(value:&str) {
+    value += "!"
+}
+
+test "str structure fields" {
+    var label = Label(text:"initial")
+
+    assert(read(label.text) == "initial")
+    label.text = "changed"
+    edit(label.text)
+
+    assert(label.text == "changed!")
+}
+
+test "str nested structure fields" {
+    var panel = Panel(title:Label(text:"title"))
+
+    assert(read(panel.title.text) == "title")
+    edit(panel.title.text)
+
+    assert(panel.title.text == "title!")
+}
+
+test "str class fields" {
+    var configuration = Configuration(text:"initial")
+
+    assert(read(configuration.text) == "initial")
+    configuration.text = "changed"
+    edit(configuration.text)
+
+    assert(configuration.text == "changed!")
+}

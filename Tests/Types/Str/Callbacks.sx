@@ -1,0 +1,54 @@
+struct Formatter {
+    let apply:func(str) str
+}
+
+func identity(value:str) str { return value }
+
+func matches(value:@str) bool { return value == "value" }
+
+func append(value:&str) {
+    value += "!"
+}
+
+func transform(value:str, callback:func(str) str) str {
+    return callback(value)
+}
+
+func observe(value:@str, callback:func(@str) bool) bool {
+    return callback(value)
+}
+
+func mutate(value:&str, callback:func(&str)) {
+    callback(value)
+}
+
+test "str named callbacks" {
+    var value = "value"
+
+    assert(transform(value, identity) == "value")
+    assert(observe(value, matches))
+
+    mutate(value, append)
+    assert(value == "value!")
+}
+
+test "str anonymous callbacks and captures" {
+    let suffix = "!"
+    var calls = 0
+
+    let result = transform("value", func(value:str) str {
+        calls += 1
+        return value + suffix
+    })
+
+    assert(result == "value!")
+    assert(calls == 1)
+}
+
+test "str callbacks stored in fields" {
+    let formatter = Formatter(apply:func(value:str) str {
+        return "[$(value)]"
+    })
+
+    assert(formatter.apply("value") == "[value]")
+}

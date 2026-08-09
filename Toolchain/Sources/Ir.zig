@@ -75,6 +75,8 @@ pub const Instruction = union(enum) {
     class_cast: Copy,
     class_retain: ClassRetain,
     class_drop: ClassDrop,
+    list_retain: ListResource,
+    list_drop: ListResource,
     global_load: GlobalLoad,
     global_store: GlobalStore,
     structure_init: StructureInit,
@@ -174,6 +176,10 @@ pub const Instruction = union(enum) {
     };
 
     pub const ClassRetain = struct { operand: ValueId };
+    pub const ListResource = struct {
+        operand: ValueId,
+        deallocate: bool = false,
+    };
 
     pub const ClassDrop = struct {
         operand: ValueId,
@@ -298,6 +304,7 @@ pub const Instruction = union(enum) {
         kind: ListEditKind,
         index: ?ValueId = null,
         argument: ?ValueId = null,
+        argument_transferred: bool = false,
         removed: ?ValueId = null,
         position: Source.Position,
     };
@@ -741,6 +748,14 @@ fn writeInstruction(
                 }
                 try output.append(allocator, ']');
             }
+        },
+        .list_retain => |retain| {
+            try output.appendSlice(allocator, "list.retain ");
+            try appendValueChecked(output, allocator, function, retain.operand);
+        },
+        .list_drop => |drop| {
+            try output.appendSlice(allocator, "list.drop ");
+            try appendValueChecked(output, allocator, function, drop.operand);
         },
         .global_load => |load| {
             try appendResult(output, allocator, program, function, load.result);

@@ -85,6 +85,8 @@ pub const Instruction = union(enum) {
     class_store: ClassStore,
     class_retain: ClassRetain,
     class_drop: ClassDrop,
+    list_retain: ListResource,
+    list_drop: ListResource,
     list_init: ListInit,
     enum_init: EnumInit,
     enum_test: EnumTest,
@@ -261,6 +263,10 @@ pub const Instruction = union(enum) {
     };
 
     pub const ClassRetain = struct { operand: Slot };
+    pub const ListResource = struct {
+        operand: Slot,
+        deallocate: bool = false,
+    };
 
     pub const ClassDrop = struct {
         operand: Slot,
@@ -342,6 +348,7 @@ pub const Instruction = union(enum) {
         index: ?Slot,
         argument: ?Span,
         argument_dynamic: bool = false,
+        argument_transferred: bool = false,
         argument_count: u32 = 0,
         removed: ?Span,
         element_width: u12,
@@ -707,6 +714,7 @@ pub fn validate(program: Program) Error!void {
                     try requireSpan(function, value.replacement);
                 },
                 .class_retain => |value| try requireSlot(function, value.operand),
+                .list_retain, .list_drop => |value| try requireSlot(function, value.operand),
                 .class_drop => |value| {
                     try requireSlot(function, value.operand);
                     for (value.plans) |plan| {

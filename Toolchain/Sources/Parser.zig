@@ -507,6 +507,7 @@ pub const Parser = struct {
             .minus_equal => .subtract,
             .star_equal => .multiply,
             .slash_equal => .divide,
+            .percent_equal => .remainder,
             .plus_plus => .increment,
             .minus_minus => .decrement,
             else => null,
@@ -1228,17 +1229,18 @@ test "parse every arithmetic assignment statement" {
         \\    value -= 3
         \\    value *= 4
         \\    value /= 5
+        \\    value %= 6
         \\    value++
         \\    value--
         \\}
     );
     const statements = (try parser.parse()).functions[0].statements;
-    const expected = [_]Ast.AssignmentOperator{ .add, .subtract, .multiply, .divide, .increment, .decrement };
+    const expected = [_]Ast.AssignmentOperator{ .add, .subtract, .multiply, .divide, .remainder, .increment, .decrement };
     for (expected, statements[1..]) |operator, statement| {
         try std.testing.expectEqual(operator, statement.assignment_statement.operator);
     }
-    try std.testing.expect(statements[5].assignment_statement.value == null);
     try std.testing.expect(statements[6].assignment_statement.value == null);
+    try std.testing.expect(statements[7].assignment_statement.value == null);
 }
 
 test "parse simple and nested field assignment targets" {

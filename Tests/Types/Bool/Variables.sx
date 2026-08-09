@@ -1,0 +1,19 @@
+test "bool local variables and intrinsic value" {
+    let intrinsic:bool
+    let inferred = true
+    var changed = false
+    changed = true
+
+    if intrinsic { panic("intrinsic bool must be false") }
+    if !inferred { panic("inferred bool") }
+    if !changed { panic("assigned bool") }
+}
+
+test "bool assignments preserve independent values" {
+    var source = true
+    var copied = source
+    copied = false
+
+    if !source { panic("source changed with its copy") }
+    if copied { panic("copy was not changed") }
+}

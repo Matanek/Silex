@@ -95,8 +95,15 @@ pub fn build(b: *std.Build) void {
 
     const tests = b.addTest(.{ .root_module = module });
     const test_command = b.addRunArtifact(tests);
-    const test_step = b.step("test", "Run compiler tests");
+    const language_test_command = b.addRunArtifact(executable);
+    language_test_command.addArg("test");
+    language_test_command.addDirectoryArg(b.path("../Tests"));
+    const language_test_step = b.step("test-language", "Run executable Silex language tests");
+    language_test_step.dependOn(&language_test_command.step);
+
+    const test_step = b.step("test", "Run compiler and Silex language tests");
     test_step.dependOn(&test_command.step);
+    test_step.dependOn(&language_test_command.step);
 
     const lsp_test_module = b.createModule(.{
         .root_source_file = b.path("Sources/LspTests.zig"),
@@ -111,4 +118,5 @@ pub fn build(b: *std.Build) void {
     const check_step = b.step("check", "Build and test the toolchain");
     check_step.dependOn(b.getInstallStep());
     check_step.dependOn(&test_command.step);
+    check_step.dependOn(&language_test_command.step);
 }

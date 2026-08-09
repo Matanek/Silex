@@ -30,7 +30,7 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
                 break :current value;
             };
             const replacement = try analyzeReplacement(self, builder, assignment, field.declaration.type, current, target.fields[0].name, false);
-            if (Resources.containsClass(self, field.declaration.type)) try Resources.retainValue(self, builder, field.declaration.type, replacement);
+            if (Resources.requiresRetain(self, field.declaration.type)) try Resources.retainValue(self, builder, field.declaration.type, replacement);
             if (Resources.needsDrop(self, field.declaration.type) or Resources.containsClass(self, field.declaration.type)) {
                 const previous = try self.newValue(builder, field.declaration.type);
                 try self.emit(builder, .{ .global_load = .{ .result = previous, .global = field.global } });
@@ -73,7 +73,7 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
         const current = if (assignment.operator == .assign) null else try loadBinding(self, builder, binding);
         const replacement = try analyzeReplacement(self, builder, assignment, binding.type, current, target.name, false);
         if (assignment.operator == .assign) {
-            if (Resources.containsClass(self, binding.type)) try Resources.retainValue(self, builder, binding.type, replacement);
+            if (Resources.requiresRetain(self, binding.type)) try Resources.retainValue(self, builder, binding.type, replacement);
             if (binding.available and (Resources.needsDrop(self, binding.type) or Resources.containsClass(self, binding.type))) {
                 try Resources.emitDrop(self, builder, binding.type, try loadBinding(self, builder, binding));
             }
@@ -158,7 +158,7 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
             .field => |step| self.structures[step.structure].is_class,
             .collection => false,
         } else false;
-        if (!class_owned_field and Resources.containsClass(self, current_type)) try Resources.retainValue(self, builder, current_type, replacement);
+        if (!class_owned_field and Resources.requiresRetain(self, current_type)) try Resources.retainValue(self, builder, current_type, replacement);
         if (Resources.needsDrop(self, current_type) or (!class_owned_field and Resources.containsClass(self, current_type))) {
             try Resources.emitDrop(self, builder, current_type, current_value);
         }
@@ -430,6 +430,14 @@ fn analyzeReplacement(
             );
         return self.fail(assignment.position, message);
     }
+    if (assignment.operator == .remainder and target_type.isFloat()) {
+        const message = try std.fmt.allocPrint(
+            self.allocator,
+            "operator '%=' requires an integer target, found '{s}'",
+            .{self.typeName(target_type)},
+        );
+        return self.fail(assignment.position, message);
+    }
     const right = switch (assignment.operator) {
         .increment, .decrement => try emitOne(self, builder, target_type),
         else => rhs: {
@@ -461,6 +469,7 @@ fn analyzeReplacement(
             .subtract, .decrement => .subtract,
             .multiply => .multiply,
             .divide => .divide,
+            .remainder => .remainder,
             .assign => unreachable,
         },
         .left = current.?,
@@ -516,6 +525,7 @@ fn operatorText(operator: Ast.AssignmentOperator) []const u8 {
         .subtract => "-=",
         .multiply => "*=",
         .divide => "/=",
+        .remainder => "%=",
         .increment => "++",
         .decrement => "--",
     };

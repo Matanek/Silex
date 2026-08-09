@@ -1,0 +1,25 @@
+test "floating point local variables and intrinsic values" {
+    let ordinary:float = 1.5
+    let single:float32 = 2.5
+    let precise:float64 = 3.5
+    let intrinsic32:float32
+    let intrinsic64:float64
+
+    if ordinary != 1.5 || single != 2.5 || precise != 3.5 { panic("floating values") }
+    if intrinsic32 != 0.0 || intrinsic64 != 0.0 { panic("intrinsic floating values") }
+}
+
+test "floating point exponent literals" {
+    let positive = 1.5e2
+    let negative:float64 = 2.5e-1
+
+    if positive != 150.0 || negative != 0.25 { panic("floating exponent literals") }
+}
+
+test "floating assignments preserve independent values" {
+    var source:float64 = 1.25
+    var copied = source
+    copied = 9.5
+
+    if source != 1.25 || copied != 9.5 { panic("floating assignment independence") }
+}

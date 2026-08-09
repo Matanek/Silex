@@ -1,0 +1,25 @@
+func dimensions() (width:int, height:int) { return (width:1280, height:720) }
+func bounds() (int, int) { return (-10, 10) }
+func swap(value:(int, int)) (int, int) {
+    let (first, second) = value
+    return (second, first)
+}
+
+test "named tuple fields return and destructuring" {
+    let size = dimensions()
+    let (width, height) = size
+
+    if size.width != 1280 || size.height != 720 { panic("named tuple fields") }
+    if width != 1280 || height != 720 { panic("named tuple destructuring") }
+}
+
+test "positional tuple parameters returns and collections" {
+    let reversed = swap(bounds())
+    let (maximum, minimum) = reversed
+    if maximum != 10 || minimum != -10 { panic("positional tuple transport") }
+
+    let samples:(int, bool)[2] = [(1, true), (2, false)]
+    let (first_number, first_flag) = samples[0]
+    let (second_number, second_flag) = samples[1]
+    if first_number != 1 || !first_flag || second_number != 2 || second_flag { panic("tuple collection positions") }
+}

@@ -1,0 +1,38 @@
+enum Connection {
+    waiting
+    connected(str)
+    closed(str)
+}
+
+enum Direction:int {
+    north = 1
+    south = -2
+}
+
+enum Outcome<T,E> {
+    success(T)
+    failure(E)
+}
+
+func describe(connection:Connection) str {
+    return match connection {
+        waiting => "waiting"
+        connected(name) => name
+        closed(reason) => reason
+    }
+}
+
+test "associated enum construction comparison and matching" {
+    let pending = Connection.waiting
+    let active = Connection.connected("server")
+    if describe(pending) != "waiting" || describe(active) != "server" { panic("enum matching") }
+    if active != Connection.connected("server") { panic("enum payload equality") }
+    if pending == Connection.closed("timeout") { panic("enum variant inequality") }
+}
+
+test "raw and generic enum positions" {
+    let code:int = Direction.south.raw_value
+    let result = Outcome<int,str>.success(42)
+    let value = match result { success(number) => number; failure(message) => message.count() }
+    if code != -2 || value != 42 { panic("raw or generic enum") }
+}

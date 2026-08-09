@@ -1,0 +1,27 @@
+class Counter {
+    public var value:int
+    public func increment() { self.value++ }
+}
+
+func mutate(counter:Counter) { counter.increment() }
+func observe(counter:@Counter) int { return counter.value }
+func replace(counter:&Counter, value:int) { counter = Counter(value:value) }
+
+test "class value parameters preserve shared identity" {
+    var first = Counter(value:1)
+    var alias = first
+    mutate(alias)
+
+    if first.value != 2 || observe(alias) != 2 { panic("shared class identity") }
+    if first != alias { panic("class identity equality") }
+}
+
+test "mutable class references can replace caller storage" {
+    var counter = Counter(value:1)
+    var previous = counter
+    replace(counter, 9)
+
+    if counter.value != 9 { panic("class reference replacement") }
+    if previous.value != 1 { panic("replaced class instance was mutated") }
+    if counter == previous { panic("replacement preserved old identity") }
+}

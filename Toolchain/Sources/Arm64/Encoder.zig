@@ -649,6 +649,17 @@ fn encodeFunction(
                 try Fixups.patch19(words.items, skip_finalization.still_referenced, done);
                 try Fixups.patch19(words.items, skip_finalization.already_dropped, done);
             },
+            .list_retain => |retain| try ListRuntime.emitRetain(allocator, words, retain),
+            .list_drop => |drop| try ListRuntime.emitDrop(
+                allocator,
+                words,
+                external_call_sites,
+                switch (platform) {
+                    .darwin => .darwin,
+                    .windows => .windows,
+                },
+                drop,
+            ),
             .list_init => |initialization| try ListRuntime.emitInit(allocator, words, &fixups.epilogue, external_call_sites, @enumFromInt(@intFromEnum(platform)), initialization),
             .enum_init => |initialization| {
                 try emitImmediate64(allocator, words, .x9, initialization.tag);
@@ -870,12 +881,13 @@ fn encodeFunction(
             },
             .branch => |branch_value| {
                 try loadValue(allocator, words, function, .x9, branch_value.condition);
+                try words.append(allocator, compareBranchZero(.x9) | (2 << 5));
                 try control_fixups.append(allocator, .{
                     .at = words.items.len,
                     .target = branch_value.then_instruction,
-                    .width = .imm19,
+                    .width = .imm26,
                 });
-                try words.append(allocator, compareBranchNonZero(.x9));
+                try words.append(allocator, branch());
                 try control_fixups.append(allocator, .{
                     .at = words.items.len,
                     .target = branch_value.else_instruction,
@@ -1849,8 +1861,22 @@ fn appendFixup(
     instruction: u32,
     width: FixupWidth,
 ) Allocator.Error!void {
-    try fixups.append(allocator, .{ .at = words.items.len, .width = width });
-    try words.append(allocator, instruction);
+    switch (width) {
+        .imm19 => {
+            try words.append(allocator, invertConditionalBranch(instruction) | (2 << 5));
+            try fixups.append(allocator, .{ .at = words.items.len, .width = .imm26 });
+            try words.append(allocator, branch());
+        },
+        .imm26 => {
+            try fixups.append(allocator, .{ .at = words.items.len, .width = .imm26 });
+            try words.append(allocator, instruction);
+        },
+    }
+}
+
+fn invertConditionalBranch(instruction: u32) u32 {
+    const is_compare_branch = instruction & 0x7e000000 == 0x34000000;
+    return instruction ^ if (is_compare_branch) @as(u32, 1 << 24) else 1;
 }
 
 fn patchLocal(words: []u32, fixup: LocalFixup, target: usize) Error!void {

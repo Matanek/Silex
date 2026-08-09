@@ -440,7 +440,7 @@ pub const Analyzer = struct {
         var infos: std.ArrayList(AnonymousCapture) = .empty;
         var values: std.ArrayList(Ir.ValueId) = .empty;
         for (builder.bindings.items) |binding| {
-            if (!binding.available or !functionMentionsName(self.program.functions[function_id], binding.name)) continue;
+            if (!binding.available or !functionMentionsName(self.program, self.program.functions[function_id], binding.name)) continue;
             const reference = if (binding.reference) |existing|
                 existing
             else if (binding.local) |local| reference: {
@@ -1399,7 +1399,7 @@ pub const Analyzer = struct {
             }
             if (parameter.mode != .read) try Borrowing.requireOwned(self, argument, call.arguments[index].position, "passed by value");
             const converted = try self.coerce(builder, argument, parameter.type, call.name_position);
-            if (parameter.mode == .value and Resources.containsClass(self, parameter.type)) {
+            if (parameter.mode == .value and Resources.requiresRetain(self, parameter.type)) {
                 try Resources.retainValue(self, builder, parameter.type, converted.value);
             }
             try argument_ids.append(self.allocator, converted.value);
@@ -1428,14 +1428,14 @@ pub const Analyzer = struct {
             .arguments = try argument_ids.toOwnedSlice(self.allocator),
         } });
         for (mutable_arguments.items) |argument| try MutableReferences.writeBack(self, builder, argument.prepared);
-        for (arguments.items) |argument| if (argument.transferred and Resources.containsClass(self, argument.type)) {
+        for (arguments.items) |argument| if (argument.transferred and Resources.requiresRetain(self, argument.type)) {
             try Resources.emitDrop(self, builder, argument.type, argument.value);
         };
         if (result == null) return null;
         if (function.return_mode == .value) return .{
             .type = function.return_type,
             .value = result.?,
-            .transferred = Resources.containsClass(self, function.return_type),
+            .transferred = Resources.requiresRetain(self, function.return_type),
         };
         const provenance = function.return_provenance.?;
         var parameter_index: ?usize = null;
@@ -1671,109 +1671,156 @@ pub const Analyzer = struct {
     }
 };
 
-fn functionMentionsName(function: Ast.Function, name: []const u8) bool {
+fn functionMentionsName(program: Ast.Program, function: Ast.Function, name: []const u8) bool {
     for (function.parameters) |parameter| if (std.mem.eql(u8, parameter.name, name)) return false;
-    return statementsMentionName(function.statements, name);
+    return statementsMentionFreeName(program, function.statements, name, false);
 }
 
-fn statementsMentionName(statements: []const Ast.Statement, name: []const u8) bool {
+fn statementsMentionName(program: Ast.Program, statements: []const Ast.Statement, name: []const u8) bool {
+    return statementsMentionFreeName(program, statements, name, false);
+}
+
+fn statementsMentionFreeName(
+    program: Ast.Program,
+    statements: []const Ast.Statement,
+    name: []const u8,
+    initially_shadowed: bool,
+) bool {
+    var shadowed = initially_shadowed;
     for (statements) |statement| switch (statement) {
         .variable_declaration => |declaration| {
-            if (declaration.initializer) |value| if (expressionMentionsName(value, name)) return true;
+            if (!shadowed) if (declaration.initializer) |value| if (expressionMentionsName(program, value, name)) return true;
+            if (std.mem.eql(u8, declaration.name, name)) shadowed = true;
+            for (declaration.destructuring) |binding| if (std.mem.eql(u8, binding.name, name)) {
+                shadowed = true;
+                break;
+            };
         },
         .assignment_statement => |assignment| {
-            if (std.mem.eql(u8, assignment.target.name, name)) return true;
-            for (assignment.target.indices) |index| if (expressionMentionsName(index.value, name)) return true;
-            if (assignment.value) |value| if (expressionMentionsName(value, name)) return true;
+            if (!shadowed) {
+                if (std.mem.eql(u8, assignment.target.name, name)) return true;
+                for (assignment.target.indices) |index| if (expressionMentionsName(program, index.value, name)) return true;
+                if (assignment.value) |value| if (expressionMentionsName(program, value, name)) return true;
+            }
         },
         .return_statement => |return_value| if (return_value.value) |value| {
-            if (expressionMentionsName(value, name)) return true;
+            if (!shadowed and expressionMentionsName(program, value, name)) return true;
         },
-        .expression_statement => |expression| if (expressionMentionsName(expression, name)) return true,
+        .expression_statement => |expression| if (!shadowed and expressionMentionsName(program, expression, name)) return true,
         .print_statement => |print_value| for (print_value.values) |value| {
-            if (expressionMentionsName(value, name)) return true;
+            if (!shadowed and expressionMentionsName(program, value, name)) return true;
         },
         .assert_statement => |assertion| {
-            if (expressionMentionsName(assertion.condition, name) or expressionMentionsName(assertion.message, name)) return true;
+            if (!shadowed and (expressionMentionsName(program, assertion.condition, name) or expressionMentionsName(program, assertion.message, name))) return true;
         },
-        .panic_statement => |panic_value| if (expressionMentionsName(panic_value.value, name)) return true,
+        .panic_statement => |panic_value| if (!shadowed and expressionMentionsName(program, panic_value.value, name)) return true,
         .if_statement => |conditional| {
             for (conditional.branches) |branch| {
-                if (expressionMentionsName(branch.condition.source(), name) or statementsMentionName(branch.statements, name)) return true;
+                if (!shadowed and expressionMentionsName(program, branch.condition.source(), name)) return true;
+                const branch_shadowed = shadowed or switch (branch.condition) {
+                    .binding => |binding| std.mem.eql(u8, binding.name, name),
+                    .expression => false,
+                };
+                if (statementsMentionFreeName(program, branch.statements, name, branch_shadowed)) return true;
             }
-            if (conditional.else_statements) |alternative| if (statementsMentionName(alternative, name)) return true;
+            if (conditional.else_statements) |alternative| if (statementsMentionFreeName(program, alternative, name, shadowed)) return true;
         },
         .while_statement => |loop| {
-            if (expressionMentionsName(loop.condition.source(), name) or statementsMentionName(loop.statements, name)) return true;
+            if (!shadowed and expressionMentionsName(program, loop.condition.source(), name)) return true;
+            const body_shadowed = shadowed or switch (loop.condition) {
+                .binding => |binding| std.mem.eql(u8, binding.name, name),
+                .expression => false,
+            };
+            if (statementsMentionFreeName(program, loop.statements, name, body_shadowed)) return true;
         },
         .for_statement => |loop| {
-            switch (loop.source) {
-                .collection => |collection| if (expressionMentionsName(collection, name)) return true,
-                .range => |range| if (expressionMentionsName(range.start, name) or expressionMentionsName(range.end, name)) return true,
-            }
-            if (statementsMentionName(loop.statements, name)) return true;
+            if (!shadowed) switch (loop.source) {
+                .collection => |collection| if (expressionMentionsName(program, collection, name)) return true,
+                .range => |range| if (expressionMentionsName(program, range.start, name) or expressionMentionsName(program, range.end, name)) return true,
+            };
+            var body_shadowed = shadowed or std.mem.eql(u8, loop.name, name);
+            if (loop.index_name) |index_name| body_shadowed = body_shadowed or std.mem.eql(u8, index_name, name);
+            for (loop.bindings) |binding| if (std.mem.eql(u8, binding.name, name)) {
+                body_shadowed = true;
+                break;
+            };
+            if (statementsMentionFreeName(program, loop.statements, name, body_shadowed)) return true;
         },
-        .mutex_statement => |mutex| if (statementsMentionName(mutex.statements, name)) return true,
+        .mutex_statement => |mutex| if (statementsMentionFreeName(program, mutex.statements, name, shadowed)) return true,
         .break_statement, .continue_statement => {},
     };
     return false;
 }
 
-fn expressionMentionsName(expression: *const Ast.Expression, name: []const u8) bool {
+fn expressionMentionsName(program: Ast.Program, expression: *const Ast.Expression, name: []const u8) bool {
     return switch (expression.value) {
-        .identifier => |identifier| std.mem.eql(u8, identifier, name),
+        .identifier => |identifier| mention: {
+            if (std.mem.eql(u8, identifier, name)) break :mention true;
+            for (program.functions) |nested| {
+                if (nested.is_anonymous and anonymousNameMatches(nested.name, identifier)) {
+                    break :mention functionMentionsName(program, nested, name);
+                }
+            }
+            break :mention false;
+        },
         .generic_reference => |reference| std.mem.eql(u8, reference.name, name),
         .call => |call| mentions: {
-            if (call.receiver) |receiver| if (expressionMentionsName(receiver, name)) break :mentions true;
+            if (call.receiver) |receiver| if (expressionMentionsName(program, receiver, name)) break :mentions true;
             if (std.mem.eql(u8, call.name, name)) break :mentions true;
-            for (call.arguments) |argument| if (expressionMentionsName(argument, name)) break :mentions true;
-            for (call.named_arguments) |argument| if (expressionMentionsName(argument.value, name)) break :mentions true;
+            for (call.arguments) |argument| if (expressionMentionsName(program, argument, name)) break :mentions true;
+            for (call.named_arguments) |argument| if (expressionMentionsName(program, argument.value, name)) break :mentions true;
             break :mentions false;
         },
         .cascade => |cascade| mentions: {
-            if (expressionMentionsName(cascade.receiver, name)) break :mentions true;
+            if (expressionMentionsName(program, cascade.receiver, name)) break :mentions true;
             for (cascade.operations) |operation| switch (operation) {
                 .method_call => |call| {
-                    for (call.arguments) |argument| if (expressionMentionsName(argument, name)) break :mentions true;
-                    for (call.named_arguments) |argument| if (expressionMentionsName(argument.value, name)) break :mentions true;
+                    for (call.arguments) |argument| if (expressionMentionsName(program, argument, name)) break :mentions true;
+                    for (call.named_arguments) |argument| if (expressionMentionsName(program, argument.value, name)) break :mentions true;
                 },
-                .field_assignment => |assignment| if (expressionMentionsName(assignment.value, name)) break :mentions true,
+                .field_assignment => |assignment| if (expressionMentionsName(program, assignment.value, name)) break :mentions true,
             };
             break :mentions false;
         },
-        .field_access => |access| expressionMentionsName(access.base, name),
-        .unary => |unary| expressionMentionsName(unary.operand, name) or
-            (if (unary.try_alternative) |alternative| if (alternative.message) |message| expressionMentionsName(message, name) else if (alternative.statements) |statements| statementsMentionName(statements, name) else false else false),
-        .binary => |binary| expressionMentionsName(binary.left, name) or expressionMentionsName(binary.right, name),
-        .conversion => |conversion| expressionMentionsName(conversion.operand, name),
-        .string_count => |value| expressionMentionsName(value, name),
+        .field_access => |access| expressionMentionsName(program, access.base, name),
+        .unary => |unary| expressionMentionsName(program, unary.operand, name) or
+            (if (unary.try_alternative) |alternative| if (alternative.message) |message| expressionMentionsName(program, message, name) else if (alternative.statements) |statements| statementsMentionName(program, statements, name) else false else false),
+        .binary => |binary| expressionMentionsName(program, binary.left, name) or expressionMentionsName(program, binary.right, name),
+        .conversion => |conversion| expressionMentionsName(program, conversion.operand, name),
+        .string_count => |value| expressionMentionsName(program, value, name),
         .sequence_literal => |sequence| mentions: {
-            for (sequence.values) |value| if (expressionMentionsName(value, name)) break :mentions true;
+            for (sequence.values) |value| if (expressionMentionsName(program, value, name)) break :mentions true;
             break :mentions false;
         },
         .tuple_literal => |tuple| mentions: {
-            for (tuple.elements) |element| if (expressionMentionsName(element.value, name)) break :mentions true;
+            for (tuple.elements) |element| if (expressionMentionsName(program, element.value, name)) break :mentions true;
             break :mentions false;
         },
-        .index_access => |access| expressionMentionsName(access.base, name) or expressionMentionsName(access.index, name),
-        .slice_access => |access| expressionMentionsName(access.base, name) or expressionMentionsName(access.start, name) or expressionMentionsName(access.end, name),
+        .index_access => |access| expressionMentionsName(program, access.base, name) or expressionMentionsName(program, access.index, name),
+        .slice_access => |access| expressionMentionsName(program, access.base, name) or expressionMentionsName(program, access.start, name) or expressionMentionsName(program, access.end, name),
         .interpolated_string => |interpolation| mentions: {
             for (interpolation.parts) |part| switch (part) {
-                .expression => |value| if (expressionMentionsName(value, name)) break :mentions true,
+                .expression => |value| if (expressionMentionsName(program, value, name)) break :mentions true,
                 .text => {},
             };
             break :mentions false;
         },
         .match_expression => |match_value| mentions: {
-            if (expressionMentionsName(match_value.subject, name)) break :mentions true;
+            if (expressionMentionsName(program, match_value.subject, name)) break :mentions true;
             for (match_value.branches) |branch| {
-                if (branch.value) |value| if (expressionMentionsName(value, name)) break :mentions true;
-                if (branch.statements) |statements| if (statementsMentionName(statements, name)) break :mentions true;
+                if (branch.value) |value| if (expressionMentionsName(program, value, name)) break :mentions true;
+                if (branch.statements) |statements| if (statementsMentionName(program, statements, name)) break :mentions true;
             }
             break :mentions false;
         },
         .integer, .floating, .boolean, .null_value, .string => false,
     };
+}
+
+fn anonymousNameMatches(candidate: []const u8, requested: []const u8) bool {
+    if (std.mem.eql(u8, candidate, requested)) return true;
+    if (!std.mem.endsWith(u8, candidate, requested) or candidate.len == requested.len) return false;
+    return candidate[candidate.len - requested.len - 1] == '.';
 }
 
 fn conversionCost(self: *Analyzer, source: Types.Type, target: Types.Type) ?u8 {

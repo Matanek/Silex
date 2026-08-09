@@ -1,0 +1,16 @@
+test "floating precision widening" {
+    let single:float32 = 1.5
+    let precise:float64 = single
+
+    if precise != 1.5 { panic("float32 to float64 widening") }
+}
+
+test "checked explicit numeric conversions" {
+    let integer = 42
+    let as_float = integer as float64
+    let precise:float64 = 12.0
+    let as_integer = precise as int
+    let narrowed = as_float as float32
+
+    if as_float != 42.0 || as_integer != 12 || narrowed != 42.0 { panic("explicit numeric conversions") }
+}

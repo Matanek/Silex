@@ -491,7 +491,7 @@ fn analyzeCallWithReceiver(
         }
         if (parameter.mode != .read) try Borrowing.requireOwned(self, argument, call.arguments[index].position, "passed by value");
         const converted = try self.coerce(builder, argument, parameter.type, call.arguments[index].position);
-        if (parameter.mode == .value and Resources.containsClass(self, parameter.type)) {
+        if (parameter.mode == .value and Resources.requiresRetain(self, parameter.type)) {
             try Resources.retainValue(self, builder, parameter.type, converted.value);
         }
         try argument_ids.append(self.allocator, converted.value);
@@ -524,10 +524,10 @@ fn analyzeCallWithReceiver(
         .implementations = implementations,
     } });
     for (mutable_arguments.items) |prepared| try MutableReferences.writeBack(self, builder, prepared);
-    for (arguments.items) |argument| if (argument.transferred and Resources.containsClass(self, argument.type)) {
+    for (arguments.items) |argument| if (argument.transferred and Resources.requiresRetain(self, argument.type)) {
         try Resources.emitDrop(self, builder, argument.type, argument.value);
     };
-    if (receiver.transferred and Resources.containsClass(self, receiver.type)) {
+    if (receiver.transferred and Resources.requiresRetain(self, receiver.type)) {
         try Resources.emitDrop(self, builder, receiver.type, receiver.value);
     }
 
@@ -544,7 +544,7 @@ fn analyzeCallWithReceiver(
             .value = value,
             .borrowed_root = if (method.return_mode == .read) receiver.borrowed_root orelse Borrowing.rootName(receiver_expression) else null,
             .borrowed_mode = method.return_mode,
-            .transferred = method.return_mode == .value and Resources.containsClass(self, method.return_type),
+            .transferred = method.return_mode == .value and Resources.requiresRetain(self, method.return_type),
         };
         return null;
     }
@@ -571,7 +571,7 @@ fn analyzeCallWithReceiver(
         return .{
             .type = method.return_type,
             .value = value,
-            .transferred = Resources.containsClass(self, method.return_type) or if (method.intrinsic) |intrinsic| switch (intrinsic) {
+            .transferred = Resources.requiresRetain(self, method.return_type) or if (method.intrinsic) |intrinsic| switch (intrinsic) {
                 .resource_remove => true,
                 else => false,
             } else false,
@@ -589,7 +589,7 @@ fn analyzeCallWithReceiver(
     return .{
         .type = method.return_type,
         .value = value,
-        .transferred = Resources.containsClass(self, method.return_type),
+        .transferred = Resources.requiresRetain(self, method.return_type),
     };
 }
 
@@ -712,7 +712,7 @@ fn analyzeNamedCall(
         }
         if (parameter.mode != .read) try Borrowing.requireOwned(self, argument, source.position, "passed by value");
         const converted = try self.coerce(builder, argument, parameter.type, source.position);
-        if (parameter.mode == .value and Resources.containsClass(self, parameter.type)) try Resources.retainValue(self, builder, parameter.type, converted.value);
+        if (parameter.mode == .value and Resources.requiresRetain(self, parameter.type)) try Resources.retainValue(self, builder, parameter.type, converted.value);
         try ids.append(self.allocator, converted.value);
     }
     const ir_return_type = methodIrReturnType(self, structure_index, flat, method);
@@ -737,11 +737,11 @@ fn analyzeNamedCall(
     } });
     for (mutable_arguments.items) |prepared| try MutableReferences.writeBack(self, builder, prepared);
     for (typed) |maybe_argument| if (maybe_argument) |argument| {
-        if (argument.transferred and Resources.containsClass(self, argument.type)) {
+        if (argument.transferred and Resources.requiresRetain(self, argument.type)) {
             try Resources.emitDrop(self, builder, argument.type, argument.value);
         }
     };
-    if (receiver.transferred and Resources.containsClass(self, receiver.type)) try Resources.emitDrop(self, builder, receiver.type, receiver.value);
+    if (receiver.transferred and Resources.requiresRetain(self, receiver.type)) try Resources.emitDrop(self, builder, receiver.type, receiver.value);
     if (borrowed_mutable) {
         try MutableReferences.writeBack(self, builder, borrowed_receiver.?);
         const root = receiver.borrowed_root orelse Borrowing.rootName(receiver_expression) orelse return self.fail(receiver_expression.position, "borrowed return cannot originate from a temporary");
@@ -755,7 +755,7 @@ fn analyzeNamedCall(
             .value = value,
             .borrowed_root = if (method.return_mode == .read) receiver.borrowed_root orelse Borrowing.rootName(receiver_expression) else null,
             .borrowed_mode = method.return_mode,
-            .transferred = method.return_mode == .value and Resources.containsClass(self, method.return_type),
+            .transferred = method.return_mode == .value and Resources.requiresRetain(self, method.return_type),
         };
         return null;
     }
@@ -779,7 +779,7 @@ fn analyzeNamedCall(
         }
         const value = try self.newValue(builder, method.return_type);
         try self.emit(builder, .{ .field_load = .{ .result = value, .base = call_result.?, .field = 1 } });
-        return .{ .type = method.return_type, .value = value, .transferred = Resources.containsClass(self, method.return_type) };
+        return .{ .type = method.return_type, .value = value, .transferred = Resources.requiresRetain(self, method.return_type) };
     }
     const updated_receiver = try self.newValue(builder, receiver.type);
     try self.emit(builder, .{ .field_load = .{ .result = updated_receiver, .base = call_result.?, .field = 0 } });
@@ -790,7 +790,7 @@ fn analyzeNamedCall(
     try writePlace(self, builder, place.?, replacement);
     const value = try self.newValue(builder, method.return_type);
     try self.emit(builder, .{ .field_load = .{ .result = value, .base = call_result.?, .field = 1 } });
-    return .{ .type = method.return_type, .value = value, .transferred = Resources.containsClass(self, method.return_type) };
+    return .{ .type = method.return_type, .value = value, .transferred = Resources.requiresRetain(self, method.return_type) };
 }
 
 fn failArgumentProblem(self: anytype, call: Ast.Expression.Call, problem: Arguments.Problem) !void {
@@ -1215,7 +1215,7 @@ fn emitMutatingReturn(
 ) !void {
     try Resources.emitActiveDrops(self, builder, 0);
     try Resources.emitMutexUnlocks(self, builder, 0);
-    if (value) |returned| if (Resources.containsClass(self, method.return_type)) {
+    if (value) |returned| if (Resources.requiresRetain(self, method.return_type)) {
         try Resources.retainValue(self, builder, method.return_type, returned);
     };
     const receiver_type = Ast.Type.structure(structure_index);

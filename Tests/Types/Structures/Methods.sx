@@ -1,0 +1,30 @@
+struct Counter {
+    var value:int
+
+    func increment(amount:int = 1) { self.value += amount }
+    func current() int { return self.value }
+    static func starting(at:int) Counter { return Counter(value:at) }
+}
+
+struct Pair<T> {
+    let first:T
+    let second:T
+}
+
+test "structure instance and static methods" {
+    var counter = Counter.starting(at:10)
+    counter.increment()
+    counter.increment(amount:4)
+
+    if counter.current() != 15 { panic("structure methods") }
+}
+
+test "generic structure positions" {
+    let pair = Pair<int>(first:10, second:20)
+    // Current limit: a nominal collection needs a type annotation when its
+    // first element is a variable rather than a syntactically typed literal.
+    let pairs:Pair<int>[] = [pair, Pair<int>(first:30, second:40)]
+    var total = 0
+    for value in pairs { total += value.first + value.second }
+    if total != 100 { panic("generic structures in collections") }
+}

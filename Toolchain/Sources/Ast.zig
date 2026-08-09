@@ -229,6 +229,7 @@ pub const AssignmentOperator = enum {
     subtract,
     multiply,
     divide,
+    remainder,
     increment,
     decrement,
 };

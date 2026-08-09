@@ -14,7 +14,12 @@ print(inspect(box))
 
 `@T` expresses read intent for the borrowed path. The function may read it or
 forward it to another `@T`; it cannot mutate, move, store, or return that
-capability directly.
+capability directly. It may return an ordinary copy when `T` is a value that
+cannot expose a reached class reference:
+
+```sx
+func copied(value:@int) int { return value }
+```
 
 For a class, fields and methods reached through the borrowed path remain
 read-only. An independent alias may still change the same instance: `@` is not
@@ -37,6 +42,10 @@ print(count) // 2
 
 For a class, an ordinary `Class` parameter may mutate the shared instance but
 cannot replace the caller's reference. `&Class` may do both.
+
+Like `@T`, `&T` may produce an ordinary value copy when doing so cannot leak a
+borrowed capability. Returning `@T` or `&T` explicitly remains the way to
+return an alias rather than a copy.
 
 ## Return a borrow
 

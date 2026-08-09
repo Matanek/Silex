@@ -1,0 +1,42 @@
+struct Color {
+    let red:uint8
+    let green:uint8
+    let blue:uint8
+}
+
+struct Theme {
+    var background:Color
+}
+
+class Settings {
+    public var background:Color
+}
+
+func red(color:Color) uint8 { return color.red }
+func observe(color:@Color) uint8 { return color.green }
+func brighten(color:&Color) { color = Color(red:color.red, green:color.green, blue:255) }
+func make_color() Color { return Color(red:10, green:20, blue:30) }
+
+test "copyable structure in every ordinary value position" {
+    var local_color = make_color()
+    var theme = Theme(background:local_color)
+    var settings = Settings(background:theme.background)
+    let values:Color[] = [local_color, theme.background, settings.background]
+
+    if red(local_color) != 10 { panic("local value argument") }
+    if red(theme.background) != 10 { panic("structure field value argument") }
+    if red(settings.background) != 10 { panic("class field value argument must not require copy") }
+    if observe(values[1]) != 20 { panic("collection element read argument") }
+
+    brighten(settings.background)
+    if settings.background.blue != 255 { panic("class field mutable argument") }
+}
+
+test "structure fields copy independently" {
+    var first = Theme(background:Color(red:1, green:2, blue:3))
+    var second = first
+    second.background = Color(red:9, green:8, blue:7)
+
+    if first.background.red != 1 { panic("source structure changed with copy") }
+    if second.background.red != 9 { panic("copied structure did not change") }
+}

@@ -137,7 +137,7 @@ pub fn call(self: anytype, builder: anytype, call_value: Ast.Expression.Call) !?
         } else {
             if (parameter.mode == .value) try Borrowing.requireOwned(self, argument, expression.position, "passed by value");
             const converted = try self.coerce(builder, argument, parameter.type, expression.position);
-            if (parameter.mode == .value and Resources.containsClass(self, parameter.type)) {
+            if (parameter.mode == .value and Resources.requiresRetain(self, parameter.type)) {
                 try Resources.retainValue(self, builder, parameter.type, converted.value);
             }
             try arguments.append(self.allocator, converted.value);

@@ -1,5 +1,6 @@
 pub const Symbol = enum {
     virtual_alloc,
+    virtual_free,
     process_prng,
     query_performance_counter,
     query_performance_frequency,
@@ -76,6 +77,7 @@ pub const Symbol = enum {
     pub fn sourceName(self: Symbol) []const u8 {
         return switch (self) {
             .virtual_alloc => "VirtualAlloc",
+            .virtual_free => "VirtualFree",
             .process_prng => "ProcessPrng",
             .query_performance_counter => "QueryPerformanceCounter",
             .query_performance_frequency => "QueryPerformanceFrequency",
@@ -153,7 +155,7 @@ pub const Symbol = enum {
 
     pub fn libraryName(self: Symbol) []const u8 {
         return switch (self) {
-            .virtual_alloc => "KERNEL32.dll",
+            .virtual_alloc, .virtual_free => "KERNEL32.dll",
             .process_prng => "bcryptprimitives.dll",
             .query_performance_counter, .query_performance_frequency, .get_system_time_as_file_time => "KERNEL32.dll",
             .crt_write, .crt_read, .crt_isatty, .crt_wopen, .crt_close, .crt_commit, .crt_lseeki64, .crt_chsize_s, .crt_p_argc, .crt_p_wargv => "ucrtbase.dll",

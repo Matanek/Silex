@@ -1,0 +1,37 @@
+test "str fixed arrays and lists" {
+    var fixed:str[2] = ["first", "second"]
+    var values:str[] = ["one", "two", "three"]
+
+    fixed[1] = "changed"
+    values[0] += "!"
+    values.append("four")
+
+    assert(fixed[0] == "first")
+    assert(fixed[1] == "changed")
+    assert(values.count() == 4)
+    assert(values[0] == "one!")
+    assert(values[-1] == "four")
+}
+
+test "str collections preserve copied values" {
+    var source = "initial"
+    // A variable first element does not currently infer the list element type.
+    var values:str[] = [source]
+
+    source = "changed"
+    values[0] += "!"
+
+    assert(source == "changed")
+    assert(values[0] == "initial!")
+}
+
+test "str list iteration is complete" {
+    let values = ["a", "b", "c"]
+    var result = ""
+
+    for value in values {
+        result += value
+    }
+
+    assert(result == "abc")
+}

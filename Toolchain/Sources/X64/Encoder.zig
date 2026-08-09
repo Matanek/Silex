@@ -395,7 +395,7 @@ fn encodeFunction(
                 try emitClassLoad(allocator, bytes, value);
             },
             .class_store => |value| try emitClassStore(allocator, bytes, value),
-            .class_retain, .class_drop => {},
+            .class_retain, .class_drop, .list_retain, .list_drop => {},
             .enum_init => |initialization| {
                 try emitImmediate(allocator, bytes, .rax, initialization.tag);
                 for (0..initialization.result.width) |index| {

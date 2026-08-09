@@ -18,6 +18,31 @@ pub fn containsClass(self: anytype, type_value: Ast.Type) bool {
     return containsClassInner(self, type_value, 0);
 }
 
+pub fn requiresRetain(self: anytype, type_value: Ast.Type) bool {
+    return requiresRetainInner(self, type_value, 0);
+}
+
+fn requiresRetainInner(self: anytype, type_value: Ast.Type, depth: usize) bool {
+    if (depth > self.structures.len + self.enums.len + 1) return false;
+    if (type_value.optionalChild()) |child| return requiresRetainInner(self, child, depth + 1);
+    const index = type_value.structureIndex() orelse return false;
+    if (index >= self.structures.len) return false;
+    const structure = self.structures[index];
+    if (structure.is_protocol or structure.is_class) return true;
+    if (structure.collection) |collection| {
+        if (collection.view) return false;
+        return collection.length == null or requiresRetainInner(self, collection.element, depth + 1);
+    }
+    for (self.enums) |enumeration| if (enumeration.type_index == index) {
+        for (enumeration.variants) |variant| for (variant.associated_types) |associated| {
+            if (requiresRetainInner(self, associated, depth + 1)) return true;
+        };
+        return false;
+    };
+    for (structure.fields) |field| if (requiresRetainInner(self, field.type, depth + 1)) return true;
+    return false;
+}
+
 fn containsClassInner(self: anytype, type_value: Ast.Type, depth: usize) bool {
     if (depth > self.structures.len + self.enums.len + 1) return false;
     if (type_value.optionalChild()) |child| return containsClassInner(self, child, depth + 1);
@@ -49,7 +74,7 @@ fn needsDropInner(self: anytype, type_value: Ast.Type, depth: usize) bool {
     if (self.structures[index].is_class) return false;
     if (self.structures[index].collection) |collection| {
         if (collection.view) return false;
-        return needsDropInner(self, collection.element, depth + 1);
+        return collection.length == null or needsDropInner(self, collection.element, depth + 1);
     }
     for (self.enums) |enumeration| if (enumeration.type_index == index) {
         for (enumeration.variants) |variant| for (variant.associated_types) |associated| {
@@ -259,7 +284,7 @@ pub fn emitMutexUnlocks(self: anytype, builder: anytype, target_depth: usize) !v
 
 pub fn retainValue(self: anytype, builder: anytype, type_value: Ast.Type, value: Ir.ValueId) AnalyzeError!void {
     if (type_value.optionalChild()) |child| {
-        if (!containsClass(self, child)) return;
+        if (!requiresRetain(self, child)) return;
         const absent = try self.newValue(builder, type_value);
         try self.emit(builder, .{ .optional_null = .{ .result = absent } });
         const present = try self.newValue(builder, .bool);
@@ -287,7 +312,7 @@ pub fn retainValue(self: anytype, builder: anytype, type_value: Ast.Type, value:
         return;
     }
     for (self.structures[type_index].fields, 0..) |field, field_index| {
-        if (!containsClass(self, field.type)) continue;
+        if (!requiresRetain(self, field.type)) continue;
         const field_value = try self.newValue(builder, field.type);
         try self.emit(builder, .{ .field_load = .{ .result = field_value, .base = value, .field = field_index } });
         try retainValue(self, builder, field.type, field_value);
@@ -407,7 +432,22 @@ fn emitEnumDrop(self: anytype, builder: anytype, enumeration_index: usize, value
 }
 
 fn emitCollectionDrop(self: anytype, builder: anytype, collection_type: Ast.Type, collection: Ast.Collection, value: Ir.ValueId) AnalyzeError!void {
-    if (!needsDrop(self, collection.element) and !containsClass(self, collection.element)) return;
+    return emitCollectionDropInner(self, builder, collection_type, collection, value, true);
+}
+
+pub fn emitCollectionElementsDrop(self: anytype, builder: anytype, collection_type: Ast.Type, value: Ir.ValueId) AnalyzeError!void {
+    const type_index = collection_type.structureIndex() orelse return;
+    if (type_index >= self.structures.len) return;
+    const collection = self.structures[type_index].collection orelse return;
+    return emitCollectionDropInner(self, builder, collection_type, collection, value, false);
+}
+
+fn emitCollectionDropInner(self: anytype, builder: anytype, collection_type: Ast.Type, collection: Ast.Collection, value: Ir.ValueId, drop_storage: bool) AnalyzeError!void {
+    const drops_elements = needsDrop(self, collection.element) or containsClass(self, collection.element);
+    if (!drops_elements) {
+        if (drop_storage and collection.length == null) try self.emit(builder, .{ .list_drop = .{ .operand = value } });
+        return;
+    }
     const index_local = builder.local_types.items.len;
     try builder.local_types.append(self.allocator, .int);
     const count = try self.newValue(builder, .int);
@@ -444,11 +484,13 @@ fn emitCollectionDrop(self: anytype, builder: anytype, collection_type: Ast.Type
     try emitDrop(self, builder, collection.element, element);
     self.terminate(builder, .{ .jump = condition_block });
     builder.current_block = exit_block;
+    if (drop_storage and collection.length == null) try self.emit(builder, .{ .list_drop = .{ .operand = value } });
     _ = collection_type;
 }
 
 fn emitCollectionRetain(self: anytype, builder: anytype, collection: Ast.Collection, value: Ir.ValueId) AnalyzeError!void {
-    if (!containsClass(self, collection.element)) return;
+    if (collection.length == null) try self.emit(builder, .{ .list_retain = .{ .operand = value } });
+    if (!requiresRetain(self, collection.element)) return;
     const index_local = builder.local_types.items.len;
     try builder.local_types.append(self.allocator, .int);
     const zero = try self.newValue(builder, .int);

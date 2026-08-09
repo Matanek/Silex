@@ -1,0 +1,31 @@
+func classify(value:int) str {
+    if value < 0 { return "negative" }
+    elif value == 0 { return "zero" }
+    else { return "positive" }
+}
+
+test "conditional branches select one path" {
+    if classify(-1) != "negative" || classify(0) != "zero" || classify(1) != "positive" {
+        panic("conditional branches")
+    }
+}
+
+test "while break and continue control the nearest loop" {
+    var value = 0
+    var total = 0
+    while value < 10 {
+        value++
+        if value % 2 == 0 { continue }
+        if value > 7 { break }
+        total += value
+    }
+    if total != 16 { panic("while loop controls") }
+}
+
+test "range and indexed collection iteration are complete" {
+    var values = [10, 20, 30]
+    for index, var value in values.indexed() { value += index }
+    var total = 0
+    for i in 0...values.count() { total += values[i] }
+    if total != 63 { panic("range or indexed iteration") }
+}

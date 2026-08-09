@@ -1,0 +1,40 @@
+struct BoolFields {
+    var enabled:bool
+}
+
+class BoolState {
+    public var enabled:bool
+}
+
+struct BoolPredicate {
+    let callback:func(bool) bool
+}
+
+func bool_value(value:bool) bool { return value }
+func bool_read(value:@bool) bool { return value }
+func bool_write(value:&bool) { value = !value }
+func bool_apply(value:bool, callback:func(bool) bool) bool { return callback(value) }
+
+test "bool field parameter and return positions" {
+    var fields = BoolFields(enabled:false)
+    var state = BoolState(enabled:false)
+
+    bool_write(fields.enabled)
+    bool_write(state.enabled)
+
+    if !bool_value(fields.enabled) { panic("structure field value position") }
+    if !bool_read(state.enabled) { panic("class field read position") }
+}
+
+test "bool collection and callback positions" {
+    var values = [true, false, true]
+    bool_write(values[1])
+
+    var seen = 0
+    for value in values { if value { seen++ } }
+    if seen != 3 { panic("bool collection iteration") }
+
+    let invert = func(value:bool) bool { return !value }
+    let predicate = BoolPredicate(callback:invert)
+    if bool_apply(true, predicate.callback) { panic("bool callback field") }
+}

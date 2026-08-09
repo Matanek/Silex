@@ -1,0 +1,20 @@
+test "floating arithmetic and comparisons" {
+    let left:float64 = 7.5
+    let right:float64 = 2.5
+
+    if left + right != 10.0 { panic("float addition") }
+    if left - right != 5.0 { panic("float subtraction") }
+    if left * right != 18.75 { panic("float multiplication") }
+    if left / right != 3.0 { panic("float division") }
+    if !(left > right && left >= 7.5 && right < left && right <= 2.5) { panic("float ordering") }
+}
+
+test "floating compound assignments" {
+    var value:float64 = 2.0
+    value += 1.0
+    value *= 4.0
+    value -= 2.0
+    value /= 5.0
+
+    if value != 2.0 { panic("floating compound assignments") }
+}

@@ -98,7 +98,7 @@ pub fn analyzeVariable(self: anytype, builder: anytype, declaration: Ast.Variabl
         );
         return self.fail(if (declaration.initializer) |value| value.position else declaration.name_position, message);
     }
-    if (Resources.containsClass(self, declared_type) and !initializer.transferred) {
+    if (Resources.requiresRetain(self, declared_type) and !initializer.transferred) {
         try Resources.retainValue(self, builder, declared_type, initializer.value);
     }
     if (declaration.mutable) {
@@ -155,10 +155,11 @@ pub fn analyzeReturn(self: anytype, builder: anytype, function: Ast.Function, st
             self.terminate(builder, .{ .return_value = if (function.return_mode == .mutable and !view_return) value.reference.? else value.value });
             return;
         }
-        const copied_projection = value.borrowed_root != null and expression.value == .field_access and
-            !Resources.containsClass(self, value.type);
-        if (!copied_projection) try Borrowing.requireOwned(self, value, expression.position, "returned");
-        if (Resources.containsClass(self, value.type) and !value.transferred) {
+        const copied_borrow = value.borrowed_root != null and
+            !Resources.requiresRetain(self, value.type) and
+            !Collections.isViewType(self.structures, value.type);
+        if (!copied_borrow) try Borrowing.requireOwned(self, value, expression.position, "returned");
+        if (Resources.requiresRetain(self, value.type) and !value.transferred) {
             try Resources.retainValue(self, builder, value.type, value.value);
         }
         try Resources.emitActiveDrops(self, builder, 0);

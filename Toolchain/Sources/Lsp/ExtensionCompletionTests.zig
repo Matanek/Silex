@@ -418,6 +418,71 @@ test "reuse an existing call when completing an imported module function" {
     try std.testing.expectEqual(@as(?u8, 2), new_call.insertTextFormat);
 }
 
+test "complete common STD Text operations" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "STD/Module/Text");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "func main() {}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "STD/Package.json",
+        .data = "{\"name\":\"STD\",\"version\":\"0.1.0\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "STD/Module/Text/@Module.sx",
+        .data =
+        \\public func is_empty(text:@str) bool { return text == "" }
+        \\public func contains(text:@str, expected:@str) bool { return false }
+        \\public func starts_with(text:@str, prefix:@str) bool { return false }
+        \\public func ends_with(text:@str, suffix:@str) bool { return false }
+        \\public func trim(text:@str) str { return "" + text }
+        \\public func trim_start(text:@str) str { return "" + text }
+        \\public func trim_end(text:@str) str { return "" + text }
+        \\public func replace(text:@str, expected:@str, replacement:@str) str { return "" + text }
+        \\public func index_of(text:@str, expected:@str) int? { return null }
+        \\public func slice(text:@str, start:int, end:int) str { return "" + text }
+        \\public func split(text:@str, separator:@str) str[] { return [] }
+        \\public func join(values:@str[], separator:@str) str { return "" + separator }
+        \\public func titlecase(text:@str) str { return "" + text }
+        ,
+    });
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const main_path = try std.fs.path.join(allocator, &.{ root, "Main.sx" });
+    const uri = try std.fmt.allocPrint(allocator, "file://{s}", .{main_path});
+    const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
+    const source =
+        \\use STD.Text
+        \\func main() {
+        \\    print(Text.)
+        \\}
+    ;
+    const cursor = std.mem.indexOf(u8, source, "Text.").? + "Text.".len;
+    const items = (try Workspace.itemsAt(
+        allocator,
+        std.testing.io,
+        null,
+        root_uri,
+        uri,
+        &.{},
+        source,
+        cursor,
+    )).?;
+    const expected = [_][]const u8{
+        "is_empty", "contains", "starts_with", "ends_with", "trim", "trim_start", "trim_end", "replace", "index_of",
+        "slice", "split", "join", "titlecase",
+    };
+    for (expected) |label| try std.testing.expect(hasLabel(items, label));
+    try std.testing.expectEqualStrings(
+        "index_of(${1:text}, ${2:expected})$0",
+        itemWithLabel(items, "index_of").?.insertText.?,
+    );
+}
+
 test "complete static members of a module principal type" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

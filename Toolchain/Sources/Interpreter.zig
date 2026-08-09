@@ -372,6 +372,7 @@ fn executeInstruction(
                 }
             }
         },
+        .list_retain, .list_drop => {},
         .global_load => |load_value| try store(function, values, load_value.result, try Globals.load(allocator, session.globals, load_value)),
         .global_store => |store_value| {
             const guard = session.snapshot_gate.mutation();

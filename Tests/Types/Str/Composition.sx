@@ -1,0 +1,43 @@
+enum TextState {
+    empty
+    present(str)
+}
+
+struct Box<T> {
+    let value:T
+}
+
+func unwrap(value:str?) str {
+    if let present = value { return present }
+    return "missing"
+}
+
+func describe(state:TextState) str {
+    return match state {
+        empty => "empty"
+        present(value) => value
+    }
+}
+
+test "str optional positions" {
+    let present:str? = "value"
+    let missing:str? = null
+
+    assert(unwrap(present) == "value")
+    assert(unwrap(missing) == "missing")
+}
+
+test "str enum payload positions" {
+    assert(describe(TextState.empty()) == "empty")
+    assert(describe(TextState.present("value")) == "value")
+}
+
+test "str generic and tuple positions" {
+    let boxed = Box<str>(value:"boxed")
+    let pair = ("left", "right")
+    let (left, right) = pair
+
+    assert(boxed.value == "boxed")
+    assert(left == "left")
+    assert(right == "right")
+}

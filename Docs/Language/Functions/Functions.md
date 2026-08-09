@@ -78,7 +78,9 @@ visit(42, func(value:int) { print(value) })
 An anonymous function captures only the outer bindings that it uses. A
 captured `var` remains shared: changing it in the anonymous function changes
 the variable in the surrounding function, and copies of the function value
-refer to the same binding. A captured `let` remains immutable.
+refer to the same binding. A captured `let` remains immutable. Nested
+anonymous functions may capture a binding from any enclosing lexical level;
+intermediate functions carry that context automatically.
 
 ```sx
 var count = 0

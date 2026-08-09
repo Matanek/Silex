@@ -85,7 +85,7 @@ pub fn analyzeMutation(self: anytype, builder: anytype, call: Ast.Expression.Cal
         try requireArity(self, call, 2);
         const index = try requireIndex(self, builder, call.arguments[0]);
         const replacement = try self.analyzeExpressionExpected(builder, call.arguments[1], collection.element);
-        if (Resources.containsClass(self, collection.element)) try Resources.retainValue(self, builder, collection.element, replacement.value);
+        if (Resources.requiresRetain(self, collection.element)) try Resources.retainValue(self, builder, collection.element, replacement.value);
         const previous = try self.newValue(builder, collection.element);
         try self.emit(builder, .{ .collection_load = .{ .result = previous, .collection = source.value, .index = index.value, .position = call.name_position } });
         const updated = try self.newValue(builder, binding.type);
@@ -134,6 +134,7 @@ pub fn analyzeMutation(self: anytype, builder: anytype, call: Ast.Expression.Cal
     var index: ?Ir.ValueId = null;
     var argument: ?Ir.ValueId = null;
     var argument_type: ?Ast.Type = null;
+    var argument_transferred = false;
     var removed: ?Ir.ValueId = null;
     var return_type = binding.type;
     if (std.mem.eql(u8, call.name, "reverse")) {
@@ -142,7 +143,7 @@ pub fn analyzeMutation(self: anytype, builder: anytype, call: Ast.Expression.Cal
     } else if (std.mem.eql(u8, call.name, "clear")) {
         try requireArity(self, call, 0);
         if (Resources.needsDrop(self, binding.type) or Resources.containsClass(self, binding.type)) {
-            try Resources.emitDrop(self, builder, binding.type, source.value);
+            try Resources.emitCollectionElementsDrop(self, builder, binding.type, source.value);
         }
         kind = .clear;
     } else if (std.mem.eql(u8, call.name, "append")) {
@@ -162,6 +163,7 @@ pub fn analyzeMutation(self: anytype, builder: anytype, call: Ast.Expression.Cal
             kind = .append_sequence;
             argument = value.value;
             argument_type = value.type;
+            argument_transferred = value.transferred;
         } else return self.fail(call.arguments[0].position, "append expects an element or compatible sequence");
     } else if (std.mem.eql(u8, call.name, "prepend")) {
         try requireArity(self, call, 1);
@@ -189,12 +191,16 @@ pub fn analyzeMutation(self: anytype, builder: anytype, call: Ast.Expression.Cal
             kind = .take_last;
         }
     }
-    if (argument) |value| if (Resources.containsClass(self, argument_type.?)) {
+    if (argument) |value| if (Resources.requiresRetain(self, argument_type.?)) {
         try Resources.retainValue(self, builder, argument_type.?, value);
     };
     const updated = try self.newValue(builder, binding.type);
-    try self.emit(builder, .{ .list_edit = .{ .result = updated, .collection = source.value, .kind = kind, .index = index, .argument = argument, .removed = removed, .position = call.name_position } });
+    try self.emit(builder, .{ .list_edit = .{ .result = updated, .collection = source.value, .kind = kind, .index = index, .argument = argument, .argument_transferred = argument_transferred, .removed = removed, .position = call.name_position } });
     try storeBinding(self, builder, binding, updated);
+    if (kind != .append and kind != .clear) try self.emit(builder, .{ .list_drop = .{
+        .operand = source.value,
+        .deallocate = binding.local != null,
+    } });
     return if (removed) |value| .{ .type = return_type, .value = value } else null;
 }
 

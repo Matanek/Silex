@@ -70,16 +70,25 @@ test "reject mutation and move conflicts between call arguments" {
     try std.testing.expect(std.mem.startsWith(u8, frontend.diagnostic.?.message, "cannot move or mutate 'values' while it is passed as '@"));
 }
 
-test "reject moving or returning a read-reference parameter by value" {
+test "copy a read-reference parameter into a value return and reject escaping capabilities" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
-    var frontend = Frontend.Frontend.init(arena.allocator());
-    try std.testing.expectError(error.InvalidSource, frontend.compile("func leak(value:@int) int { return value } func main() { print(leak(1)) }"));
-    try std.testing.expectEqualStrings("read-reference parameter 'value' cannot be returned", frontend.diagnostic.?.message);
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const result = try Interpreter.runCapture(allocator, (try frontend.compile(
+        "func copied(value:@int) int { return value } func main() { var value = 1; print(copied(value)); value = 2; print(value) }",
+    )).ir);
+    try std.testing.expectEqualStrings("1\n2\n", result.stdout);
 
     frontend.diagnostic = null;
     try std.testing.expectError(error.InvalidSource, frontend.compile("func consume(value:@int) { let duplicate = move value } func main() { consume(1) }"));
     try std.testing.expectEqualStrings("a read-reference parameter cannot be consumed with 'move'", frontend.diagnostic.?.message);
+
+    frontend.diagnostic = null;
+    try std.testing.expectError(error.InvalidSource, frontend.compile(
+        "class State { public var value:int } func leak(value:@State) State { return value } func main() {}",
+    ));
+    try std.testing.expectEqualStrings("read-reference parameter 'value' cannot be returned", frontend.diagnostic.?.message);
 }
 
 test "reference mode alone cannot distinguish overloads" {

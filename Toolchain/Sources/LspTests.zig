@@ -7,5 +7,6 @@ test {
     _ = @import("Lsp/Server.zig");
     _ = @import("Lsp/Workspace.zig");
     _ = @import("Lsp/Tests/ContextContracts.zig");
+    _ = @import("Lsp/Tests/CallbackCompletion.zig");
     _ = @import("Lsp/Tests/WorkspaceContracts.zig");
 }

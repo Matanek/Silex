@@ -1,0 +1,45 @@
+struct Position {
+    var x:int
+    var y:int
+}
+
+class State {
+    public var value:int
+}
+
+struct Owner {
+    var position:Position
+    var state:State
+}
+
+func transferred(value:Position) Position { return move value }
+func inspect(value:@Position) int { return value.x + value.y }
+func edit(value:&Position) { value.x += 10 }
+
+test "ordinary structure copies and explicit moves" {
+    var first = Position(x:1, y:2)
+    var second = first
+    second.x = 9
+    let moved = transferred(move second)
+    second = Position(x:3, y:4)
+
+    if first.x != 1 || moved.x != 9 || second.x != 3 { panic("copy and move semantics") }
+}
+
+test "read and mutable references operate on ordinary places" {
+    var owner = Owner(position:Position(x:1, y:2), state:State(value:5))
+    if inspect(owner.position) != 3 { panic("read structure field reference") }
+    edit(owner.position)
+    if owner.position.x != 11 { panic("mutable structure field reference") }
+}
+
+test "copy detaches reached class identity" {
+    var first = Owner(position:Position(), state:State(value:5))
+    var shared = first
+    var detached = copy first
+    shared.state.value = 8
+    detached.state.value = 13
+
+    if first.state.value != 8 { panic("ordinary copy did not share class identity") }
+    if detached.state.value != 13 || detached.state == first.state { panic("copy did not detach class identity") }
+}
