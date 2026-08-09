@@ -9,6 +9,17 @@ print("x=", position.x, ", y=", position.y)
 `print` evaluates arguments from left to right, adds no separator, and writes
 one final line break. It accepts strings, numbers, and booleans.
 
+```sx
+let x = 10
+let y = 5
+let r = "x=$(x + 1), y=$(y * 2)"
+
+print("x=$(x + 1), y=$(y * 2)")
+print(r)
+```
+
+Use '$(...)' to inject values in string
+
 ## Assert a condition
 
 ```sx

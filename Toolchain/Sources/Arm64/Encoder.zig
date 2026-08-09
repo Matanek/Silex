@@ -448,6 +448,11 @@ fn encodeFunction(
             try words.append(allocator, storeStack(.x9, @intCast(@as(usize, parameter.start) + leaf)));
         }
     }
+    for (function.capture_parameters, 0..) |capture, index| {
+        if (capture.aggregate or capture.width != 1) return error.InvalidMachineProgram;
+        try emitLoadAtOffset(allocator, words, .x9, .x14, index * Machine.slot_size);
+        try words.append(allocator, storeStack(.x9, capture.start));
+    }
 
     for (function.instructions, 0..) |instruction, instruction_index| {
         instruction_offsets[instruction_index] = words.items.len;
@@ -760,7 +765,15 @@ fn encodeFunction(
             .function_address => |address| {
                 try function_addresses.append(allocator, .{ .at = words.items.len, .function = address.function });
                 try appendRelocatableAddress(allocator, words, .x9);
-                try words.append(allocator, storeStack(.x9, address.result));
+                try words.append(allocator, storeStack(.x9, address.result.start));
+                if (address.environment) |environment| {
+                    for (address.captures, 0..) |capture, index| {
+                        try loadValue(allocator, words, function, .x9, capture);
+                        try words.append(allocator, storeStack(.x9, @intCast(@as(usize, environment.start) + index)));
+                    }
+                    try emitStackAddress(allocator, words, .x9, environment.start);
+                } else try words.append(allocator, moveWideZero64(.x9, 0, 0));
+                try words.append(allocator, storeStack(.x9, address.result.start + 1));
             },
             .call => |call| {
                 for (call.arguments, 0..) |argument, index| {
@@ -791,6 +804,7 @@ fn encodeFunction(
                 if (call.result) |result| if (result.aggregate) {
                     if (result.width == 0) try words.append(allocator, moveWideZero64(.x15, 0, 0)) else try emitStackAddress(allocator, words, .x15, result.start);
                 };
+                try words.append(allocator, loadStack(.x14, call.callee + 1));
                 try words.append(allocator, loadStack(.x16, call.callee));
                 try words.append(allocator, A64.branchLinkRegister(.x16));
                 try appendFixup(allocator, words, &fixups.epilogue, compareBranchNonZero(.x8), .imm19);

@@ -12,6 +12,8 @@ const Layout = struct {
     values: []const Machine.Span,
     locals: []const Machine.Span,
     parameters: []const Machine.Span,
+    capture_parameters: []const Machine.Span,
+    environments: []const ?Machine.Span,
     return_width: u12,
     return_aggregate: bool,
     hidden_return_slot: ?Machine.Slot,
@@ -217,6 +219,7 @@ fn lowerFunction(
         .name = function.name,
         .parameter_count = parameter_count,
         .parameters = layout.parameters,
+        .capture_parameters = layout.capture_parameters,
         .return_type = function.return_type,
         .return_width = layout.return_width,
         .return_aggregate = layout.return_aggregate,
@@ -262,10 +265,16 @@ fn lowerInstruction(
             .result = layout.values[constant.result].start,
             .bits = constant.bits,
         } },
-        .function_reference => |reference| .{ .function_address = .{
-            .result = layout.values[reference.result].start,
-            .function = reference.function,
-        } },
+        .function_reference => |reference| closure: {
+            const captures = try allocator.alloc(Machine.Slot, reference.captures.len);
+            for (reference.captures, 0..) |capture, index| captures[index] = layout.values[capture].start;
+            break :closure .{ .function_address = .{
+                .result = layout.values[reference.result],
+                .function = reference.function,
+                .captures = captures,
+                .environment = layout.environments[reference.result],
+            } };
+        },
         .optional_null => |optional| .{ .optional_null = .{ .result = layout.values[optional.result] } },
         .optional_some => |optional| .{ .optional_some = .{
             .result = layout.values[optional.result],
@@ -735,6 +744,7 @@ fn lowerCopy(result: Machine.Span, operand: Machine.Span) Machine.Instruction {
 }
 
 fn requiresDeepCopy(program: Ir.Program, type_value: Ir.Type) Machine.Error!bool {
+    if (type_value.functionIndex() != null) return false;
     if (type_value.optionalChild()) |child| return requiresDeepCopy(program, child);
     if (enumByType(program, type_value)) |enumeration| {
         for (enumeration.variants) |variant| {
@@ -764,6 +774,21 @@ fn buildLayout(allocator: Allocator, program: Ir.Program, function: Ir.Function)
     for (function.local_types, 0..) |type_value, index| {
         locals[index] = try allocateSpan(program, type_value, &next);
     }
+    const environments = try allocator.alloc(?Machine.Span, function.value_types.len);
+    @memset(environments, null);
+    for (function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
+        .function_reference => |reference| if (reference.captures.len != 0) {
+            const start = try Machine.checkedSlot(next);
+            next += reference.captures.len;
+            if (next > Machine.max_slots) return error.FrameTooLarge;
+            environments[reference.result] = .{
+                .start = start,
+                .width = @intCast(reference.captures.len),
+                .aggregate = true,
+            };
+        },
+        else => {},
+    };
     const return_aggregate = isAggregate(program, function.return_type);
     const return_width: u12 = if (function.return_type == .void)
         0
@@ -774,12 +799,16 @@ fn buildLayout(allocator: Allocator, program: Ir.Program, function: Ir.Function)
         next += 1;
         break :hidden slot;
     } else null;
+    const capture_parameters = try allocator.alloc(Machine.Span, function.capture_types.len);
+    @memcpy(capture_parameters, values[0..function.capture_types.len]);
     const parameters = try allocator.alloc(Machine.Span, function.parameter_types.len);
-    @memcpy(parameters, values[0..function.parameter_types.len]);
+    @memcpy(parameters, values[function.capture_types.len .. function.capture_types.len + function.parameter_types.len]);
     return .{
         .values = values,
         .locals = locals,
         .parameters = parameters,
+        .capture_parameters = capture_parameters,
+        .environments = environments,
         .return_width = return_width,
         .return_aggregate = return_aggregate,
         .hidden_return_slot = hidden_return_slot,
@@ -801,6 +830,7 @@ fn allocateSpan(program: Ir.Program, type_value: Ir.Type, next: *usize) Machine.
 }
 
 fn leafCount(program: Ir.Program, type_value: Ir.Type) Machine.Error!usize {
+    if (type_value.functionIndex() != null) return 2;
     if (type_value.optionalChild()) |child| return 1 + try leafCount(program, child);
     if (enumByType(program, type_value)) |enumeration| {
         if (enumeration.raw_type != null) return 2;
@@ -958,6 +988,17 @@ fn appendEqualityLeaves(
     offset: *usize,
     result: *std.ArrayList(Machine.Instruction.EqualityLeaf),
 ) Machine.Error!void {
+    if (type_value.functionIndex() != null) {
+        for (0..2) |_| {
+            try result.append(allocator, .{
+                .offset = try Machine.checkedSlot(offset.*),
+                .type = .uint,
+                .guards = guards,
+            });
+            offset.* += 1;
+        }
+        return;
+    }
     if (type_value.optionalChild()) |child| {
         const tag_offset = try Machine.checkedSlot(offset.*);
         try result.append(allocator, .{ .offset = tag_offset, .type = .bool, .guards = guards });
@@ -1048,6 +1089,11 @@ fn appendFlattenedTypes(
     type_value: Ir.Type,
     result: *std.ArrayList(Ir.Type),
 ) Machine.Error!void {
+    if (type_value.functionIndex() != null) {
+        try result.append(allocator, .uint);
+        try result.append(allocator, .uint);
+        return;
+    }
     if (type_value.optionalChild()) |child| {
         try result.append(allocator, .bool);
         return appendFlattenedTypes(allocator, program, child, result);
@@ -1108,6 +1154,7 @@ fn flattenedTypesForList(allocator: Allocator, program: Ir.Program, types: []con
 }
 
 fn isAggregate(program: Ir.Program, type_value: Ir.Type) bool {
+    if (type_value.functionIndex() != null) return true;
     if (type_value.optionalChild() != null) return true;
     const index = type_value.structureIndex() orelse return false;
     if (index >= program.structures.len) return true;

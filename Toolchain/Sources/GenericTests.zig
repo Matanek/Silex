@@ -693,6 +693,20 @@ test "compose public generic methods through modules" {
     try std.testing.expectEqualStrings("20\n22\n", result.stdout);
 }
 
+test "specialize an explicit generic method with a named function callback" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\struct Mapper { func apply<T>(value:T, callback:func(T) T) T { return callback(value) } }
+        \\func increment(value:int) int { return value + 1 }
+        \\func main() { print(Mapper().apply<int>(41, increment)) }
+    );
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("42\n", result.stdout);
+}
+
 test "diagnose invalid generic method declarations and calls" {
     try expectCompileError(
         "struct Factory { func create<T>() int { return 1 } } func main() { Factory().create() }",

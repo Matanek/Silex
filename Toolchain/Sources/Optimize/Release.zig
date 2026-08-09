@@ -123,6 +123,7 @@ fn optimizeFunction(allocator: Allocator, function: Ir.Function, summaries: []co
 }
 
 fn summarize(function: Ir.Function) GlobalSummary {
+    if (function.capture_types.len != 0) return .none;
     if (function.blocks.len != 1) return .none;
     const returned = switch (function.blocks[0].terminator) {
         .return_value => |value| value,
@@ -196,10 +197,14 @@ fn rewriteInstruction(allocator: Allocator, instruction: Ir.Instruction, aliases
         .optional_null,
         .global_load,
         .local_address,
-        .function_reference,
         .mutex_lock,
         .mutex_unlock,
         => instruction,
+        .function_reference => |value| .{ .function_reference = .{
+            .result = value.result,
+            .function = value.function,
+            .captures = try rewriteValues(allocator, value.captures, aliases),
+        } },
         .string_address => |value| .{ .string_address = .{
             .result = value.result,
             .operand = canonical(aliases, value.operand),
@@ -685,8 +690,8 @@ fn countUses(instruction: Ir.Instruction, uses: []usize) void {
         .global_load,
         .local_load,
         .local_address,
-        .function_reference,
         => {},
+        .function_reference => |value| useValues(uses, value.captures),
         .optional_some => |value| useValue(uses, value.operand),
         .optional_unwrap => |value| useValue(uses, value.operand),
         .copy => |value| useValue(uses, value.operand),

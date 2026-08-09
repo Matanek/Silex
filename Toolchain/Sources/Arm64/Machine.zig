@@ -450,8 +450,10 @@ pub const Instruction = union(enum) {
     };
 
     pub const FunctionAddress = struct {
-        result: Slot,
+        result: Span,
         function: FunctionId,
+        captures: []const Slot = &.{},
+        environment: ?Span = null,
     };
 
     pub const IndirectCall = struct {
@@ -508,6 +510,7 @@ pub const Function = struct {
     name: []const u8,
     parameter_count: u4,
     parameters: []const Span = &.{},
+    capture_parameters: []const Span = &.{},
     return_type: Types.Type,
     return_width: u12 = 0,
     return_aggregate: bool = false,
@@ -842,8 +845,14 @@ pub fn validate(program: Program) Error!void {
                     try requireSlot(function, value.right);
                 },
                 .function_address => |value| {
-                    try requireSlot(function, value.result);
+                    try requireSpan(function, value.result);
+                    if (!value.result.aggregate or value.result.width != 2) return error.InvalidMachineProgram;
                     if (value.function >= program.functions.len) return error.InvalidMachineProgram;
+                    for (value.captures) |capture| try requireSlot(function, capture);
+                    if (value.environment) |environment| {
+                        try requireSpan(function, environment);
+                        if (!environment.aggregate or environment.width != value.captures.len) return error.InvalidMachineProgram;
+                    } else if (value.captures.len != 0) return error.InvalidMachineProgram;
                 },
                 .call => |call| {
                     if (call.function >= program.functions.len) return error.InvalidMachineProgram;

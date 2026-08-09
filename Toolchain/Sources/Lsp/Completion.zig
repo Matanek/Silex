@@ -297,8 +297,10 @@ pub fn itemsAt(
         else
             null;
     }
-    disambiguateCallableLabels(result);
-    return result;
+    const expanded = try expandOptionalCallVariants(allocator, result, source, cursor);
+    const unique = deduplicateCallableShapes(expanded);
+    disambiguateCallableLabels(unique);
+    return unique;
 }
 
 pub fn parameterItemsAt(
@@ -371,6 +373,114 @@ pub const ActiveCall = struct {
     supplied_parameters: []const []const u8,
     named_mode: bool,
 };
+
+pub const ActiveArgument = struct {
+    callee_name: []const u8,
+    callee_end: usize,
+    parameter_name: ?[]const u8,
+    positional_index: usize,
+    value_start: usize,
+};
+
+pub fn activeArgumentAt(allocator: Allocator, source: []const u8, cursor: usize) !?ActiveArgument {
+    if (cursor > source.len) return null;
+    const tokens = try tokensUntil(allocator, source, cursor);
+    var openings: std.ArrayList(usize) = .empty;
+    for (tokens, 0..) |token, index| switch (token.tag) {
+        .left_parenthesis => try openings.append(allocator, index),
+        .right_parenthesis => {
+            if (openings.items.len != 0) _ = openings.pop();
+        },
+        else => {},
+    };
+    const opening_index = if (openings.items.len != 0) openings.items[openings.items.len - 1] else return null;
+    if (opening_index == 0 or tokens[opening_index - 1].tag != .identifier) return null;
+
+    var segment_start = opening_index + 1;
+    var positional_index: usize = 0;
+    var parenthesis_depth: usize = 0;
+    var bracket_depth: usize = 0;
+    for (tokens[opening_index + 1 ..], opening_index + 1..) |token, index| switch (token.tag) {
+        .left_parenthesis => parenthesis_depth += 1,
+        .right_parenthesis => parenthesis_depth -|= 1,
+        .left_bracket => bracket_depth += 1,
+        .right_bracket => bracket_depth -|= 1,
+        .comma => if (parenthesis_depth == 0 and bracket_depth == 0) {
+            positional_index += 1;
+            segment_start = index + 1;
+        },
+        else => {},
+    };
+
+    const current = tokens[segment_start..];
+    const named = current.len >= 2 and current[0].tag == .identifier and current[1].tag == .colon;
+    const value_token = if (named) @as(usize, 2) else 0;
+    const value_start = if (current.len > value_token) current[value_token].start else cursor;
+    const callee = tokens[opening_index - 1];
+    return .{
+        .callee_name = callee.lexeme,
+        .callee_end = callee.end,
+        .parameter_name = if (named) current[0].lexeme else null,
+        .positional_index = positional_index,
+        .value_start = value_start,
+    };
+}
+
+pub fn sourceForArgumentLookup(
+    allocator: Allocator,
+    source: []const u8,
+    cursor: usize,
+    argument: ActiveArgument,
+) ![]const u8 {
+    return std.fmt.allocPrint(allocator, "{s}true{s}", .{
+        source[0..argument.value_start],
+        source[cursor..],
+    });
+}
+
+pub fn callablesExpectFunctionArgument(callables: []const CompletionItem, argument: ActiveArgument) bool {
+    for (callables) |item| {
+        const name = item.filterText orelse item.label;
+        if (!std.mem.eql(u8, name, argument.callee_name)) continue;
+        const signature = signatureParameters(item.detail, name) orelse continue;
+        var start: usize = 0;
+        var depth: usize = 0;
+        var parameter_index: usize = 0;
+        var index: usize = 0;
+        while (index <= signature.len) : (index += 1) {
+            const at_end = index == signature.len;
+            if (!at_end) switch (signature[index]) {
+                '(', '[', '<' => depth += 1,
+                ')', ']', '>' => depth -|= 1,
+                else => {},
+            };
+            if (!at_end and (signature[index] != ',' or depth != 0)) continue;
+            const parameter = std.mem.trim(u8, signature[start..index], " \t\r\n");
+            start = index + 1;
+            defer parameter_index += 1;
+            const colon = std.mem.indexOfScalar(u8, parameter, ':') orelse continue;
+            const parameter_name = std.mem.trim(u8, parameter[0..colon], " \t\r\n");
+            const selected = if (argument.parameter_name) |expected_name|
+                std.mem.eql(u8, parameter_name, expected_name)
+            else
+                parameter_index == argument.positional_index;
+            if (!selected) continue;
+            const type_name = std.mem.trim(u8, parameter[colon + 1 ..], " \t\r\n");
+            if (std.mem.eql(u8, type_name, "function") or std.mem.startsWith(u8, type_name, "func(")) return true;
+        }
+    }
+    return false;
+}
+
+pub fn insertFunctionReferences(allocator: Allocator, items: []const CompletionItem) ![]const CompletionItem {
+    const result = try allocator.dupe(CompletionItem, items);
+    for (result) |*item| {
+        if (item.kind != CompletionKind.function and item.kind != CompletionKind.method) continue;
+        item.insertText = item.filterText orelse item.label;
+        item.insertTextFormat = null;
+    }
+    return result;
+}
 
 pub fn sourceForParameterLookup(
     allocator: Allocator,
@@ -498,7 +608,7 @@ pub fn insertTextFor(allocator: Allocator, item: CompletionItem) ![]const u8 {
     const signature = callableSignature(item) orelse return item.label;
     if (std.mem.startsWith(u8, signature, "()")) return std.fmt.allocPrint(allocator, "{s}()", .{item.label});
     if (std.mem.indexOfScalar(u8, signature, ':') == null) return std.fmt.allocPrint(allocator, "{s}($0)", .{item.label});
-    return namedCallSnippet(allocator, item.label, signature);
+    return parameterCallSnippet(allocator, item.label, signature);
 }
 
 pub fn insertTextFormatFor(item: CompletionItem) ?u8 {
@@ -521,8 +631,87 @@ pub fn insertTextFormatForAt(item: CompletionItem, source: []const u8, cursor: u
     return insertTextFormatFor(item);
 }
 
+pub fn expandOptionalCallVariants(
+    allocator: Allocator,
+    items: []const CompletionItem,
+    source: []const u8,
+    cursor: usize,
+) ![]CompletionItem {
+    const should_expand = !callFollows(source, cursor);
+    var additional: usize = 0;
+    if (should_expand) for (items) |item| if (optionalCallLayout(item) != null) {
+        additional += 1;
+    };
+    const result = try allocator.alloc(CompletionItem, items.len + additional);
+    var index: usize = 0;
+    for (items) |item| {
+        if (if (should_expand) optionalCallLayout(item) else null) |layout| {
+            const signature = callableSignature(item).?;
+            result[index] = item;
+            result[index].detail = try std.fmt.allocPrint(allocator, "{s}({s}){s}", .{
+                item.label,
+                signature[1..layout.required_end],
+                signature[layout.closing + 1 ..],
+            });
+            result[index].insertText = try insertTextFor(allocator, result[index]);
+            result[index].insertTextFormat = insertTextFormatFor(result[index]);
+            index += 1;
+        }
+        result[index] = item;
+        index += 1;
+    }
+    return result;
+}
+
+const OptionalCallLayout = struct {
+    closing: usize,
+    required_end: usize,
+};
+
+fn optionalCallLayout(item: CompletionItem) ?OptionalCallLayout {
+    const signature = callableSignature(item) orelse return null;
+    var depth: usize = 0;
+    var parameter_start: usize = 1;
+    var parameter_has_default = false;
+    var saw_optional = false;
+    var required_end: usize = 1;
+    var previous_segment_end: usize = 1;
+    var index: usize = 1;
+    while (index < signature.len) : (index += 1) {
+        switch (signature[index]) {
+            '(', '[', '<' => depth += 1,
+            ')', ']', '>' => if (depth != 0) {
+                depth -= 1;
+            } else {
+                if (index == parameter_start) return null;
+                if (parameter_has_default) {
+                    if (!saw_optional) required_end = previous_segment_end;
+                    saw_optional = true;
+                } else if (saw_optional) return null;
+                return if (saw_optional) .{ .closing = index, .required_end = required_end } else null;
+            },
+            '=' => {
+                if (depth == 0) parameter_has_default = true;
+            },
+            ',' => if (depth == 0) {
+                if (index == parameter_start) return null;
+                if (parameter_has_default) {
+                    if (!saw_optional) required_end = previous_segment_end;
+                    saw_optional = true;
+                } else if (saw_optional) return null;
+                previous_segment_end = index;
+                parameter_start = index + 1;
+                parameter_has_default = false;
+            },
+            else => {},
+        }
+    }
+    return null;
+}
+
 pub fn callFollows(source: []const u8, cursor: usize) bool {
     var index = cursor;
+    while (index < source.len and isIdentifierContinue(source[index])) index += 1;
     while (index < source.len and (source[index] == ' ' or source[index] == '\t')) index += 1;
     return index < source.len and source[index] == '(';
 }
@@ -530,12 +719,71 @@ pub fn callFollows(source: []const u8, cursor: usize) bool {
 fn callableSignature(item: CompletionItem) ?[]const u8 {
     if (item.kind != CompletionKind.method and item.kind != CompletionKind.function and item.kind != CompletionKind.enum_member and
         item.kind != CompletionKind.structure and item.kind != CompletionKind.class) return null;
-    if (!std.mem.startsWith(u8, item.detail, item.label)) return null;
-    const signature = item.detail[item.label.len..];
+    const name = item.filterText orelse item.label;
+    if (!std.mem.startsWith(u8, item.detail, name)) return null;
+    const signature = item.detail[name.len..];
     return if (std.mem.startsWith(u8, signature, "(")) signature else null;
 }
 
-fn namedCallSnippet(allocator: Allocator, label: []const u8, signature: []const u8) ![]const u8 {
+pub fn deduplicateCallableShapes(items: []CompletionItem) []CompletionItem {
+    var count: usize = 0;
+    for (items) |item| {
+        var duplicate = false;
+        for (items[0..count]) |existing| if (sameCallableShape(existing, item)) {
+            duplicate = true;
+            break;
+        };
+        if (duplicate) continue;
+        items[count] = item;
+        count += 1;
+    }
+    return items[0..count];
+}
+
+fn sameCallableShape(left: CompletionItem, right: CompletionItem) bool {
+    const left_name = left.filterText orelse left.label;
+    const right_name = right.filterText orelse right.label;
+    if (!std.mem.eql(u8, left_name, right_name)) return false;
+    const left_signature = callableSignature(left) orelse return false;
+    const right_signature = callableSignature(right) orelse return false;
+    var left_cursor: usize = 1;
+    var right_cursor: usize = 1;
+    while (true) {
+        const left_parameter = nextParameterLabel(left_signature, &left_cursor);
+        const right_parameter = nextParameterLabel(right_signature, &right_cursor);
+        if (left_parameter == null or right_parameter == null) return left_parameter == null and right_parameter == null;
+        if (!std.mem.eql(u8, left_parameter.?, right_parameter.?)) return false;
+    }
+}
+
+fn nextParameterLabel(signature: []const u8, cursor: *usize) ?[]const u8 {
+    while (cursor.* < signature.len and std.ascii.isWhitespace(signature[cursor.*])) cursor.* += 1;
+    if (cursor.* >= signature.len or signature[cursor.*] == ')') return null;
+    const start = cursor.*;
+    var colon: ?usize = null;
+    var depth: usize = 0;
+    while (cursor.* < signature.len) : (cursor.* += 1) switch (signature[cursor.*]) {
+        '(', '[', '<' => depth += 1,
+        ')', ']', '>' => if (depth != 0) {
+            depth -= 1;
+        } else {
+            const end = colon orelse cursor.*;
+            return std.mem.trim(u8, signature[start..end], " \t\r\n");
+        },
+        ':' => if (depth == 0 and colon == null) {
+            colon = cursor.*;
+        },
+        ',' => if (depth == 0) {
+            const end = colon orelse cursor.*;
+            cursor.* += 1;
+            return std.mem.trim(u8, signature[start..end], " \t\r\n");
+        },
+        else => {},
+    };
+    return null;
+}
+
+fn parameterCallSnippet(allocator: Allocator, label: []const u8, signature: []const u8) ![]const u8 {
     var result: []const u8 = try std.fmt.allocPrint(allocator, "{s}(", .{label});
     var start: usize = 1;
     var depth: usize = 0;
@@ -548,11 +796,11 @@ fn namedCallSnippet(allocator: Allocator, label: []const u8, signature: []const 
             ')', ']', '>' => if (depth != 0) {
                 depth -= 1;
             } else {
-                if (index > start) result = try appendNamedPlaceholder(allocator, result, signature[start..index], placeholder);
+                if (index > start) result = try appendParameterPlaceholder(allocator, result, signature[start..index], placeholder);
                 return std.fmt.allocPrint(allocator, "{s})$0", .{result});
             },
             ',' => if (depth == 0) {
-                result = try appendNamedPlaceholder(allocator, result, signature[start..index], placeholder);
+                result = try appendParameterPlaceholder(allocator, result, signature[start..index], placeholder);
                 placeholder += 1;
                 start = index + 1;
             },
@@ -562,14 +810,13 @@ fn namedCallSnippet(allocator: Allocator, label: []const u8, signature: []const 
     return std.fmt.allocPrint(allocator, "{s}$0)", .{result});
 }
 
-fn appendNamedPlaceholder(allocator: Allocator, prefix: []const u8, parameter_text: []const u8, placeholder: usize) ![]const u8 {
+fn appendParameterPlaceholder(allocator: Allocator, prefix: []const u8, parameter_text: []const u8, placeholder: usize) ![]const u8 {
     const parameter = std.mem.trim(u8, parameter_text, " \t\r\n");
     const colon = std.mem.indexOfScalar(u8, parameter, ':') orelse return prefix;
     const name = std.mem.trim(u8, parameter[0..colon], " \t\r\n");
-    return std.fmt.allocPrint(allocator, "{s}{s}{s}:${{{d}:{s}}}", .{
+    return std.fmt.allocPrint(allocator, "{s}{s}${{{d}:{s}}}", .{
         prefix,
         if (placeholder == 1) "" else ", ",
-        name,
         placeholder,
         name,
     });
@@ -962,7 +1209,7 @@ fn appendMembers(
         }, 0, false);
         return;
     }
-    const structure = findStructure(program, type_name) orelse return;
+    const structure = findStructure(program, nominalReceiverName(type_name)) orelse return;
     if (structure.collection) |collection| {
         try appendCollectionMembers(allocator, candidates, source, cursor, context, collection);
         return;
@@ -1078,6 +1325,20 @@ fn appendCollectionMembers(
         .kind = CompletionKind.method,
         .detail = "is_empty() bool",
     }, 0, true);
+    if (!collection.view) {
+        const mutations = [_]struct { label: []const u8, detail: []const u8 }{
+            .{ .label = "append", .detail = "append(value)" },
+            .{ .label = "prepend", .detail = "prepend(value)" },
+            .{ .label = "insert", .detail = "insert(index, value)" },
+            .{ .label = "replace", .detail = "replace(index, value)" },
+            .{ .label = "clear", .detail = "clear()" },
+        };
+        for (mutations) |mutation| try appendCandidate(allocator, candidates, context, .{
+            .label = mutation.label,
+            .kind = CompletionKind.method,
+            .detail = mutation.detail,
+        }, 0, true);
+    }
     const line_start = if (std.mem.lastIndexOfScalar(u8, source[0..cursor], '\n')) |newline| newline + 1 else 0;
     if (!collection.view and isForSourceLine(source[line_start..cursor])) try appendCandidate(allocator, candidates, context, .{
         .label = "indexed",
@@ -1293,6 +1554,7 @@ fn appendCandidate(
     priority: u8,
     callable: bool,
 ) !void {
+    if (isReservedCompilerName(item.label)) return;
     const prefix_match = std.mem.startsWith(u8, item.label, context.prefix);
     const matches = prefix_match or
         (item.kind != CompletionKind.keyword and item.kind != CompletionKind.value and
@@ -1314,6 +1576,10 @@ fn appendCandidate(
         .priority = ranked_priority,
         .callable = callable,
     });
+}
+
+pub fn isReservedCompilerName(name: []const u8) bool {
+    return std.mem.startsWith(u8, name, "__silex_");
 }
 
 fn candidateLessThan(_: void, left: Candidate, right: Candidate) bool {
@@ -1460,13 +1726,31 @@ fn visibleLocals(allocator: Allocator, source: []const u8, program: Ast.Program,
             },
             .keyword_for => {
                 var binding = index + 1;
+                if (binding < tokens.len and tokens[binding].tag == .left_parenthesis) {
+                    const callable = containingCallable(source, program, cursor);
+                    const tuple_type = inferDestructuredForType(program, callable, tokens, binding) orelse continue;
+                    const tuple = structureForType(program, tuple_type) orelse continue;
+                    if (!tuple.is_tuple) continue;
+                    var field_index: usize = 0;
+                    var cursor_index = binding + 1;
+                    while (cursor_index < tokens.len and tokens[cursor_index].tag != .right_parenthesis) : (cursor_index += 1) {
+                        if (tokens[cursor_index].tag != .identifier or field_index >= tuple.fields.len) continue;
+                        try locals.append(allocator, .{
+                            .name = tokens[cursor_index].lexeme,
+                            .type_name = memberTypeName(program, tuple.fields[field_index].type),
+                            .depth = depth + 1,
+                        });
+                        field_index += 1;
+                    }
+                    continue;
+                }
                 if (binding < tokens.len and (tokens[binding].tag == .keyword_let or tokens[binding].tag == .keyword_var)) {
                     binding += 1;
                 }
                 if (binding >= tokens.len or tokens[binding].tag != .identifier) continue;
                 try locals.append(allocator, .{
                     .name = tokens[binding].lexeme,
-                    .type_name = null,
+                    .type_name = inferForElementType(program, containingCallable(source, program, cursor), locals.items, tokens, binding),
                     // A for binding starts at the loop body, whose opening brace
                     // has not yet been consumed at this point.
                     .depth = depth + 1,
@@ -1479,6 +1763,124 @@ fn visibleLocals(allocator: Allocator, source: []const u8, program: Ast.Program,
         }
     }
     return locals.toOwnedSlice(allocator);
+}
+
+fn inferDestructuredForType(program: Ast.Program, callable: ?Callable, tokens: []const Token, opening: usize) ?Ast.Type {
+    var index = opening + 1;
+    while (index < tokens.len and tokens[index].tag != .keyword_in) : (index += 1) {}
+    if (index + 1 >= tokens.len or tokens[index + 1].tag != .identifier) return null;
+    const source_name = tokens[index + 1].lexeme;
+    const owner = callable orelse return null;
+    var source_type: ?Ast.Type = null;
+    for (owner.parameters) |parameter| if (std.mem.eql(u8, parameter.name, source_name)) {
+        source_type = parameter.type;
+        break;
+    };
+    const generic_index = (source_type orelse return null).genericInstantiationIndex() orelse return null;
+    if (generic_index >= program.generic_types.len) return null;
+    const generic = program.generic_types[generic_index];
+    if (generic.arguments.len == 0) return null;
+    return generic.arguments[0];
+}
+
+fn inferForElementType(
+    program: Ast.Program,
+    callable: ?Callable,
+    locals: []const Local,
+    tokens: []const Token,
+    binding: usize,
+) ?[]const u8 {
+    var index = binding + 1;
+    while (index < tokens.len and tokens[index].tag != .keyword_in) : (index += 1) {}
+    if (index + 1 >= tokens.len or tokens[index].tag != .keyword_in or
+        (tokens[index + 1].tag != .identifier and tokens[index + 1].tag != .keyword_self)) return null;
+    index += 1;
+    const root = tokens[index].lexeme;
+    var current: ?Ast.Type = null;
+    if (std.mem.eql(u8, root, "self")) {
+        const owner = callable orelse return null;
+        current = .structure(findStructureIndex(program, owner.structure_name orelse return null) orelse return null);
+    } else if (callable) |owner| {
+        for (owner.parameters) |parameter| if (std.mem.eql(u8, parameter.name, root)) {
+            current = parameter.type;
+            break;
+        };
+    }
+    if (current == null) {
+        var local_index = locals.len;
+        while (local_index != 0) {
+            local_index -= 1;
+            if (!std.mem.eql(u8, locals[local_index].name, root)) continue;
+            const spelling = locals[local_index].type_name orelse break;
+            current = typeForSpelling(program, spelling);
+            break;
+        }
+    }
+    if (current == null and index + 1 < tokens.len and tokens[index + 1].tag == .left_parenthesis) {
+        for (program.functions) |function| if (std.mem.eql(u8, function.name, root)) {
+            current = function.return_type;
+            break;
+        };
+    }
+    index += 1;
+    while (index + 1 < tokens.len and tokens[index].tag == .dot and tokens[index + 1].tag == .identifier) {
+        const owner = structureForType(program, current orelse return null) orelse return null;
+        const name = tokens[index + 1].lexeme;
+        const call = index + 2 < tokens.len and tokens[index + 2].tag == .left_parenthesis;
+        var next: ?Ast.Type = null;
+        if (call) {
+            for (owner.methods) |method| if (std.mem.eql(u8, method.name, name)) {
+                next = method.return_type;
+                break;
+            };
+        } else for (owner.fields) |field| if (std.mem.eql(u8, field.name, name)) {
+            next = field.type;
+            break;
+        };
+        current = next orelse return null;
+        index += 2;
+        if (call) {
+            var depth: usize = 0;
+            while (index < tokens.len) : (index += 1) switch (tokens[index].tag) {
+                .left_parenthesis => depth += 1,
+                .right_parenthesis => {
+                    depth -|= 1;
+                    if (depth == 0) {
+                        index += 1;
+                        break;
+                    }
+                },
+                else => {},
+            };
+        }
+    }
+    const element = collectionElementType(program, current orelse return null) orelse return null;
+    return typeName(program, element);
+}
+
+fn typeForSpelling(program: Ast.Program, spelling: []const u8) ?Ast.Type {
+    for (program.type_names, 0..) |name, index| if (std.mem.eql(u8, name, spelling)) return .structure(index);
+    return null;
+}
+
+fn structureForType(program: Ast.Program, type_value: Ast.Type) ?Ast.Structure {
+    if (type_value.genericInstantiationIndex()) |index| {
+        if (index >= program.generic_types.len) return null;
+        return structureForType(program, program.generic_types[index].base);
+    }
+    return findStructure(program, nominalReceiverName(typeName(program, type_value)));
+}
+
+fn collectionElementType(program: Ast.Program, type_value: Ast.Type) ?Ast.Type {
+    if (type_value.genericInstantiationIndex()) |index| {
+        if (index >= program.generic_types.len) return null;
+        const generic = program.generic_types[index];
+        const base = structureForType(program, generic.base) orelse return null;
+        if (base.collection == null or generic.arguments.len == 0) return null;
+        return generic.arguments[0];
+    }
+    const structure = structureForType(program, type_value) orelse return null;
+    return if (structure.collection) |collection| collection.element else null;
 }
 
 fn tryErrorLocal(program: Ast.Program, tokens: []const Token, else_index: usize, depth: usize) ?Local {
@@ -1835,6 +2237,7 @@ fn parseForCompletion(
     const before_prefix = std.mem.trim(u8, source[line_start..context.prefix_start], " \t\r");
     const for_source = isForSourceLine(before_prefix);
     const for_body_follows = for_source and blockFollowsCompletion(source, cursor);
+    const control_body_missing = lineStartsControlCondition(before_prefix) and !blockFollowsCompletion(source, cursor);
     const completing_try_error = try isTryErrorBindingPositionAt(allocator, source, context.prefix_start);
     const completing_try_alternative = try isTryAlternativePositionAt(allocator, source, context.prefix_start);
     const placeholder: []const u8 = if (completing_try_error)
@@ -1848,7 +2251,7 @@ fn parseForCompletion(
             "()"
         else if (memberFollowedByAssignment(source, cursor))
             "__completion"
-        else if (for_source and !for_body_follows)
+        else if ((for_source and !for_body_follows) or control_body_missing)
             "__completion() {}"
         else
             "__completion()",
@@ -1898,6 +2301,12 @@ fn isForSourceLine(line: []const u8) bool {
         if (token.tag == .end) return false;
         if (token.tag == .keyword_in) return true;
     }
+}
+
+pub fn lineStartsControlCondition(line: []const u8) bool {
+    return std.mem.startsWith(u8, line, "if ") or
+        std.mem.startsWith(u8, line, "elif ") or
+        std.mem.startsWith(u8, line, "while ");
 }
 
 fn blockFollowsCompletion(source: []const u8, cursor: usize) bool {
@@ -2080,12 +2489,20 @@ fn baseTypeName(program: Ast.Program, source_type: Ast.Type) []const u8 {
 }
 
 fn memberTypeName(program: Ast.Program, type_value: Ast.Type) []const u8 {
-    return typeName(program, type_value.optionalChild() orelse type_value);
+    const direct = type_value.optionalChild() orelse type_value;
+    if (direct.genericInstantiationIndex()) |index| {
+        if (index < program.generic_types.len) return typeName(program, program.generic_types[index].base);
+    }
+    return typeName(program, direct);
 }
 
 fn findStructure(program: Ast.Program, name: []const u8) ?Ast.Structure {
     for (program.structures) |structure| {
-        if (std.mem.eql(u8, structure.name, name) or std.mem.endsWith(u8, name, structure.name)) return structure;
+        if (std.mem.eql(u8, structure.name, name)) return structure;
+        if (structure.name.len > name.len and std.mem.endsWith(u8, structure.name, name) and
+            structure.name[structure.name.len - name.len - 1] == '.') return structure;
+        if (name.len > structure.name.len and std.mem.endsWith(u8, name, structure.name) and
+            name[name.len - structure.name.len - 1] == '.') return structure;
     }
     return null;
 }
@@ -2099,7 +2516,11 @@ fn findEnum(program: Ast.Program, name: []const u8) ?Ast.Enum {
 }
 
 fn findStructureIndex(program: Ast.Program, name: []const u8) ?usize {
-    for (program.type_names, 0..) |candidate, index| if (std.mem.eql(u8, candidate, name)) return index;
+    for (program.type_names, 0..) |candidate, index| {
+        if (std.mem.eql(u8, candidate, name)) return index;
+        if (candidate.len > name.len and std.mem.endsWith(u8, candidate, name) and
+            candidate[candidate.len - name.len - 1] == '.') return index;
+    }
     return null;
 }
 
@@ -2214,7 +2635,12 @@ pub fn recoverCascadeForParsing(
     const prefix_start = identifierPrefixStart(source, cursor);
     if (prefix_start < 2 or source[prefix_start - 2] != '.' or source[prefix_start - 1] != '.') return null;
     const start = cascadeRecoveryStart(source, prefix_start - 2);
-    const end = if (std.mem.indexOfScalarPos(u8, source, cursor, '\n')) |newline| newline else source.len;
+    const end = if (start == prefix_start - 2)
+        cursor
+    else if (std.mem.indexOfScalarPos(u8, source, cursor, '\n')) |newline|
+        newline
+    else
+        source.len;
     const recovered: []const u8 = try std.fmt.allocPrint(allocator, "{s}{s}", .{ source[0..start], source[end..] });
     return recovered;
 }
@@ -2708,6 +3134,121 @@ test "complete anonymous function parameters without exposing synthetic function
     const items = try itemsAt(arena.allocator(), source, cursor, .invoked);
     try std.testing.expect(contains(items, "value"));
     for (items) |item| try std.testing.expect(!std.mem.startsWith(u8, item.label, "__silex_anonymous_"));
+}
+
+test "complete loop element members inside string interpolation" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source =
+        \\struct Attribute { var key:str; var value:str }
+        \\class Element {
+        \\    var attributes:Attribute[]
+        \\    public func get_attributes() Attribute[] { return self.attributes }
+        \\}
+        \\func format(e:Element) str {
+        \\    var result = ""
+        \\    for attr in e.get_attributes() {
+        \\        result = result + " $(attr.)"
+        \\    }
+        \\    return result
+        \\}
+    ;
+    const cursor = std.mem.indexOf(u8, source, "attr.)").? + "attr.".len;
+    const items = try itemsAt(arena.allocator(), source, cursor, .trigger_character);
+    try std.testing.expect(contains(items, "key"));
+    try std.testing.expect(contains(items, "value"));
+}
+
+test "preserve local member types in loops and mutable methods" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const child_source =
+        \\struct Tag {
+        \\    var tags:Tag[]
+        \\    func to_str() str {
+        \\        var content = ""
+        \\        for child in self.tags {
+        \\            content = content + child.
+        \\        }
+        \\        return content
+        \\    }
+        \\}
+    ;
+    const child_cursor = std.mem.indexOf(u8, child_source, "child.").? + "child.".len;
+    const child_items = try itemsAt(arena.allocator(), child_source, child_cursor, .trigger_character);
+    try std.testing.expect(contains(child_items, "to_str"));
+
+    const array_source =
+        \\struct Tag {
+        \\    var attr_names:str[]
+        \\    func set_attribute() {
+        \\        self.attr_names.
+        \\    }
+        \\}
+    ;
+    const array_cursor = std.mem.indexOf(u8, array_source, "attr_names.").? + "attr_names.".len;
+    const array_items = try itemsAt(arena.allocator(), array_source, array_cursor, .trigger_character);
+    try std.testing.expect(contains(array_items, "append"));
+    try std.testing.expect(contains(array_items, "prepend"));
+    try std.testing.expect(contains(array_items, "count"));
+}
+
+test "preserve specialized field types during member completion" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source =
+        \\struct Dictionary<K, V> {
+        \\    func values() V[] { return [] }
+        \\    func count() int { return 0 }
+        \\}
+        \\struct Store {
+        \\    var attributes:Dictionary<str, str>
+        \\    func inspect() {
+        \\        self.attributes.
+        \\    }
+        \\}
+    ;
+    const cursor = std.mem.indexOf(u8, source, "attributes.").? + "attributes.".len;
+    const items = try itemsAt(arena.allocator(), source, cursor, .trigger_character);
+    try std.testing.expect(contains(items, "values"));
+    try std.testing.expect(contains(items, "count"));
+    try std.testing.expect(!contains(items, "Dictionary"));
+}
+
+test "preserve tuple element types in query-style for destructuring" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source =
+        \\class Query<Pattern> {}
+        \\struct Rotator3D { func rotate() {} }
+        \\struct Transform3D {}
+        \\func rotate_entities(rotators:Query<(@Rotator3D, &Transform3D)>) {
+        \\    for (rotator, transform) in rotators {
+        \\        rotator.
+        \\    }
+        \\}
+    ;
+    const cursor = std.mem.indexOf(u8, source, "rotator.").? + "rotator.".len;
+    const items = try itemsAt(arena.allocator(), source, cursor, .trigger_character);
+    try std.testing.expect(contains(items, "rotate"));
+}
+
+test "complete an inline cascade" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source =
+        \\struct Tag {
+        \\    private var hidden:int
+        \\    public var visible:int
+        \\    private func secret() {}
+        \\    public func show() {}
+        \\}
+        \\func main() { var tag = Tag().. }
+    ;
+    const cursor = std.mem.indexOf(u8, source, ".. }").? + "..".len;
+    const items = try itemsAt(arena.allocator(), source, cursor, .trigger_character);
+    try std.testing.expect(contains(items, "visible"));
+    try std.testing.expect(contains(items, "show"));
 }
 
 test "complete test-local helpers only inside their block" {
@@ -3415,7 +3956,7 @@ test "complete embedded file intrinsics in expressions" {
     try std.testing.expect(contains(items, "embed_bytes"));
 }
 
-test "keep overload signatures and default values distinct" {
+test "deduplicate overloads by labels while preserving distinct call shapes" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const source =
@@ -3433,9 +3974,93 @@ test "keep overload signatures and default values distinct" {
         try std.testing.expect(item.insertText != null);
     };
     try std.testing.expectEqual(@as(usize, 2), signatures);
+    try std.testing.expect(contains(items, "convert(value:int)"));
     try std.testing.expect(contains(items, "convert(value:int, radix:int = 10)"));
-    try std.testing.expect(contains(items, "convert(value:str)"));
-    try std.testing.expect(std.mem.indexOf(u8, items[indexOf(items, "convert").?].detail, "radix:int = 10") != null);
+    try std.testing.expect(!contains(items, "convert(value:str)"));
+    var saw_default = false;
+    for (items) |item| if (completionNameMatches(item, "convert") and
+        std.mem.indexOf(u8, item.detail, "radix:int = 10") != null)
+    {
+        saw_default = true;
+    };
+    try std.testing.expect(saw_default);
+}
+
+test "offer omitted and explicit calls when every parameter has a default" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source =
+        \\struct Settings {}
+        \\func configure(settings:Settings = Settings()) {}
+        \\func main() { confi }
+    ;
+    const cursor = std.mem.indexOf(u8, source, "confi }").? + "confi".len;
+    const items = try itemsAt(arena.allocator(), source, cursor, .invoked);
+    var configure_count: usize = 0;
+    for (items) |item| if (item.filterText != null and std.mem.eql(u8, item.filterText.?, "configure")) {
+        configure_count += 1;
+    };
+    try std.testing.expectEqual(@as(usize, 2), configure_count);
+    var saw_empty = false;
+    var saw_explicit = false;
+    for (items) |item| {
+        if (item.filterText == null or !std.mem.eql(u8, item.filterText.?, "configure")) continue;
+        saw_empty = saw_empty or std.mem.eql(u8, item.insertText.?, "configure()");
+        saw_explicit = saw_explicit or std.mem.indexOf(u8, item.insertText.?, "${1:settings}") != null;
+        try std.testing.expect(std.mem.indexOf(u8, item.insertText.?, "settings:") == null);
+    }
+    try std.testing.expect(saw_empty);
+    try std.testing.expect(saw_explicit);
+}
+
+test "offer required parameters before the complete defaulted signature" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source =
+        \\func schedule(stage:int, callback:func(), priority:int = 0) {}
+        \\func callback() {}
+        \\func main() { sche }
+    ;
+    const cursor = std.mem.indexOf(u8, source, "sche }").? + "sche".len;
+    const items = try itemsAt(arena.allocator(), source, cursor, .invoked);
+    var matches: std.ArrayList(CompletionItem) = .empty;
+    for (items) |item| if (item.filterText != null and std.mem.eql(u8, item.filterText.?, "schedule")) {
+        try matches.append(arena.allocator(), item);
+    };
+    try std.testing.expectEqual(@as(usize, 2), matches.items.len);
+    try std.testing.expectEqualStrings("schedule(${1:stage}, ${2:callback})$0", matches.items[0].insertText.?);
+    try std.testing.expectEqualStrings("schedule(${1:stage}, ${2:callback}, ${3:priority})$0", matches.items[1].insertText.?);
+}
+
+test "recover member completion in an unfinished conditional" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source =
+        \\struct Input { func pressed() bool { return true } }
+        \\func main() {
+        \\    let input = Input()
+        \\    if input.
+        \\}
+    ;
+    const cursor = std.mem.indexOf(u8, source, "input.\n").? + "input.".len;
+    const items = try itemsAt(arena.allocator(), source, cursor, .trigger_character);
+    try std.testing.expect(contains(items, "pressed"));
+}
+
+test "hide reserved compiler hooks from local member completion" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source =
+        \\class Application {
+        \\    internal func __silex_add_system() {}
+        \\    func add_system() {}
+        \\}
+        \\func main() { Application(). }
+    ;
+    const cursor = std.mem.indexOf(u8, source, ". }").? + 1;
+    const items = try itemsAt(arena.allocator(), source, cursor, .trigger_character);
+    try std.testing.expect(contains(items, "add_system"));
+    try std.testing.expect(!contains(items, "__silex_add_system"));
 }
 
 test "filter overload signatures with arguments already present" {

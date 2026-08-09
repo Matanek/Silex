@@ -8,6 +8,7 @@ const MutableReferences = @import("MutableReferences.zig");
 const Optionals = @import("Optionals.zig");
 const Support = @import("Support.zig");
 const Resources = @import("Resources.zig");
+const Visibility = @import("Visibility.zig");
 
 pub fn prepare(self: anytype) ![]const Ir.FunctionType {
     const result = try self.allocator.alloc(Ir.FunctionType, self.program.function_types.len);
@@ -37,10 +38,23 @@ pub fn reference(self: anytype, builder: anytype, position: anytype, name: []con
         }
         selected = function_id;
     }
+    for (self.program.structures, 0..) |structure, structure_index| {
+        if (structure.is_protocol) continue;
+        for (structure.methods, 0..) |method, method_index| {
+            if (!method.is_static or !staticMethodNameMatches(structure.name, method.name, name) or
+                !Visibility.memberVisible(self, structure_index, method, position) or !matches(signature, method)) continue;
+            if (selected != null) {
+                const message = try std.fmt.allocPrint(self.allocator, "function reference '{s}' is ambiguous for the expected callback type", .{name});
+                return self.fail(position, message);
+            }
+            selected = methodFunctionId(self.program, structure_index, method_index);
+        }
+    }
     const function_id = selected orelse return null;
     const result = try self.newValue(builder, expected);
-    try self.emit(builder, .{ .function_reference = .{ .result = result, .function = function_id } });
-    return .{ .type = expected, .value = result };
+    const captures = try self.prepareAnonymousCaptures(builder, function_id);
+    try self.emit(builder, .{ .function_reference = .{ .result = result, .function = function_id, .captures = captures } });
+    return .{ .type = expected, .value = result, .lexical_captures = captures.len != 0 };
 }
 
 pub fn inferredReference(self: anytype, builder: anytype, position: anytype, name: []const u8) !?Model.TypedValue {
@@ -60,8 +74,9 @@ pub fn inferredReference(self: anytype, builder: anytype, position: anytype, nam
     const function_id = selected_function orelse return null;
     const type_value = selected_type.?;
     const result = try self.newValue(builder, type_value);
-    try self.emit(builder, .{ .function_reference = .{ .result = result, .function = function_id } });
-    return .{ .type = type_value, .value = result };
+    const captures = try self.prepareAnonymousCaptures(builder, function_id);
+    try self.emit(builder, .{ .function_reference = .{ .result = result, .function = function_id, .captures = captures } });
+    return .{ .type = type_value, .value = result, .lexical_captures = captures.len != 0 };
 }
 
 pub const CallResult = struct { value: ?Model.TypedValue };
@@ -178,6 +193,20 @@ fn nameMatches(candidate: []const u8, requested: []const u8) bool {
     if (std.mem.eql(u8, candidate, requested)) return true;
     if (!std.mem.endsWith(u8, candidate, requested) or candidate.len == requested.len) return false;
     return candidate[candidate.len - requested.len - 1] == '.';
+}
+
+fn staticMethodNameMatches(structure: []const u8, method: []const u8, requested: []const u8) bool {
+    const dot = std.mem.lastIndexOfScalar(u8, requested, '.') orelse return false;
+    return std.mem.eql(u8, requested[dot + 1 ..], method) and nameMatches(structure, requested[0..dot]);
+}
+
+fn methodFunctionId(program: Ast.Program, structure_index: usize, method_index: usize) Ir.FunctionId {
+    var result = program.functions.len;
+    for (program.structures) |structure| result += structure.constructors.len;
+    for (program.structures[0..structure_index]) |structure| if (!structure.is_protocol) {
+        result += structure.methods.len;
+    };
+    return result + method_index;
 }
 
 fn findBinding(bindings: []const Model.Binding, requested: []const u8) ?Model.Binding {

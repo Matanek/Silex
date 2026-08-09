@@ -107,6 +107,24 @@ test "evaluate collection source and range bounds once from left to right" {
     try std.testing.expectEqualStrings("V\n7\n8\nS\nE\n0\n1\n", output);
 }
 
+test "for bindings retain class roots copied from returned collections" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const source =
+        \\class Item {}
+        \\func items() Item[] { return [Item(), Item()] }
+        \\func main() { for item in items() { print("item") } }
+    ;
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(source);
+    const text = try Ir.writeText(allocator, compilation.ir);
+    const loop_load = std.mem.indexOf(u8, text, "collection.load") orelse return error.TestExpectedEqual;
+    try std.testing.expect(std.mem.indexOfPos(u8, text, loop_load, "class.retain") != null);
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("item\nitem\n", result.stdout);
+}
+
 test "iterate fixed arrays and dynamic lists with zero-origin indices" {
     const output = try run(
         \\func values() int[] { print("source"); return [7, 8, 9] }

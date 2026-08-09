@@ -111,6 +111,27 @@ test "native effects match the reference output" {
     try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
 }
 
+test "native optional aggregates preserve callback layout" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const source =
+        \\struct Job { let callback:func(int) int }
+        \\func increment(value:int) int { return value + 1 }
+        \\func main() {
+        \\    var pending:Job? = Job(callback:increment)
+        \\    if var job = pending { print(job.callback(41)) }
+        \\}
+    ;
+    var frontend = Frontend.Frontend.init(allocator);
+    const reference = try Interpreter.runCapture(allocator, (try frontend.compile(source)).ir);
+    const native = try compileAndRun(allocator, source);
+    try std.testing.expectEqual(reference.exit_code, exitCode(native));
+    try std.testing.expectEqualSlices(u8, reference.stdout, native.stdout);
+    try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
+}
+
 test "native try failure alternatives match the reference interpreter" {
     if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
@@ -1359,6 +1380,69 @@ test "native class drop matches the reference interpreter" {
     const reference = try Interpreter.runCapture(allocator, (try frontend.compile(source)).ir);
     const native = try compileAndRun(allocator, source);
     try std.testing.expectEqual(reference.exit_code, exitCode(native));
+    try std.testing.expectEqualSlices(u8, reference.stdout, native.stdout);
+    try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
+}
+
+test "native returned class collections survive for binding copies" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const source =
+        \\class Node {
+        \\    var parent:Node?
+        \\    var children:Node[]
+        \\    public init() { self.children = [] }
+        \\    public init(parent:Node) { self.parent = parent; self.children = []; parent.add(self) }
+        \\    protected func add(child:Node) { self.children.append(child) }
+        \\    public func get_children() Node[] { return self.children }
+        \\}
+        \\func make() Node {
+        \\    var root = Node()
+        \\    var first = Node(root)
+        \\    var second = Node(root)
+        \\    var third = Node(root)
+        \\    var fourth = Node(root)
+        \\    return root
+        \\}
+        \\func main() {
+        \\    var root = make()
+        \\    for child in root.get_children() { print("child") }
+        \\}
+    ;
+    var frontend = Frontend.Frontend.init(allocator);
+    const reference = try Interpreter.runCapture(allocator, (try frontend.compile(source)).ir);
+    const native = try compileAndRun(allocator, source);
+    try std.testing.expectEqual(reference.exit_code, exitCode(native));
+    try std.testing.expectEqualSlices(u8, reference.stdout, native.stdout);
+    try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
+}
+
+test "native lexical closures share captured method locals" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const source =
+        \\struct Element {
+        \\    let name:str
+        \\    func each_attr(callback:func(str, str)) { callback("id", "main") }
+        \\    func render() str {
+        \\        var result = self.name
+        \\        self.each_attr(func(key:str, value:str) {
+        \\            result = result + " $(key)=\"$(value)\""
+        \\        })
+        \\        return result
+        \\    }
+        \\}
+        \\func main() { print(Element(name:"element").render()) }
+    ;
+    var frontend = Frontend.Frontend.init(allocator);
+    const reference = try Interpreter.runCapture(allocator, (try frontend.compile(source)).ir);
+    const native = try compileAndRun(allocator, source);
+    try std.testing.expectEqual(reference.exit_code, exitCode(native));
+    try std.testing.expectEqualStrings("element id=\"main\"\n", native.stdout);
     try std.testing.expectEqualSlices(u8, reference.stdout, native.stdout);
     try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
 }

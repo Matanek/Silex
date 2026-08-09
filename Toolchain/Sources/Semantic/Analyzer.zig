@@ -47,6 +47,13 @@ pub const Binding = Model.Binding;
 pub const TypedValue = Model.TypedValue;
 pub const BlockBuilder = Model.BlockBuilder;
 pub const FunctionBuilder = Model.FunctionBuilder;
+pub const AnonymousCapture = struct {
+    name: []const u8,
+    type: Types.Type,
+    mutable: bool,
+    borrowed_root: ?[]const u8,
+    borrowed_mode: Ast.Parameter.Mode,
+};
 pub const Analyzer = struct {
     allocator: Allocator,
     program: Ast.Program = undefined,
@@ -63,7 +70,7 @@ pub const Analyzer = struct {
     specialization_file: ?usize = null,
     module_context: ?[]const u8 = null,
     owner_context: ?usize = null,
-    anonymous_function_context: bool = false,
+    anonymous_captures: []?[]const AnonymousCapture = &.{},
     function_context: ?Ast.Function = null,
     target: ?Target = null,
     packages: ?Packages.Graph = null,
@@ -84,6 +91,8 @@ pub const Analyzer = struct {
     fn analyzeProgram(self: *Analyzer, program: Ast.Program, require_entry: bool) AnalyzeError!Ir.Program {
         self.program = program;
         self.diagnostic = null;
+        self.anonymous_captures = try self.allocator.alloc(?[]const AnonymousCapture, program.functions.len);
+        @memset(self.anonymous_captures, null);
         self.structures = try Declarations.prepareStructures(self);
         const function_types = try Callbacks.prepare(self);
         self.globals = try StaticMembers.prepare(self);
@@ -95,14 +104,16 @@ pub const Analyzer = struct {
         try Protocols.validate(self);
         try self.validateDeclarations(require_entry);
         try self.validateParameterDefaults();
-        var functions: std.ArrayList(Ir.Function) = .empty;
+        const source_functions = try self.allocator.alloc(?Ir.Function, program.functions.len);
+        @memset(source_functions, null);
         for (program.functions, 0..) |function, function_id| {
-            try functions.append(self.allocator, try self.analyzeFunction(function_id, function));
+            if (!function.is_anonymous) source_functions[function_id] = try self.analyzeFunction(function_id, function);
         }
+        var generated_functions: std.ArrayList(Ir.Function) = .empty;
         for (program.structures, 0..) |structure, structure_index| {
             if (structure.is_protocol) continue;
             for (structure.constructors, 0..) |constructor, constructor_index| {
-                try functions.append(
+                try generated_functions.append(
                     self.allocator,
                     try Constructors.analyze(self, structure_index, constructor_index, constructor),
                 );
@@ -111,7 +122,7 @@ pub const Analyzer = struct {
         for (program.structures, 0..) |structure, structure_index| {
             if (structure.is_protocol) continue;
             for (structure.methods, 0..) |method, method_index| {
-                try functions.append(
+                try generated_functions.append(
                     self.allocator,
                     try Methods.analyze(self, structure_index, method_index, method),
                 );
@@ -119,12 +130,33 @@ pub const Analyzer = struct {
         }
         for (program.structures) |structure| if (structure.drop) |drop| {
             const nominal = self.structureIndex(structure.name) orelse return error.InvalidSource;
-            try functions.append(self.allocator, try Resources.analyzeDrop(self, nominal, structure, drop));
+            try generated_functions.append(self.allocator, try Resources.analyzeDrop(self, nominal, structure, drop));
         };
         for (program.structures) |structure| if (structure.is_class and !structure.is_static) {
             const nominal = self.structureIndex(structure.name) orelse return error.InvalidSource;
-            try functions.append(self.allocator, try Resources.analyzeClassFields(self, nominal, structure));
+            try generated_functions.append(self.allocator, try Resources.analyzeClassFields(self, nominal, structure));
         };
+        var remaining = program.functions.len;
+        while (remaining != 0) {
+            var progressed = false;
+            for (program.functions, 0..) |function, function_id| {
+                if (!function.is_anonymous or source_functions[function_id] != null or self.anonymous_captures[function_id] == null) continue;
+                source_functions[function_id] = try self.analyzeFunction(function_id, function);
+                progressed = true;
+            }
+            if (!progressed) break;
+            remaining -= 1;
+        }
+        var functions: std.ArrayList(Ir.Function) = .empty;
+        for (program.functions, 0..) |function, function_id| {
+            if (source_functions[function_id] == null) {
+                if (!function.is_anonymous) return error.InvalidSource;
+                self.anonymous_captures[function_id] = &.{};
+                source_functions[function_id] = try self.analyzeFunction(function_id, function);
+            }
+            try functions.append(self.allocator, source_functions[function_id].?);
+        }
+        try functions.appendSlice(self.allocator, generated_functions.items);
         return .{
             .globals = self.globals,
             .structures = self.structures,
@@ -322,7 +354,6 @@ pub const Analyzer = struct {
     }
 
     fn analyzeFunction(self: *Analyzer, function_id: Ir.FunctionId, function: Ast.Function) AnalyzeError!Ir.Function {
-        _ = function_id;
         if (function.intrinsic) |intrinsic| switch (intrinsic) {
             .system_adapter => |adapter| return InjectedSystems.analyze(self, function, adapter),
             else => {},
@@ -336,9 +367,6 @@ pub const Analyzer = struct {
         else
             null;
         defer self.module_context = previous_module_context;
-        const previous_anonymous_function_context = self.anonymous_function_context;
-        self.anonymous_function_context = function.is_anonymous;
-        defer self.anonymous_function_context = previous_anonymous_function_context;
         const previous_specialization_file = self.specialization_file;
         self.specialization_file = function.specialization_file;
         defer self.specialization_file = previous_specialization_file;
@@ -347,8 +375,25 @@ pub const Analyzer = struct {
         defer self.function_context = previous_function_context;
         var builder: FunctionBuilder = .{ .return_type = function.return_type };
         try builder.blocks.append(self.allocator, .{});
+        const captures = if (function.is_anonymous)
+            self.anonymous_captures[function_id] orelse &.{}
+        else
+            &.{};
+        const capture_types = try self.allocator.alloc(Types.Type, captures.len);
+        for (captures, 0..) |capture, capture_index| {
+            capture_types[capture_index] = .address;
+            try builder.value_types.append(self.allocator, .address);
+            try builder.bindings.append(self.allocator, .{
+                .name = capture.name,
+                .type = capture.type,
+                .reference = capture_index,
+                .mutable = capture.mutable,
+                .borrowed_root = capture.borrowed_root,
+                .borrowed_mode = capture.borrowed_mode,
+            });
+        }
         var parameter_types: std.ArrayList(Types.Type) = .empty;
-        for (function.parameters, 0..) |parameter, value| {
+        for (function.parameters, captures.len..) |parameter, value| {
             try parameter_types.append(self.allocator, try Collections.bindFunctionParameter(self, &builder, parameter, value));
         }
 
@@ -377,12 +422,53 @@ pub const Analyzer = struct {
         const owned_blocks = try blocks.toOwnedSlice(self.allocator);
         return .{
             .name = function.name,
+            .capture_types = capture_types,
             .parameter_types = try parameter_types.toOwnedSlice(self.allocator),
             .return_type = Collections.loweredBorrowType(self.structures, function.return_mode, function.return_type),
             .value_types = try builder.value_types.toOwnedSlice(self.allocator),
             .local_types = try builder.local_types.toOwnedSlice(self.allocator),
             .blocks = owned_blocks,
         };
+    }
+
+    pub fn prepareAnonymousCaptures(
+        self: *Analyzer,
+        builder: *FunctionBuilder,
+        function_id: Ir.FunctionId,
+    ) AnalyzeError![]const Ir.ValueId {
+        if (function_id >= self.program.functions.len or !self.program.functions[function_id].is_anonymous) return &.{};
+        var infos: std.ArrayList(AnonymousCapture) = .empty;
+        var values: std.ArrayList(Ir.ValueId) = .empty;
+        for (builder.bindings.items) |binding| {
+            if (!binding.available or !functionMentionsName(self.program.functions[function_id], binding.name)) continue;
+            const reference = if (binding.reference) |existing|
+                existing
+            else if (binding.local) |local| reference: {
+                const created = try self.newValue(builder, .address);
+                try self.emit(builder, .{ .local_address = .{ .result = created, .local = local } });
+                break :reference created;
+            } else if (binding.value) |value| reference: {
+                const local = builder.local_types.items.len;
+                try builder.local_types.append(self.allocator, binding.type);
+                try self.emit(builder, .{ .local_store = .{ .local = local, .operand = value } });
+                const created = try self.newValue(builder, .address);
+                try self.emit(builder, .{ .local_address = .{ .result = created, .local = local } });
+                break :reference created;
+            } else continue;
+            try infos.append(self.allocator, .{
+                .name = binding.name,
+                .type = binding.type,
+                .mutable = binding.mutable,
+                .borrowed_root = binding.borrowed_root,
+                .borrowed_mode = binding.borrowed_mode,
+            });
+            try values.append(self.allocator, reference);
+        }
+        const capture_infos = try infos.toOwnedSlice(self.allocator);
+        if (self.anonymous_captures[function_id]) |existing| {
+            if (existing.len != capture_infos.len) return self.fail(self.program.functions[function_id].position, "anonymous function has inconsistent lexical captures");
+        } else self.anonymous_captures[function_id] = capture_infos;
+        return values.toOwnedSlice(self.allocator);
     }
 
     pub fn analyzeStatements(self: *Analyzer, builder: *FunctionBuilder, function: Ast.Function, statements: []const Ast.Statement) AnalyzeError!bool {
@@ -1584,6 +1670,111 @@ pub const Analyzer = struct {
         return error.InvalidSource;
     }
 };
+
+fn functionMentionsName(function: Ast.Function, name: []const u8) bool {
+    for (function.parameters) |parameter| if (std.mem.eql(u8, parameter.name, name)) return false;
+    return statementsMentionName(function.statements, name);
+}
+
+fn statementsMentionName(statements: []const Ast.Statement, name: []const u8) bool {
+    for (statements) |statement| switch (statement) {
+        .variable_declaration => |declaration| {
+            if (declaration.initializer) |value| if (expressionMentionsName(value, name)) return true;
+        },
+        .assignment_statement => |assignment| {
+            if (std.mem.eql(u8, assignment.target.name, name)) return true;
+            for (assignment.target.indices) |index| if (expressionMentionsName(index.value, name)) return true;
+            if (assignment.value) |value| if (expressionMentionsName(value, name)) return true;
+        },
+        .return_statement => |return_value| if (return_value.value) |value| {
+            if (expressionMentionsName(value, name)) return true;
+        },
+        .expression_statement => |expression| if (expressionMentionsName(expression, name)) return true,
+        .print_statement => |print_value| for (print_value.values) |value| {
+            if (expressionMentionsName(value, name)) return true;
+        },
+        .assert_statement => |assertion| {
+            if (expressionMentionsName(assertion.condition, name) or expressionMentionsName(assertion.message, name)) return true;
+        },
+        .panic_statement => |panic_value| if (expressionMentionsName(panic_value.value, name)) return true,
+        .if_statement => |conditional| {
+            for (conditional.branches) |branch| {
+                if (expressionMentionsName(branch.condition.source(), name) or statementsMentionName(branch.statements, name)) return true;
+            }
+            if (conditional.else_statements) |alternative| if (statementsMentionName(alternative, name)) return true;
+        },
+        .while_statement => |loop| {
+            if (expressionMentionsName(loop.condition.source(), name) or statementsMentionName(loop.statements, name)) return true;
+        },
+        .for_statement => |loop| {
+            switch (loop.source) {
+                .collection => |collection| if (expressionMentionsName(collection, name)) return true,
+                .range => |range| if (expressionMentionsName(range.start, name) or expressionMentionsName(range.end, name)) return true,
+            }
+            if (statementsMentionName(loop.statements, name)) return true;
+        },
+        .mutex_statement => |mutex| if (statementsMentionName(mutex.statements, name)) return true,
+        .break_statement, .continue_statement => {},
+    };
+    return false;
+}
+
+fn expressionMentionsName(expression: *const Ast.Expression, name: []const u8) bool {
+    return switch (expression.value) {
+        .identifier => |identifier| std.mem.eql(u8, identifier, name),
+        .generic_reference => |reference| std.mem.eql(u8, reference.name, name),
+        .call => |call| mentions: {
+            if (call.receiver) |receiver| if (expressionMentionsName(receiver, name)) break :mentions true;
+            if (std.mem.eql(u8, call.name, name)) break :mentions true;
+            for (call.arguments) |argument| if (expressionMentionsName(argument, name)) break :mentions true;
+            for (call.named_arguments) |argument| if (expressionMentionsName(argument.value, name)) break :mentions true;
+            break :mentions false;
+        },
+        .cascade => |cascade| mentions: {
+            if (expressionMentionsName(cascade.receiver, name)) break :mentions true;
+            for (cascade.operations) |operation| switch (operation) {
+                .method_call => |call| {
+                    for (call.arguments) |argument| if (expressionMentionsName(argument, name)) break :mentions true;
+                    for (call.named_arguments) |argument| if (expressionMentionsName(argument.value, name)) break :mentions true;
+                },
+                .field_assignment => |assignment| if (expressionMentionsName(assignment.value, name)) break :mentions true,
+            };
+            break :mentions false;
+        },
+        .field_access => |access| expressionMentionsName(access.base, name),
+        .unary => |unary| expressionMentionsName(unary.operand, name) or
+            (if (unary.try_alternative) |alternative| if (alternative.message) |message| expressionMentionsName(message, name) else if (alternative.statements) |statements| statementsMentionName(statements, name) else false else false),
+        .binary => |binary| expressionMentionsName(binary.left, name) or expressionMentionsName(binary.right, name),
+        .conversion => |conversion| expressionMentionsName(conversion.operand, name),
+        .string_count => |value| expressionMentionsName(value, name),
+        .sequence_literal => |sequence| mentions: {
+            for (sequence.values) |value| if (expressionMentionsName(value, name)) break :mentions true;
+            break :mentions false;
+        },
+        .tuple_literal => |tuple| mentions: {
+            for (tuple.elements) |element| if (expressionMentionsName(element.value, name)) break :mentions true;
+            break :mentions false;
+        },
+        .index_access => |access| expressionMentionsName(access.base, name) or expressionMentionsName(access.index, name),
+        .slice_access => |access| expressionMentionsName(access.base, name) or expressionMentionsName(access.start, name) or expressionMentionsName(access.end, name),
+        .interpolated_string => |interpolation| mentions: {
+            for (interpolation.parts) |part| switch (part) {
+                .expression => |value| if (expressionMentionsName(value, name)) break :mentions true,
+                .text => {},
+            };
+            break :mentions false;
+        },
+        .match_expression => |match_value| mentions: {
+            if (expressionMentionsName(match_value.subject, name)) break :mentions true;
+            for (match_value.branches) |branch| {
+                if (branch.value) |value| if (expressionMentionsName(value, name)) break :mentions true;
+                if (branch.statements) |statements| if (statementsMentionName(statements, name)) break :mentions true;
+            }
+            break :mentions false;
+        },
+        .integer, .floating, .boolean, .null_value, .string => false,
+    };
+}
 
 fn conversionCost(self: *Analyzer, source: Types.Type, target: Types.Type) ?u8 {
     return Conversions.cost(self, source, target);

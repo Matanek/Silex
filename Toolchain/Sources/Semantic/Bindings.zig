@@ -72,6 +72,7 @@ pub fn analyzeVariable(self: anytype, builder: anytype, declaration: Ast.Variabl
             .mutable = alias_mode == .mutable,
             .borrowed_root = initializer.borrowed_root,
             .borrowed_mode = alias_mode,
+            .lexical_captures = initializer.lexical_captures,
         });
         return;
     }
@@ -109,11 +110,13 @@ pub fn analyzeVariable(self: anytype, builder: anytype, declaration: Ast.Variabl
             .type = declared_type,
             .local = local,
             .mutable = true,
+            .lexical_captures = initializer.lexical_captures,
         });
     } else try builder.bindings.append(self.allocator, .{
         .name = declaration.name,
         .type = declared_type,
         .value = initializer.value,
+        .lexical_captures = initializer.lexical_captures,
     });
 }
 
@@ -125,6 +128,7 @@ pub fn analyzeReturn(self: anytype, builder: anytype, function: Ast.Function, st
             expression,
             Optionals.expectedContext(function.return_type, expression),
         );
+        if (value.lexical_captures) return self.fail(expression.position, "capturing function value cannot be returned from its lexical scope");
         if (value.type != function.return_type and self.canImplicitlyConvert(value.type, function.return_type)) {
             value = try self.coerce(builder, value, function.return_type, expression.position);
         }

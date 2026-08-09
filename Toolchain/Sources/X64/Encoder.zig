@@ -201,6 +201,11 @@ fn encodeFunction(
             try emitStoreStack(allocator, bytes, argument_registers[index], parameter.start);
         }
     }
+    for (function.capture_parameters, 0..) |capture, index| {
+        if (capture.aggregate or capture.width != 1) return error.InvalidMachineProgram;
+        try emitLoadMemory(allocator, bytes, .rax, .r12, -@as(i32, @intCast(index * Machine.slot_size)));
+        try emitStoreStack(allocator, bytes, .rax, capture.start);
+    }
 
     const instruction_offsets = try allocator.alloc(usize, function.instructions.len + 1);
     defer allocator.free(instruction_offsets);
@@ -478,7 +483,15 @@ fn encodeFunction(
                 const displacement_at = bytes.items.len;
                 try bytes.appendNTimes(allocator, 0, 4);
                 try function_addresses.append(allocator, .{ .displacement_at = displacement_at, .function = address.function });
-                try emitStoreStack(allocator, bytes, .rax, address.result);
+                try emitStoreStack(allocator, bytes, .rax, address.result.start);
+                if (address.environment) |environment| {
+                    for (address.captures, 0..) |capture, index| {
+                        try emitLoadStack(allocator, bytes, .rax, capture);
+                        try emitStoreStack(allocator, bytes, .rax, @intCast(@as(usize, environment.start) + index));
+                    }
+                    try emitAddressStack(allocator, bytes, .rax, environment.start);
+                } else try emitImmediate(allocator, bytes, .rax, 0);
+                try emitStoreStack(allocator, bytes, .rax, address.result.start + 1);
             },
             .call => |call| {
                 for (call.arguments, 0..) |argument, index| {
@@ -508,6 +521,7 @@ fn encodeFunction(
                     }
                 }
                 if (call.result) |result| if (result.aggregate) try emitAddressStack(allocator, bytes, .r15, result.start);
+                try emitLoadStack(allocator, bytes, .r12, call.callee + 1);
                 try emitLoadStack(allocator, bytes, .rax, call.callee);
                 try bytes.appendSlice(allocator, &.{ 0xff, 0xd0 });
                 try bytes.appendSlice(allocator, &.{ 0x48, 0x85, 0xd2 });

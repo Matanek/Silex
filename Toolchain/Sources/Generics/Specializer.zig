@@ -127,6 +127,7 @@ pub const Specializer = struct {
             for (function.parameters) |parameter| try locals.append(self.allocator, .{ .name = parameter.name, .type = parameter.type });
             function.statements = try self.rewriteStatements(function.statements, &.{}, &locals);
             self.functions.items[function_index] = function;
+            if (function.is_anonymous) try self.internFunctionType(function);
         }
 
         try self.compactTypeNames();
@@ -139,6 +140,21 @@ pub const Specializer = struct {
         result.enums = try self.enums.toOwnedSlice(self.allocator);
         result.functions = try self.functions.toOwnedSlice(self.allocator);
         return result;
+    }
+
+    fn internFunctionType(self: *Specializer, function: Ast.Function) Allocator.Error!void {
+        const parameters = try self.allocator.alloc(Ast.FunctionType.ParameterType, function.parameters.len);
+        for (function.parameters, 0..) |parameter, index| parameters[index] = .{
+            .type = parameter.type,
+            .mode = parameter.mode,
+        };
+        const candidate: Ast.FunctionType = .{
+            .parameters = parameters,
+            .return_type = function.return_type,
+            .return_mode = function.return_mode,
+        };
+        for (self.function_types.items) |existing| if (sameFunctionType(existing, candidate)) return;
+        try self.function_types.append(self.allocator, candidate);
     }
 
     fn compactTypeNames(self: *Specializer) SpecializeError!void {

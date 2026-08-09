@@ -309,7 +309,7 @@ test "insert calls and place the cursor inside parameterized functions and metho
     const members = try Completion.itemsAt(arena.allocator(), source, member_cursor, .trigger_character);
     try std.testing.expectEqualStrings("reset()", itemWithLabel(members, "reset").?.insertText.?);
     try std.testing.expect(itemWithLabel(members, "reset").?.insertTextFormat == null);
-    try std.testing.expectEqualStrings("add(value:${1:value})$0", itemWithLabel(members, "add").?.insertText.?);
+    try std.testing.expectEqualStrings("add(${1:value})$0", itemWithLabel(members, "add").?.insertText.?);
     try std.testing.expectEqual(@as(?u8, 2), itemWithLabel(members, "add").?.insertTextFormat);
 
     const function_source =
@@ -323,7 +323,7 @@ test "insert calls and place the cursor inside parameterized functions and metho
     const functions = try Completion.itemsAt(arena.allocator(), function_source, function_cursor, .invoked);
     try std.testing.expectEqualStrings("answer()", itemWithLabel(functions, "answer").?.insertText.?);
     try std.testing.expect(itemWithLabel(functions, "answer").?.insertTextFormat == null);
-    try std.testing.expectEqualStrings("consume(value:${1:value}, count:${2:count})$0", itemWithLabel(functions, "consume").?.insertText.?);
+    try std.testing.expectEqualStrings("consume(${1:value})$0", itemWithLabel(functions, "consume").?.insertText.?);
     try std.testing.expectEqual(@as(?u8, 2), itemWithLabel(functions, "consume").?.insertTextFormat);
 }
 
@@ -414,7 +414,7 @@ test "reuse an existing call when completing an imported module function" {
         new_call_cursor,
     )).?;
     const new_call = itemWithLabel(new_call_items, "sha256").?;
-    try std.testing.expectEqualStrings("sha256(value:${1:value})$0", new_call.insertText.?);
+    try std.testing.expectEqualStrings("sha256(${1:value})$0", new_call.insertText.?);
     try std.testing.expectEqual(@as(?u8, 2), new_call.insertTextFormat);
 }
 
@@ -547,7 +547,7 @@ test "insert calls for structure and class constructors" {
 
     const entity_cursor = std.mem.indexOf(u8, source, "En\n").? + "En".len;
     const entities = try Completion.itemsAt(arena.allocator(), source, entity_cursor, .invoked);
-    try std.testing.expectEqualStrings("Entity(name:${1:name})$0", itemWithLabel(entities, "Entity").?.insertText.?);
+    try std.testing.expectEqualStrings("Entity(${1:name})$0", itemWithLabel(entities, "Entity").?.insertText.?);
     try std.testing.expectEqual(@as(?u8, 2), itemWithLabel(entities, "Entity").?.insertTextFormat);
 }
 

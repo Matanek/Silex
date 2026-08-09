@@ -444,6 +444,26 @@ test "lower arithmetic assignments through the existing checked operators" {
     try std.testing.expect(instructions[9] == .local_store);
 }
 
+test "lower string concatenation assignments to string concatenation" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var parser = Parser.init(allocator,
+        \\func main() {
+        \\    var result = ""
+        \\    result += "Silex"
+        \\    print(result)
+        \\}
+    );
+    var analyzer = Analyzer.init(allocator);
+    const program = try analyzer.analyze(try parser.parse());
+    const instructions = program.functions[0].blocks[0].instructions;
+    try std.testing.expect(instructions[4] == .string_concat);
+    try std.testing.expect(instructions[5] == .local_store);
+    const result = try @import("../Interpreter.zig").runCapture(allocator, program);
+    try std.testing.expectEqualStrings("Silex\n", result.stdout);
+}
+
 test "diagnose invalid arithmetic assignments with their source operator" {
     try expectSemanticError(
         "func main() { let value = 1; value += 2 }",

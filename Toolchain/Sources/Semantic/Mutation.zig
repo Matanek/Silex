@@ -396,6 +396,25 @@ fn analyzeReplacement(
         return value.value;
     }
 
+    if (assignment.operator == .add and target_type == .str) {
+        const right = try self.analyzeExpressionExpected(builder, assignment.value.?, .str);
+        if (right.type != .str) {
+            const message = try std.fmt.allocPrint(
+                self.allocator,
+                "operator '+=' does not accept '{s}' and '{s}'",
+                .{ self.typeName(target_type), self.typeName(right.type) },
+            );
+            return self.fail(assignment.value.?.position, message);
+        }
+        const result = try self.newValue(builder, .str);
+        try self.emit(builder, .{ .string_concat = .{
+            .result = result,
+            .left = current.?,
+            .right = right.value,
+        } });
+        return result;
+    }
+
     if (!target_type.isNumeric()) {
         const message = if (field_target)
             try std.fmt.allocPrint(

@@ -329,6 +329,7 @@ pub const Instruction = union(enum) {
     pub const FunctionReference = struct {
         result: ValueId,
         function: FunctionId,
+        captures: []const ValueId = &.{},
     };
 
     pub const LocalLoad = struct {
@@ -489,6 +490,7 @@ pub const Block = struct {
 
 pub const Function = struct {
     name: []const u8,
+    capture_types: []const Type = &.{},
     parameter_types: []const Type,
     return_type: Type,
     value_types: []const Type,
@@ -1027,9 +1029,19 @@ fn writeInstruction(
             {
                 return error.InvalidProgram;
             }
+            if (reference.captures.len != program.functions[reference.function].capture_types.len) return error.InvalidProgram;
             try appendResult(output, allocator, program, function, reference.result);
             try output.appendSlice(allocator, "function @");
             try output.appendSlice(allocator, program.functions[reference.function].name);
+            if (reference.captures.len != 0) {
+                try output.appendSlice(allocator, " captures (");
+                for (reference.captures, 0..) |capture, index| {
+                    if (index != 0) try output.appendSlice(allocator, ", ");
+                    try appendValueChecked(output, allocator, function, capture);
+                    if (function.value_types[capture] != .address) return error.InvalidProgram;
+                }
+                try output.append(allocator, ')');
+            }
         },
         .local_load => |load| {
             try appendResult(output, allocator, program, function, load.result);

@@ -75,10 +75,25 @@ func visit(value:int, callback:func(int)) { callback(value) }
 visit(42, func(value:int) { print(value) })
 ```
 
-Anonymous functions currently cannot capture values from their surrounding
-function. Their parameters and declarations made inside their body remain
-available normally. A capture produces a targeted diagnostic until closure
-environments and their lifetime rules are implemented.
+An anonymous function captures only the outer bindings that it uses. A
+captured `var` remains shared: changing it in the anonymous function changes
+the variable in the surrounding function, and copies of the function value
+refer to the same binding. A captured `let` remains immutable.
+
+```sx
+var count = 0
+var increment = func() { count += 1 }
+var same_increment = increment
+
+increment()
+same_increment()
+print(count) // 2
+```
+
+Captures are lexical borrows; they do not copy the captured value or extend
+its lifetime. A capturing function therefore cannot be returned from the
+scope that owns its captures. It can be passed to a synchronous callback and
+called while that scope is active.
 
 Function values can be stored in structure fields and called like ordinary
 functions. They are language values; this does not expose a machine address or

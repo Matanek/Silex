@@ -97,6 +97,7 @@ pub fn itemsAtForTarget(
     const project = try indexProject(allocator, io, global_packages_root, selected_target, root, document_path);
     const query = try queryAt(allocator, source, cursor, project, io, documents);
     if (query == null) return null;
+    const completing_use_path = std.meta.activeTag(query.?) == .use_path;
 
     var ranked: std.ArrayList(RankedItem) = .empty;
     switch (query.?) {
@@ -138,11 +139,18 @@ pub fn itemsAtForTarget(
         result[index] = entry.item;
         result[index].sortText = try std.fmt.allocPrint(allocator, "{d:0>3}-{d:0>6}", .{ entry.priority, index });
         result[index].filterText = entry.item.label;
-        result[index].insertText = try Completion.insertTextForAt(allocator, entry.item, source, cursor);
-        result[index].insertTextFormat = Completion.insertTextFormatForAt(entry.item, source, cursor);
+        if (completing_use_path) {
+            result[index].insertText = entry.item.label;
+            result[index].insertTextFormat = null;
+        } else {
+            result[index].insertText = try Completion.insertTextForAt(allocator, entry.item, source, cursor);
+            result[index].insertTextFormat = Completion.insertTextFormatForAt(entry.item, source, cursor);
+        }
     }
-    Completion.disambiguateCallableLabels(result);
-    return result;
+    const expanded = try Completion.expandOptionalCallVariants(allocator, result, source, cursor);
+    const unique = Completion.deduplicateCallableShapes(expanded);
+    Completion.disambiguateCallableLabels(unique);
+    return unique;
 }
 
 pub fn parameterItemsAtForTarget(
@@ -498,8 +506,10 @@ pub fn scopeItemsAtForTarget(
         result[index].insertText = try Completion.insertTextForAt(allocator, entry.item, source, cursor);
         result[index].insertTextFormat = Completion.insertTextFormatForAt(entry.item, source, cursor);
     }
-    Completion.disambiguateCallableLabels(result);
-    return result;
+    const expanded = try Completion.expandOptionalCallVariants(allocator, result, source, cursor);
+    const unique = Completion.deduplicateCallableShapes(expanded);
+    Completion.disambiguateCallableLabels(unique);
+    return unique;
 }
 
 fn hasLocalNominal(program: Ast.Program, name: []const u8) bool {
@@ -594,6 +604,20 @@ fn queryAt(
                 .prefix = prefix,
                 .cursor = cursor,
             } };
+            if (try importedInstanceCallReturnTypePath(
+                allocator,
+                io,
+                documents,
+                project,
+                program,
+                source,
+                cursor,
+                call,
+            )) |type_path| return .{ .imported_member = .{
+                .type_path = type_path,
+                .prefix = prefix,
+                .cursor = cursor,
+            } };
         }
         if (Completion.directCall(receiver)) |call| {
             if (try importedConstructorCallTypePath(
@@ -666,6 +690,31 @@ fn queryAt(
                     } };
                 }
             }
+        }
+    }
+    // Keep qualified package paths usable while the surrounding source is
+    // temporarily unparsable, as happens between accepting a call snippet and
+    // finishing one of its arguments. Namespaces expose their children, while
+    // declarations expose their static members (including enum variants).
+    if ((findProvider(project.index, receiver) != null or project.index.isNamespace(receiver)) and
+        try modulePathVisible(allocator, io, documents, project, receiver))
+    {
+        return .{ .qualifier = .{
+            .path = receiver,
+            .prefix = prefix,
+            .cursor = cursor,
+            .type_only = qualified_type,
+        } };
+    }
+    if (declarationTarget(project.index, receiver)) |target| {
+        const provider = project.index.providers[target.provider];
+        if (project.graph.canAccess(project.current_owner, provider.owner, provider.name)) {
+            return .{ .imported_member = .{
+                .type_path = receiver,
+                .prefix = prefix,
+                .cursor = cursor,
+                .static_receiver = true,
+            } };
         }
     }
     return null;
@@ -1126,6 +1175,20 @@ fn appendImportedMembers(
     query: ImportedMemberQuery,
     ranked: *std.ArrayList(RankedItem),
 ) !void {
+    return appendImportedMembersDepth(allocator, io, documents, project, current_source, query, ranked, 0);
+}
+
+fn appendImportedMembersDepth(
+    allocator: Allocator,
+    io: Io,
+    documents: []const Types.Document,
+    project: IndexedProject,
+    current_source: []const u8,
+    query: ImportedMemberQuery,
+    ranked: *std.ArrayList(RankedItem),
+    depth: usize,
+) !void {
+    if (depth > project.index.providers.len) return;
     const target = declarationTarget(project.index, query.type_path) orelse return;
     const provider = project.index.providers[target.provider];
     if (!project.graph.canAccess(project.current_owner, provider.owner, provider.name)) return;
@@ -1227,6 +1290,22 @@ fn appendImportedMembers(
         }
         return;
     }
+    for (loaded.program.uses) |exported| {
+        if (!exported.is_public or exported.alias == null or
+            !std.mem.eql(u8, exported.alias.?, target.declaration)) continue;
+        var resolved = query;
+        resolved.type_path = exported.path;
+        return appendImportedMembersDepth(
+            allocator,
+            io,
+            documents,
+            project,
+            current_source,
+            resolved,
+            ranked,
+            depth + 1,
+        );
+    }
 }
 
 fn appendProviderExtensionMethods(
@@ -1326,12 +1405,16 @@ fn parseCurrentAtCompletion(
     if (try Completion.recoverCascadeForParsing(allocator, source, cursor)) |recovered| {
         if (try parseCurrent(allocator, recovered)) |program| return program;
     }
+    const completion_line_start = if (std.mem.lastIndexOfScalar(u8, source[0..cursor], '\n')) |newline| newline + 1 else 0;
+    const before_cursor = std.mem.trim(u8, source[completion_line_start..cursor], " \t\r");
+    const control_body_missing = Completion.lineStartsControlCondition(before_cursor) and
+        !blockFollowsCursor(source, cursor);
     const placeholder = if (type_position)
         if (prefix.len == 0) "__Completion" else ""
     else if (Completion.callFollows(source, cursor))
         if (prefix.len == 0) "__completion" else ""
     else if (prefix.len == 0)
-        "__completion()"
+        if (control_body_missing) "__completion() {}" else "__completion()"
     else
         "()";
     const recovered = try std.fmt.allocPrint(allocator, "{s}{s}{s}", .{
@@ -1357,6 +1440,13 @@ fn parseCurrentAtCompletion(
         source[line_end..],
     });
     return parseCurrent(allocator, without_incomplete_declaration);
+}
+
+fn blockFollowsCursor(source: []const u8, cursor: usize) bool {
+    var index = cursor;
+    while (index < source.len and (source[index] == ' ' or source[index] == '\t' or source[index] == '\r' or
+        source[index] == '\n')) index += 1;
+    return index < source.len and source[index] == '{';
 }
 
 fn parseCurrentAtScope(
@@ -1387,7 +1477,6 @@ fn parseCurrentAtScope(
         source[cursor..],
     });
     if (try parseCurrent(allocator, recovered)) |program| return program;
-    if (!type_only) return null;
     const line_end = if (std.mem.indexOfScalarPos(u8, source, cursor, '\n')) |newline|
         newline + 1
     else
@@ -1845,6 +1934,61 @@ fn importedQualifiedCallReturnTypePath(
     return qualified;
 }
 
+fn importedInstanceCallReturnTypePath(
+    allocator: Allocator,
+    io: Io,
+    documents: []const Types.Document,
+    project: IndexedProject,
+    current: Ast.Program,
+    source: []const u8,
+    cursor: usize,
+    call: Completion.QualifiedCall,
+) !?[]const u8 {
+    const local_type = parameterTypePathAt(source, current, cursor, call.owner) orelse
+        loopBindingTypePathAt(source, current, cursor, call.owner) orelse
+        try declaredTypePath(allocator, source, cursor, call.owner) orelse return null;
+    var owner_path = try importedTypePath(allocator, current, project, local_type) orelse return null;
+    var depth: usize = 0;
+    while (depth <= project.index.providers.len) : (depth += 1) {
+        const target = declarationTarget(project.index, owner_path) orelse return null;
+        const provider = project.index.providers[target.provider];
+        if (!project.graph.canAccess(project.current_owner, provider.owner, provider.name)) return null;
+        const loaded = try loadProgram(allocator, io, documents, provider) orelse return null;
+        var matched_structure = false;
+        for (loaded.program.structures) |structure| {
+            if (!structure.is_public or !std.mem.eql(u8, structure.name, target.declaration)) continue;
+            matched_structure = true;
+            var return_name: ?[]const u8 = null;
+            for (structure.methods) |method| {
+                if (method.is_static or method.is_local or method.is_private or method.is_protected or
+                    !std.mem.eql(u8, method.name, call.name) or
+                    !parametersAcceptArity(method.parameters, call.arity)) continue;
+                if (method.is_internal) {
+                    if (provider.owner != project.current_owner) continue;
+                } else if (!method.is_public) continue;
+                const candidate = returnTypeName(loaded.program, method.return_type) orelse continue;
+                if (return_name != null and !std.mem.eql(u8, return_name.?, candidate)) return null;
+                return_name = candidate;
+            }
+            const name = return_name orelse return null;
+            if (try importedTypePath(allocator, loaded.program, project, name)) |resolved| return resolved;
+            if (std.mem.indexOfScalar(u8, name, '.') != null and declarationTarget(project.index, name) != null) return name;
+            if (std.mem.eql(u8, name, target.declaration)) return owner_path;
+            return try std.fmt.allocPrint(allocator, "{s}.{s}", .{ provider.name, name });
+        }
+        if (matched_structure) return null;
+        var reexport: ?[]const u8 = null;
+        for (loaded.program.uses) |use| {
+            if (!use.is_public or use.alias == null or
+                !std.mem.eql(u8, use.alias.?, target.declaration)) continue;
+            reexport = use.path;
+            break;
+        }
+        owner_path = reexport orelse return null;
+    }
+    return null;
+}
+
 fn returnTypeName(program: Ast.Program, source_type: Ast.Type) ?[]const u8 {
     const type_value = source_type.optionalChild() orelse source_type;
     if (type_value.genericInstantiationIndex()) |index| {
@@ -1947,6 +2091,7 @@ fn appendRanked(
     priority: u8,
     overloaded: bool,
 ) !void {
+    if (Completion.isReservedCompilerName(item.label)) return;
     for (ranked.items, 0..) |existing, index| {
         if (!std.mem.eql(u8, existing.item.label, item.label)) continue;
         if (existing.item.kind == CompletionKind.module and item.kind != CompletionKind.module) {
@@ -2053,6 +2198,9 @@ test "complete simple modules before declarations in a use path" {
     try std.testing.expect(found_inside);
     try std.testing.expect(hasLabel(items, "Visible"));
     try std.testing.expect(!hasLabel(items, "Hidden"));
+    const visible = items[labelIndex(items, "Visible").?];
+    try std.testing.expectEqualStrings("Visible", visible.insertText.?);
+    try std.testing.expect(visible.insertTextFormat == null);
 
     const namespace_source = "use Module2.";
     const namespace_items = (try itemsAt(
@@ -2279,11 +2427,13 @@ test "complete public package APIs module aliases members and overlays" {
     try std.testing.expect(!hasLabel(qualifier_items, "hidden"));
     try std.testing.expect(!hasLabel(qualifier_items, "package_only"));
     try std.testing.expectEqual(@as(usize, 1), labelCount(qualifier_items, "add"));
-    try std.testing.expect(std.mem.indexOf(
-        u8,
-        qualifier_items[labelIndex(qualifier_items, "add").?].detail,
-        "right:int = 1",
-    ) != null);
+    var saw_complete_add = false;
+    for (qualifier_items) |item| if (completionNameMatches(item, "add") and
+        std.mem.indexOf(u8, item.detail, "right:int = 1") != null)
+    {
+        saw_complete_add = true;
+    };
+    try std.testing.expect(saw_complete_add);
 
     const constructor_source =
         \\use Math.Operations
@@ -2350,6 +2500,10 @@ test "complete public package APIs module aliases members and overlays" {
     try std.testing.expect(hasLabel(cascade_items, "to_str"));
     try std.testing.expect(!hasLabel(cascade_items, "add"));
     try std.testing.expect(!hasLabel(cascade_items, "if"));
+    try std.testing.expect(!hasLabel(cascade_items, "hidden_value"));
+    try std.testing.expect(!hasLabel(cascade_items, "hidden_method"));
+    try std.testing.expect(!hasLabel(cascade_items, "package_value"));
+    try std.testing.expect(!hasLabel(cascade_items, "package_method"));
 
     const static_source =
         \\use Math.Operations.Builder
@@ -2540,6 +2694,7 @@ test "complete imported application members in a cascade" {
     var temporary = std.testing.tmpDir(.{});
     defer temporary.cleanup();
     try temporary.dir.createDirPath(std.testing.io, "GFX/Module");
+    try temporary.dir.createDirPath(std.testing.io, "GFX/Module/Window");
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Package.json",
         .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\"}",
@@ -2547,9 +2702,33 @@ test "complete imported application members in a cascade" {
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Module/Bootstrap.sx",
         .data =
+        \\public enum Schedule { startup; update }
+        \\public class Resources { public func insert() {} }
         \\public class Application {
         \\    public func install() Application { return self }
+        \\    public func resources() Resources { return Resources() }
+        \\    public func add_system(schedule:Schedule, callback:func()) Application { return self }
+        \\    public func add_system<System>(schedule:Schedule, callback:System) Application { panic("unspecialized") }
         \\    public func run() int { return 0 }
+        \\    internal func __silex_add_system() Application { return self }
+        \\    internal func __silex_run_query() {}
+        \\}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/@Module.sx",
+        .data =
+        \\public use GFX.Bootstrap.Application
+        \\public use GFX.Bootstrap.Resources
+        \\public use GFX.Bootstrap.Schedule
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/Window/@Module.sx",
+        .data =
+        \\public class Window {
+        \\    public init(settings:int = 0) {}
+        \\    public func show() {}
         \\}
         ,
     });
@@ -2577,8 +2756,178 @@ test "complete imported application members in a cascade" {
         cursor,
     )).?;
     try std.testing.expect(hasLabel(items, "install"));
+    try std.testing.expectEqualStrings(
+        "add_system(${1:schedule}, ${2:callback})$0",
+        items[labelIndex(items, "add_system").?].insertText.?,
+    );
+    try std.testing.expectEqual(@as(usize, 1), labelCount(items, "add_system"));
     try std.testing.expect(hasLabel(items, "run"));
     try std.testing.expect(!hasLabel(items, "if"));
+    try std.testing.expect(!hasLabel(items, "__silex_add_system"));
+    try std.testing.expect(!hasLabel(items, "__silex_run_query"));
+
+    const resources_source =
+        \\use GFX
+        \\func main() {
+        \\    let application = GFX.Application()
+        \\    application.resources().
+        \\}
+    ;
+    const resources_cursor = std.mem.indexOf(u8, resources_source, "resources().").? + "resources().".len;
+    const resources_items = (try itemsAt(
+        allocator,
+        std.testing.io,
+        null,
+        root_uri,
+        uri,
+        &.{},
+        resources_source,
+        resources_cursor,
+    )).?;
+    try std.testing.expect(hasLabel(resources_items, "insert"));
+    try std.testing.expect(!hasLabel(resources_items, "GFX"));
+
+    const direct_source =
+        \\func main() {
+        \\    var window = GFX.Window()
+        \\        ..
+        \\}
+    ;
+    const direct_cursor = std.mem.indexOf(u8, direct_source, "..\n").? + "..".len;
+    const direct_items = (try itemsAt(
+        allocator,
+        std.testing.io,
+        null,
+        root_uri,
+        uri,
+        &.{},
+        direct_source,
+        direct_cursor,
+    )).?;
+    try std.testing.expect(hasLabel(direct_items, "show"));
+
+    const conditional_source =
+        \\use GFX.Bootstrap
+        \\func main() {
+        \\    let app = Bootstrap.Application()
+        \\    if app.
+        \\}
+    ;
+    const conditional_cursor = std.mem.indexOf(u8, conditional_source, "app.\n").? + "app.".len;
+    const conditional_items = (try itemsAt(
+        allocator,
+        std.testing.io,
+        null,
+        root_uri,
+        uri,
+        &.{},
+        conditional_source,
+        conditional_cursor,
+    )).?;
+    try std.testing.expect(hasLabel(conditional_items, "install"));
+    try std.testing.expect(hasLabel(conditional_items, "run"));
+
+    const optional_constructor_source = "func main() { let window = GFX.Wind }";
+    const optional_constructor_cursor = std.mem.indexOf(u8, optional_constructor_source, "Wind }").? + "Wind".len;
+    const optional_constructor_items = (try itemsAt(
+        allocator,
+        std.testing.io,
+        null,
+        root_uri,
+        uri,
+        &.{},
+        optional_constructor_source,
+        optional_constructor_cursor,
+    )).?;
+    try std.testing.expectEqual(@as(usize, 2), labelCount(optional_constructor_items, "Window"));
+    var saw_empty_constructor = false;
+    var saw_explicit_constructor = false;
+    for (optional_constructor_items) |item| {
+        if (item.filterText == null or !std.mem.eql(u8, item.filterText.?, "Window")) continue;
+        saw_empty_constructor = saw_empty_constructor or std.mem.eql(u8, item.insertText.?, "Window()");
+        saw_explicit_constructor = saw_explicit_constructor or std.mem.indexOf(u8, item.insertText.?, "${1:settings}") != null;
+        try std.testing.expect(std.mem.indexOf(u8, item.insertText.?, "settings:") == null);
+    }
+    try std.testing.expect(saw_empty_constructor);
+    try std.testing.expect(saw_explicit_constructor);
+
+    const reexported_enum_source =
+        \\use GFX
+        \\func callback() {}
+        \\func main() {
+        \\    GFX.Application()
+        \\        ..add_system(schedule:GFX.Schedule., callback:callback)
+        \\}
+    ;
+    const reexported_enum_cursor = std.mem.indexOf(u8, reexported_enum_source, "GFX.Schedule.").? +
+        "GFX.Schedule.".len;
+    const reexported_enum_items = (try itemsAt(
+        allocator,
+        std.testing.io,
+        null,
+        root_uri,
+        uri,
+        &.{},
+        reexported_enum_source,
+        reexported_enum_cursor,
+    )).?;
+    try std.testing.expect(hasLabel(reexported_enum_items, "startup"));
+    try std.testing.expect(hasLabel(reexported_enum_items, "update"));
+
+    const invalid_named_tail_source =
+        \\use GFX
+        \\func callback() {}
+        \\func main() {
+        \\    GFX.Application()
+        \\        ..add_system(schedule:GFX.Schedule., callback)
+        \\        ..run()
+        \\}
+    ;
+    const invalid_named_tail_cursor = std.mem.indexOf(u8, invalid_named_tail_source, "schedule:").? +
+        "schedule:".len;
+    const invalid_named_tail_items = try scopeItemsAt(
+        allocator,
+        std.testing.io,
+        null,
+        root_uri,
+        uri,
+        &.{},
+        invalid_named_tail_source,
+        invalid_named_tail_cursor,
+    );
+    try std.testing.expect(hasLabel(invalid_named_tail_items, "GFX"));
+
+    const invalid_qualified_cursor = std.mem.indexOf(u8, invalid_named_tail_source, "schedule:GFX.").? +
+        "schedule:GFX.".len;
+    const invalid_qualified_items = (try itemsAt(
+        allocator,
+        std.testing.io,
+        null,
+        root_uri,
+        uri,
+        &.{},
+        invalid_named_tail_source,
+        invalid_qualified_cursor,
+    )).?;
+    try std.testing.expect(hasLabel(invalid_qualified_items, "Schedule"));
+
+    const invalid_declaration_cursor = std.mem.indexOf(
+        u8,
+        invalid_named_tail_source,
+        "schedule:GFX.Schedule.",
+    ).? + "schedule:GFX.Schedule.".len;
+    const invalid_declaration_items = (try itemsAt(
+        allocator,
+        std.testing.io,
+        null,
+        root_uri,
+        uri,
+        &.{},
+        invalid_named_tail_source,
+        invalid_declaration_cursor,
+    )).?;
+    try std.testing.expect(hasLabel(invalid_declaration_items, "startup"));
+    try std.testing.expect(hasLabel(invalid_declaration_items, "update"));
 
     const nested_source =
         \\use GFX.Bootstrap.Application

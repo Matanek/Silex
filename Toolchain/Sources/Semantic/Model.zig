@@ -17,6 +17,7 @@ pub const Binding = struct {
     available: bool = true,
     refined_type: ?Types.Type = null,
     refined_value: ?Ir.ValueId = null,
+    lexical_captures: bool = false,
 };
 
 pub const TypedValue = struct {
@@ -26,6 +27,7 @@ pub const TypedValue = struct {
     borrowed_root: ?[]const u8 = null,
     borrowed_mode: Ast.Parameter.Mode = .value,
     reference: ?Ir.ValueId = null,
+    lexical_captures: bool = false,
 };
 
 pub const BlockBuilder = struct {

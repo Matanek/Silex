@@ -265,6 +265,10 @@ fn analyzeCollectionFor(self: anytype, builder: anytype, function: Ast.Function,
     const collection_value = try loadLocalValue(self, builder, collection_local, source.type);
     const element = try self.newValue(builder, collection.element);
     try self.emit(builder, .{ .collection_load = .{ .result = element, .collection = collection_value, .index = index, .position = loop.position } });
+    // A for binding is a value copy of the collection element. Dynamic list
+    // loads only copy the stored bits, so class roots nested anywhere in that
+    // value must be retained before the binding is dropped or written back.
+    if (Resources.containsClass(self, collection.element)) try Resources.retainValue(self, builder, collection.element, element);
     const binding_count = builder.bindings.items.len;
     if (loop.index_name) |name| try builder.bindings.append(self.allocator, .{
         .name = name,

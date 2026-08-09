@@ -168,10 +168,24 @@ pub fn invokeDepth(
     depth: usize,
     session: *Session,
 ) Error!Value {
+    return invokeClosureDepth(allocator, program, function_id, &.{}, arguments, depth, session);
+}
+
+fn invokeClosureDepth(
+    allocator: Allocator,
+    program: Ir.Program,
+    function_id: Ir.FunctionId,
+    captures: []const Value,
+    arguments: []const Value,
+    depth: usize,
+    session: *Session,
+) Error!Value {
     if (depth >= max_call_depth) return error.CallStackOverflow;
     if (function_id >= program.functions.len) return error.InvalidProgram;
     const function = program.functions[function_id];
-    if (arguments.len != function.parameter_types.len or function.parameter_types.len > function.value_types.len) {
+    if (captures.len != function.capture_types.len or arguments.len != function.parameter_types.len or
+        captures.len + arguments.len > function.value_types.len)
+    {
         return error.InvalidProgram;
     }
 
@@ -181,7 +195,11 @@ pub fn invokeDepth(
     const locals = try allocator.alloc(?Value, function.local_types.len);
     defer allocator.free(locals);
     @memset(locals, null);
-    for (arguments, function.parameter_types, 0..) |argument, parameter_type, index| {
+    for (captures, function.capture_types, 0..) |capture, capture_type, index| {
+        if (capture.typeOf() != capture_type) return error.InvalidProgram;
+        values[index] = try cloneValue(allocator, capture);
+    }
+    for (arguments, function.parameter_types, captures.len..) |argument, parameter_type, index| {
         if (argument.typeOf() != parameter_type) return error.InvalidProgram;
         values[index] = try cloneValue(allocator, argument);
     }
@@ -277,9 +295,12 @@ fn executeInstruction(
         .constant_float64 => |constant| try store(function, values, constant.result, .{ .float64 = @bitCast(constant.bits) }),
         .function_reference => |reference| {
             if (reference.function >= program.functions.len) return error.InvalidProgram;
+            const captures = try allocator.alloc(Value, reference.captures.len);
+            for (reference.captures, 0..) |capture, index| captures[index] = try cloneValue(allocator, try load(values, capture));
             try store(function, values, reference.result, .{ .function = .{
                 .type = function.value_types[reference.result],
                 .id = reference.function,
+                .captures = captures,
             } });
         },
         .optional_null => |optional| {
@@ -594,7 +615,7 @@ fn executeInstruction(
             const call_arguments = try allocator.alloc(Value, call.arguments.len);
             defer allocator.free(call_arguments);
             for (call.arguments, 0..) |argument, index| call_arguments[index] = try load(values, argument);
-            const result = try invokeDepth(allocator, program, callback.id, call_arguments, depth + 1, session);
+            const result = try invokeClosureDepth(allocator, program, callback.id, callback.captures, call_arguments, depth + 1, session);
             if (call.result) |result_id| {
                 if (callee.return_type == .void or result == .void) return error.InvalidProgram;
                 try store(function, values, result_id, result);

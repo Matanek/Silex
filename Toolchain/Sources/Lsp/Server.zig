@@ -150,6 +150,12 @@ pub const Server = struct {
             };
             const trigger_kind = Protocol.completionTriggerKind(params);
             const trigger_character = Protocol.completionTriggerCharacter(params) orelse "";
+            const function_value_expected = self.functionValueExpectedAt(
+                allocator,
+                uri,
+                source,
+                cursor,
+            ) catch false;
             const completing_try_error = Completion.isTryErrorBindingPositionAt(allocator, source, cursor) catch false;
             const completing_try_alternative = Completion.isTryAlternativePositionAt(allocator, source, cursor) catch false;
             const local_parameters = try Completion.parameterItemsAt(allocator, source, cursor);
@@ -195,7 +201,11 @@ pub const Server = struct {
                 ) catch null;
                 if (project_items) |items| {
                     const merged = try mergeCompletionItems(allocator, parameters, items);
-                    return try self.reply(allocator, id, .{ .isIncomplete = false, .items = merged });
+                    const contextual = if (function_value_expected)
+                        try Completion.insertFunctionReferences(allocator, merged)
+                    else
+                        merged;
+                    return try self.reply(allocator, id, .{ .isIncomplete = false, .items = contextual });
                 }
             }
             const items = try Completion.itemsAt(allocator, source, cursor, trigger_kind);
@@ -213,10 +223,18 @@ pub const Server = struct {
                 ) catch &.{};
                 const scoped = try mergeCompletionItems(allocator, items, imported);
                 const merged = try mergeCompletionItems(allocator, parameters, scoped);
-                return try self.reply(allocator, id, .{ .isIncomplete = false, .items = merged });
+                const contextual = if (function_value_expected)
+                    try Completion.insertFunctionReferences(allocator, merged)
+                else
+                    merged;
+                return try self.reply(allocator, id, .{ .isIncomplete = false, .items = contextual });
             }
             const merged = try mergeCompletionItems(allocator, parameters, items);
-            return try self.reply(allocator, id, .{ .isIncomplete = false, .items = merged });
+            const contextual = if (function_value_expected)
+                try Completion.insertFunctionReferences(allocator, merged)
+            else
+                merged;
+            return try self.reply(allocator, id, .{ .isIncomplete = false, .items = contextual });
         }
         if (std.mem.eql(u8, request.method, "textDocument/documentColor")) {
             const id = request.id orelse return null;
@@ -357,6 +375,32 @@ pub const Server = struct {
         }
         return null;
     }
+
+    fn functionValueExpectedAt(
+        self: *Server,
+        allocator: Allocator,
+        uri: []const u8,
+        source: []const u8,
+        cursor: usize,
+    ) !bool {
+        const argument = try Completion.activeArgumentAt(allocator, source, cursor) orelse return false;
+        const lookup_source = try Completion.sourceForArgumentLookup(allocator, source, cursor, argument);
+        const local = try Completion.itemsAt(allocator, lookup_source, argument.callee_end, .invoked);
+        if (Completion.callablesExpectFunctionArgument(local, argument)) return true;
+        if (self.workspace_root_uri == null) return false;
+        const imported = (try Workspace.itemsAtForTarget(
+            allocator,
+            self.io,
+            self.global_packages_root,
+            self.target,
+            self.workspace_root_uri,
+            uri,
+            self.documents.items,
+            lookup_source,
+            argument.callee_end,
+        )) orelse return false;
+        return Completion.callablesExpectFunctionArgument(imported, argument);
+    }
 };
 
 fn mergeCompletionItems(
@@ -376,9 +420,10 @@ fn mergeCompletionItems(
         }
         if (!duplicate) try result.append(allocator, candidate);
     }
-    Completion.disambiguateCallableLabels(result.items);
-    std.mem.sort(Types.CompletionItem, result.items, {}, completionItemLessThan);
-    return result.toOwnedSlice(allocator);
+    const unique = Completion.deduplicateCallableShapes(result.items);
+    Completion.disambiguateCallableLabels(unique);
+    std.mem.sort(Types.CompletionItem, unique, {}, completionItemLessThan);
+    return allocator.dupe(Types.CompletionItem, unique);
 }
 
 fn completionItemLessThan(_: void, left: Types.CompletionItem, right: Types.CompletionItem) bool {
@@ -401,6 +446,7 @@ fn needsWorkspaceCompletion(allocator: Allocator, source: []const u8, cursor: us
     if (Completion.isTypePositionAt(allocator, source, prefix_start) catch false) return true;
     if (prefix_start != 0 and source[prefix_start - 1] == '.' and
         (prefix_start < 2 or source[prefix_start - 2] != '.')) return true;
+    if (prefix_start >= 2 and source[prefix_start - 2] == '.' and source[prefix_start - 1] == '.') return true;
     if (prefix_start != 0 and source[prefix_start - 1] == '.' and
         (Completion.isQualifiedTypePositionAt(allocator, source, prefix_start) catch false)) return true;
     if (Completion.isReturnExpressionAt(allocator, source, cursor) catch false) return true;
@@ -419,6 +465,14 @@ test "contextual qualifiers request workspace completion without an import" {
     try std.testing.expect(needsWorkspaceCompletion(allocator, "func seed() { Target. }", 21));
     try std.testing.expect(needsWorkspaceCompletion(allocator, "func main() { STD. }", 18));
     try std.testing.expect(needsWorkspaceCompletion(allocator, "func main() { STD.Math. }", 23));
+    const cascade_source =
+        \\func main() {
+        \\    var window = GFX.Window()
+        \\        ..
+        \\}
+    ;
+    const cascade_cursor = std.mem.indexOf(u8, cascade_source, "..\n").? + "..".len;
+    try std.testing.expect(needsWorkspaceCompletion(allocator, cascade_source, cascade_cursor));
     const package_prefix_source = "func main() { var value = S }";
     const package_prefix_cursor = std.mem.indexOf(u8, package_prefix_source, "S }").? + 1;
     try std.testing.expect(needsWorkspaceCompletion(allocator, package_prefix_source, package_prefix_cursor));
@@ -738,6 +792,84 @@ test "member completion never leaks the global language catalogue" {
     try std.testing.expect(std.mem.indexOf(u8, response, "\"label\":\"true\"") == null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"label\":\"float\"") == null);
     try std.testing.expect(std.mem.indexOf(u8, response, "\"label\":\"if\"") == null);
+}
+
+test "callback arguments insert function and static method references" {
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Api.sx",
+        .data =
+        \\public class Application {
+        \\    public func add_system(schedule:int, callback:func()) Application { return self }
+        \\}
+        ,
+    });
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const main_path = try std.fs.path.join(allocator, &.{ root, "Main.sx" });
+    const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
+    const main_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{main_path});
+
+    var server = Server.init(std.testing.allocator, std.testing.io);
+    defer server.deinit();
+    server.workspace_root_uri = try std.testing.allocator.dupe(u8, root_uri);
+
+    const function_source =
+        \\use Api.Application
+        \\func create_cube() {}
+        \\struct Systems { static func rotate_entities() {} }
+        \\func main() {
+        \\    Application()
+        \\        ..add_system(schedule:0, callback:cre)
+        \\}
+    ;
+    try server.setDocument(.{ .uri = main_uri, .text = function_source, .version = 1 });
+    const function_offset = std.mem.indexOf(u8, function_source, "callback:cre").? + "callback:cre".len;
+    const function_position = Protocol.positionAtByteOffset(function_source, function_offset, .utf16).?;
+    const function_request = try std.json.Stringify.valueAlloc(allocator, .{
+        .jsonrpc = Types.protocol_version,
+        .id = 20,
+        .method = "textDocument/completion",
+        .params = .{
+            .textDocument = .{ .uri = main_uri },
+            .position = function_position,
+        },
+    }, .{});
+    const function_response = (try server.handleBody(allocator, function_request)).?;
+    try std.testing.expect(std.mem.indexOf(u8, function_response, "\"label\":\"create_cube\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, function_response, "\"insertText\":\"create_cube\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, function_response, "\"insertText\":\"create_cube()\"") == null);
+
+    const method_source =
+        \\use Api.Application
+        \\func create_cube() {}
+        \\struct Systems { static func rotate_entities() {} }
+        \\func main() {
+        \\    Application()
+        \\        ..add_system(schedule:0, callback:Systems.rot)
+        \\}
+    ;
+    try server.setDocument(.{ .uri = main_uri, .text = method_source, .version = 2 });
+    const method_offset = std.mem.indexOf(u8, method_source, "Systems.rot").? + "Systems.rot".len;
+    const method_position = Protocol.positionAtByteOffset(method_source, method_offset, .utf16).?;
+    const method_request = try std.json.Stringify.valueAlloc(allocator, .{
+        .jsonrpc = Types.protocol_version,
+        .id = 21,
+        .method = "textDocument/completion",
+        .params = .{
+            .textDocument = .{ .uri = main_uri },
+            .position = method_position,
+            .context = .{ .triggerKind = 2, .triggerCharacter = "." },
+        },
+    }, .{});
+    const method_response = (try server.handleBody(allocator, method_request)).?;
+    try std.testing.expect(std.mem.indexOf(u8, method_response, "\"label\":\"rotate_entities\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, method_response, "\"insertText\":\"rotate_entities\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, method_response, "\"insertText\":\"rotate_entities()\"") == null);
 }
 
 test "server resumes an imported outer cascade after a nested cascade" {

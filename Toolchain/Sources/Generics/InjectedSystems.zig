@@ -9,8 +9,11 @@ const resources_name = "GFX.Bootstrap.Resources";
 const world_name = "GFX.ECS.World";
 
 pub fn rewriteRegistration(self: anytype, call: *Ast.Expression.Call, locals: anytype) !bool {
-    if (call.receiver == null or call.arguments.len != 2 or call.named_arguments.len != 0) return false;
+    if (call.receiver == null) return false;
     if (!std.mem.eql(u8, call.name, "add_system") and !std.mem.eql(u8, call.name, "add_after_system")) return false;
+    const ordered = try registrationArguments(self.allocator, call.*) orelse return false;
+    call.arguments = ordered;
+    call.named_arguments = &.{};
     const receiver_type = self.inferExpressionType(call.receiver.?, locals) orelse return false;
     const receiver = self.structureForType(receiver_type) orelse return false;
     if (!std.mem.eql(u8, receiver.name, application_name)) return false;
@@ -230,6 +233,27 @@ pub fn rewriteRegistration(self: anytype, call: *Ast.Expression.Call, locals: an
     call.compiler_generated = true;
     call.arguments = arguments;
     return true;
+}
+
+fn registrationArguments(allocator: std.mem.Allocator, call: Ast.Expression.Call) !?[]const *Ast.Expression {
+    if (call.arguments.len + call.named_arguments.len != 2 or call.arguments.len > 2) return null;
+    var ordered = [_]?*Ast.Expression{ null, null };
+    for (call.arguments, 0..) |argument, index| ordered[index] = argument;
+    for (call.named_arguments) |argument| {
+        const index: usize = if (std.mem.eql(u8, argument.name, "schedule"))
+            0
+        else if (std.mem.eql(u8, argument.name, "callback"))
+            1
+        else
+            return null;
+        if (ordered[index] != null) return null;
+        ordered[index] = argument.value;
+    }
+    if (ordered[0] == null or ordered[1] == null) return null;
+    const result = try allocator.alloc(*Ast.Expression, 2);
+    result[0] = ordered[0].?;
+    result[1] = ordered[1].?;
+    return result;
 }
 
 fn adapterParameters(self: anytype, position: Source.Position, application_type: Ast.Type, range: bool) ![]const Ast.Parameter {

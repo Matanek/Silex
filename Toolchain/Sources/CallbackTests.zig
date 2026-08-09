@@ -40,6 +40,18 @@ test "void callback types omit an explicit return type" {
     try std.testing.expectEqualStrings("42\n", output);
 }
 
+test "static methods pass as callback values" {
+    const output = try run(
+        \\struct Systems {
+        \\    static func tick() { print("tick") }
+        \\}
+        \\func invoke(callback:func()) { callback() }
+        \\func main() { invoke(Systems.tick) }
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("tick\n", output);
+}
+
 test "anonymous functions execute as callbacks" {
     const output = try run(
         \\func transform(value:int, callback:func(int) int) int { return callback(value) }
@@ -53,21 +65,82 @@ test "anonymous functions execute as callbacks" {
     try std.testing.expectEqualStrings("42\n7\n", output);
 }
 
-test "capturing anonymous functions report their unsupported environment" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    var frontend = Frontend.Frontend.init(arena.allocator());
-    try std.testing.expectError(error.InvalidSource, frontend.compile(
+test "anonymous functions capture immutable lexical values" {
+    const output = try run(
         \\func apply(callback:func() int) int { return callback() }
         \\func main() {
         \\    let value = 42
         \\    print(apply(func() int { return value }))
         \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("42\n", output);
+}
+
+test "anonymous functions share mutations with captured var bindings" {
+    const output = try run(
+        \\func each_attr(callback:func(str, str)) { callback("id", "main") }
+        \\func main() {
+        \\    var result = "element"
+        \\    each_attr(func(key:str, value:str) {
+        \\        result = result + " $(key)=\"$(value)\""
+        \\    })
+        \\    print(result)
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("element id=\"main\"\n", output);
+}
+
+test "methods share captured locals with synchronous callbacks" {
+    const output = try run(
+        \\struct Element {
+        \\    let name:str
+        \\    func each_attr(callback:func(str, str)) { callback("id", "main") }
+        \\    func render() str {
+        \\        var result = self.name
+        \\        self.each_attr(func(key:str, value:str) {
+        \\            result = result + " $(key)=\"$(value)\""
+        \\        })
+        \\        return result
+        \\    }
+        \\}
+        \\func main() { print(Element(name:"element").render()) }
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("element id=\"main\"\n", output);
+}
+
+test "capturing closures cannot outlive their lexical environment" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var frontend = Frontend.Frontend.init(arena.allocator());
+    try std.testing.expectError(error.InvalidSource, frontend.compile(
+        \\func invalid() func() int {
+        \\    let value = 42
+        \\    return func() int { return value }
+        \\}
+        \\func main() {}
     ));
     try std.testing.expectEqualStrings(
-        "anonymous functions cannot capture surrounding value 'value' yet",
+        "capturing function value cannot be returned from its lexical scope",
         frontend.diagnostic.?.message,
     );
+}
+
+test "copies of a closure share the same captured var" {
+    const output = try run(
+        \\func main() {
+        \\    var count = 0
+        \\    var first = func() { count += 1 }
+        \\    var second = first
+        \\    first()
+        \\    second()
+        \\    print(count)
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("2\n", output);
 }
 
 test "anonymous callbacks survive generic handle specialization" {

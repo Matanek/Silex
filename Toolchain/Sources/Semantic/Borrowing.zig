@@ -6,10 +6,7 @@ const Resources = @import("Resources.zig");
 
 pub fn analyzeIdentifier(self: anytype, builder: anytype, position: @import("../Source.zig").Position, name: []const u8) !Model.TypedValue {
     const binding = Support.findBinding(builder.bindings.items, name) orelse {
-        const message = if (self.anonymous_function_context)
-            try std.fmt.allocPrint(self.allocator, "anonymous functions cannot capture surrounding value '{s}' yet", .{name})
-        else
-            try std.fmt.allocPrint(self.allocator, "unknown variable '{s}'", .{name});
+        const message = try std.fmt.allocPrint(self.allocator, "unknown variable '{s}'", .{name});
         return self.fail(position, message);
     };
     if (!binding.available) {
@@ -25,6 +22,7 @@ pub fn analyzeIdentifier(self: anytype, builder: anytype, position: @import("../
         .borrowed_root = borrowed_root,
         .borrowed_mode = borrowed_mode,
         .reference = binding.reference,
+        .lexical_captures = binding.lexical_captures,
     };
     if (!binding.type.hasRuntimeValue()) {
         const message = try std.fmt.allocPrint(self.allocator, "values of type '{s}' are not executable yet", .{binding.type.name()});
@@ -33,14 +31,14 @@ pub fn analyzeIdentifier(self: anytype, builder: anytype, position: @import("../
     if (binding.local) |local| {
         const result = try self.newValue(builder, binding.type);
         try self.emit(builder, .{ .local_load = .{ .result = result, .local = local } });
-        return .{ .type = binding.type, .value = result, .borrowed_root = borrowed_root, .borrowed_mode = borrowed_mode, .reference = binding.reference };
+        return .{ .type = binding.type, .value = result, .borrowed_root = borrowed_root, .borrowed_mode = borrowed_mode, .reference = binding.reference, .lexical_captures = binding.lexical_captures };
     }
     if (binding.reference) |reference| {
         const result = try self.newValue(builder, binding.type);
         try self.emit(builder, .{ .reference_load = .{ .result = result, .reference = reference } });
-        return .{ .type = binding.type, .value = result, .borrowed_root = borrowed_root, .borrowed_mode = borrowed_mode, .reference = reference };
+        return .{ .type = binding.type, .value = result, .borrowed_root = borrowed_root, .borrowed_mode = borrowed_mode, .reference = reference, .lexical_captures = binding.lexical_captures };
     }
-    return .{ .type = binding.type, .value = binding.value.?, .borrowed_root = borrowed_root, .borrowed_mode = borrowed_mode, .reference = binding.reference };
+    return .{ .type = binding.type, .value = binding.value.?, .borrowed_root = borrowed_root, .borrowed_mode = borrowed_mode, .reference = binding.reference, .lexical_captures = binding.lexical_captures };
 }
 
 pub fn requireOwned(self: anytype, value: Model.TypedValue, position: @import("../Source.zig").Position, action: []const u8) !void {

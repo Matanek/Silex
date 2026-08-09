@@ -204,8 +204,8 @@ test "systems inject read and mutable resources while preserving legacy callback
         \\    resources.insert(World(value:40))
         \\    application.add_system(0, update)
         \\    application.add_system(0, observe)
-        \\    application.add_after_system(0, empty)
-        \\    application.add_system(0, legacy)
+        \\    application.add_after_system(schedule:0, callback:empty)
+        \\    application.add_system(schedule:0, callback:legacy)
         \\    if true { let world:@World = resources.get<World>(); print(world.value) }
         \\}
         ,

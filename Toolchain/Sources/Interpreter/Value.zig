@@ -25,6 +25,7 @@ pub const Value = union(enum) {
     pub const Function = struct {
         type: Ir.Type,
         id: Ir.FunctionId,
+        captures: []const Value = &.{},
     };
 
     pub const Reference = union(enum) {
@@ -171,7 +172,7 @@ pub fn equal(left: Value, right: Value) Error!bool {
             }
             break :enum_value true;
         },
-        .function => |function| function.id == right.function.id,
+        .function => |function| function.id == right.function.id and function.captures.len == right.function.captures.len,
         .view, .reference, .void => error.InvalidProgram,
     };
 }
