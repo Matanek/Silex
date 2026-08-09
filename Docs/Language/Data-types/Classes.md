@@ -187,6 +187,12 @@ uses the receiver's visible type; the selected method dispatches on the
 instance's real class. Constructors, private methods, static methods, and
 extension methods are not virtual.
 
+Receiver mutation belongs to the inherited method contract. An override cannot
+introduce mutation when the base method is read-only. Conversely, an override
+of a mutating method preserves that contract even when its own body does not
+write `self`; dynamic calls still return and retain the receiver state expected
+by the base slot.
+
 ## Shared identity
 
 A class value always designates an object. Passing or storing it preserves that

@@ -52,8 +52,39 @@ pub fn inferMutability(allocator: std.mem.Allocator, program: Ast.Program) ![]co
                 flat += 1;
             }
         }
+        flat = 0;
+        for (program.structures, 0..) |structure, structure_index| {
+            for (structure.methods) |method| {
+                if (!mutating[flat] and method.is_override and inheritedOverrideMutates(program, structure_index, method, mutating)) {
+                    mutating[flat] = true;
+                    changed = true;
+                }
+                flat += 1;
+            }
+        }
     }
     return mutating;
+}
+
+fn inheritedOverrideMutates(
+    program: Ast.Program,
+    structure_index: usize,
+    method: Ast.Function,
+    mutating: []const bool,
+) bool {
+    var current = program.structures[structure_index].base;
+    while (current) |base_type| {
+        const base_index = base_type.structureIndex() orelse return false;
+        if (base_index >= program.structures.len) return false;
+        const base = program.structures[base_index];
+        for (base.methods, 0..) |candidate, method_index| {
+            if (!candidate.is_static and Inheritance.sameSignature(candidate, method)) {
+                return mutating[flatMethodIndex(program, base_index, method_index)];
+            }
+        }
+        current = base.base;
+    }
+    return false;
 }
 
 pub fn extendStructures(
@@ -504,13 +535,15 @@ fn analyzeCallWithReceiver(
     const ir_return_type = methodIrReturnType(self, structure_index, flat, method);
     const call_result: ?Ir.ValueId = if (ir_return_type == .void) null else try self.newValue(builder, ir_return_type);
     const arguments_slice = try argument_ids.toOwnedSlice(self.allocator);
-    const implementations = if (method.extension == null and class_receiver and !super_call and
+    const dispatchable = method.extension == null and class_receiver and !super_call and
         !(self.constructor_context != null and receiver_expression.value == .identifier and std.mem.eql(u8, receiver_expression.value.identifier, "self")) and
-        (method.is_public or method.is_protected))
+        (method.is_public or method.is_protected);
+    const implementations = if (dispatchable)
         try Inheritance.implementations(self, self.allocator, structure_index, method_index)
     else
         &.{};
-    if (implementations.len == 0) {
+    const requires_dynamic_receiver = dispatchable and mutating and Inheritance.hasStrictDescendant(self, receiver_structure_index);
+    if (implementations.len == 0 and !requires_dynamic_receiver) {
         try self.emit(builder, .{ .call = .{
             .result = call_result,
             .function = methodFunctionId(self.program, structure_index, method_index),
@@ -718,13 +751,15 @@ fn analyzeNamedCall(
     const ir_return_type = methodIrReturnType(self, structure_index, flat, method);
     const call_result: ?Ir.ValueId = if (ir_return_type == .void) null else try self.newValue(builder, ir_return_type);
     const arguments_slice = try ids.toOwnedSlice(self.allocator);
-    const implementations = if (method.extension == null and class_receiver and !super_call and
+    const dispatchable = method.extension == null and class_receiver and !super_call and
         !(self.constructor_context != null and receiver_expression.value == .identifier and std.mem.eql(u8, receiver_expression.value.identifier, "self")) and
-        (method.is_public or method.is_protected))
+        (method.is_public or method.is_protected);
+    const implementations = if (dispatchable)
         try Inheritance.implementations(self, self.allocator, structure_index, method_index)
     else
         &.{};
-    if (implementations.len == 0) try self.emit(builder, .{ .call = .{
+    const requires_dynamic_receiver = dispatchable and mutating and Inheritance.hasStrictDescendant(self, receiver_structure_index);
+    if (implementations.len == 0 and !requires_dynamic_receiver) try self.emit(builder, .{ .call = .{
         .result = call_result,
         .function = methodFunctionId(self.program, structure_index, method_index),
         .arguments = arguments_slice,

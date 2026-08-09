@@ -38,6 +38,13 @@ pub fn isDescendant(self: anytype, candidate: usize, ancestor: usize) bool {
     return false;
 }
 
+pub fn hasStrictDescendant(self: anytype, ancestor: usize) bool {
+    for (self.structures, 0..) |_, candidate| {
+        if (candidate != ancestor and isDescendant(self, candidate, ancestor)) return true;
+    }
+    return false;
+}
+
 pub fn fieldByIndex(self: anytype, structure_index: usize, flattened: usize) ?Field {
     if (structure_index >= self.structures.len or flattened >= self.structures[structure_index].fields.len) return null;
     const base = self.structures[structure_index].base;

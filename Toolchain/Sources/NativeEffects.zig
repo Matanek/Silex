@@ -1346,15 +1346,20 @@ test "native class overrides match the reference interpreter" {
         \\    override public func label() str { return "$(super.label()) player" }
         \\    override public func bump() { super.bump(); super.bump() }
         \\}
+        \\class Observer : Entity {
+        \\    override public func bump() { print("observed") }
+        \\}
         \\class Captain : Player { override public func label() str { return "captain" } }
         \\func label(value:Entity) str { return value.label() }
         \\func bump(value:Entity) { value.bump() }
         \\func main() {
         \\    var player = Player()
+        \\    var observer = Observer()
         \\    var captain = Captain()
         \\    bump(player)
+        \\    bump(observer)
         \\    print(label(player), " ", label(captain))
-        \\    print(player.current())
+        \\    print(player.current(), " ", observer.current())
         \\}
     ;
     var frontend = Frontend.Frontend.init(allocator);

@@ -358,6 +358,27 @@ test "mutating overrides and constructor calls bind at the required phase" {
     try std.testing.expectEqualStrings("base init\nchild init\n2\n", output);
 }
 
+test "nonmutating override bodies preserve a mutating receiver contract" {
+    const output = try run(
+        \\class Base {
+        \\    protected var value:int = 0
+        \\    public func hook() { self.value++ }
+        \\    public func run() { self.hook(); self.value++ }
+        \\    public func current() int { return self.value }
+        \\}
+        \\class Child : Base {
+        \\    override public func hook() { print("child") }
+        \\}
+        \\func main() {
+        \\    var value:Base = Child()
+        \\    value.run()
+        \\    print(value.current())
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("child\n1\n", output);
+}
+
 test "static members use type-qualified shared storage" {
     const output = try run(
         \\struct Counter {
