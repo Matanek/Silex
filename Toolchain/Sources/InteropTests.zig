@@ -106,6 +106,7 @@ test "compose the typed macOS WebKit Objective-C system surface" {
         \\let get_class = C.function<func(C.Pointer<uint8>) C.Pointer<uint8> >(library:MacOS.web_kit, name:"objc_getClass")
         \\let selector = C.function<func(C.Pointer<uint8>) C.Pointer<uint8> >(library:MacOS.web_kit, name:"sel_registerName")
         \\let message = C.function<func(C.Pointer<uint8>, C.Pointer<uint8>) C.Pointer<uint8> >(library:MacOS.web_kit, name:"objc_msgSend")
+        \\let user_script = C.function<func(C.Pointer<uint8>, C.Pointer<uint8>, C.Pointer<uint8>, uint, int32) C.Pointer<uint8> >(library:MacOS.web_kit, name:"objc_msgSend")
         \\func main() {}
         ,
     });
@@ -113,10 +114,10 @@ test "compose the typed macOS WebKit Objective-C system surface" {
     var compiler = Project.Compiler.init(allocator, std.testing.io);
     compiler.target = .macos_arm64;
     const compilation = try compiler.compile(input);
-    try std.testing.expectEqual(@as(usize, 3), compilation.boundaries.len);
+    try std.testing.expectEqual(@as(usize, 4), compilation.boundaries.len);
     for (compilation.boundaries) |boundary| try std.testing.expectEqualStrings("MacOS.web_kit", boundary.provider);
     const machine = try Lower.lowerBoundaries(allocator, compilation.ir, compilation.boundaries);
-    try std.testing.expectEqualStrings("MacOS.web_kit", machine.external_functions[2].provider);
+    try std.testing.expectEqualStrings("MacOS.web_kit", machine.external_functions[3].provider);
 }
 
 test "compose and interpret exact float32 and float64 math signatures" {

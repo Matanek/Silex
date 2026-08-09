@@ -747,6 +747,9 @@ fn macOSWebKitFunctionAvailable(
     if (parameters.len == 3 and parameters[2] == .int32) return return_type == .void;
     if (parameters.len == 4 and parameters[2] == .address and parameters[3] == .address) return return_type == .address or return_type == .void;
     if (parameters.len == 4 and parameters[2] == .address and parameters[3] == .uint) return return_type == .address;
+    if (std.mem.eql(Types.Type, parameters, &.{ .address, .address, .address, .uint, .int32 })) {
+        return return_type == .address;
+    }
     if (parameters.len == 6 and return_type == .address) {
         for (parameters[2..]) |parameter| if (parameter != .float64) return false;
         return true;

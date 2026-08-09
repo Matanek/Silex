@@ -1628,6 +1628,9 @@ fn supportedMacOSWebKitExternal(function: ExternalFunction) bool {
     if (arguments.len == 3 and arguments[2] == .int32) return function.signature.result == null;
     if (arguments.len == 4 and arguments[2] == .read_address and arguments[3] == .read_address) return function.signature.result == .read_address or function.signature.result == null;
     if (arguments.len == 4 and arguments[2] == .read_address and arguments[3] == .uint64) return function.signature.result == .read_address;
+    if (std.mem.eql(AbiValue, arguments, &.{ .read_address, .read_address, .read_address, .uint64, .int32 })) {
+        return function.signature.result == .read_address;
+    }
     if (arguments.len == 6 and function.signature.result == .read_address) {
         for (arguments[2..]) |argument| if (argument != .float64) return false;
         return true;
