@@ -5,8 +5,8 @@ const Model = @import("Model.zig");
 const Ownership = @import("Resources.zig");
 const Source = @import("../Source.zig");
 
-const application_name = "GFX.Bootstrap.Application";
-const resources_name = "GFX.Bootstrap.Resources";
+const application_name = "GFX.Application";
+const resources_name = "GFX.Application.Resources";
 const commands_name = "GFX.ECS.Commands";
 
 pub fn analyze(self: anytype, function: Ast.Function, adapter: Ast.SystemAdapter) !Ir.Function {

@@ -738,6 +738,12 @@ test "reserve static keyword" {
     try std.testing.expectEqual(TokenTag.keyword_static, (try lexer.next()).tag);
 }
 
+test "keep intrinsic as a contextual identifier" {
+    var lexer = Lexer.init("intrinsic class Resources {}");
+    try std.testing.expectEqual(TokenTag.identifier, (try lexer.next()).tag);
+    try std.testing.expectEqual(TokenTag.keyword_class, (try lexer.next()).tag);
+}
+
 test "recognize reserved range keyword" {
     var lexer = Lexer.init("range(0, 10)");
     try std.testing.expectEqual(TokenTag.keyword_range, (try lexer.next()).tag);

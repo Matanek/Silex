@@ -65,6 +65,7 @@ pages. The same pages explain `drop` where those types can declare it.
 
 - [Syntax quick reference](Reference/Syntax.md)
 - [Current limits](Reference/Current-limits.md)
+- [Recognize compiler-provided declarations](Reference/Intrinsic-declarations.md)
 
 ## Find a cross-cutting feature
 

@@ -881,7 +881,7 @@ test "server resumes an imported outer cascade after a nested cascade" {
         .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\"}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "GFX/Module/Bootstrap.sx",
+        .sub_path = "GFX/Module/Application.sx",
         .data =
         \\public class Application {
         \\    public func install() Application { return self }
@@ -898,7 +898,7 @@ test "server resumes an imported outer cascade after a nested cascade" {
     const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
     const main_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{main_path});
     const source =
-        \\use GFX.Bootstrap.Application
+        \\use GFX.Application
         \\struct Settings { var title:str }
         \\struct WindowPlugin {}
         \\func main() {

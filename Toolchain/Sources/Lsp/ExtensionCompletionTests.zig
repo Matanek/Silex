@@ -128,7 +128,7 @@ test "complete an imported nominal relation before its body exists" {
         .data = "{\"name\":\"GFX\",\"version\":\"0.1.0\"}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "GFX/Module/Bootstrap.sx",
+        .sub_path = "GFX/Module/Application.sx",
         .data = "public protocol Plugin {}",
     });
     const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
@@ -137,21 +137,21 @@ test "complete an imported nominal relation before its body exists" {
     const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
 
     const sources = [_][]const u8{
-        \\use GFX.Bootstrap
+        \\use GFX.Application
         \\
-        \\struct FooPlugin : Bootstrap.Pl
+        \\struct FooPlugin : Application.Pl
         \\
         \\func main() {}
         ,
-        \\use GFX.Bootstrap
+        \\use GFX.Application
         \\
-        \\struct FooPlugin : Bootstrap.Pl {}
+        \\struct FooPlugin : Application.Pl {}
         \\
         \\func main() {}
         ,
     };
     for (sources) |source| {
-        const cursor = std.mem.indexOf(u8, source, "Bootstrap.Pl").? + "Bootstrap.Pl".len;
+        const cursor = std.mem.indexOf(u8, source, "Application.Pl").? + "Application.Pl".len;
         const items = (try Workspace.itemsAt(
             allocator,
             std.testing.io,

@@ -76,8 +76,10 @@ pub const Parser = struct {
                 .keyword_func => try functions.append(self.allocator, try self.parseFunction(false, false, false)),
                 .identifier => if (std.mem.eql(u8, self.current.lexeme, "test"))
                     try functions.appendSlice(self.allocator, try TestBlocks.parse(self))
+                else if (std.mem.eql(u8, self.current.lexeme, "intrinsic"))
+                    try structures.append(self.allocator, try Nominals.parseIntrinsicClass(self, false))
                 else
-                    return self.fail("expected use, enum, struct, class, protocol, function, or test declaration"),
+                    return self.fail("expected use, enum, struct, class, intrinsic class, protocol, function, or test declaration"),
                 .keyword_let => try external_functions.append(self.allocator, try Interop.parseFunction(self)),
                 .keyword_extend => try extensions.append(self.allocator, try Extensions.parse(self)),
                 .keyword_public => {
@@ -86,11 +88,15 @@ pub const Parser = struct {
                         .keyword_use => try uses.append(self.allocator, try Uses.parse(self, true)),
                         .keyword_struct => try structures.append(self.allocator, try Nominals.parse(self, true, false, false, false)),
                         .keyword_class => try structures.append(self.allocator, try Nominals.parse(self, true, false, false, true)),
+                        .identifier => if (std.mem.eql(u8, self.current.lexeme, "intrinsic"))
+                            try structures.append(self.allocator, try Nominals.parseIntrinsicClass(self, true))
+                        else
+                            return self.fail("expected use, enum, struct, class, intrinsic class, protocol, or function declaration after 'public'"),
                         .keyword_static => try structures.append(self.allocator, try Nominals.parseStaticClass(self, true, false, false)),
                         .keyword_enum => try enums.append(self.allocator, try EnumParser.parse(self, true, false, false)),
                         .keyword_protocol => try structures.append(self.allocator, try Protocols.parse(self, true, false, false)),
                         .keyword_func => try functions.append(self.allocator, try self.parseFunction(true, false, false)),
-                        else => return self.fail("expected use, enum, struct, class, protocol, or function declaration after 'public'"),
+                        else => return self.fail("expected use, enum, struct, class, intrinsic class, protocol, or function declaration after 'public'"),
                     }
                 },
                 .keyword_internal, .keyword_local => {
@@ -193,6 +199,14 @@ pub const Parser = struct {
     }
 
     pub fn parseFunction(self: *Parser, is_public: bool, is_internal: bool, is_local: bool) ParseError!Ast.Function {
+        return self.parseFunctionDeclaration(is_public, is_internal, is_local, false);
+    }
+
+    pub fn parseIntrinsicMethod(self: *Parser, is_public: bool, is_internal: bool, is_local: bool) ParseError!Ast.Function {
+        return self.parseFunctionDeclaration(is_public, is_internal, is_local, true);
+    }
+
+    fn parseFunctionDeclaration(self: *Parser, is_public: bool, is_internal: bool, is_local: bool, allow_bodyless: bool) ParseError!Ast.Function {
         const position = self.current.position;
         try self.expect(.keyword_func, "expected 'func'");
         if (self.current.tag != .identifier and self.current.tag != .keyword_copy) return self.fail("expected function name");
@@ -245,7 +259,9 @@ pub const Parser = struct {
                 }
             }
         }
-        const return_type: Ast.Type = if (self.current.tag == .left_brace) .void else try self.parseType();
+        const bodyless_void = allow_bodyless and
+            (self.current.tag == .semicolon or self.current.tag == .right_brace or self.current.position.line > self.previous.position.line);
+        const return_type: Ast.Type = if (self.current.tag == .left_brace or bodyless_void) .void else try self.parseType();
         if (return_mode != .value and return_type == .void) return self.failAt(name_position, "a borrowed return cannot be 'void'");
         if (return_mode != .value and return_provenance == null) {
             var compatible: ?[]const u8 = null;
@@ -258,6 +274,11 @@ pub const Parser = struct {
             }
             if (count == 1) return_provenance = compatible;
         }
+        const is_intrinsic_declaration = allow_bodyless and self.current.tag != .left_brace;
+        const statements = if (is_intrinsic_declaration) statements: {
+            try self.expectStatementTerminator();
+            break :statements &.{};
+        } else try self.parseBlock();
         return .{
             .is_test = self.test_prefix != null,
             .test_owner = self.test_prefix,
@@ -273,7 +294,8 @@ pub const Parser = struct {
             .return_type = return_type,
             .return_mode = return_mode,
             .return_provenance = return_provenance,
-            .statements = try self.parseBlock(),
+            .is_intrinsic_declaration = is_intrinsic_declaration,
+            .statements = statements,
         };
     }
 

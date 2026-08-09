@@ -53,9 +53,9 @@ test "clear diagnostics for valid cascades owned by the frontend" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const diagnostics = try analyze(arena.allocator(),
-        \\use GFX.Bootstrap
+        \\use GFX.Application
         \\func main() {
-        \\    var app = Bootstrap.Application()
+        \\    var app = Application()
         \\        ..install()
         \\        ..run()
         \\}
@@ -67,9 +67,9 @@ test "preserve parser diagnostics inside malformed cascades" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const diagnostics = try analyze(arena.allocator(),
-        \\use GFX.Bootstrap
+        \\use GFX.Application
         \\func main() {
-        \\    var app = Bootstrap.Application()
+        \\    var app = Application()
         \\        ..run(
         \\}
     , .utf16, true);

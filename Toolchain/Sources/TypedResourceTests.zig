@@ -2,20 +2,20 @@ const std = @import("std");
 const Project = @import("Project.zig");
 const Interpreter = @import("Interpreter.zig");
 
-const bootstrap_source =
-    \\public class Resources {
-    \\    private var __resource_order:int[]
-    \\    public init() { self.__resource_order = [] }
-    \\    public func insert<T>(value:T) { panic("unspecialized insert") }
-    \\    public func has<T>() bool { panic("unspecialized has") }
-    \\    public func get<T>() @T { panic("unspecialized get") }
-    \\    public func get_mut<T>() &T { panic("unspecialized get_mut") }
-    \\    public func try_get<T>() @T? { panic("unspecialized try_get") }
-    \\    public func try_get_mut<T>() &T? { panic("unspecialized try_get_mut") }
-    \\    public func remove<T>() T? { panic("unspecialized remove") }
-    \\    public func clear() { panic("unspecialized clear") }
-    \\    drop { self.clear() }
+const resources_source =
+    \\public intrinsic class Resources {
+    \\    public func insert<T>(value:T)
+    \\    public func has<T>() bool
+    \\    public func get<T>() @T
+    \\    public func get_mut<T>() &T
+    \\    public func try_get<T>() @T?
+    \\    public func try_get_mut<T>() &T?
+    \\    public func remove<T>() T?
+    \\    public func clear()
     \\}
+;
+
+const application_declaration =
     \\public class Application {
     \\    private var store:Resources
     \\    public init() { self.store = Resources() }
@@ -29,6 +29,8 @@ const bootstrap_source =
     \\}
 ;
 
+const application_source = resources_source ++ application_declaration;
+
 fn prepare(temporary: anytype) !void {
     try temporary.dir.createDirPath(std.testing.io, "GFX/Module");
     try temporary.dir.createDirPath(std.testing.io, "GFX/Smokes");
@@ -36,11 +38,76 @@ fn prepare(temporary: anytype) !void {
         .sub_path = "GFX/Package.json",
         .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\"}",
     });
-    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "GFX/Module/Bootstrap.sx", .data = bootstrap_source });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "GFX/Module/Application.sx", .data = application_source });
 }
 
 fn inputPath(allocator: std.mem.Allocator, temporary: anytype) ![]const u8 {
     return std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "GFX", "Smokes", "Main.sx" });
+}
+
+test "typed resources require the exact compiler-provided intrinsic contract" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try prepare(&temporary);
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/Application.sx",
+        .data =
+        \\public intrinsic class Resources {
+        \\    public func insert<T>(value:T) { panic("placeholder") }
+        \\    public func has<T>() bool
+        \\    public func get<T>() @T
+        \\    public func get_mut<T>() &T
+        \\    public func try_get<T>() @T?
+        \\    public func try_get_mut<T>() &T?
+        \\    public func remove<T>() T?
+        \\    public func clear()
+        \\}
+        ++ application_declaration,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Smokes/Main.sx",
+        .data = "use GFX.Application\nfunc main() { let application = Application() }",
+    });
+
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    try std.testing.expectError(error.InvalidSource, compiler.compile(try inputPath(allocator, temporary)));
+    try std.testing.expectEqualStrings(
+        "intrinsic class 'GFX.Application.Resources' does not match the compiler-provided contract",
+        compiler.diagnostic.?.message,
+    );
+}
+
+test "reject intrinsic classes without a compiler implementation" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "Demo/Module");
+    try temporary.dir.createDirPath(std.testing.io, "Demo/Smokes");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Demo/Package.json",
+        .data = "{\"name\":\"Demo\",\"version\":\"1.0.0\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Demo/Module/Magic.sx",
+        .data = "public intrinsic class Magic { public func run() }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Demo/Smokes/Main.sx",
+        .data = "use Demo.Magic\nfunc main() { let magic = Magic() }",
+    });
+    const path = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Demo", "Smokes", "Main.sx" });
+
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    try std.testing.expectError(error.InvalidSource, compiler.compile(path));
+    try std.testing.expectEqualStrings(
+        "intrinsic class 'Demo.Magic' has no compiler implementation",
+        compiler.diagnostic.?.message,
+    );
 }
 
 test "typed application resources isolate canonical concrete types and destroy in reverse insertion order" {
@@ -66,12 +133,12 @@ test "typed application resources isolate canonical concrete types and destroy i
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Smokes/Main.sx",
         .data =
-        \\use GFX.Bootstrap
+        \\use GFX.Application
         \\use GFX.Model
         \\use GFX.Facade
         \\func main() {
-        \\    var first_app = Bootstrap.Application()
-        \\    var second_app = Bootstrap.Application()
+        \\    var first_app = Application()
+        \\    var second_app = Application()
         \\    var first = first_app.resources()
         \\    var second = second_app.resources()
         \\    first.insert(Model.State(value:40))
@@ -109,9 +176,9 @@ test "typed resources report a missing required resource" {
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Smokes/Main.sx",
         .data =
-        \\use GFX.Bootstrap
+        \\use GFX.Application
         \\struct State { let value:int }
-        \\func main() { var app = Bootstrap.Application(); var resources = app.resources(); let state:@State = resources.get<State>(); print(state.value) }
+        \\func main() { var app = Application(); var resources = app.resources(); let state:@State = resources.get<State>(); print(state.value) }
         ,
     });
 
@@ -132,10 +199,10 @@ test "removing a class resource transfers its last registry root" {
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Smokes/Main.sx",
         .data =
-        \\use GFX.Bootstrap
+        \\use GFX.Application
         \\class Token { drop { print("token dropped") } }
         \\func main() {
-        \\    var application = Bootstrap.Application()
+        \\    var application = Application()
         \\    var resources = application.resources()
         \\    resources.insert(Token())
         \\    var removed = resources.remove<Token>()
@@ -162,10 +229,10 @@ test "typed resources cannot be invalidated while borrowed" {
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Smokes/Main.sx",
         .data =
-        \\use GFX.Bootstrap
+        \\use GFX.Application
         \\struct State { let value:int }
         \\func main() {
-        \\    var app = Bootstrap.Application()
+        \\    var app = Application()
         \\    var resources = app.resources()
         \\    resources.insert(State(value:1))
         \\    let state:@State = resources.get<State>()
@@ -190,15 +257,15 @@ test "systems inject read and mutable resources while preserving legacy callback
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Smokes/Main.sx",
         .data =
-        \\use GFX.Bootstrap
+        \\use GFX.Application
         \\struct Time { let delta:int }
         \\struct World { var value:int }
         \\func update(time:@Time, world:&World) { world.value += time.delta }
         \\func observe(first:@Time, second:@Time) { print(first.delta + second.delta) }
         \\func empty() { print("empty") }
-        \\func legacy(application:Bootstrap.Application) { print(application.resources().has<World>()) }
+        \\func legacy(application:Application) { print(application.resources().has<World>()) }
         \\func main() {
-        \\    var application = Bootstrap.Application()
+        \\    var application = Application()
         \\    var resources = application.resources()
         \\    resources.insert(Time(delta:2))
         \\    resources.insert(World(value:40))
@@ -228,20 +295,20 @@ test "system callbacks keep their declaring module identity" {
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Module/Feature.sx",
         .data =
-        \\use GFX.Bootstrap
+        \\use GFX.Application
         \\public struct State { public var value:int }
         \\func update(state:&State) { state.value += 2 }
-        \\public func install(application:Bootstrap.Application) { application.add_system(0, update) }
+        \\public func install(application:Application) { application.add_system(0, update) }
         ,
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Smokes/Main.sx",
         .data =
-        \\use GFX.Bootstrap
+        \\use GFX.Application
         \\use GFX.Feature
         \\func update() { print("entry callback") }
         \\func main() {
-        \\    var application = Bootstrap.Application()
+        \\    var application = Application()
         \\    var resources = application.resources()
         \\    resources.insert(Feature.State(value:40))
         \\    Feature.install(application)
@@ -267,10 +334,10 @@ test "injected systems name their missing resource" {
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Smokes/Main.sx",
         .data =
-        \\use GFX.Bootstrap
+        \\use GFX.Application
         \\struct Time { let delta:int }
         \\func update(time:@Time) { print(time.delta) }
-        \\func main() { var application = Bootstrap.Application(); application.add_system(0, update) }
+        \\func main() { var application = Application(); application.add_system(0, update) }
         ,
     });
 
@@ -286,7 +353,7 @@ test "injected systems reject invalid signatures and mutable conflicts" {
         .{ .system = "func invalid(value:int) {}", .expected = "must use '@int' or '&int'" },
         .{ .system = "func invalid() int { return 1 }", .expected = "must return 'void'" },
         .{ .system = "func invalid(first:&State, second:@State) {}", .expected = "conflicting mutable access" },
-        .{ .system = "func invalid(application:Bootstrap.Application, state:@State) {}", .expected = "Application must be the sole" },
+        .{ .system = "func invalid(application:Application, state:@State) {}", .expected = "Application must be the sole" },
     };
     for (cases) |case| {
         var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
@@ -297,7 +364,7 @@ test "injected systems reject invalid signatures and mutable conflicts" {
         try prepare(&temporary);
         const source = try std.fmt.allocPrint(
             allocator,
-            "use GFX.Bootstrap\nstruct State {{ var value:int }}\n{s}\nfunc main() {{ var application = Bootstrap.Application(); application.add_system(0, invalid) }}",
+            "use GFX.Application\nstruct State {{ var value:int }}\n{s}\nfunc main() {{ var application = Application(); application.add_system(0, invalid) }}",
             .{case.system},
         );
         try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "GFX/Smokes/Main.sx", .data = source });

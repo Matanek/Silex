@@ -93,6 +93,7 @@ pub const Specializer = struct {
         }
         try self.type_names.appendSlice(self.allocator, program.type_names);
         try self.validateConstraintDeclarations();
+        try TypedResources.validateDeclarations(self);
         for (program.enums) |enumeration| {
             if (enumeration.type_parameters.len == 0) try self.enums.append(self.allocator, enumeration);
         }
@@ -105,10 +106,11 @@ pub const Specializer = struct {
                 try self.structures.append(self.allocator, structure);
             }
         }
+        try TypedResources.prepareConcreteStorage(self);
         const concrete_structure_count = self.structures.items.len;
         for (0..concrete_structure_count) |structure_index| {
             try self.rewriteStructureAt(structure_index, &.{}, null);
-            TypedResources.markConcreteMethods(self, structure_index);
+            try TypedResources.markConcreteMethods(self, structure_index);
         }
         for (program.functions) |function| {
             if (function.type_parameters.len == 0) try self.functions.append(self.allocator, function);

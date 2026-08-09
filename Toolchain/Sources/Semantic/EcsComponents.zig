@@ -3,7 +3,7 @@ const Ast = @import("../Ast.zig");
 const Ir = @import("../Ir.zig");
 const Model = @import("Model.zig");
 
-const resources_name = "GFX.Bootstrap.Resources";
+const resources_name = "GFX.ECS.ComponentStore.ComponentPools";
 const pool_prefix = "GFX.ECS.ComponentPool<";
 
 pub fn analyze(self: anytype, structure_index: usize, method: Ast.Function) !Ir.Function {

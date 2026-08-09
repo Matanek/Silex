@@ -2,13 +2,35 @@ const std = @import("std");
 const Ast = @import("../Ast.zig");
 const Source = @import("../Source.zig");
 
-pub const canonical_name = "GFX.Bootstrap.Resources";
+pub const canonical_name = "GFX.Application.Resources";
+pub const component_pools_name = "GFX.ECS.ComponentStore.ComponentPools";
 pub const order_field_name = "__resource_order";
 pub const slot_prefix = "__resource_slot_";
 
+pub fn validateDeclarations(self: anytype) !void {
+    for (self.source.structures) |structure| {
+        if (!structure.is_intrinsic) {
+            if (isTypedStoreName(structure.name)) {
+                const message = try std.fmt.allocPrint(self.allocator, "'{s}' must be declared as an intrinsic class", .{structure.name});
+                return self.fail(structure.name_position, message);
+            }
+            continue;
+        }
+        if (!isTypedStoreName(structure.name)) {
+            const message = try std.fmt.allocPrint(
+                self.allocator,
+                "intrinsic class '{s}' has no compiler implementation",
+                .{structure.name},
+            );
+            return self.fail(structure.name_position, message);
+        }
+        try validateStoreContract(self, structure);
+    }
+}
+
 pub fn isResources(self: anytype, structure_type: Ast.Type) bool {
     const structure = self.structureForType(structure_type) orelse return false;
-    return std.mem.eql(u8, structure.name, canonical_name);
+    return isTypedStoreName(structure.name);
 }
 
 pub fn intrinsicForSpecialization(
@@ -30,12 +52,148 @@ pub fn intrinsicForSpecialization(
     return null;
 }
 
-pub fn markConcreteMethods(self: anytype, structure_index: usize) void {
+pub fn markConcreteMethods(self: anytype, structure_index: usize) !void {
+    if (!isTypedStoreName(self.structures.items[structure_index].name)) return;
     const structure = &self.structures.items[structure_index];
-    if (!std.mem.eql(u8, structure.name, canonical_name)) return;
     for (@constCast(structure.methods)) |*method| {
         if (std.mem.eql(u8, method.name, "clear")) method.intrinsic = .resource_clear;
     }
+}
+
+pub fn prepareConcreteStorage(self: anytype) !void {
+    var index: usize = 0;
+    while (index < self.structures.items.len) : (index += 1) {
+        if (isTypedStoreName(self.structures.items[index].name)) try installStorage(self, index);
+    }
+}
+
+fn validateStoreContract(self: anytype, structure: Ast.Structure) !void {
+    if (!structure.is_class or
+        (std.mem.eql(u8, structure.name, canonical_name) and !structure.is_public) or
+        structure.type_parameters.len != 0 or structure.methods.len != 8)
+    {
+        return invalidContract(self, structure.name, structure.name_position);
+    }
+    for (structure.methods) |method| {
+        if (!method.is_public or method.is_static or !method.is_intrinsic_declaration) {
+            return invalidContract(self, structure.name, method.name_position);
+        }
+        const generic = Ast.Type.genericParameter(0);
+        const valid = if (std.mem.eql(u8, method.name, "insert"))
+            method.type_parameters.len == 1 and method.parameters.len == 1 and method.parameters[0].type == generic and
+                method.parameters[0].mode == .value and method.return_type == .void and method.return_mode == .value
+        else if (std.mem.eql(u8, method.name, "has"))
+            genericQuery(method, .bool, .value)
+        else if (std.mem.eql(u8, method.name, "get"))
+            genericQuery(method, generic, .read)
+        else if (std.mem.eql(u8, method.name, "get_mut"))
+            genericQuery(method, generic, .mutable)
+        else if (std.mem.eql(u8, method.name, "try_get"))
+            genericQuery(method, .optional(generic), .read)
+        else if (std.mem.eql(u8, method.name, "try_get_mut"))
+            genericQuery(method, .optional(generic), .mutable)
+        else if (std.mem.eql(u8, method.name, "remove"))
+            genericQuery(method, .optional(generic), .value)
+        else if (std.mem.eql(u8, method.name, "clear"))
+            method.type_parameters.len == 0 and method.parameters.len == 0 and method.return_type == .void and method.return_mode == .value
+        else
+            false;
+        if (!valid) return invalidContract(self, structure.name, method.name_position);
+    }
+}
+
+fn genericQuery(method: Ast.Function, return_type: Ast.Type, return_mode: Ast.Parameter.Mode) bool {
+    return method.type_parameters.len == 1 and method.parameters.len == 0 and
+        method.return_type == return_type and method.return_mode == return_mode;
+}
+
+fn invalidContract(self: anytype, name: []const u8, position: Source.Position) !void {
+    const message = try std.fmt.allocPrint(
+        self.allocator,
+        "intrinsic class '{s}' does not match the compiler-provided contract",
+        .{name},
+    );
+    return self.fail(position, message);
+}
+
+fn isTypedStoreName(name: []const u8) bool {
+    return std.mem.eql(u8, name, canonical_name) or std.mem.eql(u8, name, component_pools_name);
+}
+
+fn installStorage(self: anytype, structure_index: usize) !void {
+    const position = self.structures.items[structure_index].position;
+    const order_type = try ensureOrderType(self, position);
+    const fields = try self.allocator.alloc(Ast.StructureField, 1);
+    const empty_order = try self.allocator.create(Ast.Expression);
+    empty_order.* = .{ .position = position, .value = .{ .sequence_literal = .{
+        .values = &.{},
+        .inferred_type = order_type,
+    } } };
+    fields[0] = .{
+        .is_public = false,
+        .is_private = true,
+        .position = position,
+        .name_position = position,
+        .name = order_field_name,
+        .mutable = true,
+        .type = order_type,
+        .default = null,
+    };
+    self.structures.items[structure_index].fields = fields;
+
+    const constructor_statements = try self.allocator.alloc(Ast.Statement, 1);
+    constructor_statements[0] = .{ .assignment_statement = .{
+        .position = position,
+        .target = .{
+            .name_position = position,
+            .name = "self",
+            .fields = try self.allocator.dupe(Ast.AssignmentTarget.Field, &.{.{
+                .name_position = position,
+                .name = order_field_name,
+            }}),
+        },
+        .operator = .assign,
+        .value = empty_order,
+    } };
+    const constructors = try self.allocator.alloc(Ast.Constructor, 1);
+    constructors[0] = .{
+        .is_public = true,
+        .position = position,
+        .parameters = &.{},
+        .statements = constructor_statements,
+    };
+    self.structures.items[structure_index].constructors = constructors;
+
+    const receiver = try self.allocator.create(Ast.Expression);
+    receiver.* = .{ .position = position, .value = .{ .identifier = "self" } };
+    const call = try self.allocator.create(Ast.Expression);
+    call.* = .{ .position = position, .value = .{ .call = .{
+        .name = "clear",
+        .name_position = position,
+        .receiver = receiver,
+        .arguments = &.{},
+    } } };
+    const statements = try self.allocator.alloc(Ast.Statement, 1);
+    statements[0] = .{ .expression_statement = call };
+    self.structures.items[structure_index].drop = .{ .position = position, .statements = statements };
+}
+
+fn ensureOrderType(self: anytype, position: Source.Position) !Ast.Type {
+    const name = "int[]";
+    const type_value = self.typeForName(name) orelse value: {
+        const created = Ast.Type.structure(self.type_names.items.len);
+        try self.type_names.append(self.allocator, name);
+        break :value created;
+    };
+    if (self.structureForType(type_value) == null) try self.structures.append(self.allocator, .{
+        .is_public = false,
+        .position = position,
+        .name_position = position,
+        .name = name,
+        .fields = &.{},
+        .collection = .{ .element = .int, .length = null },
+    });
+    return type_value;
 }
 
 fn ensureSlot(self: anytype, structure_type: Ast.Type, resource_type: Ast.Type, position: Source.Position) !usize {

@@ -155,7 +155,7 @@ test "compose a cascade whose receiver is a qualified package type" {
         .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\"}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "GFX/Module/Bootstrap.sx",
+        .sub_path = "GFX/Module/Application.sx",
         .data =
         \\public struct Application {
         \\    var running:bool = false
@@ -167,9 +167,9 @@ test "compose a cascade whose receiver is a qualified package type" {
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Main.sx",
         .data =
-        \\use GFX.Bootstrap
+        \\use GFX.Application
         \\func main() {
-        \\    var app = Bootstrap.Application()
+        \\    var app = Application()
         \\        ..run()
         \\    print(app.is_running())
         \\}

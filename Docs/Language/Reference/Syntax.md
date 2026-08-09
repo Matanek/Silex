@@ -12,6 +12,7 @@ constraints.
 | Mixed call | `name(expression, other:expression)` |
 | Structure | `struct Name { ... }` |
 | Class | `class Name { ... }` |
+| Compiler-provided class contract | `intrinsic class Name { ... }` |
 | Protocol | `protocol Name { ... }` |
 | Extension | `extend Name { ... }` |
 | Enum variant | `caseName(Type)` inside `enum` |

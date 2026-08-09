@@ -3,13 +3,19 @@ const Ast = @import("../Ast.zig");
 const Generics = @import("Generics.zig");
 
 pub fn parse(self: anytype, is_public: bool, is_internal: bool, is_local: bool, is_class: bool) !Ast.Structure {
-    return parseType(self, is_public, is_internal, is_local, false, false, is_class, false);
+    return parseType(self, is_public, is_internal, is_local, false, false, is_class, false, false);
+}
+
+pub fn parseIntrinsicClass(self: anytype, is_public: bool) !Ast.Structure {
+    try self.advance();
+    if (self.current.tag != .keyword_class) return self.fail("expected 'class' after 'intrinsic'");
+    return parseType(self, is_public, false, false, false, false, true, false, true);
 }
 
 pub fn parseStaticClass(self: anytype, is_public: bool, is_internal: bool, is_local: bool) !Ast.Structure {
     try self.advance();
     if (self.current.tag != .keyword_class) return self.fail("expected 'class' after 'static'");
-    return parseType(self, is_public, is_internal, is_local, false, false, true, true);
+    return parseType(self, is_public, is_internal, is_local, false, false, true, true, false);
 }
 
 fn parseType(
@@ -21,6 +27,7 @@ fn parseType(
     is_protected: bool,
     is_class: bool,
     is_static_class: bool,
+    is_intrinsic: bool,
 ) !Ast.Structure {
     const position = self.current.position;
     try self.advance();
@@ -52,6 +59,7 @@ fn parseType(
     var conformances: std.ArrayList(Ast.Type) = .empty;
     var base_position = name_position;
     if (self.current.tag == .colon) {
+        if (is_intrinsic) return self.fail("intrinsic classes cannot declare a base or conformances");
         if (is_static_class) return self.fail("static classes cannot declare a base");
         try self.advance();
         while (true) {
@@ -132,11 +140,13 @@ fn parseType(
                 member_protected,
                 nested_is_class,
                 nested_is_static,
+                false,
             );
             try self.nested_structures.append(self.allocator, nested);
             continue;
         }
         if (self.current.tag == .keyword_init) {
+            if (is_intrinsic) return self.fail("intrinsic classes cannot declare constructors");
             if (is_static_class) return self.fail("static classes cannot declare constructors");
             if (member_static) return self.fail("constructors cannot be static");
             if (member_override) return self.fail("constructors cannot declare override");
@@ -151,7 +161,10 @@ fn parseType(
         if (self.current.tag == .keyword_func) {
             if (is_static_class and !member_static) return self.fail("static class methods must start with 'static func'");
             if (member_override and member_static) return self.fail("static methods cannot declare override");
-            var method = try self.parseFunction(member_public, member_internal, member_local);
+            var method = if (is_intrinsic)
+                try self.parseIntrinsicMethod(member_public, member_internal, member_local)
+            else
+                try self.parseFunction(member_public, member_internal, member_local);
             method.is_static = member_static;
             method.is_override = member_override;
             method.is_private = member_private;
@@ -163,6 +176,7 @@ fn parseType(
             continue;
         }
         if (self.current.tag == .keyword_drop) {
+            if (is_intrinsic) return self.fail("intrinsic classes cannot declare drop");
             if (is_static_class) return self.fail("static classes cannot declare drop");
             if (member_static) return self.fail("drop cannot be static");
             if (member_override) return self.fail("drop cannot declare override");
@@ -179,6 +193,7 @@ fn parseType(
             .keyword_var => true,
             else => return self.fail("structure field must start with 'let' or 'var'"),
         };
+        if (is_intrinsic) return self.fail("intrinsic classes cannot declare fields");
         if (is_static_class and !member_static) return self.fail("static class fields must start with 'static let' or 'static var'");
         if (member_override) return self.fail("fields cannot declare override");
         const field_position = self.current.position;
@@ -222,6 +237,7 @@ fn parseType(
         .is_private = is_private,
         .is_protected = is_protected,
         .is_class = is_class,
+        .is_intrinsic = is_intrinsic,
         .is_static = is_static_class,
         .enclosing = enclosing,
         .position = position,

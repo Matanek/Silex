@@ -4,8 +4,8 @@ const Source = @import("../Source.zig");
 const WorkerSafety = @import("WorkerSafety.zig");
 const QueryParallel = @import("QueryParallel.zig");
 
-const application_name = "GFX.Bootstrap.Application";
-const resources_name = "GFX.Bootstrap.Resources";
+const application_name = "GFX.Application";
+const resources_name = "GFX.Application.Resources";
 const world_name = "GFX.ECS.World";
 
 pub fn rewriteRegistration(self: anytype, call: *Ast.Expression.Call, locals: anytype) !bool {
@@ -276,9 +276,9 @@ fn appendUnique(allocator: std.mem.Allocator, values: *std.ArrayList([]const u8)
 
 fn mainThreadType(name: []const u8) bool {
     return std.mem.eql(u8, name, "GFX.Window") or
-        std.mem.eql(u8, name, "GFX.GPU") or
+        std.mem.eql(u8, name, "GFX.Rendering.GPU") or
         std.mem.startsWith(u8, name, "GFX.Window.") or
-        std.mem.startsWith(u8, name, "GFX.GPU.");
+        std.mem.startsWith(u8, name, "GFX.Rendering.GPU.");
 }
 
 fn stringSequence(self: anytype, values: []const []const u8, position: Source.Position) !*Ast.Expression {

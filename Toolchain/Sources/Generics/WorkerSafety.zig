@@ -38,7 +38,7 @@ pub fn validateSubmission(
     // descriptor has classified the actual system callback. The dynamic
     // callback stored by the envelope is therefore not a user-controlled
     // worker-safety escape hatch.
-    if (std.mem.eql(u8, job.name, "GFX.Bootstrap.SystemJob")) return;
+    if (std.mem.eql(u8, job.name, "GFX.Application.SystemJob")) return;
 
     if (try containsExecutor(self, arguments[0], &.{})) |capture_position| {
         const message = try std.fmt.allocPrint(
@@ -82,7 +82,7 @@ pub fn systemIsWorkerSafe(self: anytype, target_name: []const u8, target_positio
         findSystemFunction(self.source.functions, target_name, target_position) orelse return false;
 
     if (std.mem.startsWith(u8, target.name, "GFX.Window.") or
-        std.mem.startsWith(u8, target.name, "GFX.GPU.")) return false;
+        std.mem.startsWith(u8, target.name, "GFX.Rendering.GPU.")) return false;
 
     var checker = Checker(@TypeOf(self.*)){
         .self = self,

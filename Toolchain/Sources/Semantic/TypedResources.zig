@@ -81,8 +81,8 @@ fn emitInsert(self: anytype, builder: anytype, structure: usize, field: usize, m
     const replacement = try self.newValue(builder, slot_type);
     try self.emit(builder, .{ .optional_some = .{ .result = replacement, .operand = 1 } });
     const result = try self.newValue(builder, .structure(structure));
-    try self.emit(builder, .{ .field_store = .{ .result = result, .base = 0, .field = field, .replacement = replacement } });
-    self.terminate(builder, .{ .return_value = 0 });
+    try self.emit(builder, .{ .field_store = .{ .result = result, .base = order_result, .field = field, .replacement = replacement } });
+    self.terminate(builder, .{ .return_value = result });
 }
 
 fn emitHas(self: anytype, builder: anytype, structure: usize, field: usize) !void {
@@ -153,7 +153,7 @@ fn emitRemove(self: anytype, builder: anytype, structure: usize, field: usize, f
     try self.emit(builder, .{ .structure_init = .{
         .result = returned,
         .structure = result_type.structureIndex().?,
-        .fields = try self.allocator.dupe(Ir.ValueId, &.{ 0, slot }),
+        .fields = try self.allocator.dupe(Ir.ValueId, &.{ result, slot }),
     } });
     self.terminate(builder, .{ .return_value = returned });
 }

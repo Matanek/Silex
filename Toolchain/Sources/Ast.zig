@@ -455,6 +455,9 @@ pub const Structure = struct {
     is_private: bool = false,
     is_protected: bool = false,
     is_class: bool = false,
+    /// The class contract is declared by source while its storage and member
+    /// implementations are supplied by a compiler-recognized intrinsic.
+    is_intrinsic: bool = false,
     is_static: bool = false,
     is_protocol: bool = false,
     is_tuple: bool = false,
@@ -549,6 +552,8 @@ pub const Function = struct {
     return_mode: Parameter.Mode = .value,
     return_provenance: ?[]const u8 = null,
     intrinsic: ?FunctionIntrinsic = null,
+    /// True for a signature-only member of an intrinsic class.
+    is_intrinsic_declaration: bool = false,
     statements: []const Statement,
 };
 

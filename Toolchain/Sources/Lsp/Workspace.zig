@@ -2700,10 +2700,10 @@ test "complete imported application members in a cascade" {
         .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\"}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "GFX/Module/Bootstrap.sx",
+        .sub_path = "GFX/Module/Application.sx",
         .data =
+        \\public intrinsic class Resources { public func insert() }
         \\public enum Schedule { startup; update }
-        \\public class Resources { public func insert() {} }
         \\public class Application {
         \\    public func install() Application { return self }
         \\    public func resources() Resources { return Resources() }
@@ -2718,9 +2718,8 @@ test "complete imported application members in a cascade" {
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Module/@Module.sx",
         .data =
-        \\public use GFX.Bootstrap.Application
-        \\public use GFX.Bootstrap.Resources
-        \\public use GFX.Bootstrap.Schedule
+        \\public use GFX.Application
+        \\public use GFX.Application.Schedule
         ,
     });
     try temporary.dir.writeFile(std.testing.io, .{
@@ -2738,9 +2737,9 @@ test "complete imported application members in a cascade" {
     const uri = try std.fmt.allocPrint(allocator, "file://{s}", .{main_path});
     const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
     const source =
-        \\use GFX.Bootstrap
+        \\use GFX.Application
         \\func main() {
-        \\    var app = Bootstrap.Application()
+        \\    var app = Application()
         \\        ..
         \\}
     ;
@@ -2807,9 +2806,9 @@ test "complete imported application members in a cascade" {
     try std.testing.expect(hasLabel(direct_items, "show"));
 
     const conditional_source =
-        \\use GFX.Bootstrap
+        \\use GFX.Application
         \\func main() {
-        \\    let app = Bootstrap.Application()
+        \\    let app = Application()
         \\    if app.
         \\}
     ;
@@ -2930,7 +2929,7 @@ test "complete imported application members in a cascade" {
     try std.testing.expect(hasLabel(invalid_declaration_items, "update"));
 
     const nested_source =
-        \\use GFX.Bootstrap.Application
+        \\use GFX.Application
         \\struct Settings { var title:str }
         \\struct WindowPlugin {}
         \\func main() {
