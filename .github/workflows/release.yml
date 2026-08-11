@@ -50,7 +50,9 @@ jobs:
           "$RUNNER_TEMP/silex-macos-arm64/bin/silex" --version
           "$RUNNER_TEMP/silex-macos-arm64/bin/silex" targets
           "$RUNNER_TEMP/silex-macos-arm64/bin/silex" install STD
-          "$RUNNER_TEMP/silex-macos-arm64/bin/silex" run Examples/Distribution/Hello.sx
+          output=$("$RUNNER_TEMP/silex-macos-arm64/bin/silex" run Examples/Distribution/Hello.sx)
+          printf '%s\n' "$output"
+          test "$output" = "84"
           tar -C "$RUNNER_TEMP" -czf silex-macos-arm64.tar.gz silex-macos-arm64
           shasum -a 256 silex-macos-arm64.tar.gz > silex-macos-arm64.tar.gz.sha256
 
@@ -103,7 +105,9 @@ jobs:
           "$RUNNER_TEMP/silex-linux-x64/bin/silex" --version
           "$RUNNER_TEMP/silex-linux-x64/bin/silex" targets
           "$RUNNER_TEMP/silex-linux-x64/bin/silex" install STD
-          "$RUNNER_TEMP/silex-linux-x64/bin/silex" run Examples/Distribution/Hello.sx
+          output=$("$RUNNER_TEMP/silex-linux-x64/bin/silex" run Examples/Distribution/Hello.sx)
+          printf '%s\n' "$output"
+          test "$output" = "84"
           tar -C "$RUNNER_TEMP" -czf silex-linux-x64.tar.gz silex-linux-x64
           sha256sum silex-linux-x64.tar.gz > silex-linux-x64.tar.gz.sha256
 
@@ -167,7 +171,14 @@ jobs:
           & $silex --version
           & $silex targets
           & $silex install STD
-          & $silex run Examples/Distribution/Hello.sx
+          $output = & $silex run Examples/Distribution/Hello.sx
+          if ($LASTEXITCODE -ne 0) {
+            throw "Silex package smoke failed with exit code $LASTEXITCODE"
+          }
+          $output
+          if (($output -join "`n").Trim() -ne "84") {
+            throw "Silex package smoke produced unexpected output"
+          }
           Compress-Archive $root silex-windows-x64.zip
           $hash = (Get-FileHash silex-windows-x64.zip -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  silex-windows-x64.zip" | Set-Content -NoNewline silex-windows-x64.zip.sha256

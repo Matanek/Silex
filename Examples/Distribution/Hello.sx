@@ -1,5 +1,5 @@
-use STD.System
+use STD.Collections.Hashing
 
 func main() {
-    print("Silex $(System.target_name(System.target()))")
+    print(Hashing.hash_int(42))
 }

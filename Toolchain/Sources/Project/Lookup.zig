@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const Ast = @import("../Ast.zig");
 const Modules = @import("../Modules.zig");
 const Reexports = @import("Reexports.zig");
@@ -28,9 +29,24 @@ pub fn isAccessibleNamespace(self: anytype, name: []const u8, owner: usize) bool
 
 pub fn findProviderPath(self: anytype, path: []const u8) ?usize {
     for (self.index.providers, 0..) |provider, index| {
-        if (std.mem.eql(u8, provider.path, path)) return index;
+        if (samePath(provider.path, path, builtin.os.tag == .windows)) return index;
     }
     return null;
+}
+
+fn samePath(left: []const u8, right: []const u8, windows: bool) bool {
+    if (left.len != right.len) return false;
+    for (left, right) |left_character, right_character| {
+        if (windows and isWindowsSeparator(left_character) and isWindowsSeparator(right_character)) continue;
+        if (windows) {
+            if (std.ascii.toLower(left_character) != std.ascii.toLower(right_character)) return false;
+        } else if (left_character != right_character) return false;
+    }
+    return true;
+}
+
+fn isWindowsSeparator(character: u8) bool {
+    return character == '/' or character == '\\';
 }
 
 pub fn findLocalFunction(program: Ast.Program, name: []const u8) bool {
@@ -51,6 +67,15 @@ pub fn longestAccessibleModulePrefix(self: anytype, path: []const u8, owner: usi
         }
         end = std.mem.lastIndexOfScalar(u8, prefix, '.') orelse return null;
     }
+}
+
+test "compare Windows provider paths across separator and case spelling" {
+    try std.testing.expect(samePath(
+        "Examples\\Distribution\\Hello.sx",
+        "examples/Distribution/Hello.sx",
+        true,
+    ));
+    try std.testing.expect(!samePath("Examples\\Distribution\\Hello.sx", "Examples/Distribution/Hello.sx", false));
 }
 
 pub fn discoverProviders(self: anytype, input_path: []const u8) !Modules.Index {
