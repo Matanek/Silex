@@ -16,6 +16,19 @@ Read the [language guide](Docs/Language/README.md) to find the source form for
 each implemented feature. Read [compiler architecture](Docs/Architecture.md)
 for the current compilation path and its limits.
 
+## Install
+
+The standalone compiler currently supports macOS on Apple Silicon and does not
+require Zig on the developer's machine:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Matanek/Silex/main/install.sh | sh
+silex --version
+```
+
+See the [installation guide](Docs/Installation.md) for checksum verification,
+custom destinations, source builds, and removal.
+
 ## Build and test
 
 ```sh
@@ -31,8 +44,8 @@ cd Toolchain
 zig build run -- run /path/to/Main.sx
 ```
 
-The published Silex installer prepares its toolchain automatically. When
-building Silex from source, or repairing an incomplete installation, run:
+Shader compilation uses one optional tool installed separately. Before
+compiling HLSL, run:
 
 ```sh
 silex setup

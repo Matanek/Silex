@@ -154,3 +154,28 @@ fn hex(character: u8) ?u8 {
         else => null,
     };
 }
+
+test "reject a package that requires a newer Silex before LSP indexing" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "Modern/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Modern/Package.json",
+        .data =
+        \\{"name":"Modern","version":"1.0.0","requires":{"silex":">=99.0.0 <100.0.0"}}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Modern/Module/Main.sx",
+        .data = "func main() {}",
+    });
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Modern" });
+    const document = try std.fs.path.join(allocator, &.{ root, "Module", "Main.sx" });
+    try std.testing.expectError(
+        error.InvalidPackageGraph,
+        index(allocator, std.testing.io, null, .macos_arm64, root, document),
+    );
+}

@@ -1,0 +1,63 @@
+name: Release Silex
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  macos-arm64:
+    runs-on: macos-15
+
+    steps:
+      - name: Check out the tagged source
+        uses: actions/checkout@v6
+
+      - name: Verify the tag and manifest version
+        shell: bash
+        run: |
+          set -euo pipefail
+          manifest_version=$(sed -n 's/^[[:space:]]*\.version = "\([^"]*\)",/\1/p' Toolchain/build.zig.zon)
+          tag_version=${GITHUB_REF_NAME#v}
+          test -n "$manifest_version"
+          test "$manifest_version" = "$tag_version"
+
+      - name: Install Zig 0.16.0
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fL https://ziglang.org/download/0.16.0/zig-aarch64-macos-0.16.0.tar.xz -o zig.tar.xz
+          echo "b23d70deaa879b5c2d486ed3316f7eaa53e84acf6fc9cc747de152450d401489  zig.tar.xz" | shasum -a 256 -c -
+          tar -xf zig.tar.xz
+          echo "$PWD/zig-aarch64-macos-0.16.0" >> "$GITHUB_PATH"
+
+      - name: Build the standalone compiler
+        working-directory: Toolchain
+        run: zig build -Doptimize=ReleaseSafe --prefix "$RUNNER_TEMP/silex-prefix"
+
+      - name: Assemble and verify the release artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/silex-macos-arm64/bin"
+          cp "$RUNNER_TEMP/silex-prefix/bin/silex" "$RUNNER_TEMP/silex-macos-arm64/bin/silex"
+          cp LICENSE NOTICE README.md "$RUNNER_TEMP/silex-macos-arm64/"
+          "$RUNNER_TEMP/silex-macos-arm64/bin/silex" --version
+          "$RUNNER_TEMP/silex-macos-arm64/bin/silex" targets
+          tar -C "$RUNNER_TEMP" -czf silex-macos-arm64.tar.gz silex-macos-arm64
+          shasum -a 256 silex-macos-arm64.tar.gz > silex-macos-arm64.tar.gz.sha256
+
+      - name: Publish the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            silex-macos-arm64.tar.gz \
+            silex-macos-arm64.tar.gz.sha256 \
+            --verify-tag \
+            --title "Silex $GITHUB_REF_NAME" \
+            --generate-notes

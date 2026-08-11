@@ -123,8 +123,7 @@ pub const Installer = struct {
             else => return self.fail("package manifest must be a JSON object"),
         };
         var result: std.ArrayList(Artifact) = .empty;
-        const target_artifacts = root.get("artifacts") orelse
-            return self.fail("package does not declare installable artifacts");
+        const target_artifacts = root.get("artifacts") orelse return &.{};
         try self.appendPlatformEntries(&result, target_artifacts, "artifacts", target);
         std.mem.sort(Artifact, result.items, {}, artifactLessThan);
         return result.toOwnedSlice(self.allocator);

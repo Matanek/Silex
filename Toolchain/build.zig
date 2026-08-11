@@ -4,11 +4,16 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    const package_version = manifestVersion();
+    const build_options = b.addOptions();
+    build_options.addOption([]const u8, "version", package_version);
+
     const module = b.createModule(.{
         .root_source_file = b.path("Sources/Main.zig"),
         .target = target,
         .optimize = optimize,
     });
+    module.addOptions("build_options", build_options);
     const runtime_target = b.resolveTargetQuery(.{
         .cpu_arch = .aarch64,
         .os_tag = .macos,
@@ -96,6 +101,7 @@ pub fn build(b: *std.Build) void {
     const executable = b.addExecutable(.{
         .name = "silex",
         .root_module = module,
+        .version = std.SemanticVersion.parse(package_version) catch unreachable,
     });
     b.installArtifact(executable);
 
@@ -138,6 +144,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    lsp_test_module.addOptions("build_options", build_options);
     const lsp_tests = b.addTest(.{ .root_module = lsp_test_module });
     const lsp_test_command = b.addRunArtifact(lsp_tests);
     const lsp_test_step = b.step("test-lsp", "Run the language-server contract tests");
@@ -148,4 +155,14 @@ pub fn build(b: *std.Build) void {
     check_step.dependOn(&test_command.step);
     check_step.dependOn(&deep_copy_test_command.step);
     check_step.dependOn(&language_test_command.step);
+}
+
+fn manifestVersion() []const u8 {
+    const manifest = @embedFile("build.zig.zon");
+    const prefix = ".version = \"";
+    const start = (std.mem.indexOf(u8, manifest, prefix) orelse
+        @panic("build.zig.zon must declare .version")) + prefix.len;
+    const end = std.mem.indexOfScalarPos(u8, manifest, start, '"') orelse
+        @panic("build.zig.zon contains an invalid .version");
+    return manifest[start..end];
 }

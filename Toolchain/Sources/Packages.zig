@@ -1,4 +1,5 @@
 const std = @import("std");
+const build_options = @import("build_options");
 const macho = std.macho;
 const Modules = @import("Modules.zig");
 const TargetModule = @import("Target.zig");
@@ -53,6 +54,41 @@ pub const Constraint = struct {
         return candidate.major == self.version.major;
     }
 };
+
+pub const SilexRequirement = struct {
+    text: []const u8,
+    minimum: Version,
+    maximum_exclusive: ?Version,
+
+    pub fn parse(text: []const u8) error{InvalidRequirement}!SilexRequirement {
+        var clauses = std.mem.tokenizeScalar(u8, text, ' ');
+        const minimum_clause = clauses.next() orelse return error.InvalidRequirement;
+        if (!std.mem.startsWith(u8, minimum_clause, ">=") or minimum_clause.len == 2) {
+            return error.InvalidRequirement;
+        }
+        const minimum = Version.parse(minimum_clause[2..]) catch return error.InvalidRequirement;
+        const maximum_exclusive = if (clauses.next()) |maximum_clause| maximum: {
+            if (!std.mem.startsWith(u8, maximum_clause, "<") or maximum_clause.len == 1) {
+                return error.InvalidRequirement;
+            }
+            const maximum = Version.parse(maximum_clause[1..]) catch return error.InvalidRequirement;
+            if (maximum.order(minimum) != .gt) return error.InvalidRequirement;
+            break :maximum maximum;
+        } else null;
+        if (clauses.next() != null) return error.InvalidRequirement;
+        return .{ .text = text, .minimum = minimum, .maximum_exclusive = maximum_exclusive };
+    }
+
+    pub fn accepts(self: SilexRequirement, version: Version) bool {
+        if (version.order(self.minimum) == .lt) return false;
+        if (self.maximum_exclusive) |maximum| return version.order(maximum) == .lt;
+        return true;
+    }
+};
+
+fn currentToolchainVersion() Version {
+    return Version.parse(build_options.version) catch @panic("invalid Silex toolchain version");
+}
 
 fn constraintSymbol(constraint: Constraint) u8 {
     return if (constraint.kind == .exact) '=' else '^';
@@ -139,6 +175,18 @@ pub const Graph = struct {
     }
 };
 
+pub const ManifestInfo = struct {
+    name: []const u8,
+    version: Version,
+    silex_requirement: SilexRequirement,
+    dependencies: []const ManifestDependency,
+};
+
+pub const ManifestDependency = struct {
+    name: []const u8,
+    constraint: Constraint,
+};
+
 pub const Result = struct {
     graph: Graph,
     diagnostic: ?[]const u8 = null,
@@ -147,6 +195,7 @@ pub const Result = struct {
 const RawManifest = struct {
     name: ?[]const u8 = null,
     version: ?[]const u8 = null,
+    requires: ?std.json.Value = null,
     dependencies: ?std.json.Value = null,
     boundary: ?std.json.Value = null,
     artifacts: ?std.json.Value = null,
@@ -155,13 +204,9 @@ const RawManifest = struct {
 const ParsedManifest = struct {
     name: ?[]const u8,
     version: ?Version,
-    dependencies: []const RequestedDependency,
+    silex_requirement: ?SilexRequirement,
+    dependencies: []const ManifestDependency,
     boundary_providers: []const BoundaryProvider,
-};
-
-const RequestedDependency = struct {
-    name: []const u8,
-    constraint: Constraint,
 };
 
 const State = enum { visiting, done };
@@ -177,6 +222,7 @@ pub const Resolver = struct {
     io: Io,
     global_root: ?[]const u8,
     target: TargetModule.Target,
+    toolchain_version: Version = currentToolchainVersion(),
     local_root: []const u8 = "",
     shared_root: []const u8 = "",
     builders: std.ArrayList(Builder) = .empty,
@@ -195,7 +241,10 @@ pub const Resolver = struct {
         try self.rejectLegacy(project_root);
         const manifest_path = try std.fs.path.join(self.allocator, &.{ project_root, "Package.json" });
         const root_manifest = try self.loadOptional(manifest_path);
-        if (root_manifest) |manifest| try self.validateRootIdentity(manifest, project_root);
+        if (root_manifest) |manifest| {
+            try self.validateToolchain(manifest);
+            try self.validateRootIdentity(manifest, project_root);
+        }
         self.local_root = if (root_manifest != null and root_manifest.?.name != null)
             std.fs.path.dirname(project_root) orelse project_root
         else
@@ -229,6 +278,28 @@ pub const Resolver = struct {
             packages[index] = builder.package;
         }
         return .{ .packages = packages, .explicit = root_manifest != null };
+    }
+
+    pub fn inspectPackage(self: *Resolver, package_root: []const u8) !ManifestInfo {
+        self.diagnostic = null;
+        try self.rejectLegacy(package_root);
+        const path = try std.fs.path.join(self.allocator, &.{ package_root, "Package.json" });
+        const raw = try self.readManifest(path);
+        const manifest = try self.parseManifestCore(raw);
+        const name = manifest.name orelse return self.fail("an installable package requires name and version");
+        const version = manifest.version orelse return self.fail("an installable package requires name and version");
+        const requirement = manifest.silex_requirement orelse return self.fail(try std.fmt.allocPrint(
+            self.allocator,
+            "package '{s}@{d}.{d}.{d}' does not declare requires.silex",
+            .{ name, version.major, version.minor, version.patch },
+        ));
+        try self.validateToolchain(manifest);
+        return .{
+            .name = name,
+            .version = version,
+            .silex_requirement = requirement,
+            .dependencies = manifest.dependencies,
+        };
     }
 
     fn findSharedRoot(self: *Resolver, project_root: []const u8) ![]const u8 {
@@ -289,7 +360,7 @@ pub const Resolver = struct {
         }
     }
 
-    fn resolveDependencies(self: *Resolver, owner: usize, dependencies: []const RequestedDependency) anyerror!void {
+    fn resolveDependencies(self: *Resolver, owner: usize, dependencies: []const ManifestDependency) anyerror!void {
         for (dependencies) |request| {
             const package = try self.resolveRequest(owner, request);
             try self.builders.items[owner].dependencies.append(self.allocator, .{
@@ -300,7 +371,7 @@ pub const Resolver = struct {
         }
     }
 
-    fn resolveRequest(self: *Resolver, owner: usize, request: RequestedDependency) anyerror!usize {
+    fn resolveRequest(self: *Resolver, owner: usize, request: ManifestDependency) anyerror!usize {
         if (self.find(request.name)) |existing| {
             const builder = &self.builders.items[existing];
             if (!request.constraint.accepts(builder.package.version.?)) {
@@ -331,6 +402,10 @@ pub const Resolver = struct {
             available = newest(available, version);
         }
 
+        if (try self.linked(owner, request)) |selected| {
+            return self.resolveSelected(selected.root, selected.manifest, request.name, selected.version);
+        }
+
         if (try self.bestGlobal(request, &available)) |selected| {
             return self.resolveSelected(selected.root, selected.manifest, request.name, selected.version);
         }
@@ -343,7 +418,48 @@ pub const Resolver = struct {
         version: Version,
     };
 
-    fn bestGlobal(self: *Resolver, request: RequestedDependency, available: *?Version) !?Selected {
+    const Link = struct {
+        path: []const u8,
+    };
+
+    fn linked(self: *Resolver, owner: usize, request: ManifestDependency) !?Selected {
+        const global_root = self.global_root orelse return null;
+        const silex_root = std.fs.path.dirname(global_root) orelse return null;
+        const file_name = try std.fmt.allocPrint(self.allocator, "{s}.json", .{request.name});
+        const link_path = try std.fs.path.join(self.allocator, &.{ silex_root, "links", file_name });
+        const source = Io.Dir.cwd().readFileAlloc(self.io, link_path, self.allocator, .limited(64 * 1024)) catch |err| switch (err) {
+            error.FileNotFound, error.NotDir => return null,
+            else => return self.fail(try std.fmt.allocPrint(
+                self.allocator,
+                "linked package '{s}' cannot be read; run 'silex unlink {s}'",
+                .{ request.name, request.name },
+            )),
+        };
+        const link = std.json.parseFromSliceLeaky(Link, self.allocator, source, .{
+            .allocate = .alloc_always,
+            .ignore_unknown_fields = false,
+        }) catch return self.fail(try std.fmt.allocPrint(
+            self.allocator,
+            "linked package '{s}' has an invalid link; run 'silex unlink {s}'",
+            .{ request.name, request.name },
+        ));
+        const manifest = self.loadRequired(link.path) catch |err| switch (err) {
+            error.InvalidPackageGraph => return self.fail(try std.fmt.allocPrint(
+                self.allocator,
+                "linked package '{s}' is unavailable at '{s}'; run 'silex unlink {s}'",
+                .{ request.name, link.path, request.name },
+            )),
+            else => |other| return other,
+        };
+        const version = try self.validateSelected(manifest, request.name, link.path, true);
+        if (!request.constraint.accepts(version)) {
+            return self.fail(try self.unresolvedDependencyDiagnostic(owner, request, version));
+        }
+        try self.validateToolchain(manifest);
+        return .{ .root = link.path, .manifest = manifest, .version = version };
+    }
+
+    fn bestGlobal(self: *Resolver, request: ManifestDependency, available: *?Version) !?Selected {
         const global_root = self.global_root orelse return null;
         var directory = Io.Dir.cwd().openDir(self.io, global_root, .{ .iterate = true }) catch |err| switch (err) {
             error.FileNotFound, error.NotDir => return null,
@@ -352,6 +468,7 @@ pub const Resolver = struct {
         defer directory.close(self.io);
         const prefix = try std.fmt.allocPrint(self.allocator, "{s}@", .{request.name});
         var best: ?Selected = null;
+        var toolchain_incompatible: ?Selected = null;
         var iterator = directory.iterateAssumeFirstIteration();
         while (try iterator.next(self.io)) |entry| {
             if (entry.kind != .directory or !std.mem.startsWith(u8, entry.name, prefix)) continue;
@@ -363,14 +480,23 @@ pub const Resolver = struct {
             if (!folder_version.eql(version)) return self.fail("global package folder and manifest version differ");
             available.* = newest(available.*, version);
             if (!request.constraint.accepts(version)) continue;
+            if (!manifest.silex_requirement.?.accepts(self.toolchain_version)) {
+                if (toolchain_incompatible == null or version.order(toolchain_incompatible.?.version) == .gt) {
+                    toolchain_incompatible = .{ .root = root, .manifest = manifest, .version = version };
+                }
+                continue;
+            }
             if (best == null or version.order(best.?.version) == .gt) {
                 best = .{ .root = root, .manifest = manifest, .version = version };
             }
         }
+        if (best == null) {
+            if (toolchain_incompatible) |selected| try self.validateToolchain(selected.manifest);
+        }
         return best;
     }
 
-    fn selectedVersionDiagnostic(self: *Resolver, owner: usize, request: RequestedDependency, selected: Version) ![]const u8 {
+    fn selectedVersionDiagnostic(self: *Resolver, owner: usize, request: ManifestDependency, selected: Version) ![]const u8 {
         return std.fmt.allocPrint(
             self.allocator,
             "package '{s}' requires '{s}' {c}{d}.{d}.{d}, but version {d}.{d}.{d} is already selected",
@@ -391,7 +517,7 @@ pub const Resolver = struct {
     fn unresolvedDependencyDiagnostic(
         self: *Resolver,
         owner: usize,
-        request: RequestedDependency,
+        request: ManifestDependency,
         available: ?Version,
     ) ![]const u8 {
         const owner_label = try self.ownerLabel(owner);
@@ -440,6 +566,7 @@ pub const Resolver = struct {
         version: Version,
     ) anyerror!usize {
         if (self.find(name)) |existing| return existing;
+        try self.validateToolchain(manifest);
         const roots = try self.moduleRoots(root, true);
         const index = self.builders.items.len;
         try self.builders.append(self.allocator, .{
@@ -526,11 +653,44 @@ pub const Resolver = struct {
         global: bool,
     ) !Version {
         _ = root;
-        _ = global;
         const name = manifest.name orelse return self.fail("a package dependency requires name and version");
         const version = manifest.version orelse return self.fail("a package dependency requires name and version");
         if (!std.mem.eql(u8, name, expected_name)) return self.fail("package folder and manifest name differ");
+        if (global and manifest.silex_requirement == null) {
+            return self.fail(try std.fmt.allocPrint(
+                self.allocator,
+                "installed package '{s}@{d}.{d}.{d}' does not declare requires.silex",
+                .{ name, version.major, version.minor, version.patch },
+            ));
+        }
         return version;
+    }
+
+    fn validateToolchain(self: *Resolver, manifest: ParsedManifest) !void {
+        const requirement = manifest.silex_requirement orelse return;
+        if (requirement.accepts(self.toolchain_version)) return;
+        const label = if (manifest.name) |name|
+            if (manifest.version) |package_version|
+                try std.fmt.allocPrint(
+                    self.allocator,
+                    "{s}@{d}.{d}.{d}",
+                    .{ name, package_version.major, package_version.minor, package_version.patch },
+                )
+            else
+                name
+        else
+            "application";
+        return self.fail(try std.fmt.allocPrint(
+            self.allocator,
+            "package '{s}' requires Silex {s}, but this toolchain is Silex {d}.{d}.{d}",
+            .{
+                label,
+                requirement.text,
+                self.toolchain_version.major,
+                self.toolchain_version.minor,
+                self.toolchain_version.patch,
+            },
+        ));
     }
 
     fn validateRootIdentity(self: *Resolver, manifest: ParsedManifest, root: []const u8) !void {
@@ -565,13 +725,23 @@ pub const Resolver = struct {
     }
 
     fn parseManifest(self: *Resolver, path: []const u8) !ParsedManifest {
+        const raw = try self.readManifest(path);
+        var manifest = try self.parseManifestCore(raw);
+        manifest.boundary_providers = try self.parseBoundary(raw.boundary, raw.name, std.fs.path.dirname(path) orelse ".");
+        return manifest;
+    }
+
+    fn readManifest(self: *Resolver, path: []const u8) !RawManifest {
         const source = Io.Dir.cwd().readFileAlloc(self.io, path, self.allocator, .limited(1024 * 1024)) catch {
             return self.fail("package manifest cannot be read");
         };
-        const raw = std.json.parseFromSliceLeaky(RawManifest, self.allocator, source, .{
+        return std.json.parseFromSliceLeaky(RawManifest, self.allocator, source, .{
             .allocate = .alloc_always,
             .ignore_unknown_fields = false,
         }) catch return self.fail("invalid package manifest or unsupported field");
+    }
+
+    fn parseManifestCore(self: *Resolver, raw: RawManifest) !ParsedManifest {
         if ((raw.name == null) != (raw.version == null)) {
             return self.fail("a manifest must declare name and version together");
         }
@@ -581,7 +751,24 @@ pub const Resolver = struct {
             null;
         if (raw.name) |name| if (!Modules.validName(name)) return self.fail("invalid package identity");
 
-        var dependencies: std.ArrayList(RequestedDependency) = .empty;
+        var silex_requirement: ?SilexRequirement = null;
+        if (raw.requires) |value| {
+            const object = switch (value) {
+                .object => |object| object,
+                else => return self.fail("requires must be an object containing silex"),
+            };
+            if (object.count() != 1 or object.get("silex") == null) {
+                return self.fail("requires accepts only a silex version range");
+            }
+            const text = switch (object.get("silex").?) {
+                .string => |text| text,
+                else => return self.fail("requires.silex must be a version range string"),
+            };
+            silex_requirement = SilexRequirement.parse(text) catch
+                return self.fail("invalid requires.silex version range; expected '>=MAJOR.MINOR.PATCH' with optional '<MAJOR.MINOR.PATCH'");
+        }
+
+        var dependencies: std.ArrayList(ManifestDependency) = .empty;
         if (raw.dependencies) |value| {
             const object = switch (value) {
                 .object => |object| object,
@@ -600,13 +787,14 @@ pub const Resolver = struct {
                     .constraint = Constraint.parse(text) catch return self.fail("invalid dependency version constraint"),
                 });
             }
-            std.mem.sort(RequestedDependency, dependencies.items, {}, dependencyLessThan);
+            std.mem.sort(ManifestDependency, dependencies.items, {}, dependencyLessThan);
         }
         return .{
             .name = raw.name,
             .version = version,
+            .silex_requirement = silex_requirement,
             .dependencies = try dependencies.toOwnedSlice(self.allocator),
-            .boundary_providers = try self.parseBoundary(raw.boundary, raw.name, std.fs.path.dirname(path) orelse "."),
+            .boundary_providers = &.{},
         };
     }
 
@@ -818,7 +1006,7 @@ fn stringLessThan(_: void, left: []const u8, right: []const u8) bool {
     return std.mem.lessThan(u8, left, right);
 }
 
-fn dependencyLessThan(_: void, left: RequestedDependency, right: RequestedDependency) bool {
+fn dependencyLessThan(_: void, left: ManifestDependency, right: ManifestDependency) bool {
     return std.mem.lessThan(u8, left.name, right.name);
 }
 
@@ -861,6 +1049,69 @@ test "parse exact and caret stable versions" {
     try std.testing.expect((try Constraint.parse("^0.2.1")).accepts(try Version.parse("0.3.0")));
     try std.testing.expect(!(try Constraint.parse("^0.2.1")).accepts(try Version.parse("1.0.0")));
     try std.testing.expectError(error.InvalidVersion, Version.parse("1.2.3-beta"));
+}
+
+test "parse and apply Silex toolchain requirements before package sources" {
+    const bounded = try SilexRequirement.parse(">=0.38.0 <0.41.0");
+    try std.testing.expect(bounded.accepts(try Version.parse("0.38.0")));
+    try std.testing.expect(bounded.accepts(try Version.parse("0.40.9")));
+    try std.testing.expect(!bounded.accepts(try Version.parse("0.37.9")));
+    try std.testing.expect(!bounded.accepts(try Version.parse("0.41.0")));
+    try std.testing.expect((try SilexRequirement.parse(">=0.38.0")).accepts(try Version.parse("1.0.0")));
+    try std.testing.expectError(error.InvalidRequirement, SilexRequirement.parse("^0.38.0"));
+    try std.testing.expectError(error.InvalidRequirement, SilexRequirement.parse(">=0.41.0 <0.38.0"));
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "Modern/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Modern/Package.json",
+        .data =
+        \\{"name":"Modern","version":"1.2.0","requires":{"silex":">=0.39.0 <0.42.0"}}
+        ,
+    });
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Modern" });
+    var resolver = Resolver.init(allocator, std.testing.io, null);
+    resolver.toolchain_version = try Version.parse("0.38.0");
+    try std.testing.expectError(error.InvalidPackageGraph, resolver.resolve(root));
+    try std.testing.expectEqualStrings(
+        "package 'Modern@1.2.0' requires Silex >=0.39.0 <0.42.0, but this toolchain is Silex 0.38.0",
+        resolver.diagnostic.?,
+    );
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Modern/Package.json",
+        .data =
+        \\{"name":"Modern","version":"1.2.0","requires":{"silex":">=0.38.0 <0.39.0"}}
+        ,
+    });
+    resolver = Resolver.init(allocator, std.testing.io, null);
+    resolver.toolchain_version = try Version.parse("0.38.0");
+    const graph = try resolver.resolve(root);
+    try std.testing.expectEqualStrings("Modern", graph.packages[0].name.?);
+
+    try temporary.dir.createDirPath(std.testing.io, "App");
+    try temporary.dir.createDirPath(std.testing.io, "Global/Legacy@1.0.0/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "App/Package.json",
+        .data = "{\"dependencies\":{\"Legacy\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Global/Legacy@1.0.0/Package.json",
+        .data = "{\"name\":\"Legacy\",\"version\":\"1.0.0\"}",
+    });
+    const app = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "App" });
+    const global = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Global" });
+    resolver = Resolver.init(allocator, std.testing.io, global);
+    resolver.toolchain_version = try Version.parse("0.38.0");
+    try std.testing.expectError(error.InvalidPackageGraph, resolver.resolve(app));
+    try std.testing.expectEqualStrings(
+        "installed package 'Legacy@1.0.0' does not declare requires.silex",
+        resolver.diagnostic.?,
+    );
 }
 
 test "resolve a target-private ARM64 archive and reject escaping paths" {
@@ -1002,11 +1253,11 @@ test "prefer compatible sibling and otherwise select newest global version" {
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Global/Math@1.5.0/Package.json",
-        .data = "{\"name\":\"Math\",\"version\":\"1.5.0\"}",
+        .data = "{\"name\":\"Math\",\"version\":\"1.5.0\",\"requires\":{\"silex\":\">=0.38.0 <0.39.0\"}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Global/Math@1.9.0/Package.json",
-        .data = "{\"name\":\"Math\",\"version\":\"1.9.0\"}",
+        .data = "{\"name\":\"Math\",\"version\":\"1.9.0\",\"requires\":{\"silex\":\">=0.39.0 <0.40.0\"}}",
     });
     const base = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
     const app = try std.fs.path.join(allocator, &.{ base, "App" });
@@ -1026,7 +1277,7 @@ test "prefer compatible sibling and otherwise select newest global version" {
     });
     resolver = Resolver.init(allocator, std.testing.io, global);
     graph = try resolver.resolve(app);
-    try std.testing.expect(graph.packages[1].version.?.eql(try Version.parse("1.9.0")));
+    try std.testing.expect(graph.packages[1].version.?.eql(try Version.parse("1.5.0")));
 }
 
 test "discover packages beside the source directory parent" {
@@ -1129,7 +1380,7 @@ test "resolve qualified identities literally from an injected global root" {
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Global/Silex.Bootstrap@0.1.7/Package.json",
-        .data = "{\"name\":\"Silex.Bootstrap\",\"version\":\"0.1.7\"}",
+        .data = "{\"name\":\"Silex.Bootstrap\",\"version\":\"0.1.7\",\"requires\":{\"silex\":\">=0.38.0 <0.39.0\"}}",
     });
     const base = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
     const app = try std.fs.path.join(allocator, &.{ base, "App" });

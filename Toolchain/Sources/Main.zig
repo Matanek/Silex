@@ -1,4 +1,5 @@
 const std = @import("std");
+const build_options = @import("build_options");
 const Artifacts = @import("Artifacts.zig");
 const Boundary = @import("Boundary.zig");
 const Cli = @import("Cli.zig");
@@ -22,6 +23,8 @@ const NativeLink = @import("NativeLink.zig");
 const ReleaseOptimizer = @import("Optimize/Release.zig");
 const Project = @import("Project.zig");
 const Packages = @import("Packages.zig");
+const PackageRegistry = @import("PackageRegistry.zig");
+const PackageStore = @import("PackageStore.zig");
 const NativeTestRunner = @import("NativeTestRunner.zig");
 const TestDiscovery = @import("TestDiscovery.zig");
 const TargetModule = @import("Target.zig");
@@ -36,9 +39,12 @@ const usage =
     \\       silex interpret <source.sx> [-n|--nocache] [--emit-ir]
     \\       silex test <source.sx|directory> [-n|--nocache] [--emit-ir]
     \\       silex compile <source.sx> [--target <target>] [-d|--debug|-r|--release] [-n|--nocache] -o|--output <executable>
-    \\       silex install <package-directory> [--target <target>]
+    \\       silex install <package|package-directory> [--target <target>]
+    \\       silex link <package-directory> [--target <target>]
+    \\       silex unlink <package-name>
     \\       silex setup
     \\       silex targets
+    \\       silex version
     \\       silex lsp
     \\
     \\Builds and runs a native Silex program, executes portable IR through the
@@ -57,6 +63,8 @@ test {
     _ = EmbeddedFiles;
     _ = ShaderAssets;
     _ = CliProgress;
+    _ = PackageStore;
+    _ = PackageRegistry;
 }
 
 pub fn main(init: std.process.Init) u8 {
@@ -73,13 +81,23 @@ fn runCli(init: std.process.Init) !u8 {
         try Io.File.stdout().writeStreamingAll(init.io, usage);
         return 0;
     }
+    if (args.len == 2 and isVersion(args[1])) return printVersion(init.io);
     if (std.mem.eql(u8, args[1], "run")) return runSource(init, allocator, args[2..]);
     if (std.mem.eql(u8, args[1], "interpret")) return interpretSource(init, allocator, args[2..]);
     if (std.mem.eql(u8, args[1], "test")) return testSource(init, allocator, args[2..]);
     if (std.mem.eql(u8, args[1], "compile")) return compileNative(init, allocator, args[2..]);
     if (std.mem.eql(u8, args[1], "install")) return installPackage(init, allocator, args[2..]);
+    if (std.mem.eql(u8, args[1], "link")) return linkPackage(init, allocator, args[2..]);
+    if (std.mem.eql(u8, args[1], "unlink")) return unlinkPackage(init, allocator, args[2..]);
     if (std.mem.eql(u8, args[1], "setup")) return setupToolchain(init, allocator, args[2..]);
     if (std.mem.eql(u8, args[1], "targets")) return listTargets(init, allocator, args[2..]);
+    if (std.mem.eql(u8, args[1], "version")) {
+        if (args.len != 2) {
+            std.debug.print("silex: 'version' does not accept arguments\n", .{});
+            return 1;
+        }
+        return printVersion(init.io);
+    }
     if (std.mem.eql(u8, args[1], "lsp")) return runLanguageServer(init, args[2..]);
     std.debug.print("silex: unknown command '{s}'\n\n{s}", .{ args[1], usage });
     return 1;
@@ -129,26 +147,158 @@ fn installPackage(init: std.process.Init, allocator: std.mem.Allocator, args: []
         std.debug.print("silex: 'install' requires --target on an unrecognized host\n", .{});
         return 1;
     };
-    var installer = Artifacts.Installer.init(allocator, init.gpa, init.io);
-    const summary = installer.install(options.package_path, target) catch |err| switch (err) {
-        error.InvalidManifest => {
-            std.debug.print(
-                "silex: cannot install package: {s}\n",
-                .{installer.diagnostic orelse "invalid artifact declaration"},
-            );
+    const packages_root = try globalPackagesRoot(allocator, init.environ_map) orelse {
+        std.debug.print("silex: cannot locate the user home directory for package installation\n", .{});
+        return 1;
+    };
+    var store = PackageStore.Manager.init(allocator, init.gpa, init.io, packages_root);
+    const result = try installPackageOperand(
+        init,
+        allocator,
+        &store,
+        packages_root,
+        options.package_path,
+        target,
+    ) orelse return 1;
+    std.debug.print("silex: {s} {s}@{d}.{d}.{d} in {s}\n", .{
+        if (result.installed) "installed" else "already installed",
+        result.package.name,
+        result.package.version.major,
+        result.package.version.minor,
+        result.package.version.patch,
+        result.destination,
+    });
+    return 0;
+}
+
+fn installPackageOperand(
+    init: std.process.Init,
+    allocator: std.mem.Allocator,
+    store: *PackageStore.Manager,
+    packages_root: []const u8,
+    operand: []const u8,
+    target: TargetModule.Target,
+) !?PackageStore.InstallResult {
+    const status = Io.Dir.cwd().statFile(init.io, operand, .{}) catch |err| switch (err) {
+        error.FileNotFound, error.NotDir => null,
+        else => return err,
+    };
+    if (status) |found| {
+        if (found.kind != .directory) {
+            std.debug.print("silex: package source '{s}' is not a directory\n", .{operand});
+            return null;
+        }
+        return store.install(operand, target) catch |err| switch (err) {
+            error.InvalidPackageStore => {
+                std.debug.print("silex: cannot install package: {s}\n", .{store.diagnostic orelse "invalid package"});
+                return null;
+            },
+            else => return err,
+        };
+    }
+    if (looksLikePath(operand)) {
+        std.debug.print("silex: cannot locate package directory '{s}'\n", .{operand});
+        return null;
+    }
+
+    const request = PackageRegistry.Request.parse(operand) catch {
+        std.debug.print("silex: invalid package request '{s}'; expected Name or Name@MAJOR.MINOR.PATCH\n", .{operand});
+        return null;
+    };
+    const silex_root = std.fs.path.dirname(packages_root) orelse {
+        std.debug.print("silex: invalid user package store\n", .{});
+        return null;
+    };
+    const cache_root = try std.fs.path.join(allocator, &.{ silex_root, "cache", "registry" });
+    var registry = PackageRegistry.Client.init(allocator, init.gpa, init.io, cache_root);
+    const location = init.environ_map.get("SILEX_REGISTRY") orelse PackageRegistry.default_location;
+    const catalog = registry.load(location) catch |err| switch (err) {
+        error.InvalidRegistry => {
+            std.debug.print("silex: cannot use package registry: {s}\n", .{registry.diagnostic orelse "invalid registry"});
+            return null;
+        },
+        else => return err,
+    };
+    return registry.install(
+        catalog,
+        request,
+        Packages.Version.parse(build_options.version) catch unreachable,
+        target,
+        store,
+    ) catch |err| switch (err) {
+        error.InvalidRegistry => {
+            std.debug.print("silex: cannot install package: {s}\n", .{registry.diagnostic orelse "cannot install registry package"});
+            return null;
+        },
+        else => return err,
+    };
+}
+
+fn looksLikePath(text: []const u8) bool {
+    return std.fs.path.isAbsolute(text) or
+        std.mem.startsWith(u8, text, ".") or
+        std.mem.indexOfAny(u8, text, "/\\") != null;
+}
+
+fn linkPackage(init: std.process.Init, allocator: std.mem.Allocator, args: []const []const u8) !u8 {
+    const options = switch (Cli.parseInstall(args)) {
+        .options => |options| options,
+        .diagnostic => |diagnostic| {
+            printCliDiagnostic("link", diagnostic);
+            return 1;
+        },
+    };
+    const packages_root = try globalPackagesRoot(allocator, init.environ_map) orelse {
+        std.debug.print("silex: cannot locate the user home directory for package links\n", .{});
+        return 1;
+    };
+    const target = options.target orelse TargetModule.Target.host() orelse {
+        std.debug.print("silex: 'link' requires --target on an unrecognized host\n", .{});
+        return 1;
+    };
+    var store = PackageStore.Manager.init(allocator, init.gpa, init.io, packages_root);
+    const result = store.link(options.package_path, target) catch |err| switch (err) {
+        error.InvalidPackageStore => {
+            std.debug.print("silex: cannot link package: {s}\n", .{store.diagnostic orelse "invalid package"});
             return 1;
         },
         else => return err,
     };
-    if (summary.installed == 0) {
-        std.debug.print("silex: artifacts for {s} are already installed\n", .{target.name()});
-    } else {
-        std.debug.print("silex: installed {d} artifact{s} for {s}\n", .{
-            summary.installed,
-            if (summary.installed == 1) "" else "s",
-            target.name(),
-        });
+    std.debug.print("silex: linked {s}@{d}.{d}.{d} to {s}\n", .{
+        result.package.name,
+        result.package.version.major,
+        result.package.version.minor,
+        result.package.version.patch,
+        result.source,
+    });
+    return 0;
+}
+
+fn unlinkPackage(init: std.process.Init, allocator: std.mem.Allocator, args: []const []const u8) !u8 {
+    const options = switch (Cli.parsePackage(args)) {
+        .options => |options| options,
+        .diagnostic => |diagnostic| {
+            printCliDiagnostic("unlink", diagnostic);
+            return 1;
+        },
+    };
+    const packages_root = try globalPackagesRoot(allocator, init.environ_map) orelse {
+        std.debug.print("silex: cannot locate the user home directory for package links\n", .{});
+        return 1;
+    };
+    var store = PackageStore.Manager.init(allocator, init.gpa, init.io, packages_root);
+    const removed = store.unlink(options.package) catch |err| switch (err) {
+        error.InvalidPackageStore => {
+            std.debug.print("silex: cannot unlink package: {s}\n", .{store.diagnostic orelse "invalid package name"});
+            return 1;
+        },
+        else => return err,
+    };
+    if (!removed) {
+        std.debug.print("silex: package '{s}' is not linked\n", .{options.package});
+        return 1;
     }
+    std.debug.print("silex: unlinked {s}\n", .{options.package});
     return 0;
 }
 
@@ -992,10 +1142,10 @@ fn printCliDiagnostic(command: []const u8, diagnostic: Cli.Diagnostic) void {
             std.debug.print("silex: 'test' accepts only one source file or directory, found '{s}'\n", .{diagnostic.argument.?})
         else
             std.debug.print("silex: '{s}' accepts only one source file, found '{s}'\n", .{ command, diagnostic.argument.? }),
-        .missing_package => std.debug.print("silex: 'install' expects one package directory\n", .{}),
+        .missing_package => std.debug.print("silex: '{s}' expects one package directory or name\n", .{command}),
         .multiple_packages => std.debug.print(
-            "silex: 'install' accepts only one package directory, found '{s}'\n",
-            .{diagnostic.argument.?},
+            "silex: '{s}' accepts only one package directory or name, found '{s}'\n",
+            .{ command, diagnostic.argument.? },
         ),
         .missing_output => if (diagnostic.argument) |argument|
             std.debug.print("silex: option '{s}' expects an output path\n", .{argument})
@@ -1013,6 +1163,17 @@ fn printCliDiagnostic(command: []const u8, diagnostic: Cli.Diagnostic) void {
 
 fn isHelp(argument: []const u8) bool {
     return std.mem.eql(u8, argument, "--help") or std.mem.eql(u8, argument, "-h");
+}
+
+fn isVersion(argument: []const u8) bool {
+    return std.mem.eql(u8, argument, "--version") or std.mem.eql(u8, argument, "-V");
+}
+
+fn printVersion(io: Io) !u8 {
+    var buffer: [64]u8 = undefined;
+    const text = std.fmt.bufPrint(&buffer, "silex {s}\n", .{build_options.version}) catch unreachable;
+    try Io.File.stdout().writeStreamingAll(io, text);
+    return 0;
 }
 
 fn globalPackagesRoot(

@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "packages": [
+    {
+      "name": "STD",
+      "releases": [
+        {
+          "version": "0.16.0",
+          "requires": {
+            "silex": ">=0.38.0 <0.39.0"
+          },
+          "archive": {
+            "url": "https://github.com/Matanek/Silex-Lib-STD/releases/download/v0.16.0/STD-0.16.0.tar.gz",
+            "sha256": "a248acc9c72ae2a01d95d28e8a26ff390f0814b6b122339ec26aa8790d364cda"
+          }
+        }
+      ]
+    },
+    {
+      "name": "GFX",
+      "releases": [
+        {
+          "version": "0.23.0",
+          "requires": {
+            "silex": ">=0.38.0 <0.39.0"
+          },
+          "archive": {
+            "url": "https://github.com/Matanek/Silex-Lib-GFX/releases/download/v0.23.0/GFX-0.23.0.tar.gz",
+            "sha256": "f97efb930aeb83b67222274049a7da8672ce115a4d387bbd16311da2ee25fe5d"
+          }
+        }
+      ]
+    }
+  ]
+}

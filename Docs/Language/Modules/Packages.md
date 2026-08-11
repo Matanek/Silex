@@ -79,7 +79,28 @@ Its directory name and manifest identity match:
 ```json
 {
   "name": "Math",
-  "version": "1.4.1"
+  "version": "1.4.1",
+  "requires": {
+    "silex": ">=0.38.0 <0.39.0"
+  }
+}
+```
+
+`requires.silex` states which Silex toolchains can load the package. The range
+starts with an inclusive minimum and may add one exclusive maximum, separated
+by a space. Silex validates this requirement before discovering or parsing the
+package's modules. An installed package must declare it; application manifests
+and local packages may omit it while being developed.
+
+Use a bounded range while Silex is experimental so a breaking compiler release
+cannot silently consume older package sources. A package may omit the maximum
+only when it deliberately supports every newer Silex release:
+
+```json
+{
+  "requires": {
+    "silex": ">=1.2.0"
+  }
 }
 ```
 
@@ -99,16 +120,86 @@ accepts the requested version and every newer version with the same major
 number, including during the `0.x` development series. For example, `^0.7.0`
 accepts `0.8.0` but rejects `1.0.0`.
 
-Silex first checks a compatible sibling package, then installed packages under
-`~/.silex/packages/Name@MAJOR.MINOR.PATCH/`.
+Silex resolves a dependency in this order:
+
+1. a compatible package beside the project;
+2. a compatible package in the nearest ancestor `Packages/` directory;
+3. a package registered with `silex link`;
+4. the newest compatible installed version under
+   `~/.silex/packages/Name@MAJOR.MINOR.PATCH/`.
+
+The `SilexProject/Packages/` workspace therefore remains live by default:
+editing `Packages/STD` or `Packages/GFX` is visible immediately to projects
+inside the workspace. No installation, commit, tag, or push is involved.
 
 Dependencies are direct. Declare every package used by the application; a
 transitive dependency is not automatically visible.
 
-## Install verified package artifacts
+## Install a package
+
+Install a package from a local checkout:
+
+~~~sh
+silex install path/to/STD
+~~~
+
+Install the newest published version compatible with the running toolchain, or
+request one exact published version:
+
+~~~sh
+silex install STD
+silex install STD@0.16.0
+~~~
+
+Published packages come from the Silex registry. Their source archive is
+verified against its registry SHA-256 before extraction, and its manifest must
+match the selected name, version, and `requires.silex` range. Silex resolves
+and installs every declared dependency first, selecting the newest published
+version that satisfies both its package constraint and the running toolchain.
+Dependency cycles and unavailable compatible releases are diagnosed before the
+requested package is installed.
+
+Silex validates its identity, version, and `requires.silex`, then copies it to
+`~/.silex/packages/Name@MAJOR.MINOR.PATCH/`. Git metadata and local `.silex`
+state are excluded. An installed version is immutable: the same name and
+version cannot be replaced by another installation. Publish a new package
+version when its distributed contents change.
+
+If the package declares target artifacts, installation also prepares them for
+the host. Select another target explicitly when required:
+
+~~~sh
+silex install path/to/GFX --target windows-x64
+~~~
+
+### Work on a package live
+
+For a package checkout outside the consumer's ancestor `Packages/` directory,
+register its source directory once:
+
+~~~sh
+silex link path/to/STD
+~~~
+
+Consumers now resolve `STD` directly from that directory. Saved source and
+manifest changes are visible to the compiler and LSP on their next request;
+there is no copy and no Git publication step. Declared artifacts are prepared
+inside the linked checkout for the host, or for the explicit target selected
+with `--target`. Remove the override with:
+
+~~~sh
+silex unlink STD
+~~~
+
+The resolver then falls back to a compatible installed version. While the link
+exists it is an intentional override: if its version no longer satisfies the
+consumer or its `requires.silex` no longer accepts the toolchain, Silex reports
+the incompatibility instead of silently selecting an installed copy.
+
+## Declare verified package artifacts
 
 A source package may keep large, prebuilt files outside Git and declare where
-Silex installs them for each target:
+Silex prepares them for each target during package installation:
 
 ~~~json
 {
@@ -122,18 +213,6 @@ Silex installs them for each target:
     }
   }
 }
-~~~
-
-Install the artifacts for the host:
-
-~~~sh
-silex install path/to/GFX
-~~~
-
-Or prepare one explicit compilation target:
-
-~~~sh
-silex install path/to/GFX --target windows-x64
 ~~~
 
 `path` is relative to the package and cannot escape it. `url` must use HTTPS,

@@ -49,6 +49,10 @@ pub const InstallOptions = struct {
     target: ?TargetModule.Target,
 };
 
+pub const PackageOptions = struct {
+    package: []const u8,
+};
+
 pub const RunResult = union(enum) {
     options: RunOptions,
     diagnostic: Diagnostic,
@@ -66,6 +70,11 @@ pub const InterpretResult = union(enum) {
 
 pub const InstallResult = union(enum) {
     options: InstallOptions,
+    diagnostic: Diagnostic,
+};
+
+pub const PackageResult = union(enum) {
+    options: PackageOptions,
     diagnostic: Diagnostic,
 };
 
@@ -214,6 +223,22 @@ pub fn parseInstall(args: []const []const u8) InstallResult {
     } };
 }
 
+pub fn parsePackage(args: []const []const u8) PackageResult {
+    var package: ?[]const u8 = null;
+    for (args) |argument| {
+        if (std.mem.startsWith(u8, argument, "-")) {
+            return failure(PackageResult, .unknown_option, argument);
+        } else if (package != null) {
+            return failure(PackageResult, .multiple_packages, argument);
+        } else {
+            package = argument;
+        }
+    }
+    return .{ .options = .{
+        .package = package orelse return failure(PackageResult, .missing_package, null),
+    } };
+}
+
 fn failure(comptime Result: type, kind: Diagnostic.Kind, argument: ?[]const u8) Result {
     return .{ .diagnostic = .{ .kind = kind, .argument = argument } };
 }
@@ -259,6 +284,13 @@ test "install accepts one package and an optional target" {
     try expectInstallDiagnostic(parseInstall(&.{ "A", "B" }), .multiple_packages, "B");
     try expectInstallDiagnostic(parseInstall(&.{ "A", "--target" }), .missing_target, "--target");
     try expectInstallDiagnostic(parseInstall(&.{ "A", "--target", "other" }), .unknown_target, "other");
+}
+
+test "package commands accept exactly one path or name" {
+    try std.testing.expectEqualStrings("Packages/STD", parsePackage(&.{"Packages/STD"}).options.package);
+    try expectPackageDiagnostic(parsePackage(&.{}), .missing_package, null);
+    try expectPackageDiagnostic(parsePackage(&.{ "STD", "GFX" }), .multiple_packages, "GFX");
+    try expectPackageDiagnostic(parsePackage(&.{"--force"}), .unknown_option, "--force");
 }
 
 test "compile accepts recognized targets and diagnoses invalid selections" {
@@ -339,6 +371,12 @@ fn expectInterpretDiagnostic(result: InterpretResult, kind: Diagnostic.Kind, arg
 }
 
 fn expectInstallDiagnostic(result: InstallResult, kind: Diagnostic.Kind, argument: ?[]const u8) !void {
+    const diagnostic = result.diagnostic;
+    try std.testing.expectEqual(kind, diagnostic.kind);
+    if (argument) |expected| try std.testing.expectEqualStrings(expected, diagnostic.argument.?);
+}
+
+fn expectPackageDiagnostic(result: PackageResult, kind: Diagnostic.Kind, argument: ?[]const u8) !void {
     const diagnostic = result.diagnostic;
     try std.testing.expectEqual(kind, diagnostic.kind);
     if (argument) |expected| try std.testing.expectEqualStrings(expected, diagnostic.argument.?);
