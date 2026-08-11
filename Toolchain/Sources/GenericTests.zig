@@ -212,6 +212,69 @@ test "reuse a generic nominal type already named by a collection" {
     try std.testing.expectEqualStrings("42\n", result.stdout);
 }
 
+test "specialize a generic function with a generic nominal type argument" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\struct Entry<Key, Value> { let key:Key; let value:Value }
+        \\struct Cursor<T> { let values:T[]; func count() int { return self.values.count() } }
+        \\func count_where<T>(values:Cursor<T>, predicate:func(@T) bool) int {
+        \\    var count = 0
+        \\    for value in values.values { if predicate(value) { count++ } }
+        \\    return count
+        \\}
+        \\func passing(entry:@Entry<str, int>) bool { return entry.value >= 10 }
+        \\func main() {
+        \\    let entries:Entry<str, int>[] = [Entry<str, int>(key:"Ada", value:12)]
+        \\    print(count_where<Entry<str, int>>(Cursor<Entry<str, int>>(values:entries), passing))
+        \\}
+    );
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("1\n", result.stdout);
+}
+
+test "compose nested generic callback specialization through a module" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data =
+        \\use Api
+        \\use Api.Entry
+        \\use Api.Cursor
+        \\func passing(entry:@Entry<str, int>) bool { return entry.value >= 10 }
+        \\func main() {
+        \\    let entries:Entry<str, int>[] = [Entry<str, int>(key:"Ada", value:12)]
+        \\    let values = Cursor<Entry<str, int>>(values:entries)
+        \\    print(Api.count_where<Entry<str, int>>(values, passing))
+        \\    print(Api.count_where(values, passing))
+        \\}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Api.sx",
+        .data =
+        \\public struct Entry<Key, Value> { let key:Key; let value:Value }
+        \\public struct Cursor<T> { let values:T[] }
+        \\public func count_where<T>(values:Cursor<T>, predicate:func(@T) bool) int {
+        \\    var count = 0
+        \\    for value in values.values { if predicate(value) { count++ } }
+        \\    return count
+        \\}
+        ,
+    });
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(input);
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("1\n1\n", result.stdout);
+}
+
 test "prefer concrete overloads and specialize defaults and stable recursion" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

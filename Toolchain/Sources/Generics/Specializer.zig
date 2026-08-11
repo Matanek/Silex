@@ -120,6 +120,7 @@ pub const Specializer = struct {
             var locals: std.ArrayList(Binding) = .empty;
             function.parameters = try self.rewriteParameters(function.parameters, &.{}, &locals);
             function.return_type = try self.rewriteType(function.return_type, &.{}, function.name_position);
+            try self.internFunctionType(function.*);
         }
 
         var function_index: usize = 0;
@@ -129,7 +130,6 @@ pub const Specializer = struct {
             for (function.parameters) |parameter| try locals.append(self.allocator, .{ .name = parameter.name, .type = parameter.type });
             function.statements = try self.rewriteStatements(function.statements, &.{}, &locals);
             self.functions.items[function_index] = function;
-            if (function.is_anonymous) try self.internFunctionType(function);
         }
 
         try self.compactTypeNames();
@@ -1648,10 +1648,10 @@ pub const Specializer = struct {
                     if (std.mem.eql(u8, locals[index].name, name)) break :local locals[index].type;
                 }
                 var matched: ?Ast.Type = null;
-                for (self.source.functions) |function| {
+                for (self.functions.items) |function| {
                     if (!functionNameMatches(function.name, name) or function.type_parameters.len != 0) continue;
                     var found_type: ?Ast.Type = null;
-                    for (self.source.function_types, 0..) |function_type, function_index| {
+                    for (self.function_types.items, 0..) |function_type, function_index| {
                         if (functionTypeMatchesDeclaration(function_type, function)) {
                             found_type = .function(function_index);
                             break;

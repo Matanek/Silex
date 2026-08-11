@@ -1562,7 +1562,7 @@ fn parameterTypePathAt(
 
 fn parameterTypePath(program: Ast.Program, parameters: []const Ast.Parameter, receiver: []const u8) ?[]const u8 {
     for (parameters) |parameter| {
-        if (std.mem.eql(u8, parameter.name, receiver)) return Completion.typeName(program, parameter.type);
+        if (std.mem.eql(u8, parameter.name, receiver)) return returnTypeName(program, parameter.type);
     }
     return null;
 }
@@ -3120,6 +3120,10 @@ test "complete imported members on borrowed function parameters" {
         \\    public func is_quit_requested() bool { return false }
         \\    public func update() {}
         \\}
+        \\public struct Entry<Key, Value> {
+        \\    let key:Key
+        \\    let value:Value
+        \\}
         ,
     });
 
@@ -3169,6 +3173,28 @@ test "complete imported members on borrowed function parameters" {
     try std.testing.expect(hasLabel(state_items, "is_quit_requested"));
     try std.testing.expect(!hasLabel(state_items, "update"));
     try std.testing.expect(!hasLabel(state_items, "if"));
+
+    const entry_source =
+        \\use GFX.Input.Entry
+        \\func passing(entry:@Entry<str, int>) bool {
+        \\    entry.
+        \\    return true
+        \\}
+    ;
+    const entry_cursor = std.mem.indexOf(u8, entry_source, "entry.\n").? + "entry.".len;
+    const entry_items = (try itemsAt(
+        allocator,
+        std.testing.io,
+        null,
+        root_uri,
+        uri,
+        &.{},
+        entry_source,
+        entry_cursor,
+    )).?;
+    try std.testing.expect(hasLabel(entry_items, "key"));
+    try std.testing.expect(hasLabel(entry_items, "value"));
+    try std.testing.expect(!hasLabel(entry_items, "update"));
 }
 
 test "complete a module facade together with its child namespace" {

@@ -165,6 +165,17 @@ let explicit = identity<str>("Silex")
 
 Supply every type argument or let Silex infer all of them from ordinary
 arguments. The expected return type does not participate in inference.
+Type arguments may themselves be generic specializations, including when a
+named callback uses the same concrete type:
+
+```sx
+func passing(entry:@Entry<str, int>) bool {
+    return entry.value >= 10
+}
+
+let explicit = count_where<Entry<str, int>>(entries, passing)
+let inferred = count_where(entries, passing)
+```
 
 Constrain a type parameter with a [protocol](../Data-types/Protocols.md):
 
