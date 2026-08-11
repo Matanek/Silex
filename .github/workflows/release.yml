@@ -50,7 +50,8 @@ jobs:
           "$RUNNER_TEMP/silex-macos-arm64/bin/silex" --version
           "$RUNNER_TEMP/silex-macos-arm64/bin/silex" targets
           "$RUNNER_TEMP/silex-macos-arm64/bin/silex" install STD
-          output=$("$RUNNER_TEMP/silex-macos-arm64/bin/silex" run Examples/Distribution/Hello.sx)
+          "$RUNNER_TEMP/silex-macos-arm64/bin/silex" run Examples/Distribution/Hello.sx > "$RUNNER_TEMP/silex-smoke-output.txt"
+          output=$(cat "$RUNNER_TEMP/silex-smoke-output.txt")
           printf '%s\n' "$output"
           test "$output" = "84"
           tar -C "$RUNNER_TEMP" -czf silex-macos-arm64.tar.gz silex-macos-arm64
@@ -105,7 +106,8 @@ jobs:
           "$RUNNER_TEMP/silex-linux-x64/bin/silex" --version
           "$RUNNER_TEMP/silex-linux-x64/bin/silex" targets
           "$RUNNER_TEMP/silex-linux-x64/bin/silex" install STD
-          output=$("$RUNNER_TEMP/silex-linux-x64/bin/silex" run Examples/Distribution/Hello.sx)
+          "$RUNNER_TEMP/silex-linux-x64/bin/silex" run Examples/Distribution/Hello.sx > "$RUNNER_TEMP/silex-smoke-output.txt"
+          output=$(cat "$RUNNER_TEMP/silex-smoke-output.txt")
           printf '%s\n' "$output"
           test "$output" = "84"
           tar -C "$RUNNER_TEMP" -czf silex-linux-x64.tar.gz silex-linux-x64
@@ -171,12 +173,17 @@ jobs:
           & $silex --version
           & $silex targets
           & $silex install STD
-          $output = & $silex run Examples/Distribution/Hello.sx
-          if ($LASTEXITCODE -ne 0) {
-            throw "Silex package smoke failed with exit code $LASTEXITCODE"
+          $outputPath = Join-Path $env:RUNNER_TEMP "silex-smoke-output.txt"
+          $process = Start-Process -FilePath $silex `
+            -ArgumentList "run", "Examples/Distribution/Hello.sx" `
+            -RedirectStandardOutput $outputPath `
+            -NoNewWindow -Wait -PassThru
+          if ($process.ExitCode -ne 0) {
+            throw "Silex package smoke failed with exit code $($process.ExitCode)"
           }
-          $output
-          if (($output -join "`n").Trim() -ne "84") {
+          $output = (Get-Content $outputPath -Raw).Trim()
+          Write-Host $output
+          if ($output -ne "84") {
             throw "Silex package smoke produced unexpected output"
           }
           Compress-Archive $root silex-windows-x64.zip
