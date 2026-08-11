@@ -1,5 +1,7 @@
 use STD.Collections.Hashing
 
 func main() {
-    print(Hashing.hash_int(42))
+    if Hashing.hash_int(42) != 84 {
+        panic("STD returned an invalid hash")
+    }
 }
