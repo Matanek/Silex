@@ -78,9 +78,11 @@ zig build
 
 The release workflow accepts a tag only when its version matches the toolchain
 manifest. It builds each standalone executable on its native GitHub runner,
-then installs STD, compiles a package-consuming Silex program, and exercises
-native execution before publishing the archives and their checksums. Linux and
-Windows additionally execute that package-consuming program on their runners.
+then installs STD and compiles a package-consuming Silex program before
+publishing the archives and their checksums. Linux and Windows additionally
+execute that program on their runners. macOS native execution is validated on
+Apple Silicon hardware outside the hosted runner, whose environment currently
+faults even on an empty generated Mach-O program.
 
 ## Remove Silex
 

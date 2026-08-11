@@ -51,7 +51,6 @@ jobs:
           "$RUNNER_TEMP/silex-macos-arm64/bin/silex" targets
           "$RUNNER_TEMP/silex-macos-arm64/bin/silex" install STD
           "$RUNNER_TEMP/silex-macos-arm64/bin/silex" compile Examples/Distribution/Hello.sx -o "$RUNNER_TEMP/silex-package-smoke"
-          "$RUNNER_TEMP/silex-macos-arm64/bin/silex" run Examples/Distribution/Native.sx
           tar -C "$RUNNER_TEMP" -czf silex-macos-arm64.tar.gz silex-macos-arm64
           shasum -a 256 silex-macos-arm64.tar.gz > silex-macos-arm64.tar.gz.sha256
 
