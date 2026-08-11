@@ -1,0 +1,72 @@
+name: Smoke public installers
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Published Silex version, or latest
+        required: true
+        default: latest
+
+permissions:
+  contents: read
+
+jobs:
+  unix:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            execution: compile
+          - runner: ubuntu-24.04
+            execution: run
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - name: Check out the consumer smoke
+        uses: actions/checkout@v6
+
+      - name: Install the published compiler
+        shell: bash
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          export HOME="$RUNNER_TEMP/home"
+          export SILEX_INSTALL_DIR="$RUNNER_TEMP/bin"
+          export SILEX_VERSION="$REQUESTED_VERSION"
+          mkdir -p "$HOME"
+          curl -fsSL https://raw.githubusercontent.com/Matanek/Silex/main/install.sh | sh
+          "$SILEX_INSTALL_DIR/silex" --version
+          "$SILEX_INSTALL_DIR/silex" install STD
+          if [ "${{ matrix.execution }}" = "run" ]; then
+            "$SILEX_INSTALL_DIR/silex" run Examples/Distribution/Hello.sx
+          else
+            "$SILEX_INSTALL_DIR/silex" compile Examples/Distribution/Hello.sx -o "$RUNNER_TEMP/silex-package-smoke"
+          fi
+
+  windows-x64:
+    runs-on: windows-2025
+
+    steps:
+      - name: Check out the consumer smoke
+        uses: actions/checkout@v6
+
+      - name: Install the published compiler
+        shell: pwsh
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
+          $env:USERPROFILE = Join-Path $env:RUNNER_TEMP "home"
+          $env:HOME = $env:USERPROFILE
+          $env:SILEX_INSTALL_DIR = Join-Path $env:RUNNER_TEMP "bin"
+          $env:SILEX_VERSION = $env:REQUESTED_VERSION
+          New-Item -ItemType Directory -Force $env:USERPROFILE | Out-Null
+          Invoke-Expression (Invoke-RestMethod https://raw.githubusercontent.com/Matanek/Silex/main/install.ps1)
+          $silex = Join-Path $env:SILEX_INSTALL_DIR "silex.exe"
+          & $silex --version
+          & $silex install STD
+          & $silex run Examples/Distribution/Hello.sx
