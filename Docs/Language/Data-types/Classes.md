@@ -211,7 +211,9 @@ class Connection {
 ```
 
 The block runs once when the last reachable root disappears; unreachable
-cycles are finalized too. With inheritance, cleanup runs from the dynamic
+cycles are finalized too. The release that makes a component unreachable
+starts its cleanup, then owned fields propagate cleanup through that component.
+With inheritance, cleanup runs from the dynamic
 class toward its bases. `drop` is not virtual, callable, or followed by an
 explicit `super` call.
 

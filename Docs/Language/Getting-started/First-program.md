@@ -14,6 +14,9 @@ Run it:
 silex run Main.sx
 ```
 
+`silex run` executes the program from the directory containing its entry source,
+so relative runtime paths remain local to that program.
+
 Compile it on Apple Silicon macOS:
 
 ```sh

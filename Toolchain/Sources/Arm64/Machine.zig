@@ -1,4 +1,5 @@
 const std = @import("std");
+const Ir = @import("../Ir.zig");
 const MathBoundary = @import("../Math/Boundary.zig");
 const Types = @import("../Types.zig");
 
@@ -87,6 +88,8 @@ pub const Instruction = union(enum) {
     class_drop: ClassDrop,
     list_retain: ListResource,
     list_drop: ListResource,
+    string_retain: ListResource,
+    string_drop: ListResource,
     list_init: ListInit,
     enum_init: EnumInit,
     enum_test: EnumTest,
@@ -102,6 +105,7 @@ pub const Instruction = union(enum) {
     format_value: FormatValue,
     string_concat: StringConcat,
     string_count: StringCount,
+    string_byte_count: StringCount,
     string_byte_at: StringByteAt,
     string_from_bytes: StringFromBytes,
     unary: Unary,
@@ -262,18 +266,25 @@ pub const Instruction = union(enum) {
         replacement: Span,
     };
 
-    pub const ClassRetain = struct { operand: Slot };
+    pub const ClassRetain = struct {
+        operand: Slot,
+        ownership: Ir.Ownership = .root,
+    };
     pub const ListResource = struct {
         operand: Slot,
+        ownership: Ir.Ownership = .root,
         deallocate: bool = false,
     };
 
     pub const ClassDrop = struct {
         operand: Slot,
+        ownership: Ir.Ownership = .root,
+        static_type: usize,
         plans: []const Plan,
 
         pub const Plan = struct {
             structure: usize,
+            byte_count: usize,
             functions: []const usize,
         };
     };
@@ -328,6 +339,7 @@ pub const Instruction = union(enum) {
         collection: Span,
         index: Slot,
         replacement: Span,
+        ownership: @import("../Ir.zig").Ownership = .root,
         count: u32,
         dynamic: bool = false,
         view: bool = false,
@@ -344,6 +356,7 @@ pub const Instruction = union(enum) {
     pub const ListEdit = struct {
         result: Slot,
         collection: Slot,
+        ownership: Ir.Ownership = .root,
         kind: @import("../Ir.zig").Instruction.ListEditKind,
         index: ?Slot,
         argument: ?Span,
@@ -714,7 +727,7 @@ pub fn validate(program: Program) Error!void {
                     try requireSpan(function, value.replacement);
                 },
                 .class_retain => |value| try requireSlot(function, value.operand),
-                .list_retain, .list_drop => |value| try requireSlot(function, value.operand),
+                .list_retain, .list_drop, .string_retain, .string_drop => |value| try requireSlot(function, value.operand),
                 .class_drop => |value| {
                     try requireSlot(function, value.operand);
                     for (value.plans) |plan| {
@@ -829,7 +842,7 @@ pub fn validate(program: Program) Error!void {
                     try requireSlot(function, value.left);
                     try requireSlot(function, value.right);
                 },
-                .string_count => |value| {
+                .string_count, .string_byte_count => |value| {
                     try requireSlot(function, value.result);
                     try requireSlot(function, value.operand);
                 },

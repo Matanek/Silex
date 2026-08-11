@@ -44,9 +44,13 @@ pub fn analyze(self: anytype, function: Ast.Function, adapter: Ast.SystemAdapter
                 .function = target,
                 .arguments = arguments,
             } });
-            if (writer_local) |local| try finishWriter(self, &builder, local);
+            if (writer_local) |local| {
+                try finishWriter(self, &builder, local);
+                try Ownership.emitDrop(self, &builder, builder.local_types.items[local], try loadLocal(self, &builder, local, builder.local_types.items[local]));
+            }
         },
     }
+    try Ownership.emitDrop(self, &builder, .structure(resources), try loadLocal(self, &builder, resources_local, .structure(resources)));
     self.terminate(&builder, .return_void);
     return finishFunction(self, function, &builder);
 }
@@ -107,8 +111,9 @@ fn injectDependencies(
             try arguments.append(self.allocator, value);
             continue;
         }
-        try Ownership.retainValue(self, builder, dependency.source_type, value);
-        try Ownership.retainValue(self, builder, dependency.source_type, value);
+        // Query is a class, so the captured World is owned by a class-field
+        // edge. Destroying the transferred query releases that same edge.
+        try Ownership.retainValueOwned(self, builder, dependency.source_type, value, .edge);
         const query_structure = dependency.type.structureIndex() orelse return error.InvalidSource;
         const range_start = switch (adapter.mode) {
             .query_range => @as(Ir.ValueId, 2),
@@ -125,6 +130,8 @@ fn injectDependencies(
             .fields = try self.allocator.dupe(Ir.ValueId, &.{ value, range_start, range_end }),
         } });
         try arguments.append(self.allocator, query);
+        // A freshly constructed query is transferred to the target's value
+        // parameter. The callee owns and destroys that query root.
     }
     return arguments.toOwnedSlice(self.allocator);
 }
@@ -154,6 +161,7 @@ fn analyzeDispatch(
         const message = try std.fmt.allocPrint(self.allocator, "parallel ECS query expected World, found '{s}'", .{self.typeName(query_dependency.source_type)});
         return self.fail(adapter.target_position, message);
     };
+    const required_type = self.program.structures[world_index].methods[count_method].parameters[0].type;
     const required = try requiredComponents(self, builder, query_dependency, world, adapter.target_position);
     const count = try self.newValue(builder, .int);
     try self.emit(builder, .{ .call = .{
@@ -161,6 +169,7 @@ fn analyzeDispatch(
         .function = methodFunctionId(self.program, world_index, count_method),
         .arguments = try self.allocator.dupe(Ir.ValueId, &.{ world, required }),
     } });
+    try Ownership.emitDrop(self, builder, required_type, required);
 
     var commands_address = try emitIntOfType(self, builder, 0, .uint);
     for (adapter.dependencies) |dependency| if (isCommands(self, dependency)) {

@@ -51,7 +51,7 @@ pub fn analyze(
                 .type_arguments = method.type_arguments,
             };
             if (try self.analyzeCall(builder, call)) |ignored| {
-                if (Resources.needsDrop(self, ignored.type) or Resources.containsClass(self, ignored.type)) {
+                if (ignored.transferred and (Resources.needsDrop(self, ignored.type) or Resources.containsClass(self, ignored.type))) {
                     try Resources.emitDrop(self, builder, ignored.type, ignored.value);
                 }
             }

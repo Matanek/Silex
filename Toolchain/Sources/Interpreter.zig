@@ -346,7 +346,7 @@ fn executeInstruction(
             };
             const guard = session.snapshot_gate.mutation();
             defer guard.release();
-            try Classes.retain(session.classes.items, class.instance);
+            try Classes.retain(session.classes.items, class.instance, retain.ownership);
         },
         .class_drop => |drop| {
             const class = switch (try load(values, drop.operand)) {
@@ -356,7 +356,7 @@ fn executeInstruction(
             const should_finalize = finalize: {
                 const guard = session.snapshot_gate.mutation();
                 defer guard.release();
-                break :finalize try Classes.release(session.classes.items, class.instance);
+                break :finalize try Classes.release(allocator, session.classes.items, class.instance, drop.ownership);
             };
             if (should_finalize) {
                 const dynamic_type = class.instance.type.structureIndex() orelse return error.InvalidProgram;
@@ -372,7 +372,7 @@ fn executeInstruction(
                 }
             }
         },
-        .list_retain, .list_drop => {},
+        .list_retain, .list_drop, .string_retain, .string_drop => {},
         .global_load => |load_value| try store(function, values, load_value.result, try Globals.load(allocator, session.globals, load_value)),
         .global_store => |store_value| {
             const guard = session.snapshot_gate.mutation();

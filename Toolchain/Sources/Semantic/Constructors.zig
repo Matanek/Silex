@@ -74,6 +74,7 @@ pub fn analyze(
 
     const initialized = try self.allocator.alloc(bool, declaration.fields.len);
     var initial_fields: std.ArrayList(Ir.ValueId) = .empty;
+    var initial_transfers: std.ArrayList(bool) = .empty;
     if (self.structures[nominal_index].base) |base_index| {
         const base_declaration = Inheritance.findDeclaration(self, base_index) orelse return error.InvalidSource;
         const base_value = if (base_declaration.constructors.len == 0) implicit: {
@@ -88,6 +89,7 @@ pub fn analyze(
             const value = try self.newValue(&builder, field.type);
             try self.emit(&builder, .{ .field_load = .{ .result = value, .base = base_value.value, .field = field_index } });
             try initial_fields.append(self.allocator, value);
+            try initial_transfers.append(self.allocator, false);
         }
     }
     for (declaration.fields, 0..) |field, field_index| {
@@ -103,7 +105,16 @@ pub fn analyze(
             value = try self.coerce(&builder, value, field.type, constructor.position);
         }
         try initial_fields.append(self.allocator, value.value);
+        try initial_transfers.append(self.allocator, value.transferred);
         initialized[field_index] = field.mutable or field.default != null;
+    }
+    if (self.structures[nominal_index].is_class) {
+        for (self.structures[nominal_index].fields, initial_fields.items, initial_transfers.items) |field, field_value, transferred| {
+            if (Resources.requiresRetain(self, field.type)) {
+                try Resources.retainValueOwned(self, &builder, field.type, field_value, .edge);
+                if (transferred) try Resources.releaseTransferredRoot(self, &builder, field.type, field_value);
+            }
+        }
     }
     const initial_self = try self.newValue(&builder, structure_type);
     try self.emit(&builder, .{ .structure_init = .{
@@ -263,7 +274,7 @@ pub fn analyzeCall(
         }
         if (parameter.mode != .read) try Borrowing.requireOwned(self, argument, call.arguments[index].position, "passed by value");
         const converted = try self.coerce(builder, argument, parameter.type, call.arguments[index].position);
-        if (parameter.mode == .value and Resources.requiresRetain(self, parameter.type)) {
+        if (parameter.mode == .value and Resources.requiresRetain(self, parameter.type) and !converted.transferred) {
             try Resources.retainValue(self, builder, parameter.type, converted.value);
         }
         try argument_ids.append(self.allocator, converted.value);
@@ -280,13 +291,10 @@ pub fn analyzeCall(
         .arguments = try argument_ids.toOwnedSlice(self.allocator),
     } });
     for (mutable_arguments.items) |prepared| try MutableReferences.writeBack(self, builder, prepared);
-    for (arguments.items) |argument| if (argument.transferred and Resources.requiresRetain(self, argument.type)) {
-        try Resources.emitDrop(self, builder, argument.type, argument.value);
-    };
     return .{
         .type = result_type,
         .value = result,
-        .transferred = Resources.requiresRetain(self, result_type) and !Resources.isClassType(self, result_type),
+        .transferred = Resources.ownsValue(self, result_type) and !Resources.isClassType(self, result_type),
     };
 }
 
@@ -379,22 +387,19 @@ fn analyzeNamedCall(
         }
         if (parameter.mode != .read) try Borrowing.requireOwned(self, argument, source.position, "passed by value");
         const converted = try self.coerce(builder, argument, parameter.type, source.position);
-        if (parameter.mode == .value and Resources.requiresRetain(self, parameter.type)) try Resources.retainValue(self, builder, parameter.type, converted.value);
+        if (parameter.mode == .value and Resources.requiresRetain(self, parameter.type) and !converted.transferred) {
+            try Resources.retainValue(self, builder, parameter.type, converted.value);
+        }
         try ids.append(self.allocator, converted.value);
     }
     const result_type = Ast.Type.structure(structure_index);
     const result = try self.newValue(builder, result_type);
     try self.emit(builder, .{ .call = .{ .result = result, .function = constructorFunctionId(self.program, declaration.name, constructor_index), .arguments = try ids.toOwnedSlice(self.allocator) } });
     for (mutable_arguments.items) |prepared| try MutableReferences.writeBack(self, builder, prepared);
-    for (typed) |maybe_argument| if (maybe_argument) |argument| {
-        if (argument.transferred and Resources.requiresRetain(self, argument.type)) {
-            try Resources.emitDrop(self, builder, argument.type, argument.value);
-        }
-    };
     return .{
         .type = result_type,
         .value = result,
-        .transferred = Resources.requiresRetain(self, result_type) and !Resources.isClassType(self, result_type),
+        .transferred = Resources.ownsValue(self, result_type) and !Resources.isClassType(self, result_type),
     };
 }
 
@@ -612,17 +617,55 @@ fn analyzeSelfAssignment(
         );
         return self.fail(assignment.value.?.position, message);
     }
-    if (Resources.requiresRetain(self, field.type)) {
-        try Resources.retainValue(self, builder, field.type, value.value);
+    if (Resources.requiresRetain(self, field.type)) try Resources.retainValueOwned(
+        self,
+        builder,
+        field.type,
+        value.value,
+        if (self.structures[fieldOwnerIndex(self, structure.name)].is_class) .edge else .root,
+    );
+    if (value.transferred and self.structures[fieldOwnerIndex(self, structure.name)].is_class) {
+        try Resources.releaseTransferredRoot(self, builder, field.type, value.value);
     }
 
     const structure_index = fieldOwnerIndex(self, structure.name);
     const structure_type = Ast.Type.structure(structure_index);
     const base = try self.newValue(builder, structure_type);
     try self.emit(builder, .{ .local_load = .{ .result = base, .local = self_local } });
-    const fields = try self.allocator.alloc(Ir.ValueId, self.structures[structure_index].fields.len);
     const inherited_count = if (self.structures[structure_index].base) |parent| self.structures[parent].fields.len else 0;
     const flattened_target = inherited_count + field_index;
+    const drops_previous = Resources.needsDrop(self, field.type) or Resources.containsClass(self, field.type);
+    const previous = if (drops_previous) previous: {
+        const loaded = try self.newValue(builder, field.type);
+        try self.emit(builder, .{ .field_load = .{ .result = loaded, .base = base, .field = flattened_target } });
+        break :previous loaded;
+    } else null;
+    if (previous != null and !self.structures[structure_index].is_class) {
+        const previous_ownership: Ir.Ownership = if (self.structures[structure_index].is_class) .edge else .root;
+        if (initialized[field_index])
+            try Resources.emitDropOwned(self, builder, field.type, previous.?, previous_ownership)
+        else
+            try Resources.emitStorageDropOwned(self, builder, field.type, previous.?, previous_ownership);
+    }
+    if (self.structures[structure_index].is_class) {
+        const replacement = try self.newValue(builder, structure_type);
+        try self.emit(builder, .{ .field_store = .{
+            .result = replacement,
+            .base = base,
+            .field = flattened_target,
+            .replacement = value.value,
+        } });
+        if (previous) |previous_value| {
+            if (initialized[field_index])
+                try Resources.emitDropOwned(self, builder, field.type, previous_value, .edge)
+            else
+                try Resources.emitStorageDropOwned(self, builder, field.type, previous_value, .edge);
+        }
+        try self.emit(builder, .{ .local_store = .{ .local = self_local, .operand = replacement } });
+        initialized[field_index] = true;
+        return;
+    }
+    const fields = try self.allocator.alloc(Ir.ValueId, self.structures[structure_index].fields.len);
     for (self.structures[structure_index].fields, 0..) |other, index| {
         if (index == flattened_target) {
             fields[index] = value.value;

@@ -164,6 +164,16 @@ pub fn writeBack(self: anytype, builder: anytype, prepared: Prepared) !void {
         replacement = switch (prepared.steps[index]) {
             .field => |field| value: {
                 const structure = self.structures[field.structure];
+                if (structure.is_class) {
+                    const result = try self.newValue(builder, .structure(field.structure));
+                    try self.emit(builder, .{ .field_store = .{
+                        .result = result,
+                        .base = bases.items[index],
+                        .field = field.field,
+                        .replacement = replacement,
+                    } });
+                    break :value result;
+                }
                 const fields = try self.allocator.alloc(Ir.ValueId, structure.fields.len);
                 for (structure.fields, 0..) |item, field_index| {
                     if (field_index == field.field) fields[field_index] = replacement else {

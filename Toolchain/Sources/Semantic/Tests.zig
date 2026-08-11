@@ -458,8 +458,8 @@ test "lower string concatenation assignments to string concatenation" {
     var analyzer = Analyzer.init(allocator);
     const program = try analyzer.analyze(try parser.parse());
     const instructions = program.functions[0].blocks[0].instructions;
-    try std.testing.expect(instructions[4] == .string_concat);
-    try std.testing.expect(instructions[5] == .local_store);
+    try std.testing.expect(instructions[5] == .string_concat);
+    try std.testing.expect(instructions[8] == .local_store);
     const result = try @import("../Interpreter.zig").runCapture(allocator, program);
     try std.testing.expectEqualStrings("Silex\n", result.stdout);
 }
@@ -579,6 +579,7 @@ test "lower strings comparisons and effects to deterministic IR" {
         \\func @main() -> void {
         \\entry:
         \\    %0:str = const ""
+        \\    str.retain %0
         \\    %1:str = const "A\0B"
         \\    print %1
         \\    %2:int = const 2

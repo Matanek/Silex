@@ -268,9 +268,9 @@ fn analyzeCollectionFor(self: anytype, builder: anytype, function: Ast.Function,
     const collection_value = try loadLocalValue(self, builder, collection_local, source.type);
     const element = try self.newValue(builder, collection.element);
     try self.emit(builder, .{ .collection_load = .{ .result = element, .collection = collection_value, .index = index, .position = loop.position } });
-    // A for binding is a value copy of the collection element. Dynamic list
-    // loads only copy the stored bits, so class roots nested anywhere in that
-    // value must be retained before the binding is dropped or written back.
+    // A for binding is an owned value copy of the collection element. Dynamic
+    // list loads copy stored bits, so reachable resources must be retained
+    // before the binding is released or written back.
     if (Resources.requiresRetain(self, collection.element)) try Resources.retainValue(self, builder, collection.element, element);
     const binding_count = builder.bindings.items.len;
     if (loop.index_name) |name| try builder.bindings.append(self.allocator, .{
@@ -412,6 +412,12 @@ fn analyzeQueryFor(
     const required_local = builder.local_types.items.len;
     try builder.local_types.append(self.allocator, required_type);
     try self.emit(builder, .{ .local_store = .{ .local = required_local, .operand = required } });
+    const query_binding_count = builder.bindings.items.len;
+    try builder.bindings.append(self.allocator, .{
+        .name = "$query-required",
+        .type = required_type,
+        .local = required_local,
+    });
 
     const archetype_local = builder.local_types.items.len;
     try builder.local_types.append(self.allocator, .int);
@@ -613,6 +619,8 @@ fn analyzeQueryFor(
     const exit_availability = try self.allocator.dupe(bool, header_availability);
     for (loop_context.break_availabilities.items) |state| Availability.merge(exit_availability, state);
     Availability.restore(builder.bindings.items, exit_availability);
+    try Resources.emitActiveDrops(self, builder, query_binding_count);
+    builder.bindings.shrinkRetainingCapacity(query_binding_count);
     return false;
 }
 
@@ -790,7 +798,7 @@ pub fn analyzeCondition(self: anytype, builder: anytype, condition: Ast.Conditio
 pub fn enterBinding(self: anytype, builder: anytype, binding: BindingValue) !void {
     const value = try self.newValue(builder, binding.child_type);
     try self.emit(builder, .{ .optional_unwrap = .{ .result = value, .operand = binding.source.value } });
-    if (Resources.requiresRetain(self, binding.child_type)) {
+    if (Resources.requiresRetain(self, binding.child_type) and !binding.source.transferred) {
         try Resources.retainValue(self, builder, binding.child_type, value);
     }
     if (binding.declaration.mutable) {

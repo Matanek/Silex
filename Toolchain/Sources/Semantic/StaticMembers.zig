@@ -7,6 +7,7 @@ const Support = @import("Support.zig");
 const Visibility = @import("Visibility.zig");
 const Optionals = @import("Optionals.zig");
 const Model = @import("Model.zig");
+const Resources = @import("Resources.zig");
 const ShaderAssets = @import("../ShaderAssets.zig");
 
 pub const Field = struct {
@@ -103,7 +104,9 @@ pub fn analyzeCall(self: anytype, builder: anytype, structure_index: usize, call
     var ids: std.ArrayList(Ir.ValueId) = .empty;
     for (arguments.items, method.parameters[0..arguments.items.len], call.arguments) |argument, parameter, source| {
         if (parameter.mode != .value) return self.fail(source.position, "borrowed static method parameters are not supported yet");
-        try ids.append(self.allocator, (try self.coerce(builder, argument, parameter.type, source.position)).value);
+        const converted = try self.coerce(builder, argument, parameter.type, source.position);
+        if (Resources.requiresRetain(self, parameter.type) and !converted.transferred) try Resources.retainValue(self, builder, parameter.type, converted.value);
+        try ids.append(self.allocator, converted.value);
     }
     for (method.parameters[arguments.items.len..]) |parameter| try ids.append(self.allocator, (try self.analyzeParameterDefault(builder, parameter)).value);
     const result = if (method.return_type == .void) null else try self.newValue(builder, method.return_type);
@@ -112,7 +115,7 @@ pub fn analyzeCall(self: anytype, builder: anytype, structure_index: usize, call
         .function = methodFunctionId(self.program, structure_index, method_index),
         .arguments = try ids.toOwnedSlice(self.allocator),
     } });
-    return if (result) |value| .{ .type = method.return_type, .value = value } else null;
+    return if (result) |value| .{ .type = method.return_type, .value = value, .transferred = Resources.ownsValue(self, method.return_type) } else null;
 }
 
 fn analyzeNamedCall(self: anytype, builder: anytype, structure_index: usize, call: Ast.Expression.Call) !?Model.TypedValue {
@@ -185,11 +188,13 @@ fn analyzeNamedCall(self: anytype, builder: anytype, structure_index: usize, cal
             continue;
         };
         if (parameter.mode != .value) return self.fail(source.position, "borrowed static method parameters are not supported yet");
-        try ids.append(self.allocator, (try self.coerce(builder, typed[index].?, parameter.type, source.position)).value);
+        const converted = try self.coerce(builder, typed[index].?, parameter.type, source.position);
+        if (Resources.requiresRetain(self, parameter.type) and !converted.transferred) try Resources.retainValue(self, builder, parameter.type, converted.value);
+        try ids.append(self.allocator, converted.value);
     }
     const result = if (method.return_type == .void) null else try self.newValue(builder, method.return_type);
     try self.emit(builder, .{ .call = .{ .result = result, .function = methodFunctionId(self.program, structure_index, method_index), .arguments = try ids.toOwnedSlice(self.allocator) } });
-    return if (result) |value| .{ .type = method.return_type, .value = value } else null;
+    return if (result) |value| .{ .type = method.return_type, .value = value, .transferred = Resources.ownsValue(self, method.return_type) } else null;
 }
 
 fn methodFunctionId(program: Ast.Program, structure_index: usize, method_index: usize) Ir.FunctionId {

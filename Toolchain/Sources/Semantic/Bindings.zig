@@ -156,7 +156,7 @@ pub fn analyzeReturn(self: anytype, builder: anytype, function: Ast.Function, st
             return;
         }
         const copied_borrow = value.borrowed_root != null and
-            !Resources.requiresRetain(self, value.type) and
+            (value.type == .str or !Resources.requiresRetain(self, value.type)) and
             !Collections.isViewType(self.structures, value.type);
         if (!copied_borrow) try Borrowing.requireOwned(self, value, expression.position, "returned");
         if (Resources.requiresRetain(self, value.type) and !value.transferred) {

@@ -12,6 +12,8 @@ pub const LocalId = usize;
 pub const BlockId = usize;
 pub const Error = Allocator.Error || error{InvalidProgram};
 
+pub const Ownership = enum { root, edge };
+
 pub const UnaryOperator = enum {
     negate,
 
@@ -77,6 +79,8 @@ pub const Instruction = union(enum) {
     class_drop: ClassDrop,
     list_retain: ListResource,
     list_drop: ListResource,
+    string_retain: ListResource,
+    string_drop: ListResource,
     global_load: GlobalLoad,
     global_store: GlobalStore,
     structure_init: StructureInit,
@@ -175,14 +179,20 @@ pub const Instruction = union(enum) {
         operand: ValueId,
     };
 
-    pub const ClassRetain = struct { operand: ValueId };
+    pub const ClassRetain = struct {
+        operand: ValueId,
+        ownership: Ownership = .root,
+    };
     pub const ListResource = struct {
         operand: ValueId,
+        ownership: Ownership = .root,
         deallocate: bool = false,
     };
 
     pub const ClassDrop = struct {
         operand: ValueId,
+        ownership: Ownership = .root,
+        static_type: usize,
         plans: []const Plan,
 
         pub const Plan = struct {
@@ -289,6 +299,7 @@ pub const Instruction = union(enum) {
         collection: ValueId,
         index: ValueId,
         replacement: ValueId,
+        ownership: Ownership = .root,
         position: Source.Position,
     };
 
@@ -301,6 +312,7 @@ pub const Instruction = union(enum) {
     pub const ListEdit = struct {
         result: ValueId,
         collection: ValueId,
+        ownership: Ownership = .root,
         kind: ListEditKind,
         index: ?ValueId = null,
         argument: ?ValueId = null,
@@ -731,10 +743,12 @@ fn writeInstruction(
         .class_retain => |retain| {
             try output.appendSlice(allocator, "class.retain ");
             try appendValueChecked(output, allocator, function, retain.operand);
+            if (retain.ownership == .edge) try output.appendSlice(allocator, " edge");
         },
         .class_drop => |drop| {
             try output.appendSlice(allocator, "class.drop ");
             try appendValueChecked(output, allocator, function, drop.operand);
+            if (drop.ownership == .edge) try output.appendSlice(allocator, " edge");
             for (drop.plans) |plan| {
                 if (plan.structure >= program.structures.len) return error.InvalidProgram;
                 try output.appendSlice(allocator, ", ");
@@ -752,9 +766,19 @@ fn writeInstruction(
         .list_retain => |retain| {
             try output.appendSlice(allocator, "list.retain ");
             try appendValueChecked(output, allocator, function, retain.operand);
+            if (retain.ownership == .edge) try output.appendSlice(allocator, " edge");
         },
         .list_drop => |drop| {
             try output.appendSlice(allocator, "list.drop ");
+            try appendValueChecked(output, allocator, function, drop.operand);
+            if (drop.ownership == .edge) try output.appendSlice(allocator, " edge");
+        },
+        .string_retain => |retain| {
+            try output.appendSlice(allocator, "str.retain ");
+            try appendValueChecked(output, allocator, function, retain.operand);
+        },
+        .string_drop => |drop| {
+            try output.appendSlice(allocator, "str.drop ");
             try appendValueChecked(output, allocator, function, drop.operand);
         },
         .global_load => |load| {
@@ -963,6 +987,7 @@ fn writeInstruction(
             try appendValueChecked(output, allocator, function, replacement.index);
             try output.appendSlice(allocator, ", ");
             try appendValueChecked(output, allocator, function, replacement.replacement);
+            if (replacement.ownership == .edge) try output.appendSlice(allocator, ", edge");
         },
         .collection_count => |count| {
             try appendResult(output, allocator, program, function, count.result);
@@ -1322,8 +1347,8 @@ fn appendInteger(output: *std.ArrayList(u8), allocator: Allocator, bits: u64, ty
 }
 
 fn appendFloat(output: *std.ArrayList(u8), allocator: Allocator, value: f64) Allocator.Error!void {
-    var buffer: [64]u8 = undefined;
-    const text = std.fmt.bufPrint(&buffer, "{d}", .{value}) catch unreachable;
+    const text = try std.fmt.allocPrint(allocator, "{d}", .{value});
+    defer allocator.free(text);
     try output.appendSlice(allocator, text);
 }
 

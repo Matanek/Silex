@@ -1,0 +1,41 @@
+struct PixelBuffer {
+    var pixels:uint8[]
+    var label:str
+
+    func copy_pixels() uint8[] { return self.pixels }
+}
+
+enum DrawingCommand {
+    text(str)
+    samples(uint8[])
+    empty
+}
+
+func make_buffer() PixelBuffer {
+    var pixels:uint8[] = []
+    pixels.append(17 as uint8)
+    pixels.append(42 as uint8)
+    return PixelBuffer(pixels:pixels, label:"drawing")
+}
+
+test "a returned structure keeps its owned resources alive" {
+    let pixels = make_buffer().copy_pixels()
+    if pixels.count() != 2 || pixels[0] != 17 || pixels[1] != 42 {
+        panic("returned structure lost its dynamic collection")
+    }
+}
+
+test "iterating enum values retains their resource payloads" {
+    var samples:uint8[] = []
+    samples.append(9 as uint8)
+    let commands:DrawingCommand[] = [DrawingCommand.text("Silex"), DrawingCommand.samples(samples)]
+    var count = 0
+    for command in commands {
+        match command {
+            text(value) => { count += value.count() }
+            samples(values) => { count += values.count() }
+            empty => {}
+        }
+    }
+    if count != 6 { panic("enum payload was released while iterating") }
+}

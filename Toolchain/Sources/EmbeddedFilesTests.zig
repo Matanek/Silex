@@ -81,18 +81,23 @@ test "embed arbitrary bytes compactly and track the source as a cache dependency
     defer temporary.cleanup();
 
     const expected = [_]u8{ 0x00, 0x89, 0xff, 0x0a, 0x42 };
+    var larger: [300]u8 = undefined;
+    for (&larger, 0..) |*byte, index| byte.* = @intCast(index % 251);
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "asset.bin", .data = &expected });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "larger.bin", .data = &larger });
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "empty.bin", .data = "" });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Main.sx",
         .data =
         \\func main() {
         \\    var bytes = embed_bytes("asset.bin")
+        \\    let larger = embed_bytes("larger.bin")
         \\    let other = embed_bytes("asset.bin")
         \\    let empty = embed_bytes("empty.bin")
         \\    assert(empty.is_empty())
         \\    bytes[0] = 7 as uint8
         \\    print(bytes.count(), " ", bytes[0], " ", bytes[1], " ", bytes[2], " ", bytes[3], " ", bytes[4], " ", other[0])
+        \\    print(larger.count(), " ", larger[0], " ", larger[250], " ", larger[251], " ", larger[299])
         \\}
         ,
     });
@@ -103,7 +108,10 @@ test "embed arbitrary bytes compactly and track the source as a cache dependency
     var compiler = Project.Compiler.init(allocator, std.testing.io);
     const compilation = try compiler.compile(input);
     const interpreted = try Interpreter.runCapture(allocator, compilation.ir);
-    try std.testing.expectEqualStrings("5 7 137 255 10 66 0\n", interpreted.stdout);
+    try std.testing.expectEqualStrings(
+        "5 7 137 255 10 66 0\n300 0 250 0 48\n",
+        interpreted.stdout,
+    );
 
     const text = try Ir.writeText(allocator, compilation.ir);
     try std.testing.expect(std.mem.indexOf(u8, text, "const.bytes 0x0089ff0a42") != null);

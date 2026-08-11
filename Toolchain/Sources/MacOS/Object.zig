@@ -34,7 +34,10 @@ fn emitEncoded(allocator: Allocator, program: Machine.Program, encoded: *Encoder
     const segment_command_size = @sizeOf(macho.segment_command_64) + section_count * @sizeOf(macho.section_64);
     const load_commands_size = segment_command_size + @sizeOf(macho.build_version_command) +
         @sizeOf(macho.symtab_command) + @sizeOf(macho.dysymtab_command);
-    const content_offset = std.mem.alignForward(usize, @sizeOf(macho.mach_header_64) + load_commands_size, 8);
+    // The embedded runtimes contain 128-bit literal loads. The linker must be
+    // allowed to keep their targets 16-byte aligned when merging __text.
+    const text_alignment = 16;
+    const content_offset = std.mem.alignForward(usize, @sizeOf(macho.mach_header_64) + load_commands_size, text_alignment);
 
     for (encoded.external_call_sites) |site| {
         if (site.function >= program.external_functions.len or site.instruction_offset + 12 > text_size) return error.InvalidMain;
@@ -136,7 +139,7 @@ fn emitEncoded(allocator: Allocator, program: Machine.Program, encoded: *Encoder
         .addr = 0,
         .size = text_size,
         .offset = @intCast(content_offset),
-        .@"align" = 2,
+        .@"align" = 4,
         .reloff = @intCast(relocation_offset),
         .nreloc = @intCast(relocations.items.len),
         .flags = macho.S_REGULAR | macho.S_ATTR_PURE_INSTRUCTIONS | macho.S_ATTR_SOME_INSTRUCTIONS,
@@ -288,6 +291,10 @@ test "emit builds an ARM64 relocatable Mach-O object" {
     try std.testing.expectEqual(@as(u32, macho.MH_MAGIC_64), std.mem.readInt(u32, bytes[0..4], .little));
     try std.testing.expectEqual(@as(u32, @bitCast(macho.CPU_TYPE_ARM64)), std.mem.readInt(u32, bytes[4..8], .little));
     try std.testing.expectEqual(@as(u32, macho.MH_OBJECT), std.mem.readInt(u32, bytes[12..16], .little));
+    const section_offset = @sizeOf(macho.mach_header_64) + @sizeOf(macho.segment_command_64);
+    const text_section = std.mem.bytesAsValue(macho.section_64, bytes[section_offset..][0..@sizeOf(macho.section_64)]);
+    try std.testing.expectEqual(@as(u32, 4), text_section.@"align");
+    try std.testing.expectEqual(@as(u32, 0), text_section.offset % 16);
 
     var temporary = std.testing.tmpDir(.{});
     defer temporary.cleanup();

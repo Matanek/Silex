@@ -1,6 +1,7 @@
 const Ast = @import("../Ast.zig");
 const Model = @import("Model.zig");
 const Collections = @import("Collections.zig");
+const Resources = @import("Resources.zig");
 
 pub fn analyze(self: anytype, builder: anytype, unary: Ast.Expression.Unary) !Model.TypedValue {
     const operand = try self.analyzeExpression(builder, unary.operand);
@@ -9,5 +10,5 @@ pub fn analyze(self: anytype, builder: anytype, unary: Ast.Expression.Unary) !Mo
     }
     const result = try self.newValue(builder, operand.type);
     try self.emit(builder, .{ .deep_copy = .{ .result = result, .operand = operand.value } });
-    return .{ .type = operand.type, .value = result };
+    return .{ .type = operand.type, .value = result, .transferred = Resources.ownsValue(self, operand.type) };
 }

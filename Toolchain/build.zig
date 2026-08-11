@@ -74,6 +74,25 @@ pub fn build(b: *std.Build) void {
         "pub const object_bytes = @embedFile(\"silex-deep-copy-runtime.macho\");\n",
     );
     module.addAnonymousImport("deep_copy_runtime_object", .{ .root_source_file = deep_copy_runtime_import });
+    const cycle_runtime_module = b.createModule(.{
+        .root_source_file = b.path("Runtime/CycleCollector.zig"),
+        .target = runtime_target,
+        .optimize = .ReleaseSmall,
+        .strip = true,
+        .unwind_tables = .none,
+    });
+    const cycle_runtime = b.addExecutable(.{
+        .name = "silex-cycle-runtime",
+        .root_module = cycle_runtime_module,
+    });
+    cycle_runtime.entry = .{ .symbol_name = "_silex_cycle" };
+    const cycle_runtime_files = b.addWriteFiles();
+    _ = cycle_runtime_files.addCopyFile(cycle_runtime.getEmittedBin(), "silex-cycle-runtime.macho");
+    const cycle_runtime_import = cycle_runtime_files.add(
+        "CycleRuntimeObject.zig",
+        "pub const object_bytes = @embedFile(\"silex-cycle-runtime.macho\");\n",
+    );
+    module.addAnonymousImport("cycle_runtime_object", .{ .root_source_file = cycle_runtime_import });
     const executable = b.addExecutable(.{
         .name = "silex",
         .root_module = module,
@@ -95,6 +114,14 @@ pub fn build(b: *std.Build) void {
 
     const tests = b.addTest(.{ .root_module = module });
     const test_command = b.addRunArtifact(tests);
+    const deep_copy_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("Runtime/DeepCopy.zig"),
+            .target = runtime_target,
+            .optimize = .Debug,
+        }),
+    });
+    const deep_copy_test_command = b.addRunArtifact(deep_copy_tests);
     const language_test_command = b.addRunArtifact(executable);
     language_test_command.addArg("test");
     language_test_command.addDirectoryArg(b.path("../Tests"));
@@ -103,6 +130,7 @@ pub fn build(b: *std.Build) void {
 
     const test_step = b.step("test", "Run compiler and Silex language tests");
     test_step.dependOn(&test_command.step);
+    test_step.dependOn(&deep_copy_test_command.step);
     test_step.dependOn(&language_test_command.step);
 
     const lsp_test_module = b.createModule(.{
@@ -118,5 +146,6 @@ pub fn build(b: *std.Build) void {
     const check_step = b.step("check", "Build and test the toolchain");
     check_step.dependOn(b.getInstallStep());
     check_step.dependOn(&test_command.step);
+    check_step.dependOn(&deep_copy_test_command.step);
     check_step.dependOn(&language_test_command.step);
 }

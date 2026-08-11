@@ -1,6 +1,7 @@
 const std = @import("std");
 const Frontend = @import("Frontend.zig");
 const Interpreter = @import("Interpreter.zig");
+const Ir = @import("Ir.zig");
 
 test "mutate fixed arrays and dynamic lists with value semantics" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
@@ -74,6 +75,26 @@ test "mutate a dynamic list stored in a mutable field" {
     );
     const result = try Interpreter.runCapture(allocator, compilation.ir);
     try std.testing.expectEqualStrings("42\n", result.stdout);
+}
+
+test "preserve edge ownership while replacing a class-owned list" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\class Values {
+        \\    public var items:int[]
+        \\    public init() { self.items = [1, 2, 3] }
+        \\    public func reorder() { self.items.swap(0, 2) }
+        \\}
+        \\func main() { var values = Values(); values.reorder(); print(values.items[0]) }
+    );
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("3\n", result.stdout);
+    const text = try Ir.writeText(allocator, compilation.ir);
+    try std.testing.expect(std.mem.indexOf(u8, text, "collection.replace") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, ", edge") != null);
 }
 
 test "mutate fields of collection elements in place" {

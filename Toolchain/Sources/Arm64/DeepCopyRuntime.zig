@@ -13,6 +13,7 @@ pub const Error = error{InvalidRuntimeImage};
 
 pub const Payload = struct {
     bytes: []const u8,
+    text_size: usize,
     page_offset: u12,
     entry_offset: usize,
 };
@@ -22,6 +23,7 @@ pub fn payload() Error!Payload {
     const command_count = read32(16);
     var command_offset: usize = mach_header_size;
     var text_offset: ?usize = null;
+    var text_size: usize = 0;
     var text_address: u64 = 0;
     var payload_end: usize = 0;
     var entry_file_offset: ?usize = null;
@@ -46,6 +48,7 @@ pub fn payload() Error!Payload {
                     if (file_offset + size > object_bytes.len) return error.InvalidRuntimeImage;
                     if (std.mem.eql(u8, section_name, "__text")) {
                         text_offset = file_offset;
+                        text_size = size;
                         text_address = address;
                     }
                     if (std.mem.eql(u8, section_name, "__text") or
@@ -69,6 +72,7 @@ pub fn payload() Error!Payload {
     if (payload_end <= start or entry < start or entry >= payload_end) return error.InvalidRuntimeImage;
     return .{
         .bytes = object_bytes[start..payload_end],
+        .text_size = text_size,
         .page_offset = @intCast(text_address % page_size),
         .entry_offset = entry - start,
     };

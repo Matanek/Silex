@@ -99,6 +99,26 @@ test "keep a temporary class cascade alive through its terminal call" {
     try std.testing.expectEqualStrings("run\ndrop\n", result.stdout);
 }
 
+test "a stable class cascade leaves ownership with its binding" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\class Application {
+        \\    public func install() Application { return self }
+        \\    drop { print("drop") }
+        \\}
+        \\func main() {
+        \\    var application = Application()
+        \\    application..install()
+        \\    print("alive")
+        \\}
+    );
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("alive\ndrop\n", result.stdout);
+}
+
 test "reject cascade mutation through an immutable receiver" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

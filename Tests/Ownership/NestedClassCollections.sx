@@ -1,0 +1,48 @@
+class Node {
+    public var children:Node[]
+
+    init(children:Node[]) {
+        self.children = children
+    }
+
+    public static func leaf() Node { return Node([]) }
+
+    public static func from_members(members:Member[]) Node {
+        var children:Node[] = []
+        for member in members { children.append(member.value) }
+        return Node(children)
+    }
+}
+
+struct Member { var value:Node }
+
+class ByteCollector {
+    var offset:int
+
+    public init(initial:int) { self.offset = initial }
+
+    public func collect() uint8[] {
+        var output:uint8[] = []
+        while self.offset < 4 {
+            self.offset++
+            output.append(self.offset as uint8)
+            continue
+        }
+        return output
+    }
+}
+
+test "nested list ownership survives static construction" {
+    var members:Member[] = []
+    members.append(Member(value:Node.leaf()))
+    var node = Node.from_members(members)
+    if node.children.count() != 1 { panic("nested list lost its child") }
+}
+
+test "continue keeps resources declared outside a mutating method loop alive" {
+    var collector = ByteCollector(0)
+    let output = collector.collect()
+    if output.count() != 4 || output[0] != 1 || output[3] != 4 {
+        panic("continue released an outer collection")
+    }
+}

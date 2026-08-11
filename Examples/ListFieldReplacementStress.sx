@@ -1,0 +1,34 @@
+class FrameState {
+    var first:int[]
+    var second:int[]
+    var third:int[]
+    var fourth:int[]
+    var fifth:int[]
+    var sixth:int[]
+
+    public init() {
+        self.first = []
+        self.second = []
+        self.third = []
+        self.fourth = []
+        self.fifth = []
+        self.sixth = []
+    }
+
+    public func begin_frame() {
+        self.first = []
+        self.second = []
+        self.third = []
+        self.fourth = []
+        self.fifth = []
+        self.sixth = []
+    }
+}
+
+func main() {
+    var state = FrameState()
+    for index in 0...200000 {
+        state.begin_frame()
+    }
+    print("list field replacement stress complete")
+}

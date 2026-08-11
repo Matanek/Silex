@@ -18,6 +18,11 @@ const PathStep = union(enum) {
     collection: struct { base: Ir.ValueId, type: Ast.Type, index: Ir.ValueId, position: @import("../Source.zig").Position },
 };
 
+const Replacement = struct {
+    value: Ir.ValueId,
+    transferred: bool = false,
+};
+
 pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.AssignmentStatement) !void {
     const target = assignment.target;
     if (StaticMembers.ownerIndex(self, target.name)) |structure_index| if (target.fields.len == 1 and target.indices.len == 0 and target.indexed_fields.len == 0) {
@@ -30,13 +35,15 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
                 break :current value;
             };
             const replacement = try analyzeReplacement(self, builder, assignment, field.declaration.type, current, target.fields[0].name, false);
-            if (Resources.requiresRetain(self, field.declaration.type)) try Resources.retainValue(self, builder, field.declaration.type, replacement);
+            if (Resources.requiresRetain(self, field.declaration.type) and !replacement.transferred) {
+                try Resources.retainValue(self, builder, field.declaration.type, replacement.value);
+            }
             if (Resources.needsDrop(self, field.declaration.type) or Resources.containsClass(self, field.declaration.type)) {
                 const previous = try self.newValue(builder, field.declaration.type);
                 try self.emit(builder, .{ .global_load = .{ .result = previous, .global = field.global } });
                 try Resources.emitDrop(self, builder, field.declaration.type, previous);
             }
-            try self.emit(builder, .{ .global_store = .{ .global = field.global, .operand = replacement } });
+            try self.emit(builder, .{ .global_store = .{ .global = field.global, .operand = replacement.value } });
             return;
         }
     };
@@ -72,13 +79,13 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
         };
         const current = if (assignment.operator == .assign) null else try loadBinding(self, builder, binding);
         const replacement = try analyzeReplacement(self, builder, assignment, binding.type, current, target.name, false);
-        if (assignment.operator == .assign) {
-            if (Resources.requiresRetain(self, binding.type)) try Resources.retainValue(self, builder, binding.type, replacement);
-            if (binding.available and (Resources.needsDrop(self, binding.type) or Resources.containsClass(self, binding.type))) {
-                try Resources.emitDrop(self, builder, binding.type, try loadBinding(self, builder, binding));
-            }
+        if (Resources.requiresRetain(self, binding.type) and !replacement.transferred) {
+            try Resources.retainValue(self, builder, binding.type, replacement.value);
         }
-        try storeBinding(self, builder, binding, replacement);
+        if (binding.available and (Resources.needsDrop(self, binding.type) or Resources.containsClass(self, binding.type))) {
+            try Resources.emitDrop(self, builder, binding.type, try loadBinding(self, builder, binding));
+        }
+        try storeBinding(self, builder, binding, replacement.value);
         builder.bindings.items[binding_index].available = true;
         Optionals.invalidateRefinement(builder, target.name);
         return;
@@ -144,7 +151,7 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
         "collection element"
     else
         target.fields[target.fields.len - 1].name;
-    var replacement = try analyzeReplacement(
+    const analyzed_replacement = try analyzeReplacement(
         self,
         builder,
         assignment,
@@ -153,16 +160,25 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
         final_name,
         target.indices.len == 0 or target.indexed_fields.len != 0,
     );
-    if (assignment.operator == .assign) {
-        const class_owned_field = if (steps.items.len != 0) switch (steps.items[steps.items.len - 1]) {
-            .field => |step| self.structures[step.structure].is_class,
-            .collection => false,
-        } else false;
-        if (!class_owned_field and Resources.requiresRetain(self, current_type)) try Resources.retainValue(self, builder, current_type, replacement);
-        if (Resources.needsDrop(self, current_type) or (!class_owned_field and Resources.containsClass(self, current_type))) {
-            try Resources.emitDrop(self, builder, current_type, current_value);
+    const class_owned_field = if (steps.items.len != 0) switch (steps.items[steps.items.len - 1]) {
+        .field => |step| self.structures[step.structure].is_class,
+        .collection => false,
+    } else false;
+    if (Resources.requiresRetain(self, current_type)) {
+        if (class_owned_field) {
+            try Resources.retainValueOwned(self, builder, current_type, analyzed_replacement.value, .edge);
+            if (analyzed_replacement.transferred) {
+                try Resources.releaseTransferredRoot(self, builder, current_type, analyzed_replacement.value);
+            }
+        } else if (!analyzed_replacement.transferred) {
+            try Resources.retainValueOwned(self, builder, current_type, analyzed_replacement.value, .root);
         }
     }
+    const drops_replaced_value = Resources.needsDrop(self, current_type) or Resources.containsClass(self, current_type);
+    if (drops_replaced_value and !class_owned_field) {
+        try Resources.emitDropOwned(self, builder, current_type, current_value, if (class_owned_field) .edge else .root);
+    }
+    var replacement = analyzed_replacement.value;
     var index = steps.items.len;
     while (index != 0) {
         index -= 1;
@@ -177,6 +193,13 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
                         .field = step.field,
                         .replacement = replacement,
                     } });
+                    // Publish the replacement before releasing the previous
+                    // edge. Besides keeping self-assignment safe, this makes
+                    // the field continuously valid for concurrent cycle
+                    // tracing.
+                    if (class_owned_field and drops_replaced_value) {
+                        try Resources.emitDropOwned(self, builder, current_type, current_value, .edge);
+                    }
                     replacement = result;
                     continue;
                 }
@@ -367,7 +390,7 @@ fn analyzeReplacement(
     current: ?Ir.ValueId,
     target_name: []const u8,
     field_target: bool,
-) !Ir.ValueId {
+) !Replacement {
     if (assignment.operator == .assign) {
         var value = try self.analyzeExpressionExpected(
             builder,
@@ -393,7 +416,7 @@ fn analyzeReplacement(
             return self.fail(assignment.value.?.position, message);
         }
         try Borrowing.requireOwned(self, value, assignment.value.?.position, "stored");
-        return value.value;
+        return .{ .value = value.value, .transferred = value.transferred };
     }
 
     if (assignment.operator == .add and target_type == .str) {
@@ -412,7 +435,8 @@ fn analyzeReplacement(
             .left = current.?,
             .right = right.value,
         } });
-        return result;
+        if (right.transferred) try Resources.emitDrop(self, builder, right.type, right.value);
+        return .{ .value = result, .transferred = true };
     }
 
     if (!target_type.isNumeric()) {
@@ -475,7 +499,7 @@ fn analyzeReplacement(
         .left = current.?,
         .right = right,
     } });
-    return result;
+    return .{ .value = result };
 }
 
 fn emitOne(self: anytype, builder: anytype, type_value: Ast.Type) !Ir.ValueId {

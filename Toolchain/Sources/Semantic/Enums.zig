@@ -73,6 +73,7 @@ pub fn analyzeInitializer(self: anytype, builder: anytype, call: Ast.Expression.
         return self.fail(call.name_position, message);
     }
     var values: std.ArrayList(Ir.ValueId) = .empty;
+    var transfers: std.ArrayList(bool) = .empty;
     for (call.arguments, variant.associated_types, 0..) |argument, expected, index| {
         var value = try self.analyzeExpressionExpected(builder, argument, Optionals.expectedContext(expected, argument));
         if (value.type != expected) value = try self.coerce(builder, value, expected, argument.position);
@@ -84,6 +85,11 @@ pub fn analyzeInitializer(self: anytype, builder: anytype, call: Ast.Expression.
         }
         try Borrowing.requireOwned(self, value, argument.position, "stored in an enum");
         try values.append(self.allocator, value.value);
+        try transfers.append(self.allocator, value.transferred);
+    }
+    for (variant.associated_types, values.items, transfers.items) |payload_type, payload, transferred| {
+        if (!Resources.requiresRetain(self, payload_type)) continue;
+        if (!transferred) try Resources.retainValue(self, builder, payload_type, payload);
     }
     const result_type = Ast.Type.structure(typeIndex(self.program, enumeration.name).?);
     const result = try self.newValue(builder, result_type);
@@ -93,7 +99,7 @@ pub fn analyzeInitializer(self: anytype, builder: anytype, call: Ast.Expression.
         .variant = variant_index,
         .values = try values.toOwnedSlice(self.allocator),
     } });
-    return .{ .type = result_type, .value = result };
+    return .{ .type = result_type, .value = result, .transferred = Resources.ownsValue(self, result_type) };
 }
 
 pub fn analyzeValue(

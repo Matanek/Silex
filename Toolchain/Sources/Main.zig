@@ -388,7 +388,7 @@ fn runSource(init: std.process.Init, allocator: std.mem.Allocator, args: []const
     var progress = CliProgress.Build.init(init.io);
     progress.source(.run, options.source_path);
     progress.finish();
-    return executeNative(init, output_path);
+    return executeNative(init, allocator, output_path, options.source_path);
 }
 
 fn interpretSource(init: std.process.Init, allocator: std.mem.Allocator, args: []const []const u8) !u8 {
@@ -944,9 +944,19 @@ fn runArtifactPath(allocator: std.mem.Allocator, options: Cli.RunOptions, target
     );
 }
 
-fn executeNative(init: std.process.Init, executable_path: []const u8) !u8 {
+fn executeNative(
+    init: std.process.Init,
+    allocator: std.mem.Allocator,
+    executable_path: []const u8,
+    source_path: []const u8,
+) !u8 {
+    const current_directory = try std.process.currentPathAlloc(init.io, allocator);
+    const absolute_executable = try std.fs.path.resolve(allocator, &.{ current_directory, executable_path });
+    const source_directory = std.fs.path.dirname(source_path) orelse ".";
+    const absolute_source_directory = try std.fs.path.resolve(allocator, &.{ current_directory, source_directory });
     var child = std.process.spawn(init.io, .{
-        .argv = &.{executable_path},
+        .argv = &.{absolute_executable},
+        .cwd = .{ .path = absolute_source_directory },
         .stdin = .inherit,
         .stdout = .inherit,
         .stderr = .inherit,

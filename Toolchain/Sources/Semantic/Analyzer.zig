@@ -537,14 +537,14 @@ pub const Analyzer = struct {
             },
             .expression_statement => |expression| switch (expression.value) {
                 .call => |call| {
-                    if (try self.analyzeCall(builder, call)) |value| if (Resources.needsDrop(self, value.type) or Resources.containsClass(self, value.type))
+                    if (try self.analyzeCall(builder, call)) |value| if (value.transferred and (Resources.needsDrop(self, value.type) or Resources.containsClass(self, value.type)))
                         try Resources.emitDrop(self, builder, value.type, value.value);
                     return false;
                 },
                 .match_expression => |match_value| return Matches.analyzeStatement(self, builder, function, match_value),
                 .cascade => {
                     const value = try self.analyzeExpression(builder, expression);
-                    if (Resources.needsDrop(self, value.type) or Resources.containsClass(self, value.type)) {
+                    if (value.transferred and (Resources.needsDrop(self, value.type) or Resources.containsClass(self, value.type))) {
                         try Resources.emitDrop(self, builder, value.type, value.value);
                     }
                     return false;
@@ -728,7 +728,9 @@ pub const Analyzer = struct {
                 .left = left.value,
                 .right = right.value,
             } });
-            return .{ .type = .str, .value = result };
+            if (left.transferred) try Resources.emitDrop(self, builder, left.type, left.value);
+            if (right.transferred) try Resources.emitDrop(self, builder, right.type, right.value);
+            return .{ .type = .str, .value = result, .transferred = true };
         }
         const ordering = binary.operator == .less or binary.operator == .less_equal or
             binary.operator == .greater or binary.operator == .greater_equal;
@@ -789,6 +791,12 @@ pub const Analyzer = struct {
             .left = left.value,
             .right = right.value,
         } });
+        if (left.transferred and Resources.needsDrop(self, left.type)) {
+            try Resources.emitDrop(self, builder, left.type, left.value);
+        }
+        if (right.transferred and Resources.needsDrop(self, right.type)) {
+            try Resources.emitDrop(self, builder, right.type, right.value);
+        }
         return .{ .type = result_type, .value = result };
     }
 
@@ -1078,6 +1086,7 @@ pub const Analyzer = struct {
         }
 
         var field_values: std.ArrayList(Ir.ValueId) = .empty;
+        var field_transfers: std.ArrayList(bool) = .empty;
         if (structure.base) |base_index| {
             const base = try self.analyzeStructureInitializer(builder, .{
                 .name = self.structures[base_index].name,
@@ -1088,6 +1097,7 @@ pub const Analyzer = struct {
                 const value = try self.newValue(builder, field.type);
                 try self.emit(builder, .{ .field_load = .{ .result = value, .base = base.value, .field = field_index } });
                 try field_values.append(self.allocator, value);
+                try field_transfers.append(self.allocator, false);
             }
         }
         for (declaration.fields) |field| {
@@ -1121,6 +1131,16 @@ pub const Analyzer = struct {
             }
             try Borrowing.requireOwned(self, value, if (provided) |expression| expression.position else call.name_position, "stored");
             try field_values.append(self.allocator, value.value);
+            try field_transfers.append(self.allocator, value.transferred);
+        }
+        for (self.structures[structure_index].fields, field_values.items, field_transfers.items) |field, field_value, transferred| {
+            if (!Resources.requiresRetain(self, field.type)) continue;
+            if (declaration.is_class) {
+                try Resources.retainValueOwned(self, builder, field.type, field_value, .edge);
+                if (transferred) try Resources.releaseTransferredRoot(self, builder, field.type, field_value);
+            } else if (!transferred) {
+                try Resources.retainValue(self, builder, field.type, field_value);
+            }
         }
         const result_type = Types.Type.structure(structure_index);
         const result = try self.newValue(builder, result_type);
@@ -1129,7 +1149,11 @@ pub const Analyzer = struct {
             .structure = structure_index,
             .fields = try field_values.toOwnedSlice(self.allocator),
         } });
-        return .{ .type = result_type, .value = result };
+        return .{
+            .type = result_type,
+            .value = result,
+            .transferred = Resources.ownsValue(self, result_type) and !declaration.is_class,
+        };
     }
 
     pub fn emitIntrinsic(self: *Analyzer, builder: *FunctionBuilder, type_value: Types.Type, position: Source.Position) AnalyzeError!TypedValue {
@@ -1151,7 +1175,7 @@ pub const Analyzer = struct {
                 if (collection.length == null and !collection.view) {
                     const result = try self.newValue(builder, type_value);
                     try self.emit(builder, .{ .list_init = .{ .result = result, .values = &.{} } });
-                    return .{ .type = type_value, .value = result };
+                    return .{ .type = type_value, .value = result, .transferred = true };
                 }
             }
         };
@@ -1399,7 +1423,7 @@ pub const Analyzer = struct {
             }
             if (parameter.mode != .read) try Borrowing.requireOwned(self, argument, call.arguments[index].position, "passed by value");
             const converted = try self.coerce(builder, argument, parameter.type, call.name_position);
-            if (parameter.mode == .value and Resources.requiresRetain(self, parameter.type)) {
+            if (parameter.mode == .value and Resources.requiresRetain(self, parameter.type) and !converted.transferred) {
                 try Resources.retainValue(self, builder, parameter.type, converted.value);
             }
             try argument_ids.append(self.allocator, converted.value);
@@ -1428,14 +1452,11 @@ pub const Analyzer = struct {
             .arguments = try argument_ids.toOwnedSlice(self.allocator),
         } });
         for (mutable_arguments.items) |argument| try MutableReferences.writeBack(self, builder, argument.prepared);
-        for (arguments.items) |argument| if (argument.transferred and Resources.requiresRetain(self, argument.type)) {
-            try Resources.emitDrop(self, builder, argument.type, argument.value);
-        };
         if (result == null) return null;
         if (function.return_mode == .value) return .{
             .type = function.return_type,
             .value = result.?,
-            .transferred = Resources.requiresRetain(self, function.return_type),
+            .transferred = Resources.ownsValue(self, function.return_type),
         };
         const provenance = function.return_provenance.?;
         var parameter_index: ?usize = null;
@@ -1543,6 +1564,9 @@ pub const Analyzer = struct {
         }
         for (values, 0..) |value, index| {
             try self.emit(builder, .{ .print = .{ .value = value.value, .newline = index + 1 == values.len } });
+            if (value.transferred and Resources.needsDrop(self, value.type)) {
+                try Resources.emitDrop(self, builder, value.type, value.value);
+            }
         }
     }
 
@@ -1563,7 +1587,7 @@ pub const Analyzer = struct {
                     if (value.type == .str) break :value value;
                     const formatted = try self.newValue(builder, .str);
                     try self.emit(builder, .{ .format_value = .{ .result = formatted, .operand = value.value } });
-                    break :value .{ .type = .str, .value = formatted };
+                    break :value .{ .type = .str, .value = formatted, .transferred = true };
                 },
             };
             const combined = try self.newValue(builder, .str);
@@ -1572,7 +1596,9 @@ pub const Analyzer = struct {
                 .left = result.value,
                 .right = text.value,
             } });
-            result = .{ .type = .str, .value = combined };
+            if (result.transferred) try Resources.emitDrop(self, builder, result.type, result.value);
+            if (text.transferred) try Resources.emitDrop(self, builder, text.type, text.value);
+            result = .{ .type = .str, .value = combined, .transferred = true };
         }
         return result;
     }
@@ -1587,6 +1613,7 @@ pub const Analyzer = struct {
             .message = message.value,
             .position = statement.position,
         } });
+        if (message.transferred) try Resources.emitDrop(self, builder, message.type, message.value);
     }
 
     fn analyzePanic(self: *Analyzer, builder: *FunctionBuilder, statement: Ast.EffectStatement) AnalyzeError!void {
@@ -1598,7 +1625,9 @@ pub const Analyzer = struct {
     fn analyzeStringCount(self: *Analyzer, builder: *FunctionBuilder, operand: *const Ast.Expression) AnalyzeError!TypedValue {
         const value = try self.analyzeExpression(builder, operand);
         if (value.type != .str) return self.fail(operand.position, "count() expects 'str'");
-        return self.emitStringCount(builder, value.value);
+        const result = try self.emitStringCount(builder, value.value);
+        if (value.transferred) try Resources.emitDrop(self, builder, value.type, value.value);
+        return result;
     }
 
     pub fn emitStringCount(self: *Analyzer, builder: *FunctionBuilder, operand: Ir.ValueId) AnalyzeError!TypedValue {

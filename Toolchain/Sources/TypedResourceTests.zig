@@ -1,6 +1,7 @@
 const std = @import("std");
 const Project = @import("Project.zig");
 const Interpreter = @import("Interpreter.zig");
+const Ir = @import("Ir.zig");
 
 const resources_source =
     \\public intrinsic class Resources {
@@ -283,6 +284,76 @@ test "systems inject read and mutable resources while preserving legacy callback
     const result = try Interpreter.runCapture(allocator, compilation.ir);
     try std.testing.expectEqual(@as(u8, 0), result.exit_code);
     try std.testing.expectEqualStrings("4\nempty\ntrue\n42\n", result.stdout);
+}
+
+test "query iteration releases its compiler-owned component list on every exit" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try prepare(&temporary);
+    try temporary.dir.createDirPath(std.testing.io, "GFX/Module/ECS");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/ECS/@Module.sx",
+        .data =
+        \\public use GFX.ECS.Entity.Entity
+        \\public use GFX.ECS.World.World
+        \\public use GFX.ECS.Query.Query
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/ECS/Entity.sx",
+        .data = "public struct Entity { public let value:int }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/ECS/World.sx",
+        .data =
+        \\use GFX.ECS.Entity.Entity
+        \\public class World {
+        \\    internal func query_archetype_count() int { return 0 }
+        \\    internal func query_matches(archetype:int, required:@int[]) bool { return false }
+        \\    internal func query_entity(archetype:int, row:int) Entity { return Entity(value:0) }
+        \\    internal func query_row_start(archetype:int, required:@int[], range_start:int) int { return 0 }
+        \\    internal func query_row_end(archetype:int, required:@int[], range_end:int) int { return 0 }
+        \\}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/ECS/Query.sx",
+        .data =
+        \\use GFX.ECS.World.World
+        \\public class Query<Pattern> {
+        \\    internal var world:World
+        \\    internal let range_start:int
+        \\    internal let range_end:int
+        \\    internal init(world:World) { self.world = world; self.range_start = 0; self.range_end = -1 }
+        \\    internal init(world:World, range_start:int, range_end:int) { self.world = world; self.range_start = range_start; self.range_end = range_end }
+        \\}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Smokes/Main.sx",
+        .data =
+        \\use GFX.Application
+        \\use GFX.ECS
+        \\func inspect(query:ECS.Query<(ECS.Entity, ECS.Entity)>) {
+        \\    for (first, second) in query {
+        \\        if first.value == second.value { return }
+        \\    }
+        \\}
+        \\func main() { var application = Application(); application.add_system(0, inspect) }
+        ,
+    });
+
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(try inputPath(allocator, temporary));
+    const text = try Ir.writeText(allocator, compilation.ir);
+    const start = std.mem.indexOf(u8, text, "func @GFX.Smokes.Main.inspect(") orelse return error.TestUnexpectedResult;
+    const tail = text[start..];
+    const finish = std.mem.indexOf(u8, tail, "\n}\n") orelse return error.TestUnexpectedResult;
+    const function_text = tail[0 .. finish + 3];
+    try std.testing.expectEqual(@as(usize, 2), std.mem.count(u8, function_text, "list.drop"));
 }
 
 test "system callbacks keep their declaring module identity" {

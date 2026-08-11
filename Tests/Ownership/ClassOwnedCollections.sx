@@ -1,0 +1,32 @@
+class CollectionOwner {
+    public var values:int[]
+}
+
+enum CollectionOutcome { success(int[]); failure }
+
+func make_collection_owner() CollectionOwner {
+    var values:int[] = []
+    values.append(7)
+    return CollectionOwner(values:values)
+}
+
+func make_collection_outcome() CollectionOutcome {
+    var values:int[] = []
+    values.append(7)
+    return CollectionOutcome.success(values)
+}
+
+test "a returned class keeps its owned dynamic collection alive" {
+    var owner = make_collection_owner()
+    if owner.values.count() != 1 { panic("returned class lost its dynamic collection") }
+    if owner.values[0] != 7 { panic("returned class collection was corrupted") }
+}
+
+test "an enum payload keeps its owned dynamic collection alive" {
+    match make_collection_outcome() {
+        success(values) => {
+            if values.count() != 1 || values[0] != 7 { panic("enum lost its dynamic collection") }
+        }
+        failure => { panic("unexpected collection outcome") }
+    }
+}

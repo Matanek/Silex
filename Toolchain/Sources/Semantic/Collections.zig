@@ -23,6 +23,7 @@ pub fn receiverIsCollection(structures: []const Ir.Structure, builder: anytype, 
 pub fn analyzeMutation(self: anytype, builder: anytype, call: Ast.Expression.Call) !?Model.TypedValue {
     const receiver_expression = call.receiver.?;
     var source: Model.TypedValue = undefined;
+    var ownership: Ir.Ownership = .root;
     const binding: Model.Binding = switch (receiver_expression.value) {
         .identifier => |name| binding: {
             const existing = findBinding(builder.bindings.items, name) orelse return self.fail(receiver_expression.position, "unknown collection variable");
@@ -35,9 +36,14 @@ pub fn analyzeMutation(self: anytype, builder: anytype, call: Ast.Expression.Cal
         .field_access => binding: {
             source = try self.analyzeExpression(builder, receiver_expression);
             if (collectionForType(self.structures, source.type) == null) return null;
+            const access = receiver_expression.value.field_access;
+            if (inferReceiverType(self.structures, builder, access.base)) |base_type| {
+                if (base_type.structureIndex()) |base_index| {
+                    if (self.structures[base_index].is_class) ownership = .edge;
+                }
+            }
             var reference = source.reference;
             if (reference == null) {
-                const access = receiver_expression.value.field_access;
                 if (access.base.value == .identifier) {
                     const root = findBinding(builder.bindings.items, access.base.value.identifier) orelse
                         return self.fail(receiver_expression.position, "collection mutation requires a mutable field receiver");
@@ -85,11 +91,11 @@ pub fn analyzeMutation(self: anytype, builder: anytype, call: Ast.Expression.Cal
         try requireArity(self, call, 2);
         const index = try requireIndex(self, builder, call.arguments[0]);
         const replacement = try self.analyzeExpressionExpected(builder, call.arguments[1], collection.element);
-        if (Resources.requiresRetain(self, collection.element)) try Resources.retainValue(self, builder, collection.element, replacement.value);
+        if (Resources.requiresRetain(self, collection.element)) try Resources.retainValueOwned(self, builder, collection.element, replacement.value, ownership);
         const previous = try self.newValue(builder, collection.element);
         try self.emit(builder, .{ .collection_load = .{ .result = previous, .collection = source.value, .index = index.value, .position = call.name_position } });
         const updated = try self.newValue(builder, binding.type);
-        try self.emit(builder, .{ .collection_replace = .{ .result = updated, .collection = source.value, .index = index.value, .replacement = replacement.value, .position = call.name_position } });
+        try self.emit(builder, .{ .collection_replace = .{ .result = updated, .collection = source.value, .index = index.value, .replacement = replacement.value, .ownership = ownership, .position = call.name_position } });
         try storeBinding(self, builder, binding, updated);
         return .{ .type = collection.element, .value = previous };
     }
@@ -103,8 +109,8 @@ pub fn analyzeMutation(self: anytype, builder: anytype, call: Ast.Expression.Cal
         try self.emit(builder, .{ .collection_load = .{ .result = right, .collection = source.value, .index = right_index.value, .position = call.name_position } });
         const first = try self.newValue(builder, binding.type);
         const updated = try self.newValue(builder, binding.type);
-        try self.emit(builder, .{ .collection_replace = .{ .result = first, .collection = source.value, .index = left_index.value, .replacement = right, .position = call.name_position } });
-        try self.emit(builder, .{ .collection_replace = .{ .result = updated, .collection = first, .index = right_index.value, .replacement = left, .position = call.name_position } });
+        try self.emit(builder, .{ .collection_replace = .{ .result = first, .collection = source.value, .index = left_index.value, .replacement = right, .ownership = ownership, .position = call.name_position } });
+        try self.emit(builder, .{ .collection_replace = .{ .result = updated, .collection = first, .index = right_index.value, .replacement = left, .ownership = ownership, .position = call.name_position } });
         try storeBinding(self, builder, binding, updated);
         return null;
     }
@@ -121,8 +127,8 @@ pub fn analyzeMutation(self: anytype, builder: anytype, call: Ast.Expression.Cal
             try self.emit(builder, .{ .collection_load = .{ .result = right, .collection = updated, .index = right_constant, .position = call.name_position } });
             const first = try self.newValue(builder, binding.type);
             const next = try self.newValue(builder, binding.type);
-            try self.emit(builder, .{ .collection_replace = .{ .result = first, .collection = updated, .index = left_constant, .replacement = right, .position = call.name_position } });
-            try self.emit(builder, .{ .collection_replace = .{ .result = next, .collection = first, .index = right_constant, .replacement = left, .position = call.name_position } });
+            try self.emit(builder, .{ .collection_replace = .{ .result = first, .collection = updated, .index = left_constant, .replacement = right, .ownership = ownership, .position = call.name_position } });
+            try self.emit(builder, .{ .collection_replace = .{ .result = next, .collection = first, .index = right_constant, .replacement = left, .ownership = ownership, .position = call.name_position } });
             updated = next;
         }
         try storeBinding(self, builder, binding, updated);
@@ -143,7 +149,7 @@ pub fn analyzeMutation(self: anytype, builder: anytype, call: Ast.Expression.Cal
     } else if (std.mem.eql(u8, call.name, "clear")) {
         try requireArity(self, call, 0);
         if (Resources.needsDrop(self, binding.type) or Resources.containsClass(self, binding.type)) {
-            try Resources.emitCollectionElementsDrop(self, builder, binding.type, source.value);
+            try Resources.emitCollectionElementsDropOwned(self, builder, binding.type, source.value, ownership);
         }
         kind = .clear;
     } else if (std.mem.eql(u8, call.name, "append")) {
@@ -192,16 +198,24 @@ pub fn analyzeMutation(self: anytype, builder: anytype, call: Ast.Expression.Cal
         }
     }
     if (argument) |value| if (Resources.requiresRetain(self, argument_type.?)) {
-        try Resources.retainValue(self, builder, argument_type.?, value);
+        try Resources.retainValueOwned(self, builder, argument_type.?, value, ownership);
     };
     const updated = try self.newValue(builder, binding.type);
-    try self.emit(builder, .{ .list_edit = .{ .result = updated, .collection = source.value, .kind = kind, .index = index, .argument = argument, .argument_transferred = argument_transferred, .removed = removed, .position = call.name_position } });
+    try self.emit(builder, .{ .list_edit = .{ .result = updated, .collection = source.value, .ownership = ownership, .kind = kind, .index = index, .argument = argument, .argument_transferred = argument_transferred, .removed = removed, .position = call.name_position } });
     try storeBinding(self, builder, binding, updated);
     if (kind != .append and kind != .clear) try self.emit(builder, .{ .list_drop = .{
         .operand = source.value,
-        .deallocate = binding.local != null,
+        .ownership = ownership,
+        .deallocate = true,
     } });
-    return if (removed) |value| .{ .type = return_type, .value = value } else null;
+    if (removed) |value| {
+        if (ownership == .edge and Resources.requiresRetain(self, return_type)) {
+            try Resources.retainValue(self, builder, return_type, value);
+            try Resources.emitDropOwned(self, builder, return_type, value, .edge);
+        }
+        return .{ .type = return_type, .value = value, .transferred = Resources.ownsValue(self, return_type) };
+    }
+    return null;
 }
 
 fn storeBinding(self: anytype, builder: anytype, binding: anytype, value: Ir.ValueId) !void {
@@ -258,6 +272,9 @@ pub fn analyzeLiteral(
             return self.fail(expression.position, message);
         }
         try Borrowing.requireOwned(self, value, expression.position, "stored in a collection");
+        if (Resources.requiresRetain(self, collection.element) and !value.transferred) {
+            try Resources.retainValue(self, builder, collection.element, value.value);
+        }
         fields[index] = value.value;
     }
     const result = try self.newValue(builder, type_value);
@@ -265,7 +282,7 @@ pub fn analyzeLiteral(
         try self.emit(builder, .{ .list_init = .{ .result = result, .values = fields } })
     else
         try self.emit(builder, .{ .structure_init = .{ .result = result, .structure = structure_index, .fields = fields } });
-    return .{ .type = type_value, .value = result };
+    return .{ .type = type_value, .value = result, .transferred = collection.length == null };
 }
 
 pub fn analyzeIndex(self: anytype, builder: anytype, access: Ast.Expression.IndexAccess) !Model.TypedValue {

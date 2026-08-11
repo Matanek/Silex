@@ -11,6 +11,9 @@ const Register = A64.Register;
 pub const Error = Machine.Error || Allocator.Error || Fixups.Error;
 
 const descriptor_header_size = 8;
+const dynamic_prefix_size = 16;
+const dynamic_flag: u64 = 1 << 63;
+const length_mask: u64 = dynamic_flag - 1;
 const concat_scratch_size = 48;
 const macos_write = 4;
 
@@ -34,8 +37,8 @@ pub fn emitComparison(
     if (binary.operator != .equal and binary.operator != .not_equal) return error.InvalidMachineProgram;
     try words.append(allocator, A64.loadStack(.x9, binary.left));
     try words.append(allocator, A64.loadStack(.x10, binary.right));
-    try words.append(allocator, A64.load64(.x11, .x9, 0));
-    try words.append(allocator, A64.load64(.x12, .x10, 0));
+    try loadLength(allocator, words, .x11, .x9, .x14);
+    try loadLength(allocator, words, .x12, .x10, .x14);
     try words.append(allocator, A64.moveWideZero32(.x13, 0));
     try words.append(allocator, A64.compareRegisters(.x11, .x12));
     const unequal_length = words.items.len;
@@ -77,7 +80,7 @@ pub fn emitCount(
     count: Machine.Instruction.StringCount,
 ) Error!void {
     try words.append(allocator, A64.loadStack(.x9, count.operand));
-    try words.append(allocator, A64.load64(.x10, .x9, 0));
+    try loadLength(allocator, words, .x10, .x9, .x14);
     try words.append(allocator, A64.addSubtractImmediate(.x9, .x9, descriptor_header_size, true));
     try words.append(allocator, A64.moveWideZero32(.x11, 0));
     const empty = words.items.len;
@@ -103,6 +106,64 @@ pub fn emitCount(
     try words.append(allocator, A64.storeStack(.x11, count.result));
 }
 
+pub fn emitByteCount(allocator: Allocator, words: *std.ArrayList(u32), count: Machine.Instruction.StringCount) Error!void {
+    try words.append(allocator, A64.loadStack(.x9, count.operand));
+    try loadLength(allocator, words, .x10, .x9, .x11);
+    try words.append(allocator, A64.storeStack(.x10, count.result));
+}
+
+pub fn emitRetain(allocator: Allocator, words: *std.ArrayList(u32), value: Machine.Instruction.ListResource) Error!void {
+    try words.append(allocator, A64.loadStack(.x10, value.operand));
+    try words.append(allocator, A64.load64(.x9, .x10, 0));
+    try emitImmediate64(allocator, words, .x11, dynamic_flag);
+    try words.append(allocator, A64.andRegisters(.x9, .x9, .x11));
+    const literal = words.items.len;
+    try words.append(allocator, A64.compareBranchZero64(.x9));
+    try words.append(allocator, A64.addSubtractImmediate(.x10, .x10, dynamic_prefix_size, false));
+    const retry = words.items.len;
+    try words.append(allocator, A64.loadAcquireExclusive64(.x9, .x10));
+    try words.append(allocator, A64.addSubtractImmediate(.x9, .x9, 1, true));
+    try words.append(allocator, A64.storeReleaseExclusive64(.x11, .x9, .x10));
+    const conflicted = words.items.len;
+    try words.append(allocator, A64.compareBranchNonZero(.x11));
+    try Fixups.patch19(words.items, conflicted, retry);
+    try Fixups.patch19(words.items, literal, words.items.len);
+}
+
+pub fn emitDrop(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    sites: *std.ArrayList(ExternalCalls.Site),
+    platform: Allocation.Platform,
+    value: Machine.Instruction.ListResource,
+) Error!void {
+    try words.append(allocator, A64.loadStack(.x10, value.operand));
+    try words.append(allocator, A64.load64(.x9, .x10, 0));
+    try emitImmediate64(allocator, words, .x11, dynamic_flag);
+    try words.append(allocator, A64.andRegisters(.x9, .x9, .x11));
+    const literal = words.items.len;
+    try words.append(allocator, A64.compareBranchZero64(.x9));
+    try words.append(allocator, A64.addSubtractImmediate(.x10, .x10, dynamic_prefix_size, false));
+    const retry = words.items.len;
+    try words.append(allocator, A64.loadAcquireExclusive64(.x9, .x10));
+    const already_released = words.items.len;
+    try words.append(allocator, A64.compareBranchZero64(.x9));
+    try words.append(allocator, A64.addSubtractImmediate(.x9, .x9, 1, false));
+    try words.append(allocator, A64.storeReleaseExclusive64(.x11, .x9, .x10));
+    const conflicted = words.items.len;
+    try words.append(allocator, A64.compareBranchNonZero(.x11));
+    try Fixups.patch19(words.items, conflicted, retry);
+    const retained = words.items.len;
+    try words.append(allocator, A64.compareBranchNonZero64(.x9));
+    try words.append(allocator, A64.load64(.x1, .x10, 8));
+    try words.append(allocator, A64.moveRegister(.x0, .x10));
+    try Allocation.emitFree(allocator, words, sites, platform);
+    const done = words.items.len;
+    try Fixups.patch19(words.items, literal, done);
+    try Fixups.patch19(words.items, already_released, done);
+    try Fixups.patch19(words.items, retained, done);
+}
+
 pub fn emitConcat(
     allocator: Allocator,
     words: *std.ArrayList(u32),
@@ -113,14 +174,14 @@ pub fn emitConcat(
 ) Error!void {
     try words.append(allocator, A64.loadStack(.x9, concat.left));
     try words.append(allocator, A64.loadStack(.x12, concat.right));
-    try words.append(allocator, A64.load64(.x10, .x9, 0));
+    try loadLength(allocator, words, .x10, .x9, .x7);
     try words.append(allocator, A64.addSubtractImmediate(.x11, .x9, descriptor_header_size, true));
-    try words.append(allocator, A64.load64(.x13, .x12, 0));
+    try loadLength(allocator, words, .x13, .x12, .x7);
     try words.append(allocator, A64.addSubtractImmediate(.x14, .x12, descriptor_header_size, true));
     try words.append(allocator, A64.addSetFlags(.x15, .x10, .x13));
     const length_overflow = words.items.len;
     try words.append(allocator, A64.conditionalBranch(.carry_set));
-    try words.append(allocator, A64.moveWideZero32(.x9, descriptor_header_size));
+    try words.append(allocator, A64.moveWideZero32(.x9, descriptor_header_size + dynamic_prefix_size));
     try words.append(allocator, A64.addSetFlags(.x1, .x15, .x9));
     const allocation_overflow = words.items.len;
     try words.append(allocator, A64.conditionalBranch(.carry_set));
@@ -137,7 +198,14 @@ pub fn emitConcat(
 
     try words.append(allocator, A64.moveRegister(.x15, .x0));
     try words.append(allocator, A64.load64(.x10, .zero_or_sp, 32));
-    try words.append(allocator, A64.store64(.x10, .x15, 0));
+    try words.append(allocator, A64.moveWideZero32(.x9, 1));
+    try words.append(allocator, A64.store64(.x9, .x15, 0));
+    try words.append(allocator, A64.addSubtractImmediate(.x9, .x10, descriptor_header_size + dynamic_prefix_size, true));
+    try words.append(allocator, A64.store64(.x9, .x15, 8));
+    try words.append(allocator, A64.addSubtractImmediate(.x15, .x15, dynamic_prefix_size, true));
+    try emitImmediate64(allocator, words, .x9, dynamic_flag);
+    try words.append(allocator, A64.addRegisters(.x9, .x10, .x9));
+    try words.append(allocator, A64.store64(.x9, .x15, 0));
     try words.append(allocator, A64.addSubtractImmediate(.x12, .x15, descriptor_header_size, true));
     try words.append(allocator, A64.load64(.x10, .zero_or_sp, 0));
     try words.append(allocator, A64.load64(.x11, .zero_or_sp, 8));
@@ -173,7 +241,7 @@ pub fn emitFromBytes(
 ) Error!void {
     try words.append(allocator, A64.loadStack(.x10, conversion.bytes.start));
     try words.append(allocator, A64.loadStack(.x11, @intCast(@as(usize, conversion.bytes.start) + 1)));
-    try words.append(allocator, A64.moveWideZero32(.x9, descriptor_header_size));
+    try words.append(allocator, A64.moveWideZero32(.x9, descriptor_header_size + dynamic_prefix_size));
     try words.append(allocator, A64.addSetFlags(.x1, .x11, .x9));
     const allocation_overflow = words.items.len;
     try words.append(allocator, A64.conditionalBranch(.carry_set));
@@ -187,7 +255,14 @@ pub fn emitFromBytes(
 
     try words.append(allocator, A64.moveRegister(.x15, .x0));
     try words.append(allocator, A64.load64(.x10, .zero_or_sp, 8));
-    try words.append(allocator, A64.store64(.x10, .x15, 0));
+    try words.append(allocator, A64.moveWideZero32(.x9, 1));
+    try words.append(allocator, A64.store64(.x9, .x15, 0));
+    try words.append(allocator, A64.addSubtractImmediate(.x9, .x10, descriptor_header_size + dynamic_prefix_size, true));
+    try words.append(allocator, A64.store64(.x9, .x15, 8));
+    try words.append(allocator, A64.addSubtractImmediate(.x15, .x15, dynamic_prefix_size, true));
+    try emitImmediate64(allocator, words, .x9, dynamic_flag);
+    try words.append(allocator, A64.addRegisters(.x9, .x10, .x9));
+    try words.append(allocator, A64.store64(.x9, .x15, 0));
     try words.append(allocator, A64.load64(.x11, .zero_or_sp, 0));
     try words.append(allocator, A64.addSubtractImmediate(.x12, .x15, descriptor_header_size, true));
     try emitCopyByteSlots(allocator, words, .x10, .x11, .x12);
@@ -218,7 +293,7 @@ pub fn emitPrint(
     newline: bool,
 ) Error!void {
     try words.append(allocator, A64.loadStack(.x9, slot));
-    try words.append(allocator, A64.load64(.x2, .x9, 0));
+    try loadLength(allocator, words, .x2, .x9, .x10);
     try words.append(allocator, A64.addSubtractImmediate(.x1, .x9, descriptor_header_size, true));
     try words.append(allocator, A64.moveWideZero32(.x0, descriptor));
     try words.append(allocator, A64.moveWideZero32(.x16, macos_write));
@@ -308,4 +383,16 @@ fn emitImmediate64(
     try words.append(allocator, A64.moveWideKeep64(register, @truncate(value >> 16), 1));
     try words.append(allocator, A64.moveWideKeep64(register, @truncate(value >> 32), 2));
     try words.append(allocator, A64.moveWideKeep64(register, @truncate(value >> 48), 3));
+}
+
+fn loadLength(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    destination: Register,
+    pointer: Register,
+    scratch: Register,
+) Allocator.Error!void {
+    try words.append(allocator, A64.load64(destination, pointer, 0));
+    try emitImmediate64(allocator, words, scratch, length_mask);
+    try words.append(allocator, A64.andRegisters(destination, destination, scratch));
 }

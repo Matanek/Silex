@@ -75,13 +75,13 @@ fn emitInsert(self: anytype, builder: anytype, structure: usize, field: usize, m
         .field = order_field,
         .replacement = updated_order,
     } });
-    if (Ownership.needsDrop(self, slot_type) or Ownership.containsClass(self, slot_type)) {
-        try Ownership.emitDrop(self, builder, slot_type, previous);
-    }
     const replacement = try self.newValue(builder, slot_type);
     try self.emit(builder, .{ .optional_some = .{ .result = replacement, .operand = 1 } });
     const result = try self.newValue(builder, .structure(structure));
     try self.emit(builder, .{ .field_store = .{ .result = result, .base = order_result, .field = field, .replacement = replacement } });
+    if (Ownership.needsDrop(self, slot_type) or Ownership.containsClass(self, slot_type)) {
+        try Ownership.emitDrop(self, builder, slot_type, previous);
+    }
     self.terminate(builder, .{ .return_value = result });
 }
 
@@ -212,9 +212,6 @@ fn emitClear(self: anytype, builder: anytype, structure: usize) !void {
         self.terminate(builder, .{ .branch = .{ .condition = present, .then_block = drop_block, .else_block = skip_block } });
 
         builder.current_block = drop_block;
-        if (Ownership.needsDrop(self, field.type) or Ownership.containsClass(self, field.type)) {
-            try Ownership.emitDrop(self, builder, field.type, previous);
-        }
         const null_value = try self.newValue(builder, field.type);
         try self.emit(builder, .{ .optional_null = .{ .result = null_value } });
         const result = try self.newValue(builder, .structure(structure));
@@ -224,6 +221,9 @@ fn emitClear(self: anytype, builder: anytype, structure: usize) !void {
             .field = field_index,
             .replacement = null_value,
         } });
+        if (Ownership.needsDrop(self, field.type) or Ownership.containsClass(self, field.type)) {
+            try Ownership.emitDrop(self, builder, field.type, previous);
+        }
         self.terminate(builder, .{ .jump = decrement });
 
         builder.current_block = skip_block;

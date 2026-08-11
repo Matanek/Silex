@@ -1,0 +1,25 @@
+class OrderedValues {
+    public var items:int[]
+
+    public init() {
+        self.items = [0, 1, 2, 3]
+    }
+
+    public func rotate() {
+        self.items.swap(0, 1)
+        self.items.swap(1, 2)
+        self.items.swap(2, 3)
+    }
+}
+
+test "replacing elements preserves ownership of a class field list" {
+    var values = OrderedValues()
+    for iteration in 0...10000 {
+        values.rotate()
+    }
+    assert(values.items.count() == 4)
+    assert(values.items[0] == 0)
+    assert(values.items[1] == 1)
+    assert(values.items[2] == 2)
+    assert(values.items[3] == 3)
+}

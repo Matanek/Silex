@@ -19,6 +19,7 @@ pub const Register = enum(u5) {
     x15 = 15,
     x16 = 16,
     x17 = 17,
+    x19 = 19,
     x29 = 29,
     x30 = 30,
     zero_or_sp = 31,

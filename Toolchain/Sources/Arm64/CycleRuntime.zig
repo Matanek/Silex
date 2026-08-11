@@ -1,6 +1,6 @@
 const std = @import("std");
 
-pub const object_bytes = @import("float_runtime_object").object_bytes;
+pub const object_bytes = @import("cycle_runtime_object").object_bytes;
 
 const mach_header_size = 32;
 const segment_command_64 = 0x19;
@@ -27,7 +27,6 @@ pub fn payload() Error!Payload {
     var text_address: u64 = 0;
     var payload_end: usize = 0;
     var entry_file_offset: ?usize = null;
-
     for (0..command_count) |_| {
         if (command_offset + 8 > object_bytes.len) return error.InvalidRuntimeImage;
         const command = read32(command_offset);
@@ -36,7 +35,6 @@ pub fn payload() Error!Payload {
         if (command == segment_command_64) {
             if (command_size < segment_command_size) return error.InvalidRuntimeImage;
             const section_count = read32(command_offset + 64);
-            if (segment_command_size + section_count * section_size > command_size) return error.InvalidRuntimeImage;
             var section_offset = command_offset + segment_command_size;
             for (0..section_count) |_| {
                 const section_name = name(section_offset);
@@ -66,7 +64,6 @@ pub fn payload() Error!Payload {
         }
         command_offset += command_size;
     }
-
     const start = text_offset orelse return error.InvalidRuntimeImage;
     const entry = entry_file_offset orelse return error.InvalidRuntimeImage;
     if (payload_end <= start or entry < start or entry >= payload_end) return error.InvalidRuntimeImage;
@@ -78,24 +75,9 @@ pub fn payload() Error!Payload {
     };
 }
 
-fn read32(offset: usize) u32 {
-    return std.mem.readInt(u32, object_bytes[offset..][0..4], .little);
-}
-
-fn read64(offset: usize) u64 {
-    return std.mem.readInt(u64, object_bytes[offset..][0..8], .little);
-}
-
+fn read32(offset: usize) u32 { return std.mem.readInt(u32, object_bytes[offset..][0..4], .little); }
+fn read64(offset: usize) u64 { return std.mem.readInt(u64, object_bytes[offset..][0..8], .little); }
 fn name(offset: usize) []const u8 {
     const bytes = object_bytes[offset..][0..16];
     return bytes[0 .. std.mem.indexOfScalar(u8, bytes, 0) orelse bytes.len];
-}
-
-test "bundled float formatter is an ARM64 Mach-O image" {
-    try std.testing.expect(object_bytes.len > 4);
-    try std.testing.expectEqual(@as(u32, 0xfeedfacf), std.mem.readInt(u32, object_bytes[0..4], .little));
-    const runtime = try payload();
-    try std.testing.expect(runtime.bytes.len > 4096);
-    try std.testing.expect(runtime.entry_offset < runtime.bytes.len);
-    try std.testing.expectEqual(@as(u12, 0), runtime.page_offset % 4);
 }

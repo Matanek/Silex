@@ -22,12 +22,12 @@ pub fn emitInit(
 ) Error!void {
     var width: usize = 0;
     for (value.fields) |field| width += field.width;
-    try immediate(allocator, words, .x1, (width + 3) * Machine.slot_size);
+    try immediate(allocator, words, .x1, (width + 4) * Machine.slot_size);
     switch (platform) {
         .darwin => try allocate(allocator, words),
         .windows => {
             try immediate(allocator, words, .x0, 0);
-            try immediate(allocator, words, .x1, (width + 3) * Machine.slot_size);
+            try immediate(allocator, words, .x1, (width + 4) * Machine.slot_size);
             try immediate(allocator, words, .x2, 0x3000);
             try immediate(allocator, words, .x3, 4);
             try external_sites.append(allocator, .{
@@ -50,7 +50,8 @@ pub fn emitInit(
     try words.append(allocator, A64.store64(.x9, .x15, 0));
     try words.append(allocator, A64.store64(.zero_or_sp, .x15, Machine.slot_size));
     try words.append(allocator, A64.store64(.zero_or_sp, .x15, 2 * Machine.slot_size));
-    var offset: usize = 3;
+    try words.append(allocator, A64.store64(.zero_or_sp, .x15, 3 * Machine.slot_size));
+    var offset: usize = 4;
     for (value.fields) |field| for (0..field.width) |leaf| {
         try words.append(allocator, A64.loadStack(.x9, @intCast(@as(usize, field.start) + leaf)));
         try words.append(allocator, A64.store64(.x9, .x15, @intCast(offset * Machine.slot_size)));
@@ -66,7 +67,7 @@ pub fn emitInit(
 
 pub fn emitLoad(allocator: Allocator, words: *std.ArrayList(u32), value: Machine.Instruction.ClassLoad) Error!void {
     try words.append(allocator, A64.loadStack(.x10, value.base));
-    try addOffset(allocator, words, .x10, 3 * Machine.slot_size);
+    try addOffset(allocator, words, .x10, 4 * Machine.slot_size);
     if (value.byte_offset != 0) try addOffset(allocator, words, .x10, value.byte_offset);
     for (0..value.result.width) |leaf| {
         try words.append(allocator, A64.load64(.x9, .x10, @intCast(leaf * Machine.slot_size)));
@@ -77,7 +78,7 @@ pub fn emitLoad(allocator: Allocator, words: *std.ArrayList(u32), value: Machine
 pub fn emitStore(allocator: Allocator, words: *std.ArrayList(u32), value: Machine.Instruction.ClassStore) Error!void {
     try words.append(allocator, A64.loadStack(.x10, value.base));
     try words.append(allocator, A64.storeStack(.x10, value.result));
-    try addOffset(allocator, words, .x10, 3 * Machine.slot_size);
+    try addOffset(allocator, words, .x10, 4 * Machine.slot_size);
     if (value.byte_offset != 0) try addOffset(allocator, words, .x10, value.byte_offset);
     for (0..value.replacement.width) |leaf| {
         try words.append(allocator, A64.loadStack(.x9, @intCast(@as(usize, value.replacement.start) + leaf)));

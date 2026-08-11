@@ -1,5 +1,6 @@
 const std = @import("std");
 const Machine = @import("Machine.zig");
+const Ir = @import("../Ir.zig");
 const Numeric = @import("../Numeric.zig");
 const A64 = @import("Instructions.zig");
 const Fixups = @import("Fixups.zig");
@@ -10,9 +11,12 @@ const ProtocolRuntime = @import("ProtocolRuntime.zig");
 const TextRuntime = @import("TextRuntime.zig");
 const FloatRuntime = @import("FloatRuntime.zig");
 const DeepCopyRuntime = @import("DeepCopyRuntime.zig");
+const CycleRuntime = @import("CycleRuntime.zig");
 const ExternalCalls = @import("ExternalCalls.zig");
+const Allocation = @import("Allocation.zig");
 const Register = A64.Register;
 const Condition = A64.Condition;
+const enable_cycle_collector = true;
 const saveFrame = A64.saveFrame;
 const moveFramePointer = A64.moveFramePointer;
 const restoreFrame = A64.restoreFrame;
@@ -62,7 +66,7 @@ const addRegisters = A64.addRegisters;
 
 const Allocator = std.mem.Allocator;
 
-pub const Error = Machine.Error || Allocator.Error || Fixups.Error || FloatRuntime.Error || DeepCopyRuntime.Error || error{UnsupportedInstruction};
+pub const Error = Machine.Error || Allocator.Error || Fixups.Error || FloatRuntime.Error || DeepCopyRuntime.Error || CycleRuntime.Error || error{UnsupportedInstruction};
 
 pub const Entry = union(enum) {
     none,
@@ -106,6 +110,7 @@ const FunctionFixups = struct {
 };
 
 const DeepCopyFixup = struct { call_at: usize, data_at: usize };
+const CycleFixup = struct { call_at: usize, data_at: ?usize = null };
 const FunctionAddressFixup = struct { at: usize, function: Machine.FunctionId };
 
 pub fn encode(allocator: Allocator, program: Machine.Program, entry: Entry) Error!Image {
@@ -119,12 +124,14 @@ pub fn encodeWindows(allocator: Allocator, program: Machine.Program, entry: Entr
 fn encodeForPlatform(allocator: Allocator, program: Machine.Program, entry: Entry, platform: Platform) Error!Image {
     _ = FloatRuntime.object_bytes;
     _ = DeepCopyRuntime.object_bytes;
+    _ = CycleRuntime.object_bytes;
     try Machine.validate(program);
     var words: std.ArrayList(u32) = .empty;
     const offsets = try allocator.alloc(u32, program.functions.len);
     var calls: std.ArrayList(CallFixup) = .empty;
     var float_calls: std.ArrayList(usize) = .empty;
     var deep_copy_calls: std.ArrayList(DeepCopyFixup) = .empty;
+    var cycle_calls: std.ArrayList(CycleFixup) = .empty;
     var data_fixups: std.ArrayList(DataFixup) = .empty;
     var snapshot_data_fixups: std.ArrayList(usize) = .empty;
     var external_call_sites: std.ArrayList(ExternalCalls.Site) = .empty;
@@ -133,7 +140,7 @@ fn encodeForPlatform(allocator: Allocator, program: Machine.Program, entry: Entr
 
     for (program.functions, 0..) |function, function_id| {
         offsets[function_id] = @intCast(words.items.len * 4);
-        try encodeFunction(allocator, &words, &calls, &function_addresses, &float_calls, &deep_copy_calls, &data_fixups, &external_call_sites, platform, program, function);
+        try encodeFunction(allocator, &words, &calls, &function_addresses, &float_calls, &deep_copy_calls, &cycle_calls, &data_fixups, &external_call_sites, platform, program, function);
     }
 
     const entry_offset: ?u32 = switch (entry) {
@@ -214,6 +221,7 @@ fn encodeForPlatform(allocator: Allocator, program: Machine.Program, entry: Entr
         const runtime_start = words.items.len * 4 + runtime_bytes.items.len;
         const formatter_target = (runtime_start + runtime.entry_offset) / 4;
         for (float_calls.items) |at| try patch26(words.items, at, formatter_target);
+        try appendRuntimeAddressSites(allocator, runtime_start, runtime, &address_sites);
         try runtime_bytes.appendSlice(allocator, runtime.bytes);
     }
     if (deep_copy_calls.items.len != 0) {
@@ -222,6 +230,16 @@ fn encodeForPlatform(allocator: Allocator, program: Machine.Program, entry: Entr
         const runtime_start = words.items.len * 4 + runtime_bytes.items.len;
         const target = (runtime_start + runtime.entry_offset) / 4;
         for (deep_copy_calls.items) |fixup| try patch26(words.items, fixup.call_at, target);
+        try appendRuntimeAddressSites(allocator, runtime_start, runtime, &address_sites);
+        try runtime_bytes.appendSlice(allocator, runtime.bytes);
+    }
+    if (cycle_calls.items.len != 0) {
+        const runtime = try CycleRuntime.payload();
+        try appendRuntimePadding(allocator, words.items.len, &runtime_bytes, runtime.page_offset);
+        const runtime_start = words.items.len * 4 + runtime_bytes.items.len;
+        const target = (runtime_start + runtime.entry_offset) / 4;
+        for (cycle_calls.items) |fixup| try patch26(words.items, fixup.call_at, target);
+        try appendRuntimeAddressSites(allocator, runtime_start, runtime, &address_sites);
         try runtime_bytes.appendSlice(allocator, runtime.bytes);
     }
 
@@ -292,6 +310,16 @@ fn encodeForPlatform(allocator: Allocator, program: Machine.Program, entry: Entr
             });
         }
     }
+    if (cycle_calls.items.len != 0) {
+        const target = copy_model_offset orelse return error.InvalidMachineProgram;
+        for (cycle_calls.items) |fixup| if (fixup.data_at) |at| {
+            try patchPageAddress(words.items, at, target);
+            try address_sites.append(allocator, .{
+                .instruction_offset = @intCast(at * @sizeOf(u32)),
+                .target_offset = @intCast(target),
+            });
+        };
+    }
     if (snapshot_data_fixups.items.len != 0) {
         const target = snapshot_lock_offset orelse return error.InvalidMachineProgram;
         for (snapshot_data_fixups.items) |at| {
@@ -339,6 +367,50 @@ fn appendRuntimePadding(
     try runtime_bytes.appendNTimes(allocator, 0, padding);
 }
 
+fn appendRuntimeAddressSites(
+    allocator: Allocator,
+    runtime_start: usize,
+    runtime: anytype,
+    sites: *std.ArrayList(AddressSite),
+) Error!void {
+    var offset: usize = 0;
+    while (offset + 8 <= runtime.text_size) : (offset += 4) {
+        const page = std.mem.readInt(u32, runtime.bytes[offset..][0..4], .little);
+        if (page & 0x9f000000 != 0x90000000) continue;
+        const page_offset = try runtimePageTarget(runtime, offset, page);
+        try sites.append(allocator, .{
+            .instruction_offset = @intCast(runtime_start + offset),
+            .target_offset = @intCast(runtime_start + page_offset),
+        });
+    }
+}
+
+fn runtimePageTarget(runtime: anytype, offset: usize, page: u32) Error!usize {
+    const low_instruction = std.mem.readInt(u32, runtime.bytes[offset + 4 ..][0..4], .little);
+    const immediate = (low_instruction >> 10) & 0xfff;
+    const target_low: usize = if (low_instruction & 0x1f000000 == 0x11000000)
+        @as(usize, immediate) << @as(u6, if (low_instruction & (1 << 22) != 0) 12 else 0)
+    else if (low_instruction & 0x3b000000 == 0x39000000)
+        @as(usize, immediate) * runtimeLoadScale(low_instruction)
+    else
+        return error.InvalidRuntimeImage;
+
+    const encoded = ((page >> 5) & 0x7ffff) << 2 | ((page >> 29) & 0x3);
+    var page_delta: i64 = encoded;
+    if (encoded & (1 << 20) != 0) page_delta -= 1 << 21;
+    const source_virtual = @as(i64, runtime.page_offset) + @as(i64, @intCast(offset));
+    const source_page = source_virtual & ~@as(i64, 0xfff);
+    const target_virtual = source_page + page_delta * 0x1000 + @as(i64, @intCast(target_low));
+    const relative = target_virtual - @as(i64, runtime.page_offset);
+    if (relative < 0 or relative >= runtime.bytes.len) return error.InvalidRuntimeImage;
+    return @intCast(relative);
+}
+
+fn runtimeLoadScale(instruction: u32) usize {
+    if (instruction & 0x04000000 != 0 and instruction & 0x00c00000 == 0x00c00000) return 16;
+    return @as(usize, 1) << @intCast((instruction >> 30) & 0x3);
+}
+
 fn emitSnapshotAcquire(allocator: Allocator, words: *std.ArrayList(u32), data_fixups: *std.ArrayList(usize)) Error!void {
     try data_fixups.append(allocator, words.items.len);
     try appendRelocatableAddress(allocator, words, .x14);
@@ -360,8 +432,13 @@ fn emitSnapshotRelease(allocator: Allocator, words: *std.ArrayList(u32), data_fi
     try words.append(allocator, A64.storeRelease64(.zero_or_sp, .x14));
 }
 
-fn emitClassRetain(allocator: Allocator, words: *std.ArrayList(u32)) Error!void {
-    try words.append(allocator, addSubtractImmediate(.x14, .x10, Machine.slot_size, true));
+fn emitClassRetain(allocator: Allocator, words: *std.ArrayList(u32), ownership: Ir.Ownership) Error!void {
+    if (ownership == .edge) try emitMarkCycleDirty(allocator, words);
+    const offset: u12 = switch (ownership) {
+        .root => Machine.slot_size,
+        .edge => 2 * Machine.slot_size,
+    };
+    try words.append(allocator, addSubtractImmediate(.x14, .x10, offset, true));
     const retry = words.items.len;
     try words.append(allocator, A64.loadAcquireExclusive64(.x9, .x14));
     try words.append(allocator, addSubtractImmediate(.x9, .x9, 1, true));
@@ -373,14 +450,24 @@ fn emitClassRetain(allocator: Allocator, words: *std.ArrayList(u32)) Error!void 
 
 /// Decrements a class root atomically and claims destruction exactly once.
 const ClassDropBranches = struct {
-    still_referenced: usize,
+    cycle_candidate: usize,
+    rooted: usize,
     already_dropped: usize,
 };
 
 /// Returns the branches that skip finalization when another root remains or a
 /// concurrent drop has already claimed the instance.
-fn emitClassDrop(allocator: Allocator, words: *std.ArrayList(u32)) Error!ClassDropBranches {
-    try words.append(allocator, addSubtractImmediate(.x14, .x10, Machine.slot_size, true));
+fn emitClassDrop(allocator: Allocator, words: *std.ArrayList(u32), ownership: Ir.Ownership) Error!ClassDropBranches {
+    if (ownership == .edge) try emitMarkCycleDirty(allocator, words);
+    const offset: u12 = switch (ownership) {
+        .root => Machine.slot_size,
+        .edge => 2 * Machine.slot_size,
+    };
+    const other_offset: u12 = switch (ownership) {
+        .root => 2 * Machine.slot_size,
+        .edge => Machine.slot_size,
+    };
+    try words.append(allocator, addSubtractImmediate(.x14, .x10, offset, true));
     const release_retry = words.items.len;
     try words.append(allocator, A64.loadAcquireExclusive64(.x9, .x14));
     const unrooted = words.items.len;
@@ -390,25 +477,70 @@ fn emitClassDrop(allocator: Allocator, words: *std.ArrayList(u32)) Error!ClassDr
     const release_conflicted = words.items.len;
     try words.append(allocator, compareBranchNonZero(.x11));
     try Fixups.patch19(words.items, release_conflicted, release_retry);
-    const still_referenced = words.items.len;
-    try words.append(allocator, compareBranchNonZero64(.x9));
+    const count_ready = words.items.len;
+    try Fixups.patch19(words.items, unrooted, count_ready);
+    try words.append(allocator, load64(.x11, .x10, other_offset));
+    // Cycle tracing is useful only when no root remains. A live root proves
+    // reachability immediately and must not trigger an O(graph) probe.
+    const rooted = words.items.len;
+    try words.append(allocator, switch (ownership) {
+        .root => compareBranchNonZero64(.x9),
+        .edge => compareBranchNonZero64(.x11),
+    });
+    const cycle_candidate = words.items.len;
+    try words.append(allocator, switch (ownership) {
+        .root => compareBranchNonZero64(.x11),
+        .edge => compareBranchNonZero64(.x9),
+    });
 
-    try words.append(allocator, addSubtractImmediate(.x14, .x10, 2 * Machine.slot_size, true));
+    try words.append(allocator, addSubtractImmediate(.x14, .x10, 3 * Machine.slot_size, true));
     const claim_retry = words.items.len;
-    try Fixups.patch19(words.items, unrooted, claim_retry);
     try words.append(allocator, A64.loadAcquireExclusive64(.x9, .x14));
+    // State 2 means that the cycle collector is inspecting the object. Wait
+    // for it to either release the claim (0) or commit finalization (1)
+    // before deciding who owns destruction.
+    try words.append(allocator, moveWideZero64(.x11, 2, 0));
+    try words.append(allocator, compareRegisters(.x9, .x11));
+    const tracing = words.items.len;
+    try words.append(allocator, conditionalBranch(.equal));
+    // State 1 is already finalized. State 3 is a committed cycle member and
+    // is deliberately allowed to transition to 1 when its cascading edge
+    // count reaches zero.
+    try words.append(allocator, moveWideZero64(.x11, 1, 0));
+    try words.append(allocator, compareRegisters(.x9, .x11));
     const already_dropped = words.items.len;
-    try words.append(allocator, compareBranchNonZero64(.x9));
+    try words.append(allocator, conditionalBranch(.equal));
     try words.append(allocator, moveWideZero64(.x9, 1, 0));
     try words.append(allocator, A64.storeReleaseExclusive64(.x11, .x9, .x14));
     const claim_conflicted = words.items.len;
     try words.append(allocator, compareBranchNonZero(.x11));
+    try Fixups.patch19(words.items, tracing, claim_retry);
     try Fixups.patch19(words.items, claim_conflicted, claim_retry);
 
     return .{
-        .still_referenced = still_referenced,
+        .cycle_candidate = cycle_candidate,
+        .rooted = rooted,
         .already_dropped = already_dropped,
     };
+}
+
+/// State 4 caches a negative cycle proof for an externally reached object.
+/// Changing an incoming edge invalidates that proof before the reference count
+/// transition which may make the component collectible.
+fn emitMarkCycleDirty(allocator: Allocator, words: *std.ArrayList(u32)) Error!void {
+    try words.append(allocator, addSubtractImmediate(.x14, .x10, 3 * Machine.slot_size, true));
+    const retry = words.items.len;
+    try words.append(allocator, A64.loadAcquireExclusive64(.x9, .x14));
+    try words.append(allocator, moveWideZero64(.x11, 4, 0));
+    try words.append(allocator, compareRegisters(.x9, .x11));
+    const clean = words.items.len;
+    try words.append(allocator, conditionalBranch(.not_equal));
+    try words.append(allocator, moveWideZero64(.x9, 0, 0));
+    try words.append(allocator, A64.storeReleaseExclusive64(.x11, .x9, .x14));
+    const conflicted = words.items.len;
+    try words.append(allocator, compareBranchNonZero(.x11));
+    try Fixups.patch19(words.items, conflicted, retry);
+    try Fixups.patch19(words.items, clean, words.items.len);
 }
 
 fn findString(program: Machine.Program, value: []const u8) ?usize {
@@ -425,6 +557,7 @@ fn encodeFunction(
     function_addresses: *std.ArrayList(FunctionAddressFixup),
     float_calls: *std.ArrayList(usize),
     deep_copy_calls: *std.ArrayList(DeepCopyFixup),
+    cycle_calls: *std.ArrayList(CycleFixup),
     data_fixups: *std.ArrayList(DataFixup),
     external_call_sites: *std.ArrayList(ExternalCalls.Site),
     platform: Platform,
@@ -435,9 +568,11 @@ fn encodeFunction(
     var control_fixups: std.ArrayList(ControlFixup) = .empty;
     const instruction_offsets = try allocator.alloc(usize, function.instructions.len);
     defer allocator.free(instruction_offsets);
+    const encoded_frame_size = std.math.add(u16, function.frame_size, if (enable_cycle_collector) 16 else 0) catch return error.InvalidMachineProgram;
+    const cycle_context_slot: Machine.Slot = @intCast(function.frame_size / Machine.slot_size);
     try words.append(allocator, saveFrame());
     try words.append(allocator, moveFramePointer());
-    try emitStackAdjustment(allocator, words, function.frame_size, false);
+    try emitStackAdjustment(allocator, words, encoded_frame_size, false);
     if (function.hidden_return_slot) |slot| try words.append(allocator, storeStack(.x15, slot));
     for (function.parameters, 0..) |parameter, index| {
         const incoming: Register = @enumFromInt(index);
@@ -622,11 +757,44 @@ fn encodeFunction(
             .class_store => |store| try ClassRuntime.emitStore(allocator, words, store),
             .class_retain => |retain| {
                 try words.append(allocator, loadStack(.x10, retain.operand));
-                try emitClassRetain(allocator, words);
+                try emitClassRetain(allocator, words, retain.ownership);
             },
             .class_drop => |drop| {
+                if (enable_cycle_collector) {
+                    try words.append(allocator, storeStack(.zero_or_sp, cycle_context_slot));
+                }
                 try words.append(allocator, loadStack(.x10, drop.operand));
-                const skip_finalization = try emitClassDrop(allocator, words);
+                const skip_finalization = try emitClassDrop(allocator, words, drop.ownership);
+                const finalize_without_cycle = words.items.len;
+                try words.append(allocator, branch());
+
+                const cycle_prepare = words.items.len;
+                var cycle_unavailable: ?usize = null;
+                var cycle_claimed: ?usize = null;
+                if (platform == .darwin and enable_cycle_collector) {
+                    try words.append(allocator, loadStack(.x10, drop.operand));
+                    try words.append(allocator, load64(.x9, .x10, 3 * Machine.slot_size));
+                    cycle_claimed = words.items.len;
+                    try words.append(allocator, compareBranchNonZero(.x9));
+                    try words.append(allocator, moveWideZero32(.x0, 0));
+                    try words.append(allocator, loadStack(.x1, drop.operand));
+                    const data_at = words.items.len;
+                    try appendRelocatableAddress(allocator, words, .x2);
+                    try emitImmediate64(allocator, words, .x3, 0x100 + drop.static_type);
+                    const call_at = words.items.len;
+                    try words.append(allocator, branchLink());
+                    try cycle_calls.append(allocator, .{ .call_at = call_at, .data_at = data_at });
+                    cycle_unavailable = words.items.len;
+                    try words.append(allocator, compareBranchZero64(.x0));
+                    try words.append(allocator, storeStack(.x0, cycle_context_slot));
+                }
+                const finalize_cycle = words.items.len;
+                try words.append(allocator, branch());
+
+                const finalize = words.items.len;
+                try Fixups.patch26(words.items, finalize_without_cycle, finalize);
+                try Fixups.patch26(words.items, finalize_cycle, finalize);
+                try words.append(allocator, loadStack(.x10, drop.operand));
                 try words.append(allocator, load64(.x9, .x10, 0));
                 var finalized: std.ArrayList(usize) = .empty;
                 for (drop.plans) |plan| {
@@ -640,14 +808,33 @@ fn encodeFunction(
                         try words.append(allocator, branchLink());
                         try appendFixup(allocator, words, &fixups.epilogue, compareBranchNonZero(.x8), .imm19);
                     }
+                    try words.append(allocator, loadStack(.x0, drop.operand));
+                    try emitImmediate64(allocator, words, .x1, plan.byte_count);
+                    try Allocation.emitFree(allocator, words, external_call_sites, @enumFromInt(@intFromEnum(platform)));
                     try finalized.append(allocator, words.items.len);
                     try words.append(allocator, branch());
                     try Fixups.patch19(words.items, skip, words.items.len);
                 }
+                const finalization_complete = words.items.len;
+                for (finalized.items) |at| try Fixups.patch26(words.items, at, finalization_complete);
+                if (platform == .darwin and enable_cycle_collector) {
+                    try words.append(allocator, loadStack(.x1, cycle_context_slot));
+                    const no_context = words.items.len;
+                    try words.append(allocator, compareBranchZero64(.x1));
+                    try words.append(allocator, moveWideZero64(.x0, 1, 0));
+                    try words.append(allocator, moveWideZero32(.x2, 0));
+                    try words.append(allocator, moveWideZero32(.x3, 0));
+                    const finish_call = words.items.len;
+                    try words.append(allocator, branchLink());
+                    try cycle_calls.append(allocator, .{ .call_at = finish_call });
+                    try Fixups.patch19(words.items, no_context, words.items.len);
+                }
                 const done = words.items.len;
-                for (finalized.items) |at| try Fixups.patch26(words.items, at, done);
-                try Fixups.patch19(words.items, skip_finalization.still_referenced, done);
+                try Fixups.patch19(words.items, skip_finalization.cycle_candidate, cycle_prepare);
+                try Fixups.patch19(words.items, skip_finalization.rooted, done);
                 try Fixups.patch19(words.items, skip_finalization.already_dropped, done);
+                if (cycle_unavailable) |at| try Fixups.patch19(words.items, at, done);
+                if (cycle_claimed) |at| try Fixups.patch19(words.items, at, done);
             },
             .list_retain => |retain| try ListRuntime.emitRetain(allocator, words, retain),
             .list_drop => |drop| try ListRuntime.emitDrop(
@@ -658,6 +845,14 @@ fn encodeFunction(
                     .darwin => .darwin,
                     .windows => .windows,
                 },
+                drop,
+            ),
+            .string_retain => |retain| try StringRuntime.emitRetain(allocator, words, retain),
+            .string_drop => |drop| try StringRuntime.emitDrop(
+                allocator,
+                words,
+                external_call_sites,
+                @enumFromInt(@intFromEnum(platform)),
                 drop,
             ),
             .list_init => |initialization| try ListRuntime.emitInit(allocator, words, &fixups.epilogue, external_call_sites, @enumFromInt(@intFromEnum(platform)), initialization),
@@ -736,6 +931,7 @@ fn encodeFunction(
             ),
             .string_concat => |concat| try StringRuntime.emitConcat(allocator, words, &fixups.epilogue, external_call_sites, @enumFromInt(@intFromEnum(platform)), concat),
             .string_count => |count| try StringRuntime.emitCount(allocator, words, count),
+            .string_byte_count => |count| try StringRuntime.emitByteCount(allocator, words, count),
             .string_byte_at => |access| {
                 try words.append(allocator, loadStack(.x9, access.operand));
                 try words.append(allocator, addSubtractImmediate(.x9, .x9, 8, true));
@@ -917,7 +1113,7 @@ fn encodeFunction(
     try words.append(allocator, branch());
 
     const epilogue_label = words.items.len;
-    try emitStackAdjustment(allocator, words, function.frame_size, true);
+    try emitStackAdjustment(allocator, words, encoded_frame_size, true);
     try words.append(allocator, restoreFrame());
     try words.append(allocator, returnInstruction());
 

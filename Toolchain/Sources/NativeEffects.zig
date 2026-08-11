@@ -76,6 +76,28 @@ test "native recursive copy preserves detached graph topology" {
     try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
 }
 
+test "native class heap crosses allocation segments without corrupting objects" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const source =
+        \\class Box { public let value:int }
+        \\func main() {
+        \\    var index = 0
+        \\    while index < 2000 {
+        \\        var box = Box(value:index)
+        \\        if index == 1999 { print(box.value) }
+        \\        index++
+        \\    }
+        \\}
+    ;
+    const result = try compileAndRun(allocator, source);
+    try std.testing.expectEqual(@as(u8, 0), exitCode(result));
+    try std.testing.expectEqualStrings("1999\n", result.stdout);
+    try std.testing.expectEqualStrings("", result.stderr);
+}
+
 test "native effects match the reference output" {
     if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
@@ -1476,6 +1498,63 @@ test "native returned class collections survive for binding copies" {
     const native = try compileAndRun(allocator, source);
     try std.testing.expectEqual(reference.exit_code, exitCode(native));
     try std.testing.expectEqualSlices(u8, reference.stdout, native.stdout);
+    try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
+}
+
+test "native class cycles finalize once across direct list and protocol edges" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const source =
+        \\class DirectNode {
+        \\    public let name:str
+        \\    public var next:DirectNode? = null
+        \\    drop { print("direct ", self.name) }
+        \\}
+        \\class CollectionNode {
+        \\    public let name:str
+        \\    public var links:CollectionNode[]
+        \\    public init(name:str) { self.name = name; self.links = [] }
+        \\    drop { print("collection ", self.name) }
+        \\}
+        \\protocol Link { func label() str }
+        \\class ProtocolNode : Link {
+        \\    public let name:str
+        \\    public var next:Link? = null
+        \\    public func label() str { return self.name }
+        \\    drop { print("protocol ", self.name) }
+        \\}
+        \\func direct_cycle() {
+        \\    var first = DirectNode(name:"first")
+        \\    var second = DirectNode(name:"second")
+        \\    first.next = second
+        \\    second.next = first
+        \\}
+        \\func collection_cycle() {
+        \\    var first = CollectionNode("first")
+        \\    var second = CollectionNode("second")
+        \\    first.links.append(second)
+        \\    second.links.append(first)
+        \\}
+        \\func protocol_cycle() {
+        \\    var first = ProtocolNode(name:"first")
+        \\    var second = ProtocolNode(name:"second")
+        \\    first.next = second
+        \\    second.next = first
+        \\}
+        \\func main() { direct_cycle(); collection_cycle(); protocol_cycle() }
+    ;
+    var frontend = Frontend.Frontend.init(allocator);
+    const reference = try Interpreter.runCapture(allocator, (try frontend.compile(source)).ir);
+    const native = try compileAndRun(allocator, source);
+    try std.testing.expectEqual(@as(u8, 0), exitCode(native));
+    try std.testing.expectEqual(reference.exit_code, exitCode(native));
+    try std.testing.expectEqualSlices(u8, reference.stdout, native.stdout);
+    try std.testing.expectEqualStrings(
+        "direct first\ndirect second\ncollection first\ncollection second\nprotocol first\nprotocol second\n",
+        native.stdout,
+    );
     try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
 }
 

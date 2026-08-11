@@ -212,6 +212,18 @@ test "constructed values transfer nested class roots through bindings returns an
     try std.testing.expectEqualStrings("alive owned\ndrop owned\n", output);
 }
 
+test "conditional binding consumes a transferred optional class root" {
+    const output = try run(
+        \\class Token { drop { print("drop") } }
+        \\func create() Token? { return Token() }
+        \\func main() {
+        \\    if var token = create() { print(token == token) }
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("true\ndrop\n", output);
+}
+
 test "class visibility closes construction and private state" {
     try expectCompileError(
         "class Vault { init() {} } func main() { var value = Vault() }",
@@ -605,7 +617,7 @@ test "class drop follows the dynamic type after an upcast" {
     try std.testing.expectEqualStrings("child\nbase\n", output);
 }
 
-test "class cycles finalize once while their graph is readable" {
+test "last released root finalizes its unreachable cycle once while the graph is readable" {
     const output = try run(
         \\class Node {
         \\    public let name:str
@@ -620,5 +632,44 @@ test "class cycles finalize once while their graph is readable" {
         \\}
     );
     defer std.testing.allocator.free(output);
-    try std.testing.expectEqualStrings("drop second linked=true\ndrop first linked=true\n", output);
+    try std.testing.expectEqualStrings("drop first linked=true\ndrop second linked=true\n", output);
+}
+
+test "unreachable cycles crossing dynamic collections finalize every class once" {
+    const output = try run(
+        \\class Node {
+        \\    public let name:str
+        \\    public var links:Node[]
+        \\    public init(name:str) { self.name = name; self.links = [] }
+        \\    drop { print("drop ", self.name, " links=", self.links.count()) }
+        \\}
+        \\func main() {
+        \\    var first = Node("first")
+        \\    var second = Node("second")
+        \\    first.links.append(second)
+        \\    second.links.append(first)
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("drop first links=1\ndrop second links=1\n", output);
+}
+
+test "unreachable cycles crossing protocol values finalize every class once" {
+    const output = try run(
+        \\protocol Link { func label() str }
+        \\class Node : Link {
+        \\    public let name:str
+        \\    public var next:Link? = null
+        \\    public func label() str { return self.name }
+        \\    drop { print("drop ", self.name) }
+        \\}
+        \\func main() {
+        \\    var first = Node(name:"first")
+        \\    var second = Node(name:"second")
+        \\    first.next = second
+        \\    second.next = first
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("drop first\ndrop second\n", output);
 }

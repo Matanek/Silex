@@ -1,0 +1,57 @@
+protocol Link {}
+
+class Node:Link {
+    var label:str
+    var next:Node?
+    var links:Link[]
+
+    public init(label:str) {
+        self.label = label
+        self.next = null
+        self.links = []
+    }
+
+    public func connect(other:Node) {
+        self.next = other
+        self.links.append(other)
+    }
+
+    public func close_cycle() { self.links.append(self) }
+}
+
+struct Payload {
+    let name:str
+    let values:int[]
+    var owner:Node
+}
+
+class MinimalNode {
+    var next:MinimalNode?
+
+    public init() { self.next = null }
+    public func connect(other:MinimalNode) { self.next = other }
+}
+
+func exercise(index:int) {
+    var minimal_first = MinimalNode()
+    var minimal_second = MinimalNode()
+    minimal_first.connect(minimal_second)
+    minimal_second.connect(minimal_first)
+
+    var first = Node("first-$(index)")
+    var second = Node("second-$(index)")
+    first.connect(second)
+    second.connect(first)
+    first.close_cycle()
+    second.close_cycle()
+    var values:int[] = []
+    for value in 0...32 { values.append(index + value) }
+    var payload = Payload(name:"payload-$(index)", values:values, owner:first)
+    var detached = copy payload
+    if detached.values.count() != 32 { panic("invalid detached copy") }
+}
+
+func main() {
+    for index in 0...20000 { exercise(index) }
+    print("memory stress complete")
+}

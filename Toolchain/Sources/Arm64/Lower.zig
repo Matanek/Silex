@@ -300,10 +300,13 @@ fn lowerInstruction(
         else
             lowerCopy(layout.values[copy.result], layout.values[copy.operand]),
         .class_cast => |cast| lowerCopy(layout.values[cast.result], layout.values[cast.operand]),
-        .class_retain => |retain| .{ .class_retain = .{ .operand = layout.values[retain.operand].start } },
-        .list_retain => |retain| .{ .list_retain = .{ .operand = layout.values[retain.operand].start } },
+        .class_retain => |retain| .{ .class_retain = .{ .operand = layout.values[retain.operand].start, .ownership = retain.ownership } },
+        .list_retain => |retain| .{ .list_retain = .{ .operand = layout.values[retain.operand].start, .ownership = retain.ownership } },
+        .string_retain => |retain| .{ .string_retain = .{ .operand = layout.values[retain.operand].start, .ownership = retain.ownership } },
+        .string_drop => |drop| .{ .string_drop = .{ .operand = layout.values[drop.operand].start, .ownership = drop.ownership } },
         .list_drop => |drop| .{ .list_drop = .{
             .operand = layout.values[drop.operand].start,
+            .ownership = drop.ownership,
             .deallocate = drop.deallocate,
         } },
         .class_drop => |drop| finalize: {
@@ -311,9 +314,13 @@ fn lowerInstruction(
             for (drop.plans, 0..) |plan, plan_index| {
                 const functions = try allocator.alloc(usize, plan.functions.len);
                 for (plan.functions, 0..) |finalizer, index| functions[index] = finalizer.function;
-                plans[plan_index] = .{ .structure = plan.structure, .functions = functions };
+                plans[plan_index] = .{
+                    .structure = plan.structure,
+                    .byte_count = (try leafCount(program, .structure(plan.structure)) + 4) * Machine.slot_size,
+                    .functions = functions,
+                };
             }
-            break :finalize .{ .class_drop = .{ .operand = layout.values[drop.operand].start, .plans = plans } };
+            break :finalize .{ .class_drop = .{ .operand = layout.values[drop.operand].start, .ownership = drop.ownership, .static_type = drop.static_type, .plans = plans } };
         },
         .global_load => |load| .{ .global_load = .{ .result = layout.values[load.result], .global = load.global } },
         .global_store => |store| .{ .global_store = .{ .operand = layout.values[store.operand], .global = store.global } },
@@ -411,6 +418,7 @@ fn lowerInstruction(
                 .collection = layout.values[replacement.collection],
                 .index = layout.values[replacement.index].start,
                 .replacement = layout.values[replacement.replacement],
+                .ownership = replacement.ownership,
                 .count = count,
                 .dynamic = collection.length == null,
                 .view = collection.view,
@@ -429,6 +437,7 @@ fn lowerInstruction(
             break :edit_value .{ .list_edit = .{
                 .result = layout.values[edit.result].start,
                 .collection = layout.values[edit.collection].start,
+                .ownership = edit.ownership,
                 .kind = edit.kind,
                 .index = if (edit.index) |index| layout.values[index].start else null,
                 .argument = if (edit.argument) |argument| layout.values[argument] else null,
@@ -473,9 +482,9 @@ fn lowerInstruction(
             .reference = layout.values[address.operand].start,
             .byte_offset = 8,
         } },
-        .string_byte_count => |count| .{ .reference_load = .{
-            .result = layout.values[count.result],
-            .reference = layout.values[count.operand].start,
+        .string_byte_count => |count| .{ .string_byte_count = .{
+            .result = layout.values[count.result].start,
+            .operand = layout.values[count.operand].start,
         } },
         .string_byte_at => |access| .{ .string_byte_at = .{
             .result = layout.values[access.result].start,
@@ -564,7 +573,7 @@ fn lowerInstruction(
             const value: Machine.Instruction.ReferenceOffset = .{
                 .result = layout.values[field.result].start,
                 .reference = layout.values[field.reference].start,
-                .byte_offset = @intCast((try fieldOffset(program, field.structure, field.field) + @as(usize, if (is_class) 3 else 0)) * Machine.slot_size),
+                .byte_offset = @intCast((try fieldOffset(program, field.structure, field.field) + @as(usize, if (is_class) 4 else 0)) * Machine.slot_size),
             };
             break :reference_field if (is_class)
                 .{ .reference_indirect_offset = value }
@@ -1042,7 +1051,29 @@ fn appendEqualityLeaves(
     };
     if (structure_index >= program.structures.len) return error.InvalidMachineProgram;
     const structure = program.structures[structure_index];
-    if (structure.is_protocol) return error.UnsupportedType;
+    if (structure.is_protocol) {
+        const start = offset.*;
+        const tag_offset = try Machine.checkedSlot(start);
+        try result.append(allocator, .{ .offset = tag_offset, .type = .uint, .guards = guards });
+        for (program.structures, 0..) |candidate, candidate_index| {
+            if (candidate.is_protocol or !irConforms(program, candidate_index, structure_index)) continue;
+            var payload_offset = start + 1;
+            const active = try appendEqualityGuard(allocator, guards, .{
+                .offset = tag_offset,
+                .expected = candidate_index,
+            });
+            try appendEqualityLeaves(
+                allocator,
+                program,
+                .structure(candidate_index),
+                active,
+                &payload_offset,
+                result,
+            );
+        }
+        offset.* = start + try leafCount(program, type_value);
+        return;
+    }
     if (structure.is_class) {
         try result.append(allocator, .{
             .offset = try Machine.checkedSlot(offset.*),

@@ -33,7 +33,10 @@ pub fn analyzeNull(
     if (type_value.optionalChild() == null) return self.fail(position, "'null' requires an expected optional type");
     const result = try self.newValue(builder, type_value);
     try self.emit(builder, .{ .optional_null = .{ .result = result } });
-    return .{ .type = type_value, .value = result };
+    // An absent optional owns no payload. Treating it as a transferred value
+    // prevents callers from generating a full recursive retain graph for a
+    // value that is known to be empty.
+    return .{ .type = type_value, .value = result, .transferred = true };
 }
 
 pub fn promote(
@@ -45,14 +48,20 @@ pub fn promote(
     if (target.optionalChild() != value.type) return null;
     const result = try self.newValue(builder, target);
     try self.emit(builder, .{ .optional_some = .{ .result = result, .operand = value.value } });
-    return .{ .type = target, .value = result, .borrowed_root = value.borrowed_root, .borrowed_mode = value.borrowed_mode };
+    return .{
+        .type = target,
+        .value = result,
+        .transferred = value.transferred,
+        .borrowed_root = value.borrowed_root,
+        .borrowed_mode = value.borrowed_mode,
+    };
 }
 
 pub fn intrinsic(self: anytype, builder: anytype, type_value: Types.Type) !?Model.TypedValue {
     if (type_value.optionalChild() == null) return null;
     const result = try self.newValue(builder, type_value);
     try self.emit(builder, .{ .optional_null = .{ .result = result } });
-    return .{ .type = type_value, .value = result };
+    return .{ .type = type_value, .value = result, .transferred = true };
 }
 
 pub fn emitPresence(self: anytype, builder: anytype, source: Model.TypedValue) !Model.TypedValue {
@@ -72,7 +81,13 @@ pub fn unwrap(self: anytype, builder: anytype, source: Model.TypedValue) !Model.
     const child = source.type.optionalChild() orelse return error.InvalidSource;
     const result = try self.newValue(builder, child);
     try self.emit(builder, .{ .optional_unwrap = .{ .result = result, .operand = source.value } });
-    return .{ .type = child, .value = result, .borrowed_root = source.borrowed_root, .borrowed_mode = source.borrowed_mode };
+    return .{
+        .type = child,
+        .value = result,
+        .transferred = source.transferred,
+        .borrowed_root = source.borrowed_root,
+        .borrowed_mode = source.borrowed_mode,
+    };
 }
 
 pub fn conversionCost(source: Types.Type, target: Types.Type) ?u8 {

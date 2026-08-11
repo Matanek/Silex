@@ -1,0 +1,59 @@
+struct Ledger {
+    var values:int[]
+
+    public init() {
+        self.values = []
+    }
+
+    public func append(value:int) {
+        self.values.append(value)
+    }
+
+    public func count() int {
+        return self.values.count()
+    }
+
+    public func last() int {
+        return self.values[self.values.count() - 1]
+    }
+}
+
+class LedgerOwner {
+    public var ledger:Ledger
+
+    public init() {
+        self.ledger = Ledger()
+    }
+
+    public func append_by_method(value:int) {
+        self.ledger.append(value)
+    }
+
+    public func count() int {
+        return self.ledger.count()
+    }
+
+    public func last() int {
+        return self.ledger.last()
+    }
+}
+
+func append_to(ledger:&Ledger, value:int) {
+    ledger.append(value)
+}
+
+func append_owner_by_reference(owner:&LedgerOwner, value:int) {
+    append_to(owner.ledger, value)
+}
+
+test "mutating a nested structure preserves its owning class identity" {
+    var owner = LedgerOwner()
+    var alias = owner
+    for value in 0...1000 {
+        if value % 2 == 0 { owner.append_by_method(value) }
+        else { append_owner_by_reference(owner, value) }
+    }
+    assert(alias.count() == 1000)
+    assert(alias.last() == 999)
+    assert(owner.count() == alias.count())
+}

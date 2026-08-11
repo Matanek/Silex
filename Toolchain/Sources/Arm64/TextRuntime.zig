@@ -10,6 +10,8 @@ const Register = A64.Register;
 pub const Error = Machine.Error || Allocator.Error || Fixups.Error;
 
 const descriptor_header_size = 8;
+const dynamic_prefix_size = 16;
+const dynamic_flag: u64 = 1 << 63;
 const integer_scratch_size = 64;
 const float_scratch_size = 384;
 const float_output_offset = 16;
@@ -160,7 +162,12 @@ fn allocateDescriptor(
 ) Error!void {
     try words.append(allocator, A64.store64(.x11, .zero_or_sp, 0));
     try words.append(allocator, A64.store64(.x12, .zero_or_sp, 8));
-    try words.append(allocator, A64.addSubtractImmediate(.x1, .x12, descriptor_header_size, true));
+    try words.append(allocator, A64.addSubtractImmediate(
+        .x1,
+        .x12,
+        descriptor_header_size + dynamic_prefix_size,
+        true,
+    ));
     try words.append(allocator, A64.moveWideZero32(.x0, 0));
     try words.append(allocator, A64.moveWideZero32(.x2, protection_read_write));
     try words.append(allocator, A64.moveWideZero32(.x3, map_private_anonymous));
@@ -174,7 +181,19 @@ fn allocateDescriptor(
     try words.append(allocator, A64.moveRegister(.x15, .x0));
     try words.append(allocator, A64.load64(.x11, .zero_or_sp, 0));
     try words.append(allocator, A64.load64(.x12, .zero_or_sp, 8));
-    try words.append(allocator, A64.store64(.x12, .x15, 0));
+    try words.append(allocator, A64.moveWideZero32(.x9, 1));
+    try words.append(allocator, A64.store64(.x9, .x15, 0));
+    try words.append(allocator, A64.addSubtractImmediate(
+        .x9,
+        .x12,
+        descriptor_header_size + dynamic_prefix_size,
+        true,
+    ));
+    try words.append(allocator, A64.store64(.x9, .x15, 8));
+    try words.append(allocator, A64.addSubtractImmediate(.x15, .x15, dynamic_prefix_size, true));
+    try emitImmediate64(allocator, words, .x9, dynamic_flag);
+    try words.append(allocator, A64.addRegisters(.x9, .x12, .x9));
+    try words.append(allocator, A64.store64(.x9, .x15, 0));
     try words.append(allocator, A64.addSubtractImmediate(.x13, .x15, descriptor_header_size, true));
     try emitCopy(allocator, words, .x12, .x11, .x13);
     try words.append(allocator, A64.addSubtractImmediate(.zero_or_sp, .zero_or_sp, scratch_size, true));

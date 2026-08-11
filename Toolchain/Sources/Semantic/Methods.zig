@@ -7,6 +7,7 @@ const Numeric = @import("../Numeric.zig");
 const Support = @import("Support.zig");
 const Optionals = @import("Optionals.zig");
 const Control = @import("Control.zig");
+const Availability = @import("Availability.zig");
 const Borrowing = @import("Borrowing.zig");
 const MutableReferences = @import("MutableReferences.zig");
 const Resources = @import("Resources.zig");
@@ -522,7 +523,7 @@ fn analyzeCallWithReceiver(
         }
         if (parameter.mode != .read) try Borrowing.requireOwned(self, argument, call.arguments[index].position, "passed by value");
         const converted = try self.coerce(builder, argument, parameter.type, call.arguments[index].position);
-        if (parameter.mode == .value and Resources.requiresRetain(self, parameter.type)) {
+        if (parameter.mode == .value and Resources.requiresRetain(self, parameter.type) and !converted.transferred) {
             try Resources.retainValue(self, builder, parameter.type, converted.value);
         }
         try argument_ids.append(self.allocator, converted.value);
@@ -557,9 +558,6 @@ fn analyzeCallWithReceiver(
         .implementations = implementations,
     } });
     for (mutable_arguments.items) |prepared| try MutableReferences.writeBack(self, builder, prepared);
-    for (arguments.items) |argument| if (argument.transferred and Resources.requiresRetain(self, argument.type)) {
-        try Resources.emitDrop(self, builder, argument.type, argument.value);
-    };
     if (receiver.transferred and Resources.requiresRetain(self, receiver.type)) {
         try Resources.emitDrop(self, builder, receiver.type, receiver.value);
     }
@@ -577,7 +575,7 @@ fn analyzeCallWithReceiver(
             .value = value,
             .borrowed_root = if (method.return_mode == .read) receiver.borrowed_root orelse Borrowing.rootName(receiver_expression) else null,
             .borrowed_mode = method.return_mode,
-            .transferred = method.return_mode == .value and Resources.requiresRetain(self, method.return_type),
+            .transferred = method.return_mode == .value and Resources.ownsValue(self, method.return_type),
         };
         return null;
     }
@@ -604,7 +602,7 @@ fn analyzeCallWithReceiver(
         return .{
             .type = method.return_type,
             .value = value,
-            .transferred = Resources.requiresRetain(self, method.return_type) or if (method.intrinsic) |intrinsic| switch (intrinsic) {
+            .transferred = Resources.ownsValue(self, method.return_type) or if (method.intrinsic) |intrinsic| switch (intrinsic) {
                 .resource_remove => true,
                 else => false,
             } else false,
@@ -622,7 +620,7 @@ fn analyzeCallWithReceiver(
     return .{
         .type = method.return_type,
         .value = value,
-        .transferred = Resources.requiresRetain(self, method.return_type),
+        .transferred = Resources.ownsValue(self, method.return_type),
     };
 }
 
@@ -745,7 +743,9 @@ fn analyzeNamedCall(
         }
         if (parameter.mode != .read) try Borrowing.requireOwned(self, argument, source.position, "passed by value");
         const converted = try self.coerce(builder, argument, parameter.type, source.position);
-        if (parameter.mode == .value and Resources.requiresRetain(self, parameter.type)) try Resources.retainValue(self, builder, parameter.type, converted.value);
+        if (parameter.mode == .value and Resources.requiresRetain(self, parameter.type) and !converted.transferred) {
+            try Resources.retainValue(self, builder, parameter.type, converted.value);
+        }
         try ids.append(self.allocator, converted.value);
     }
     const ir_return_type = methodIrReturnType(self, structure_index, flat, method);
@@ -771,11 +771,6 @@ fn analyzeNamedCall(
         .implementations = implementations,
     } });
     for (mutable_arguments.items) |prepared| try MutableReferences.writeBack(self, builder, prepared);
-    for (typed) |maybe_argument| if (maybe_argument) |argument| {
-        if (argument.transferred and Resources.requiresRetain(self, argument.type)) {
-            try Resources.emitDrop(self, builder, argument.type, argument.value);
-        }
-    };
     if (receiver.transferred and Resources.requiresRetain(self, receiver.type)) try Resources.emitDrop(self, builder, receiver.type, receiver.value);
     if (borrowed_mutable) {
         try MutableReferences.writeBack(self, builder, borrowed_receiver.?);
@@ -790,7 +785,7 @@ fn analyzeNamedCall(
             .value = value,
             .borrowed_root = if (method.return_mode == .read) receiver.borrowed_root orelse Borrowing.rootName(receiver_expression) else null,
             .borrowed_mode = method.return_mode,
-            .transferred = method.return_mode == .value and Resources.requiresRetain(self, method.return_type),
+            .transferred = method.return_mode == .value and Resources.ownsValue(self, method.return_type),
         };
         return null;
     }
@@ -814,7 +809,7 @@ fn analyzeNamedCall(
         }
         const value = try self.newValue(builder, method.return_type);
         try self.emit(builder, .{ .field_load = .{ .result = value, .base = call_result.?, .field = 1 } });
-        return .{ .type = method.return_type, .value = value, .transferred = Resources.requiresRetain(self, method.return_type) };
+        return .{ .type = method.return_type, .value = value, .transferred = Resources.ownsValue(self, method.return_type) };
     }
     const updated_receiver = try self.newValue(builder, receiver.type);
     try self.emit(builder, .{ .field_load = .{ .result = updated_receiver, .base = call_result.?, .field = 0 } });
@@ -825,7 +820,7 @@ fn analyzeNamedCall(
     try writePlace(self, builder, place.?, replacement);
     const value = try self.newValue(builder, method.return_type);
     try self.emit(builder, .{ .field_load = .{ .result = value, .base = call_result.?, .field = 1 } });
-    return .{ .type = method.return_type, .value = value, .transferred = Resources.requiresRetain(self, method.return_type) };
+    return .{ .type = method.return_type, .value = value, .transferred = Resources.ownsValue(self, method.return_type) };
 }
 
 fn failArgumentProblem(self: anytype, call: Ast.Expression.Call, problem: Arguments.Problem) !void {
@@ -1052,6 +1047,17 @@ fn writePlace(self: anytype, builder: anytype, place: Place, replacement_value: 
         path_index -= 1;
         const structure_index = structure_indices[path_index];
         const structure = self.structures[structure_index];
+        if (structure.is_class) {
+            const result = try self.newValue(builder, .structure(structure_index));
+            try self.emit(builder, .{ .field_store = .{
+                .result = result,
+                .base = bases[path_index],
+                .field = place.fields[path_index],
+                .replacement = replacement,
+            } });
+            replacement = result;
+            continue;
+        }
         const fields = try self.allocator.alloc(Ir.ValueId, structure.fields.len);
         for (structure.fields, 0..) |field, field_index| {
             if (field_index == place.fields[path_index]) {
@@ -1102,7 +1108,7 @@ fn analyzeMutatingStatements(
                     const message = try std.fmt.allocPrint(self.allocator, "expected return value of type '{s}'", .{self.typeName(method.return_type)});
                     return self.fail(return_statement.position, message);
                 }
-                try emitMutatingReturn(self, builder, structure_index, flat, self_local, method, if (value) |typed| typed.value else null);
+                try emitMutatingReturn(self, builder, structure_index, flat, self_local, method, value);
                 break :returned true;
             },
             .if_statement => |conditional| try analyzeMutatingIf(self, builder, method, structure_index, flat, self_local, conditional),
@@ -1215,27 +1221,41 @@ fn analyzeMutatingWhile(
     self_local: Ir.LocalId,
     loop: Ast.WhileStatement,
 ) AnalyzeError!bool {
+    const availability_count = builder.bindings.items.len;
+    const header_availability = try Availability.snapshot(self.allocator, builder.bindings.items, availability_count);
     const condition_block = try self.newBlock(builder);
     const body_block = try self.newBlock(builder);
     const exit_block = try self.newBlock(builder);
     self.terminate(builder, .{ .jump = condition_block });
     builder.current_block = condition_block;
     const analyzed = try Control.analyzeCondition(self, builder, loop.condition, "while");
+    const false_availability = try Availability.snapshot(self.allocator, builder.bindings.items, availability_count);
     self.terminate(builder, .{ .branch = .{ .condition = analyzed.condition.value, .then_block = body_block, .else_block = exit_block } });
     builder.current_block = body_block;
     try builder.loops.append(self.allocator, .{
         .continue_block = condition_block,
         .break_block = exit_block,
+        .availability_count = availability_count,
+        .drop_binding_count = availability_count,
+        .header_availability = header_availability,
         .mutex_depth = builder.mutex_depth,
     });
+    const loop_index = builder.loops.items.len - 1;
     const binding_count = builder.bindings.items.len;
     if (analyzed.binding) |binding| try Control.enterBinding(self, builder, binding);
     const terminated = try analyzeMutatingStatements(self, builder, method, structure_index, flat, self_local, loop.statements);
     if (!terminated) try Resources.emitActiveDrops(self, builder, binding_count);
     builder.bindings.shrinkRetainingCapacity(binding_count);
+    const loop_context = builder.loops.items[loop_index];
     builder.loops.items.len -= 1;
-    if (!terminated) self.terminate(builder, .{ .jump = condition_block });
+    if (!terminated) {
+        try Availability.requireHeader(self, builder.bindings.items, header_availability, loop.position);
+        self.terminate(builder, .{ .jump = condition_block });
+    }
     builder.current_block = exit_block;
+    const exit_availability = try self.allocator.dupe(bool, false_availability);
+    for (loop_context.break_availabilities.items) |state| Availability.merge(exit_availability, state);
+    Availability.restore(builder.bindings.items, exit_availability);
     return false;
 }
 
@@ -1246,13 +1266,13 @@ fn emitMutatingReturn(
     flat: usize,
     self_local: Ir.LocalId,
     method: Ast.Function,
-    value: ?Ir.ValueId,
+    value: ?Model.TypedValue,
 ) !void {
+    if (value) |returned| if (Resources.requiresRetain(self, method.return_type) and !returned.transferred) {
+        try Resources.retainValue(self, builder, method.return_type, returned.value);
+    };
     try Resources.emitActiveDrops(self, builder, 0);
     try Resources.emitMutexUnlocks(self, builder, 0);
-    if (value) |returned| if (Resources.requiresRetain(self, method.return_type)) {
-        try Resources.retainValue(self, builder, method.return_type, returned);
-    };
     const receiver_type = Ast.Type.structure(structure_index);
     const receiver = try self.newValue(builder, receiver_type);
     try self.emit(builder, .{ .local_load = .{ .result = receiver, .local = self_local } });
@@ -1265,7 +1285,7 @@ fn emitMutatingReturn(
     try self.emit(builder, .{ .structure_init = .{
         .result = result,
         .structure = result_type.structureIndex().?,
-        .fields = try self.allocator.dupe(Ir.ValueId, &.{ receiver, value.? }),
+        .fields = try self.allocator.dupe(Ir.ValueId, &.{ receiver, value.?.value }),
     } });
     self.terminate(builder, .{ .return_value = result });
 }

@@ -41,6 +41,9 @@ pub fn analyze(self: anytype, builder: anytype, match_value: Ast.Expression.Matc
             result_type = branch_value.type;
             result = try self.newValue(builder, branch_value.type);
         }
+        if (Resources.requiresRetain(self, branch_value.type) and !branch_value.transferred) {
+            try Resources.retainValue(self, builder, branch_value.type, branch_value.value);
+        }
         try self.emit(builder, .{ .copy = .{ .result = result.?, .operand = branch_value.value } });
         try Resources.emitActiveDrops(self, builder, binding_count);
         try exit_availabilities.append(self.allocator, try Availability.snapshot(self.allocator, builder.bindings.items, availability_count));
@@ -50,7 +53,11 @@ pub fn analyze(self: anytype, builder: anytype, match_value: Ast.Expression.Matc
     for (exit_availabilities.items[1..]) |state| Availability.merge(merged_availability, state);
     Availability.restore(builder.bindings.items, merged_availability);
     builder.current_block = prepared.merge_block;
-    return .{ .type = result_type.?, .value = result.? };
+    return .{
+        .type = result_type.?,
+        .value = result.?,
+        .transferred = Resources.ownsValue(self, result_type.?),
+    };
 }
 
 pub fn analyzeStatement(
@@ -229,10 +236,18 @@ fn bindBranch(
             .index = payload_index,
         } });
         if (binding.mutable) {
+            if (!prepared.subject.transferred and Resources.requiresRetain(self, binding_type)) {
+                try Resources.retainValue(self, builder, binding_type, payload);
+            }
             const local = builder.local_types.items.len;
             try builder.local_types.append(self.allocator, binding_type);
             try self.emit(builder, .{ .local_store = .{ .local = local, .operand = payload } });
             try builder.bindings.append(self.allocator, .{ .name = binding.name, .type = binding_type, .local = local, .mutable = true });
-        } else try builder.bindings.append(self.allocator, .{ .name = binding.name, .type = binding_type, .value = payload });
+        } else {
+            if (!prepared.subject.transferred and Resources.requiresRetain(self, binding_type)) {
+                try Resources.retainValue(self, builder, binding_type, payload);
+            }
+            try builder.bindings.append(self.allocator, .{ .name = binding.name, .type = binding_type, .value = payload });
+        }
     }
 }
