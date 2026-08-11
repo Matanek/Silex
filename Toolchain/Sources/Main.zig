@@ -1180,7 +1180,7 @@ fn globalPackagesRoot(
     allocator: std.mem.Allocator,
     environment: *const std.process.Environ.Map,
 ) !?[]const u8 {
-    const home = environment.get("HOME") orelse return null;
+    const home = environment.get("HOME") orelse environment.get("USERPROFILE") orelse return null;
     return try std.fs.path.join(allocator, &.{ home, ".silex", "packages" });
 }
 

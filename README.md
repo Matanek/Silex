@@ -18,11 +18,18 @@ for the current compilation path and its limits.
 
 ## Install
 
-The standalone compiler currently supports macOS on Apple Silicon and does not
-require Zig on the developer's machine:
+The standalone compiler supports macOS on Apple Silicon and Linux x64 without
+requiring Zig or Git on the developer's machine:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/Matanek/Silex/main/install.sh | sh
+silex --version
+```
+
+On Windows x64, run from PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/Matanek/Silex/main/install.ps1 | iex
 silex --version
 ```
 
@@ -82,7 +89,7 @@ The interpreter intentionally supports only the few platform boundaries it can
 model without reproducing an operating-system runtime. Use `run` for ordinary
 programs that depend on STD interop.
 
-## Compile for Apple Silicon macOS
+## Compile a native program
 
 ```sh
 cd Toolchain
@@ -132,8 +139,9 @@ The report checks observable output first, then records compiler versions,
 binary sizes, compilation times, and execution times under
 `.zig-cache/benchmark-native/`.
 
-The native path emits ARM64 instructions and the Mach-O executable container.
-It invokes no C/C++ generator, external assembler, or linker.
+The native path emits the selected platform's machine instructions and Mach-O,
+ELF, or PE executable container. It invokes no C/C++ generator, external
+assembler, or linker.
 
 List the exact targets recognized by the current compiler with:
 

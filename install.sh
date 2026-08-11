@@ -6,10 +6,14 @@ silex_repository="Matanek/Silex"
 silex_system=$(uname -s)
 silex_machine=$(uname -m)
 
-if [ "$silex_system" != "Darwin" ] || [ "$silex_machine" != "arm64" ]; then
-    echo "silex: the published installer currently supports macOS on Apple Silicon" >&2
-    exit 1
-fi
+case "$silex_system:$silex_machine" in
+    Darwin:arm64) silex_platform="macos-arm64" ;;
+    Linux:x86_64|Linux:amd64) silex_platform="linux-x64" ;;
+    *)
+        echo "silex: unsupported host $silex_system $silex_machine; expected macOS ARM64 or Linux x64" >&2
+        exit 1
+        ;;
+esac
 
 if [ -z "${HOME:-}" ] && [ -z "${SILEX_INSTALL_DIR:-}" ]; then
     echo "silex: HOME is not set; set SILEX_INSTALL_DIR explicitly" >&2
@@ -18,7 +22,7 @@ fi
 
 silex_install_dir=${SILEX_INSTALL_DIR:-"$HOME/.local/bin"}
 silex_release=${SILEX_VERSION:-latest}
-silex_asset="silex-macos-arm64.tar.gz"
+silex_asset="silex-$silex_platform.tar.gz"
 silex_checksum="$silex_asset.sha256"
 
 if [ "$silex_release" = "latest" ]; then
@@ -40,13 +44,20 @@ curl -fL "$silex_release_url/$silex_checksum" -o "$silex_temporary/$silex_checks
 
 (
     cd "$silex_temporary"
-    shasum -a 256 -c "$silex_checksum"
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum -c "$silex_checksum"
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 -c "$silex_checksum"
+    else
+        echo "silex: sha256sum or shasum is required to verify the download" >&2
+        exit 1
+    fi
     tar -xzf "$silex_asset"
 )
 
 mkdir -p "$silex_install_dir"
 silex_staged="$silex_install_dir/.silex-install.$$"
-install -m 755 "$silex_temporary/silex-macos-arm64/bin/silex" "$silex_staged"
+install -m 755 "$silex_temporary/silex-$silex_platform/bin/silex" "$silex_staged"
 mv -f "$silex_staged" "$silex_install_dir/silex"
 silex_staged=""
 

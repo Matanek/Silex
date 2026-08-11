@@ -1,9 +1,10 @@
 # Install Silex
 
-The published compiler currently supports macOS on Apple Silicon. It is a
-standalone executable: using it does not require Zig or a source checkout.
+The published compiler supports macOS on Apple Silicon, Linux x64, and Windows
+x64. It is a standalone executable: using it does not require Zig, Git, or a
+source checkout.
 
-## User installation
+## macOS and Linux
 
 Inspect [`install.sh`](../install.sh), then run:
 
@@ -11,7 +12,7 @@ Inspect [`install.sh`](../install.sh), then run:
 curl -fsSL https://raw.githubusercontent.com/Matanek/Silex/main/install.sh | sh
 ```
 
-The installer downloads the latest `silex-macos-arm64` release, verifies its
+The installer selects `silex-macos-arm64` or `silex-linux-x64`, verifies its
 published SHA-256 checksum, and installs `silex` under `~/.local/bin`. Set an
 explicit destination when needed:
 
@@ -19,9 +20,33 @@ explicit destination when needed:
 SILEX_INSTALL_DIR="$HOME/bin" sh install.sh
 ```
 
+## Windows
+
+Inspect [`install.ps1`](../install.ps1), then run it from PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/Matanek/Silex/main/install.ps1 | iex
+```
+
+The installer downloads `silex-windows-x64`, verifies its published SHA-256
+checksum, and installs `silex.exe` under `%LOCALAPPDATA%\Silex\bin`. Select a
+different destination with the `SILEX_INSTALL_DIR` environment variable:
+
+```powershell
+$env:SILEX_INSTALL_DIR = "$HOME\bin"
+irm https://raw.githubusercontent.com/Matanek/Silex/main/install.ps1 | iex
+```
+
+The Windows executable is currently unsigned, so Windows may display a
+reputation warning. The checksum still detects a modified or incomplete
+download when compared with the file published by the release workflow.
+
+## Version and verification
+
 Set `SILEX_VERSION` to a published semantic version to install that release
-instead of the latest. An existing executable at the selected destination is
-replaced only after the new archive has been downloaded and verified.
+instead of the latest. On PowerShell, use `$env:SILEX_VERSION = "0.38.2"`.
+An existing executable at the selected destination is replaced only after the
+new archive has been downloaded and verified.
 
 Make sure the destination is on `PATH`, then verify the installation:
 
@@ -52,10 +77,12 @@ zig build
 ```
 
 The release workflow accepts a tag only when its version matches the toolchain
-manifest. It builds and smoke-tests the standalone executable before publishing
-the archive and its checksum.
+manifest. It builds each standalone executable on its native GitHub runner,
+then installs STD and executes a package-consuming Silex program before
+publishing the archives and their checksums.
 
 ## Remove Silex
 
 Remove the installed executable. User packages, compiler tools, and caches live
-separately under `~/.silex/` and can be retained for a later installation.
+separately under `~/.silex/` on Unix and `%USERPROFILE%\.silex\` on Windows;
+they can be retained for a later installation.
