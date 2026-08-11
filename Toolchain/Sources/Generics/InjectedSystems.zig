@@ -19,14 +19,18 @@ pub fn rewriteRegistration(self: anytype, call: *Ast.Expression.Call, locals: an
     if (!std.mem.eql(u8, receiver.name, application_name)) return false;
 
     const callback = call.arguments[1];
-    const callback_type = self.inferExpressionType(callback, locals) orelse {
+    var callback_type: ?Ast.Type = null;
+    if (callback.value == .identifier) {
+        callback_type = try self.inferConcreteFunctionType(callback.value.identifier);
+    }
+    if (callback_type == null) callback_type = self.inferExpressionType(callback, locals);
+    const concrete_callback_type = callback_type orelse
         return self.fail(callback.position, "system callback must be a named or captureless function");
-    };
-    const function_index = callback_type.functionIndex() orelse {
+    const function_index = concrete_callback_type.functionIndex() orelse {
         return self.fail(callback.position, "system callback must be a function");
     };
-    if (function_index >= self.source.function_types.len) return error.InvalidSource;
-    const signature = self.source.function_types[function_index];
+    if (function_index >= self.function_types.items.len) return error.InvalidSource;
+    const signature = self.function_types.items[function_index];
     if (signature.return_type != .void or signature.return_mode != .value) {
         const message = try std.fmt.allocPrint(
             self.allocator,

@@ -286,6 +286,46 @@ test "systems inject read and mutable resources while preserving legacy callback
     try std.testing.expectEqualStrings("4\nempty\ntrue\n42\n", result.stdout);
 }
 
+test "structure methods register system callbacks declared later in their module" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try prepare(&temporary);
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/Application.sx",
+        .data = resources_source ++
+            \\public class Application {
+            \\    private var store:Resources
+            \\    public init() { self.store = Resources() }
+            \\    public func resources() Resources { return self.store }
+            \\    public func add_system(schedule:int, callback:func(Application)) { callback(self) }
+            \\    public func add_system<System>(schedule:int, callback:System) { panic("unspecialized system") }
+            \\    public func add_after_system(schedule:int, callback:func(Application)) { callback(self) }
+            \\    public func add_after_system<System>(schedule:int, callback:System) { panic("unspecialized system") }
+            \\    internal func __silex_add_system(schedule:int, callback:func(Application, int), after:bool, reads:str[], writes:str[], flags:uint) { callback(self, 0) }
+            \\    public func run() { self.add_after_system(0, flush) }
+            \\    drop { self.store.clear() }
+            \\}
+            \\func flush() { print("flushed") }
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Smokes/Main.sx",
+        .data =
+        \\use GFX.Application
+        \\func main() { var application = Application(); application.run() }
+        ,
+    });
+
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(try inputPath(allocator, temporary));
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqual(@as(u8, 0), result.exit_code);
+    try std.testing.expectEqualStrings("flushed\n", result.stdout);
+}
+
 test "query iteration releases its compiler-owned component list on every exit" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

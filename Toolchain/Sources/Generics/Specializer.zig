@@ -112,15 +112,24 @@ pub const Specializer = struct {
             try self.rewriteStructureAt(structure_index, &.{}, null);
             try TypedResources.markConcreteMethods(self, structure_index);
         }
+
         for (program.functions) |function| {
-            if (function.type_parameters.len == 0) try self.functions.append(self.allocator, function);
+            if (function.type_parameters.len != 0) continue;
+            var present = false;
+            for (self.functions.items) |existing| {
+                if (samePosition(existing.name_position, function.name_position)) {
+                    present = true;
+                    break;
+                }
+            }
+            if (!present) try self.functions.append(self.allocator, function);
         }
 
         for (self.functions.items) |*function| {
             var locals: std.ArrayList(Binding) = .empty;
             function.parameters = try self.rewriteParameters(function.parameters, &.{}, &locals);
             function.return_type = try self.rewriteType(function.return_type, &.{}, function.name_position);
-            try self.internFunctionType(function.*);
+            _ = try self.internFunctionType(function.*);
         }
 
         var function_index: usize = 0;
@@ -144,7 +153,7 @@ pub const Specializer = struct {
         return result;
     }
 
-    fn internFunctionType(self: *Specializer, function: Ast.Function) Allocator.Error!void {
+    fn internFunctionType(self: *Specializer, function: Ast.Function) Allocator.Error!Ast.Type {
         const parameters = try self.allocator.alloc(Ast.FunctionType.ParameterType, function.parameters.len);
         for (function.parameters, 0..) |parameter, index| parameters[index] = .{
             .type = parameter.type,
@@ -155,8 +164,34 @@ pub const Specializer = struct {
             .return_type = function.return_type,
             .return_mode = function.return_mode,
         };
-        for (self.function_types.items) |existing| if (sameFunctionType(existing, candidate)) return;
+        for (self.function_types.items, 0..) |existing, index| {
+            if (sameFunctionType(existing, candidate)) return .function(index);
+        }
+        const index = self.function_types.items.len;
         try self.function_types.append(self.allocator, candidate);
+        return .function(index);
+    }
+
+    pub fn inferConcreteFunctionType(self: *Specializer, name: []const u8) SpecializeError!?Ast.Type {
+        var match: ?Ast.Function = null;
+        for (self.source.functions) |function| {
+            if (function.type_parameters.len != 0 or !functionNameMatches(function.name, name)) continue;
+            if (match != null) return null;
+            match = function;
+        }
+        var function = match orelse return null;
+        var present = false;
+        for (self.functions.items) |existing| {
+            if (samePosition(existing.name_position, function.name_position)) {
+                present = true;
+                break;
+            }
+        }
+        if (!present) try self.functions.append(self.allocator, function);
+        var locals: std.ArrayList(Binding) = .empty;
+        function.parameters = try self.rewriteParameters(function.parameters, &.{}, &locals);
+        function.return_type = try self.rewriteType(function.return_type, &.{}, function.name_position);
+        return try self.internFunctionType(function);
     }
 
     fn compactTypeNames(self: *Specializer) SpecializeError!void {
