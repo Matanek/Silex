@@ -39,6 +39,7 @@ jobs:
           mkdir -p "$HOME"
           curl -fsSL https://raw.githubusercontent.com/Matanek/Silex/main/install.sh | sh
           "$SILEX_INSTALL_DIR/silex" --version
+          "$SILEX_INSTALL_DIR/silex" setup
           "$SILEX_INSTALL_DIR/silex" install STD
           if [ "${{ matrix.execution }}" = "run" ]; then
             "$SILEX_INSTALL_DIR/silex" run Examples/Distribution/Hello.sx
@@ -68,5 +69,6 @@ jobs:
           Invoke-Expression (Invoke-RestMethod https://raw.githubusercontent.com/Matanek/Silex/main/install.ps1)
           $silex = Join-Path $env:SILEX_INSTALL_DIR "silex.exe"
           & $silex --version
+          & $silex setup
           & $silex install STD
           & $silex run Examples/Distribution/Hello.sx

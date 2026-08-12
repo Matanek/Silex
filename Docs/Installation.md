@@ -44,7 +44,7 @@ download when compared with the file published by the release workflow.
 ## Version and verification
 
 Set `SILEX_VERSION` to a published semantic version to install that release
-instead of the latest. On PowerShell, use `$env:SILEX_VERSION = "0.38.2"`.
+instead of the latest. On PowerShell, use `$env:SILEX_VERSION = "0.38.3"`.
 An existing executable at the selected destination is replaced only after the
 new archive has been downloaded and verified.
 
@@ -55,15 +55,19 @@ silex --version
 silex targets
 ```
 
-The compiler itself is now ready. Shader compilation is an optional toolchain
-capability and requires one additional setup step:
+The compiler itself is now ready for sources without native package boundaries.
+Run the one-time toolchain setup before using packages such as GFX or compiling
+shaders:
 
 ```sh
 silex setup
 ```
 
-This installs the verified Shadercross tool for the host under
-`~/.silex/toolchain/`. It is not linked into applications.
+This installs verified, host-specific copies of Shadercross and the private Zig
+linker under `~/.silex/toolchain/`. They are toolchain implementation details,
+not package dependencies, and are not linked into applications. A system Zig
+installation remains unnecessary for users; Zig is required only to build the
+Silex compiler itself from source.
 
 ## Build from source
 

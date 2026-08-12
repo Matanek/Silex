@@ -18,8 +18,8 @@ for the current compilation path and its limits.
 
 ## Install
 
-The standalone compiler supports macOS on Apple Silicon and Linux x64 without
-requiring Zig or Git on the developer's machine:
+The standalone compiler supports macOS on Apple Silicon, Linux x64, and
+Windows x64 without requiring Zig or Git on the developer's machine:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/Matanek/Silex/main/install.sh | sh
@@ -51,16 +51,17 @@ cd Toolchain
 zig build run -- run /path/to/Main.sx
 ```
 
-Shader compilation uses one optional tool installed separately. Before
-compiling HLSL, run:
+Run the one-time toolchain setup before compiling applications that use native
+package boundaries or HLSL:
 
 ```sh
 silex setup
 ```
 
-This installs the Shadercross build tool for the host under
-`~/.silex/toolchain/`. It is part of the Silex toolchain, not a GFX package
-dependency, and it is never linked into an application.
+This installs verified, host-specific copies of Shadercross and the private Zig
+linker under `~/.silex/toolchain/`. They are implementation details of the
+Silex toolchain, not package dependencies. The user does not need a system Zig
+installation.
 
 `run` builds a private native executable under `.silex/run/`, executes it with
 the current terminal streams and returns its exit code. Debug is the default;

@@ -49,6 +49,7 @@ jobs:
           cp LICENSE NOTICE README.md "$RUNNER_TEMP/silex-macos-arm64/"
           "$RUNNER_TEMP/silex-macos-arm64/bin/silex" --version
           "$RUNNER_TEMP/silex-macos-arm64/bin/silex" targets
+          "$RUNNER_TEMP/silex-macos-arm64/bin/silex" setup
           "$RUNNER_TEMP/silex-macos-arm64/bin/silex" install STD
           "$RUNNER_TEMP/silex-macos-arm64/bin/silex" compile Examples/Distribution/Hello.sx -o "$RUNNER_TEMP/silex-package-smoke"
           tar -C "$RUNNER_TEMP" -czf silex-macos-arm64.tar.gz silex-macos-arm64
@@ -91,7 +92,7 @@ jobs:
 
       - name: Build the standalone compiler
         working-directory: Toolchain
-        run: zig build -Doptimize=ReleaseSafe --prefix "$RUNNER_TEMP/silex-prefix"
+        run: zig build -Doptimize=ReleaseSafe -Dcpu=baseline --prefix "$RUNNER_TEMP/silex-prefix"
 
       - name: Assemble and smoke-test the artifact
         shell: bash
@@ -102,6 +103,7 @@ jobs:
           cp LICENSE NOTICE README.md "$RUNNER_TEMP/silex-linux-x64/"
           "$RUNNER_TEMP/silex-linux-x64/bin/silex" --version
           "$RUNNER_TEMP/silex-linux-x64/bin/silex" targets
+          "$RUNNER_TEMP/silex-linux-x64/bin/silex" setup
           "$RUNNER_TEMP/silex-linux-x64/bin/silex" install STD
           "$RUNNER_TEMP/silex-linux-x64/bin/silex" run Examples/Distribution/Hello.sx
           tar -C "$RUNNER_TEMP" -czf silex-linux-x64.tar.gz silex-linux-x64
@@ -153,7 +155,7 @@ jobs:
       - name: Build the standalone compiler
         working-directory: Toolchain
         shell: pwsh
-        run: zig build -Doptimize=ReleaseSafe --prefix "$env:RUNNER_TEMP/silex-prefix"
+        run: zig build -Doptimize=ReleaseSafe -Dcpu=baseline --prefix "$env:RUNNER_TEMP/silex-prefix"
 
       - name: Assemble and smoke-test the artifact
         shell: pwsh
@@ -166,6 +168,7 @@ jobs:
           $silex = Join-Path $bin "silex.exe"
           & $silex --version
           & $silex targets
+          & $silex setup
           & $silex install STD
           & $silex run Examples/Distribution/Hello.sx
           Compress-Archive $root silex-windows-x64.zip

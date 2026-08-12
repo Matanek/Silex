@@ -1,5 +1,6 @@
 const std = @import("std");
 const Machine = @import("../Arm64/Machine.zig");
+const MathBoundary = @import("../Math/Boundary.zig");
 const WindowsImports = @import("../Windows/Imports.zig");
 
 const Allocator = std.mem.Allocator;
@@ -21,12 +22,13 @@ pub fn emit(
 ) Error!void {
     if (call.function >= program.external_functions.len) return error.InvalidMachineProgram;
     const external = program.external_functions[call.function];
-    if (external.package_private) {
+    if (external.package_private or MathBoundary.identify(external.source_name) != null) {
         return emitBoundaryCall(allocator, bytes, external_sites, platform, external, call);
     }
     switch (platform) {
         .linux => {
             if (!std.mem.eql(u8, external.provider, "Linux.kernel")) {
+                std.debug.print("x64 unsupported Linux boundary: {s}.{s}\n", .{ external.provider, external.source_name });
                 return unsupported("Linux external boundary");
             }
             if (std.mem.eql(u8, external.source_name, "thread_spawn") and call.arguments.len == 2) {
@@ -218,7 +220,10 @@ pub fn emit(
                 try emitLoadStack(allocator, bytes, .rdi, call.arguments[0]);
                 try emitLoadStack(allocator, bytes, .rsi, call.arguments[1]);
                 try emitImmediate(allocator, bytes, .rax, 90);
-            } else return unsupported("Linux external boundary");
+            } else {
+                std.debug.print("x64 unsupported Linux boundary: {s}.{s}\n", .{ external.provider, external.source_name });
+                return unsupported("Linux external boundary");
+            }
             try bytes.appendSlice(allocator, &.{ 0x0f, 0x05 });
         },
         .windows => {

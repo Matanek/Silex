@@ -7,7 +7,11 @@ const Machine = @import("Arm64/Machine.zig");
 const MachO = @import("MacOS/MachO.zig");
 const MachOObject = @import("MacOS/Object.zig");
 const MacOSLink = @import("MacOS/Link.zig");
+const NativeLink = @import("NativeLink.zig");
 const Packages = @import("Packages.zig");
+const TargetModule = @import("Target.zig");
+const X64Encoder = @import("X64/Encoder.zig");
+const X64Object = @import("X64/Object.zig");
 
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
@@ -28,6 +32,8 @@ pub fn lower(
 pub fn execute(
     allocator: Allocator,
     io: Io,
+    target: TargetModule.Target,
+    linker_path: []const u8,
     program: Machine.Program,
     function: Machine.FunctionId,
     source_path: []const u8,
@@ -42,26 +48,28 @@ pub fn execute(
             allocator,
             io,
             files,
-            "native-test-macos-arm64",
+            try std.fmt.allocPrint(allocator, "native-test-{s}", .{target.name()}),
             function_text,
         )
     else
         CompilationCache.artifactKey("native-test", &.{ source_path, function_text });
-    const executable = try artifactPath(allocator, source_path, digest);
+    const executable = try artifactPath(allocator, source_path, digest, target);
     if (reusable and exists(io, executable)) return run(allocator, io, executable);
-    return executeAt(allocator, io, program, function, executable, providers);
+    return executeAt(allocator, io, target, linker_path, program, function, executable, providers);
 }
 
 fn executeAt(
     allocator: Allocator,
     io: Io,
+    target: TargetModule.Target,
+    linker_path: []const u8,
     program: Machine.Program,
     function: Machine.FunctionId,
     executable: []const u8,
     providers: []const Packages.BoundaryProvider,
 ) !std.process.RunResult {
     try Io.Dir.cwd().createDirPath(io, std.fs.path.dirname(executable).?);
-    if (providers.len != 0 or MacOSLink.requiresSystemLink(program.external_functions)) {
+    if (target.eql(.macos_arm64) and (providers.len != 0 or MacOSLink.requiresSystemLink(program.external_functions))) {
         const object = try MachOObject.emitFunction(allocator, program, function);
         const object_path = try std.fmt.allocPrint(allocator, "{s}.o", .{executable});
         {
@@ -69,9 +77,29 @@ fn executeAt(
             defer file.close(io);
             try file.writeStreamingAll(io, object);
         }
-        try MacOSLink.executable(allocator, io, object_path, executable, providers, program.external_functions);
+        try MacOSLink.executable(allocator, io, linker_path, object_path, executable, providers, program.external_functions);
         return run(allocator, io, executable);
     }
+    if (target.eql(.linux_x64) or target.eql(.windows_x64)) {
+        var image = if (target.eql(.linux_x64))
+            try X64Encoder.encodeLinuxFunctionObject(allocator, program, function)
+        else
+            try X64Encoder.encodeWindowsFunctionObject(allocator, program, function);
+        defer image.deinit(allocator);
+        const object = if (target.eql(.linux_x64))
+            try X64Object.emitElf(allocator, program, image)
+        else
+            try X64Object.emitCoff(allocator, program, image);
+        const object_path = try std.fmt.allocPrint(allocator, "{s}.o", .{executable});
+        {
+            const file = try Io.Dir.cwd().createFile(io, object_path, .{});
+            defer file.close(io);
+            try file.writeStreamingAll(io, object);
+        }
+        try NativeLink.executable(allocator, io, linker_path, target, object_path, executable, providers);
+        return run(allocator, io, executable);
+    }
+    if (!target.eql(.macos_arm64)) return error.UnsupportedTarget;
     const bytes = try MachO.emitFunction(allocator, program, function);
     {
         const file = try Io.Dir.cwd().createFile(io, executable, .{ .permissions = .executable_file });
@@ -91,12 +119,17 @@ fn exists(io: Io, path: []const u8) bool {
     return true;
 }
 
-fn artifactPath(allocator: Allocator, source_path: []const u8, digest: [32]u8) ![]const u8 {
+fn artifactPath(
+    allocator: Allocator,
+    source_path: []const u8,
+    digest: [32]u8,
+    target: TargetModule.Target,
+) ![]const u8 {
     const hex = std.fmt.bytesToHex(digest, .lower);
     return std.fmt.allocPrint(
         allocator,
-        ".silex/test/{s}-{s}",
-        .{ std.fs.path.stem(source_path), hex[0..] },
+        ".silex/test/{s}-{s}{s}",
+        .{ std.fs.path.stem(source_path), hex[0..], if (target.eql(.windows_x64)) ".exe" else "" },
     );
 }
 
@@ -124,10 +157,10 @@ test "execute native test entries independently and preserve failures" {
     const base = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
     const failed_executable = try std.fs.path.join(allocator, &.{ base, "native-test-fails" });
     const continued_executable = try std.fs.path.join(allocator, &.{ base, "native-test-continues" });
-    const failed = try executeAt(allocator, std.testing.io, machine, entries.items[0], failed_executable, &.{});
+    const failed = try executeAt(allocator, std.testing.io, .macos_arm64, "zig", machine, entries.items[0], failed_executable, &.{});
     try std.testing.expectEqual(@as(u8, 1), exitCode(failed.term));
     try std.testing.expect(std.mem.indexOf(u8, failed.stderr, "assertion failed: planned") != null);
-    const continued = try executeAt(allocator, std.testing.io, machine, entries.items[1], continued_executable, &.{});
+    const continued = try executeAt(allocator, std.testing.io, .macos_arm64, "zig", machine, entries.items[1], continued_executable, &.{});
     try std.testing.expectEqual(@as(u8, 0), exitCode(continued.term));
     try std.testing.expectEqualStrings("continued\n", continued.stdout);
 }
@@ -160,7 +193,7 @@ test "execute a native test through a macOS system boundary" {
     const compilation = try compiler.compileTests(input);
     try std.testing.expectEqual(@as(usize, 1), compilation.tests.len);
     const machine = try lower(allocator, std.testing.io, compilation.ir, compilation.boundaries, false);
-    const result = try executeAt(allocator, std.testing.io, machine, compilation.tests[0].function, executable, &.{});
+    const result = try executeAt(allocator, std.testing.io, .macos_arm64, "zig", machine, compilation.tests[0].function, executable, &.{});
     try std.testing.expectEqual(@as(u8, 0), exitCode(result.term));
     try std.testing.expectEqualStrings("native boundary\n", result.stdout);
 }
@@ -222,6 +255,8 @@ test "link a package boundary provider into a native test" {
     const result = try executeAt(
         allocator,
         std.testing.io,
+        .macos_arm64,
+        "zig",
         machine,
         compilation.tests[0].function,
         executable,

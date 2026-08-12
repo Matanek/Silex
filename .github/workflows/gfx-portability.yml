@@ -18,12 +18,8 @@ jobs:
       matrix:
         include:
           - runner: macos-15
-            zig_archive: zig-aarch64-macos-0.16.0.tar.xz
-            zig_sha256: b23d70deaa879b5c2d486ed3316f7eaa53e84acf6fc9cc747de152450d401489
             execution: compile
           - runner: ubuntu-24.04
-            zig_archive: zig-x86_64-linux-0.16.0.tar.xz
-            zig_sha256: 70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00
             execution: run
     runs-on: ${{ matrix.runner }}
 
@@ -35,33 +31,39 @@ jobs:
         shell: bash
         env:
           REQUESTED_VERSION: ${{ inputs.version }}
-          ZIG_ARCHIVE: ${{ matrix.zig_archive }}
-          ZIG_SHA256: ${{ matrix.zig_sha256 }}
         run: |
           set -euo pipefail
           export HOME="$RUNNER_TEMP/home"
           export SILEX_INSTALL_DIR="$RUNNER_TEMP/bin"
           export SILEX_VERSION="$REQUESTED_VERSION"
-          mkdir -p "$HOME" "$RUNNER_TEMP/zig"
-
-          curl -fsSL "https://ziglang.org/download/0.16.0/$ZIG_ARCHIVE" -o "$RUNNER_TEMP/$ZIG_ARCHIVE"
-          echo "$ZIG_SHA256  $RUNNER_TEMP/$ZIG_ARCHIVE" | shasum -a 256 -c -
-          tar -xJf "$RUNNER_TEMP/$ZIG_ARCHIVE" -C "$RUNNER_TEMP/zig" --strip-components=1
-          export PATH="$RUNNER_TEMP/zig:$PATH"
-          zig version
+          mkdir -p "$HOME"
 
           curl -fsSL https://raw.githubusercontent.com/Matanek/Silex/main/install.sh | sh
           "$SILEX_INSTALL_DIR/silex" --version
+          "$SILEX_INSTALL_DIR/silex" setup
           "$SILEX_INSTALL_DIR/silex" install STD
           "$SILEX_INSTALL_DIR/silex" install GFX
+          mkdir -p "$RUNNER_TEMP/packages"
+          cp -R "$HOME/.silex/packages/GFX@0.23.1" "$RUNNER_TEMP/packages/GFX"
+          package="$RUNNER_TEMP/packages/GFX"
+          repository="$GITHUB_WORKSPACE"
+          cd "$RUNNER_TEMP/packages"
 
           if [ "${{ matrix.execution }}" = "run" ]; then
-            "$SILEX_INSTALL_DIR/silex" compile Examples/Distribution/GFX/Runtime.sx -o "$RUNNER_TEMP/gfx-runtime-smoke"
+            "$SILEX_INSTALL_DIR/silex" compile "$package/Smokes/NativeLibraries.sx" -o "$RUNNER_TEMP/gfx-native-libraries"
+            timeout 30s env SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=dummy "$RUNNER_TEMP/gfx-native-libraries"
+            "$SILEX_INSTALL_DIR/silex" test "$package/Tests/Color.sx"
+            "$SILEX_INSTALL_DIR/silex" test "$package/Tests/TransformCamera.sx"
+            "$SILEX_INSTALL_DIR/silex" test "$package/Tests/CollectionFieldMutation.sx"
+            "$SILEX_INSTALL_DIR/silex" compile "$repository/Examples/Distribution/GFX/Runtime.sx" -o "$RUNNER_TEMP/gfx-runtime-smoke"
             timeout 30s env SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=dummy "$RUNNER_TEMP/gfx-runtime-smoke"
+            "$SILEX_INSTALL_DIR/silex" compile "$repository/Examples/Distribution/GFX/Window.sx" -o "$RUNNER_TEMP/gfx-window-smoke"
+            "$SILEX_INSTALL_DIR/silex" compile "$repository/Examples/Distribution/GFX/Drawing.sx" -o "$RUNNER_TEMP/gfx-drawing-smoke"
           else
-            "$SILEX_INSTALL_DIR/silex" compile Examples/Distribution/GFX/Runtime.sx -o "$RUNNER_TEMP/gfx-runtime-smoke"
-            "$SILEX_INSTALL_DIR/silex" compile Examples/Distribution/GFX/Window.sx -o "$RUNNER_TEMP/gfx-window-smoke"
-            "$SILEX_INSTALL_DIR/silex" compile Examples/Distribution/GFX/Drawing.sx -o "$RUNNER_TEMP/gfx-drawing-smoke"
+            "$SILEX_INSTALL_DIR/silex" compile "$package/Smokes/NativeLibraries.sx" -o "$RUNNER_TEMP/gfx-native-libraries"
+            "$SILEX_INSTALL_DIR/silex" compile "$repository/Examples/Distribution/GFX/Runtime.sx" -o "$RUNNER_TEMP/gfx-runtime-smoke"
+            "$SILEX_INSTALL_DIR/silex" compile "$repository/Examples/Distribution/GFX/Window.sx" -o "$RUNNER_TEMP/gfx-window-smoke"
+            "$SILEX_INSTALL_DIR/silex" compile "$repository/Examples/Distribution/GFX/Drawing.sx" -o "$RUNNER_TEMP/gfx-drawing-smoke"
           fi
 
   windows-x64:
@@ -70,23 +72,6 @@ jobs:
     steps:
       - name: Check out the consumer smokes
         uses: actions/checkout@v6
-
-      - name: Install Zig 0.16 for native package linking
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          $PSNativeCommandUseErrorActionPreference = $true
-          $archive = Join-Path $env:RUNNER_TEMP "zig-x86_64-windows-0.16.0.zip"
-          Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile $archive
-          $actual = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()
-          $expected = "68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e"
-          if ($actual -ne $expected) {
-            throw "Zig archive checksum mismatch: expected $expected, got $actual"
-          }
-          $zigRoot = Join-Path $env:RUNNER_TEMP "zig"
-          Expand-Archive $archive -DestinationPath $zigRoot
-          $zigBin = (Get-ChildItem $zigRoot -Directory | Select-Object -First 1).FullName
-          $zigBin | Out-File $env:GITHUB_PATH -Append
 
       - name: Validate the published GFX package
         shell: pwsh
@@ -103,14 +88,25 @@ jobs:
           $env:SDL_VIDEODRIVER = "dummy"
           New-Item -ItemType Directory -Force $env:USERPROFILE | Out-Null
 
-          zig version
           Invoke-Expression (Invoke-RestMethod https://raw.githubusercontent.com/Matanek/Silex/main/install.ps1)
           $silex = Join-Path $env:SILEX_INSTALL_DIR "silex.exe"
           & $silex --version
+          & $silex setup
           & $silex install STD
           & $silex install GFX
+          $packages = Join-Path $env:RUNNER_TEMP "packages"
+          New-Item -ItemType Directory -Force $packages | Out-Null
+          Copy-Item -Recurse (Join-Path $env:USERPROFILE ".silex/packages/GFX@0.23.1") (Join-Path $packages "GFX")
+          $package = Join-Path $packages "GFX"
+          Set-Location $packages
+          & $silex test (Join-Path $package "Tests/Color.sx")
+          & $silex test (Join-Path $package "Tests/TransformCamera.sx")
+          & $silex test (Join-Path $package "Tests/CollectionFieldMutation.sx")
+          $nativeLibraries = Join-Path $env:RUNNER_TEMP "gfx-native-libraries.exe"
+          & $silex compile (Join-Path $package "Smokes/NativeLibraries.sx") -o $nativeLibraries
+          & $nativeLibraries
           $runtime = Join-Path $env:RUNNER_TEMP "gfx-runtime-smoke.exe"
-          & $silex compile Examples/Distribution/GFX/Runtime.sx -o $runtime
+          & $silex compile (Join-Path $env:GITHUB_WORKSPACE "Examples/Distribution/GFX/Runtime.sx") -o $runtime
           $process = Start-Process -FilePath $runtime -NoNewWindow -PassThru
           if (-not $process.WaitForExit(30000)) {
             Stop-Process -Id $process.Id -Force
@@ -119,3 +115,5 @@ jobs:
           if ($process.ExitCode -ne 0) {
             throw "The linked SDL3 runtime exited with code $($process.ExitCode)"
           }
+          & $silex compile (Join-Path $env:GITHUB_WORKSPACE "Examples/Distribution/GFX/Window.sx") -o (Join-Path $env:RUNNER_TEMP "gfx-window-smoke.exe")
+          & $silex compile (Join-Path $env:GITHUB_WORKSPACE "Examples/Distribution/GFX/Drawing.sx") -o (Join-Path $env:RUNNER_TEMP "gfx-drawing-smoke.exe")

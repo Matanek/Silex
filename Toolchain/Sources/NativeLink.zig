@@ -10,6 +10,7 @@ pub const Error = Allocator.Error || error{LinkFailed};
 pub fn executable(
     allocator: Allocator,
     io: Io,
+    linker_path: []const u8,
     target: TargetModule.Target,
     object_path: []const u8,
     output_path: []const u8,
@@ -24,7 +25,7 @@ pub fn executable(
     else
         return error.LinkFailed;
     var arguments: std.ArrayList([]const u8) = .empty;
-    try arguments.appendSlice(allocator, &.{ "zig", "cc", "-target", triple, object_path, "-o", output_path });
+    try arguments.appendSlice(allocator, &.{ linker_path, "cc", "-target", triple, object_path, "-o", output_path });
     for (providers) |provider| try arguments.append(allocator, provider.archive);
     var libraries: std.ArrayList([]const u8) = .empty;
     for (providers) |provider| for (provider.libraries) |library| {

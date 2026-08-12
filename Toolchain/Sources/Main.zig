@@ -117,20 +117,22 @@ fn setupToolchain(init: std.process.Init, allocator: std.mem.Allocator, args: []
         return 1;
     };
     var installer = Artifacts.Installer.init(allocator, init.gpa, init.io);
-    const summary = installer.installTool(root, ToolchainSetup.shadercross(host)) catch |err| switch (err) {
-        error.InvalidManifest => {
-            std.debug.print(
-                "silex: cannot install Shadercross: {s}\n",
-                .{installer.diagnostic orelse "invalid toolchain artifact"},
-            );
-            return 1;
-        },
-        else => return err,
-    };
-    if (summary.installed == 0) {
-        std.debug.print("silex: Shadercross is already installed for {s}\n", .{host.name()});
-    } else {
-        std.debug.print("silex: installed Shadercross for {s}\n", .{host.name()});
+    for ([_]Artifacts.ToolSpec{ ToolchainSetup.shadercross(host), ToolchainSetup.linker(host) }) |tool| {
+        const summary = installer.installTool(root, tool) catch |err| switch (err) {
+            error.InvalidManifest => {
+                std.debug.print(
+                    "silex: cannot install {s}: {s}\n",
+                    .{ tool.name, installer.diagnostic orelse "invalid toolchain artifact" },
+                );
+                return 1;
+            },
+            else => return err,
+        };
+        if (summary.installed == 0) {
+            std.debug.print("silex: {s} is already installed for {s}\n", .{ tool.name, host.name() });
+        } else {
+            std.debug.print("silex: installed {s} for {s}\n", .{ tool.name, host.name() });
+        }
     }
     return 0;
 }
@@ -327,6 +329,8 @@ fn testSource(init: std.process.Init, allocator: std.mem.Allocator, args: []cons
         else => return err,
     };
     const packages_root = try globalPackagesRoot(allocator, init.environ_map);
+    const linker_path = try nativeLinkerPath(allocator, init.io, init.environ_map, target);
+    const native_target = target.eql(.macos_arm64) or target.eql(.linux_x64) or target.eql(.windows_x64);
     var passed: usize = 0;
     var failed: usize = 0;
     var source_errors: usize = 0;
@@ -352,7 +356,7 @@ fn testSource(init: std.process.Init, allocator: std.mem.Allocator, args: []cons
         if (options.emit_ir) {
             try Io.File.stdout().writeStreamingAll(init.io, try Ir.writeText(source_allocator, compilation.ir));
         }
-        const native_program = if (target.eql(.macos_arm64))
+        const native_program = if (native_target)
             NativeTestRunner.lower(
                 source_allocator,
                 init.io,
@@ -366,7 +370,7 @@ fn testSource(init: std.process.Init, allocator: std.mem.Allocator, args: []cons
             }
         else
             null;
-        if (target.eql(.macos_arm64) and native_program == null) continue;
+        if (native_target and native_program == null) continue;
         const boundary_providers = try requiredBoundaryProviders(
             source_allocator,
             compilation.boundaries,
@@ -400,6 +404,8 @@ fn testSource(init: std.process.Init, allocator: std.mem.Allocator, args: []cons
                 const result = NativeTestRunner.execute(
                     source_allocator,
                     init.io,
+                    target,
+                    linker_path,
                     machine,
                     case.function,
                     source_path,
@@ -698,6 +704,7 @@ fn compileNativeOptions(
         std.debug.print("silex: target '{s}' is recognized but its native backend is not implemented yet\n", .{target.name()});
         return 1;
     }
+    const linker_path = try nativeLinkerPath(allocator, init.io, init.environ_map, target);
 
     progress.target(target.name(), @tagName(options.mode));
 
@@ -760,6 +767,7 @@ fn compileNativeOptions(
         MacOSLink.executable(
             allocator,
             init.io,
+            linker_path,
             object_path,
             options.output_path,
             boundary_providers,
@@ -798,7 +806,7 @@ fn compileNativeOptions(
         }
         if (std.fs.path.dirname(options.output_path)) |directory| try Io.Dir.cwd().createDirPath(init.io, directory);
         progress.stage(.link);
-        NativeLink.executable(allocator, init.io, target, object_path, options.output_path, boundary_providers) catch |err| {
+        NativeLink.executable(allocator, init.io, linker_path, target, object_path, options.output_path, boundary_providers) catch |err| {
             std.debug.print("silex: cannot link native package artifacts for {s}: {t}\n", .{ target.name(), err });
             return 1;
         };
@@ -821,7 +829,7 @@ fn compileNativeOptions(
         }
         if (std.fs.path.dirname(options.output_path)) |directory| try Io.Dir.cwd().createDirPath(init.io, directory);
         progress.stage(.link);
-        NativeLink.executable(allocator, init.io, target, object_path, options.output_path, boundary_providers) catch |err| {
+        NativeLink.executable(allocator, init.io, linker_path, target, object_path, options.output_path, boundary_providers) catch |err| {
             std.debug.print("silex: cannot link native package artifacts for windows-arm64: {t}\n", .{err});
             return 1;
         };
@@ -1190,6 +1198,20 @@ fn globalToolchainRoot(
 ) !?[]const u8 {
     const home = environment.get("HOME") orelse environment.get("USERPROFILE") orelse return null;
     return try std.fs.path.join(allocator, &.{ home, ".silex", "toolchain" });
+}
+
+fn nativeLinkerPath(
+    allocator: std.mem.Allocator,
+    io: Io,
+    environment: *const std.process.Environ.Map,
+    target: TargetModule.Target,
+) ![]const u8 {
+    const root = try globalToolchainRoot(allocator, environment) orelse return "zig";
+    const host = TargetModule.Target.host() orelse target;
+    const managed = try ToolchainSetup.linkerExecutablePath(allocator, root, host);
+    const file = Io.Dir.cwd().openFile(io, managed, .{}) catch return "zig";
+    file.close(io);
+    return managed;
 }
 
 fn configureShaderCompiler(

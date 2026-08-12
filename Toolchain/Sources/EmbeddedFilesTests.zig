@@ -128,6 +128,8 @@ test "embed arbitrary bytes compactly and track the source as a cache dependency
         const native = try NativeTestRunner.execute(
             allocator,
             std.testing.io,
+            .macos_arm64,
+            "zig",
             machine,
             main,
             input,

@@ -23,7 +23,7 @@ pub const Archive = struct {
     provides: []const u8,
     strip_components: u32,
 
-    pub const Format = enum { tar_gz, zip };
+    pub const Format = enum { tar_gz, tar_xz, zip };
 };
 
 pub const ToolSpec = struct {
@@ -314,6 +314,18 @@ pub const Installer = struct {
             .tar_gz => {
                 var window: [std.compress.flate.max_window_len]u8 = undefined;
                 var decompress: std.compress.flate.Decompress = .init(&file_reader.interface, .gzip, &window);
+                try std.tar.extract(self.io, output, &decompress.reader, .{
+                    .strip_components = extraction.strip_components,
+                });
+            },
+            .tar_xz => {
+                const buffer = try self.download_allocator.alloc(u8, 64 * 1024);
+                var decompress = try std.compress.xz.Decompress.init(
+                    &file_reader.interface,
+                    self.download_allocator,
+                    buffer,
+                );
+                defer decompress.deinit();
                 try std.tar.extract(self.io, output, &decompress.reader, .{
                     .strip_components = extraction.strip_components,
                 });

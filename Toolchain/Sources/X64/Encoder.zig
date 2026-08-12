@@ -7,6 +7,8 @@ const Reachability = @import("Reachability.zig");
 const TextRuntime = @import("TextRuntime.zig");
 
 const Allocator = std.mem.Allocator;
+const dynamic_string_flag: u64 = 1 << 63;
+const dynamic_string_prefix_size: u8 = 16;
 
 pub const Error = Machine.Error || Allocator.Error || FloatRuntime.Error || error{UnsupportedInstruction};
 
@@ -37,24 +39,39 @@ const Platform = ExternalCalls.Platform;
 /// scalar arguments use RDI, RSI, RDX, RCX, R8, R9, R10, R11; scalar results
 /// use RAX; the execution status uses RDX.
 pub fn encodeLinux(allocator: Allocator, program: Machine.Program) Error!Image {
-    return encode(allocator, program, .linux, false);
+    return encode(allocator, program, .linux, false, null);
 }
 
 pub fn encodeWindows(allocator: Allocator, program: Machine.Program) Error!Image {
-    return encode(allocator, program, .windows, false);
+    return encode(allocator, program, .windows, false, null);
 }
 
 pub fn encodeLinuxObject(allocator: Allocator, program: Machine.Program) Error!Image {
-    return encode(allocator, program, .linux, true);
+    return encode(allocator, program, .linux, true, null);
 }
 
 pub fn encodeWindowsObject(allocator: Allocator, program: Machine.Program) Error!Image {
-    return encode(allocator, program, .windows, true);
+    return encode(allocator, program, .windows, true, null);
 }
 
-fn encode(allocator: Allocator, program: Machine.Program, platform: Platform, linked: bool) Error!Image {
+pub fn encodeLinuxFunctionObject(allocator: Allocator, program: Machine.Program, function: Machine.FunctionId) Error!Image {
+    return encode(allocator, program, .linux, true, function);
+}
+
+pub fn encodeWindowsFunctionObject(allocator: Allocator, program: Machine.Program, function: Machine.FunctionId) Error!Image {
+    return encode(allocator, program, .windows, true, function);
+}
+
+fn encode(
+    allocator: Allocator,
+    program: Machine.Program,
+    platform: Platform,
+    linked: bool,
+    entry: ?Machine.FunctionId,
+) Error!Image {
     try Machine.validate(program);
-    const main_id = findMain(program) orelse return error.InvalidMachineProgram;
+    const main_id = entry orelse findMain(program) orelse return error.InvalidMachineProgram;
+    if (main_id >= program.functions.len) return error.InvalidMachineProgram;
     const reachable = try Reachability.find(allocator, program, main_id);
     defer allocator.free(reachable);
 
@@ -396,6 +413,8 @@ fn encodeFunction(
             },
             .class_store => |value| try emitClassStore(allocator, bytes, value),
             .class_retain, .class_drop, .list_retain, .list_drop => {},
+            .string_retain => |value| try emitStringRetain(allocator, bytes, value),
+            .string_drop => |value| try emitStringDrop(allocator, bytes, windows_import_sites, platform, value),
             .enum_init => |initialization| {
                 try emitImmediate(allocator, bytes, .rax, initialization.tag);
                 for (0..initialization.result.width) |index| {
@@ -474,6 +493,12 @@ fn encodeFunction(
                 try emitLoadStack(allocator, bytes, .rcx, access.index);
                 try bytes.appendSlice(allocator, &.{ 0x48, 0x01, 0xc8, 0x48, 0x0f, 0xb6, 0x00 });
                 try emitStoreStack(allocator, bytes, .rax, access.result);
+            },
+            .string_byte_count => |value| {
+                try emitLoadStack(allocator, bytes, .rax, value.operand);
+                try emitLoadMemory(allocator, bytes, .rax, .rax, 0);
+                try emitMaskDynamicStringLength(allocator, bytes, .rax);
+                try emitStoreStack(allocator, bytes, .rax, value.result);
             },
             .string_from_bytes => |value| try emitStringFromBytes(allocator, bytes, windows_import_sites, platform, &epilogue_fixups, value),
             .string_concat => |value| try emitStringConcat(allocator, bytes, windows_import_sites, platform, &epilogue_fixups, value),
@@ -640,6 +665,8 @@ fn emitStringBinary(allocator: Allocator, bytes: *std.ArrayList(u8), binary: Mac
     try emitLoadStack(allocator, bytes, .r12, binary.right);
     try emitLoadMemory(allocator, bytes, .rcx, .rbx, 0);
     try emitLoadMemory(allocator, bytes, .rdx, .r12, 0);
+    try emitMaskDynamicStringLength(allocator, bytes, .rcx);
+    try emitMaskDynamicStringLength(allocator, bytes, .rdx);
     try emitImmediate(allocator, bytes, .r13, @intFromBool(binary.operator == .not_equal));
     try bytes.appendSlice(allocator, &.{ 0x48, 0x39, 0xd1, 0x0f, 0x85 });
     const unequal_length = bytes.items.len;
@@ -856,6 +883,7 @@ fn emitWriteStatic(allocator: Allocator, bytes: *std.ArrayList(u8), fixups: *std
 fn emitWriteStringSlot(allocator: Allocator, bytes: *std.ArrayList(u8), slot: Machine.Slot) Allocator.Error!void {
     try emitLoadStack(allocator, bytes, .rsi, slot);
     try bytes.appendSlice(allocator, &.{ 0x48, 0x8b, 0x16, 0x48, 0x83, 0xc6, 0x08 });
+    try emitMaskDynamicStringLength(allocator, bytes, .rdx);
     try emitImmediate(allocator, bytes, .rax, 1);
     try emitImmediate(allocator, bytes, .rdi, 2);
     try bytes.appendSlice(allocator, &.{ 0x0f, 0x05 });
@@ -1301,10 +1329,17 @@ fn emitStringFromBytes(
     try emitLoadStack(allocator, bytes, .rbx, value.bytes.start);
     try emitLoadStack(allocator, bytes, .r12, @intCast(@as(usize, value.bytes.start) + 1));
     try emitMoveRegister(allocator, bytes, .rsi, .r12);
-    try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xc6, 9 });
+    try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xc6, 25 });
     try emitAllocation(allocator, bytes, import_sites, platform, epilogue);
     try emitMoveRegister(allocator, bytes, .r15, .rax);
-    try emitStoreMemory(allocator, bytes, .r15, 0, .r12);
+    try emitImmediate(allocator, bytes, .r11, 1);
+    try emitStoreMemory(allocator, bytes, .r15, 0, .r11);
+    try emitStoreMemory(allocator, bytes, .r15, 8, .rsi);
+    try bytes.appendSlice(allocator, &.{ 0x49, 0x83, 0xc7, dynamic_string_prefix_size });
+    try emitMoveRegister(allocator, bytes, .r11, .r12);
+    try emitImmediate(allocator, bytes, .r13, dynamic_string_flag);
+    try emitOrRegister(allocator, bytes, .r11, .r13);
+    try emitStoreMemory(allocator, bytes, .r15, 0, .r11);
     try emitMoveRegister(allocator, bytes, .r14, .r15);
     try bytes.appendSlice(allocator, &.{ 0x49, 0x83, 0xc6, 8, 0x4d, 0x85, 0xe4, 0x0f, 0x84 });
     const copied = bytes.items.len;
@@ -1327,6 +1362,7 @@ fn emitStringCount(
 ) Error!void {
     try emitLoadStack(allocator, bytes, .rbx, value.operand);
     try emitLoadMemory(allocator, bytes, .rcx, .rbx, 0);
+    try emitMaskDynamicStringLength(allocator, bytes, .rcx);
     try emitImmediate(allocator, bytes, .r12, 0);
     try bytes.appendSlice(allocator, &.{ 0x48, 0x85, 0xc9, 0x0f, 0x84 });
     const finished_empty = bytes.items.len;
@@ -1359,14 +1395,23 @@ fn emitStringConcat(
     try emitLoadStack(allocator, bytes, .r12, value.right);
     try emitLoadMemory(allocator, bytes, .r13, .rbx, 0);
     try emitLoadMemory(allocator, bytes, .r14, .r12, 0);
+    try emitMaskDynamicStringLength(allocator, bytes, .r13);
+    try emitMaskDynamicStringLength(allocator, bytes, .r14);
     try emitMoveRegister(allocator, bytes, .r15, .r13);
     try bytes.appendSlice(allocator, &.{ 0x4d, 0x01, 0xf7 });
     try emitMoveRegister(allocator, bytes, .rsi, .r15);
-    try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xc6, 9 });
+    try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xc6, 25 });
     try emitAllocation(allocator, bytes, import_sites, platform, epilogue);
     try emitMoveRegister(allocator, bytes, .r10, .rax);
-    try emitStoreMemory(allocator, bytes, .r10, 0, .r15);
-    try emitMoveRegister(allocator, bytes, .r15, .rax);
+    try emitImmediate(allocator, bytes, .r11, 1);
+    try emitStoreMemory(allocator, bytes, .r10, 0, .r11);
+    try emitStoreMemory(allocator, bytes, .r10, 8, .rsi);
+    try bytes.appendSlice(allocator, &.{ 0x49, 0x83, 0xc2, dynamic_string_prefix_size });
+    try emitMoveRegister(allocator, bytes, .r11, .r15);
+    try emitImmediate(allocator, bytes, .rax, dynamic_string_flag);
+    try emitOrRegister(allocator, bytes, .r11, .rax);
+    try emitStoreMemory(allocator, bytes, .r10, 0, .r11);
+    try emitStoreStack(allocator, bytes, .r10, value.result);
     try bytes.appendSlice(allocator, &.{ 0x49, 0x83, 0xc2, 8, 0x48, 0x83, 0xc3, 8, 0x49, 0x83, 0xc4, 8 });
 
     try bytes.appendSlice(allocator, &.{ 0x4d, 0x85, 0xed, 0x0f, 0x84 });
@@ -1389,7 +1434,65 @@ fn emitStringConcat(
     try patchRelative(bytes.items, right_repeat, right_loop);
     try patchRelative(bytes.items, right_finished, bytes.items.len);
     try bytes.appendSlice(allocator, &.{ 0x41, 0xc6, 0x02, 0 });
-    try emitStoreStack(allocator, bytes, .r15, value.result);
+}
+
+fn emitStringRetain(
+    allocator: Allocator,
+    bytes: *std.ArrayList(u8),
+    value: Machine.Instruction.ListResource,
+) Error!void {
+    try emitLoadStack(allocator, bytes, .r10, value.operand);
+    try emitLoadMemory(allocator, bytes, .r9, .r10, 0);
+    try emitImmediate(allocator, bytes, .r11, dynamic_string_flag);
+    try emitAndRegister(allocator, bytes, .r9, .r11);
+    try bytes.appendSlice(allocator, &.{ 0x4d, 0x85, 0xc9, 0x0f, 0x84 });
+    const literal = bytes.items.len;
+    try bytes.appendNTimes(allocator, 0, 4);
+    try bytes.appendSlice(allocator, &.{ 0x49, 0x83, 0xea, dynamic_string_prefix_size, 0xf0, 0x49, 0xff, 0x02 });
+    try patchRelative(bytes.items, literal, bytes.items.len);
+}
+
+fn emitStringDrop(
+    allocator: Allocator,
+    bytes: *std.ArrayList(u8),
+    import_sites: *std.ArrayList(WindowsImports.X64Site),
+    platform: Platform,
+    value: Machine.Instruction.ListResource,
+) Error!void {
+    try emitLoadStack(allocator, bytes, .r10, value.operand);
+    try emitLoadMemory(allocator, bytes, .r9, .r10, 0);
+    try emitImmediate(allocator, bytes, .r11, dynamic_string_flag);
+    try emitAndRegister(allocator, bytes, .r9, .r11);
+    try bytes.appendSlice(allocator, &.{ 0x4d, 0x85, 0xc9, 0x0f, 0x84 });
+    const literal = bytes.items.len;
+    try bytes.appendNTimes(allocator, 0, 4);
+    try bytes.appendSlice(allocator, &.{ 0x49, 0x83, 0xea, dynamic_string_prefix_size });
+    try emitImmediate(allocator, bytes, .r9, std.math.maxInt(u64));
+    try bytes.appendSlice(allocator, &.{ 0xf0, 0x4d, 0x0f, 0xc1, 0x0a });
+    try bytes.appendSlice(allocator, &.{ 0x49, 0x83, 0xf9, 1, 0x0f, 0x85 });
+    const retained = bytes.items.len;
+    try bytes.appendNTimes(allocator, 0, 4);
+    switch (platform) {
+        .linux => {
+            try emitMoveRegister(allocator, bytes, .rdi, .r10);
+            try emitLoadMemory(allocator, bytes, .rsi, .r10, 8);
+            try emitImmediate(allocator, bytes, .rax, 11);
+            try bytes.appendSlice(allocator, &.{ 0x0f, 0x05 });
+        },
+        .windows => {
+            try emitMoveRegister(allocator, bytes, .rcx, .r10);
+            try emitImmediate(allocator, bytes, .rdx, 0);
+            try emitImmediate(allocator, bytes, .r8, 0x8000);
+            try ExternalCalls.emitWindowsImportCall(allocator, bytes, import_sites, .virtual_free);
+        },
+    }
+    try patchRelative(bytes.items, retained, bytes.items.len);
+    try patchRelative(bytes.items, literal, bytes.items.len);
+}
+
+fn emitMaskDynamicStringLength(allocator: Allocator, bytes: *std.ArrayList(u8), register: Register) Allocator.Error!void {
+    try emitImmediate(allocator, bytes, .r11, dynamic_string_flag - 1);
+    try emitAndRegister(allocator, bytes, register, .r11);
 }
 
 fn appendConditionalEpilogue(allocator: Allocator, bytes: *std.ArrayList(u8), fixups: *std.ArrayList(EpilogueFixup), condition: u8) Allocator.Error!void {
@@ -1581,6 +1684,31 @@ fn emitMoveRegister(allocator: Allocator, bytes: *std.ArrayList(u8), destination
     try bytes.append(allocator, 0xc0 | (@as(u8, @intFromEnum(source) & 7) << 3) | @as(u8, @intFromEnum(destination) & 7));
 }
 
+fn emitAndRegister(allocator: Allocator, bytes: *std.ArrayList(u8), destination: Register, source: Register) Allocator.Error!void {
+    try emitRegisterBinary(allocator, bytes, 0x21, destination, source);
+}
+
+fn emitOrRegister(allocator: Allocator, bytes: *std.ArrayList(u8), destination: Register, source: Register) Allocator.Error!void {
+    try emitRegisterBinary(allocator, bytes, 0x09, destination, source);
+}
+
+fn emitRegisterBinary(
+    allocator: Allocator,
+    bytes: *std.ArrayList(u8),
+    opcode: u8,
+    destination: Register,
+    source: Register,
+) Allocator.Error!void {
+    const rex: u8 = 0x48 |
+        (@as(u8, @intFromBool(@intFromEnum(source) >= 8)) << 2) |
+        @as(u8, @intFromBool(@intFromEnum(destination) >= 8));
+    try bytes.appendSlice(allocator, &.{
+        rex,
+        opcode,
+        0xc0 | (@as(u8, @intFromEnum(source) & 7) << 3) | @as(u8, @intFromEnum(destination) & 7),
+    });
+}
+
 fn emitRex(allocator: Allocator, bytes: *std.ArrayList(u8), wide: bool, register: Register) Allocator.Error!void {
     try bytes.append(allocator, 0x40 | (@as(u8, @intFromBool(wide)) << 3) | (@as(u8, @intFromBool(@intFromEnum(register) >= 8)) << 2));
 }
@@ -1631,4 +1759,41 @@ test "encode a no-op Silex main for the Linux X64 process contract" {
     defer windows.deinit(std.testing.allocator);
     try std.testing.expectEqual(@as(usize, 0), windows.windows_import_sites.len);
     try std.testing.expectEqual(@as(u8, 0xc3), windows.code[windows.code.len - 1]);
+}
+
+test "encode owned strings with allocation retain and release on both X64 hosts" {
+    const instructions = [_]Machine.Instruction{
+        .{ .constant_str = .{ .result = 0, .string = 0 } },
+        .{ .constant_str = .{ .result = 1, .string = 1 } },
+        .{ .string_concat = .{ .result = 2, .left = 0, .right = 1 } },
+        .{ .string_retain = .{ .operand = 2 } },
+        .{ .string_drop = .{ .operand = 2 } },
+        .{ .string_drop = .{ .operand = 2 } },
+        .return_void,
+    };
+    const functions = [_]Machine.Function{.{
+        .name = "main",
+        .parameter_count = 0,
+        .return_type = .void,
+        .slot_count = 3,
+        .frame_size = 32,
+        .instructions = &instructions,
+    }};
+    const program: Machine.Program = .{ .functions = &functions, .strings = &.{ "left", "right" } };
+
+    const linux = try encodeLinuxObject(std.testing.allocator, program);
+    defer linux.deinit(std.testing.allocator);
+    try std.testing.expect(linux.code.len > 0);
+
+    const windows = try encodeWindowsObject(std.testing.allocator, program);
+    defer windows.deinit(std.testing.allocator);
+    var alloc = false;
+    var free = false;
+    for (windows.windows_import_sites) |site| switch (site.symbol) {
+        .virtual_alloc => alloc = true,
+        .virtual_free => free = true,
+        else => {},
+    };
+    try std.testing.expect(alloc);
+    try std.testing.expect(free);
 }
