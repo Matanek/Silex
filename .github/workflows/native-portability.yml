@@ -71,7 +71,12 @@ jobs:
           "$silex" setup
           "$silex" install STD
           "$silex" install GFX
-          "$silex" test "$GITHUB_WORKSPACE/Tests/Types/Str/Operators.sx"
+          if ! "$silex" test "$GITHUB_WORKSPACE/Tests/Types/Str/Operators.sx"; then
+            for executable in "$GITHUB_WORKSPACE"/.silex/test/Operators-*; do
+              gdb --batch -ex run -ex "x/12i \$pc-24" --args "$executable" || true
+            done
+            exit 1
+          fi
           "$silex" test "$GITHUB_WORKSPACE/Tests/Types/Str/Returns.sx"
           mkdir -p "$RUNNER_TEMP/packages"
           cp -R "$HOME/.silex/packages/GFX@0.23.1" "$RUNNER_TEMP/packages/GFX"
