@@ -86,6 +86,42 @@ Its directory name and manifest identity match:
 }
 ```
 
+Qualified package names extend the namespace of each shorter package prefix.
+Packages reject independently distributed extensions by default, so `GFX` and
+`GFX.UI` cannot be loaded together unless `GFX` explicitly authorizes that
+direct child package:
+
+```json
+{
+  "name": "GFX",
+  "version": "1.4.1",
+  "extensions": [
+    "GFX.UI"
+  ]
+}
+```
+
+Use `"GFX.*"` to authorize any direct child of `GFX`. The wildcard covers one
+name segment only: it permits `GFX.UI`, but never `GFX.UI.Controls`. Once
+authorized, `GFX.UI` owns its namespace and must independently grant
+`"GFX.UI.Controls"` or `"GFX.UI.*"`. Every qualified package therefore requires
+its immediate parent package in the graph and the authorization of that parent.
+An extension entry cannot skip a level or name a package outside the declaring
+package's namespace. Omit `extensions` or use an empty array to keep the
+namespace closed.
+
+This policy concerns separate package identities. Modules owned directly by
+`GFX`, including a module named `GFX.UI`, remain valid without authorization
+because they belong to the same package.
+
+For registry packages, extension grants are copied into the immutable release
+manifest and checked against the archived `Package.json`. The installed package
+keeps an internal proof of that release. Editing a global package manifest does
+not grant another namespace: Silex rejects a manifest whose checksum or
+extension policy no longer matches its proof and asks for reinstallation.
+Sibling workspace packages and packages selected with `silex link` remain live
+development sources and therefore use their current manifests directly.
+
 `requires.silex` states which Silex toolchains can load the package. The range
 starts with an inclusive minimum and may add one exclusive maximum, separated
 by a space. Silex validates this requirement before discovering or parsing the

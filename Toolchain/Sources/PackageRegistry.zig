@@ -35,6 +35,8 @@ pub const Release = struct {
     name: []const u8,
     version: Packages.Version,
     requirement: Packages.SilexRequirement,
+    repository: ?[]const u8,
+    extensions: []const []const u8,
     url: []const u8,
     sha256: []const u8,
 };
@@ -157,6 +159,8 @@ const RawManifest = struct {
     name: []const u8,
     version: []const u8,
     requires: RawRequires,
+    repository: ?[]const u8 = null,
+    extensions: []const []const u8 = &.{},
     archive: RawArchive,
 };
 
@@ -275,7 +279,8 @@ pub const Client = struct {
         };
         if (!std.mem.eql(u8, manifest.name, release.name) or
             !manifest.version.eql(release.version) or
-            !std.mem.eql(u8, manifest.silex_requirement.text, release.requirement.text))
+            !std.mem.eql(u8, manifest.silex_requirement.text, release.requirement.text) or
+            !equalStrings(manifest.extensions, release.extensions))
         {
             return self.failFmt("downloaded package '{s}' does not match its registry release", .{release.name});
         }
@@ -288,7 +293,11 @@ pub const Client = struct {
             const selected = try self.loadRelease(registry, package, indexed);
             _ = try self.installRelease(registry, selected, toolchain, target, store, stack);
         }
-        return store.install(source, target) catch |err| switch (err) {
+        return store.installPublished(source, target, .{
+            .repository = release.repository,
+            .archive_sha256 = release.sha256,
+            .extensions = release.extensions,
+        }) catch |err| switch (err) {
             error.InvalidPackageStore => return self.failFmt(
                 "cannot install package '{s}': {s}",
                 .{ release.name, store.diagnostic orelse "invalid package" },
@@ -366,6 +375,23 @@ pub const Client = struct {
         if (!std.mem.startsWith(u8, raw.archive.url, "https://")) {
             return self.failFmt("release '{s}@{s}' archive must use HTTPS", .{ package.name, version_text });
         }
+        if (raw.repository) |repository| {
+            if (!validRepository(repository)) {
+                return self.failFmt("release '{s}@{s}' has an invalid repository identity", .{ package.name, version_text });
+            }
+            const prefix = try std.fmt.allocPrint(self.allocator, "https://github.com/{s}/releases/download/", .{repository});
+            if (!std.mem.startsWith(u8, raw.archive.url, prefix)) {
+                return self.failFmt("release '{s}@{s}' archive does not belong to its repository", .{ package.name, version_text });
+            }
+        }
+        for (raw.extensions, 0..) |extension, index| {
+            if (!Packages.validExtensionGrant(raw.name, extension)) {
+                return self.failFmt("release '{s}@{s}' has an invalid extension grant", .{ package.name, version_text });
+            }
+            if (index > 0 and std.mem.order(u8, raw.extensions[index - 1], extension) != .lt) {
+                return self.failFmt("release '{s}@{s}' extension grants must be sorted and unique", .{ package.name, version_text });
+            }
+        }
         if (!validSha256(raw.archive.sha256)) {
             return self.failFmt("release '{s}@{s}' has an invalid SHA-256 checksum", .{ package.name, version_text });
         }
@@ -373,6 +399,8 @@ pub const Client = struct {
             .name = raw.name,
             .version = indexed.version,
             .requirement = requirement,
+            .repository = raw.repository,
+            .extensions = raw.extensions,
             .url = raw.archive.url,
             .sha256 = raw.archive.sha256,
         };
@@ -493,6 +521,19 @@ fn validSha256(text: []const u8) bool {
     return true;
 }
 
+fn validRepository(repository: []const u8) bool {
+    const slash = std.mem.indexOfScalar(u8, repository, '/') orelse return false;
+    if (slash == 0 or slash + 1 == repository.len or std.mem.indexOfScalarPos(u8, repository, slash + 1, '/') != null) return false;
+    for (repository) |character| if (!std.ascii.isAlphanumeric(character) and character != '-' and character != '_' and character != '.' and character != '/') return false;
+    return true;
+}
+
+fn equalStrings(left: []const []const u8, right: []const []const u8) bool {
+    if (left.len != right.len) return false;
+    for (left, right) |left_value, right_value| if (!std.mem.eql(u8, left_value, right_value)) return false;
+    return true;
+}
+
 test "parse package requests" {
     const latest = try Request.parse("STD");
     try std.testing.expectEqualStrings("STD", latest.name);
@@ -562,7 +603,7 @@ test "install registry package dependencies before the requested package" {
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Cache/sources/GFX@2.0.0/Package.json",
         .data =
-        \\{"name":"GFX","version":"2.0.0","requires":{"silex":">=0.38.0 <0.39.0"},"dependencies":{"STD":"^1.0.0"}}
+        \\{"name":"GFX","version":"2.0.0","requires":{"silex":">=0.38.0 <0.39.0"},"extensions":["GFX.UI"],"dependencies":{"STD":"^1.0.0"}}
         ,
     });
     const base = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
@@ -585,11 +626,11 @@ test "install registry package dependencies before the requested package" {
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Registry/packages/STD/1.0.0.json",
-        .data = try std.fmt.allocPrint(allocator, "{{\"schema\":1,\"name\":\"STD\",\"version\":\"1.0.0\",\"requires\":{{\"silex\":\">=0.38.0 <0.39.0\"}},\"archive\":{{\"url\":\"https://example.test/STD.tar.gz\",\"sha256\":\"{s}\"}}}}", .{empty_sha}),
+        .data = try std.fmt.allocPrint(allocator, "{{\"schema\":1,\"name\":\"STD\",\"version\":\"1.0.0\",\"requires\":{{\"silex\":\">=0.38.0 <0.39.0\"}},\"repository\":\"Matanek/STD\",\"extensions\":[],\"archive\":{{\"url\":\"https://github.com/Matanek/STD/releases/download/v1.0.0/STD.tar.gz\",\"sha256\":\"{s}\"}}}}", .{empty_sha}),
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Registry/packages/GFX/2.0.0.json",
-        .data = try std.fmt.allocPrint(allocator, "{{\"schema\":1,\"name\":\"GFX\",\"version\":\"2.0.0\",\"requires\":{{\"silex\":\">=0.38.0 <0.39.0\"}},\"archive\":{{\"url\":\"https://example.test/GFX.tar.gz\",\"sha256\":\"{s}\"}}}}", .{empty_sha}),
+        .data = try std.fmt.allocPrint(allocator, "{{\"schema\":1,\"name\":\"GFX\",\"version\":\"2.0.0\",\"requires\":{{\"silex\":\">=0.38.0 <0.39.0\"}},\"repository\":\"Matanek/GFX\",\"extensions\":[\"GFX.UI\"],\"archive\":{{\"url\":\"https://github.com/Matanek/GFX/releases/download/v2.0.0/GFX.tar.gz\",\"sha256\":\"{s}\"}}}}", .{empty_sha}),
     });
     const registry = try client.load(registry_path);
     var store = PackageStore.Manager.init(allocator, std.testing.allocator, std.testing.io, store_root);
@@ -603,6 +644,7 @@ test "install registry package dependencies before the requested package" {
     try std.testing.expectEqualStrings("GFX", result.package.name);
     try std.testing.expect(try pathExists(std.testing.io, try std.fs.path.join(allocator, &.{ store_root, "STD@1.0.0" })));
     try std.testing.expect(try pathExists(std.testing.io, try std.fs.path.join(allocator, &.{ store_root, "GFX@2.0.0" })));
+    try std.testing.expect(try pathExists(std.testing.io, try std.fs.path.join(allocator, &.{ store_root, "GFX@2.0.0", ".silex", "registry.json" })));
 }
 
 fn pathExists(io: Io, path: []const u8) !bool {

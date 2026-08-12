@@ -121,6 +121,8 @@ pub const Publisher = struct {
             package.name,
             version_text,
             package.silex_requirement.text,
+            repository,
+            package.extensions,
             archive_url,
             checksum,
         );
@@ -353,6 +355,8 @@ fn renderManifest(
     name: []const u8,
     version: []const u8,
     requirement: []const u8,
+    repository: []const u8,
+    extensions: []const []const u8,
     archive_url: []const u8,
     checksum: []const u8,
 ) ![]const u8 {
@@ -361,6 +365,8 @@ fn renderManifest(
         name: []const u8,
         version: []const u8,
         requires: struct { silex: []const u8 },
+        repository: []const u8,
+        extensions: []const []const u8,
         archive: struct { url: []const u8, sha256: []const u8 },
     };
     var output: Io.Writer.Allocating = .init(allocator);
@@ -369,6 +375,8 @@ fn renderManifest(
         .name = name,
         .version = version,
         .requires = .{ .silex = requirement },
+        .repository = repository,
+        .extensions = extensions,
         .archive = .{ .url = archive_url, .sha256 = checksum },
     }, .{ .whitespace = .indent_2 }, &output.writer);
     try output.writer.writeByte('\n');
@@ -461,6 +469,8 @@ test "render the immutable registry manifest" {
         "GFX",
         "0.24.0",
         ">=0.38.0",
+        "Matanek/Silex-Lib-GFX",
+        &.{ "GFX.UI", "GFX.Tools" },
         "https://github.com/Matanek/Silex-Lib-GFX/releases/download/v0.24.0/GFX-0.24.0.tar.gz",
         digest,
     );
@@ -468,6 +478,8 @@ test "render the immutable registry manifest" {
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, rendered, .{});
     defer parsed.deinit();
     try std.testing.expectEqualStrings("GFX", parsed.value.object.get("name").?.string);
+    try std.testing.expectEqualStrings("Matanek/Silex-Lib-GFX", parsed.value.object.get("repository").?.string);
+    try std.testing.expectEqualStrings("GFX.Tools", parsed.value.object.get("extensions").?.array.items[1].string);
     try std.testing.expectEqualStrings(digest, parsed.value.object.get("archive").?.object.get("sha256").?.string);
     try std.testing.expect(std.mem.endsWith(u8, rendered, "\n"));
 }

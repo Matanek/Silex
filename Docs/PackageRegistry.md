@@ -29,6 +29,8 @@ and one immutable source archive:
   "requires": {
     "silex": ">=0.38.0"
   },
+  "repository": "Matanek/Silex-Lib-STD",
+  "extensions": [],
   "archive": {
     "url": "https://github.com/Matanek/Silex-Lib-STD/releases/download/v0.16.2/STD-0.16.2.tar.gz",
     "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
@@ -42,11 +44,23 @@ that version. The downloaded archive must contain one top-level directory and
 its `Package.json` must match the registry name, version, and Silex range.
 Dependencies remain declared only in that manifest; the installer resolves
 them transitively through the same registry and verifies each archive in turn.
+For new releases, the immutable registry manifest also records the package's
+GitHub repository and its `extensions` policy. The archive URL must belong to
+that repository, and the policy must exactly match the archived `Package.json`.
+All releases of one package name remain attached to the same repository.
+
+Installation stores an internal registry proof beside the package sources. It
+contains the repository, archive checksum, extension policy, and checksum of
+the installed `Package.json`. Global package resolution grants namespace
+extensions only from an intact proof; editing the installed manifest produces
+a diagnostic requiring reinstallation. Local sibling packages and packages
+registered with `silex link` deliberately continue to use their live manifests
+for development.
 
 ## Release sequence
 
-1. Update and validate `Package.json`, including `version` and
-   `requires.silex`.
+1. Update and validate `Package.json`, including `version`, `requires.silex`,
+   and `extensions`.
 2. Commit the complete package contents.
 3. Tag that commit as `vMAJOR.MINOR.PATCH` and push the tag.
 4. Create or verify the immutable GitHub Release, its source archive, and its

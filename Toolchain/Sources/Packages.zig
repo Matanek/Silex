@@ -107,6 +107,7 @@ pub const Dependency = struct {
 pub const Package = struct {
     name: ?[]const u8,
     version: ?Version,
+    extensions: []const []const u8 = &.{},
     root: []const u8,
     module_roots: []const ModuleRoot,
     inactive_modules: []const []const u8,
@@ -179,6 +180,7 @@ pub const ManifestInfo = struct {
     name: []const u8,
     version: Version,
     silex_requirement: SilexRequirement,
+    extensions: []const []const u8,
     dependencies: []const ManifestDependency,
 };
 
@@ -195,6 +197,7 @@ pub const Result = struct {
 const RawManifest = struct {
     name: ?[]const u8 = null,
     version: ?[]const u8 = null,
+    extensions: ?std.json.Value = null,
     requires: ?std.json.Value = null,
     dependencies: ?std.json.Value = null,
     boundary: ?std.json.Value = null,
@@ -204,6 +207,7 @@ const RawManifest = struct {
 const ParsedManifest = struct {
     name: ?[]const u8,
     version: ?Version,
+    extensions: []const []const u8,
     silex_requirement: ?SilexRequirement,
     dependencies: []const ManifestDependency,
     boundary_providers: []const BoundaryProvider,
@@ -256,6 +260,7 @@ pub const Resolver = struct {
             .package = .{
                 .name = if (root_manifest) |manifest| manifest.name else null,
                 .version = if (root_manifest) |manifest| manifest.version else null,
+                .extensions = if (root_manifest) |manifest| manifest.extensions else &.{},
                 .root = project_root,
                 .module_roots = roots.active,
                 .inactive_modules = roots.inactive,
@@ -271,6 +276,7 @@ pub const Resolver = struct {
             try self.resolveAdjacent();
         }
         self.builders.items[0].state = .done;
+        try self.validateNamespaceExtensions();
 
         const packages = try self.allocator.alloc(Package, self.builders.items.len);
         for (self.builders.items, 0..) |*builder, index| {
@@ -298,6 +304,7 @@ pub const Resolver = struct {
             .name = name,
             .version = version,
             .silex_requirement = requirement,
+            .extensions = manifest.extensions,
             .dependencies = manifest.dependencies,
         };
     }
@@ -475,8 +482,9 @@ pub const Resolver = struct {
             const suffix = entry.name[prefix.len..];
             const folder_version = Version.parse(suffix) catch return self.fail("global package folder has an invalid version");
             const root = try std.fs.path.join(self.allocator, &.{ global_root, entry.name });
-            const manifest = try self.loadRequired(root);
+            var manifest = try self.loadRequired(root);
             const version = try self.validateSelected(manifest, request.name, root, true);
+            manifest = try self.trustGlobalExtensions(root, manifest, request.name, version);
             if (!folder_version.eql(version)) return self.fail("global package folder and manifest version differ");
             available.* = newest(available.*, version);
             if (!request.constraint.accepts(version)) continue;
@@ -494,6 +502,54 @@ pub const Resolver = struct {
             if (toolchain_incompatible) |selected| try self.validateToolchain(selected.manifest);
         }
         return best;
+    }
+
+    fn trustGlobalExtensions(
+        self: *Resolver,
+        root: []const u8,
+        manifest: ParsedManifest,
+        name: []const u8,
+        version: Version,
+    ) !ParsedManifest {
+        var trusted = manifest;
+        trusted.extensions = &.{};
+        const receipt_path = try std.fs.path.join(self.allocator, &.{ root, ".silex", "registry.json" });
+        const source = Io.Dir.cwd().readFileAlloc(self.io, receipt_path, self.allocator, .limited(1024 * 1024)) catch |err| switch (err) {
+            error.FileNotFound, error.NotDir => return trusted,
+            else => return self.fail("installed package registry proof cannot be read"),
+        };
+        const Receipt = struct {
+            schema: u8,
+            name: []const u8,
+            version: []const u8,
+            repository: ?[]const u8,
+            archive_sha256: []const u8,
+            manifest_sha256: []const u8,
+            extensions: []const []const u8,
+        };
+        const receipt = std.json.parseFromSliceLeaky(Receipt, self.allocator, source, .{
+            .allocate = .alloc_always,
+            .ignore_unknown_fields = false,
+        }) catch return self.fail("installed package has an invalid registry proof; remove it and reinstall");
+        const version_text = try std.fmt.allocPrint(
+            self.allocator,
+            "{d}.{d}.{d}",
+            .{ version.major, version.minor, version.patch },
+        );
+        const manifest_path = try std.fs.path.join(self.allocator, &.{ root, "Package.json" });
+        const manifest_sha256 = try fileSha256(self.allocator, self.io, manifest_path);
+        if (receipt.schema != 1 or
+            !std.mem.eql(u8, receipt.name, name) or
+            !std.mem.eql(u8, receipt.version, version_text) or
+            !validSha256(receipt.archive_sha256) or
+            !std.mem.eql(u8, receipt.manifest_sha256, manifest_sha256) or
+            !equalStrings(receipt.extensions, manifest.extensions))
+        {
+            return self.fail("installed package does not match its registry proof; remove it and reinstall");
+        }
+        _ = receipt.repository;
+        trusted.extensions = receipt.extensions;
+        return trusted;
     }
 
     fn selectedVersionDiagnostic(self: *Resolver, owner: usize, request: ManifestDependency, selected: Version) ![]const u8 {
@@ -573,6 +629,7 @@ pub const Resolver = struct {
             .package = .{
                 .name = name,
                 .version = version,
+                .extensions = manifest.extensions,
                 .root = root,
                 .module_roots = roots.active,
                 .inactive_modules = roots.inactive,
@@ -693,6 +750,26 @@ pub const Resolver = struct {
         ));
     }
 
+    fn validateNamespaceExtensions(self: *Resolver) !void {
+        for (self.builders.items) |builder| {
+            const child = builder.package.name orelse continue;
+            const separator = std.mem.lastIndexOfScalar(u8, child, '.') orelse continue;
+            const parent_name = child[0..separator];
+            const parent_index = self.find(parent_name) orelse return self.fail(try std.fmt.allocPrint(
+                self.allocator,
+                "package '{s}' requires parent package '{s}' to authorize its namespace",
+                .{ child, parent_name },
+            ));
+            const parent = self.builders.items[parent_index].package;
+            if (allowsExtension(parent.extensions, child)) continue;
+            return self.fail(try std.fmt.allocPrint(
+                self.allocator,
+                "package '{s}' does not authorize package '{s}' as a namespace extension",
+                .{ parent_name, child },
+            ));
+        }
+    }
+
     fn validateRootIdentity(self: *Resolver, manifest: ParsedManifest, root: []const u8) !void {
         if ((manifest.name == null) != (manifest.version == null)) {
             return self.fail("a manifest must declare name and version together");
@@ -751,6 +828,31 @@ pub const Resolver = struct {
             null;
         if (raw.name) |name| if (!Modules.validName(name)) return self.fail("invalid package identity");
 
+        var extensions: std.ArrayList([]const u8) = .empty;
+        if (raw.extensions) |value| {
+            const package_name = raw.name orelse return self.fail("an application manifest cannot declare extensions");
+            const array = switch (value) {
+                .array => |array| array,
+                else => return self.fail("extensions must be an array of direct child package names"),
+            };
+            for (array.items) |item| {
+                const extension = switch (item) {
+                    .string => |text| text,
+                    else => return self.fail("an extension grant must be a package name string"),
+                };
+                if (!validExtensionGrant(package_name, extension)) {
+                    return self.fail("an extension grant must name one direct child package or use Parent.*");
+                }
+                try extensions.append(self.allocator, extension);
+            }
+            std.mem.sort([]const u8, extensions.items, {}, stringLessThan);
+            if (extensions.items.len > 1) {
+                for (extensions.items[1..], extensions.items[0 .. extensions.items.len - 1]) |current, previous| {
+                    if (std.mem.eql(u8, current, previous)) return self.fail("extension grants must be unique");
+                }
+            }
+        }
+
         var silex_requirement: ?SilexRequirement = null;
         if (raw.requires) |value| {
             const object = switch (value) {
@@ -792,6 +894,7 @@ pub const Resolver = struct {
         return .{
             .name = raw.name,
             .version = version,
+            .extensions = try extensions.toOwnedSlice(self.allocator),
             .silex_requirement = silex_requirement,
             .dependencies = try dependencies.toOwnedSlice(self.allocator),
             .boundary_providers = &.{},
@@ -928,6 +1031,42 @@ fn belongsTo(module_name: []const u8, package_name: []const u8) bool {
             module_name[package_name.len] == '.');
 }
 
+pub fn validExtensionGrant(package_name: []const u8, grant: []const u8) bool {
+    if (grant.len <= package_name.len + 1 or !std.mem.startsWith(u8, grant, package_name) or
+        grant[package_name.len] != '.') return false;
+    const child = grant[package_name.len + 1 ..];
+    return std.mem.eql(u8, child, "*") or
+        (Modules.validName(child) and std.mem.indexOfScalar(u8, child, '.') == null);
+}
+
+fn allowsExtension(grants: []const []const u8, child: []const u8) bool {
+    for (grants) |grant| {
+        if (std.mem.eql(u8, grant, child) or std.mem.endsWith(u8, grant, ".*")) return true;
+    }
+    return false;
+}
+
+fn equalStrings(left: []const []const u8, right: []const []const u8) bool {
+    if (left.len != right.len) return false;
+    for (left, right) |left_value, right_value| if (!std.mem.eql(u8, left_value, right_value)) return false;
+    return true;
+}
+
+fn validSha256(text: []const u8) bool {
+    if (text.len != 64) return false;
+    for (text) |character| if (!std.ascii.isDigit(character) and !(character >= 'a' and character <= 'f')) return false;
+    return true;
+}
+
+fn fileSha256(allocator: Allocator, io: Io, path: []const u8) ![]const u8 {
+    const source = Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(1024 * 1024)) catch
+        return error.InvalidPackageGraph;
+    var digest: [std.crypto.hash.sha2.Sha256.digest_length]u8 = undefined;
+    std.crypto.hash.sha2.Sha256.hash(source, &digest, .{});
+    const hex = std.fmt.bytesToHex(digest, .lower);
+    return allocator.dupe(u8, &hex);
+}
+
 fn validRelativePath(path: []const u8) bool {
     if (path.len == 0 or std.fs.path.isAbsolute(path) or std.mem.indexOfScalar(u8, path, '\\') != null) return false;
     var components = std.mem.splitScalar(u8, path, '/');
@@ -1049,6 +1188,45 @@ test "parse exact and caret stable versions" {
     try std.testing.expect((try Constraint.parse("^0.2.1")).accepts(try Version.parse("0.3.0")));
     try std.testing.expect(!(try Constraint.parse("^0.2.1")).accepts(try Version.parse("1.0.0")));
     try std.testing.expectError(error.InvalidVersion, Version.parse("1.2.3-beta"));
+}
+
+test "diagnose invalid package extension grants" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "GFX/Module");
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "GFX" });
+
+    const cases = [_]struct { source: []const u8, diagnostic: []const u8 }{
+        .{
+            .source = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":{}}",
+            .diagnostic = "extensions must be an array of direct child package names",
+        },
+        .{
+            .source = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":[false]}",
+            .diagnostic = "an extension grant must be a package name string",
+        },
+        .{
+            .source = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":[\"GFX.UI.Controls\"]}",
+            .diagnostic = "an extension grant must name one direct child package or use Parent.*",
+        },
+        .{
+            .source = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":[\"GFX.UI\",\"GFX.UI\"]}",
+            .diagnostic = "extension grants must be unique",
+        },
+        .{
+            .source = "{\"extensions\":[]}",
+            .diagnostic = "an application manifest cannot declare extensions",
+        },
+    };
+    for (cases) |case| {
+        try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "GFX/Package.json", .data = case.source });
+        var resolver = Resolver.init(allocator, std.testing.io, null);
+        try std.testing.expectError(error.InvalidPackageGraph, resolver.resolve(root));
+        try std.testing.expectEqualStrings(case.diagnostic, resolver.diagnostic.?);
+    }
 }
 
 test "parse and apply Silex toolchain requirements before package sources" {
@@ -1386,9 +1564,36 @@ test "resolve qualified identities literally from an injected global root" {
     const app = try std.fs.path.join(allocator, &.{ base, "App" });
     const global = try std.fs.path.join(allocator, &.{ base, "Global" });
     var resolver = Resolver.init(allocator, std.testing.io, global);
+    try std.testing.expectError(error.InvalidPackageGraph, resolver.resolve(app));
+    try std.testing.expectEqualStrings(
+        "package 'Silex.Bootstrap' requires parent package 'Silex' to authorize its namespace",
+        resolver.diagnostic.?,
+    );
+
+    try temporary.dir.createDirPath(std.testing.io, "Global/Silex@0.1.0/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "App/Package.json",
+        .data = "{\"dependencies\":{\"Silex\":\"^0.1.0\",\"Silex.Bootstrap\":\"^0.1.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Global/Silex@0.1.0/Package.json",
+        .data = "{\"name\":\"Silex\",\"version\":\"0.1.0\",\"requires\":{\"silex\":\">=0.38.0 <0.39.0\"},\"extensions\":[\"Silex.Bootstrap\"]}",
+    });
+    try temporary.dir.createDirPath(std.testing.io, "Global/Silex@0.1.0/.silex");
+    const silex_manifest = try std.fs.path.join(allocator, &.{ global, "Silex@0.1.0", "Package.json" });
+    const manifest_sha256 = try fileSha256(allocator, std.testing.io, silex_manifest);
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Global/Silex@0.1.0/.silex/registry.json",
+        .data = try std.fmt.allocPrint(
+            allocator,
+            "{{\"schema\":1,\"name\":\"Silex\",\"version\":\"0.1.0\",\"repository\":\"Matanek/Silex\",\"archive_sha256\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\",\"manifest_sha256\":\"{s}\",\"extensions\":[\"Silex.Bootstrap\"]}}",
+            .{manifest_sha256},
+        ),
+    });
+    resolver = Resolver.init(allocator, std.testing.io, global);
     const graph = try resolver.resolve(app);
-    try std.testing.expectEqualStrings("Silex.Bootstrap", graph.packages[1].name.?);
-    try std.testing.expect(std.mem.endsWith(u8, graph.packages[1].root, "Silex.Bootstrap@0.1.7"));
+    try std.testing.expectEqualStrings("Silex.Bootstrap", graph.packages[2].name.?);
+    try std.testing.expect(std.mem.endsWith(u8, graph.packages[2].root, "Silex.Bootstrap@0.1.7"));
 }
 
 test "reject incompatible graph constraints missing packages and legacy manifests" {

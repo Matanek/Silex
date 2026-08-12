@@ -906,11 +906,14 @@ test "qualified packages share namespaces without sharing ownership" {
         const module_path = try std.fs.path.join(allocator, &.{ name, "Module" });
         try temporary.dir.createDirPath(std.testing.io, module_path);
         const manifest_path = try std.fs.path.join(allocator, &.{ name, "Package.json" });
-        const manifest = try std.fmt.allocPrint(
-            allocator,
-            "{{\"name\":\"{s}\",\"version\":\"1.0.0\"}}",
-            .{name},
-        );
+        const manifest = if (std.mem.eql(u8, name, "Silex"))
+            "{\"name\":\"Silex\",\"version\":\"1.0.0\",\"extensions\":[\"Silex.*\"]}"
+        else
+            try std.fmt.allocPrint(
+                allocator,
+                "{{\"name\":\"{s}\",\"version\":\"1.0.0\"}}",
+                .{name},
+            );
         try temporary.dir.writeFile(std.testing.io, .{ .sub_path = manifest_path, .data = manifest });
     }
     try temporary.dir.writeFile(std.testing.io, .{
@@ -944,6 +947,95 @@ test "qualified packages share namespaces without sharing ownership" {
     compiler = Compiler.init(allocator, std.testing.io);
     try std.testing.expectError(error.InvalidSource, compiler.compile(input));
     try std.testing.expectEqualStrings("multiple source files provide the same module", compiler.diagnostic.?.message);
+}
+
+test "packages authorize direct namespace extensions hierarchically" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.createDirPath(std.testing.io, "GFX/Module");
+    try temporary.dir.createDirPath(std.testing.io, "GFX.UI/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Package.json",
+        .data = "{\"dependencies\":{\"GFX\":\"=1.0.0\",\"GFX.UI\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Package.json",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX.UI/Package.json",
+        .data = "{\"name\":\"GFX.UI\",\"version\":\"1.0.0\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/Core.sx",
+        .data = "public func value() int { return 20 }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX.UI/Module/Button.sx",
+        .data = "public func value() int { return 22 }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "use GFX.Core\nuse GFX.UI.Button\nfunc main() { print(Core.value() + Button.value()) }",
+    });
+
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Compiler.init(allocator, std.testing.io);
+    try std.testing.expectError(error.InvalidSource, compiler.compile(input));
+    try std.testing.expectEqualStrings(
+        "package 'GFX' does not authorize package 'GFX.UI' as a namespace extension",
+        compiler.diagnostic.?.message,
+    );
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Package.json",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":[\"GFX.UI\"]}",
+    });
+    compiler = Compiler.init(allocator, std.testing.io);
+    var compilation = try compiler.compile(input);
+    var result = try @import("../Interpreter.zig").runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("42\n", result.stdout);
+
+    try temporary.dir.createDirPath(std.testing.io, "GFX.UI.Controls/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Package.json",
+        .data = "{\"dependencies\":{\"GFX\":\"=1.0.0\",\"GFX.UI\":\"=1.0.0\",\"GFX.UI.Controls\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Package.json",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":[\"GFX.*\"]}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX.UI.Controls/Package.json",
+        .data = "{\"name\":\"GFX.UI.Controls\",\"version\":\"1.0.0\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX.UI.Controls/Module/Panel.sx",
+        .data = "public func value() int { return 1 }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "use GFX.Core\nuse GFX.UI.Button\nuse GFX.UI.Controls.Panel\nfunc main() { print(Core.value() + Button.value() + Panel.value()) }",
+    });
+    compiler = Compiler.init(allocator, std.testing.io);
+    try std.testing.expectError(error.InvalidSource, compiler.compile(input));
+    try std.testing.expectEqualStrings(
+        "package 'GFX.UI' does not authorize package 'GFX.UI.Controls' as a namespace extension",
+        compiler.diagnostic.?.message,
+    );
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX.UI/Package.json",
+        .data = "{\"name\":\"GFX.UI\",\"version\":\"1.0.0\",\"extensions\":[\"GFX.UI.*\"]}",
+    });
+    compiler = Compiler.init(allocator, std.testing.io);
+    compilation = try compiler.compile(input);
+    result = try @import("../Interpreter.zig").runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("43\n", result.stdout);
 }
 
 test "enforce public package interfaces and direct dependency visibility" {

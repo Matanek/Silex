@@ -20,6 +20,22 @@ pub const LinkResult = struct {
     artifacts: Artifacts.Summary,
 };
 
+pub const PublicationProof = struct {
+    repository: ?[]const u8,
+    archive_sha256: []const u8,
+    extensions: []const []const u8,
+};
+
+const Receipt = struct {
+    schema: u8 = 1,
+    name: []const u8,
+    version: []const u8,
+    repository: ?[]const u8,
+    archive_sha256: []const u8,
+    manifest_sha256: []const u8,
+    extensions: []const []const u8,
+};
+
 pub const Manager = struct {
     allocator: Allocator,
     download_allocator: Allocator,
@@ -42,8 +58,29 @@ pub const Manager = struct {
     }
 
     pub fn install(self: *Manager, source: []const u8, target: TargetModule.Target) !InstallResult {
+        return self.installWithProof(source, target, null);
+    }
+
+    pub fn installPublished(
+        self: *Manager,
+        source: []const u8,
+        target: TargetModule.Target,
+        proof: PublicationProof,
+    ) !InstallResult {
+        return self.installWithProof(source, target, proof);
+    }
+
+    fn installWithProof(
+        self: *Manager,
+        source: []const u8,
+        target: TargetModule.Target,
+        proof: ?PublicationProof,
+    ) !InstallResult {
         self.diagnostic = null;
         const package = try self.inspect(source);
+        if (proof) |publication| if (!equalStrings(package.extensions, publication.extensions)) {
+            return self.failFmt("package '{s}' extensions do not match its registry proof", .{package.name});
+        };
         const folder = try packageFolder(self.allocator, package);
         const destination = try std.fs.path.join(self.allocator, &.{ self.packages_root, folder });
         if (try exists(self.io, destination)) {
@@ -51,6 +88,7 @@ pub const Manager = struct {
             if (!std.mem.eql(u8, existing.name, package.name) or !existing.version.eql(package.version)) {
                 return self.failFmt("installed package folder '{s}' has inconsistent contents", .{folder});
             }
+            if (proof) |publication| try self.verifyReceipt(destination, existing, publication);
             const artifacts = try self.prepareArtifacts(destination, target);
             return .{
                 .package = existing,
@@ -69,6 +107,7 @@ pub const Manager = struct {
         );
 
         try self.copyTree(source, staging);
+        if (proof) |publication| try self.writeReceipt(staging, package, publication);
         var published = false;
         defer if (!published) Io.Dir.cwd().deleteTree(self.io, staging) catch {};
 
@@ -83,6 +122,55 @@ pub const Manager = struct {
             .artifacts = artifacts,
             .installed = true,
         };
+    }
+
+    fn writeReceipt(self: *Manager, root: []const u8, package: Packages.ManifestInfo, proof: PublicationProof) !void {
+        const metadata_root = try std.fs.path.join(self.allocator, &.{ root, ".silex" });
+        try Io.Dir.cwd().createDirPath(self.io, metadata_root);
+        const path = try std.fs.path.join(self.allocator, &.{ metadata_root, "registry.json" });
+        const manifest_path = try std.fs.path.join(self.allocator, &.{ root, "Package.json" });
+        const manifest_sha256 = try fileSha256(self.allocator, self.io, manifest_path);
+        const version = try std.fmt.allocPrint(
+            self.allocator,
+            "{d}.{d}.{d}",
+            .{ package.version.major, package.version.minor, package.version.patch },
+        );
+        const source = try std.json.Stringify.valueAlloc(self.allocator, Receipt{
+            .name = package.name,
+            .version = version,
+            .repository = proof.repository,
+            .archive_sha256 = proof.archive_sha256,
+            .manifest_sha256 = manifest_sha256,
+            .extensions = proof.extensions,
+        }, .{ .whitespace = .indent_2 });
+        try Io.Dir.cwd().writeFile(self.io, .{ .sub_path = path, .data = source });
+    }
+
+    fn verifyReceipt(self: *Manager, root: []const u8, package: Packages.ManifestInfo, proof: PublicationProof) !void {
+        const path = try std.fs.path.join(self.allocator, &.{ root, ".silex", "registry.json" });
+        const source = Io.Dir.cwd().readFileAlloc(self.io, path, self.allocator, .limited(1024 * 1024)) catch
+            return self.failFmt("installed package '{s}' has no registry proof; remove it and reinstall", .{package.name});
+        const receipt = std.json.parseFromSliceLeaky(Receipt, self.allocator, source, .{
+            .allocate = .alloc_always,
+            .ignore_unknown_fields = false,
+        }) catch return self.failFmt("installed package '{s}' has an invalid registry proof", .{package.name});
+        const version = try std.fmt.allocPrint(
+            self.allocator,
+            "{d}.{d}.{d}",
+            .{ package.version.major, package.version.minor, package.version.patch },
+        );
+        const manifest_path = try std.fs.path.join(self.allocator, &.{ root, "Package.json" });
+        const manifest_sha256 = try fileSha256(self.allocator, self.io, manifest_path);
+        if (receipt.schema != 1 or
+            !std.mem.eql(u8, receipt.name, package.name) or
+            !std.mem.eql(u8, receipt.version, version) or
+            !optionalStringEqual(receipt.repository, proof.repository) or
+            !std.mem.eql(u8, receipt.archive_sha256, proof.archive_sha256) or
+            !std.mem.eql(u8, receipt.manifest_sha256, manifest_sha256) or
+            !equalStrings(receipt.extensions, proof.extensions))
+        {
+            return self.failFmt("installed package '{s}' does not match its registry proof; remove it and reinstall", .{package.name});
+        }
     }
 
     pub fn link(self: *Manager, source: []const u8, target: TargetModule.Target) !LinkResult {
@@ -205,6 +293,25 @@ fn exists(io: Io, path: []const u8) !bool {
     return true;
 }
 
+fn fileSha256(allocator: Allocator, io: Io, path: []const u8) ![]const u8 {
+    const source = try Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(1024 * 1024));
+    var digest: [std.crypto.hash.sha2.Sha256.digest_length]u8 = undefined;
+    std.crypto.hash.sha2.Sha256.hash(source, &digest, .{});
+    const hex = std.fmt.bytesToHex(digest, .lower);
+    return allocator.dupe(u8, &hex);
+}
+
+fn optionalStringEqual(left: ?[]const u8, right: ?[]const u8) bool {
+    if (left == null or right == null) return left == null and right == null;
+    return std.mem.eql(u8, left.?, right.?);
+}
+
+fn equalStrings(left: []const []const u8, right: []const []const u8) bool {
+    if (left.len != right.len) return false;
+    for (left, right) |left_value, right_value| if (!std.mem.eql(u8, left_value, right_value)) return false;
+    return true;
+}
+
 test "install copies an immutable package without repository state" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -231,6 +338,65 @@ test "install copies an immutable package without repository state" {
     try std.testing.expect(!try exists(std.testing.io, try std.fs.path.join(allocator, &.{ result.destination, ".git" })));
     const repeated = try manager.install(source, .macos_arm64);
     try std.testing.expect(!repeated.installed);
+}
+
+test "published package extensions require an intact registry proof" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "GFX/Module");
+    try temporary.dir.createDirPath(std.testing.io, "GFX.UI/Module");
+    try temporary.dir.createDirPath(std.testing.io, "App");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Package.json",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"requires\":{\"silex\":\">=0.38.0 <0.39.0\"},\"extensions\":[\"GFX.UI\"]}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX.UI/Package.json",
+        .data = "{\"name\":\"GFX.UI\",\"version\":\"1.0.0\",\"requires\":{\"silex\":\">=0.38.0 <0.39.0\"},\"dependencies\":{\"GFX\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "App/Package.json",
+        .data = "{\"dependencies\":{\"GFX\":\"=1.0.0\",\"GFX.UI\":\"=1.0.0\"}}",
+    });
+    const base = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const packages_root = try std.fs.path.join(allocator, &.{ base, "Home", ".silex", "packages" });
+    const gfx = try std.fs.path.join(allocator, &.{ base, "GFX" });
+    const ui = try std.fs.path.join(allocator, &.{ base, "GFX.UI" });
+    const app = try std.fs.path.join(allocator, &.{ base, "App" });
+    const digest = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    var manager = Manager.init(allocator, std.testing.allocator, std.testing.io, packages_root);
+    const gfx_result = try manager.installPublished(gfx, .macos_arm64, .{
+        .repository = "Matanek/Silex-Lib-GFX",
+        .archive_sha256 = digest,
+        .extensions = &.{"GFX.UI"},
+    });
+    _ = try manager.installPublished(ui, .macos_arm64, .{
+        .repository = "Matanek/Silex-Lib-GFX-UI",
+        .archive_sha256 = digest,
+        .extensions = &.{},
+    });
+    var resolver = Packages.Resolver.init(allocator, std.testing.io, packages_root);
+    const graph = try resolver.resolve(app);
+    try std.testing.expectEqual(@as(usize, 3), graph.packages.len);
+
+    try Io.Dir.cwd().writeFile(std.testing.io, .{
+        .sub_path = try std.fs.path.join(allocator, &.{ gfx_result.destination, "Package.json" }),
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"requires\":{\"silex\":\">=0.38.0 <0.39.0\"},\"extensions\":[\"GFX.Evil\"]}",
+    });
+    resolver = Packages.Resolver.init(allocator, std.testing.io, packages_root);
+    try std.testing.expectError(error.InvalidPackageGraph, resolver.resolve(app));
+    try std.testing.expectEqualStrings(
+        "installed package does not match its registry proof; remove it and reinstall",
+        resolver.diagnostic.?,
+    );
+    try std.testing.expectError(error.InvalidPackageStore, manager.installPublished(gfx, .macos_arm64, .{
+        .repository = "Matanek/Silex-Lib-GFX",
+        .archive_sha256 = digest,
+        .extensions = &.{"GFX.UI"},
+    }));
 }
 
 test "link exposes live package sources and unlink removes the override" {

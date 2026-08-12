@@ -3302,6 +3302,61 @@ test "complete a module facade together with its child namespace" {
     try std.testing.expect(hasLabel(package_prefix_items, "STD"));
 }
 
+test "respect closed package namespaces during completion" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.createDirPath(std.testing.io, "GFX/Module");
+    try temporary.dir.createDirPath(std.testing.io, "GFX.UI/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Package.json",
+        .data = "{\"dependencies\":{\"GFX\":\"=1.0.0\",\"GFX.UI\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Package.json",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX.UI/Package.json",
+        .data = "{\"name\":\"GFX.UI\",\"version\":\"1.0.0\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = "func main() {}" });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX.UI/Module/Button.sx",
+        .data = "public struct Button {}",
+    });
+
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const main_path = try std.fs.path.join(allocator, &.{ root, "Main.sx" });
+    const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
+    const uri = try std.fmt.allocPrint(allocator, "file://{s}", .{main_path});
+    const source = "use GFX.UI.";
+
+    try std.testing.expectError(
+        error.InvalidPackageGraph,
+        itemsAt(allocator, std.testing.io, null, root_uri, uri, &.{}, source, source.len),
+    );
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Package.json",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":[\"GFX.UI\"]}",
+    });
+    const items = (try itemsAt(
+        allocator,
+        std.testing.io,
+        null,
+        root_uri,
+        uri,
+        &.{},
+        source,
+        source.len,
+    )).?;
+    try std.testing.expect(hasLabel(items, "Button"));
+}
+
 fn hasLabel(items: []const Types.CompletionItem, label: []const u8) bool {
     for (items) |item| if (completionNameMatches(item, label)) return true;
     return false;
