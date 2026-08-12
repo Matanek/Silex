@@ -56,8 +56,8 @@ jobs:
           "$SILEX_INSTALL_DIR/silex" install GFX
 
           if [ "${{ matrix.execution }}" = "run" ]; then
-            SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=dummy \
-              "$SILEX_INSTALL_DIR/silex" run Examples/Distribution/GFX/Runtime.sx
+            "$SILEX_INSTALL_DIR/silex" compile Examples/Distribution/GFX/Runtime.sx -o "$RUNNER_TEMP/gfx-runtime-smoke"
+            timeout 30s env SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=dummy "$RUNNER_TEMP/gfx-runtime-smoke"
           else
             "$SILEX_INSTALL_DIR/silex" compile Examples/Distribution/GFX/Runtime.sx -o "$RUNNER_TEMP/gfx-runtime-smoke"
             "$SILEX_INSTALL_DIR/silex" compile Examples/Distribution/GFX/Window.sx -o "$RUNNER_TEMP/gfx-window-smoke"
@@ -109,4 +109,13 @@ jobs:
           & $silex --version
           & $silex install STD
           & $silex install GFX
-          & $silex run Examples/Distribution/GFX/Runtime.sx
+          $runtime = Join-Path $env:RUNNER_TEMP "gfx-runtime-smoke.exe"
+          & $silex compile Examples/Distribution/GFX/Runtime.sx -o $runtime
+          $process = Start-Process -FilePath $runtime -NoNewWindow -PassThru
+          if (-not $process.WaitForExit(30000)) {
+            Stop-Process -Id $process.Id -Force
+            throw "The linked SDL3 runtime did not exit within 30 seconds"
+          }
+          if ($process.ExitCode -ne 0) {
+            throw "The linked SDL3 runtime exited with code $($process.ExitCode)"
+          }
