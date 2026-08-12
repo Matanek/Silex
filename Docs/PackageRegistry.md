@@ -50,9 +50,29 @@ them transitively through the same registry and verifies each archive in turn.
 2. Commit the complete package contents.
 3. Tag that commit as `vMAJOR.MINOR.PATCH` and push the tag.
 4. Let the package release workflow publish the source archive and checksum.
-5. Open a pull request against `Matanek/Silex-Registry` that adds
-   `registry/v1/packages/Name/MAJOR.MINOR.PATCH.json` with the release URL and
-   published SHA-256 value.
+5. From a checkout containing `Silex-Registry/`, prepare the immutable registry
+   proposal:
+
+   ```sh
+   silex publish path/to/Package
+   ```
+
+6. Validate and open a pull request from the resulting registry change.
+
+`silex publish` requires a clean package repository whose current commit carries
+the exact `vMAJOR.MINOR.PATCH` tag. It derives the GitHub release from `origin`,
+downloads its published checksum, downloads and hashes the archive, then writes
+the version manifest under the registry source tree. It refuses an existing
+version instead of replacing it. When the registry checkout is elsewhere, name
+it explicitly through the environment:
+
+```sh
+SILEX_REGISTRY_SOURCE=/absolute/path/to/Silex-Registry silex publish path/to/Package
+```
+
+The command prepares the reviewed publication; it does not merge or bypass the
+registry pull request. The package becomes available to `silex install` after
+that pull request is merged and deployed.
 
 The deployment validates the version manifest and regenerates the package
 `index.json`. The tag and manifest versions must match. A registry entry is

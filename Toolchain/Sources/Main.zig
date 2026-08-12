@@ -24,6 +24,7 @@ const ReleaseOptimizer = @import("Optimize/Release.zig");
 const Project = @import("Project.zig");
 const Packages = @import("Packages.zig");
 const PackageRegistry = @import("PackageRegistry.zig");
+const PackagePublish = @import("PackagePublish.zig");
 const PackageStore = @import("PackageStore.zig");
 const NativeTestRunner = @import("NativeTestRunner.zig");
 const TestDiscovery = @import("TestDiscovery.zig");
@@ -40,6 +41,7 @@ const usage =
     \\       silex test <source.sx|directory> [-n|--nocache] [--emit-ir]
     \\       silex compile <source.sx> [--target <target>] [-d|--debug|-r|--release] [-n|--nocache] -o|--output <executable>
     \\       silex install <package|package-directory> [--target <target>]
+    \\       silex publish <package-directory>
     \\       silex link <package-directory> [--target <target>]
     \\       silex unlink <package-name>
     \\       silex setup
@@ -65,6 +67,7 @@ test {
     _ = CliProgress;
     _ = PackageStore;
     _ = PackageRegistry;
+    _ = PackagePublish;
 }
 
 pub fn main(init: std.process.Init) u8 {
@@ -87,6 +90,7 @@ fn runCli(init: std.process.Init) !u8 {
     if (std.mem.eql(u8, args[1], "test")) return testSource(init, allocator, args[2..]);
     if (std.mem.eql(u8, args[1], "compile")) return compileNative(init, allocator, args[2..]);
     if (std.mem.eql(u8, args[1], "install")) return installPackage(init, allocator, args[2..]);
+    if (std.mem.eql(u8, args[1], "publish")) return publishPackage(init, allocator, args[2..]);
     if (std.mem.eql(u8, args[1], "link")) return linkPackage(init, allocator, args[2..]);
     if (std.mem.eql(u8, args[1], "unlink")) return unlinkPackage(init, allocator, args[2..]);
     if (std.mem.eql(u8, args[1], "setup")) return setupToolchain(init, allocator, args[2..]);
@@ -101,6 +105,30 @@ fn runCli(init: std.process.Init) !u8 {
     if (std.mem.eql(u8, args[1], "lsp")) return runLanguageServer(init, args[2..]);
     std.debug.print("silex: unknown command '{s}'\n\n{s}", .{ args[1], usage });
     return 1;
+}
+
+fn publishPackage(init: std.process.Init, allocator: std.mem.Allocator, args: []const []const u8) !u8 {
+    const options = switch (Cli.parsePackage(args)) {
+        .options => |options| options,
+        .diagnostic => |diagnostic| {
+            printCliDiagnostic("publish", diagnostic);
+            return 1;
+        },
+    };
+    const registry_root = init.environ_map.get("SILEX_REGISTRY_SOURCE") orelse "Silex-Registry";
+    var publisher = PackagePublish.Publisher.init(allocator, init.gpa, init.io);
+    const result = publisher.prepare(options.package, registry_root) catch |err| switch (err) {
+        error.InvalidPublication, error.InvalidPackageGraph => {
+            std.debug.print("silex: cannot publish package: {s}\n", .{publisher.diagnostic orelse "invalid publication"});
+            return 1;
+        },
+        else => return err,
+    };
+    std.debug.print(
+        "silex: prepared {s}@{d}.{d}.{d} for registry review in {s}\n",
+        .{ result.name, result.version.major, result.version.minor, result.version.patch, result.manifest_path },
+    );
+    return 0;
 }
 
 fn setupToolchain(init: std.process.Init, allocator: std.mem.Allocator, args: []const []const u8) !u8 {
