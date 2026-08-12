@@ -390,9 +390,9 @@ fn encodeFunction(
                 try emitImmediate(allocator, bytes, .rcx, @as(u64, value.result.width) * Machine.slot_size);
                 try bytes.appendSlice(allocator, &.{ 0x48, 0x0f, 0xaf, 0xc1 });
                 try emitAddressStack(allocator, bytes, .rcx, value.collection.start);
-                try bytes.appendSlice(allocator, &.{ 0x48, 0x01, 0xc1 });
+                try bytes.appendSlice(allocator, &.{ 0x48, 0x29, 0xc1 });
                 for (0..value.result.width) |leaf| {
-                    try emitLoadMemory(allocator, bytes, .rax, .rcx, @intCast(leaf * Machine.slot_size));
+                    try emitLoadMemory(allocator, bytes, .rax, .rcx, -@as(i32, @intCast(leaf * Machine.slot_size)));
                     try emitStoreStack(allocator, bytes, .rax, @intCast(@as(usize, value.result.start) + leaf));
                 }
             },
@@ -1066,8 +1066,13 @@ fn emitCollectionReference(
     try patchRelative(bytes.items, in_bounds, bytes.items.len);
     try bytes.appendSlice(allocator, &.{ 0x48, 0x69, 0xc0 });
     try appendInt(allocator, bytes, u32, @as(u32, value.element_width) * Machine.slot_size);
-    try bytes.appendSlice(allocator, &.{ 0x48, 0x01, 0xd8 });
-    try emitStoreStack(allocator, bytes, .rax, value.result);
+    if (value.dynamic) {
+        try bytes.appendSlice(allocator, &.{ 0x48, 0x01, 0xd8 });
+        try emitStoreStack(allocator, bytes, .rax, value.result);
+    } else {
+        try bytes.appendSlice(allocator, &.{ 0x48, 0x29, 0xc3 });
+        try emitStoreStack(allocator, bytes, .rbx, value.result);
+    }
 }
 
 fn emitViewReplace(
@@ -1165,10 +1170,10 @@ fn emitFixedReplace(
     try emitMoveRegister(allocator, bytes, .rax, .r13);
     try bytes.appendSlice(allocator, &.{ 0x48, 0x69, 0xc0 });
     try appendInt(allocator, bytes, u32, @as(u32, value.replacement.width) * Machine.slot_size);
-    try bytes.appendSlice(allocator, &.{ 0x49, 0x01, 0xc6 });
+    try bytes.appendSlice(allocator, &.{ 0x49, 0x29, 0xc6 });
     for (0..value.replacement.width) |leaf| {
         try emitLoadStack(allocator, bytes, .rax, @intCast(@as(usize, value.replacement.start) + leaf));
-        try emitStoreMemory(allocator, bytes, .r14, @intCast(leaf * Machine.slot_size), .rax);
+        try emitStoreMemory(allocator, bytes, .r14, -@as(i32, @intCast(leaf * Machine.slot_size)), .rax);
     }
 }
 
