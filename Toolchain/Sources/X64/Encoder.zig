@@ -1467,9 +1467,7 @@ fn emitStringDrop(
     const literal = bytes.items.len;
     try bytes.appendNTimes(allocator, 0, 4);
     try bytes.appendSlice(allocator, &.{ 0x49, 0x83, 0xea, dynamic_string_prefix_size });
-    try emitImmediate(allocator, bytes, .r9, std.math.maxInt(u64));
-    try bytes.appendSlice(allocator, &.{ 0xf0, 0x4d, 0x0f, 0xc1, 0x0a });
-    try bytes.appendSlice(allocator, &.{ 0x49, 0x83, 0xf9, 1, 0x0f, 0x85 });
+    try bytes.appendSlice(allocator, &.{ 0xf0, 0x49, 0xff, 0x0a, 0x0f, 0x85 });
     const retained = bytes.items.len;
     try bytes.appendNTimes(allocator, 0, 4);
     switch (platform) {
