@@ -52,16 +52,14 @@ jobs:
 
           curl -fsSL https://raw.githubusercontent.com/Matanek/Silex/main/install.sh | sh
           "$SILEX_INSTALL_DIR/silex" --version
-          "$SILEX_INSTALL_DIR/silex" setup
           "$SILEX_INSTALL_DIR/silex" install STD
           "$SILEX_INSTALL_DIR/silex" install GFX
 
           if [ "${{ matrix.execution }}" = "run" ]; then
             SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=dummy \
-              "$SILEX_INSTALL_DIR/silex" run Examples/Distribution/GFX/Window.sx
-            SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=dummy \
-              "$SILEX_INSTALL_DIR/silex" run Examples/Distribution/GFX/Drawing.sx
+              "$SILEX_INSTALL_DIR/silex" run Examples/Distribution/GFX/Runtime.sx
           else
+            "$SILEX_INSTALL_DIR/silex" compile Examples/Distribution/GFX/Runtime.sx -o "$RUNNER_TEMP/gfx-runtime-smoke"
             "$SILEX_INSTALL_DIR/silex" compile Examples/Distribution/GFX/Window.sx -o "$RUNNER_TEMP/gfx-window-smoke"
             "$SILEX_INSTALL_DIR/silex" compile Examples/Distribution/GFX/Drawing.sx -o "$RUNNER_TEMP/gfx-drawing-smoke"
           fi
@@ -109,8 +107,6 @@ jobs:
           Invoke-Expression (Invoke-RestMethod https://raw.githubusercontent.com/Matanek/Silex/main/install.ps1)
           $silex = Join-Path $env:SILEX_INSTALL_DIR "silex.exe"
           & $silex --version
-          & $silex setup
           & $silex install STD
           & $silex install GFX
-          & $silex run Examples/Distribution/GFX/Window.sx
-          & $silex run Examples/Distribution/GFX/Drawing.sx
+          & $silex run Examples/Distribution/GFX/Runtime.sx

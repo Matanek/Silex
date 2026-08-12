@@ -1,0 +1,5 @@
+use GFX.Display
+
+func main() {
+    var displays = Display.Displays()
+}
