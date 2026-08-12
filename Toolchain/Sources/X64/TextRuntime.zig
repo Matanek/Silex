@@ -189,7 +189,7 @@ fn emitStoreMemory(allocator: Allocator, bytes: *std.ArrayList(u8), base: Regist
 }
 
 fn emitImmediate(allocator: Allocator, bytes: *std.ArrayList(u8), register: Register, value: u64) !void {
-    try emitRex(allocator, bytes, true, register);
+    try bytes.append(allocator, 0x48 | @as(u8, @intFromBool(@intFromEnum(register) >= 8)));
     try bytes.append(allocator, 0xb8 + (@as(u8, @intFromEnum(register)) & 7));
     try appendInt(allocator, bytes, u64, value);
 }
@@ -218,4 +218,11 @@ fn appendInt(allocator: Allocator, bytes: *std.ArrayList(u8), comptime T: type, 
     var storage: [@sizeOf(T)]u8 = undefined;
     std.mem.writeInt(T, &storage, @as(T, @intCast(value)), .little);
     try bytes.appendSlice(allocator, &storage);
+}
+
+test "encode immediate destinations in extended registers" {
+    var bytes: std.ArrayList(u8) = .empty;
+    defer bytes.deinit(std.testing.allocator);
+    try emitImmediate(std.testing.allocator, &bytes, .r12, 7);
+    try std.testing.expectEqualSlices(u8, &.{ 0x49, 0xbc, 7, 0, 0, 0, 0, 0, 0, 0 }, bytes.items);
 }
