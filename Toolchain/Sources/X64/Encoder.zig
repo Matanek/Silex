@@ -1467,8 +1467,8 @@ fn emitStringDrop(
     const literal = bytes.items.len;
     try bytes.appendNTimes(allocator, 0, 4);
     try bytes.appendSlice(allocator, &.{ 0x49, 0x83, 0xea, dynamic_string_prefix_size });
-    try bytes.appendSlice(allocator, &.{ 0xf0, 0x49, 0xff, 0x0a, 0x0f, 0x85 });
-    const retained = bytes.items.len;
+    try bytes.appendSlice(allocator, &.{ 0xf0, 0x49, 0xff, 0x0a, 0xe9 });
+    const diagnostic_skip_free = bytes.items.len;
     try bytes.appendNTimes(allocator, 0, 4);
     switch (platform) {
         .linux => {
@@ -1484,7 +1484,7 @@ fn emitStringDrop(
             try ExternalCalls.emitWindowsImportCall(allocator, bytes, import_sites, .virtual_free);
         },
     }
-    try patchRelative(bytes.items, retained, bytes.items.len);
+    try patchRelative(bytes.items, diagnostic_skip_free, bytes.items.len);
     try patchRelative(bytes.items, literal, bytes.items.len);
 }
 
