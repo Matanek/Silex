@@ -200,10 +200,7 @@ fn encodeFunction(
 ) Error!void {
     if (function.register_slots.len != 0) return unsupported("release register allocation");
     try bytes.appendSlice(allocator, &.{ 0x55, 0x48, 0x89, 0xe5 });
-    if (function.frame_size != 0) {
-        try bytes.appendSlice(allocator, &.{ 0x48, 0x81, 0xec });
-        try appendInt(allocator, bytes, u32, function.frame_size);
-    }
+    try emitFrameAllocation(allocator, bytes, platform, function.frame_size);
     const argument_registers = [_]Register{ .rdi, .rsi, .rdx, .rcx, .r8, .r9, .r10, .r11 };
     if (function.parameters.len != function.parameter_count) return error.InvalidMachineProgram;
     if (function.hidden_return_slot) |slot| try emitStoreStack(allocator, bytes, .r15, slot);
@@ -1627,6 +1624,30 @@ fn emitStoreStack(allocator: Allocator, bytes: *std.ArrayList(u8), register: Reg
     try appendInt(allocator, bytes, i32, slotDisplacement(slot));
 }
 
+fn emitFrameAllocation(
+    allocator: Allocator,
+    bytes: *std.ArrayList(u8),
+    platform: Platform,
+    frame_size: u16,
+) Allocator.Error!void {
+    var remaining: u32 = frame_size;
+    if (platform == .windows) {
+        while (remaining > 4096) {
+            try emitStackSubtraction(allocator, bytes, 4096);
+            // Windows grows committed stack memory one guarded page at a time.
+            // Touch every crossed page before moving RSP farther down.
+            try bytes.appendSlice(allocator, &.{ 0xf6, 0x04, 0x24, 0x00 });
+            remaining -= 4096;
+        }
+    }
+    if (remaining != 0) try emitStackSubtraction(allocator, bytes, remaining);
+}
+
+fn emitStackSubtraction(allocator: Allocator, bytes: *std.ArrayList(u8), amount: u32) Allocator.Error!void {
+    try bytes.appendSlice(allocator, &.{ 0x48, 0x81, 0xec });
+    try appendInt(allocator, bytes, u32, amount);
+}
+
 fn emitLoadGlobal(
     allocator: Allocator,
     bytes: *std.ArrayList(u8),
@@ -1813,4 +1834,21 @@ test "encode memory operands based on R12 with the required SIB byte" {
     bytes.clearRetainingCapacity();
     try emitStoreMemory(std.testing.allocator, &bytes, .r12, 8, .r14);
     try std.testing.expectEqualSlices(u8, &.{ 0x4d, 0x89, 0xb4, 0x24, 8, 0, 0, 0 }, bytes.items);
+}
+
+test "probe every Windows stack page in large X64 frames" {
+    var bytes: std.ArrayList(u8) = .empty;
+    defer bytes.deinit(std.testing.allocator);
+    try emitFrameAllocation(std.testing.allocator, &bytes, .windows, 8192);
+    try std.testing.expectEqualSlices(u8, &.{
+        0x48, 0x81, 0xec, 0x00, 0x10, 0x00, 0x00,
+        0xf6, 0x04, 0x24, 0x00,
+        0x48, 0x81, 0xec, 0x00, 0x10, 0x00, 0x00,
+    }, bytes.items);
+
+    bytes.clearRetainingCapacity();
+    try emitFrameAllocation(std.testing.allocator, &bytes, .linux, 8192);
+    try std.testing.expectEqualSlices(u8, &.{
+        0x48, 0x81, 0xec, 0x00, 0x20, 0x00, 0x00,
+    }, bytes.items);
 }
