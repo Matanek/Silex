@@ -50,7 +50,7 @@ them transitively through the same registry and verifies each archive in turn.
 2. Commit the complete package contents.
 3. Tag that commit as `vMAJOR.MINOR.PATCH` and push the tag.
 4. Let the package release workflow publish the source archive and checksum.
-5. Open a pull request against `Matanek/Silex-Website` that adds
+5. Open a pull request against `Matanek/Silex-Registry` that adds
    `registry/v1/packages/Name/MAJOR.MINOR.PATCH.json` with the release URL and
    published SHA-256 value.
 
