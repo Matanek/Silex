@@ -49,7 +49,13 @@ them transitively through the same registry and verifies each archive in turn.
    `requires.silex`.
 2. Commit the complete package contents.
 3. Tag that commit as `vMAJOR.MINOR.PATCH` and push the tag.
-4. Let the package release workflow publish the source archive and checksum.
+4. Create or verify the immutable GitHub Release, its source archive, and its
+   lowercase SHA-256 checksum:
+
+   ```sh
+   silex release path/to/Package
+   ```
+
 5. From a checkout containing `Silex-Registry/`, prepare the immutable registry
    proposal:
 
@@ -58,6 +64,14 @@ them transitively through the same registry and verifies each archive in turn.
    ```
 
 6. Validate and open a pull request from the resulting registry change.
+
+`silex release` requires a clean GitHub repository whose current commit carries
+the exact `vMAJOR.MINOR.PATCH` tag declared by `Package.json`. The tag must
+already exist on the remote. With an authenticated GitHub CLI (`gh`), Silex
+creates `Name-MAJOR.MINOR.PATCH.tar.gz`, gives it one top-level versioned
+directory, calculates its checksum, and publishes both files in the GitHub
+Release. Repeating the command verifies the existing release instead of
+replacing it.
 
 `silex publish` requires a clean package repository whose current commit carries
 the exact `vMAJOR.MINOR.PATCH` tag. It derives the GitHub release from `origin`,

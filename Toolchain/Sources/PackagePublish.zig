@@ -12,6 +12,13 @@ pub const Result = struct {
     sha256: []const u8,
 };
 
+pub const ReleaseResult = struct {
+    name: []const u8,
+    version: Packages.Version,
+    url: []const u8,
+    created: bool,
+};
+
 pub const Publisher = struct {
     allocator: Allocator,
     download_allocator: Allocator,
@@ -26,25 +33,68 @@ pub const Publisher = struct {
         };
     }
 
+    pub fn release(self: *Publisher, package_root: []const u8) !ReleaseResult {
+        self.diagnostic = null;
+        const package = try self.inspectPackage(package_root);
+        const version_text = try versionText(self.allocator, package.version);
+        try self.validateRepositoryState(package_root, version_text);
+        const remote = try self.git(package_root, &.{ "remote", "get-url", "origin" });
+        const repository = repositoryFromRemote(self.allocator, std.mem.trim(u8, remote, " \t\r\n")) catch
+            return self.fail("package origin must identify a GitHub repository");
+        const archive_name = try std.fmt.allocPrint(self.allocator, "{s}-{s}.tar.gz", .{ package.name, version_text });
+        const tag = try std.fmt.allocPrint(self.allocator, "v{s}", .{version_text});
+        const release_url = try std.fmt.allocPrint(self.allocator, "https://github.com/{s}/releases/tag/{s}", .{ repository, tag });
+        const archive_url = try std.fmt.allocPrint(
+            self.allocator,
+            "https://github.com/{s}/releases/download/{s}/{s}",
+            .{ repository, tag, archive_name },
+        );
+
+        if (try self.githubReleaseExists(repository, tag)) {
+            _ = try self.publishedChecksum(archive_url, archive_name);
+            return .{ .name = package.name, .version = package.version, .url = release_url, .created = false };
+        }
+
+        const temporary_name = try std.fmt.allocPrint(self.allocator, ".silex-release-{s}-{s}", .{ package.name, version_text });
+        const temporary_root = try std.fs.path.resolve(self.allocator, &.{ package_root, temporary_name });
+        if (try pathExists(self.io, temporary_root)) {
+            return self.failFmt("temporary release directory already exists: '{s}'", .{temporary_root});
+        }
+        Io.Dir.cwd().createDirPath(self.io, temporary_root) catch |err|
+            return self.failFmt("cannot create temporary release directory: {t}", .{err});
+        defer Io.Dir.cwd().deleteTree(self.io, temporary_root) catch {};
+
+        const archive_path = try std.fs.path.join(self.allocator, &.{ temporary_root, archive_name });
+        const prefix = try std.fmt.allocPrint(self.allocator, "{s}-{s}/", .{ package.name, version_text });
+        _ = try self.git(package_root, &.{ "archive", "--format=tar.gz", try std.fmt.allocPrint(self.allocator, "--prefix={s}", .{prefix}), try std.fmt.allocPrint(self.allocator, "--output={s}", .{archive_path}), "HEAD" });
+
+        const digest = sha256File(self.io, archive_path) catch |err|
+            return self.failFmt("cannot hash package archive: {t}", .{err});
+        const checksum = std.fmt.bytesToHex(digest, .lower);
+        const checksum_path = try std.fmt.allocPrint(self.allocator, "{s}.sha256", .{archive_path});
+        const checksum_source = try std.fmt.allocPrint(self.allocator, "{s}  {s}\n", .{ checksum, archive_name });
+        const checksum_file = Io.Dir.cwd().createFile(self.io, checksum_path, .{ .exclusive = true }) catch |err|
+            return self.failFmt("cannot create release checksum: {t}", .{err});
+        checksum_file.writeStreamingAll(self.io, checksum_source) catch |err| {
+            checksum_file.close(self.io);
+            return self.failFmt("cannot write release checksum: {t}", .{err});
+        };
+        checksum_file.close(self.io);
+
+        const title = try std.fmt.allocPrint(self.allocator, "{s} {s}", .{ package.name, version_text });
+        self.createGithubRelease(repository, tag, title, archive_path, checksum_path) catch |err| switch (err) {
+            error.InvalidPublication => {
+                if (!try self.githubReleaseExists(repository, tag)) return err;
+            },
+            else => return err,
+        };
+        _ = try self.publishedChecksum(archive_url, archive_name);
+        return .{ .name = package.name, .version = package.version, .url = release_url, .created = true };
+    }
+
     pub fn prepare(self: *Publisher, package_root: []const u8, registry_root: []const u8) !Result {
         self.diagnostic = null;
-        const status = Io.Dir.cwd().statFile(self.io, package_root, .{}) catch |err| switch (err) {
-            error.FileNotFound, error.NotDir => return self.failFmt("cannot locate package directory '{s}'", .{package_root}),
-            else => return err,
-        };
-        if (status.kind != .directory) return self.failFmt("package source '{s}' is not a directory", .{package_root});
-
-        var resolver = Packages.Resolver.init(self.allocator, self.io, null);
-        const package = resolver.inspectPackage(package_root) catch |err| switch (err) {
-            error.InvalidPackageGraph => return self.failFmt(
-                "cannot publish package: {s}",
-                .{resolver.diagnostic orelse "invalid package"},
-            ),
-            else => return err,
-        };
-        if (!std.mem.eql(u8, std.fs.path.basename(package_root), package.name)) {
-            return self.fail("local package folder and manifest name differ");
-        }
+        const package = try self.inspectPackage(package_root);
 
         const version_text = try versionText(self.allocator, package.version);
         try self.validateRegistryRoot(registry_root);
@@ -64,11 +114,7 @@ pub const Publisher = struct {
             "https://github.com/{s}/releases/download/v{s}/{s}",
             .{ repository, version_text, archive_name },
         );
-        const checksum_url = try std.fmt.allocPrint(self.allocator, "{s}.sha256", .{archive_url});
-        const checksum_source = try self.fetch(checksum_url, "release checksum", 4096);
-        const checksum = parseChecksum(self.allocator, checksum_source, archive_name) catch
-            return self.fail("published release checksum is invalid or names another archive");
-        try self.verifyPublishedArchive(archive_url, checksum);
+        const checksum = try self.publishedChecksum(archive_url, archive_name);
 
         const manifest = try renderManifest(
             self.allocator,
@@ -108,6 +154,23 @@ pub const Publisher = struct {
         };
     }
 
+    fn inspectPackage(self: *Publisher, package_root: []const u8) !Packages.ManifestInfo {
+        const status = Io.Dir.cwd().statFile(self.io, package_root, .{}) catch |err| switch (err) {
+            error.FileNotFound, error.NotDir => return self.failFmt("cannot locate package directory '{s}'", .{package_root}),
+            else => return err,
+        };
+        if (status.kind != .directory) return self.failFmt("package source '{s}' is not a directory", .{package_root});
+        var resolver = Packages.Resolver.init(self.allocator, self.io, null);
+        const package = resolver.inspectPackage(package_root) catch |err| switch (err) {
+            error.InvalidPackageGraph => return self.fail(resolver.diagnostic orelse "invalid package"),
+            else => return err,
+        };
+        if (!std.mem.eql(u8, std.fs.path.basename(package_root), package.name)) {
+            return self.fail("local package folder and manifest name differ");
+        }
+        return package;
+    }
+
     fn validateRepositoryState(self: *Publisher, package_root: []const u8, version: []const u8) !void {
         const changes = try self.git(package_root, &.{ "status", "--porcelain" });
         if (std.mem.trim(u8, changes, " \t\r\n").len != 0) {
@@ -129,6 +192,48 @@ pub const Publisher = struct {
                 .{registry_root},
             );
         }
+    }
+
+    fn githubReleaseExists(self: *Publisher, repository: []const u8, tag: []const u8) !bool {
+        const result = std.process.run(self.download_allocator, self.io, .{
+            .argv = &.{ "gh", "release", "view", tag, "--repo", repository, "--json", "tagName" },
+            .stdout_limit = .limited(1024 * 1024),
+            .stderr_limit = .limited(1024 * 1024),
+        }) catch |err| return self.failFmt("cannot run GitHub CLI 'gh': {t}", .{err});
+        defer self.download_allocator.free(result.stdout);
+        defer self.download_allocator.free(result.stderr);
+        const success = switch (result.term) {
+            .exited => |code| code == 0,
+            else => false,
+        };
+        if (success) return true;
+        const detail = std.mem.trim(u8, result.stderr, " \t\r\n");
+        if (releaseIsMissing(detail)) return false;
+        return self.failFmt("cannot inspect GitHub release: {s}", .{if (detail.len == 0) "gh failed" else detail});
+    }
+
+    fn createGithubRelease(
+        self: *Publisher,
+        repository: []const u8,
+        tag: []const u8,
+        title: []const u8,
+        archive_path: []const u8,
+        checksum_path: []const u8,
+    ) !void {
+        const result = std.process.run(self.download_allocator, self.io, .{
+            .argv = &.{ "gh", "release", "create", tag, archive_path, checksum_path, "--repo", repository, "--verify-tag", "--title", title, "--generate-notes" },
+            .stdout_limit = .limited(1024 * 1024),
+            .stderr_limit = .limited(1024 * 1024),
+        }) catch |err| return self.failFmt("cannot run GitHub CLI 'gh': {t}", .{err});
+        defer self.download_allocator.free(result.stdout);
+        defer self.download_allocator.free(result.stderr);
+        const success = switch (result.term) {
+            .exited => |code| code == 0,
+            else => false,
+        };
+        if (success) return;
+        const detail = std.mem.trim(u8, result.stderr, " \t\r\n");
+        return self.failFmt("cannot create GitHub release: {s}", .{if (detail.len == 0) "gh failed" else detail});
     }
 
     fn git(self: *Publisher, package_root: []const u8, arguments: []const []const u8) ![]const u8 {
@@ -174,6 +279,15 @@ pub const Publisher = struct {
         if (!std.mem.eql(u8, &actual, &expected)) {
             return self.fail("published package archive does not match its SHA-256 checksum");
         }
+    }
+
+    fn publishedChecksum(self: *Publisher, archive_url: []const u8, archive_name: []const u8) ![]const u8 {
+        const checksum_url = try std.fmt.allocPrint(self.allocator, "{s}.sha256", .{archive_url});
+        const checksum_source = try self.fetch(checksum_url, "release checksum", 4096);
+        const checksum = parseChecksum(self.allocator, checksum_source, archive_name) catch
+            return self.fail("published release checksum is invalid or names another archive");
+        try self.verifyPublishedArchive(archive_url, checksum);
+        return checksum;
     }
 
     fn fetch(self: *Publisher, url: []const u8, label: []const u8, limit: usize) ![]const u8 {
@@ -265,6 +379,28 @@ fn versionText(allocator: Allocator, version: Packages.Version) ![]const u8 {
     return std.fmt.allocPrint(allocator, "{d}.{d}.{d}", .{ version.major, version.minor, version.patch });
 }
 
+fn sha256File(io: Io, path: []const u8) ![32]u8 {
+    const file = try Io.Dir.cwd().openFile(io, path, .{});
+    defer file.close(io);
+    var hasher = std.crypto.hash.sha2.Sha256.init(.{});
+    var offset: u64 = 0;
+    var buffer: [64 * 1024]u8 = undefined;
+    while (true) {
+        const amount = try file.readPositionalAll(io, &buffer, offset);
+        if (amount == 0) break;
+        hasher.update(buffer[0..amount]);
+        offset += amount;
+    }
+    var digest: [32]u8 = undefined;
+    hasher.final(&digest);
+    return digest;
+}
+
+fn releaseIsMissing(detail: []const u8) bool {
+    return std.mem.indexOf(u8, detail, "release not found") != null or
+        std.mem.indexOf(u8, detail, "Release not found") != null;
+}
+
 fn pathExists(io: Io, path: []const u8) !bool {
     _ = Io.Dir.cwd().statFile(io, path, .{}) catch |err| switch (err) {
         error.FileNotFound, error.NotDir => return false,
@@ -293,6 +429,27 @@ test "accept the release workflow checksum format and reject another archive" {
     try std.testing.expectError(
         error.InvalidChecksum,
         parseChecksum(allocator, digest ++ "  STD-0.24.0.tar.gz\n", "GFX-0.24.0.tar.gz"),
+    );
+}
+
+test "recognize only an absent GitHub release diagnostic" {
+    try std.testing.expect(releaseIsMissing("release not found"));
+    try std.testing.expect(releaseIsMissing("HTTP 404: Release not found"));
+    try std.testing.expect(!releaseIsMissing("error connecting to api.github.com"));
+}
+
+test "hash a release archive with lowercase SHA-256 output" {
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Example-1.0.0.tar.gz", .data = "Silex" });
+    const root = try std.fs.path.join(std.testing.allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    defer std.testing.allocator.free(root);
+    const path = try std.fs.path.join(std.testing.allocator, &.{ root, "Example-1.0.0.tar.gz" });
+    defer std.testing.allocator.free(path);
+    const digest = try sha256File(std.testing.io, path);
+    try std.testing.expectEqualStrings(
+        "0c1085f0720dcca0a8a5f9ceb20955324c13959c449315b6b083775aacf16b27",
+        &std.fmt.bytesToHex(digest, .lower),
     );
 }
 

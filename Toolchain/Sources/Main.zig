@@ -41,6 +41,7 @@ const usage =
     \\       silex test <source.sx|directory> [-n|--nocache] [--emit-ir]
     \\       silex compile <source.sx> [--target <target>] [-d|--debug|-r|--release] [-n|--nocache] -o|--output <executable>
     \\       silex install <package|package-directory> [--target <target>]
+    \\       silex release <package-directory>
     \\       silex publish <package-directory>
     \\       silex link <package-directory> [--target <target>]
     \\       silex unlink <package-name>
@@ -49,8 +50,8 @@ const usage =
     \\       silex version
     \\       silex lsp
     \\
-    \\Builds and runs a native Silex program, executes portable IR through the
-    \\reference interpreter, emits an executable, or serves editor requests.
+    \\Builds and runs native Silex programs, manages package releases, executes
+    \\portable IR through the reference interpreter, or serves editor requests.
     \\
 ;
 
@@ -90,6 +91,7 @@ fn runCli(init: std.process.Init) !u8 {
     if (std.mem.eql(u8, args[1], "test")) return testSource(init, allocator, args[2..]);
     if (std.mem.eql(u8, args[1], "compile")) return compileNative(init, allocator, args[2..]);
     if (std.mem.eql(u8, args[1], "install")) return installPackage(init, allocator, args[2..]);
+    if (std.mem.eql(u8, args[1], "release")) return releasePackage(init, allocator, args[2..]);
     if (std.mem.eql(u8, args[1], "publish")) return publishPackage(init, allocator, args[2..]);
     if (std.mem.eql(u8, args[1], "link")) return linkPackage(init, allocator, args[2..]);
     if (std.mem.eql(u8, args[1], "unlink")) return unlinkPackage(init, allocator, args[2..]);
@@ -105,6 +107,29 @@ fn runCli(init: std.process.Init) !u8 {
     if (std.mem.eql(u8, args[1], "lsp")) return runLanguageServer(init, args[2..]);
     std.debug.print("silex: unknown command '{s}'\n\n{s}", .{ args[1], usage });
     return 1;
+}
+
+fn releasePackage(init: std.process.Init, allocator: std.mem.Allocator, args: []const []const u8) !u8 {
+    const options = switch (Cli.parsePackage(args)) {
+        .options => |options| options,
+        .diagnostic => |diagnostic| {
+            printCliDiagnostic("release", diagnostic);
+            return 1;
+        },
+    };
+    var publisher = PackagePublish.Publisher.init(allocator, init.gpa, init.io);
+    const result = publisher.release(options.package) catch |err| switch (err) {
+        error.InvalidPublication, error.InvalidPackageGraph => {
+            std.debug.print("silex: cannot release package: {s}\n", .{publisher.diagnostic orelse "invalid release"});
+            return 1;
+        },
+        else => return err,
+    };
+    std.debug.print(
+        "silex: {s} {s}@{d}.{d}.{d} at {s}\n",
+        .{ if (result.created) "released" else "already released", result.name, result.version.major, result.version.minor, result.version.patch, result.url },
+    );
+    return 0;
 }
 
 fn publishPackage(init: std.process.Init, allocator: std.mem.Allocator, args: []const []const u8) !u8 {
