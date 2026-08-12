@@ -109,6 +109,14 @@ jobs:
           Copy-Item -Recurse (Join-Path $env:USERPROFILE ".silex/packages/GFX@0.23.1") (Join-Path $packages "GFX")
           Set-Location $packages
           $gfx = Join-Path $packages "GFX"
+          $colorTest = Join-Path $gfx "Tests/Color.sx"
+          $colorLines = Get-Content $colorTest
+          for ($index = 0; $index -lt $colorLines.Count; $index++) {
+            if ($colorLines[$index].Trim().StartsWith("assert(") -and $colorLines[$index].Trim().EndsWith(")")) {
+              $colorLines[$index] = $colorLines[$index] -replace '\)$', ", `"source line $($index + 1)`")"
+            }
+          }
+          Set-Content $colorTest $colorLines
           & $silex test (Join-Path $gfx "Tests/Color.sx")
           & $silex test (Join-Path $gfx "Tests/TransformCamera.sx")
           & $silex test (Join-Path $gfx "Tests/CollectionFieldMutation.sx")
