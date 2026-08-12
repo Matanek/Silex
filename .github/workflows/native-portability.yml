@@ -77,7 +77,7 @@ jobs:
           cp -R "$HOME/.silex/packages/GFX@0.23.1" "$RUNNER_TEMP/packages/GFX"
           cd "$RUNNER_TEMP/packages"
           "$silex" test GFX/Tests/Color.sx
-          sed -i '14i\    print("camera center x1000: ", (center.x * 1000.0) as int, ", ", (center.y * 1000.0) as int, ", ", (center.z * 1000.0) as int, ", ", (center.w * 1000.0) as int)' GFX/Tests/TransformCamera.sx
+          sed -i '14i\    print((center.x * 1000.0) as int)\n    print((center.y * 1000.0) as int)\n    print((center.z * 1000.0) as int)\n    print((center.w * 1000.0) as int)' GFX/Tests/TransformCamera.sx
           "$silex" test GFX/Tests/TransformCamera.sx
           "$silex" test GFX/Tests/CollectionFieldMutation.sx
           "$silex" compile GFX/Smokes/NativeLibraries.sx -o "$RUNNER_TEMP/gfx-native-libraries"
