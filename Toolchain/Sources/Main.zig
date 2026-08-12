@@ -214,7 +214,7 @@ fn installPackageOperand(
     const cache_root = try std.fs.path.join(allocator, &.{ silex_root, "cache", "registry" });
     var registry = PackageRegistry.Client.init(allocator, init.gpa, init.io, cache_root);
     const location = init.environ_map.get("SILEX_REGISTRY") orelse PackageRegistry.default_location;
-    const catalog = registry.load(location) catch |err| switch (err) {
+    const registry_index = registry.load(location) catch |err| switch (err) {
         error.InvalidRegistry => {
             std.debug.print("silex: cannot use package registry: {s}\n", .{registry.diagnostic orelse "invalid registry"});
             return null;
@@ -222,7 +222,7 @@ fn installPackageOperand(
         else => return err,
     };
     return registry.install(
-        catalog,
+        registry_index,
         request,
         Packages.Version.parse(build_options.version) catch unreachable,
         target,

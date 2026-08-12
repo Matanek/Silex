@@ -1,20 +1,36 @@
 # Publish Silex packages
 
-The public package registry is [`Registry.json`](../Registry.json). The Silex
-CLI reads it when `silex install Name` or
+The public package registry is hosted at
+[`https://silex-lang.org/registry/v1/index.json`](https://silex-lang.org/registry/v1/index.json).
+The Silex CLI reads it when `silex install Name` or
 `silex install Name@MAJOR.MINOR.PATCH` does not name a local directory.
+
+The registry is split by package and version. Its generated package index lists
+the available versions and their Silex compatibility, while each immutable
+manifest owns the archive URL and checksum:
+
+```text
+registry/v1/
+  index.json
+  packages/
+    STD/
+      index.json        generated during deployment
+      0.16.2.json       immutable release manifest
+```
 
 Each registry release records the package version, its supported Silex range,
 and one immutable source archive:
 
 ```json
 {
-  "version": "0.16.0",
+  "schema": 1,
+  "name": "STD",
+  "version": "0.16.2",
   "requires": {
-    "silex": ">=0.38.0 <0.39.0"
+    "silex": ">=0.38.0"
   },
   "archive": {
-    "url": "https://github.com/Matanek/Silex-Lib-STD/releases/download/v0.16.0/STD-0.16.0.tar.gz",
+    "url": "https://github.com/Matanek/Silex-Lib-STD/releases/download/v0.16.2/STD-0.16.2.tar.gz",
     "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
   }
 }
@@ -34,20 +50,23 @@ them transitively through the same registry and verifies each archive in turn.
 2. Commit the complete package contents.
 3. Tag that commit as `vMAJOR.MINOR.PATCH` and push the tag.
 4. Let the package release workflow publish the source archive and checksum.
-5. Add the release URL and the published SHA-256 value to `Registry.json` in
-   the Silex repository.
+5. Open a pull request against `Matanek/Silex-Website` that adds
+   `registry/v1/packages/Name/MAJOR.MINOR.PATCH.json` with the release URL and
+   published SHA-256 value.
 
-The tag and manifest versions must match. A registry entry is added only after
-the immutable archive exists; placeholder URLs or checksums are not valid
-releases.
+The deployment validates the version manifest and regenerates the package
+`index.json`. The tag and manifest versions must match. A registry entry is
+added only after the immutable archive exists; placeholder URLs or checksums
+are not valid releases.
 
 ## Develop the registry locally
 
-Set `SILEX_REGISTRY` to a local JSON file while editing or testing registry
-selection:
+Set `SILEX_REGISTRY` to a local registry root index while editing or testing
+registry selection. Relative package and manifest endpoints are resolved from
+that file:
 
 ```sh
-SILEX_REGISTRY=/absolute/path/to/Registry.json silex install STD
+SILEX_REGISTRY=/absolute/path/to/registry/v1/index.json silex install STD
 ```
 
 The default registry always uses HTTPS. Package archives referenced by either
