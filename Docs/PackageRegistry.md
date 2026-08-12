@@ -1,7 +1,7 @@
 # Publish Silex packages
 
 The public package registry is hosted at
-[`https://silex-lang.org/registry/v1/index.json`](https://silex-lang.org/registry/v1/index.json).
+[`https://registry.silex-lang.org/v1/index.json`](https://registry.silex-lang.org/v1/index.json).
 The Silex CLI reads it when `silex install Name` or
 `silex install Name@MAJOR.MINOR.PATCH` does not name a local directory.
 

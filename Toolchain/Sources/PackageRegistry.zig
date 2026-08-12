@@ -8,7 +8,7 @@ const TargetModule = @import("Target.zig");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
 
-pub const default_location = "https://silex-lang.org/registry/v1/index.json";
+pub const default_location = "https://registry.silex-lang.org/v1/index.json";
 
 pub const Request = struct {
     name: []const u8,
