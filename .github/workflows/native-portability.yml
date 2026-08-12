@@ -73,7 +73,7 @@ jobs:
           "$silex" install GFX
           if ! "$silex" test "$GITHUB_WORKSPACE/Tests/Types/Str/Operators.sx"; then
             for executable in "$GITHUB_WORKSPACE"/.silex/test/Operators-*; do
-              gdb --batch -ex run -ex "x/12i \$pc-24" --args "$executable" || true
+              lldb --batch -o run -o "register read rip rax rbx r10 r12 r13 r14 r15" -o 'disassemble --start-address $rip-24 --count 12' -- "$executable" || true
             done
             exit 1
           fi
