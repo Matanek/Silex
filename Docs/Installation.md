@@ -55,6 +55,25 @@ silex --version
 silex targets
 ```
 
+## Update Silex
+
+Update an installed compiler to the latest published release with:
+
+```sh
+silex update
+```
+
+The command preserves the directory containing the running executable and
+uses the same official installer as the initial installation. The new archive
+is downloaded and its published SHA-256 checksum is verified before the
+installed executable is replaced. `SILEX_VERSION` is deliberately ignored so
+an old installation pin cannot prevent an explicit update.
+
+On macOS and Linux, the command completes after the executable has been
+replaced. On Windows, replacement begins in the background and completes as
+soon as the running `silex update` process exits; the installer prints the
+final installed path when it finishes.
+
 The compiler itself is now ready for sources without native package boundaries.
 Run the one-time toolchain setup before using packages such as GFX or compiling
 shaders:

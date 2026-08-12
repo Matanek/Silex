@@ -36,6 +36,12 @@ silex --version
 See the [installation guide](Docs/Installation.md) for checksum verification,
 custom destinations, source builds, and removal.
 
+Update an installed compiler to the latest verified release with:
+
+```sh
+silex update
+```
+
 ## Build and test
 
 ```sh

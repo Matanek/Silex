@@ -32,6 +32,7 @@ const TargetModule = @import("Target.zig");
 const ToolchainSetup = @import("ToolchainSetup.zig");
 const EmbeddedFiles = @import("EmbeddedFiles.zig");
 const ShaderAssets = @import("ShaderAssets.zig");
+const SelfUpdate = @import("SelfUpdate.zig");
 
 const Io = std.Io;
 
@@ -46,6 +47,7 @@ const usage =
     \\       silex link <package-directory> [--target <target>]
     \\       silex unlink <package-name>
     \\       silex setup
+    \\       silex update
     \\       silex targets
     \\       silex version
     \\       silex lsp
@@ -69,6 +71,7 @@ test {
     _ = PackageStore;
     _ = PackageRegistry;
     _ = PackagePublish;
+    _ = SelfUpdate;
 }
 
 pub fn main(init: std.process.Init) u8 {
@@ -96,6 +99,7 @@ fn runCli(init: std.process.Init) !u8 {
     if (std.mem.eql(u8, args[1], "link")) return linkPackage(init, allocator, args[2..]);
     if (std.mem.eql(u8, args[1], "unlink")) return unlinkPackage(init, allocator, args[2..]);
     if (std.mem.eql(u8, args[1], "setup")) return setupToolchain(init, allocator, args[2..]);
+    if (std.mem.eql(u8, args[1], "update")) return updateSilex(init, allocator, args[2..]);
     if (std.mem.eql(u8, args[1], "targets")) return listTargets(init, allocator, args[2..]);
     if (std.mem.eql(u8, args[1], "version")) {
         if (args.len != 2) {
@@ -107,6 +111,25 @@ fn runCli(init: std.process.Init) !u8 {
     if (std.mem.eql(u8, args[1], "lsp")) return runLanguageServer(init, args[2..]);
     std.debug.print("silex: unknown command '{s}'\n\n{s}", .{ args[1], usage });
     return 1;
+}
+
+fn updateSilex(init: std.process.Init, allocator: std.mem.Allocator, args: []const []const u8) !u8 {
+    if (args.len != 0) {
+        std.debug.print("silex: 'update' does not accept arguments\n", .{});
+        return 1;
+    }
+    var updater = SelfUpdate.Updater.init(allocator, init.gpa, init.io);
+    const result = updater.update(init.environ_map) catch |err| switch (err) {
+        error.InvalidUpdate => {
+            std.debug.print("silex: cannot update: {s}\n", .{updater.diagnostic orelse "invalid update"});
+            return 1;
+        },
+        else => return err,
+    };
+    if (result == .scheduled) {
+        std.debug.print("silex: update scheduled; installation will finish after this process exits\n", .{});
+    }
+    return 0;
 }
 
 fn releasePackage(init: std.process.Init, allocator: std.mem.Allocator, args: []const []const u8) !u8 {

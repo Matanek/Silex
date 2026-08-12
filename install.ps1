@@ -1,5 +1,13 @@
 $ErrorActionPreference = "Stop"
 
+if ($env:SILEX_UPDATE_PID) {
+    $updateProcessId = 0
+    if (-not [int]::TryParse($env:SILEX_UPDATE_PID, [ref]$updateProcessId)) {
+        throw "silex: invalid updater process id"
+    }
+    Wait-Process -Id $updateProcessId -ErrorAction SilentlyContinue
+}
+
 $silexRepository = "Matanek/Silex"
 $architecture = $env:PROCESSOR_ARCHITECTURE
 if ($architecture -ne "AMD64" -and $env:PROCESSOR_ARCHITEW6432 -ne "AMD64") {
@@ -62,3 +70,9 @@ if ($pathEntries -notcontains $installDirectory) {
     Write-Host "silex: add $installDirectory to PATH before invoking silex"
 }
 Write-Host "silex: run 'silex setup' before compiling HLSL shaders"
+if ($env:SILEX_UPDATE_SCRIPT -and $PSCommandPath) {
+    $updateScript = [System.IO.Path]::GetFullPath($env:SILEX_UPDATE_SCRIPT)
+    if ($updateScript -eq [System.IO.Path]::GetFullPath($PSCommandPath)) {
+        Remove-Item -LiteralPath $updateScript -Force -ErrorAction SilentlyContinue
+    }
+}
