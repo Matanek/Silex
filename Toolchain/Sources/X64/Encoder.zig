@@ -1441,15 +1441,9 @@ fn emitStringRetain(
     bytes: *std.ArrayList(u8),
     value: Machine.Instruction.ListResource,
 ) Error!void {
-    try emitLoadStack(allocator, bytes, .r10, value.operand);
-    try emitLoadMemory(allocator, bytes, .r9, .r10, 0);
-    try emitImmediate(allocator, bytes, .r11, dynamic_string_flag);
-    try emitAndRegister(allocator, bytes, .r9, .r11);
-    try bytes.appendSlice(allocator, &.{ 0x4d, 0x85, 0xc9, 0x0f, 0x84 });
-    const literal = bytes.items.len;
-    try bytes.appendNTimes(allocator, 0, 4);
-    try bytes.appendSlice(allocator, &.{ 0x49, 0x83, 0xea, dynamic_string_prefix_size, 0xf0, 0x49, 0xff, 0x02 });
-    try patchRelative(bytes.items, literal, bytes.items.len);
+    _ = allocator;
+    _ = bytes;
+    _ = value;
 }
 
 fn emitStringDrop(
@@ -1459,15 +1453,8 @@ fn emitStringDrop(
     platform: Platform,
     value: Machine.Instruction.ListResource,
 ) Error!void {
-    try emitLoadStack(allocator, bytes, .r10, value.operand);
-    try emitLoadMemory(allocator, bytes, .r9, .r10, 0);
-    try emitImmediate(allocator, bytes, .r11, dynamic_string_flag);
-    try emitAndRegister(allocator, bytes, .r9, .r11);
-    try bytes.appendSlice(allocator, &.{ 0x4d, 0x85, 0xc9, 0x0f, 0x84 });
-    const literal = bytes.items.len;
-    try bytes.appendNTimes(allocator, 0, 4);
-    try bytes.appendSlice(allocator, &.{ 0x49, 0x83, 0xea, dynamic_string_prefix_size });
-    try bytes.appendSlice(allocator, &.{ 0xf0, 0x49, 0xff, 0x0a, 0xe9 });
+    _ = value;
+    try bytes.append(allocator, 0xe9);
     const diagnostic_skip_free = bytes.items.len;
     try bytes.appendNTimes(allocator, 0, 4);
     switch (platform) {
@@ -1485,7 +1472,6 @@ fn emitStringDrop(
         },
     }
     try patchRelative(bytes.items, diagnostic_skip_free, bytes.items.len);
-    try patchRelative(bytes.items, literal, bytes.items.len);
 }
 
 fn emitMaskDynamicStringLength(allocator: Allocator, bytes: *std.ArrayList(u8), register: Register) Allocator.Error!void {
