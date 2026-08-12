@@ -72,7 +72,9 @@ jobs:
           "$silex" test "$GITHUB_WORKSPACE/Tests/Types/Str/Operators.sx"
           "$silex" test "$GITHUB_WORKSPACE/Tests/Types/Str/Returns.sx"
           mkdir -p "$RUNNER_TEMP/packages"
-          cp -R "$HOME/.silex/packages/GFX@0.23.1" "$RUNNER_TEMP/packages/GFX"
+          gfx_install=$(find "$HOME/.silex/packages" -maxdepth 1 -type d -name 'GFX@*' -print -quit)
+          test -n "$gfx_install"
+          cp -R "$gfx_install" "$RUNNER_TEMP/packages/GFX"
           cd "$RUNNER_TEMP/packages"
           "$silex" test GFX/Tests/Color.sx
           "$silex" test GFX/Tests/TransformCamera.sx
@@ -104,7 +106,11 @@ jobs:
           & $silex test (Join-Path $env:GITHUB_WORKSPACE "Tests/Types/Str/Returns.sx")
           $packages = Join-Path $env:RUNNER_TEMP "packages"
           New-Item -ItemType Directory -Force $packages | Out-Null
-          Copy-Item -Recurse (Join-Path $env:USERPROFILE ".silex/packages/GFX@0.23.1") (Join-Path $packages "GFX")
+          $gfxInstall = Get-ChildItem (Join-Path $env:USERPROFILE ".silex/packages") -Directory -Filter "GFX@*" | Select-Object -First 1
+          if (-not $gfxInstall) {
+            throw "GFX was not installed"
+          }
+          Copy-Item -Recurse $gfxInstall.FullName (Join-Path $packages "GFX")
           Set-Location $packages
           $gfx = Join-Path $packages "GFX"
           & $silex test (Join-Path $gfx "Tests/Color.sx")
