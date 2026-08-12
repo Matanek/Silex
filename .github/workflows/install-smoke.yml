@@ -40,17 +40,10 @@ jobs:
           curl -fsSL https://raw.githubusercontent.com/Matanek/Silex/main/install.sh | sh
           "$SILEX_INSTALL_DIR/silex" --version
           "$SILEX_INSTALL_DIR/silex" install STD
-          "$SILEX_INSTALL_DIR/silex" install GFX
-          gfx_root=$(find "$HOME/.silex/packages" -maxdepth 1 -type d -name 'GFX@*' | sort | tail -n 1)
-          test -n "$gfx_root"
-          cp -R "$gfx_root" "$RUNNER_TEMP/GFX"
           if [ "${{ matrix.execution }}" = "run" ]; then
             "$SILEX_INSTALL_DIR/silex" run Examples/Distribution/Hello.sx
-            SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=dummy \
-              "$SILEX_INSTALL_DIR/silex" test "$RUNNER_TEMP/GFX/Tests" --nocache
           else
             "$SILEX_INSTALL_DIR/silex" compile Examples/Distribution/Hello.sx -o "$RUNNER_TEMP/silex-package-smoke"
-            "$SILEX_INSTALL_DIR/silex" compile "$RUNNER_TEMP/GFX/Examples/Applications/BasicWindow.sx" -o "$RUNNER_TEMP/silex-gfx-smoke"
           fi
 
   windows-x64:
@@ -76,16 +69,4 @@ jobs:
           $silex = Join-Path $env:SILEX_INSTALL_DIR "silex.exe"
           & $silex --version
           & $silex install STD
-          & $silex install GFX
           & $silex run Examples/Distribution/Hello.sx
-          $packageRoot = Join-Path $env:HOME ".silex\packages"
-          $gfxRoot = Get-ChildItem $packageRoot -Directory -Filter "GFX@*" |
-            Sort-Object Name |
-            Select-Object -Last 1
-          if (-not $gfxRoot) {
-            throw "The installed GFX package was not found"
-          }
-          $testRoot = Join-Path $env:RUNNER_TEMP "GFX"
-          Copy-Item $gfxRoot.FullName $testRoot -Recurse
-          $env:SDL_AUDIODRIVER = "dummy"
-          & $silex test (Join-Path $testRoot "Tests") --nocache

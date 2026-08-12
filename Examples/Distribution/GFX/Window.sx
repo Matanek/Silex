@@ -1,0 +1,15 @@
+use GFX.Window
+
+func main() {
+    var window = Window(
+        Window.Settings(
+            title:"GFX distribution smoke",
+            width:320,
+            height:240,
+            hidden:true
+        )
+    )
+    if window.id().value == 0 {
+        panic("GFX did not create an SDL window")
+    }
+}
