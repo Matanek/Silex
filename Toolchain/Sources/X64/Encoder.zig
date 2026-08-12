@@ -1441,9 +1441,15 @@ fn emitStringRetain(
     bytes: *std.ArrayList(u8),
     value: Machine.Instruction.ListResource,
 ) Error!void {
-    _ = allocator;
-    _ = bytes;
-    _ = value;
+    try emitLoadStack(allocator, bytes, .r10, value.operand);
+    try emitLoadMemory(allocator, bytes, .r9, .r10, 0);
+    try emitImmediate(allocator, bytes, .r11, dynamic_string_flag);
+    try emitAndRegister(allocator, bytes, .r9, .r11);
+    try bytes.appendSlice(allocator, &.{ 0x4d, 0x85, 0xc9, 0x0f, 0x84 });
+    const literal = bytes.items.len;
+    try bytes.appendNTimes(allocator, 0, 4);
+    try bytes.appendSlice(allocator, &.{ 0x49, 0x83, 0xea, dynamic_string_prefix_size, 0xf0, 0x49, 0xff, 0x02 });
+    try patchRelative(bytes.items, literal, bytes.items.len);
 }
 
 fn emitStringDrop(
@@ -1453,9 +1459,16 @@ fn emitStringDrop(
     platform: Platform,
     value: Machine.Instruction.ListResource,
 ) Error!void {
-    _ = value;
-    try bytes.append(allocator, 0xe9);
-    const diagnostic_skip_free = bytes.items.len;
+    try emitLoadStack(allocator, bytes, .r10, value.operand);
+    try emitLoadMemory(allocator, bytes, .r9, .r10, 0);
+    try emitImmediate(allocator, bytes, .r11, dynamic_string_flag);
+    try emitAndRegister(allocator, bytes, .r9, .r11);
+    try bytes.appendSlice(allocator, &.{ 0x4d, 0x85, 0xc9, 0x0f, 0x84 });
+    const literal = bytes.items.len;
+    try bytes.appendNTimes(allocator, 0, 4);
+    try bytes.appendSlice(allocator, &.{ 0x49, 0x83, 0xea, dynamic_string_prefix_size });
+    try bytes.appendSlice(allocator, &.{ 0xf0, 0x49, 0xff, 0x0a, 0x0f, 0x85 });
+    const retained = bytes.items.len;
     try bytes.appendNTimes(allocator, 0, 4);
     switch (platform) {
         .linux => {
@@ -1471,7 +1484,8 @@ fn emitStringDrop(
             try ExternalCalls.emitWindowsImportCall(allocator, bytes, import_sites, .virtual_free);
         },
     }
-    try patchRelative(bytes.items, diagnostic_skip_free, bytes.items.len);
+    try patchRelative(bytes.items, retained, bytes.items.len);
+    try patchRelative(bytes.items, literal, bytes.items.len);
 }
 
 fn emitMaskDynamicStringLength(allocator: Allocator, bytes: *std.ArrayList(u8), register: Register) Allocator.Error!void {
@@ -1640,17 +1654,21 @@ fn emitStoreGlobal(
 
 fn emitLoadMemory(allocator: Allocator, bytes: *std.ArrayList(u8), destination: Register, base: Register, displacement: i32) Allocator.Error!void {
     const rex: u8 = 0x48 | (@as(u8, @intFromBool(@intFromEnum(destination) >= 8)) << 2) | @intFromBool(@intFromEnum(base) >= 8);
+    const base_bits: u8 = @as(u8, @intFromEnum(base) & 7);
     try bytes.append(allocator, rex);
     try bytes.append(allocator, 0x8b);
-    try bytes.append(allocator, 0x80 | (@as(u8, @intFromEnum(destination) & 7) << 3) | @as(u8, @intFromEnum(base) & 7));
+    try bytes.append(allocator, 0x80 | (@as(u8, @intFromEnum(destination) & 7) << 3) | base_bits);
+    if (base_bits == 4) try bytes.append(allocator, 0x24);
     try appendInt(allocator, bytes, i32, displacement);
 }
 
 fn emitStoreMemory(allocator: Allocator, bytes: *std.ArrayList(u8), base: Register, displacement: i32, source: Register) Allocator.Error!void {
     const rex: u8 = 0x48 | (@as(u8, @intFromBool(@intFromEnum(source) >= 8)) << 2) | @intFromBool(@intFromEnum(base) >= 8);
+    const base_bits: u8 = @as(u8, @intFromEnum(base) & 7);
     try bytes.append(allocator, rex);
     try bytes.append(allocator, 0x89);
-    try bytes.append(allocator, 0x80 | (@as(u8, @intFromEnum(source) & 7) << 3) | @as(u8, @intFromEnum(base) & 7));
+    try bytes.append(allocator, 0x80 | (@as(u8, @intFromEnum(source) & 7) << 3) | base_bits);
+    if (base_bits == 4) try bytes.append(allocator, 0x24);
     try appendInt(allocator, bytes, i32, displacement);
 }
 
@@ -1780,4 +1798,14 @@ test "encode owned strings with allocation retain and release on both X64 hosts"
     };
     try std.testing.expect(alloc);
     try std.testing.expect(free);
+}
+
+test "encode memory operands based on R12 with the required SIB byte" {
+    var bytes: std.ArrayList(u8) = .empty;
+    defer bytes.deinit(std.testing.allocator);
+    try emitLoadMemory(std.testing.allocator, &bytes, .r14, .r12, 0);
+    try std.testing.expectEqualSlices(u8, &.{ 0x4d, 0x8b, 0xb4, 0x24, 0, 0, 0, 0 }, bytes.items);
+    bytes.clearRetainingCapacity();
+    try emitStoreMemory(std.testing.allocator, &bytes, .r12, 8, .r14);
+    try std.testing.expectEqualSlices(u8, &.{ 0x4d, 0x89, 0xb4, 0x24, 8, 0, 0, 0 }, bytes.items);
 }

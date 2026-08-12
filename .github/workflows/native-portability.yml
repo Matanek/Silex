@@ -45,13 +45,6 @@ jobs:
           tar -xJf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP"
           echo "$RUNNER_TEMP/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
 
-      - name: Install the Linux crash debugger
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes gdb
-
       - name: Install bootstrap Zig on Windows
         if: runner.os == 'Windows'
         shell: pwsh
@@ -78,12 +71,7 @@ jobs:
           "$silex" setup
           "$silex" install STD
           "$silex" install GFX
-          if ! "$silex" test "$GITHUB_WORKSPACE/Tests/Types/Str/Operators.sx"; then
-            for executable in "$GITHUB_WORKSPACE"/.silex/test/Operators-*; do
-              gdb --batch -ex run -ex "info registers rip rax rbx r10 r12 r13 r14 r15" -ex "x/12i \$pc-24" --args "$executable" || true
-            done
-            exit 1
-          fi
+          "$silex" test "$GITHUB_WORKSPACE/Tests/Types/Str/Operators.sx"
           "$silex" test "$GITHUB_WORKSPACE/Tests/Types/Str/Returns.sx"
           mkdir -p "$RUNNER_TEMP/packages"
           cp -R "$HOME/.silex/packages/GFX@0.23.1" "$RUNNER_TEMP/packages/GFX"
