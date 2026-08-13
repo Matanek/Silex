@@ -1514,8 +1514,13 @@ pub const Compiler = struct {
             .field_access => |access| {
                 if (access.base.value == .generic_reference) {
                     const reference = &access.base.value.generic_reference;
-                    if (try self.enumReceiverTarget(module, reference.name)) |target| {
-                        try self.requirePublicEnum(module, target, access.name_position);
+                    const enumeration = try self.enumReceiverTarget(module, reference.name);
+                    const structure = if (enumeration == null) try self.structureTarget(module, reference.name) else null;
+                    if (enumeration orelse structure) |target| {
+                        if (enumeration != null)
+                            try self.requirePublicEnum(module, target, access.name_position)
+                        else
+                            try self.requirePublicStructure(module, target, access.name_position);
                         reference.name = try structureCanonicalName(self.allocator, try self.nominalModule(target), target.declaration);
                         for (@constCast(reference.type_arguments)) |*argument| {
                             argument.* = self.remapType(module, type_map, argument.*);
@@ -1528,6 +1533,14 @@ pub const Compiler = struct {
                         access.base.value = .{ .identifier = try structureCanonicalName(
                             self.allocator,
                             try self.enumModule(target),
+                            target.declaration,
+                        ) };
+                        return;
+                    } else if (try self.structureTarget(module, prefix)) |target| {
+                        try self.requirePublicStructure(module, target, access.name_position);
+                        access.base.value = .{ .identifier = try structureCanonicalName(
+                            self.allocator,
+                            try self.structureModule(target),
                             target.declaration,
                         ) };
                         return;

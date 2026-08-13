@@ -16,6 +16,36 @@ fn writeBoundaryArchive(directory: std.Io.Dir) !void {
     });
 }
 
+test "qualify local types used to read static storage" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data =
+        \\struct Test {
+        \\    static let count:int = 100
+        \\}
+        \\class ClassTest {
+        \\    public static let count:int = 200
+        \\}
+        \\struct GenericTest<T> {
+        \\    static let count:int = 300
+        \\}
+        \\func main() { print(Test.count, " ", ClassTest.count, " ", GenericTest<int>.count) }
+        ,
+    });
+
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(input);
+    const result = try @import("../Interpreter.zig").runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("100 200 300\n", result.stdout);
+}
+
 test "compile only the explicit local module closure" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
