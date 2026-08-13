@@ -198,7 +198,7 @@ fn encodeFunction(
     program: Machine.Program,
     function: Machine.Function,
 ) Error!void {
-    if (function.register_slots.len != 0) return unsupported("release register allocation");
+    if (function.register_slots.len != 0 or function.float_register_slots.len != 0) return unsupported("release register allocation");
     try bytes.appendSlice(allocator, &.{ 0x55, 0x48, 0x89, 0xe5 });
     try emitFrameAllocation(allocator, bytes, platform, function.frame_size);
     const argument_registers = [_]Register{ .rdi, .rsi, .rdx, .rcx, .r8, .r9, .r10, .r11 };
@@ -1023,11 +1023,13 @@ fn emitDynamicCollectionLoad(
         try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xc3, 8 });
     }
     try emitLoadStack(allocator, bytes, .rax, value.index);
-    try bytes.appendSlice(allocator, &.{ 0x48, 0x39, 0xc8, 0x0f, 0x82 });
-    const in_bounds = bytes.items.len;
-    try bytes.appendNTimes(allocator, 0, 4);
-    try emitRuntimeFailure(allocator, bytes, epilogue);
-    try patchRelative(bytes.items, in_bounds, bytes.items.len);
+    if (value.checked) {
+        try bytes.appendSlice(allocator, &.{ 0x48, 0x39, 0xc8, 0x0f, 0x82 });
+        const in_bounds = bytes.items.len;
+        try bytes.appendNTimes(allocator, 0, 4);
+        try emitRuntimeFailure(allocator, bytes, epilogue);
+        try patchRelative(bytes.items, in_bounds, bytes.items.len);
+    }
     try bytes.appendSlice(allocator, &.{ 0x48, 0x69, 0xc0 });
     try appendInt(allocator, bytes, u32, @as(u32, value.result.width) * Machine.slot_size);
     try bytes.appendSlice(allocator, &.{ 0x48, 0x01, 0xc3 });
@@ -1789,6 +1791,32 @@ test "encode a no-op Silex main for the Linux X64 process contract" {
     try std.testing.expectEqual(@as(u8, 0xc3), windows.code[windows.code.len - 1]);
 }
 
+test "X64 keeps the scalar fallback when portable SLP groups are present" {
+    const instructions = [_]Machine.Instruction{.return_void};
+    const groups = [_]Machine.FloatLaneGroup{.{
+        .slots = .{ 0, 1, 2, 0 },
+        .width = 3,
+        .priority = 8,
+        .recurrence = false,
+        .in_loop = false,
+    }};
+    const functions = [_]Machine.Function{.{
+        .name = "main",
+        .parameter_count = 0,
+        .return_type = .void,
+        .slot_count = 3,
+        .frame_size = 32,
+        .float_lane_groups = &groups,
+        .instructions = &instructions,
+    }};
+    const linux = try encodeLinux(std.testing.allocator, .{ .functions = &functions });
+    defer linux.deinit(std.testing.allocator);
+    const windows = try encodeWindows(std.testing.allocator, .{ .functions = &functions });
+    defer windows.deinit(std.testing.allocator);
+    try std.testing.expect(linux.entry_offset > 0);
+    try std.testing.expect(windows.entry_offset > 0);
+}
+
 test "encode owned strings with allocation retain and release on both X64 hosts" {
     const instructions = [_]Machine.Instruction{
         .{ .constant_str = .{ .result = 0, .string = 0 } },
@@ -1842,8 +1870,8 @@ test "probe every Windows stack page in large X64 frames" {
     try emitFrameAllocation(std.testing.allocator, &bytes, .windows, 8192);
     try std.testing.expectEqualSlices(u8, &.{
         0x48, 0x81, 0xec, 0x00, 0x10, 0x00, 0x00,
-        0xf6, 0x04, 0x24, 0x00,
-        0x48, 0x81, 0xec, 0x00, 0x10, 0x00, 0x00,
+        0xf6, 0x04, 0x24, 0x00, 0x48, 0x81, 0xec,
+        0x00, 0x10, 0x00, 0x00,
     }, bytes.items);
 
     bytes.clearRetainingCapacity();

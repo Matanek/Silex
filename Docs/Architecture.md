@@ -252,8 +252,10 @@ open Silex document
 - The command `silex run <source.sx> [-d|--debug|-r|--release]
   [-n|--nocache]` expresses the intent to execute on the host. It emits a
   private native executable under `.silex/run/`, inherits the terminal streams,
-  waits for the program and returns its exit code. Debug is the default and
-  Release selects semantics-preserving optimization.
+  waits for the program and returns its exit code. Release is the default and
+  applies semantics-preserving optimization; `--debug` disables those
+  optimizations for backend diagnosis without weakening language safety in
+  Release.
 - `silex interpret <source.sx> [-n|--nocache] [--emit-ir]` explicitly selects
   the reference interpreter. It is intended for semantic validation and cannot
   execute most platform boundaries. `silex compile <source.sx>
@@ -266,8 +268,8 @@ open Silex document
   execution for scripts and CI. An ANSI-capable terminal clears successful
   progress when the operation completes but retains it when compilation fails.
 - Release propagates constants and copies through straight-line functions,
-  folds checked scalar operations, removes dead constants, and inlines functions proven constant,
-  identity-only or scalar-binary. ARM64 lowering then performs deterministic
+  folds checked scalar operations, removes dead constants, and inlines small
+  pure calculations over scalar and structure values. ARM64 lowering then performs deterministic
   linear-scan allocation for safe scalar leaves; addressable values, aggregates
   and values constrained by calls remain explicit spills. Fully resident leaf
   functions allocate no value frame. Debug retains the direct stack-resident

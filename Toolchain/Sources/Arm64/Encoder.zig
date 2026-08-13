@@ -47,9 +47,16 @@ const logicalShiftRightVariable = A64.logicalShiftRightVariable;
 const signExtendRegister = A64.signExtendRegister;
 const moveGeneralToFloat = A64.moveGeneralToFloat;
 const moveFloatToGeneral = A64.moveFloatToGeneral;
+const moveFloat = A64.moveFloat;
 const floatNegate = A64.floatNegate;
+const floatZero = A64.floatZero;
 const floatArithmetic = A64.floatArithmetic;
+const floatArithmetic2 = A64.floatArithmetic2;
+const floatMultiplyAdd = A64.floatMultiplyAdd;
+const floatMaxNumber = A64.floatMaxNumber;
 const floatCompare = A64.floatCompare;
+const floatCompareZero = A64.floatCompareZero;
+const floatConditionalCompare = A64.floatConditionalCompare;
 const integerToFloat = A64.integerToFloat;
 const floatToInteger = A64.floatToInteger;
 const floatConvert = A64.floatConvert;
@@ -63,6 +70,7 @@ const compareBranchNonZero64 = A64.compareBranchNonZero64;
 const branch = A64.branch;
 const branchLink = A64.branchLink;
 const addRegisters = A64.addRegisters;
+const addSubtractImmediateSetFlags = A64.addSubtractImmediateSetFlags;
 
 const Allocator = std.mem.Allocator;
 
@@ -213,7 +221,6 @@ fn encodeForPlatform(allocator: Allocator, program: Machine.Program, entry: Entr
             break :entry offset;
         },
     };
-
     var runtime_bytes: std.ArrayList(u8) = .empty;
     if (float_calls.items.len != 0) {
         const runtime = try FloatRuntime.payload();
@@ -566,21 +573,55 @@ fn encodeFunction(
 ) Error!void {
     var fixups: FunctionFixups = .{};
     var control_fixups: std.ArrayList(ControlFixup) = .empty;
+    var scalar_cache = ScalarCache{ .enabled = function.register_slots.len == 0 and function.float_register_slots.len == 0 };
     const instruction_offsets = try allocator.alloc(usize, function.instructions.len);
     defer allocator.free(instruction_offsets);
-    const encoded_frame_size = std.math.add(u16, function.frame_size, if (enable_cycle_collector) 16 else 0) catch return error.InvalidMachineProgram;
+    const runtime_frame_size: u16 = if (enable_cycle_collector) 16 else 0;
+    const saved_register_count = calleeSavedRegisterCount(function);
+    const saved_register_size: u16 = @intCast(std.mem.alignForward(usize, saved_register_count * Machine.slot_size, 16));
+    const local_frame_size = std.math.add(u16, function.frame_size, runtime_frame_size) catch return error.InvalidMachineProgram;
+    const encoded_frame_size = std.math.add(u16, local_frame_size, saved_register_size) catch return error.InvalidMachineProgram;
     const cycle_context_slot: Machine.Slot = @intCast(function.frame_size / Machine.slot_size);
     try words.append(allocator, saveFrame());
     try words.append(allocator, moveFramePointer());
     try emitStackAdjustment(allocator, words, encoded_frame_size, false);
+    var saved_register_index: usize = 0;
+    for (callee_saved_registers) |register| if (functionUsesRegister(function, register)) {
+        try emitStoreAtOffset(
+            allocator,
+            words,
+            register,
+            .zero_or_sp,
+            @as(usize, local_frame_size) + saved_register_index * Machine.slot_size,
+        );
+        saved_register_index += 1;
+    };
+    for (callee_saved_float_registers) |register| if (functionUsesFloatRegister(function, register)) {
+        try words.append(allocator, moveFloatToGeneral(.x9, register, true));
+        try emitStoreAtOffset(
+            allocator,
+            words,
+            .x9,
+            .zero_or_sp,
+            @as(usize, local_frame_size) + saved_register_index * Machine.slot_size,
+        );
+        saved_register_index += 1;
+    };
     if (function.hidden_return_slot) |slot| try words.append(allocator, storeStack(.x15, slot));
     for (function.parameters, 0..) |parameter, index| {
         const incoming: Register = @enumFromInt(index);
         if (!parameter.aggregate) {
-            try storeValue(allocator, words, function, incoming, parameter.start);
+            if (floatResidence(function, parameter.start) != null) {
+                try words.append(allocator, moveGeneralToFloat(.x9, incoming, true));
+                try storeFloatValue(allocator, words, function, .x9, parameter.start, true);
+            } else try storeValue(allocator, words, function, incoming, parameter.start);
         } else for (0..parameter.width) |leaf| {
             try emitLoadAtOffset(allocator, words, .x9, incoming, leaf * Machine.slot_size);
-            try words.append(allocator, storeStack(.x9, @intCast(@as(usize, parameter.start) + leaf)));
+            const slot: Machine.Slot = @intCast(@as(usize, parameter.start) + leaf);
+            if (floatResidence(function, slot) != null) {
+                try words.append(allocator, moveGeneralToFloat(.x10, .x9, true));
+                try storeFloatValue(allocator, words, function, .x10, slot, true);
+            } else try storeValue(allocator, words, function, .x9, slot);
         }
     }
     for (function.capture_parameters, 0..) |capture, index| {
@@ -588,21 +629,35 @@ fn encodeFunction(
         try emitLoadAtOffset(allocator, words, .x9, .x14, index * Machine.slot_size);
         try words.append(allocator, storeStack(.x9, capture.start));
     }
+    for (cachedFloatLiterals(function)) |candidate| if (candidate) |literal| {
+        try emitImmediate64(allocator, words, .x9, literal.bits);
+        try words.append(allocator, moveGeneralToFloat(literal.register, .x9, literal.double));
+    };
 
     for (function.instructions, 0..) |instruction, instruction_index| {
         instruction_offsets[instruction_index] = words.items.len;
+        try emitDeferredCollectionLoads(allocator, words, function, instruction_index);
+        if (!scalarCacheInstruction(instruction)) scalar_cache.clear();
         switch (instruction) {
             .constant_int => |constant| {
+                if (constant.bits == 0 and zeroConstantFeedsNextComparison(function, instruction_index, constant.result)) continue;
+                if (integerConstantFeedsNextArithmetic(function, instruction_index, constant)) continue;
                 const bits = if (constant.type.isSignedInteger())
                     Numeric.signExtend(constant.bits, constant.type.bitWidth())
                 else
                     constant.bits;
-                try emitImmediate64(allocator, words, .x9, bits);
-                try storeValue(allocator, words, function, .x9, constant.result);
+                const destination = valueResultRegister(function, constant.result) orelse .x9;
+                try emitImmediate64(allocator, words, destination, bits);
+                if (valueResultRegister(function, constant.result) == null) {
+                    try storeCachedValue(allocator, words, function, &scalar_cache, destination, constant.result);
+                }
             },
             .constant_bool => |constant| {
-                try words.append(allocator, moveWideZero32(.x9, @intFromBool(constant.value)));
-                try storeValue(allocator, words, function, .x9, constant.result);
+                const destination = valueResultRegister(function, constant.result) orelse .x9;
+                try words.append(allocator, moveWideZero32(destination, @intFromBool(constant.value)));
+                if (valueResultRegister(function, constant.result) == null) {
+                    try storeCachedValue(allocator, words, function, &scalar_cache, destination, constant.result);
+                }
             },
             .constant_str => |constant| {
                 try StringRuntime.emitLiteral(allocator, words, data_fixups, constant.string, constant.result);
@@ -618,12 +673,79 @@ fn encodeFunction(
                 constant,
             ),
             .constant_float32 => |constant| {
+                if (floatPairLeader(function, constant.result) != null) continue;
+                if (floatLaneResidence(function, constant.result)) |pair| {
+                    if (pair.lane != 1) return error.InvalidMachineProgram;
+                    const destination: Register = @enumFromInt(pair.register);
+                    if (constant.bits == 0) {
+                        try words.append(allocator, floatZero(destination));
+                    } else {
+                        try emitImmediate64(allocator, words, .x9, constant.bits);
+                        try words.append(allocator, moveGeneralToFloat(destination, .x9, false));
+                        try words.append(allocator, A64.duplicateFloat32Lane(destination, destination, 0));
+                    }
+                    continue;
+                }
+                if (floatMaxDiamond(function, instruction_index, constant.result, constant.bits, false)) |diamond| {
+                    const left = try prepareFloatOperand(allocator, words, function, .x9, diamond.left, false);
+                    const destination = floatResultRegister(function, diamond.destination) orelse .x10;
+                    try words.append(allocator, floatMaxNumber(destination, left, diamond.right, false));
+                    if (floatResultRegister(function, diamond.destination) == null) {
+                        try storeFloatValue(allocator, words, function, destination, diamond.destination, false);
+                    }
+                    try control_fixups.append(allocator, .{
+                        .at = words.items.len,
+                        .target = diamond.join,
+                        .width = .imm26,
+                    });
+                    try words.append(allocator, branch());
+                    continue;
+                }
+                if (constant.bits == 0 and zeroConstantFeedsNextComparison(function, instruction_index, constant.result)) continue;
+                if (constantFeedsNextComparison(function, instruction_index, constant.result) and
+                    cachedFloatLiteralRegister(function, constant.bits, false) != null) continue;
+                if (constant.bits == 0) {
+                    const destination = floatResultRegister(function, constant.result) orelse .x9;
+                    try words.append(allocator, floatZero(destination));
+                    if (floatResultRegister(function, constant.result) == null) {
+                        try storeFloatValue(allocator, words, function, destination, constant.result, false);
+                    }
+                    continue;
+                }
                 try emitImmediate64(allocator, words, .x9, constant.bits);
-                try storeValue(allocator, words, function, .x9, constant.result);
+                try words.append(allocator, moveGeneralToFloat(.x9, .x9, false));
+                try storeFloatValue(allocator, words, function, .x9, constant.result, false);
             },
             .constant_float64 => |constant| {
+                if (floatMaxDiamond(function, instruction_index, constant.result, constant.bits, true)) |diamond| {
+                    const left = try prepareFloatOperand(allocator, words, function, .x9, diamond.left, true);
+                    const destination = floatResultRegister(function, diamond.destination) orelse .x10;
+                    try words.append(allocator, floatMaxNumber(destination, left, diamond.right, true));
+                    if (floatResultRegister(function, diamond.destination) == null) {
+                        try storeFloatValue(allocator, words, function, destination, diamond.destination, true);
+                    }
+                    try control_fixups.append(allocator, .{
+                        .at = words.items.len,
+                        .target = diamond.join,
+                        .width = .imm26,
+                    });
+                    try words.append(allocator, branch());
+                    continue;
+                }
+                if (constant.bits == 0 and zeroConstantFeedsNextComparison(function, instruction_index, constant.result)) continue;
+                if (constantFeedsNextComparison(function, instruction_index, constant.result) and
+                    cachedFloatLiteralRegister(function, constant.bits, true) != null) continue;
+                if (constant.bits == 0) {
+                    const destination = floatResultRegister(function, constant.result) orelse .x9;
+                    try words.append(allocator, floatZero(destination));
+                    if (floatResultRegister(function, constant.result) == null) {
+                        try storeFloatValue(allocator, words, function, destination, constant.result, true);
+                    }
+                    continue;
+                }
                 try emitImmediate64(allocator, words, .x9, constant.bits);
-                try storeValue(allocator, words, function, .x9, constant.result);
+                try words.append(allocator, moveGeneralToFloat(.x9, .x9, true));
+                try storeFloatValue(allocator, words, function, .x9, constant.result, true);
             },
             .optional_null => |optional| {
                 try words.append(allocator, moveWideZero32(.x9, 0));
@@ -641,10 +763,55 @@ fn encodeFunction(
             },
             .optional_unwrap => |optional| try emitSpanCopy(allocator, words, optional.result, optional.operand),
             .copy => |copy| {
-                try loadValue(allocator, words, function, .x9, copy.operand);
-                try storeValue(allocator, words, function, .x9, copy.result);
+                if (floatPairLeader(function, copy.result) != null) continue;
+                if (floatLaneResidence(function, copy.result)) |pair| {
+                    if (pair.lane != 1) return error.InvalidMachineProgram;
+                    const first_copy = definingCopy(function.instructions, pair.partner) orelse return error.InvalidMachineProgram;
+                    const source = try prepareFloatPairOperand(
+                        allocator,
+                        words,
+                        function,
+                        first_copy.operand,
+                        copy.operand,
+                        .x9,
+                        .x10,
+                    );
+                    const destination: Register = @enumFromInt(pair.register);
+                    if (source != destination) try words.append(allocator, moveFloat(destination, source, true));
+                    continue;
+                }
+                if (copyBelongsToFusedComparison(function, instruction_index)) continue;
+                if (floatResidence(function, copy.operand) != null or floatResidence(function, copy.result) != null or
+                    floatLaneResidence(function, copy.operand) != null or floatLaneResidence(function, copy.result) != null)
+                {
+                    const source = floatResultRegister(function, copy.operand);
+                    const destination = floatResultRegister(function, copy.result);
+                    if (source != null and destination != null) {
+                        if (source.? != destination.?) try words.append(allocator, moveFloat(destination.?, source.?, true));
+                    } else {
+                        try loadFloatValue(allocator, words, function, .x9, copy.operand, true);
+                        try storeFloatValue(allocator, words, function, .x9, copy.result, true);
+                    }
+                } else {
+                    const source = valueResultRegister(function, copy.operand);
+                    const destination = valueResultRegister(function, copy.result);
+                    if (source != null and destination != null) {
+                        if (source.? != destination.?) try words.append(allocator, moveRegister(destination.?, source.?));
+                    } else {
+                        try loadCachedValue(allocator, words, function, &scalar_cache, .x9, copy.operand);
+                        try storeCachedValue(allocator, words, function, &scalar_cache, .x9, copy.result);
+                    }
+                }
             },
-            .copy_range => |copy| try emitSpanCopy(allocator, words, copy.result, copy.operand),
+            .copy_range => |copy| for (0..copy.result.width) |leaf| {
+                try emitRegisteredCopy(
+                    allocator,
+                    words,
+                    function,
+                    @intCast(@as(usize, copy.result.start) + leaf),
+                    @intCast(@as(usize, copy.operand.start) + leaf),
+                );
+            },
             .deep_copy => |copy| {
                 try emitStackAddress(allocator, words, .x0, copy.operand.start);
                 try emitStackAddress(allocator, words, .x1, copy.result.start);
@@ -732,10 +899,15 @@ fn encodeFunction(
             .aggregate_init => |initialization| {
                 var destination_offset: usize = 0;
                 for (initialization.fields) |field| {
-                    var destination = initialization.result;
-                    destination.start = @intCast(@as(usize, destination.start) + destination_offset);
-                    destination.width = field.width;
-                    try emitSpanCopy(allocator, words, destination, field);
+                    for (0..field.width) |leaf| {
+                        try emitRegisteredCopy(
+                            allocator,
+                            words,
+                            function,
+                            @intCast(@as(usize, initialization.result.start) + destination_offset + leaf),
+                            @intCast(@as(usize, field.start) + leaf),
+                        );
+                    }
                     destination_offset += field.width;
                 }
             },
@@ -897,7 +1069,16 @@ fn encodeFunction(
                 try words.append(allocator, storeStack(.x11, test_value.result));
             },
             .collection_load => |access| if (access.dynamic)
-                try ListRuntime.emitLoad(allocator, words, data_fixups, &fixups.epilogue, program, access)
+                try ListRuntime.emitLoad(
+                    allocator,
+                    words,
+                    data_fixups,
+                    &fixups.epilogue,
+                    program,
+                    function,
+                    access,
+                    eagerCollectionWidth(function, instruction_index, access),
+                )
             else
                 try encodeCollectionLoad(allocator, words, data_fixups, &fixups, program, access),
             .collection_reference => |access| if (access.dynamic)
@@ -908,7 +1089,8 @@ fn encodeFunction(
                 try ListRuntime.emitReplace(allocator, words, data_fixups, &fixups.epilogue, external_call_sites, @enumFromInt(@intFromEnum(platform)), program, replacement)
             else
                 try encodeCollectionReplace(allocator, words, data_fixups, &fixups, program, replacement),
-            .collection_count => |count| try ListRuntime.emitCount(allocator, words, count),
+            .collection_count => |count| if (!viewCountFeedsNextComparison(function, instruction_index, count))
+                try ListRuntime.emitCount(allocator, words, function, count),
             .list_edit => |edit| try ListRuntime.emitEdit(allocator, words, data_fixups, &fixups.epilogue, external_call_sites, @enumFromInt(@intFromEnum(platform)), program, edit),
             .collection_slice => |slice| try ListRuntime.emitSlice(allocator, words, &fixups.epilogue, external_call_sites, @enumFromInt(@intFromEnum(platform)), slice),
             .collection_view => |view| try ListRuntime.emitView(allocator, words, &fixups.epilogue, external_call_sites, @enumFromInt(@intFromEnum(platform)), view),
@@ -919,6 +1101,7 @@ fn encodeFunction(
                 &fixups,
                 data_fixups,
                 program,
+                function,
                 conversion,
             ),
             .format_value => |format| try TextRuntime.emitFormat(
@@ -950,14 +1133,12 @@ fn encodeFunction(
             ),
             .unary => |unary| {
                 if (unary.type.isFloat()) {
-                    try loadValue(allocator, words, function, .x9, unary.operand);
-                    try words.append(allocator, moveGeneralToFloat(.x9, .x9, unary.type == .float64));
+                    try loadFloatValue(allocator, words, function, .x9, unary.operand, unary.type == .float64);
                     try words.append(allocator, floatNegate(.x10, .x9, unary.type == .float64));
-                    try words.append(allocator, moveFloatToGeneral(.x10, .x10, unary.type == .float64));
-                    try storeValue(allocator, words, function, .x10, unary.result);
+                    try storeFloatValue(allocator, words, function, .x10, unary.result, unary.type == .float64);
                     continue;
                 }
-                try loadValue(allocator, words, function, .x9, unary.operand);
+                try loadCachedValue(allocator, words, function, &scalar_cache, .x9, unary.operand);
                 if (unary.type.isSignedInteger()) {
                     try emitImmediate64(allocator, words, .x10, @bitCast(Numeric.integerMin(unary.type)));
                     try words.append(allocator, compareRegisters(.x9, .x10));
@@ -966,9 +1147,39 @@ fn encodeFunction(
                     try appendFixup(allocator, words, &fixups.overflow, compareBranchNonZero64(.x9), .imm19);
                 }
                 try words.append(allocator, subtractSetFlags(.x11, .zero_or_sp, .x9));
-                try storeValue(allocator, words, function, .x11, unary.result);
+                try storeCachedValue(allocator, words, function, &scalar_cache, .x11, unary.result);
             },
-            .binary => |binary| try encodeBinary(allocator, words, &fixups, function, binary),
+            .binary => |binary| {
+                if (horizontalFloatPairAdd(function, binary)) |source| {
+                    const destination = floatResultRegister(function, binary.result) orelse .x11;
+                    try words.append(allocator, A64.horizontalAddFloat32Pair(destination, source));
+                    if (floatResultRegister(function, binary.result) == null) {
+                        try storeFloatValue(allocator, words, function, destination, binary.result, false);
+                    }
+                    continue;
+                }
+                if (floatPairLeader(function, binary.result) != null) continue;
+                if (floatLaneResidence(function, binary.result) != null and binary.type == .float32 and
+                    switch (binary.operator) {
+                        .add, .subtract, .multiply, .divide => true,
+                        else => false,
+                    })
+                {
+                    const residence = floatLaneResidence(function, binary.result).?;
+                    if (residence.lane != 1) return error.InvalidMachineProgram;
+                    const first = definingBinary(function.instructions, residence.partner) orelse return error.InvalidMachineProgram;
+                    try encodeFloatPairBinary(allocator, words, function, first);
+                    continue;
+                }
+                if (multiplyFeedsNextAdd(function, instruction_index, binary)) continue;
+                if (immediateArithmeticConstant(function, instruction_index, binary)) |constant| {
+                    try encodeImmediateArithmetic(allocator, words, &fixups, function, &scalar_cache, binary, constant);
+                } else if (comparisonBranchIndex(function, instruction_index, binary) != null) {
+                    try encodeComparisonFlags(allocator, words, function, instruction_index, binary);
+                } else if (fusedMultiplyForAdd(function, instruction_index)) |multiply_value| {
+                    try encodeFloatMultiplyAdd(allocator, words, function, binary, multiply_value);
+                } else try encodeBinary(allocator, words, &fixups, function, &scalar_cache, binary);
+            },
             .function_address => |address| {
                 try function_addresses.append(allocator, .{ .at = words.items.len, .function = address.function });
                 try appendRelocatableAddress(allocator, words, .x9);
@@ -989,7 +1200,10 @@ fn encodeFunction(
                         if (argument.width == 0) {
                             try words.append(allocator, moveWideZero64(outgoing, 0, 0));
                         } else try emitStackAddress(allocator, words, outgoing, argument.start);
-                    } else try words.append(allocator, loadStack(outgoing, argument.start));
+                    } else if (floatResidence(function, argument.start) != null) {
+                        try loadFloatValue(allocator, words, function, .x9, argument.start, false);
+                        try words.append(allocator, moveFloatToGeneral(outgoing, .x9, false));
+                    } else try loadValue(allocator, words, function, outgoing, argument.start);
                 }
                 if (call.result) |result| if (result.aggregate) {
                     if (result.width == 0) {
@@ -999,7 +1213,12 @@ fn encodeFunction(
                 try calls.append(allocator, .{ .at = words.items.len, .function = call.function });
                 try words.append(allocator, branchLink());
                 try appendFixup(allocator, words, &fixups.epilogue, compareBranchNonZero(.x8), .imm19);
-                if (call.result) |result| if (!result.aggregate) try words.append(allocator, storeStack(.x0, result.start));
+                if (call.result) |result| if (!result.aggregate) {
+                    if (floatResidence(function, result.start) != null) {
+                        try words.append(allocator, moveGeneralToFloat(.x9, .x0, false));
+                        try storeFloatValue(allocator, words, function, .x9, result.start, false);
+                    } else try storeValue(allocator, words, function, .x0, result.start);
+                };
             },
             .indirect_call => |call| {
                 for (call.arguments, 0..) |argument, index| {
@@ -1062,6 +1281,9 @@ fn encodeFunction(
                         try emitStoreAtOffset(allocator, words, .x9, .x14, leaf * Machine.slot_size);
                     }
                     try words.append(allocator, moveWideZero64(.x0, 0, 0));
+                } else if (function.return_type.isFloat()) {
+                    try loadFloatValue(allocator, words, function, .x9, value.start, function.return_type == .float64);
+                    try words.append(allocator, moveFloatToGeneral(.x0, .x9, function.return_type == .float64));
                 } else try loadValue(allocator, words, function, .x0, value.start);
                 try words.append(allocator, moveWideZero32(.x8, @intFromEnum(Machine.Status.success)));
                 try appendFixup(allocator, words, &fixups.epilogue, branch(), .imm26);
@@ -1076,29 +1298,136 @@ fn encodeFunction(
                 try words.append(allocator, branch());
             },
             .branch => |branch_value| {
-                try loadValue(allocator, words, function, .x9, branch_value.condition);
-                try words.append(allocator, compareBranchZero(.x9) | (2 << 5));
-                try control_fixups.append(allocator, .{
-                    .at = words.items.len,
-                    .target = branch_value.then_instruction,
-                    .width = .imm26,
-                });
-                try words.append(allocator, branch());
-                try control_fixups.append(allocator, .{
-                    .at = words.items.len,
-                    .target = branch_value.else_instruction,
-                    .width = .imm26,
-                });
-                try words.append(allocator, branch());
+                const then_instruction = resolveJumpTarget(function.instructions, branch_value.then_instruction);
+                const else_instruction = resolveJumpTarget(function.instructions, branch_value.else_instruction);
+                if (fusedFloatConjunction(function, instruction_index)) |conjunction| {
+                    const double = conjunction.second.type == .float64;
+                    const left = try prepareFloatOperand(
+                        allocator,
+                        words,
+                        function,
+                        .x9,
+                        conjunction.second.left,
+                        double,
+                    );
+                    try words.append(allocator, floatConditionalCompare(
+                        left,
+                        conjunction.right,
+                        invertCondition(comparisonFalseCondition(conjunction.first)),
+                        falseFlagsForCondition(comparisonFalseCondition(conjunction.second)),
+                        double,
+                    ));
+                    const second_then = resolveJumpTarget(
+                        function.instructions,
+                        conjunction.branch.then_instruction,
+                    );
+                    const second_else = resolveJumpTarget(
+                        function.instructions,
+                        conjunction.branch.else_instruction,
+                    );
+                    const false_condition = comparisonFalseCondition(conjunction.second);
+                    if (second_then == instruction_index + 1) {
+                        try control_fixups.append(allocator, .{
+                            .at = words.items.len,
+                            .target = second_else,
+                            .width = .imm19,
+                        });
+                        try words.append(allocator, conditionalBranch(false_condition));
+                    } else if (second_else == instruction_index + 1) {
+                        try control_fixups.append(allocator, .{
+                            .at = words.items.len,
+                            .target = second_then,
+                            .width = .imm19,
+                        });
+                        try words.append(allocator, conditionalBranch(invertCondition(false_condition)));
+                    } else {
+                        try control_fixups.append(allocator, .{
+                            .at = words.items.len,
+                            .target = second_else,
+                            .width = .imm19,
+                        });
+                        try words.append(allocator, conditionalBranch(false_condition));
+                        try control_fixups.append(allocator, .{
+                            .at = words.items.len,
+                            .target = second_then,
+                            .width = .imm26,
+                        });
+                        try words.append(allocator, branch());
+                    }
+                    continue;
+                }
+                if (comparisonForBranch(function, instruction_index)) |binary| {
+                    const false_condition = comparisonFalseCondition(binary);
+                    if (then_instruction == instruction_index + 1) {
+                        try control_fixups.append(allocator, .{
+                            .at = words.items.len,
+                            .target = else_instruction,
+                            .width = .imm19,
+                        });
+                        try words.append(allocator, conditionalBranch(false_condition));
+                    } else if (else_instruction == instruction_index + 1) {
+                        try control_fixups.append(allocator, .{
+                            .at = words.items.len,
+                            .target = then_instruction,
+                            .width = .imm19,
+                        });
+                        try words.append(allocator, conditionalBranch(invertCondition(false_condition)));
+                    } else {
+                        try control_fixups.append(allocator, .{
+                            .at = words.items.len,
+                            .target = else_instruction,
+                            .width = .imm19,
+                        });
+                        try words.append(allocator, conditionalBranch(false_condition));
+                        try control_fixups.append(allocator, .{
+                            .at = words.items.len,
+                            .target = then_instruction,
+                            .width = .imm26,
+                        });
+                        try words.append(allocator, branch());
+                    }
+                    continue;
+                }
+                const condition = try prepareValueOperand(allocator, words, function, .x9, branch_value.condition);
+                if (then_instruction == instruction_index + 1) {
+                    try control_fixups.append(allocator, .{
+                        .at = words.items.len,
+                        .target = else_instruction,
+                        .width = .imm19,
+                    });
+                    try words.append(allocator, compareBranchZero(condition));
+                } else if (else_instruction == instruction_index + 1) {
+                    try control_fixups.append(allocator, .{
+                        .at = words.items.len,
+                        .target = then_instruction,
+                        .width = .imm19,
+                    });
+                    try words.append(allocator, compareBranchNonZero(condition));
+                } else {
+                    try words.append(allocator, compareBranchZero(condition) | (2 << 5));
+                    try control_fixups.append(allocator, .{
+                        .at = words.items.len,
+                        .target = then_instruction,
+                        .width = .imm26,
+                    });
+                    try words.append(allocator, branch());
+                    try control_fixups.append(allocator, .{
+                        .at = words.items.len,
+                        .target = else_instruction,
+                        .width = .imm26,
+                    });
+                    try words.append(allocator, branch());
+                }
             },
         }
     }
 
     for (control_fixups.items) |fixup| {
         if (fixup.target >= instruction_offsets.len) return error.InvalidMachineProgram;
+        const target = resolveJumpTarget(function.instructions, fixup.target);
         switch (fixup.width) {
-            .imm19 => try patch19(words.items, fixup.at, instruction_offsets[fixup.target]),
-            .imm26 => try patch26(words.items, fixup.at, instruction_offsets[fixup.target]),
+            .imm19 => try patch19(words.items, fixup.at, instruction_offsets[target]),
+            .imm26 => try patch26(words.items, fixup.at, instruction_offsets[target]),
         }
     }
 
@@ -1113,6 +1442,28 @@ fn encodeFunction(
     try words.append(allocator, branch());
 
     const epilogue_label = words.items.len;
+    saved_register_index = 0;
+    for (callee_saved_registers) |register| if (functionUsesRegister(function, register)) {
+        try emitLoadAtOffset(
+            allocator,
+            words,
+            register,
+            .zero_or_sp,
+            @as(usize, local_frame_size) + saved_register_index * Machine.slot_size,
+        );
+        saved_register_index += 1;
+    };
+    for (callee_saved_float_registers) |register| if (functionUsesFloatRegister(function, register)) {
+        try emitLoadAtOffset(
+            allocator,
+            words,
+            .x9,
+            .zero_or_sp,
+            @as(usize, local_frame_size) + saved_register_index * Machine.slot_size,
+        );
+        try words.append(allocator, moveGeneralToFloat(register, .x9, true));
+        saved_register_index += 1;
+    };
     try emitStackAdjustment(allocator, words, encoded_frame_size, true);
     try words.append(allocator, restoreFrame());
     try words.append(allocator, returnInstruction());
@@ -1122,6 +1473,45 @@ fn encodeFunction(
     for (fixups.epilogue.items) |fixup| try patchLocal(words.items, fixup, epilogue_label);
     try patch26(words.items, overflow_to_epilogue, epilogue_label);
     try patch26(words.items, division_to_epilogue, epilogue_label);
+}
+
+fn resolveJumpTarget(instructions: []const Machine.Instruction, initial: usize) usize {
+    var target = initial;
+    var remaining = instructions.len;
+    while (remaining != 0) : (remaining -= 1) {
+        target = switch (instructions[target]) {
+            .jump => |next| next,
+            else => return target,
+        };
+        if (target >= instructions.len) return initial;
+    }
+    return initial;
+}
+
+const callee_saved_registers = [_]Register{
+    .x19, .x20, .x21, .x22, .x23, .x24, .x25, .x26, .x27, .x28,
+};
+const callee_saved_float_registers = [_]Register{ .x8, .x13, .x14, .x15 };
+
+fn calleeSavedRegisterCount(function: Machine.Function) usize {
+    var count: usize = 0;
+    for (callee_saved_registers) |register| count += @intFromBool(functionUsesRegister(function, register));
+    for (callee_saved_float_registers) |register| count += @intFromBool(functionUsesFloatRegister(function, register));
+    return count;
+}
+
+fn functionUsesFloatRegister(function: Machine.Function, register: Register) bool {
+    for (function.float_register_slots) |residence| {
+        if (residence != null and residence.? == @intFromEnum(register)) return true;
+    }
+    return false;
+}
+
+fn functionUsesRegister(function: Machine.Function, register: Register) bool {
+    for (function.register_slots) |residence| {
+        if (residence != null and residence.? == @intFromEnum(register)) return true;
+    }
+    return false;
 }
 
 fn emitMutexOperation(
@@ -1298,6 +1688,7 @@ fn encodeAggregateEqual(
     comparison: Machine.Instruction.AggregateEqual,
 ) Error!void {
     var unequal_branches: std.ArrayList(usize) = .empty;
+    var scalar_cache = ScalarCache{ .enabled = false };
     for (comparison.leaves) |leaf| {
         var guard_skips: std.ArrayList(usize) = .empty;
         for (leaf.guards) |guard| {
@@ -1307,7 +1698,7 @@ fn encodeAggregateEqual(
             try guard_skips.append(allocator, words.items.len);
             try words.append(allocator, conditionalBranch(.not_equal));
         }
-        try encodeBinary(allocator, words, fixups, null, .{
+        try encodeBinary(allocator, words, fixups, null, &scalar_cache, .{
             .result = comparison.result,
             .operator = .equal,
             .left = comparison.left.start + leaf.offset,
@@ -1364,6 +1755,18 @@ fn encodeCollectionLoad(
     program: Machine.Program,
     access: Machine.Instruction.CollectionLoad,
 ) Error!void {
+    if (!access.checked) {
+        try words.append(allocator, loadStack(.x9, access.index));
+        try emitStackAddress(allocator, words, .x10, access.collection.start);
+        try emitImmediate64(allocator, words, .x11, @as(u64, access.result.width) * Machine.slot_size);
+        try words.append(allocator, multiply(.x9, .x9, .x11));
+        try words.append(allocator, addRegisters(.x10, .x10, .x9));
+        for (0..access.result.width) |leaf| {
+            try emitLoadAtOffset(allocator, words, .x12, .x10, leaf * Machine.slot_size);
+            try words.append(allocator, storeStack(.x12, @intCast(@as(usize, access.result.start) + leaf)));
+        }
+        return;
+    }
     const bounds = try emitCollectionBounds(allocator, words, access.index, access.count);
     try emitStackAddress(allocator, words, .x10, access.collection.start);
     try emitImmediate64(allocator, words, .x11, @as(u64, access.result.width) * Machine.slot_size);
@@ -1445,118 +1848,651 @@ fn encodeCollectionReplace(
     try patch26(words.items, complete, words.items.len);
 }
 
+fn integerConstantFeedsNextArithmetic(
+    function: Machine.Function,
+    index: usize,
+    constant: Machine.Instruction.ConstantInt,
+) bool {
+    if (constant.bits > std.math.maxInt(u12) or index + 1 >= function.instructions.len or
+        controlTargetsInstruction(function.instructions, index + 1)) return false;
+    const binary = switch (function.instructions[index + 1]) {
+        .binary => |value| value,
+        else => return false,
+    };
+    return binary.type == constant.type and
+        (binary.operator == .add or binary.operator == .subtract) and
+        binary.right == constant.result and
+        slotUsedOnlyAt(function.instructions, constant.result, index + 1);
+}
+
+fn immediateArithmeticConstant(
+    function: Machine.Function,
+    index: usize,
+    binary: Machine.Instruction.Binary,
+) ?Machine.Instruction.ConstantInt {
+    if (index == 0) return null;
+    const constant = switch (function.instructions[index - 1]) {
+        .constant_int => |value| value,
+        else => return null,
+    };
+    return if (integerConstantFeedsNextArithmetic(function, index - 1, constant) and
+        binary.right == constant.result) constant else null;
+}
+
+fn encodeImmediateArithmetic(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    fixups: *FunctionFixups,
+    function: Machine.Function,
+    scalar_cache: *ScalarCache,
+    binary: Machine.Instruction.Binary,
+    constant: Machine.Instruction.ConstantInt,
+) Error!void {
+    const left = try prepareValueOperand(allocator, words, function, .x9, binary.left);
+    const destination = valueResultRegister(function, binary.result) orelse .x11;
+    const add = binary.operator == .add;
+    if (binary.checked) {
+        try words.append(allocator, addSubtractImmediateSetFlags(
+            destination,
+            left,
+            @intCast(constant.bits),
+            add,
+        ));
+        try appendFixup(
+            allocator,
+            words,
+            &fixups.overflow,
+            conditionalBranch(if (binary.type.isSignedInteger())
+                .overflow
+            else if (add)
+                .carry_set
+            else
+                .carry_clear),
+            .imm19,
+        );
+        try emitIntegerRangeCheck(allocator, words, fixups, binary.type, destination);
+    } else try words.append(allocator, A64.addSubtractImmediate(
+        destination,
+        left,
+        @intCast(constant.bits),
+        add,
+    ));
+    try finishValueResult(allocator, words, function, scalar_cache, destination, binary.result);
+}
+
 fn encodeBinary(
     allocator: Allocator,
     words: *std.ArrayList(u32),
     fixups: *FunctionFixups,
     function: ?Machine.Function,
+    scalar_cache: *ScalarCache,
     binary: Machine.Instruction.Binary,
 ) Error!void {
     if (binary.type == .str) return StringRuntime.emitComparison(allocator, words, binary);
-    try loadOptionalValue(allocator, words, function, .x9, binary.left);
-    try loadOptionalValue(allocator, words, function, .x10, binary.right);
     if (binary.type.isFloat()) return encodeFloatBinary(allocator, words, function, binary);
+    const left = try prepareOptionalValueOperand(allocator, words, function, .x9, binary.left);
+    const right = try prepareOptionalValueOperand(allocator, words, function, .x10, binary.right);
+    const destination = valueOptionalResultRegister(function, binary.result) orelse .x11;
     const signed = binary.type.isSignedInteger();
     switch (binary.operator) {
         .add => {
-            try words.append(allocator, addSetFlags(.x11, .x9, .x10));
-            try appendFixup(
-                allocator,
-                words,
-                &fixups.overflow,
-                conditionalBranch(if (signed) .overflow else .carry_set),
-                .imm19,
-            );
-            try emitIntegerRangeCheck(allocator, words, fixups, binary.type, .x11);
-            try storeOptionalValue(allocator, words, function, .x11, binary.result);
+            try words.append(allocator, addSetFlags(destination, left, right));
+            if (binary.checked) {
+                try appendFixup(
+                    allocator,
+                    words,
+                    &fixups.overflow,
+                    conditionalBranch(if (signed) .overflow else .carry_set),
+                    .imm19,
+                );
+                try emitIntegerRangeCheck(allocator, words, fixups, binary.type, destination);
+            }
+            try finishValueResult(allocator, words, function, scalar_cache, destination, binary.result);
         },
         .subtract => {
-            try words.append(allocator, subtractSetFlags(.x11, .x9, .x10));
-            try appendFixup(
-                allocator,
-                words,
-                &fixups.overflow,
-                conditionalBranch(if (signed) .overflow else .carry_clear),
-                .imm19,
-            );
-            try emitIntegerRangeCheck(allocator, words, fixups, binary.type, .x11);
-            try storeOptionalValue(allocator, words, function, .x11, binary.result);
+            try words.append(allocator, subtractSetFlags(destination, left, right));
+            if (binary.checked) {
+                try appendFixup(
+                    allocator,
+                    words,
+                    &fixups.overflow,
+                    conditionalBranch(if (signed) .overflow else .carry_clear),
+                    .imm19,
+                );
+                try emitIntegerRangeCheck(allocator, words, fixups, binary.type, destination);
+            }
+            try finishValueResult(allocator, words, function, scalar_cache, destination, binary.result);
         },
         .multiply => {
-            try words.append(allocator, multiply(.x11, .x9, .x10));
+            try words.append(allocator, multiply(destination, left, right));
             if (signed) {
-                try words.append(allocator, signedMultiplyHigh(.x12, .x9, .x10));
-                try words.append(allocator, arithmeticShiftRight63(.x13, .x11));
+                try words.append(allocator, signedMultiplyHigh(.x12, left, right));
+                try words.append(allocator, arithmeticShiftRight63(.x13, destination));
                 try words.append(allocator, compareRegisters(.x12, .x13));
                 try appendFixup(allocator, words, &fixups.overflow, conditionalBranch(.not_equal), .imm19);
             } else {
-                try words.append(allocator, unsignedMultiplyHigh(.x12, .x9, .x10));
+                try words.append(allocator, unsignedMultiplyHigh(.x12, left, right));
                 try appendFixup(allocator, words, &fixups.overflow, compareBranchNonZero64(.x12), .imm19);
             }
-            try emitIntegerRangeCheck(allocator, words, fixups, binary.type, .x11);
-            try storeOptionalValue(allocator, words, function, .x11, binary.result);
+            try emitIntegerRangeCheck(allocator, words, fixups, binary.type, destination);
+            try finishValueResult(allocator, words, function, scalar_cache, destination, binary.result);
         },
         .divide => {
-            try appendFixup(allocator, words, &fixups.division_by_zero, compareBranchZero64(.x10), .imm19);
+            try appendFixup(allocator, words, &fixups.division_by_zero, compareBranchZero64(right), .imm19);
             if (signed) {
                 try emitImmediate64(allocator, words, .x11, @bitCast(Numeric.integerMin(binary.type)));
-                try words.append(allocator, compareRegisters(.x9, .x11));
+                try words.append(allocator, compareRegisters(left, .x11));
                 const not_minimum = words.items.len;
                 try words.append(allocator, conditionalBranch(.not_equal));
                 try emitImmediate64(allocator, words, .x12, @bitCast(@as(i64, -1)));
-                try words.append(allocator, compareRegisters(.x10, .x12));
+                try words.append(allocator, compareRegisters(right, .x12));
                 try appendFixup(allocator, words, &fixups.overflow, conditionalBranch(.equal), .imm19);
                 try patch19(words.items, not_minimum, words.items.len);
             }
-            try words.append(allocator, if (signed) signedDivide(.x11, .x9, .x10) else unsignedDivide(.x11, .x9, .x10));
-            try storeOptionalValue(allocator, words, function, .x11, binary.result);
+            try words.append(allocator, if (signed) signedDivide(destination, left, right) else unsignedDivide(destination, left, right));
+            try finishValueResult(allocator, words, function, scalar_cache, destination, binary.result);
         },
         .remainder => {
-            try appendFixup(allocator, words, &fixups.division_by_zero, compareBranchZero64(.x10), .imm19);
+            try appendFixup(allocator, words, &fixups.division_by_zero, compareBranchZero64(right), .imm19);
             if (signed) {
                 try emitImmediate64(allocator, words, .x11, @bitCast(Numeric.integerMin(binary.type)));
-                try words.append(allocator, compareRegisters(.x9, .x11));
+                try words.append(allocator, compareRegisters(left, .x11));
                 const not_minimum = words.items.len;
                 try words.append(allocator, conditionalBranch(.not_equal));
                 try emitImmediate64(allocator, words, .x12, @bitCast(@as(i64, -1)));
-                try words.append(allocator, compareRegisters(.x10, .x12));
+                try words.append(allocator, compareRegisters(right, .x12));
                 try appendFixup(allocator, words, &fixups.overflow, conditionalBranch(.equal), .imm19);
                 try patch19(words.items, not_minimum, words.items.len);
             }
-            try words.append(allocator, if (signed) signedDivide(.x11, .x9, .x10) else unsignedDivide(.x11, .x9, .x10));
-            try words.append(allocator, multiplySubtract(.x12, .x11, .x10, .x9));
-            try storeOptionalValue(allocator, words, function, .x12, binary.result);
+            try words.append(allocator, if (signed) signedDivide(.x11, left, right) else unsignedDivide(.x11, left, right));
+            try words.append(allocator, multiplySubtract(destination, .x11, right, left));
+            try finishValueResult(allocator, words, function, scalar_cache, destination, binary.result);
         },
         .less, .less_equal, .greater, .greater_equal, .equal, .not_equal => {
-            try words.append(allocator, compareRegisters(.x9, .x10));
-            try words.append(allocator, moveWideZero32(.x11, 0));
+            try words.append(allocator, compareRegisters(left, right));
+            try words.append(allocator, moveWideZero32(destination, 0));
             const skip_true = words.items.len;
             try words.append(allocator, conditionalBranch(inverseComparison(binary.operator, signed)));
-            try words.append(allocator, moveWideZero32(.x11, 1));
+            try words.append(allocator, moveWideZero32(destination, 1));
             try patch19(words.items, skip_true, words.items.len);
-            try storeOptionalValue(allocator, words, function, .x11, binary.result);
+            try finishValueResult(allocator, words, function, scalar_cache, destination, binary.result);
         },
         .bit_and => {
-            try words.append(allocator, andRegisters(.x11, .x9, .x10));
-            try storeOptionalValue(allocator, words, function, .x11, binary.result);
+            try words.append(allocator, andRegisters(destination, left, right));
+            try finishValueResult(allocator, words, function, scalar_cache, destination, binary.result);
         },
         .bit_xor => {
-            try words.append(allocator, exclusiveOrRegisters(.x11, .x9, .x10));
-            try storeOptionalValue(allocator, words, function, .x11, binary.result);
+            try words.append(allocator, exclusiveOrRegisters(destination, left, right));
+            try finishValueResult(allocator, words, function, scalar_cache, destination, binary.result);
         },
         .shift_left, .shift_right => {
             try emitImmediate64(allocator, words, .x11, binary.type.bitWidth());
-            try words.append(allocator, compareRegisters(.x10, .x11));
+            try words.append(allocator, compareRegisters(right, .x11));
             try appendFixup(allocator, words, &fixups.overflow, conditionalBranch(.greater_equal), .imm19);
             try words.append(allocator, if (binary.operator == .shift_left)
-                logicalShiftLeftVariable(.x11, .x9, .x10)
+                logicalShiftLeftVariable(destination, left, right)
             else
-                logicalShiftRightVariable(.x11, .x9, .x10));
+                logicalShiftRightVariable(destination, left, right));
             try emitImmediate64(allocator, words, .x12, Numeric.mask(binary.type.bitWidth()));
-            try words.append(allocator, andRegisters(.x11, .x11, .x12));
-            try storeOptionalValue(allocator, words, function, .x11, binary.result);
+            try words.append(allocator, andRegisters(destination, destination, .x12));
+            try finishValueResult(allocator, words, function, scalar_cache, destination, binary.result);
         },
     }
+}
+
+fn encodeComparisonFlags(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    function: Machine.Function,
+    instruction_index: usize,
+    binary: Machine.Instruction.Binary,
+) Error!void {
+    const zero_right = comparisonHasElidedZeroRight(function, instruction_index, binary);
+    if (binary.type.isFloat()) {
+        const double = binary.type == .float64;
+        const left = try prepareFloatOperand(allocator, words, function, .x9, binary.left, double);
+        if (zero_right) {
+            try words.append(allocator, floatCompareZero(left, double));
+            return;
+        }
+        if (comparisonHasElidedCachedRight(function, instruction_index, binary)) |right| {
+            try words.append(allocator, floatCompare(left, right, double));
+            return;
+        }
+        const right = try prepareFloatOperand(allocator, words, function, .x10, binary.right, double);
+        try words.append(allocator, floatCompare(left, right, double));
+        return;
+    }
+    if (comparisonHasElidedViewCount(function, instruction_index, binary)) |count| {
+        const count_slot = count.collection.start + 1;
+        const count_register = try prepareValueOperand(allocator, words, function, .x10, count_slot);
+        const other_slot = if (binary.left == count.result) binary.right else binary.left;
+        const other_register = try prepareValueOperand(allocator, words, function, .x9, other_slot);
+        try words.append(allocator, if (binary.left == count.result)
+            compareRegisters(count_register, other_register)
+        else
+            compareRegisters(other_register, count_register));
+        return;
+    }
+    const left = try prepareValueOperand(allocator, words, function, .x9, binary.left);
+    if (zero_right) {
+        try words.append(allocator, compareRegisters(left, .zero_or_sp));
+        return;
+    }
+    const right = try prepareValueOperand(allocator, words, function, .x10, binary.right);
+    try words.append(allocator, compareRegisters(left, right));
+}
+
+fn zeroConstantFeedsNextComparison(
+    function: Machine.Function,
+    index: usize,
+    result: Machine.Slot,
+) bool {
+    return constantFeedsNextComparison(function, index, result);
+}
+
+fn constantFeedsNextComparison(
+    function: Machine.Function,
+    index: usize,
+    result: Machine.Slot,
+) bool {
+    if (index + 1 >= function.instructions.len or controlTargetsInstruction(function.instructions, index + 1)) return false;
+    const binary = switch (function.instructions[index + 1]) {
+        .binary => |value| value,
+        else => return false,
+    };
+    return binary.right == result and
+        comparisonBranchIndex(function, index + 1, binary) != null and
+        slotUsedOnlyAt(function.instructions, result, index + 1);
+}
+
+fn viewCountFeedsNextComparison(
+    function: Machine.Function,
+    index: usize,
+    count: Machine.Instruction.CollectionCount,
+) bool {
+    if (!count.view or index + 1 >= function.instructions.len or
+        controlTargetsInstruction(function.instructions, index + 1)) return false;
+    const binary = switch (function.instructions[index + 1]) {
+        .binary => |value| value,
+        else => return false,
+    };
+    return (binary.left == count.result or binary.right == count.result) and
+        comparisonBranchIndex(function, index + 1, binary) != null and
+        slotUsedOnlyAt(function.instructions, count.result, index + 1);
+}
+
+fn comparisonHasElidedViewCount(
+    function: Machine.Function,
+    index: usize,
+    binary: Machine.Instruction.Binary,
+) ?Machine.Instruction.CollectionCount {
+    if (index == 0) return null;
+    const count = switch (function.instructions[index - 1]) {
+        .collection_count => |value| value,
+        else => return null,
+    };
+    return if (viewCountFeedsNextComparison(function, index - 1, count) and
+        (binary.left == count.result or binary.right == count.result)) count else null;
+}
+
+const CachedFloatLiteral = struct {
+    bits: u64,
+    double: bool,
+    register: Register,
+};
+
+const float_literal_cache_registers = [_]Register{ .x5, .x6, .x7 };
+
+fn cachedFloatLiterals(function: Machine.Function) [float_literal_cache_registers.len]?CachedFloatLiteral {
+    var result: [float_literal_cache_registers.len]?CachedFloatLiteral = @splat(null);
+    if (function.float_register_slots.len == 0) return result;
+    var count: usize = 0;
+    for (function.instructions, 0..) |instruction, index| {
+        const candidate: CachedFloatLiteral = switch (instruction) {
+            .constant_float32 => |constant| .{ .bits = constant.bits, .double = false, .register = undefined },
+            .constant_float64 => |constant| .{ .bits = constant.bits, .double = true, .register = undefined },
+            else => continue,
+        };
+        const result_slot = switch (instruction) {
+            .constant_float32 => |constant| constant.result,
+            .constant_float64 => |constant| constant.result,
+            else => unreachable,
+        };
+        if (candidate.bits == 0 or
+            !constantFeedsNextComparison(function, index, result_slot) or
+            !instructionIsInsideLoop(function.instructions, index)) continue;
+        var duplicate = false;
+        for (result[0..count]) |existing| if (existing.?.bits == candidate.bits and
+            existing.?.double == candidate.double)
+        {
+            duplicate = true;
+            break;
+        };
+        if (duplicate) continue;
+        result[count] = .{
+            .bits = candidate.bits,
+            .double = candidate.double,
+            .register = float_literal_cache_registers[count],
+        };
+        count += 1;
+        if (count == result.len) break;
+    }
+    return result;
+}
+
+fn cachedFloatLiteralRegister(function: Machine.Function, bits: u64, double: bool) ?Register {
+    for (cachedFloatLiterals(function)) |candidate| if (candidate) |literal| {
+        if (literal.bits == bits and literal.double == double) return literal.register;
+    };
+    return null;
+}
+
+const FloatMaxDiamond = struct {
+    destination: Machine.Slot,
+    left: Machine.Slot,
+    right: Register,
+    join: usize,
+};
+
+fn floatMaxDiamond(
+    function: Machine.Function,
+    index: usize,
+    constant_result: Machine.Slot,
+    bits: u64,
+    double: bool,
+) ?FloatMaxDiamond {
+    if (index + 4 >= function.instructions.len) return null;
+    const initialization = switch (function.instructions[index + 1]) {
+        .copy => |value| value,
+        else => return null,
+    };
+    if (initialization.operand != constant_result) return null;
+    const comparison_constant = switch (function.instructions[index + 2]) {
+        .constant_float32 => |value| if (!double and value.bits == bits) value.result else return null,
+        .constant_float64 => |value| if (double and value.bits == bits) value.result else return null,
+        else => return null,
+    };
+    const comparison = switch (function.instructions[index + 3]) {
+        .binary => |value| value,
+        else => return null,
+    };
+    const expected_type: @TypeOf(comparison.type) = if (double) .float64 else .float32;
+    if (comparison.operator != .greater or comparison.right != comparison_constant or
+        comparison.type != expected_type) return null;
+    const branch_index = comparisonBranchIndex(function, index + 3, comparison) orelse return null;
+    if (branch_index != index + 4) return null;
+    const branch_value = function.instructions[branch_index].branch;
+    const then_instruction = resolveJumpTarget(function.instructions, branch_value.then_instruction);
+    const replacement = switch (function.instructions[then_instruction]) {
+        .copy => |value| value,
+        else => return null,
+    };
+    if (replacement.result != initialization.result or replacement.operand != comparison.left or
+        then_instruction + 1 >= function.instructions.len) return null;
+    const join = switch (function.instructions[then_instruction + 1]) {
+        .jump => |target| resolveJumpTarget(function.instructions, target),
+        else => return null,
+    };
+    if (resolveJumpTarget(function.instructions, branch_value.else_instruction) != join) return null;
+    const right = cachedFloatLiteralRegister(function, bits, double) orelse return null;
+    return .{
+        .destination = initialization.result,
+        .left = comparison.left,
+        .right = right,
+        .join = join,
+    };
+}
+
+fn instructionIsInsideLoop(instructions: []const Machine.Instruction, index: usize) bool {
+    for (instructions, 0..) |instruction, source| switch (instruction) {
+        .jump => |target| if (target <= index and index <= source) return true,
+        .branch => |branch_value| {
+            if ((branch_value.then_instruction <= index and index <= source) or
+                (branch_value.else_instruction <= index and index <= source)) return true;
+        },
+        else => {},
+    };
+    return false;
+}
+
+fn comparisonHasElidedCachedRight(
+    function: Machine.Function,
+    index: usize,
+    binary: Machine.Instruction.Binary,
+) ?Register {
+    if (index == 0) return null;
+    return switch (function.instructions[index - 1]) {
+        .constant_float32 => |constant| if (constant.result == binary.right and
+            constantFeedsNextComparison(function, index - 1, constant.result))
+            cachedFloatLiteralRegister(function, constant.bits, false)
+        else
+            null,
+        .constant_float64 => |constant| if (constant.result == binary.right and
+            constantFeedsNextComparison(function, index - 1, constant.result))
+            cachedFloatLiteralRegister(function, constant.bits, true)
+        else
+            null,
+        else => null,
+    };
+}
+
+fn comparisonHasElidedZeroRight(
+    function: Machine.Function,
+    index: usize,
+    binary: Machine.Instruction.Binary,
+) bool {
+    if (index == 0) return false;
+    return switch (function.instructions[index - 1]) {
+        .constant_int => |constant| constant.result == binary.right and constant.bits == 0 and
+            zeroConstantFeedsNextComparison(function, index - 1, constant.result),
+        .constant_float32 => |constant| constant.result == binary.right and constant.bits == 0 and
+            zeroConstantFeedsNextComparison(function, index - 1, constant.result),
+        .constant_float64 => |constant| constant.result == binary.right and constant.bits == 0 and
+            zeroConstantFeedsNextComparison(function, index - 1, constant.result),
+        else => false,
+    };
+}
+
+fn comparisonFalseCondition(binary: Machine.Instruction.Binary) Condition {
+    if (binary.type.isFloat()) return inverseFloatComparison(binary.operator);
+    return inverseComparison(binary.operator, binary.type.isSignedInteger());
+}
+
+fn comparisonBranchIndex(
+    function: Machine.Function,
+    index: usize,
+    binary: Machine.Instruction.Binary,
+) ?usize {
+    if (function.register_slots.len == 0 and function.float_register_slots.len == 0) return null;
+    if (!isComparison(binary.operator) or binary.type == .str or index + 1 >= function.instructions.len) return null;
+    var branch_index = index + 1;
+    var branch_condition = binary.result;
+    if (function.instructions[index + 1] == .copy) {
+        const copy = function.instructions[index + 1].copy;
+        if (copy.operand != binary.result or index + 2 >= function.instructions.len) return null;
+        branch_index = index + 2;
+        branch_condition = copy.result;
+        if (!slotUsedOnlyAt(function.instructions, binary.result, index + 1)) return null;
+    }
+    const branch_value = switch (function.instructions[branch_index]) {
+        .branch => |value| value,
+        else => return null,
+    };
+    if (branch_value.condition != branch_condition or
+        !slotUsedOnlyAt(function.instructions, branch_condition, branch_index)) return null;
+    for (function.instructions, 0..) |instruction, other_index| {
+        if (other_index > index and other_index <= branch_index) continue;
+        switch (instruction) {
+            .jump => |target| if (target > index and target <= branch_index) return null,
+            .branch => |value| if ((value.then_instruction > index and value.then_instruction <= branch_index) or
+                (value.else_instruction > index and value.else_instruction <= branch_index)) return null,
+            else => {},
+        }
+    }
+    return branch_index;
+}
+
+fn slotUsedOnlyAt(instructions: []const Machine.Instruction, slot: Machine.Slot, allowed: usize) bool {
+    for (instructions, 0..) |instruction, index| {
+        if (index != allowed and instructionUsesSlot(instruction, slot)) return false;
+    }
+    return instructionUsesSlot(instructions[allowed], slot);
+}
+
+fn copyBelongsToFusedComparison(function: Machine.Function, index: usize) bool {
+    if (index == 0) return false;
+    const binary = switch (function.instructions[index - 1]) {
+        .binary => |value| value,
+        else => return false,
+    };
+    return comparisonBranchIndex(function, index - 1, binary) == index + 1;
+}
+
+fn comparisonForBranch(function: Machine.Function, branch_index: usize) ?Machine.Instruction.Binary {
+    if (branch_index != 0) switch (function.instructions[branch_index - 1]) {
+        .binary => |binary| if (comparisonBranchIndex(function, branch_index - 1, binary) == branch_index) return binary,
+        else => {},
+    };
+    if (branch_index >= 2) switch (function.instructions[branch_index - 2]) {
+        .binary => |binary| if (comparisonBranchIndex(function, branch_index - 2, binary) == branch_index) return binary,
+        else => {},
+    };
+    return null;
+}
+
+const FusedFloatConjunction = struct {
+    first: Machine.Instruction.Binary,
+    second: Machine.Instruction.Binary,
+    branch: Machine.Instruction.Branch,
+    right: Register,
+};
+
+fn fusedFloatConjunction(function: Machine.Function, first_branch_index: usize) ?FusedFloatConjunction {
+    const first = comparisonForBranch(function, first_branch_index) orelse return null;
+    if (!first.type.isFloat()) return null;
+    const first_branch = switch (function.instructions[first_branch_index]) {
+        .branch => |value| value,
+        else => return null,
+    };
+    const second_start = resolveJumpTarget(function.instructions, first_branch.then_instruction);
+    const short_circuit = resolveJumpTarget(function.instructions, first_branch.else_instruction);
+    if (second_start + 1 >= function.instructions.len) return null;
+    const second_index = switch (function.instructions[second_start]) {
+        .constant_float32, .constant_float64 => second_start + 1,
+        else => return null,
+    };
+    const second = switch (function.instructions[second_index]) {
+        .binary => |value| value,
+        else => return null,
+    };
+    if (second.type != first.type or !isComparison(second.operator)) return null;
+    const second_branch_index = comparisonBranchIndex(function, second_index, second) orelse return null;
+    const second_branch = switch (function.instructions[second_branch_index]) {
+        .branch => |value| value,
+        else => return null,
+    };
+    if (resolveJumpTarget(function.instructions, second_branch.else_instruction) != short_circuit) return null;
+    const right = comparisonHasElidedCachedRight(function, second_index, second) orelse return null;
+    return .{
+        .first = first,
+        .second = second,
+        .branch = second_branch,
+        .right = right,
+    };
+}
+
+fn falseFlagsForCondition(condition: Condition) u4 {
+    return switch (condition) {
+        .equal, .less_equal => 0b0100,
+        .not_equal, .carry_clear, .plus => 0,
+        .carry_set, .higher => 0b0010,
+        .minus, .less => 0b1000,
+        .overflow => 0b0001,
+        .lower_or_same, .greater_equal, .greater => 0b0100,
+    };
+}
+
+fn isComparison(operator: Machine.BinaryOperator) bool {
+    return switch (operator) {
+        .less, .less_equal, .greater, .greater_equal, .equal, .not_equal => true,
+        else => false,
+    };
+}
+
+fn instructionUsesSlot(instruction: Machine.Instruction, slot: Machine.Slot) bool {
+    return switch (instruction) {
+        .copy => |value| value.operand == slot,
+        .copy_range => |value| spanContainsSlot(value.operand, slot),
+        .aggregate_init => |value| for (value.fields) |field| {
+            if (spanContainsSlot(field, slot)) break true;
+        } else false,
+        .unary => |value| value.operand == slot,
+        .binary => |value| value.left == slot or value.right == slot,
+        .convert => |value| value.operand == slot,
+        .collection_load => |value| value.index == slot or spanContainsSlot(value.collection, slot),
+        .collection_count => |value| spanContainsSlot(value.collection, slot),
+        .return_value => |value| spanContainsSlot(value, slot),
+        .branch => |value| value.condition == slot,
+        else => false,
+    };
+}
+
+fn eagerCollectionWidth(
+    function: Machine.Function,
+    load_index: usize,
+    load: Machine.Instruction.CollectionLoad,
+) u12 {
+    if (load.checked or !load.dynamic or load.result.width < 2 or
+        function.float_register_slots.len == 0) return load.result.width;
+    for (0..load.result.width) |leaf| {
+        const slot: Machine.Slot = @intCast(@as(usize, load.result.start) + leaf);
+        if (floatResidence(function, slot) == null and floatLaneResidence(function, slot) == null) return load.result.width;
+    }
+    for (0..load.result.width) |leaf| {
+        const slot: Machine.Slot = @intCast(@as(usize, load.result.start) + leaf);
+        const first_use = firstSlotUseAfter(function.instructions, load_index, slot) orelse continue;
+        for (function.instructions[load_index + 1 .. first_use]) |instruction| switch (instruction) {
+            .branch => return if (leaf == 0) load.result.width else @intCast(leaf),
+            else => {},
+        };
+    }
+    return load.result.width;
+}
+
+fn firstSlotUseAfter(
+    instructions: []const Machine.Instruction,
+    start: usize,
+    slot: Machine.Slot,
+) ?usize {
+    for (instructions[start + 1 ..], start + 1..) |instruction, index| {
+        if (instructionUsesSlot(instruction, slot)) return index;
+    }
+    return null;
+}
+
+fn emitDeferredCollectionLoads(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    function: Machine.Function,
+    instruction_index: usize,
+) Error!void {
+    for (function.instructions[0..instruction_index], 0..) |instruction, load_index| {
+        const load = switch (instruction) {
+            .collection_load => |value| value,
+            else => continue,
+        };
+        const eager_width = eagerCollectionWidth(function, load_index, load);
+        if (eager_width >= load.result.width) continue;
+        const first_slot: Machine.Slot = @intCast(@as(usize, load.result.start) + eager_width);
+        if (firstSlotUseAfter(function.instructions, load_index, first_slot) == instruction_index) {
+            try ListRuntime.emitDeferredLoad(allocator, words, function, load, eager_width);
+        }
+    }
+}
+
+fn spanContainsSlot(span: Machine.Span, slot: Machine.Slot) bool {
+    return slot >= span.start and @as(usize, slot) < @as(usize, span.start) + span.width;
 }
 
 fn encodeFloatBinary(
@@ -1566,16 +2502,18 @@ fn encodeFloatBinary(
     binary: Machine.Instruction.Binary,
 ) Error!void {
     const double = binary.type == .float64;
-    try words.append(allocator, moveGeneralToFloat(.x9, .x9, double));
-    try words.append(allocator, moveGeneralToFloat(.x10, .x10, double));
+    const left = try prepareFloatOperand(allocator, words, function, .x9, binary.left, double);
+    const right = try prepareFloatOperand(allocator, words, function, .x10, binary.right, double);
     switch (binary.operator) {
         .add, .subtract, .multiply, .divide => {
-            try words.append(allocator, floatArithmetic(.x11, .x9, .x10, binary.operator, double));
-            try words.append(allocator, moveFloatToGeneral(.x11, .x11, double));
-            try storeOptionalValue(allocator, words, function, .x11, binary.result);
+            const destination = floatResultRegister(function, binary.result) orelse .x11;
+            try words.append(allocator, floatArithmetic(destination, left, right, binary.operator, double));
+            if (floatResultRegister(function, binary.result) == null) {
+                try storeOptionalFloatValue(allocator, words, function, destination, binary.result, double);
+            }
         },
         .less, .less_equal, .greater, .greater_equal, .equal, .not_equal => {
-            try words.append(allocator, floatCompare(.x9, .x10, double));
+            try words.append(allocator, floatCompare(left, right, double));
             try words.append(allocator, moveWideZero32(.x11, 0));
             const skip_true = words.items.len;
             try words.append(allocator, conditionalBranch(inverseFloatComparison(binary.operator)));
@@ -1585,6 +2523,140 @@ fn encodeFloatBinary(
         },
         else => return error.InvalidMachineProgram,
     }
+}
+
+fn encodeFloatPairBinary(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    function: Machine.Function,
+    first: Machine.Instruction.Binary,
+) Error!void {
+    const residence = floatPairLeader(function, first.result) orelse return error.InvalidMachineProgram;
+    const partner = pairedPartner(function, first.result) orelse return error.InvalidMachineProgram;
+    const second = definingBinary(function.instructions, partner) orelse return error.InvalidMachineProgram;
+    const left = try prepareFloatPairOperand(allocator, words, function, first.left, second.left, .x9, .x10);
+    const right = try prepareFloatPairOperand(allocator, words, function, first.right, second.right, .x11, .x12);
+    try words.append(allocator, floatArithmetic2(@enumFromInt(residence.register), left, right, first.operator));
+}
+
+fn horizontalFloatPairAdd(
+    function: Machine.Function,
+    binary: Machine.Instruction.Binary,
+) ?Register {
+    if (binary.type != .float32 or binary.operator != .add) return null;
+    const left = floatLaneResidence(function, binary.left) orelse return null;
+    const right = floatLaneResidence(function, binary.right) orelse return null;
+    if (left.register != right.register or left.lane != 0 or right.lane != 1) return null;
+    return @enumFromInt(left.register);
+}
+
+fn prepareFloatPairOperand(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    function: Machine.Function,
+    first: Machine.Slot,
+    second: Machine.Slot,
+    destination: Register,
+    scratch: Register,
+) Error!Register {
+    if (first != second) if (floatLaneResidence(function, first)) |left| if (floatLaneResidence(function, second)) |right| {
+        if (left.register == right.register and left.lane == 0 and right.lane == 1) return @enumFromInt(left.register);
+    };
+    try loadFloatValue(allocator, words, function, destination, first, false);
+    if (first == second) {
+        try words.append(allocator, A64.duplicateFloat32Lane(destination, destination, 0));
+        return destination;
+    }
+    try loadFloatValue(allocator, words, function, scratch, second, false);
+    try words.append(allocator, A64.insertSecondFloat32(destination, scratch));
+    return destination;
+}
+
+fn definingBinary(instructions: []const Machine.Instruction, slot: Machine.Slot) ?Machine.Instruction.Binary {
+    for (instructions) |instruction| switch (instruction) {
+        .binary => |binary| if (binary.result == slot) return binary,
+        else => {},
+    };
+    return null;
+}
+
+fn definingCopy(instructions: []const Machine.Instruction, slot: Machine.Slot) ?Machine.Instruction.Copy {
+    for (instructions) |instruction| switch (instruction) {
+        .copy => |copy| if (copy.result == slot) return copy,
+        else => {},
+    };
+    return null;
+}
+
+fn encodeFloatMultiplyAdd(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    function: Machine.Function,
+    add: Machine.Instruction.Binary,
+    multiply_value: Machine.Instruction.Binary,
+) Error!void {
+    const double = add.type == .float64;
+    const left = try prepareFloatOperand(allocator, words, function, .x9, multiply_value.left, double);
+    const right = try prepareFloatOperand(allocator, words, function, .x10, multiply_value.right, double);
+    const accumulator_slot = if (add.left == multiply_value.result) add.right else add.left;
+    const accumulator = try prepareFloatOperand(allocator, words, function, .x11, accumulator_slot, double);
+    const destination = floatResultRegister(function, add.result) orelse .x12;
+    try words.append(allocator, floatMultiplyAdd(destination, left, right, accumulator, double));
+    if (floatResultRegister(function, add.result) == null) {
+        try storeFloatValue(allocator, words, function, destination, add.result, double);
+    }
+}
+
+fn multiplyFeedsNextAdd(
+    function: Machine.Function,
+    index: usize,
+    binary: Machine.Instruction.Binary,
+) bool {
+    if (!binary.type.isFloat() or binary.operator != .multiply or index + 1 >= function.instructions.len) return false;
+    const add = switch (function.instructions[index + 1]) {
+        .binary => |value| value,
+        else => return false,
+    };
+    if (add.type != binary.type or add.operator != .add or
+        (add.left != binary.result and add.right != binary.result)) return false;
+    if (!slotUsedOnlyAt(function.instructions, binary.result, index + 1)) return false;
+    return !controlTargetsInstruction(function.instructions, index + 1);
+}
+
+fn fusedMultiplyForAdd(function: Machine.Function, index: usize) ?Machine.Instruction.Binary {
+    if (index == 0) return null;
+    const multiply_value = switch (function.instructions[index - 1]) {
+        .binary => |value| value,
+        else => return null,
+    };
+    return if (multiplyFeedsNextAdd(function, index - 1, multiply_value)) multiply_value else null;
+}
+
+fn controlTargetsInstruction(instructions: []const Machine.Instruction, target: usize) bool {
+    for (instructions) |instruction| switch (instruction) {
+        .jump => |value| if (value == target) return true,
+        .branch => |value| if (value.then_instruction == target or value.else_instruction == target) return true,
+        else => {},
+    };
+    return false;
+}
+
+fn prepareFloatOperand(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    function: ?Machine.Function,
+    fallback: Register,
+    slot: Machine.Slot,
+    double: bool,
+) Allocator.Error!Register {
+    if (function) |value| if (floatResultRegister(value, slot)) |register| return register;
+    try loadOptionalFloatValue(allocator, words, function, fallback, slot, double);
+    return fallback;
+}
+
+fn floatResultRegister(function: ?Machine.Function, slot: Machine.Slot) ?Register {
+    if (function) |value| if (floatResidence(value, slot)) |number| return @enumFromInt(number);
+    return null;
 }
 
 fn inverseFloatComparison(operator: Machine.BinaryOperator) Condition {
@@ -1599,30 +2671,43 @@ fn inverseFloatComparison(operator: Machine.BinaryOperator) Condition {
     };
 }
 
+fn invertCondition(condition: Condition) Condition {
+    return @enumFromInt(@intFromEnum(condition) ^ 1);
+}
+
 fn encodeConversion(
     allocator: Allocator,
     words: *std.ArrayList(u32),
     fixups: *FunctionFixups,
     data_fixups: *std.ArrayList(DataFixup),
     program: Machine.Program,
+    function: Machine.Function,
     conversion: Machine.Instruction.Convert,
 ) Error!void {
-    try words.append(allocator, loadStack(.x9, conversion.operand));
     if (conversion.source.isInteger() and conversion.target.isFloat()) {
+        const operand = try prepareValueOperand(allocator, words, function, .x9, conversion.operand);
         const double = conversion.target == .float64;
-        try words.append(allocator, integerToFloat(.x10, .x9, conversion.source.isSignedInteger(), double));
+        const result = floatResultRegister(function, conversion.result) orelse .x10;
+        try words.append(allocator, integerToFloat(result, operand, conversion.source.isSignedInteger(), double));
         if (conversion.checked) {
-            try words.append(allocator, floatToInteger(.x11, .x10, conversion.source.isSignedInteger(), double));
-            try words.append(allocator, compareRegisters(.x9, .x11));
+            try words.append(allocator, floatToInteger(.x11, result, conversion.source.isSignedInteger(), double));
+            try words.append(allocator, compareRegisters(operand, .x11));
             try emitConversionGuard(allocator, words, fixups, data_fixups, program, conversion.header, .equal);
         }
-        try words.append(allocator, moveFloatToGeneral(.x10, .x10, double));
-        try words.append(allocator, storeStack(.x10, conversion.result));
+        if (floatResultRegister(function, conversion.result) == null) {
+            try storeFloatValue(allocator, words, function, result, conversion.result, double);
+        }
         return;
+    }
+    const source_is_float = conversion.source.isFloat();
+    if (source_is_float) {
+        try loadFloatValue(allocator, words, function, .x9, conversion.operand, conversion.source == .float64);
+    } else {
+        try loadValue(allocator, words, function, .x9, conversion.operand);
     }
     if (conversion.source.isFloat() and conversion.target.isInteger()) {
         const double = conversion.source == .float64;
-        try words.append(allocator, moveGeneralToFloat(.x9, .x9, double));
+        const result = valueResultRegister(function, conversion.result) orelse .x10;
         try emitFloatToIntegerRangeGuards(
             allocator,
             words,
@@ -1632,8 +2717,8 @@ fn encodeConversion(
             conversion,
             double,
         );
-        try words.append(allocator, floatToInteger(.x10, .x9, conversion.target.isSignedInteger(), double));
-        try words.append(allocator, integerToFloat(.x11, .x10, conversion.target.isSignedInteger(), double));
+        try words.append(allocator, floatToInteger(result, .x9, conversion.target.isSignedInteger(), double));
+        try words.append(allocator, integerToFloat(.x11, result, conversion.target.isSignedInteger(), double));
         try words.append(allocator, floatCompare(.x9, .x11, double));
         try emitConversionGuard(allocator, words, fixups, data_fixups, program, conversion.header, .equal);
         try emitConvertedIntegerRangeChecks(
@@ -1643,23 +2728,26 @@ fn encodeConversion(
             data_fixups,
             program,
             conversion,
-            .x10,
+            result,
         );
-        try words.append(allocator, storeStack(.x10, conversion.result));
+        if (valueResultRegister(function, conversion.result) == null) {
+            try storeValue(allocator, words, function, result, conversion.result);
+        }
         return;
     }
     if (conversion.source.isFloat() and conversion.target.isFloat()) {
         const source_double = conversion.source == .float64;
         const target_double = conversion.target == .float64;
-        try words.append(allocator, moveGeneralToFloat(.x9, .x9, source_double));
-        try words.append(allocator, floatConvert(.x10, .x9, target_double));
+        const result = floatResultRegister(function, conversion.result) orelse .x10;
+        try words.append(allocator, floatConvert(result, .x9, target_double));
         if (conversion.checked and source_double and !target_double) {
-            try words.append(allocator, floatConvert(.x11, .x10, true));
+            try words.append(allocator, floatConvert(.x11, result, true));
             try words.append(allocator, floatCompare(.x9, .x11, true));
             try emitConversionGuard(allocator, words, fixups, data_fixups, program, conversion.header, .equal);
         }
-        try words.append(allocator, moveFloatToGeneral(.x10, .x10, target_double));
-        try words.append(allocator, storeStack(.x10, conversion.result));
+        if (floatResultRegister(function, conversion.result) == null) {
+            try storeFloatValue(allocator, words, function, result, conversion.result, target_double);
+        }
         return;
     }
     if (!conversion.source.isInteger() or !conversion.target.isInteger()) return error.UnsupportedType;
@@ -1697,7 +2785,7 @@ fn encodeConversion(
         try emitImmediate64(allocator, words, .x10, Numeric.mask(conversion.target.bitWidth()));
         try words.append(allocator, andRegisters(.x9, .x9, .x10));
     }
-    try words.append(allocator, storeStack(.x9, conversion.result));
+    try storeValue(allocator, words, function, .x9, conversion.result);
 }
 
 fn emitFloatToIntegerRangeGuards(
@@ -1978,10 +3066,111 @@ fn emitPrintUnsigned(
 }
 
 fn emitImmediate64(allocator: Allocator, words: *std.ArrayList(u32), register: Register, value: u64) Allocator.Error!void {
-    try words.append(allocator, moveWideZero64(register, @truncate(value), 0));
-    try words.append(allocator, moveWideKeep64(register, @truncate(value >> 16), 1));
-    try words.append(allocator, moveWideKeep64(register, @truncate(value >> 32), 2));
-    try words.append(allocator, moveWideKeep64(register, @truncate(value >> 48), 3));
+    var first_shift: u2 = 0;
+    while (first_shift < 3 and @as(u16, @truncate(value >> (@as(u6, first_shift) * 16))) == 0) {
+        first_shift += 1;
+    }
+    try words.append(allocator, moveWideZero64(
+        register,
+        @truncate(value >> (@as(u6, first_shift) * 16)),
+        first_shift,
+    ));
+    for (0..4) |shift_value| {
+        const shift: u2 = @intCast(shift_value);
+        if (shift == first_shift) continue;
+        const part: u16 = @truncate(value >> (@as(u6, shift) * 16));
+        if (part != 0) try words.append(allocator, moveWideKeep64(register, part, shift));
+    }
+}
+
+const ScalarCache = struct {
+    enabled: bool,
+    slots: [2]?Machine.Slot = .{ null, null },
+    next: usize = 0,
+
+    fn clear(self: *ScalarCache) void {
+        self.slots = .{ null, null };
+        self.next = 0;
+    }
+};
+
+fn scalarCacheInstruction(instruction: Machine.Instruction) bool {
+    return switch (instruction) {
+        .constant_int,
+        .constant_bool,
+        .constant_float32,
+        .constant_float64,
+        .copy,
+        .unary,
+        => true,
+        .binary => |binary| binary.type != .str,
+        else => false,
+    };
+}
+
+fn loadCachedValue(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    function: Machine.Function,
+    cache: *ScalarCache,
+    destination: Register,
+    slot: Machine.Slot,
+) Allocator.Error!void {
+    return loadCachedOptionalValue(allocator, words, function, cache, destination, slot);
+}
+
+fn loadCachedOptionalValue(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    function: ?Machine.Function,
+    cache: *ScalarCache,
+    destination: Register,
+    slot: Machine.Slot,
+) Allocator.Error!void {
+    if (cache.enabled) for (cache.slots, [_]Register{ .x16, .x17 }) |cached, register| {
+        if (cached != null and cached.? == slot) {
+            if (register != destination) try words.append(allocator, moveRegister(destination, register));
+            return;
+        }
+    };
+    return loadOptionalValue(allocator, words, function, destination, slot);
+}
+
+fn storeCachedValue(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    function: Machine.Function,
+    cache: *ScalarCache,
+    source: Register,
+    slot: Machine.Slot,
+) Allocator.Error!void {
+    return storeCachedOptionalValue(allocator, words, function, cache, source, slot);
+}
+
+fn storeCachedOptionalValue(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    function: ?Machine.Function,
+    cache: *ScalarCache,
+    source: Register,
+    slot: Machine.Slot,
+) Allocator.Error!void {
+    try storeOptionalValue(allocator, words, function, source, slot);
+    if (!cache.enabled) return;
+
+    const registers = [_]Register{ .x16, .x17 };
+    for (cache.slots, registers, 0..) |cached, register, index| {
+        if (cached != null and cached.? == slot) {
+            if (source != register) try words.append(allocator, moveRegister(register, source));
+            cache.next = (index + 1) % cache.slots.len;
+            return;
+        }
+    }
+
+    const register = registers[cache.next];
+    if (source != register) try words.append(allocator, moveRegister(register, source));
+    cache.slots[cache.next] = slot;
+    cache.next = (cache.next + 1) % cache.slots.len;
 }
 
 fn loadValue(
@@ -1992,6 +3181,183 @@ fn loadValue(
     slot: Machine.Slot,
 ) Allocator.Error!void {
     return loadOptionalValue(allocator, words, function, destination, slot);
+}
+
+fn emitRegisteredCopy(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    function: Machine.Function,
+    result: Machine.Slot,
+    operand: Machine.Slot,
+) Allocator.Error!void {
+    if (floatResidence(function, operand) != null or floatResidence(function, result) != null or
+        floatLaneResidence(function, operand) != null or floatLaneResidence(function, result) != null)
+    {
+        const source = floatResultRegister(function, operand);
+        const destination = floatResultRegister(function, result);
+        if (source != null and destination != null) {
+            if (source.? != destination.?) try words.append(allocator, moveFloat(destination.?, source.?, true));
+            return;
+        }
+        try loadFloatValue(allocator, words, function, .x9, operand, true);
+        try storeFloatValue(allocator, words, function, .x9, result, true);
+        return;
+    }
+    const source = valueResultRegister(function, operand);
+    const destination = valueResultRegister(function, result);
+    if (source != null and destination != null) {
+        if (source.? != destination.?) try words.append(allocator, moveRegister(destination.?, source.?));
+        return;
+    }
+    try loadValue(allocator, words, function, .x9, operand);
+    try storeValue(allocator, words, function, .x9, result);
+}
+
+fn valueResultRegister(function: Machine.Function, slot: Machine.Slot) ?Register {
+    return valueOptionalResultRegister(function, slot);
+}
+
+fn valueOptionalResultRegister(function: ?Machine.Function, slot: Machine.Slot) ?Register {
+    if (function) |value| if (value.register_slots.len != 0) if (value.register_slots[slot]) |number| {
+        return @enumFromInt(number);
+    };
+    return null;
+}
+
+fn prepareValueOperand(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    function: Machine.Function,
+    fallback: Register,
+    slot: Machine.Slot,
+) Allocator.Error!Register {
+    return prepareOptionalValueOperand(allocator, words, function, fallback, slot);
+}
+
+fn prepareOptionalValueOperand(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    function: ?Machine.Function,
+    fallback: Register,
+    slot: Machine.Slot,
+) Allocator.Error!Register {
+    if (valueOptionalResultRegister(function, slot)) |register| return register;
+    try loadOptionalValue(allocator, words, function, fallback, slot);
+    return fallback;
+}
+
+fn finishValueResult(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    function: ?Machine.Function,
+    scalar_cache: *ScalarCache,
+    source: Register,
+    slot: Machine.Slot,
+) Allocator.Error!void {
+    if (valueOptionalResultRegister(function, slot) != null) return;
+    try storeCachedOptionalValue(allocator, words, function, scalar_cache, source, slot);
+}
+
+fn floatResidence(function: Machine.Function, slot: Machine.Slot) ?u5 {
+    if (function.float_register_slots.len == 0) return null;
+    return function.float_register_slots[slot];
+}
+
+fn floatLaneResidence(function: Machine.Function, slot: Machine.Slot) ?Machine.FloatLaneResidence {
+    if (function.float_lane_slots.len == 0) return null;
+    return function.float_lane_slots[slot];
+}
+
+fn floatPairLeader(function: Machine.Function, slot: Machine.Slot) ?Machine.FloatLaneResidence {
+    const residence = floatLaneResidence(function, slot) orelse return null;
+    return if (residence.lane == 0) residence else null;
+}
+
+fn floatPairFollower(function: Machine.Function, slot: Machine.Slot) bool {
+    const residence = floatLaneResidence(function, slot) orelse return false;
+    return residence.lane == 1;
+}
+
+fn pairedPartner(function: Machine.Function, slot: Machine.Slot) ?Machine.Slot {
+    const residence = floatLaneResidence(function, slot) orelse return null;
+    return residence.partner;
+}
+
+fn loadFloatValue(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    function: Machine.Function,
+    destination: Register,
+    slot: Machine.Slot,
+    double: bool,
+) Allocator.Error!void {
+    return loadOptionalFloatValue(allocator, words, function, destination, slot, double);
+}
+
+fn loadOptionalFloatValue(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    function: ?Machine.Function,
+    destination: Register,
+    slot: Machine.Slot,
+    double: bool,
+) Allocator.Error!void {
+    if (function) |value| if (floatLaneResidence(value, slot)) |residence| {
+        const source: Register = @enumFromInt(residence.register);
+        if (residence.lane == 0) {
+            if (source != destination) try words.append(allocator, moveFloat(destination, source, false));
+        } else try words.append(allocator, A64.duplicateFloat32Lane(destination, source, 1));
+        return;
+    };
+    if (function) |value| if (floatResidence(value, slot)) |number| {
+        const source: Register = @enumFromInt(number);
+        if (source != destination) try words.append(allocator, moveFloat(destination, source, double));
+        return;
+    };
+    const byte_offset = @as(usize, slot) * Machine.slot_size;
+    if (!double and byte_offset <= std.math.maxInt(u12)) {
+        try words.append(allocator, A64.loadFloat32(destination, .zero_or_sp, @intCast(byte_offset)));
+        return;
+    }
+    try words.append(allocator, loadStack(.x14, slot));
+    try words.append(allocator, moveGeneralToFloat(destination, .x14, double));
+}
+
+fn storeFloatValue(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    function: Machine.Function,
+    source: Register,
+    slot: Machine.Slot,
+    double: bool,
+) Allocator.Error!void {
+    return storeOptionalFloatValue(allocator, words, function, source, slot, double);
+}
+
+fn storeOptionalFloatValue(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    function: ?Machine.Function,
+    source: Register,
+    slot: Machine.Slot,
+    double: bool,
+) Allocator.Error!void {
+    if (function) |value| if (floatLaneResidence(value, slot)) |residence| {
+        try words.append(allocator, A64.insertFloat32Lane(@enumFromInt(residence.register), source, residence.lane));
+        return;
+    };
+    if (function) |value| if (floatResidence(value, slot)) |number| {
+        const destination: Register = @enumFromInt(number);
+        if (source != destination) try words.append(allocator, moveFloat(destination, source, double));
+        return;
+    };
+    const byte_offset = @as(usize, slot) * Machine.slot_size;
+    if (!double and byte_offset <= std.math.maxInt(u12)) {
+        try words.append(allocator, A64.storeFloat32(source, .zero_or_sp, @intCast(byte_offset)));
+        return;
+    }
+    try words.append(allocator, moveFloatToGeneral(.x14, source, double));
+    try words.append(allocator, storeStack(.x14, slot));
 }
 
 fn loadOptionalValue(
@@ -2059,20 +3425,14 @@ fn appendFixup(
 ) Allocator.Error!void {
     switch (width) {
         .imm19 => {
-            try words.append(allocator, invertConditionalBranch(instruction) | (2 << 5));
-            try fixups.append(allocator, .{ .at = words.items.len, .width = .imm26 });
-            try words.append(allocator, branch());
+            try fixups.append(allocator, .{ .at = words.items.len, .width = .imm19 });
+            try words.append(allocator, instruction);
         },
         .imm26 => {
             try fixups.append(allocator, .{ .at = words.items.len, .width = .imm26 });
             try words.append(allocator, instruction);
         },
     }
-}
-
-fn invertConditionalBranch(instruction: u32) u32 {
-    const is_compare_branch = instruction & 0x7e000000 == 0x34000000;
-    return instruction ^ if (is_compare_branch) @as(u32, 1 << 24) else 1;
 }
 
 fn patchLocal(words: []u32, fixup: LocalFixup, target: usize) Error!void {

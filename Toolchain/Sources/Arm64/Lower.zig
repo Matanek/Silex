@@ -5,6 +5,7 @@ const CompilationCache = @import("../CompilationCache.zig");
 const MainBoundary = @import("../MainBoundary.zig");
 const Machine = @import("Machine.zig");
 const RegisterAllocation = @import("RegisterAllocation.zig");
+const Slp = @import("../Optimize/Slp.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -164,6 +165,8 @@ fn allocateRegisters(allocator: Allocator, function: Machine.Function) Machine.E
     var result = function;
     const allocation = try RegisterAllocation.allocate(allocator, result);
     result.register_slots = allocation.residences;
+    result.float_register_slots = allocation.float_residences;
+    result.float_lane_slots = allocation.float_lane_residences;
     result.frame_size = allocation.frame_size;
     return result;
 }
@@ -201,6 +204,8 @@ fn lowerFunction(
 ) Machine.Error!Machine.Function {
     const parameter_count = try Machine.checkedArgumentCount(function.parameter_types.len);
     const layout = try buildLayout(allocator, program, function);
+    const slp = try Slp.analyze(allocator, function);
+    const float_lane_groups = try lowerSlpGroups(allocator, layout, slp);
 
     var instructions: std.ArrayList(Machine.Instruction) = .empty;
     const starts = try allocator.alloc(usize, function.blocks.len);
@@ -227,8 +232,44 @@ fn lowerFunction(
         .hidden_return_slot = layout.hidden_return_slot,
         .slot_count = layout.slot_count,
         .frame_size = try Machine.frameSize(layout.slot_count),
+        .float_lane_groups = float_lane_groups,
         .instructions = try instructions.toOwnedSlice(allocator),
     };
+}
+
+fn lowerSlpGroups(allocator: Allocator, layout: Layout, plan: Slp.Plan) Allocator.Error![]const Machine.FloatLaneGroup {
+    const groups = try allocator.alloc(Machine.FloatLaneGroup, plan.groups.len);
+    var count: usize = 0;
+    for (plan.groups) |group| {
+        var slots: [4]Machine.Slot = undefined;
+        var valid = true;
+        for (0..group.width) |lane| {
+            const span = switch (group.lanes[lane]) {
+                .value => |value| layout.values[value],
+                .local => |local| layout.locals[local],
+            };
+            if (span.width != 1 or span.aggregate) {
+                valid = false;
+                break;
+            }
+            slots[lane] = span.start;
+        }
+        if (!valid) continue;
+        groups[count] = .{
+            .slots = slots,
+            .width = group.width,
+            .priority = group.priority,
+            .recurrence = group.recurrence,
+            .in_loop = group.in_loop,
+        };
+        count += 1;
+    }
+    std.mem.sort(Machine.FloatLaneGroup, groups[0..count], {}, struct {
+        fn before(_: void, left: Machine.FloatLaneGroup, right: Machine.FloatLaneGroup) bool {
+            return left.priority > right.priority;
+        }
+    }.before);
+    return groups[0..count];
 }
 
 fn lowerInstruction(
@@ -356,10 +397,12 @@ fn lowerInstruction(
             const values = try allocator.alloc(Machine.Span, initialization.values.len);
             for (initialization.values, 0..) |value, index| values[index] = layout.values[value];
             const collection = collectionForType(program, function.value_types[initialization.result]) orelse return error.InvalidMachineProgram;
+            const element_width: u12 = @intCast(try leafCount(program, collection.element));
             break :list .{ .list_init = .{
                 .result = layout.values[initialization.result].start,
                 .values = values,
-                .element_width = @intCast(try leafCount(program, collection.element)),
+                .element_width = element_width,
+                .element_stride = try collectionElementStride(program, collection.element, element_width),
             } };
         },
         .enum_init => |initialization| enumeration: {
@@ -390,6 +433,12 @@ fn lowerInstruction(
                 .count = count,
                 .dynamic = collection.length == null,
                 .view = collection.view,
+                .checked = access.checked,
+                .element_stride = try collectionElementStride(
+                    program,
+                    collection.element,
+                    @intCast(try leafCount(program, collection.element)),
+                ),
                 .header = try internString(allocator, strings, try collectionRuntimeHeader(allocator, program, access.position)),
                 .tail = try internString(allocator, strings, if (collection.length == null) " is out of bounds for count " else try std.fmt.allocPrint(allocator, " is out of bounds for count {d}\n", .{count})),
             } };
@@ -422,6 +471,11 @@ fn lowerInstruction(
                 .count = count,
                 .dynamic = collection.length == null,
                 .view = collection.view,
+                .element_stride = try collectionElementStride(
+                    program,
+                    collection.element,
+                    @intCast(try leafCount(program, collection.element)),
+                ),
                 .header = try internString(allocator, strings, try collectionRuntimeHeader(allocator, program, replacement.position)),
                 .tail = try internString(allocator, strings, if (collection.length == null) " is out of bounds for count " else try std.fmt.allocPrint(allocator, " is out of bounds for count {d}\n", .{count})),
             } };
@@ -446,6 +500,11 @@ fn lowerInstruction(
                 .argument_count = if (argument_collection) |argument| @intCast(argument.length orelse 0) else 0,
                 .removed = if (edit.removed) |removed| layout.values[removed] else null,
                 .element_width = @intCast(try leafCount(program, collection.element)),
+                .element_stride = try collectionElementStride(
+                    program,
+                    collection.element,
+                    @intCast(try leafCount(program, collection.element)),
+                ),
                 .header = try internString(allocator, strings, try collectionRuntimeHeader(allocator, program, edit.position)),
                 .tail = try internString(allocator, strings, " is out of bounds for count "),
             } };
@@ -461,6 +520,11 @@ fn lowerInstruction(
                 .dynamic = collection.length == null,
                 .view = collection.view,
                 .element_width = @intCast(try leafCount(program, collection.element)),
+                .element_stride = try collectionElementStride(
+                    program,
+                    collection.element,
+                    @intCast(try leafCount(program, collection.element)),
+                ),
             } };
         },
         .collection_view => |view| view_value: {
@@ -475,6 +539,11 @@ fn lowerInstruction(
                 .dynamic = source.length == null,
                 .source_view = source.view,
                 .element_width = @intCast(try leafCount(program, source.element)),
+                .element_stride = try collectionElementStride(
+                    program,
+                    source.element,
+                    @intCast(try leafCount(program, source.element)),
+                ),
             } };
         },
         .string_address => |address| .{ .reference_offset = .{
@@ -652,6 +721,7 @@ fn lowerInstruction(
                 .left = layout.values[binary.left].start,
                 .right = layout.values[binary.right].start,
                 .type = function.value_types[binary.left],
+                .checked = binary.checked,
             } };
         },
         .call => |call| call: {
@@ -1182,6 +1252,36 @@ fn collectionForType(program: Ir.Program, type_value: Ir.Type) ?@import("../Type
     const index = type_value.structureIndex() orelse return null;
     if (index >= program.structures.len) return null;
     return program.structures[index].collection;
+}
+
+fn collectionElementStride(program: Ir.Program, element: Ir.Type, width: u12) Machine.Error!u12 {
+    if (try compactFloat32CollectionElement(program, element)) return std.math.mul(u12, width, 4) catch error.FrameTooLarge;
+    return std.math.mul(u12, width, Machine.slot_size) catch error.FrameTooLarge;
+}
+
+fn compactFloat32CollectionElement(program: Ir.Program, element: Ir.Type) Machine.Error!bool {
+    if (!try containsOnlyFloat32Leaves(program, element)) return false;
+    for (program.functions) |function| for (function.blocks) |block| for (block.instructions) |instruction| {
+        const collection_value = switch (instruction) {
+            .collection_reference => |value| value.collection,
+            .collection_view => |value| if (value.reference != null) value.collection else continue,
+            else => continue,
+        };
+        const collection = collectionForType(program, function.value_types[collection_value]) orelse continue;
+        if (collection.element == element) return false;
+    };
+    return true;
+}
+
+fn containsOnlyFloat32Leaves(program: Ir.Program, type_value: Ir.Type) Machine.Error!bool {
+    if (type_value == .float32) return true;
+    if (type_value.functionIndex() != null or type_value.optionalChild() != null or enumByType(program, type_value) != null) return false;
+    const structure_index = type_value.structureIndex() orelse return false;
+    if (structure_index >= program.structures.len) return error.InvalidMachineProgram;
+    const structure = program.structures[structure_index];
+    if (structure.is_class or structure.is_protocol or structure.collection != null or structure.fields.len == 0) return false;
+    for (structure.fields) |field| if (!try containsOnlyFloat32Leaves(program, field.type)) return false;
+    return true;
 }
 
 fn flattenedTypesForList(allocator: Allocator, program: Ir.Program, types: []const Ir.Type) Machine.Error![]const Ir.Type {

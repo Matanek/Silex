@@ -614,7 +614,7 @@ fn emitCollectionDropInner(self: anytype, builder: anytype, collection_type: Ast
     const one = try self.newValue(builder, .int);
     try self.emit(builder, .{ .constant_int = .{ .result = one, .bits = 1 } });
     const previous = try self.newValue(builder, .int);
-    try self.emit(builder, .{ .binary = .{ .result = previous, .operator = .subtract, .left = index, .right = one } });
+    try self.emit(builder, .{ .binary = .{ .result = previous, .operator = .subtract, .left = index, .right = one, .checked = false } });
     try self.emit(builder, .{ .local_store = .{ .local = index_local, .operand = previous } });
     const element = try self.newValue(builder, collection.element);
     try self.emit(builder, .{ .collection_load = .{
@@ -665,7 +665,7 @@ fn emitCollectionRetain(self: anytype, builder: anytype, collection: Ast.Collect
     const one = try self.newValue(builder, .int);
     try self.emit(builder, .{ .constant_int = .{ .result = one, .bits = 1 } });
     const next = try self.newValue(builder, .int);
-    try self.emit(builder, .{ .binary = .{ .result = next, .operator = .add, .left = index, .right = one } });
+    try self.emit(builder, .{ .binary = .{ .result = next, .operator = .add, .left = index, .right = one, .checked = false } });
     try self.emit(builder, .{ .local_store = .{ .local = index_local, .operand = next } });
     self.terminate(builder, .{ .jump = condition_block });
     builder.current_block = exit_block;

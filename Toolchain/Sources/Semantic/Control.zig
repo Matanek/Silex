@@ -267,7 +267,13 @@ fn analyzeCollectionFor(self: anytype, builder: anytype, function: Ast.Function,
     builder.current_block = body_block;
     const collection_value = try loadLocalValue(self, builder, collection_local, source.type);
     const element = try self.newValue(builder, collection.element);
-    try self.emit(builder, .{ .collection_load = .{ .result = element, .collection = collection_value, .index = index, .position = loop.position } });
+    try self.emit(builder, .{ .collection_load = .{
+        .result = element,
+        .collection = collection_value,
+        .index = index,
+        .checked = false,
+        .position = loop.position,
+    } });
     // A for binding is an owned value copy of the collection element. Dynamic
     // list loads copy stored bits, so reachable resources must be retained
     // before the binding is released or written back.
@@ -315,14 +321,14 @@ fn analyzeCollectionFor(self: anytype, builder: anytype, function: Ast.Function,
 
     builder.current_block = update_block;
     if (element_local) |local| try writeCollectionElement(self, builder, collection_local, source.type, index_local, local, collection.element, loop.position);
-    const next = try emitBinary(
-        self,
-        builder,
-        .add,
-        try loadLocalValue(self, builder, index_local, .int),
-        try emitInt(self, builder, 1),
-        .int,
-    );
+    const next = try self.newValue(builder, .int);
+    try self.emit(builder, .{ .binary = .{
+        .result = next,
+        .operator = .add,
+        .left = try loadLocalValue(self, builder, index_local, .int),
+        .right = try emitInt(self, builder, 1),
+        .checked = false,
+    } });
     try self.emit(builder, .{ .local_store = .{ .local = index_local, .operand = next } });
     self.terminate(builder, .{ .jump = condition_block });
 

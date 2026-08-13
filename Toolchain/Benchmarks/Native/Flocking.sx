@@ -1,0 +1,155 @@
+struct Sample {
+    let position_x:float
+    let position_y:float
+    let velocity_x:float
+    let velocity_y:float
+}
+
+struct Steering {
+    let x:float
+    let y:float
+}
+
+func make_samples(count:int) Sample[] {
+    var samples:Sample[] = []
+    for index in 0...count {
+        samples.append(Sample(
+            position_x:(index % 97) as float * 7.0,
+            position_y:(index % 89) as float * 5.0,
+            velocity_x:(index % 13) as float + 55.0,
+            velocity_y:(index % 17) as float - 8.0
+        ))
+    }
+    return samples
+}
+
+func calculate(samples:@Sample[..], rounds:int) float {
+    var checksum = 0.0
+    for round in 0...rounds {
+        let bias = round as float * 0.001
+        for boid in samples {
+            var separation_x = 0.0
+            var separation_y = 0.0
+            var center_x = 0.0
+            var center_y = 0.0
+            var heading_x = 0.0
+            var heading_y = 0.0
+            var neighbors = 0
+
+            for other in samples {
+                let offset_x = boid.position_x + bias - other.position_x
+                let offset_y = boid.position_y - other.position_y
+                let distance_squared = offset_x * offset_x + offset_y * offset_y
+                if distance_squared > 0.0 && distance_squared < 5_184.0 {
+                    center_x += other.position_x
+                    center_y += other.position_y
+                    heading_x += other.velocity_x
+                    heading_y += other.velocity_y
+                    neighbors++
+                    if distance_squared < 784.0 {
+                        var divisor = 1.0
+                        if distance_squared > 1.0 {
+                            divisor = distance_squared
+                        }
+                        separation_x += offset_x / divisor
+                        separation_y += offset_y / divisor
+                    }
+                }
+            }
+
+            if neighbors > 0 {
+                let count = neighbors as float
+                checksum += ((center_x / count - boid.position_x) * 0.35
+                    + (center_y / count - boid.position_y) * 0.35
+                    + (heading_x / count - boid.velocity_x) * 0.8
+                    + (heading_y / count - boid.velocity_y) * 0.8
+                    + separation_x * 1400.0
+                    + separation_y * 1400.0)
+            }
+        }
+    }
+    return checksum
+}
+
+func steer(boid:Sample, samples:@Sample[..]) Steering {
+    var separation_x = 0.0
+    var separation_y = 0.0
+    var center_x = 0.0
+    var center_y = 0.0
+    var heading_x = 0.0
+    var heading_y = 0.0
+    var neighbors = 0
+
+    for other in samples {
+        let offset_x = boid.position_x - other.position_x
+        let offset_y = boid.position_y - other.position_y
+        let distance_squared = offset_x * offset_x + offset_y * offset_y
+        if distance_squared > 0.0 && distance_squared < 5_184.0 {
+            center_x += other.position_x
+            center_y += other.position_y
+            heading_x += other.velocity_x
+            heading_y += other.velocity_y
+            neighbors++
+            if distance_squared < 784.0 {
+                var divisor = 1.0
+                if distance_squared > 1.0 { divisor = distance_squared }
+                separation_x += offset_x / divisor
+                separation_y += offset_y / divisor
+            }
+        }
+    }
+
+    if neighbors == 0 { return Steering(x:0.0, y:0.0) }
+    let count = neighbors as float
+    return Steering(
+        x:(center_x / count - boid.position_x) * 0.35
+            + (heading_x / count - boid.velocity_x) * 0.8
+            + separation_x * 1400.0,
+        y:(center_y / count - boid.position_y) * 0.35
+            + (heading_y / count - boid.velocity_y) * 0.8
+            + separation_y * 1400.0
+    )
+}
+
+func move_once(bodies:&Sample[], snapshot:@Sample[..], delta:float) float {
+    var checksum = 0.0
+    for index in 0...bodies.count() {
+        let boid = bodies[index]
+        let acceleration = steer(boid, snapshot)
+        let velocity_x = boid.velocity_x + acceleration.x * delta
+        let velocity_y = boid.velocity_y + acceleration.y * delta
+        let position_x = boid.position_x + velocity_x * delta
+        let position_y = boid.position_y + velocity_y * delta
+        bodies[index] = Sample(
+            position_x:position_x,
+            position_y:position_y,
+            velocity_x:velocity_x,
+            velocity_y:velocity_y
+        )
+        checksum += position_x + position_y
+    }
+    return checksum
+}
+
+func steer_all(samples:@Sample[..], rounds:int) float {
+    var checksum = 0.0
+    for round in 0...rounds {
+        for boid in samples {
+            let acceleration = steer(boid, samples)
+            checksum += acceleration.x + acceleration.y
+        }
+    }
+    return checksum
+}
+
+func main() {
+    let snapshot = make_samples(1_000)
+    let view = @snapshot[0:snapshot.count()]
+    var bodies = make_samples(1_000)
+    let calculation_ok = calculate(view, 32) > 0.0
+    let steering_checksum = steer_all(view, 256)
+    let steering_ok = steering_checksum == steering_checksum
+    let motion_ok = (move_once(bodies, view, 1.0 / 120.0) > 0.0
+        && bodies[0].position_x != snapshot[0].position_x)
+    print(calculation_ok && steering_ok && motion_ok)
+}

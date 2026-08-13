@@ -107,6 +107,25 @@ test "evaluate collection source and range bounds once from left to right" {
     try std.testing.expectEqualStrings("V\n7\n8\nS\nE\n0\n1\n", output);
 }
 
+test "collection for loops carry their proven bounds to the backend" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const source =
+        \\func main() {
+        \\    let values = [3, 5, 8]
+        \\    for value in values { print(value) }
+        \\    print(values[1])
+        \\}
+    ;
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(source);
+    const text = try Ir.writeText(allocator, compilation.ir);
+    try std.testing.expect(std.mem.indexOf(u8, text, "collection.load %") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, " bounded") != null);
+    try std.testing.expect(std.mem.indexOfPos(u8, text, std.mem.indexOf(u8, text, " bounded").? + 8, "collection.load ") != null);
+}
+
 test "for bindings retain class roots copied from returned collections" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

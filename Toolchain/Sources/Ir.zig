@@ -283,6 +283,7 @@ pub const Instruction = union(enum) {
         result: ValueId,
         collection: ValueId,
         index: ValueId,
+        checked: bool = true,
         position: Source.Position,
     };
 
@@ -438,6 +439,7 @@ pub const Instruction = union(enum) {
         operator: BinaryOperator,
         left: ValueId,
         right: ValueId,
+        checked: bool = true,
     };
 
     pub const Call = struct {
@@ -965,6 +967,7 @@ fn writeInstruction(
             try appendValueChecked(output, allocator, function, load.collection);
             try output.appendSlice(allocator, ", ");
             try appendValueChecked(output, allocator, function, load.index);
+            if (!load.checked) try output.appendSlice(allocator, " bounded");
         },
         .collection_reference => |reference| {
             try appendResult(output, allocator, program, function, reference.result);

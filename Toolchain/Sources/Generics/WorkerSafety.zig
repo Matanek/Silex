@@ -97,6 +97,63 @@ pub fn systemIsWorkerSafe(self: anytype, target_name: []const u8, target_positio
     return true;
 }
 
+/// Returns whether a direct helper call is both worker-safe and unable to
+/// mutate state supplied by its caller. Value parameters are owned by the
+/// helper and read parameters are immutable; mutable parameters would let a
+/// query worker affect data shared by another partition and are rejected.
+pub fn readOnlyCallIsWorkerSafe(self: anytype, call: Ast.Expression.Call) std.mem.Allocator.Error!bool {
+    if (call.receiver == null) {
+        // Query classification runs after concrete specialization. Source
+        // declarations still carry pre-specialization type indexes, so using
+        // them here could resolve a parameter to an unrelated concrete type.
+        const target = findSystemFunction(self.functions.items, call.name, call.name_position) orelse return false;
+        if (!parametersAreReadOnly(target.parameters)) return false;
+        var checker = Checker(@TypeOf(self.*)){
+            .self = self,
+            .parallel = false,
+            .subject_name = shortName(target.name),
+            .diagnose = false,
+        };
+        checker.validateFunction(target) catch |err| {
+            if (err == error.OutOfMemory) return error.OutOfMemory;
+            return false;
+        };
+        return true;
+    }
+
+    const receiver = call.receiver.?;
+    if (receiver.value != .identifier) return false;
+    const receiver_type = self.typeForName(receiver.value.identifier) orelse return false;
+    const owner = receiver_type.structureIndex() orelse return false;
+    if (owner >= self.structures.items.len) return false;
+    const structure = self.structures.items[owner];
+    var selected: ?Ast.Function = null;
+    for (structure.methods) |method| {
+        if (!method.is_static or !std.mem.eql(u8, method.name, call.name) or
+            method.parameters.len != call.arguments.len + call.named_arguments.len) continue;
+        if (!parametersAreReadOnly(method.parameters)) return false;
+        if (selected != null) return false;
+        selected = method;
+    }
+    const method = selected orelse return false;
+    var checker = Checker(@TypeOf(self.*)){
+        .self = self,
+        .parallel = false,
+        .subject_name = shortName(method.name),
+        .diagnose = false,
+    };
+    checker.validateMethod(owner, method) catch |err| {
+        if (err == error.OutOfMemory) return error.OutOfMemory;
+        return false;
+    };
+    return true;
+}
+
+fn parametersAreReadOnly(parameters: []const Ast.Parameter) bool {
+    for (parameters) |parameter| if (parameter.mode == .mutable) return false;
+    return true;
+}
+
 fn Checker(comptime Self: type) type {
     return struct {
         self: *Self,
@@ -306,7 +363,10 @@ fn Checker(comptime Self: type) type {
                     if (selected != null) return checker.reject(call.name_position, "use ambiguous method dispatch");
                     selected = method;
                 }
-                const method = selected orelse return checker.reject(call.name_position, "call an unknown worker method");
+                const method = selected orelse return checker.reject(
+                    call.name_position,
+                    try std.fmt.allocPrint(checker.self.allocator, "call an unknown worker method '{s}'", .{call.name}),
+                );
                 return checker.validateMethod(owner, method);
             }
 

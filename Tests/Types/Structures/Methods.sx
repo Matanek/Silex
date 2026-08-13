@@ -11,6 +11,20 @@ struct Pair<T> {
     let second:T
 }
 
+struct TickSource {
+    var ticks:int
+
+    func tick() int {
+        self.ticks++
+        return 1
+    }
+}
+
+struct Meter {
+    var elapsed:int
+    var source:TickSource
+}
+
 test "structure instance and static methods" {
     var counter = Counter.starting(at:10)
     counter.increment()
@@ -27,4 +41,12 @@ test "generic structure positions" {
     var total = 0
     for value in pairs { total += value.first + value.second }
     if total != 100 { panic("generic structures in collections") }
+}
+
+test "compound field assignment preserves sibling method mutation" {
+    var meter = Meter(elapsed:0, source:TickSource(ticks:0))
+    meter.elapsed += meter.source.tick()
+
+    if meter.elapsed != 1 { panic("compound field result") }
+    if meter.source.ticks != 1 { panic("sibling method mutation") }
 }

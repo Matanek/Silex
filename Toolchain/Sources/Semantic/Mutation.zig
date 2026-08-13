@@ -160,6 +160,12 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
         final_name,
         target.indices.len == 0 or target.indexed_fields.len != 0,
     );
+    // The replacement may mutate another field of the same value root. Keep
+    // the target's original value for compound arithmetic, but rebuild its
+    // owning path from the root as it exists after evaluating the right-hand
+    // side. Otherwise a stale aggregate base would silently undo that sibling
+    // mutation when the target field is stored.
+    try refreshPathBases(self, builder, binding, steps.items);
     const class_owned_field = if (steps.items.len != 0) switch (steps.items[steps.items.len - 1]) {
         .field => |step| self.structures[step.structure].is_class,
         .collection => false,
@@ -250,6 +256,35 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
     if (binding.local != null or binding.reference != null) {
         try storeBinding(self, builder, binding, replacement);
     }
+}
+
+fn refreshPathBases(self: anytype, builder: anytype, binding: anytype, steps: []PathStep) !void {
+    var current = try loadBinding(self, builder, binding);
+    for (steps) |*step| switch (step.*) {
+        .field => |*field| {
+            field.base = current;
+            const field_type = self.structures[field.structure].fields[field.field].type;
+            const value = try self.newValue(builder, field_type);
+            try self.emit(builder, .{ .field_load = .{
+                .result = value,
+                .base = current,
+                .field = field.field,
+            } });
+            current = value;
+        },
+        .collection => |*collection| {
+            collection.base = current;
+            const element_type = Collections.collectionForType(self.structures, collection.type).?.element;
+            const value = try self.newValue(builder, element_type);
+            try self.emit(builder, .{ .collection_load = .{
+                .result = value,
+                .collection = current,
+                .index = collection.index,
+                .position = collection.position,
+            } });
+            current = value;
+        },
+    };
 }
 
 fn analyzeFieldStep(

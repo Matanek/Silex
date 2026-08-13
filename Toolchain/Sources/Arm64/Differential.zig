@@ -393,11 +393,25 @@ test "native ARM64 agrees on nested field mutation and value copies" {
         \\    player.score.value = 9
         \\    return duplicate == Player(score:Score(value:1, other:2), reserve:3)
         \\}
+        \\struct Clock { var ticks:int; func tick() int { self.ticks++; return 1 } }
+        \\struct Counter { var elapsed:int; var clock:Clock }
+        \\func compoundPreservesSiblingMutation() int {
+        \\    var counter = Counter(elapsed:0, clock:Clock(ticks:0))
+        \\    counter.elapsed += counter.clock.tick()
+        \\    return counter.elapsed * 10 + counter.clock.ticks
+        \\}
         \\func main() {}
     );
     const machine = try Lower.lower(allocator, compilation.ir);
     try compare(allocator, compilation.ir, machine, "mutate", &.{});
     try compare(allocator, compilation.ir, machine, "copyIndependent", &.{});
+    try compare(allocator, compilation.ir, machine, "compoundPreservesSiblingMutation", &.{});
+    const function = findFunction(compilation.ir, "compoundPreservesSiblingMutation") orelse return error.TestUnexpectedResult;
+    const reference = try Interpreter.invoke(allocator, compilation.ir, function, &.{});
+    try std.testing.expectEqual(@as(i64, 11), reference.integer);
+    const native = try Runner.invoke(allocator, machine, function, &.{});
+    try std.testing.expectEqual(Machine.Status.success, native.status);
+    try std.testing.expectEqual(@as(i64, 11), native.value);
 }
 
 test "native ARM64 agrees on value constructors and branched self initialization" {

@@ -1,6 +1,6 @@
 const std = @import("std");
 const Ir = @import("../Ir.zig");
-const CompilationCache = @import("../CompilationCache.zig");
+const InlineValues = @import("InlineValues.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -28,11 +28,19 @@ const BinarySummary = struct {
 };
 
 pub fn optimize(allocator: Allocator, program: Ir.Program) !Ir.Program {
+    const prepared = try optimizeWithoutInlining(allocator, program);
+    const inlined = try InlineValues.optimize(allocator, prepared);
+    const scalarized = try replaceScalarAggregates(allocator, inlined);
+    return optimizeWithoutInlining(allocator, scalarized);
+}
+
+pub fn optimizeWithoutInlining(allocator: Allocator, program: Ir.Program) !Ir.Program {
     const summaries = try allocator.alloc(GlobalSummary, program.functions.len);
     for (program.functions, 0..) |function, index| summaries[index] = summarize(function);
     const functions = try allocator.alloc(Ir.Function, program.functions.len);
     for (program.functions, 0..) |function, index| {
-        functions[index] = try optimizeFunction(allocator, function, summaries);
+        const optimized = try optimizeFunction(allocator, function, summaries);
+        functions[index] = try simplifyBooleanDiamonds(allocator, optimized);
     }
     var result = program;
     result.functions = functions;
@@ -41,38 +49,180 @@ pub fn optimize(allocator: Allocator, program: Ir.Program) !Ir.Program {
     return result;
 }
 
+fn simplifyBooleanDiamonds(allocator: Allocator, function: Ir.Function) !Ir.Function {
+    if (function.blocks.len < 4) return function;
+    const blocks = try allocator.dupe(Ir.Block, function.blocks);
+    var changed = false;
+    for (blocks, 0..) |block, block_index| {
+        const outer = switch (block.terminator) {
+            .branch => |value| value,
+            else => continue,
+        };
+        if (outer.then_block >= blocks.len or outer.else_block >= blocks.len) continue;
+        const evaluation = blocks[outer.then_block];
+        const short_circuit = blocks[outer.else_block];
+        if (short_circuit.instructions.len != 1) continue;
+        const false_value = switch (short_circuit.instructions[0]) {
+            .constant_bool => |value| value,
+            else => continue,
+        };
+        if (false_value.value) continue;
+        const join_id = switch (short_circuit.terminator) {
+            .jump => |target| target,
+            else => continue,
+        };
+        if (join_id >= blocks.len or evaluation.instructions.len == 0) continue;
+        if (evaluation.terminator != .jump or evaluation.terminator.jump != join_id) continue;
+        const join = blocks[join_id];
+        if (join.instructions.len != 0) continue;
+        const final_branch = switch (join.terminator) {
+            .branch => |value| value,
+            else => continue,
+        };
+        if (final_branch.condition != false_value.result) continue;
+        const copy = switch (evaluation.instructions[evaluation.instructions.len - 1]) {
+            .copy => |value| value,
+            else => continue,
+        };
+        if (copy.result != false_value.result) continue;
+
+        blocks[block_index].terminator = .{ .branch = .{
+            .condition = outer.condition,
+            .then_block = outer.then_block,
+            .else_block = final_branch.else_block,
+        } };
+        blocks[outer.then_block] = .{
+            .instructions = evaluation.instructions[0 .. evaluation.instructions.len - 1],
+            .terminator = .{ .branch = .{
+                .condition = copy.operand,
+                .then_block = final_branch.then_block,
+                .else_block = final_branch.else_block,
+            } },
+        };
+        changed = true;
+    }
+    if (!changed) return function;
+    var result = function;
+    result.blocks = try removeUnreachableBlocks(allocator, blocks);
+    result.blocks = try removeDeadConstants(allocator, result);
+    return result;
+}
+
 pub fn optimizeCached(allocator: Allocator, io: std.Io, program: Ir.Program) !Ir.Program {
-    const summaries = try allocator.alloc(GlobalSummary, program.functions.len);
-    for (program.functions, 0..) |function, index| summaries[index] = summarize(function);
+    _ = io;
+    return optimize(allocator, program);
+}
+
+fn replaceScalarAggregates(allocator: Allocator, program: Ir.Program) !Ir.Program {
     const functions = try allocator.alloc(Ir.Function, program.functions.len);
     for (program.functions, 0..) |function, index| {
-        var dependencies: std.ArrayList([]const u8) = .empty;
-        const encoded = try std.json.Stringify.valueAlloc(allocator, function, .{});
-        try dependencies.append(allocator, encoded);
-        for (function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
-            .call => |call| if (call.function < program.functions.len) {
-                try dependencies.append(
-                    allocator,
-                    try std.json.Stringify.valueAlloc(allocator, program.functions[call.function], .{}),
-                );
-            },
-            else => {},
-        };
-        const digest = CompilationCache.artifactKey("optimized-function", dependencies.items);
-        if (CompilationCache.load(allocator, io, digest, "release-function")) |payload| {
-            functions[index] = std.json.parseFromSliceLeaky(Ir.Function, allocator, payload, .{}) catch
-                try optimizeFunction(allocator, function, summaries);
-        } else {
-            functions[index] = try optimizeFunction(allocator, function, summaries);
-            const payload = try std.json.Stringify.valueAlloc(allocator, functions[index], .{});
-            CompilationCache.store(allocator, io, digest, "release-function", payload);
-        }
+        functions[index] = try replaceFunctionScalarAggregates(allocator, program, function);
     }
     var result = program;
     result.functions = functions;
-    const validated = try Ir.writeText(allocator, result);
-    allocator.free(validated);
     return result;
+}
+
+fn replaceFunctionScalarAggregates(allocator: Allocator, program: Ir.Program, function: Ir.Function) !Ir.Function {
+    const roots = try allocator.alloc(?Ir.ValueId, function.value_types.len);
+    @memset(roots, null);
+    const fields = try allocator.alloc(?[]const Ir.ValueId, function.value_types.len);
+    @memset(fields, null);
+    for (function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
+        .structure_init => |value| if (scalarStructure(program, value.structure, 0)) {
+            roots[value.result] = value.result;
+            fields[value.result] = value.fields;
+        },
+        else => {},
+    };
+    var changed = true;
+    while (changed) {
+        changed = false;
+        for (function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
+            .copy => |value| if (roots[value.result] == null and roots[value.operand] != null and
+                function.value_types[value.result] == function.value_types[value.operand])
+            {
+                roots[value.result] = roots[value.operand];
+                changed = true;
+            },
+            else => {},
+        };
+    }
+
+    const uses = try allocator.alloc(usize, function.value_types.len);
+    @memset(uses, 0);
+    for (function.blocks) |block| {
+        for (block.instructions) |instruction| countUses(instruction, uses);
+        countTerminatorUses(block.terminator, uses);
+    }
+    const allowed = try allocator.alloc(usize, function.value_types.len);
+    @memset(allowed, 0);
+    for (function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
+        .copy => |value| if (roots[value.operand] != null and roots[value.result] == roots[value.operand]) {
+            allowed[value.operand] += 1;
+        },
+        .field_load => |value| if (roots[value.base] != null) {
+            allowed[value.base] += 1;
+        },
+        else => {},
+    };
+    const escaped = try allocator.alloc(bool, function.value_types.len);
+    @memset(escaped, false);
+    for (roots, 0..) |root, value| if (root) |resolved| {
+        if (uses[value] != allowed[value]) escaped[resolved] = true;
+    };
+
+    const blocks = try allocator.alloc(Ir.Block, function.blocks.len);
+    const constants = try allocator.alloc(Constant, function.value_types.len);
+    @memset(constants, .unknown);
+    for (function.blocks, 0..) |block, block_index| {
+        const aliases = try allocator.alloc(Ir.ValueId, function.value_types.len);
+        for (aliases, 0..) |*alias, value| alias.* = value;
+        var instructions: std.ArrayList(Ir.Instruction) = .empty;
+        for (block.instructions) |original| {
+            const instruction = try rewriteInstruction(allocator, original, aliases);
+            switch (instruction) {
+                .structure_init => |value| if (roots[value.result]) |root| {
+                    if (!escaped[root]) continue;
+                },
+                .copy => |value| if (roots[value.operand]) |root| {
+                    if (!escaped[root] and roots[value.result] == root) {
+                        aliases[value.result] = canonical(aliases, value.operand);
+                        continue;
+                    }
+                },
+                .field_load => |value| if (roots[value.base]) |root| {
+                    if (!escaped[root]) {
+                        const aggregate_fields = fields[root] orelse return error.InvalidProgram;
+                        if (value.field >= aggregate_fields.len) return error.InvalidProgram;
+                        aliases[value.result] = canonical(aliases, aggregate_fields[value.field]);
+                        continue;
+                    }
+                },
+                else => {},
+            }
+            try instructions.append(allocator, instruction);
+        }
+        blocks[block_index] = .{
+            .instructions = try instructions.toOwnedSlice(allocator),
+            .terminator = rewriteTerminator(block.terminator, aliases, constants),
+        };
+    }
+    var result = function;
+    result.blocks = blocks;
+    return result;
+}
+
+fn scalarStructure(program: Ir.Program, structure_index: usize, depth: usize) bool {
+    if (depth > 8 or structure_index >= program.structures.len) return false;
+    const structure = program.structures[structure_index];
+    if (structure.is_class or structure.is_static or structure.collection != null) return false;
+    for (structure.fields) |field| {
+        if (field.type.isNumeric() or field.type == .bool) continue;
+        const child = field.type.structureIndex() orelse return false;
+        if (!scalarStructure(program, child, depth + 1)) return false;
+    }
+    return true;
 }
 
 fn optimizeFunction(allocator: Allocator, function: Ir.Function, summaries: []const GlobalSummary) !Ir.Function {
@@ -87,7 +237,7 @@ fn optimizeFunction(allocator: Allocator, function: Ir.Function, summaries: []co
 
     const blocks = try allocator.alloc(Ir.Block, function.blocks.len);
     for (function.blocks, 0..) |block, block_index| {
-        var local_values = try allocator.alloc(?Ir.ValueId, function.local_types.len);
+        const local_values = try allocator.alloc(?Ir.ValueId, function.local_types.len);
         @memset(local_values, null);
         var instructions: std.ArrayList(Ir.Instruction) = .empty;
         for (block.instructions) |original| {
@@ -95,8 +245,10 @@ fn optimizeFunction(allocator: Allocator, function: Ir.Function, summaries: []co
             if (instruction == .call) instruction = inlineConstantCall(instruction.call, summaries) orelse instruction;
             switch (instruction) {
                 .copy => |copy| {
-                    aliases[copy.result] = canonical(aliases, copy.operand);
-                    continue;
+                    if (function.value_types[copy.result] == function.value_types[copy.operand]) {
+                        aliases[copy.result] = canonical(aliases, copy.operand);
+                        continue;
+                    }
                 },
                 .local_load => |load| if (local_values[load.local]) |stored| {
                     aliases[load.result] = canonical(aliases, stored);
@@ -301,6 +453,7 @@ fn rewriteInstruction(allocator: Allocator, instruction: Ir.Instruction, aliases
             .result = value.result,
             .collection = canonical(aliases, value.collection),
             .index = canonical(aliases, value.index),
+            .checked = value.checked,
             .position = value.position,
         } },
         .collection_reference => |value| .{ .collection_reference = .{
@@ -389,6 +542,7 @@ fn rewriteInstruction(allocator: Allocator, instruction: Ir.Instruction, aliases
             .operator = value.operator,
             .left = canonical(aliases, value.left),
             .right = canonical(aliases, value.right),
+            .checked = value.checked,
         } },
         .call => |value| .{ .call = .{
             .result = value.result,
@@ -881,6 +1035,39 @@ test "release folds constants and propagates copies in straight-line code" {
     try std.testing.expect(!std.mem.containsAtLeast(u8, text, 1, "copy"));
 }
 
+test "release preserves representation-changing copies" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const runtime_type = Ir.Type.structure(0);
+    const structures = [_]Ir.Structure{.{
+        .name = "Runtime",
+        .fields = &.{},
+        .is_class = true,
+    }};
+    const value_types = [_]Ir.Type{ .uint, runtime_type };
+    const instructions = [_]Ir.Instruction{
+        .{ .copy = .{ .result = 1, .operand = 0 } },
+        .{ .class_retain = .{ .operand = 1, .ownership = .root } },
+    };
+    const blocks = [_]Ir.Block{.{ .instructions = &instructions, .terminator = .return_void }};
+    const program: Ir.Program = .{
+        .structures = &structures,
+        .functions = &.{.{
+            .name = "from_address",
+            .parameter_types = &.{.uint},
+            .return_type = .void,
+            .value_types = &value_types,
+            .blocks = &blocks,
+        }},
+    };
+
+    const optimized = try optimize(allocator, program);
+    const text = try Ir.writeText(allocator, optimized);
+    try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "copy %0"));
+    try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "class.retain %1"));
+}
+
 test "release preserves effects and observable execution" {
     const Frontend = @import("../Frontend.zig");
     const Interpreter = @import("../Interpreter.zig");
@@ -989,4 +1176,49 @@ test "release inlines proven identity and scalar binary functions" {
     const text = try Ir.writeText(allocator, optimized);
     try std.testing.expect(!std.mem.containsAtLeast(u8, text, 1, "call @identity"));
     try std.testing.expect(!std.mem.containsAtLeast(u8, text, 1, "call @add"));
+}
+
+test "release inlines small value calculations and structure construction" {
+    const Frontend = @import("../Frontend.zig");
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\struct Pair { let x:float; let y:float }
+        \\func pair(x:float, y:float) Pair { return Pair(x:x, y:y) }
+        \\func squared(value:Pair) float { return value.x * value.x + value.y * value.y }
+        \\func calculate(x:float, y:float) float { return squared(pair(x, y)) }
+        \\func main() { print(calculate(3.0, 4.0)) }
+    );
+    const optimized = try optimize(allocator, compilation.ir);
+    const text = try Ir.writeText(allocator, optimized);
+    try std.testing.expect(!std.mem.containsAtLeast(u8, text, 1, "call @pair"));
+    try std.testing.expect(!std.mem.containsAtLeast(u8, text, 1, "call @squared"));
+    try std.testing.expect(!std.mem.containsAtLeast(u8, text, 1, "call @calculate"));
+}
+
+test "release scalarizes non escaping value structures" {
+    const Frontend = @import("../Frontend.zig");
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\struct Pair { let x:float; let y:float }
+        \\func add(left:Pair, right:Pair) Pair { return Pair(x:left.x + right.x, y:left.y + right.y) }
+        \\func sum(value:Pair) float {
+        \\    let combined = add(value, Pair(x:1.0, y:2.0))
+        \\    return combined.x + combined.y
+        \\}
+        \\func main() { print(sum(Pair(x:3.0, y:4.0))) }
+    );
+    const optimized = try optimize(allocator, compilation.ir);
+    const text = try Ir.writeText(allocator, optimized);
+    const start = std.mem.indexOf(u8, text, "func @sum") orelse return error.TestUnexpectedResult;
+    const tail = text[start..];
+    const end = std.mem.indexOf(u8, tail, "\n}\n") orelse tail.len;
+    const body = tail[0..end];
+    try std.testing.expect(!std.mem.containsAtLeast(u8, body, 1, "call @add"));
+    try std.testing.expect(!std.mem.containsAtLeast(u8, body, 1, "struct.init @Pair"));
 }

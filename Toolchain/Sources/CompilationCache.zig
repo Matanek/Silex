@@ -8,7 +8,11 @@ const Ast = @import("Ast.zig");
 const Boundary = @import("Boundary.zig");
 const Packages = @import("Packages.zig");
 
-pub const format = "silex-cache-v14-embed-bytes-arm64";
+// This identity covers every serialized frontend, Release and machine artifact.
+// Bump it whenever an optimizer, lowering or register-allocation contract
+// changes: source-only cache keys cannot distinguish machine plans emitted by
+// two versions of the compiler.
+pub const format = "silex-cache-v76-slp-lane-residence";
 const State = struct { files: []const []const u8 };
 
 pub const NativeInput = struct {
@@ -21,13 +25,13 @@ pub fn loadIr(allocator: Allocator, io: Io, source_path: []const u8, target_name
     const state_digest = artifactKey("frontend-state", &.{ source_path, target_name });
     const state_bytes = load(allocator, io, state_digest, "state") orelse return null;
     const state = std.json.parseFromSliceLeaky(State, allocator, state_bytes, .{}) catch return null;
-    const digest = key(allocator, io, state.files, "frontend", target_name) catch return null;
+    const digest = entryKey(allocator, io, state.files, "frontend", source_path, target_name) catch return null;
     const payload = load(allocator, io, digest, "ir-json") orelse return null;
     return std.json.parseFromSliceLeaky(Ir.Program, allocator, payload, .{}) catch null;
 }
 
 pub fn storeIr(allocator: Allocator, io: Io, source_path: []const u8, target_name: []const u8, files: []const []const u8, program: Ir.Program) void {
-    const digest = key(allocator, io, files, "frontend", target_name) catch return;
+    const digest = entryKey(allocator, io, files, "frontend", source_path, target_name) catch return;
     const payload = std.json.Stringify.valueAlloc(allocator, program, .{}) catch return;
     store(allocator, io, digest, "ir-json", payload);
     const state_payload = std.json.Stringify.valueAlloc(allocator, State{ .files = files }, .{}) catch return;
@@ -38,7 +42,7 @@ pub fn loadNativeInput(allocator: Allocator, io: Io, source_path: []const u8, ta
     const state_digest = artifactKey("native-input-state", &.{ source_path, target_name });
     const state_bytes = load(allocator, io, state_digest, "state") orelse return null;
     const state = std.json.parseFromSliceLeaky(State, allocator, state_bytes, .{}) catch return null;
-    const digest = key(allocator, io, state.files, "native-input", target_name) catch return null;
+    const digest = entryKey(allocator, io, state.files, "native-input", source_path, target_name) catch return null;
     const payload = load(allocator, io, digest, "native-input-json") orelse return null;
     return std.json.parseFromSliceLeaky(NativeInput, allocator, payload, .{}) catch null;
 }
@@ -51,7 +55,7 @@ pub fn storeNativeInput(
     files: []const []const u8,
     input: NativeInput,
 ) void {
-    const digest = key(allocator, io, files, "native-input", target_name) catch return;
+    const digest = entryKey(allocator, io, files, "native-input", source_path, target_name) catch return;
     const payload = std.json.Stringify.valueAlloc(allocator, input, .{}) catch return;
     store(allocator, io, digest, "native-input-json", payload);
     const state_payload = std.json.Stringify.valueAlloc(allocator, State{ .files = files }, .{}) catch return;
@@ -119,6 +123,19 @@ pub fn key(
     return digest;
 }
 
+fn entryKey(
+    allocator: Allocator,
+    io: Io,
+    files: []const []const u8,
+    command: []const u8,
+    source_path: []const u8,
+    target_name: []const u8,
+) ![Blake3.digest_length]u8 {
+    const variant = try std.fmt.allocPrint(allocator, "{s}:{s}", .{ target_name, source_path });
+    defer allocator.free(variant);
+    return key(allocator, io, files, command, variant);
+}
+
 fn hashAncestorManifests(allocator: Allocator, io: Io, hasher: *Blake3, source_path: []const u8) void {
     var directory = std.fs.path.dirname(source_path);
     var depth: usize = 0;
@@ -183,6 +200,26 @@ test "cache key depends on command variant paths and exact contents" {
     const debug = try key(std.testing.allocator, std.testing.io, &.{"build.zig"}, "compile", "debug");
     const release = try key(std.testing.allocator, std.testing.io, &.{"build.zig"}, "compile", "release");
     try std.testing.expect(!std.mem.eql(u8, &debug, &release));
+}
+
+test "entry cache key distinguishes programs sharing one source set" {
+    const arithmetic = try entryKey(
+        std.testing.allocator,
+        std.testing.io,
+        &.{"build.zig"},
+        "native-input",
+        "Arithmetic.sx",
+        "macos-arm64",
+    );
+    const objects = try entryKey(
+        std.testing.allocator,
+        std.testing.io,
+        &.{"build.zig"},
+        "native-input",
+        "Objects.sx",
+        "macos-arm64",
+    );
+    try std.testing.expect(!std.mem.eql(u8, &arithmetic, &objects));
 }
 
 test "native input cache retains linked boundary providers" {

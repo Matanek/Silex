@@ -12,7 +12,7 @@ report="$output_dir/report.txt"
     echo "host: $(uname -s)-$(uname -m)"
     echo "clang: $(clang++ --version | sed -n '1p')"
 
-    for workload in Arithmetic Objects; do
+    for workload in Arithmetic Objects Flocking; do
         stem=$(echo "$workload" | tr '[:upper:]' '[:lower:]')
         debug_bin="$output_dir/$stem-debug"
         release_bin="$output_dir/$stem-release"

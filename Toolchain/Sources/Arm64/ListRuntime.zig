@@ -16,8 +16,13 @@ const state_offset: u12 = 4 * Machine.slot_size;
 const darwin_page_size: u64 = 0x4000;
 const windows_page_size: u64 = 0x1000;
 
+fn elementStride(width: u12, encoded_stride: u12) u64 {
+    return if (encoded_stride != 0) encoded_stride else @as(u64, width) * Machine.slot_size;
+}
+
 pub fn emitInit(allocator: Allocator, words: *std.ArrayList(u32), epilogue: *std.ArrayList(Fixups.Local), sites: *std.ArrayList(ExternalCalls.Site), platform: Allocation.Platform, value: Machine.Instruction.ListInit) Error!void {
-    const required = header_size + @as(u64, value.values.len) * value.element_width * Machine.slot_size;
+    const stride = elementStride(value.element_width, value.element_stride);
+    const required = header_size + @as(u64, value.values.len) * stride;
     const bytes = @max(required, minimumAllocation(platform));
     try allocate(allocator, words, sites, platform, bytes);
     const failed = words.items.len;
@@ -30,11 +35,15 @@ pub fn emitInit(allocator: Allocator, words: *std.ArrayList(u32), epilogue: *std
     try immediate(allocator, words, .x9, bytes);
     try words.append(allocator, A64.store64(.x9, .x15, byte_count_offset));
     try words.append(allocator, A64.addSubtractImmediate(.x14, .x15, header_size, true));
-    for (value.values) |item| for (0..item.width) |leaf| {
-        try words.append(allocator, A64.loadStack(.x9, @intCast(@as(usize, item.start) + leaf)));
-        try words.append(allocator, A64.store64(.x9, .x14, 0));
-        try words.append(allocator, A64.addSubtractImmediate(.x14, .x14, 8, true));
-    };
+    for (value.values) |item| {
+        for (0..item.width) |leaf| {
+            try words.append(allocator, A64.loadStack(.x9, @intCast(@as(usize, item.start) + leaf)));
+            if (stride == @as(u64, value.element_width) * 4) {
+                try words.append(allocator, A64.store32Offset(.x9, .x14, @intCast(leaf * 4)));
+            } else try words.append(allocator, A64.store64(.x9, .x14, @intCast(leaf * Machine.slot_size)));
+        }
+        try words.append(allocator, A64.addSubtractImmediate(.x14, .x14, @intCast(stride), true));
+    }
     try words.append(allocator, A64.storeStack(.x15, value.result));
     const done = words.items.len;
     try words.append(allocator, A64.branch());
@@ -90,19 +99,27 @@ pub fn emitBytesLiteral(
     try Fixups.patch26(words.items, done, words.items.len);
 }
 
-pub fn emitCount(allocator: Allocator, words: *std.ArrayList(u32), value: Machine.Instruction.CollectionCount) Error!void {
+pub fn emitCount(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    function: Machine.Function,
+    value: Machine.Instruction.CollectionCount,
+) Error!void {
     if (value.view) {
-        try words.append(allocator, A64.loadStack(.x10, @intCast(@as(usize, value.collection.start) + 1)));
+        try loadValue(allocator, words, function, .x10, value.collection.start + 1);
     } else {
-        try words.append(allocator, A64.loadStack(.x9, value.collection.start));
+        try loadValue(allocator, words, function, .x9, value.collection.start);
         try words.append(allocator, A64.load64(.x10, .x9, 0));
     }
-    try words.append(allocator, A64.storeStack(.x10, value.result));
+    try storeValue(allocator, words, function, .x10, value.result);
 }
 
 pub fn emitRetain(allocator: Allocator, words: *std.ArrayList(u32), value: Machine.Instruction.ListResource) Error!void {
     try words.append(allocator, A64.loadStack(.x10, value.operand));
-    const count_offset: u12 = switch (value.ownership) { .root => root_count_offset, .edge => edge_count_offset };
+    const count_offset: u12 = switch (value.ownership) {
+        .root => root_count_offset,
+        .edge => edge_count_offset,
+    };
     try words.append(allocator, A64.addSubtractImmediate(.x14, .x10, count_offset, true));
     const retry = words.items.len;
     try words.append(allocator, A64.loadAcquireExclusive64(.x9, .x14));
@@ -143,8 +160,14 @@ fn emitDropPointer(
     platform: Allocation.Platform,
     ownership: @import("../Ir.zig").Ownership,
 ) Error!void {
-    const count_offset: u12 = switch (ownership) { .root => root_count_offset, .edge => edge_count_offset };
-    const other_offset: u12 = switch (ownership) { .root => edge_count_offset, .edge => root_count_offset };
+    const count_offset: u12 = switch (ownership) {
+        .root => root_count_offset,
+        .edge => edge_count_offset,
+    };
+    const other_offset: u12 = switch (ownership) {
+        .root => edge_count_offset,
+        .edge => root_count_offset,
+    };
     try words.append(allocator, A64.addSubtractImmediate(.x14, .x10, count_offset, true));
     const retry = words.items.len;
     try words.append(allocator, A64.loadAcquireExclusive64(.x9, .x14));
@@ -195,6 +218,8 @@ pub fn emitEdit(
     program: Machine.Program,
     value: Machine.Instruction.ListEdit,
 ) Error!void {
+    const stride = elementStride(value.element_width, value.element_stride);
+    const compact_float32 = stride == @as(u64, value.element_width) * 4;
     try words.append(allocator, A64.loadStack(.x10, value.collection));
     try words.append(allocator, A64.load64(.x13, .x10, 0));
     var invalid: ?Bounds = null;
@@ -244,7 +269,7 @@ pub fn emitEdit(
         try words.append(allocator, A64.compareRegisters(.x11, .x5));
         shared_or_full[0] = words.items.len;
         try words.append(allocator, A64.conditionalBranch(.not_equal));
-        try immediate(allocator, words, .x11, @as(u64, value.element_width) * Machine.slot_size);
+        try immediate(allocator, words, .x11, stride);
         try words.append(allocator, A64.multiply(.x5, .x12, .x11));
         try words.append(allocator, A64.addSubtractImmediate(.x5, .x5, header_size, true));
         try words.append(allocator, A64.load64(.x11, .x10, byte_count_offset));
@@ -253,12 +278,14 @@ pub fn emitEdit(
         try words.append(allocator, A64.conditionalBranch(.higher));
         if (value.kind == .append) {
             try words.append(allocator, A64.addSubtractImmediate(.x14, .x10, header_size, true));
-            try immediate(allocator, words, .x11, @as(u64, value.element_width) * Machine.slot_size);
+            try immediate(allocator, words, .x11, stride);
             try words.append(allocator, A64.multiply(.x5, .x13, .x11));
             try words.append(allocator, A64.addRegisters(.x14, .x14, .x5));
             for (0..value.argument.?.width) |leaf| {
                 try words.append(allocator, A64.loadStack(.x5, @intCast(@as(usize, value.argument.?.start) + leaf)));
-                try words.append(allocator, A64.store64(.x5, .x14, @intCast(leaf * Machine.slot_size)));
+                if (compact_float32) {
+                    try words.append(allocator, A64.store32Offset(.x5, .x14, @intCast(leaf * 4)));
+                } else try words.append(allocator, A64.store64(.x5, .x14, @intCast(leaf * Machine.slot_size)));
             }
         }
         try words.append(allocator, A64.store64(.x12, .x10, 0));
@@ -274,7 +301,7 @@ pub fn emitEdit(
         .{ .register = .x9, .offset = 16 }, .{ .register = .x12, .offset = 24 },
         .{ .register = .x7, .offset = 32 }, .{ .register = .x6, .offset = 40 },
     }) |saved| try words.append(allocator, A64.store64(saved.register, .zero_or_sp, saved.offset));
-    try immediate(allocator, words, .x11, @as(u64, value.element_width) * Machine.slot_size);
+    try immediate(allocator, words, .x11, stride);
     try words.append(allocator, A64.multiply(.x1, .x12, .x11));
     try words.append(allocator, A64.addSubtractImmediate(.x1, .x1, header_size, true));
     try ensureMinimumAllocation(allocator, words, platform, .x1);
@@ -292,8 +319,11 @@ pub fn emitEdit(
     }) |saved| try words.append(allocator, A64.load64(saved.register, .zero_or_sp, saved.offset));
     try words.append(allocator, A64.store64(.x12, .x15, 0));
     try immediate(allocator, words, .x5, 1);
-    try words.append(allocator, A64.store64(.x5, .x15, switch (value.ownership) { .root => root_count_offset, .edge => edge_count_offset }));
-    try immediate(allocator, words, .x11, @as(u64, value.element_width) * Machine.slot_size);
+    try words.append(allocator, A64.store64(.x5, .x15, switch (value.ownership) {
+        .root => root_count_offset,
+        .edge => edge_count_offset,
+    }));
+    try immediate(allocator, words, .x11, stride);
     try words.append(allocator, A64.multiply(.x11, .x12, .x11));
     try words.append(allocator, A64.addSubtractImmediate(.x11, .x11, header_size, true));
     try ensureMinimumAllocation(allocator, words, platform, .x11);
@@ -305,37 +335,37 @@ pub fn emitEdit(
     switch (value.kind) {
         .clear => {},
         .append => {
-            try copyElements(allocator, words, .x13, value.element_width);
+            try copyStoredElements(allocator, words, .x13, value.element_width, compact_float32);
         },
         .prepend => {
-            try immediate(allocator, words, .x11, @as(u64, value.element_width) * Machine.slot_size);
+            try immediate(allocator, words, .x11, stride);
             try words.append(allocator, A64.addRegisters(.x14, .x14, .x11));
-            try copyElements(allocator, words, .x13, value.element_width);
+            try copyStoredElements(allocator, words, .x13, value.element_width, compact_float32);
         },
         .append_sequence => {
-            try copyElements(allocator, words, .x13, value.element_width);
+            try copyStoredElements(allocator, words, .x13, value.element_width, compact_float32);
             if (value.argument_dynamic) {
                 try words.append(allocator, A64.addSubtractImmediate(.x7, .x7, header_size, true));
                 try words.append(allocator, A64.moveRegister(.x10, .x7));
-                try copyElements(allocator, words, .x6, value.element_width);
+                try copyStoredElements(allocator, words, .x6, value.element_width, compact_float32);
             }
         },
         .insert => {
-            try copyElements(allocator, words, .x9, value.element_width);
-            try immediate(allocator, words, .x11, @as(u64, value.element_width) * Machine.slot_size);
+            try copyStoredElements(allocator, words, .x9, value.element_width, compact_float32);
+            try immediate(allocator, words, .x11, stride);
             try words.append(allocator, A64.addRegisters(.x14, .x14, .x11));
             try words.append(allocator, A64.subtractSetFlags(.x13, .x13, .x9));
-            try copyElements(allocator, words, .x13, value.element_width);
+            try copyStoredElements(allocator, words, .x13, value.element_width, compact_float32);
         },
         .take, .take_first, .take_last => {
-            try copyElements(allocator, words, .x9, value.element_width);
-            try immediate(allocator, words, .x11, @as(u64, value.element_width) * Machine.slot_size);
+            try copyStoredElements(allocator, words, .x9, value.element_width, compact_float32);
+            try immediate(allocator, words, .x11, stride);
             try words.append(allocator, A64.addRegisters(.x10, .x10, .x11));
             try words.append(allocator, A64.subtractSetFlags(.x13, .x13, .x9));
             try words.append(allocator, A64.addSubtractImmediate(.x13, .x13, 1, false));
-            try copyElements(allocator, words, .x13, value.element_width);
+            try copyStoredElements(allocator, words, .x13, value.element_width, compact_float32);
         },
-        .reverse => try reverseElements(allocator, words, value.element_width),
+        .reverse => try reverseElements(allocator, words, value.element_width, compact_float32),
     }
     try words.append(allocator, A64.addSubtractImmediate(.zero_or_sp, .zero_or_sp, 48, true));
 
@@ -343,32 +373,38 @@ pub fn emitEdit(
         if (value.kind == .prepend) try immediate(allocator, words, .x9, 0);
         if (value.kind == .append) try words.append(allocator, A64.moveRegister(.x9, .x13));
         try words.append(allocator, A64.addSubtractImmediate(.x14, .x15, header_size, true));
-        try immediate(allocator, words, .x11, @as(u64, value.element_width) * Machine.slot_size);
+        try immediate(allocator, words, .x11, stride);
         try words.append(allocator, A64.multiply(.x9, .x9, .x11));
         try words.append(allocator, A64.addRegisters(.x14, .x14, .x9));
         for (0..value.argument.?.width) |leaf| {
             try words.append(allocator, A64.loadStack(.x12, @intCast(@as(usize, value.argument.?.start) + leaf)));
-            try words.append(allocator, A64.store64(.x12, .x14, @intCast(leaf * Machine.slot_size)));
+            if (compact_float32) {
+                try words.append(allocator, A64.store32Offset(.x12, .x14, @intCast(leaf * 4)));
+            } else try words.append(allocator, A64.store64(.x12, .x14, @intCast(leaf * Machine.slot_size)));
         }
     }
     if (value.kind == .append_sequence and !value.argument_dynamic) {
         try words.append(allocator, A64.addSubtractImmediate(.x14, .x15, header_size, true));
-        try immediate(allocator, words, .x11, @as(u64, value.element_width) * Machine.slot_size);
+        try immediate(allocator, words, .x11, stride);
         try words.append(allocator, A64.multiply(.x9, .x13, .x11));
         try words.append(allocator, A64.addRegisters(.x14, .x14, .x9));
         for (0..value.argument.?.width) |leaf| {
             try words.append(allocator, A64.loadStack(.x12, @intCast(@as(usize, value.argument.?.start) + leaf)));
-            try words.append(allocator, A64.store64(.x12, .x14, @intCast(leaf * Machine.slot_size)));
+            if (compact_float32) {
+                try words.append(allocator, A64.store32Offset(.x12, .x14, @intCast(leaf * 4)));
+            } else try words.append(allocator, A64.store64(.x12, .x14, @intCast(leaf * Machine.slot_size)));
         }
     }
     if (value.removed) |removed| {
         try words.append(allocator, A64.loadStack(.x10, value.collection));
         try words.append(allocator, A64.addSubtractImmediate(.x10, .x10, header_size, true));
-        try immediate(allocator, words, .x11, @as(u64, value.element_width) * Machine.slot_size);
+        try immediate(allocator, words, .x11, stride);
         try words.append(allocator, A64.multiply(.x9, .x9, .x11));
         try words.append(allocator, A64.addRegisters(.x10, .x10, .x9));
         for (0..removed.width) |leaf| {
-            try words.append(allocator, A64.load64(.x12, .x10, @intCast(leaf * Machine.slot_size)));
+            if (compact_float32) {
+                try words.append(allocator, A64.load32Offset(.x12, .x10, @intCast(leaf * 4)));
+            } else try words.append(allocator, A64.load64(.x12, .x10, @intCast(leaf * Machine.slot_size)));
             try words.append(allocator, A64.storeStack(.x12, @intCast(@as(usize, removed.start) + leaf)));
         }
     }
@@ -403,6 +439,8 @@ pub fn emitEdit(
 }
 
 pub fn emitSlice(allocator: Allocator, words: *std.ArrayList(u32), epilogue: *std.ArrayList(Fixups.Local), sites: *std.ArrayList(ExternalCalls.Site), platform: Allocation.Platform, value: Machine.Instruction.CollectionSlice) Error!void {
+    const stride = elementStride(value.element_width, value.element_stride);
+    const compact_float32 = stride == @as(u64, value.element_width) * 4;
     if (value.view) {
         try words.append(allocator, A64.loadStack(.x10, value.collection.start));
         try words.append(allocator, A64.loadStack(.x13, @intCast(@as(usize, value.collection.start) + 1)));
@@ -428,7 +466,7 @@ pub fn emitSlice(allocator: Allocator, words: *std.ArrayList(u32), epilogue: *st
     try words.append(allocator, A64.store64(.x10, .zero_or_sp, 0));
     try words.append(allocator, A64.store64(.x9, .zero_or_sp, 8));
     try words.append(allocator, A64.store64(.x12, .zero_or_sp, 16));
-    try immediate(allocator, words, .x11, @as(u64, value.element_width) * Machine.slot_size);
+    try immediate(allocator, words, .x11, stride);
     try words.append(allocator, A64.multiply(.x1, .x12, .x11));
     try words.append(allocator, A64.addSubtractImmediate(.x1, .x1, header_size, true));
     try allocateWithSize(allocator, words, sites, platform);
@@ -441,15 +479,15 @@ pub fn emitSlice(allocator: Allocator, words: *std.ArrayList(u32), epilogue: *st
     try words.append(allocator, A64.store64(.x13, .x15, 0));
     try immediate(allocator, words, .x11, 1);
     try words.append(allocator, A64.store64(.x11, .x15, root_count_offset));
-    try immediate(allocator, words, .x11, @as(u64, value.element_width) * Machine.slot_size);
+    try immediate(allocator, words, .x11, stride);
     try words.append(allocator, A64.multiply(.x11, .x13, .x11));
     try words.append(allocator, A64.addSubtractImmediate(.x11, .x11, header_size, true));
     try words.append(allocator, A64.store64(.x11, .x15, byte_count_offset));
-    try immediate(allocator, words, .x11, @as(u64, value.element_width) * Machine.slot_size);
+    try immediate(allocator, words, .x11, stride);
     try words.append(allocator, A64.multiply(.x9, .x9, .x11));
     try words.append(allocator, A64.addRegisters(.x10, .x10, .x9));
     try words.append(allocator, A64.addSubtractImmediate(.x14, .x15, header_size, true));
-    try copyElements(allocator, words, .x13, value.element_width);
+    try copyStoredElements(allocator, words, .x13, value.element_width, compact_float32);
     try words.append(allocator, A64.addSubtractImmediate(.zero_or_sp, .zero_or_sp, 32, true));
     try words.append(allocator, A64.storeStack(.x15, value.result));
     const complete = words.items.len;
@@ -505,7 +543,7 @@ pub fn emitView(
     try words.append(allocator, A64.conditionalBranch(.greater_equal));
     try words.append(allocator, A64.subtractSetFlags(.x12, .x8, .x9));
     try Fixups.patch19(words.items, empty, words.items.len);
-    try immediate(allocator, words, .x11, @as(u64, value.element_width) * Machine.slot_size);
+    try immediate(allocator, words, .x11, elementStride(value.element_width, value.element_stride));
     try words.append(allocator, A64.multiply(.x9, .x9, .x11));
     try words.append(allocator, A64.addRegisters(.x10, .x10, .x9));
     try words.append(allocator, A64.storeStack(.x10, value.result.start));
@@ -620,19 +658,49 @@ fn copyElements(allocator: Allocator, words: *std.ArrayList(u32), count: A64.Reg
     try Fixups.patch19(words.items, empty, words.items.len);
 }
 
-fn reverseElements(allocator: Allocator, words: *std.ArrayList(u32), width: u12) Error!void {
-    try immediate(allocator, words, .x11, @as(u64, width) * Machine.slot_size);
+fn copyStoredElements(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    count: A64.Register,
+    width: u12,
+    compact_float32: bool,
+) Error!void {
+    if (!compact_float32) return copyElements(allocator, words, count, width);
+    try immediate(allocator, words, .x11, width);
+    try words.append(allocator, A64.multiply(.x12, count, .x11));
+    const empty = words.items.len;
+    try words.append(allocator, A64.compareBranchZero64(.x12));
+    const loop = words.items.len;
+    try words.append(allocator, A64.load32(.x11, .x10));
+    try words.append(allocator, A64.store32(.x11, .x14));
+    try words.append(allocator, A64.addSubtractImmediate(.x10, .x10, 4, true));
+    try words.append(allocator, A64.addSubtractImmediate(.x14, .x14, 4, true));
+    try words.append(allocator, A64.addSubtractImmediate(.x12, .x12, 1, false));
+    const repeat = words.items.len;
+    try words.append(allocator, A64.compareBranchNonZero64(.x12));
+    try Fixups.patch19(words.items, repeat, loop);
+    try Fixups.patch19(words.items, empty, words.items.len);
+}
+
+fn reverseElements(allocator: Allocator, words: *std.ArrayList(u32), width: u12, compact_float32: bool) Error!void {
+    const stride = @as(u64, width) * if (compact_float32) @as(u64, 4) else Machine.slot_size;
+    try immediate(allocator, words, .x11, stride);
     try words.append(allocator, A64.multiply(.x9, .x13, .x11));
     try words.append(allocator, A64.addRegisters(.x10, .x10, .x9));
     const empty = words.items.len;
     try words.append(allocator, A64.compareBranchZero64(.x13));
     const outer = words.items.len;
-    try words.append(allocator, A64.addSubtractImmediate(.x10, .x10, @intCast(@as(usize, width) * Machine.slot_size), false));
+    try words.append(allocator, A64.addSubtractImmediate(.x10, .x10, @intCast(stride), false));
     for (0..width) |leaf| {
-        try words.append(allocator, A64.load64(.x12, .x10, @intCast(leaf * Machine.slot_size)));
-        try words.append(allocator, A64.store64(.x12, .x14, @intCast(leaf * Machine.slot_size)));
+        if (compact_float32) {
+            try words.append(allocator, A64.load32Offset(.x12, .x10, @intCast(leaf * 4)));
+            try words.append(allocator, A64.store32Offset(.x12, .x14, @intCast(leaf * 4)));
+        } else {
+            try words.append(allocator, A64.load64(.x12, .x10, @intCast(leaf * Machine.slot_size)));
+            try words.append(allocator, A64.store64(.x12, .x14, @intCast(leaf * Machine.slot_size)));
+        }
     }
-    try words.append(allocator, A64.addSubtractImmediate(.x14, .x14, @intCast(@as(usize, width) * Machine.slot_size), true));
+    try words.append(allocator, A64.addSubtractImmediate(.x14, .x14, @intCast(stride), true));
     try words.append(allocator, A64.addSubtractImmediate(.x13, .x13, 1, false));
     const repeat = words.items.len;
     try words.append(allocator, A64.compareBranchNonZero64(.x13));
@@ -646,18 +714,53 @@ pub fn emitLoad(
     data_fixups: *std.ArrayList(Fixups.Data),
     epilogue: *std.ArrayList(Fixups.Local),
     program: Machine.Program,
+    function: Machine.Function,
     value: Machine.Instruction.CollectionLoad,
+    leaf_count: u12,
 ) Error!void {
+    if (!value.checked) {
+        const base = if (value.view)
+            try residentOrLoadedValue(allocator, words, function, .x10, value.collection.start)
+        else base: {
+            try loadValue(allocator, words, function, .x10, value.collection.start);
+            try words.append(allocator, A64.addSubtractImmediate(.x10, .x10, header_size, true));
+            break :base .x10;
+        };
+        const index = try residentOrLoadedValue(allocator, words, function, .x9, value.index);
+        const stride = elementStride(value.result.width, value.element_stride);
+        try emitElementAddress(allocator, words, .x10, base, index, stride);
+        var leaf: usize = 0;
+        if (stride == @as(u64, value.result.width) * 4) {
+            if (allFloatResident(function, value.result)) {
+                leaf = try emitResidentFloatLoads(allocator, words, function, value.result, .x10, 0, leaf_count, stride);
+            } else while (leaf < leaf_count) : (leaf += 1) {
+                const slot: Machine.Slot = @intCast(@as(usize, value.result.start) + leaf);
+                try words.append(allocator, A64.load32Offset(.x12, .x10, @intCast(leaf * 4)));
+                try storeValue(allocator, words, function, .x12, slot);
+            }
+        } else if (allFloatResident(function, value.result)) {
+            leaf = try emitResidentFloatLoads(allocator, words, function, value.result, .x10, 0, leaf_count, stride);
+        } else while (leaf < leaf_count) : (leaf += 1) {
+            try words.append(allocator, A64.load64(.x12, .x10, @intCast(leaf * Machine.slot_size)));
+            try storeValue(allocator, words, function, .x12, @intCast(@as(usize, value.result.start) + leaf));
+        }
+        if (leaf < leaf_count) {
+            try words.append(allocator, A64.load64(.x12, .x10, @intCast(leaf * Machine.slot_size)));
+            try storeValue(allocator, words, function, .x12, @intCast(@as(usize, value.result.start) + leaf));
+        }
+        return;
+    }
     const bounds = if (value.view)
         try boundsView(allocator, words, value.collection, value.index)
     else
         try boundsDynamic(allocator, words, value.collection.start, value.index);
     if (!value.view) try words.append(allocator, A64.addSubtractImmediate(.x10, .x10, header_size, true));
-    try immediate(allocator, words, .x11, @as(u64, value.result.width) * Machine.slot_size);
-    try words.append(allocator, A64.multiply(.x9, .x9, .x11));
-    try words.append(allocator, A64.addRegisters(.x10, .x10, .x9));
+    const stride = elementStride(value.result.width, value.element_stride);
+    try addElementOffset(allocator, words, .x10, .x9, stride);
     for (0..value.result.width) |leaf| {
-        try words.append(allocator, A64.load64(.x12, .x10, @intCast(leaf * Machine.slot_size)));
+        if (stride == @as(u64, value.result.width) * 4) {
+            try words.append(allocator, A64.load32Offset(.x12, .x10, @intCast(leaf * 4)));
+        } else try words.append(allocator, A64.load64(.x12, .x10, @intCast(leaf * Machine.slot_size)));
         try words.append(allocator, A64.storeStack(.x12, @intCast(@as(usize, value.result.start) + leaf)));
     }
     const complete = words.items.len;
@@ -672,6 +775,198 @@ pub fn emitLoad(
     try emitPrintInteger(allocator, words, value.result.start, 2, true);
     try fail(allocator, words, epilogue);
     try Fixups.patch26(words.items, complete, words.items.len);
+}
+
+fn allFloatResident(function: Machine.Function, span: Machine.Span) bool {
+    for (0..span.width) |leaf| {
+        const slot: Machine.Slot = @intCast(@as(usize, span.start) + leaf);
+        const scalar = function.float_register_slots.len != 0 and function.float_register_slots[slot] != null;
+        const lane = function.float_lane_slots.len != 0 and function.float_lane_slots[slot] != null;
+        if (!scalar and !lane) return false;
+    }
+    return true;
+}
+
+pub fn emitDeferredLoad(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    function: Machine.Function,
+    value: Machine.Instruction.CollectionLoad,
+    first_leaf: u12,
+) Error!void {
+    if (value.checked or !value.dynamic or first_leaf >= value.result.width) return error.InvalidMachineProgram;
+    const base = if (value.view)
+        try residentOrLoadedValue(allocator, words, function, .x10, value.collection.start)
+    else base: {
+        try loadValue(allocator, words, function, .x10, value.collection.start);
+        try words.append(allocator, A64.addSubtractImmediate(.x10, .x10, header_size, true));
+        break :base .x10;
+    };
+    const index = try residentOrLoadedValue(allocator, words, function, .x9, value.index);
+    const stride = elementStride(value.result.width, value.element_stride);
+    try emitElementAddress(allocator, words, .x10, base, index, stride);
+    _ = try emitResidentFloatLoads(
+        allocator,
+        words,
+        function,
+        value.result,
+        .x10,
+        first_leaf,
+        value.result.width,
+        stride,
+    );
+}
+
+fn emitResidentFloatLoads(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    function: Machine.Function,
+    span: Machine.Span,
+    base: A64.Register,
+    first_leaf: usize,
+    end_leaf: usize,
+    stride: u64,
+) Allocator.Error!usize {
+    var leaf = first_leaf;
+    if (stride == @as(u64, span.width) * 4) {
+        while (leaf + 1 < end_leaf) {
+            const first_slot: Machine.Slot = @intCast(@as(usize, span.start) + leaf);
+            const second_slot = first_slot + 1;
+            if (function.float_lane_slots.len != 0) if (function.float_lane_slots[first_slot]) |first_lane| {
+                if (function.float_lane_slots[second_slot]) |second_lane| if (first_lane.register == second_lane.register and
+                    first_lane.lane == 0 and second_lane.lane == 1)
+                {
+                    try words.append(allocator, A64.loadVector64(
+                        @enumFromInt(first_lane.register),
+                        base,
+                        @intCast(leaf * 4),
+                    ));
+                    leaf += 2;
+                    continue;
+                };
+            };
+            const first: A64.Register = @enumFromInt(function.float_register_slots[first_slot].?);
+            const second: A64.Register = @enumFromInt(function.float_register_slots[second_slot].?);
+            const byte_offset = leaf * 4;
+            if (first == second or byte_offset > 252) break;
+            try words.append(allocator, A64.loadFloat32Pair(first, second, base, @intCast(byte_offset)));
+            leaf += 2;
+        }
+        while (leaf < end_leaf) : (leaf += 1) {
+            const slot: Machine.Slot = @intCast(@as(usize, span.start) + leaf);
+            const destination: A64.Register = @enumFromInt(function.float_register_slots[slot].?);
+            try words.append(allocator, A64.loadFloat32(destination, base, @intCast(leaf * 4)));
+        }
+        return leaf;
+    }
+    while (leaf + 1 < end_leaf) {
+        const first_slot: Machine.Slot = @intCast(@as(usize, span.start) + leaf);
+        const second_slot: Machine.Slot = first_slot + 1;
+        const first: A64.Register = @enumFromInt(function.float_register_slots[first_slot].?);
+        const second: A64.Register = @enumFromInt(function.float_register_slots[second_slot].?);
+        const byte_offset = leaf * Machine.slot_size;
+        if (first == second or byte_offset > 504) break;
+        try words.append(allocator, A64.loadFloat64Pair(first, second, base, @intCast(byte_offset)));
+        leaf += 2;
+    }
+    while (leaf < end_leaf) : (leaf += 1) {
+        const slot: Machine.Slot = @intCast(@as(usize, span.start) + leaf);
+        const destination: A64.Register = @enumFromInt(function.float_register_slots[slot].?);
+        try words.append(allocator, A64.loadFloat32(destination, base, @intCast(leaf * Machine.slot_size)));
+    }
+    return leaf;
+}
+
+fn addElementOffset(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    base: A64.Register,
+    index: A64.Register,
+    byte_width: u64,
+) Error!void {
+    if (std.math.isPowerOfTwo(byte_width)) {
+        try words.append(allocator, A64.addShiftedRegisters(
+            base,
+            base,
+            index,
+            @intCast(std.math.log2_int(u64, byte_width)),
+        ));
+        return;
+    }
+    try immediate(allocator, words, .x11, byte_width);
+    try words.append(allocator, A64.multiply(.x9, index, .x11));
+    try words.append(allocator, A64.addRegisters(base, base, .x9));
+}
+
+fn emitElementAddress(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    destination: A64.Register,
+    base: A64.Register,
+    index: A64.Register,
+    byte_width: u64,
+) Error!void {
+    if (std.math.isPowerOfTwo(byte_width)) {
+        try words.append(allocator, A64.addShiftedRegisters(
+            destination,
+            base,
+            index,
+            @intCast(std.math.log2_int(u64, byte_width)),
+        ));
+        return;
+    }
+    try immediate(allocator, words, .x11, byte_width);
+    try words.append(allocator, A64.multiply(.x9, index, .x11));
+    try words.append(allocator, A64.addRegisters(destination, base, .x9));
+}
+
+fn residentOrLoadedValue(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    function: Machine.Function,
+    fallback: A64.Register,
+    slot: Machine.Slot,
+) Allocator.Error!A64.Register {
+    if (function.register_slots.len != 0) if (function.register_slots[slot]) |number| {
+        return @enumFromInt(number);
+    };
+    try words.append(allocator, A64.loadStack(fallback, slot));
+    return fallback;
+}
+
+fn loadValue(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    function: Machine.Function,
+    destination: A64.Register,
+    slot: Machine.Slot,
+) Allocator.Error!void {
+    if (function.register_slots.len != 0) if (function.register_slots[slot]) |number| {
+        const source: A64.Register = @enumFromInt(number);
+        if (source != destination) try words.append(allocator, A64.moveRegister(destination, source));
+        return;
+    };
+    try words.append(allocator, A64.loadStack(destination, slot));
+}
+
+fn storeValue(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    function: Machine.Function,
+    source: A64.Register,
+    slot: Machine.Slot,
+) Allocator.Error!void {
+    if (function.float_register_slots.len != 0) if (function.float_register_slots[slot]) |number| {
+        const destination: A64.Register = @enumFromInt(number);
+        try words.append(allocator, A64.moveGeneralToFloat(destination, source, false));
+        return;
+    };
+    if (function.register_slots.len != 0) if (function.register_slots[slot]) |number| {
+        const destination: A64.Register = @enumFromInt(number);
+        if (source != destination) try words.append(allocator, A64.moveRegister(destination, source));
+        return;
+    };
+    try words.append(allocator, A64.storeStack(source, slot));
 }
 
 pub fn emitReference(
@@ -713,17 +1008,21 @@ pub fn emitReplace(
     program: Machine.Program,
     value: Machine.Instruction.CollectionReplace,
 ) Error!void {
+    const stride = elementStride(value.replacement.width, value.element_stride);
+    const compact_float32 = stride == @as(u64, value.replacement.width) * 4;
     const bounds = if (value.view)
         try boundsView(allocator, words, value.collection, value.index)
     else
         try boundsDynamic(allocator, words, value.collection.start, value.index);
     if (value.view) {
-        try immediate(allocator, words, .x11, @as(u64, value.replacement.width) * Machine.slot_size);
+        try immediate(allocator, words, .x11, stride);
         try words.append(allocator, A64.multiply(.x9, .x9, .x11));
         try words.append(allocator, A64.addRegisters(.x10, .x10, .x9));
         for (0..value.replacement.width) |leaf| {
             try words.append(allocator, A64.loadStack(.x12, @intCast(@as(usize, value.replacement.start) + leaf)));
-            try words.append(allocator, A64.store64(.x12, .x10, @intCast(leaf * Machine.slot_size)));
+            if (compact_float32) {
+                try words.append(allocator, A64.store32Offset(.x12, .x10, @intCast(leaf * 4)));
+            } else try words.append(allocator, A64.store64(.x12, .x10, @intCast(leaf * Machine.slot_size)));
         }
         for (0..2) |slot| {
             try words.append(allocator, A64.loadStack(.x12, @intCast(@as(usize, value.collection.start) + slot)));
@@ -747,7 +1046,7 @@ pub fn emitReplace(
     try words.append(allocator, A64.store64(.x10, .zero_or_sp, 0));
     try words.append(allocator, A64.store64(.x13, .zero_or_sp, 8));
     try words.append(allocator, A64.store64(.x9, .zero_or_sp, 16));
-    try immediate(allocator, words, .x11, @as(u64, value.replacement.width) * Machine.slot_size);
+    try immediate(allocator, words, .x11, stride);
     try words.append(allocator, A64.multiply(.x1, .x13, .x11));
     try words.append(allocator, A64.addSubtractImmediate(.x1, .x1, header_size, true));
     try allocateWithSize(allocator, words, sites, platform);
@@ -759,35 +1058,47 @@ pub fn emitReplace(
     try words.append(allocator, A64.load64(.x9, .zero_or_sp, 16));
     try words.append(allocator, A64.store64(.x13, .x15, 0));
     try immediate(allocator, words, .x11, 1);
-    try words.append(allocator, A64.store64(.x11, .x15, switch (value.ownership) { .root => root_count_offset, .edge => edge_count_offset }));
-    try immediate(allocator, words, .x11, @as(u64, value.replacement.width) * Machine.slot_size);
+    try words.append(allocator, A64.store64(.x11, .x15, switch (value.ownership) {
+        .root => root_count_offset,
+        .edge => edge_count_offset,
+    }));
+    try immediate(allocator, words, .x11, stride);
     try words.append(allocator, A64.multiply(.x11, .x13, .x11));
     try words.append(allocator, A64.addSubtractImmediate(.x11, .x11, header_size, true));
     try words.append(allocator, A64.store64(.x11, .x15, byte_count_offset));
     try words.append(allocator, A64.addSubtractImmediate(.x10, .x10, header_size, true));
     try words.append(allocator, A64.addSubtractImmediate(.x14, .x15, header_size, true));
-    try immediate(allocator, words, .x11, value.replacement.width);
+    try immediate(allocator, words, .x11, if (compact_float32) @as(u64, value.replacement.width) else value.replacement.width);
     try words.append(allocator, A64.multiply(.x12, .x13, .x11));
     const copy_done = words.items.len;
     try words.append(allocator, A64.compareBranchZero64(.x12));
     const copy_loop = words.items.len;
-    try words.append(allocator, A64.load64(.x11, .x10, 0));
-    try words.append(allocator, A64.store64(.x11, .x14, 0));
-    try words.append(allocator, A64.addSubtractImmediate(.x10, .x10, 8, true));
-    try words.append(allocator, A64.addSubtractImmediate(.x14, .x14, 8, true));
+    if (compact_float32) {
+        try words.append(allocator, A64.load32(.x11, .x10));
+        try words.append(allocator, A64.store32(.x11, .x14));
+        try words.append(allocator, A64.addSubtractImmediate(.x10, .x10, 4, true));
+        try words.append(allocator, A64.addSubtractImmediate(.x14, .x14, 4, true));
+    } else {
+        try words.append(allocator, A64.load64(.x11, .x10, 0));
+        try words.append(allocator, A64.store64(.x11, .x14, 0));
+        try words.append(allocator, A64.addSubtractImmediate(.x10, .x10, 8, true));
+        try words.append(allocator, A64.addSubtractImmediate(.x14, .x14, 8, true));
+    }
     try words.append(allocator, A64.addSubtractImmediate(.x12, .x12, 1, false));
     const repeat = words.items.len;
     try words.append(allocator, A64.compareBranchNonZero64(.x12));
     try Fixups.patch19(words.items, repeat, copy_loop);
     try Fixups.patch19(words.items, copy_done, words.items.len);
     try words.append(allocator, A64.addSubtractImmediate(.x14, .x15, header_size, true));
-    try immediate(allocator, words, .x11, @as(u64, value.replacement.width) * Machine.slot_size);
+    try immediate(allocator, words, .x11, stride);
     try words.append(allocator, A64.multiply(.x9, .x9, .x11));
     try words.append(allocator, A64.addRegisters(.x14, .x14, .x9));
     try words.append(allocator, A64.addSubtractImmediate(.zero_or_sp, .zero_or_sp, 32, true));
     for (0..value.replacement.width) |leaf| {
         try words.append(allocator, A64.loadStack(.x12, @intCast(@as(usize, value.replacement.start) + leaf)));
-        try words.append(allocator, A64.store64(.x12, .x14, @intCast(leaf * Machine.slot_size)));
+        if (compact_float32) {
+            try words.append(allocator, A64.store32Offset(.x12, .x14, @intCast(leaf * 4)));
+        } else try words.append(allocator, A64.store64(.x12, .x14, @intCast(leaf * Machine.slot_size)));
     }
     try words.append(allocator, A64.storeStack(.x15, value.result.start));
     try emitDropSlot(allocator, words, sites, platform, value.collection.start, value.ownership);

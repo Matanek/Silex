@@ -81,7 +81,7 @@ pub const PackageResult = union(enum) {
 pub fn parseRun(args: []const []const u8) RunResult {
     var source_path: ?[]const u8 = null;
     var emit_ir = false;
-    var mode: Mode = .debug;
+    var mode: Mode = .release;
     var explicit_mode: ?Mode = null;
     var cache = true;
 
@@ -146,7 +146,7 @@ pub fn parseInterpret(args: []const []const u8) InterpretResult {
 pub fn parseCompile(args: []const []const u8) CompileResult {
     var source_path: ?[]const u8 = null;
     var output_path: ?[]const u8 = null;
-    var mode: Mode = .debug;
+    var mode: Mode = .release;
     var explicit_mode: ?Mode = null;
     var cache = true;
     var target: ?TargetModule.Target = null;
@@ -320,8 +320,8 @@ test "compile accepts recognized targets and diagnoses invalid selections" {
     );
 }
 
-test "compile defaults to debug and accepts a repeated identical mode" {
-    try std.testing.expectEqual(Mode.debug, parseCompile(&.{ "Main.sx", "-o", "Application" }).options.mode);
+test "compile defaults to release and accepts a repeated identical mode" {
+    try std.testing.expectEqual(Mode.release, parseCompile(&.{ "Main.sx", "-o", "Application" }).options.mode);
     try std.testing.expectEqual(
         Mode.release,
         parseCompile(&.{ "-r", "Main.sx", "--release", "--output", "Application" }).options.mode,
@@ -342,6 +342,7 @@ test "compile diagnoses missing duplicate and unexpected arguments" {
 }
 
 test "run accepts native modes and emit ir but owns its output" {
+    try std.testing.expectEqual(Mode.release, parseRun(&.{"Main.sx"}).options.mode);
     const options = parseRun(&.{ "--emit-ir", "--release", "Main.sx" }).options;
     try std.testing.expect(options.emit_ir);
     try std.testing.expectEqual(Mode.release, options.mode);

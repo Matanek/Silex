@@ -10,6 +10,11 @@ struct FloatTransform {
     let callback:func(float64) float64
 }
 
+struct Float32Point {
+    var x:float
+    var y:float
+}
+
 func float_value(value:float64) float64 { return value }
 func float_read(value:@float64) float64 { return value }
 func float_write(value:&float64) { value += 0.5 }
@@ -36,4 +41,35 @@ test "float collection and callback positions" {
     let half = func(value:float64) float64 { return value / 2.0 }
     let transform = FloatTransform(callback:half)
     if float_apply(5.0, transform.callback) != 2.5 { panic("float callback field") }
+}
+
+test "float32 aggregate lists preserve append replacement and removal" {
+    var points:Float32Point[] = []
+    points.append(Float32Point(x:1.0, y:2.0))
+    points.append(Float32Point(x:3.0, y:4.0))
+    points[0] = Float32Point(x:5.0, y:6.0)
+    let removed = points.take_last()
+
+    if points.count() != 1 || points[0].x != 5.0 || points[0].y != 6.0 {
+        panic("float32 aggregate list mutation")
+    }
+    if removed.x != 3.0 || removed.y != 4.0 {
+        panic("float32 aggregate list removal")
+    }
+}
+
+test "float32 aggregate slices preserve compact values and independence" {
+    var points:Float32Point[] = [
+        Float32Point(x:1.0, y:2.0),
+        Float32Point(x:3.0, y:4.0),
+        Float32Point(x:5.0, y:6.0)
+    ]
+    let copied = points[0:points.count()]
+    points[1] = Float32Point(x:30.0, y:40.0)
+
+    var total = 0.0
+    for point in copied { total += point.x + point.y }
+    if copied.count() != 3 || total != 21.0 {
+        panic("float32 aggregate slice layout or independence")
+    }
 }

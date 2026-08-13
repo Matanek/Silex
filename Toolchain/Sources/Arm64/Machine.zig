@@ -12,6 +12,16 @@ pub const slot_size = 8;
 
 pub const FunctionId = usize;
 pub const Slot = u12;
+pub const FloatLaneResidence = struct { register: u5, lane: u1, partner: Slot };
+/// Target-independent lane affinity produced from portable IR. A backend may
+/// select any profitable subset and may keep every lane scalar.
+pub const FloatLaneGroup = struct {
+    slots: [4]Slot,
+    width: u3,
+    priority: u16,
+    recurrence: bool,
+    in_loop: bool,
+};
 pub const Span = struct {
     start: Slot,
     width: u12,
@@ -293,6 +303,7 @@ pub const Instruction = union(enum) {
         result: Slot,
         values: []const Span,
         element_width: u12,
+        element_stride: u12 = 0,
     };
 
     pub const EnumInit = struct {
@@ -317,6 +328,8 @@ pub const Instruction = union(enum) {
         count: u32,
         dynamic: bool = false,
         view: bool = false,
+        checked: bool = true,
+        element_stride: u12 = 0,
         header: usize,
         tail: usize,
     };
@@ -343,6 +356,7 @@ pub const Instruction = union(enum) {
         count: u32,
         dynamic: bool = false,
         view: bool = false,
+        element_stride: u12 = 0,
         header: usize,
         tail: usize,
     };
@@ -365,6 +379,7 @@ pub const Instruction = union(enum) {
         argument_count: u32 = 0,
         removed: ?Span,
         element_width: u12,
+        element_stride: u12 = 0,
         header: usize,
         tail: usize,
     };
@@ -378,6 +393,7 @@ pub const Instruction = union(enum) {
         dynamic: bool,
         view: bool = false,
         element_width: u12,
+        element_stride: u12 = 0,
     };
 
     pub const CollectionView = struct {
@@ -390,6 +406,7 @@ pub const Instruction = union(enum) {
         dynamic: bool,
         source_view: bool,
         element_width: u12,
+        element_stride: u12 = 0,
     };
 
     pub const AggregateEqual = struct {
@@ -450,6 +467,7 @@ pub const Instruction = union(enum) {
         left: Slot,
         right: Slot,
         type: Types.Type = .int,
+        checked: bool = true,
     };
 
     pub const StringByteAt = struct {
@@ -541,6 +559,14 @@ pub const Function = struct {
     /// Release-only residence map indexed by virtual slot. Null keeps the
     /// value in its deterministic stack slot.
     register_slots: []const ?u5 = &.{},
+    /// Release-only SIMD residence map for floating-point virtual slots.
+    float_register_slots: []const ?u5 = &.{},
+    /// Release-only SLP residence map. Two float32 slots may share the low
+    /// two lanes of one NEON register when their data flow is isomorphic.
+    float_lane_slots: []const ?FloatLaneResidence = &.{},
+    /// Portable SLP candidates. Widths 2, 3, and 4 deliberately describe
+    /// scalar affinity rather than a NEON/SSE register shape.
+    float_lane_groups: []const FloatLaneGroup = &.{},
     instructions: []const Instruction,
 };
 
@@ -594,12 +620,15 @@ pub fn slotOffset(slot: Slot) u16 {
 pub fn validate(program: Program) Error!void {
     for (program.functions) |function| {
         if (function.parameter_count > max_register_arguments) return error.TooManyArguments;
-        if (function.register_slots.len == 0) {
+        if (function.register_slots.len == 0 and function.float_register_slots.len == 0) {
             if (function.frame_size != try frameSize(function.slot_count)) return error.InvalidMachineProgram;
         } else if (function.frame_size > try frameSize(function.slot_count) or function.frame_size % 16 != 0) {
             return error.InvalidMachineProgram;
         }
         if (function.register_slots.len != 0 and function.register_slots.len != function.slot_count) {
+            return error.InvalidMachineProgram;
+        }
+        if (function.float_register_slots.len != 0 and function.float_register_slots.len != function.slot_count) {
             return error.InvalidMachineProgram;
         }
         for (function.instructions) |instruction| {
