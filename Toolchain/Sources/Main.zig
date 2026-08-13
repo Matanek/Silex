@@ -812,10 +812,7 @@ fn compileNativeOptions(
             return 1;
         },
     };
-    const lower_mode: Lower.Mode = switch (options.mode) {
-        .debug => .debug,
-        .release => .release,
-    };
+    const lower_mode = lowerModeForTarget(options.mode, target);
     const machine = (if (options.cache)
         Lower.lowerCachedWithBoundaries(allocator, init.io, native_ir, boundaries, lower_mode)
     else
@@ -1298,6 +1295,20 @@ fn configureShaderCompiler(
     const root = try globalToolchainRoot(allocator, environment) orelse return;
     const host = TargetModule.Target.host() orelse return;
     compiler.shadercross_path = try ToolchainSetup.executablePath(allocator, root, host);
+}
+
+fn lowerModeForTarget(mode: Cli.Mode, target: TargetModule.Target) Lower.Mode {
+    if (mode == .release and target.eql(.macos_arm64)) return .release;
+    // X64 keeps the optimized portable IR but uses stack slots until its
+    // native register allocator can consume release machine functions.
+    return .debug;
+}
+
+test "select release register allocation only for its supported target" {
+    try std.testing.expectEqual(Lower.Mode.release, lowerModeForTarget(.release, .macos_arm64));
+    try std.testing.expectEqual(Lower.Mode.debug, lowerModeForTarget(.release, .linux_x64));
+    try std.testing.expectEqual(Lower.Mode.debug, lowerModeForTarget(.release, .windows_x64));
+    try std.testing.expectEqual(Lower.Mode.debug, lowerModeForTarget(.debug, .macos_arm64));
 }
 
 test "run owns a stable mode-specific artifact below .silex" {
