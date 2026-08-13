@@ -556,7 +556,10 @@ fn queryAt(
     );
     if (current_program) |program| {
         if (findUseByAlias(program, receiver)) |use| {
-            if (findProvider(project.index, use.path) == null and declarationTarget(project.index, use.path) != null) {
+            if (findProvider(project.index, use.path) == null and
+                !project.index.isNamespace(use.path) and
+                declarationTarget(project.index, use.path) != null)
+            {
                 return .{ .imported_member = .{
                     .type_path = use.path,
                     .prefix = prefix,
@@ -3269,6 +3272,28 @@ test "complete a module facade together with its child namespace" {
     try std.testing.expectEqual(@as(usize, 1), labelCount(items, "Vec3"));
     const vec3 = items[labelIndex(items, "Vec3").?];
     try std.testing.expectEqual(@as(u8, 3), vec3.kind);
+
+    const imported_namespace_source =
+        \\use STD.Math
+        \\func main() {
+        \\    var value = Randomizer()
+        \\        ..seed(Math.)
+        \\}
+    ;
+    const imported_namespace_cursor = std.mem.indexOf(u8, imported_namespace_source, "Math.)").? +
+        "Math.".len;
+    const imported_namespace_items = (try itemsAt(
+        allocator,
+        std.testing.io,
+        null,
+        root_uri,
+        uri,
+        &.{},
+        imported_namespace_source,
+        imported_namespace_cursor,
+    )).?;
+    try std.testing.expect(hasLabel(imported_namespace_items, "Point"));
+    try std.testing.expect(hasLabel(imported_namespace_items, "Vec3"));
 
     const root_source = "func main() { STD. }";
     const root_cursor = std.mem.indexOf(u8, root_source, "STD. }").? + "STD.".len;
