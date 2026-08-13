@@ -379,8 +379,7 @@ pub const Client = struct {
             if (!validRepository(repository)) {
                 return self.failFmt("release '{s}@{s}' has an invalid repository identity", .{ package.name, version_text });
             }
-            const prefix = try std.fmt.allocPrint(self.allocator, "https://github.com/{s}/releases/download/", .{repository});
-            if (!std.mem.startsWith(u8, raw.archive.url, prefix)) {
+            if (!archiveBelongsToRepository(raw.archive.url, repository)) {
                 return self.failFmt("release '{s}@{s}' archive does not belong to its repository", .{ package.name, version_text });
             }
         }
@@ -526,6 +525,35 @@ fn validRepository(repository: []const u8) bool {
     if (slash == 0 or slash + 1 == repository.len or std.mem.indexOfScalarPos(u8, repository, slash + 1, '/') != null) return false;
     for (repository) |character| if (!std.ascii.isAlphanumeric(character) and character != '-' and character != '_' and character != '.' and character != '/') return false;
     return true;
+}
+
+fn archiveBelongsToRepository(url: []const u8, repository: []const u8) bool {
+    var buffer: [512]u8 = undefined;
+    const legacy = std.fmt.bufPrint(&buffer, "https://github.com/{s}/releases/download/", .{repository}) catch return false;
+    if (std.mem.startsWith(u8, url, legacy)) return true;
+    const git_prefix = std.fmt.bufPrint(&buffer, "https://raw.githubusercontent.com/{s}/", .{repository}) catch return false;
+    if (!std.mem.startsWith(u8, url, git_prefix)) return false;
+    const path = url[git_prefix.len..];
+    const slash = std.mem.indexOfScalar(u8, path, '/') orelse return false;
+    const commit = path[0..slash];
+    if (commit.len != 40 and commit.len != 64) return false;
+    for (commit) |character| if (!std.ascii.isHex(character)) return false;
+    return slash + 1 < path.len;
+}
+
+test "bind legacy and Git-native release archives to their repository" {
+    try std.testing.expect(archiveBelongsToRepository(
+        "https://github.com/Matanek/GFX/releases/download/v1.0.0/GFX.tar.gz",
+        "Matanek/GFX",
+    ));
+    try std.testing.expect(archiveBelongsToRepository(
+        "https://raw.githubusercontent.com/Matanek/GFX/0123456789abcdef0123456789abcdef01234567/GFX.tar.gz",
+        "Matanek/GFX",
+    ));
+    try std.testing.expect(!archiveBelongsToRepository(
+        "https://raw.githubusercontent.com/Other/GFX/0123456789abcdef0123456789abcdef01234567/GFX.tar.gz",
+        "Matanek/GFX",
+    ));
 }
 
 fn equalStrings(left: []const []const u8, right: []const []const u8) bool {

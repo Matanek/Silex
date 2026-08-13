@@ -25,6 +25,7 @@ const Project = @import("Project.zig");
 const Packages = @import("Packages.zig");
 const PackageRegistry = @import("PackageRegistry.zig");
 const PackagePublish = @import("PackagePublish.zig");
+const GitHubPublish = @import("GitHubPublish.zig");
 const PackageStore = @import("PackageStore.zig");
 const NativeTestRunner = @import("NativeTestRunner.zig");
 const TestDiscovery = @import("TestDiscovery.zig");
@@ -71,6 +72,7 @@ test {
     _ = PackageStore;
     _ = PackageRegistry;
     _ = PackagePublish;
+    _ = GitHubPublish;
     _ = SelfUpdate;
 }
 
@@ -163,18 +165,45 @@ fn publishPackage(init: std.process.Init, allocator: std.mem.Allocator, args: []
             return 1;
         },
     };
-    const registry_root = init.environ_map.get("SILEX_REGISTRY_SOURCE") orelse "Silex-Registry";
+    const explicit_registry = init.environ_map.get("SILEX_REGISTRY_SOURCE");
+    const registry_root = explicit_registry orelse (try globalRegistryRoot(allocator, init.environ_map) orelse {
+        std.debug.print("silex: cannot publish package: cannot locate the user home directory\n", .{});
+        return 1;
+    });
     var publisher = PackagePublish.Publisher.init(allocator, init.gpa, init.io);
-    const result = publisher.prepare(options.package, registry_root) catch |err| switch (err) {
+    const result = if (explicit_registry != null)
+        publisher.prepare(options.package, registry_root)
+    else
+        publisher.prepareManaged(options.package, registry_root);
+    const prepared = result catch |err| switch (err) {
         error.InvalidPublication, error.InvalidPackageGraph => {
             std.debug.print("silex: cannot publish package: {s}\n", .{publisher.diagnostic orelse "invalid publication"});
             return 1;
         },
         else => return err,
     };
+    if (explicit_registry != null) {
+        std.debug.print(
+            "silex: prepared {s}@{d}.{d}.{d} for registry review in {s}\n",
+            .{ prepared.name, prepared.version.major, prepared.version.minor, prepared.version.patch, prepared.manifest_path },
+        );
+        return 0;
+    }
+    const authorization_path = try globalGitHubAuthorizationPath(allocator, init.environ_map) orelse {
+        std.debug.print("silex: cannot publish package: cannot locate the user home directory\n", .{});
+        return 1;
+    };
+    var github = GitHubPublish.Publisher.init(allocator, init.gpa, init.io);
+    const submitted = github.submit(registry_root, authorization_path, prepared, init.environ_map) catch |err| switch (err) {
+        error.InvalidPublication => {
+            std.debug.print("silex: cannot publish package: {s}\n", .{github.diagnostic orelse "GitHub publication failed"});
+            return 1;
+        },
+        else => return err,
+    };
     std.debug.print(
-        "silex: prepared {s}@{d}.{d}.{d} for registry review in {s}\n",
-        .{ result.name, result.version.major, result.version.minor, result.version.patch, result.manifest_path },
+        "silex: published {s}@{d}.{d}.{d} for registry review at {s}\n",
+        .{ prepared.name, prepared.version.major, prepared.version.minor, prepared.version.patch, submitted.pull_request_url },
     );
     return 0;
 }
@@ -1271,6 +1300,22 @@ fn globalToolchainRoot(
 ) !?[]const u8 {
     const home = environment.get("HOME") orelse environment.get("USERPROFILE") orelse return null;
     return try std.fs.path.join(allocator, &.{ home, ".silex", "toolchain" });
+}
+
+fn globalRegistryRoot(
+    allocator: std.mem.Allocator,
+    environment: *const std.process.Environ.Map,
+) !?[]const u8 {
+    const home = environment.get("HOME") orelse environment.get("USERPROFILE") orelse return null;
+    return try std.fs.path.join(allocator, &.{ home, ".silex", "registry" });
+}
+
+fn globalGitHubAuthorizationPath(
+    allocator: std.mem.Allocator,
+    environment: *const std.process.Environ.Map,
+) !?[]const u8 {
+    const home = environment.get("HOME") orelse environment.get("USERPROFILE") orelse return null;
+    return try std.fs.path.join(allocator, &.{ home, ".silex", "auth", "github.json" });
 }
 
 fn nativeLinkerPath(
