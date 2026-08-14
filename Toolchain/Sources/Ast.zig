@@ -559,6 +559,7 @@ pub const Function = struct {
 
 pub const FunctionIntrinsic = union(enum) {
     resource_insert: usize,
+    resource_discard,
     resource_has: usize,
     resource_get: usize,
     resource_get_mut: usize,
@@ -574,6 +575,8 @@ pub const FunctionIntrinsic = union(enum) {
 pub const SystemAdapter = struct {
     target: []const u8,
     target_position: Source.Position,
+    receiver: ?SystemDependency = null,
+    receiver_type: ?Type = null,
     dependencies: []const SystemDependency,
     mode: Mode = .direct,
 

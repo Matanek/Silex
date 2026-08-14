@@ -39,8 +39,9 @@ pub fn analyze(self: anytype, function: Ast.Function, adapter: Ast.SystemAdapter
                 return err;
             };
             const target = targetFunction(self.program, adapter) orelse return error.InvalidSource;
+            const result = try targetCallResult(self, &builder, adapter);
             try self.emit(&builder, .{ .call = .{
-                .result = null,
+                .result = result,
                 .function = target,
                 .arguments = arguments,
             } });
@@ -55,6 +56,30 @@ pub fn analyze(self: anytype, function: Ast.Function, adapter: Ast.SystemAdapter
     return finishFunction(self, function, &builder);
 }
 
+fn targetCallResult(self: anytype, builder: anytype, adapter: Ast.SystemAdapter) !?Ir.ValueId {
+    const receiver_type = adapter.receiver_type orelse return null;
+    const owner = receiver_type.structureIndex() orelse return error.InvalidSource;
+    if (owner >= self.program.structures.len) return error.InvalidSource;
+    const requested = if (std.mem.lastIndexOfScalar(u8, adapter.target, '.')) |dot|
+        adapter.target[dot + 1 ..]
+    else
+        adapter.target;
+    for (self.program.structures[owner].methods, 0..) |method, method_index| {
+        if (method.is_static or !std.mem.eql(u8, method.name, requested)) continue;
+        const flat = flatMethodIndex(self.program, owner, method_index);
+        if (flat < self.method_mutability.len and self.method_mutability[flat]) {
+            return try self.newValue(builder, receiver_type);
+        }
+    }
+    return null;
+}
+
+fn flatMethodIndex(program: Ast.Program, structure_index: usize, method_index: usize) usize {
+    var result: usize = 0;
+    for (program.structures[0..structure_index]) |structure| result += structure.methods.len;
+    return result + method_index;
+}
+
 fn injectDependencies(
     self: anytype,
     builder: anytype,
@@ -64,6 +89,18 @@ fn injectDependencies(
     writer_local: *?Ir.LocalId,
 ) ![]const Ir.ValueId {
     var arguments: std.ArrayList(Ir.ValueId) = .empty;
+    if (adapter.receiver) |receiver| {
+        const current = try loadLocal(self, builder, resources_local, .structure(resources));
+        try requireDependency(self, builder, adapter.target, adapter.target_position, receiver, resources, current);
+        const getter = methodIndex(self.program.structures[resources], receiver.get_method) orelse return error.InvalidSource;
+        const value = try self.newValue(builder, receiver.type);
+        try self.emit(builder, .{ .call = .{
+            .result = value,
+            .function = methodFunctionId(self.program, resources, getter),
+            .arguments = try self.allocator.dupe(Ir.ValueId, &.{current}),
+        } });
+        try arguments.append(self.allocator, value);
+    }
     for (adapter.dependencies) |dependency| {
         if (isCommands(self, dependency)) {
             const parent_address = switch (adapter.mode) {
@@ -361,6 +398,25 @@ fn methodFunctionId(program: Ast.Program, structure_index: usize, method_index: 
 }
 
 fn targetFunction(program: Ast.Program, adapter: Ast.SystemAdapter) ?Ir.FunctionId {
+    if (adapter.receiver_type) |receiver_type| {
+        const owner = receiver_type.structureIndex() orelse return null;
+        if (owner >= program.structures.len) return null;
+        const requested = if (std.mem.lastIndexOfScalar(u8, adapter.target, '.')) |dot|
+            adapter.target[dot + 1 ..]
+        else
+            adapter.target;
+        for (program.structures[owner].methods, 0..) |method, method_index| {
+            if (method.is_static or !std.mem.eql(u8, method.name, requested)) continue;
+            if (method.return_type != .void or method.parameters.len != adapter.dependencies.len) continue;
+            var matches = true;
+            for (method.parameters, adapter.dependencies) |parameter, dependency| if (parameter.type != dependency.type or parameter.mode != dependency.mode) {
+                matches = false;
+                break;
+            };
+            if (matches) return methodFunctionId(program, owner, method_index);
+        }
+        return null;
+    }
     for (program.functions, 0..) |function, index| {
         if (!functionNameMatches(function.name, adapter.target)) continue;
         if (function.return_type != .void or function.parameters.len != adapter.dependencies.len) continue;

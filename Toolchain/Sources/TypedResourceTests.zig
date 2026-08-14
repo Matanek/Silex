@@ -2,10 +2,12 @@ const std = @import("std");
 const Project = @import("Project.zig");
 const Interpreter = @import("Interpreter.zig");
 const Ir = @import("Ir.zig");
+const Lower = @import("Arm64/Lower.zig");
 
 const resources_source =
     \\public intrinsic class Resources {
     \\    public func insert<T>(value:T)
+    \\    internal func retain_class<T>(value:T)
     \\    public func has<T>() bool
     \\    public func get<T>() @T
     \\    public func get_mut<T>() &T
@@ -58,6 +60,7 @@ test "typed resources require the exact compiler-provided intrinsic contract" {
         .data =
         \\public intrinsic class Resources {
         \\    public func insert<T>(value:T) { panic("placeholder") }
+        \\    internal func retain_class<T>(value:T)
         \\    public func has<T>() bool
         \\    public func get<T>() @T
         \\    public func get_mut<T>() &T
@@ -284,6 +287,80 @@ test "systems inject read and mutable resources while preserving legacy callback
     const result = try Interpreter.runCapture(allocator, compilation.ir);
     try std.testing.expectEqual(@as(u8, 0), result.exit_code);
     try std.testing.expectEqualStrings("4\nempty\ntrue\n42\n", result.stdout);
+}
+
+test "class instance methods register as stateful system callbacks" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try prepare(&temporary);
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Smokes/Main.sx",
+        .data =
+        \\use GFX.Application
+        \\struct Counter { var value:int }
+        \\class Game {
+        \\    var updates:int
+        \\    public init() { self.updates = 0 }
+        \\    public func build(application:Application) {
+        \\        application.add_system(0, Game.update)
+        \\    }
+        \\    func update(counter:&Counter) {
+        \\        self.updates++
+        \\        counter.value += 2
+        \\    }
+        \\    public func update_count() int { return self.updates }
+        \\}
+        \\func main() {
+        \\    var application = Application()
+        \\    var game = Game()
+        \\    var resources = application.resources()
+        \\    resources.insert(game)
+        \\    resources.insert(Counter(value:40))
+        \\    game.build(application)
+        \\    let counter:@Counter = resources.get<Counter>()
+        \\    print(game.update_count(), ":", counter.value)
+        \\}
+        ,
+    });
+
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(try inputPath(allocator, temporary));
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqual(@as(u8, 0), result.exit_code);
+    try std.testing.expectEqualStrings("1:42\n", result.stdout);
+    _ = try Lower.lower(allocator, compilation.ir);
+}
+
+test "instance system methods require class identity" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try prepare(&temporary);
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Smokes/Main.sx",
+        .data =
+        \\use GFX.Application
+        \\struct Game {
+        \\    func update() {}
+        \\}
+        \\func main() {
+        \\    var application = Application()
+        \\    application.add_system(0, Game.update)
+        \\}
+        ,
+    });
+
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    try std.testing.expectError(error.InvalidSource, compiler.compile(try inputPath(allocator, temporary)));
+    try std.testing.expectEqualStrings(
+        "instance system methods require a class receiver",
+        compiler.diagnostic.?.message,
+    );
 }
 
 test "structure methods register system callbacks declared later in their module" {

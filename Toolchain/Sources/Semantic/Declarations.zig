@@ -65,7 +65,9 @@ pub fn prepareStructures(self: anytype) ![]const Ir.Structure {
     for (structures, 0..) |structure, index| if (structure.is_class and !structure.is_protocol) {
         try validateInheritance(self, index, inheritance_states);
     };
-    for (self.program.structures) |structure| if (!structure.is_protocol) for (structure.fields) |field| {
+    for (self.program.structures, 0..) |structure, structure_index| if (!structure.is_protocol and
+        !isAccessPattern(self.program, .structure(structure_index))) for (structure.fields) |field|
+    {
         try Resources.validateStoredType(self, field.type, field.position, "in a structure field");
         if (!field.mutable and Resources.containsClass(self, field.type)) {
             return self.fail(field.name_position, "a field that can reach a class reference must use 'var'");

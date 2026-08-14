@@ -41,6 +41,11 @@ pub fn intrinsicForSpecialization(
     position: Source.Position,
 ) !?Ast.FunctionIntrinsic {
     if (!isResources(self, structure_type) or arguments.len != 1) return null;
+    if (std.mem.eql(u8, method_name, "retain_class")) {
+        const resource = self.structureForType(arguments[0]) orelse return .resource_discard;
+        if (!resource.is_class) return .resource_discard;
+        return .{ .resource_insert = try ensureSlot(self, structure_type, arguments[0], position) };
+    }
     const slot = try ensureSlot(self, structure_type, arguments[0], position);
     if (std.mem.eql(u8, method_name, "insert")) return .{ .resource_insert = slot };
     if (std.mem.eql(u8, method_name, "has")) return .{ .resource_has = slot };
@@ -68,18 +73,21 @@ pub fn prepareConcreteStorage(self: anytype) !void {
 }
 
 fn validateStoreContract(self: anytype, structure: Ast.Structure) !void {
+    const application_resources = std.mem.eql(u8, structure.name, canonical_name);
+    const expected_methods: usize = if (application_resources) 9 else 8;
     if (!structure.is_class or
-        (std.mem.eql(u8, structure.name, canonical_name) and !structure.is_public) or
-        structure.type_parameters.len != 0 or structure.methods.len != 8)
+        (application_resources and !structure.is_public) or
+        structure.type_parameters.len != 0 or structure.methods.len != expected_methods)
     {
         return invalidContract(self, structure.name, structure.name_position);
     }
     for (structure.methods) |method| {
-        if (!method.is_public or method.is_static or !method.is_intrinsic_declaration) {
+        const retain_class = application_resources and std.mem.eql(u8, method.name, "retain_class");
+        if ((!method.is_public and !retain_class) or method.is_static or !method.is_intrinsic_declaration) {
             return invalidContract(self, structure.name, method.name_position);
         }
         const generic = Ast.Type.genericParameter(0);
-        const valid = if (std.mem.eql(u8, method.name, "insert"))
+        const valid = if (std.mem.eql(u8, method.name, "insert") or retain_class)
             method.type_parameters.len == 1 and method.parameters.len == 1 and method.parameters[0].type == generic and
                 method.parameters[0].mode == .value and method.return_type == .void and method.return_mode == .value
         else if (std.mem.eql(u8, method.name, "has"))

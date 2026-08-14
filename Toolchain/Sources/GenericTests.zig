@@ -158,6 +158,18 @@ test "parse borrowed tuple patterns as generic type arguments" {
     try std.testing.expectEqual(Ast.Parameter.Mode.mutable, pattern.fields[1].access_mode);
 }
 
+test "borrowed tuple patterns accept class components without storing them" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var frontend = Frontend.Frontend.init(arena.allocator());
+    _ = try frontend.compile(
+        \\class Actor { public func update() {} }
+        \\struct Query<Pattern> {}
+        \\func visit(query:Query<(@Actor, &Actor)>) {}
+        \\func main() {}
+    );
+}
+
 test "borrowed tuple patterns cannot escape generic arguments as runtime values" {
     try expectCompileError(
         "func visit(value:(@int, &int)) {} func main() {}",

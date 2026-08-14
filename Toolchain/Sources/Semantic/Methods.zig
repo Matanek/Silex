@@ -1335,7 +1335,7 @@ fn intrinsicMutates(intrinsic: ?Ast.FunctionIntrinsic) bool {
     const value = intrinsic orelse return false;
     return switch (value) {
         .resource_insert, .resource_get_mut, .resource_try_get_mut, .resource_remove, .resource_clear, .component_get_mut, .world_component_get_mut => true,
-        .resource_has, .resource_get, .resource_try_get, .system_adapter => false,
+        .resource_discard, .resource_has, .resource_get, .resource_try_get, .system_adapter => false,
     };
 }
 

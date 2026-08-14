@@ -19,9 +19,13 @@ pub fn rewriteRegistration(self: anytype, call: *Ast.Expression.Call, locals: an
     if (!std.mem.eql(u8, receiver.name, application_name)) return false;
 
     const callback = call.arguments[1];
+    const target_name = try systemTargetName(self.allocator, callback) orelse null;
+    const instance_method = if (target_name) |name| findInstanceSystemMethod(self, name) else null;
     var callback_type: ?Ast.Type = null;
-    if (callback.value == .identifier) {
-        callback_type = try self.inferConcreteFunctionType(callback.value.identifier);
+    if (instance_method) |target| {
+        callback_type = try self.internFunctionType(target.method);
+    } else if (target_name) |name| {
+        callback_type = try self.inferConcreteFunctionType(name);
     }
     if (callback_type == null) callback_type = self.inferExpressionType(callback, locals);
     const concrete_callback_type = callback_type orelse
@@ -46,8 +50,26 @@ pub fn rewriteRegistration(self: anytype, call: *Ast.Expression.Call, locals: an
     for (signature.parameters) |parameter| if (parameter.type == application_type) {
         return self.fail(callback.position, "Application must be the sole system parameter");
     };
-    if (callback.value != .identifier) {
+    if (target_name == null) {
         return self.fail(callback.position, "system callback must be a named or captureless function");
+    }
+
+    var receiver_dependency: ?Ast.SystemDependency = null;
+    if (instance_method) |target| {
+        if (!target.structure.is_class) {
+            return self.fail(callback.position, "instance system methods require a class receiver");
+        }
+        const resources_type = self.typeForName(resources_name) orelse return error.InvalidSource;
+        const resource_source = self.sourceStructureForType(resources_type) orelse return error.InvalidSource;
+        const has_template = findGenericMethod(resource_source, "has") orelse return error.InvalidSource;
+        const get_template = findGenericMethod(resource_source, "get") orelse return error.InvalidSource;
+        receiver_dependency = .{
+            .type = target.type,
+            .source_type = target.type,
+            .mode = .read,
+            .has_method = try self.instantiateMethod(resources_type, has_template, &.{target.type}, callback.position),
+            .get_method = try self.instantiateMethod(resources_type, get_template, &.{target.type}, callback.position),
+        };
     }
 
     const resources_type = self.typeForName(resources_name) orelse return error.InvalidSource;
@@ -150,6 +172,9 @@ pub fn rewriteRegistration(self: anytype, call: *Ast.Expression.Call, locals: an
     var ecs_access = false;
     var world_mutable = false;
     var platform_access = false;
+    if (instance_method) |target| {
+        try appendUnique(self.allocator, &resource_writes, self.typeName(target.type));
+    }
     for (dependencies) |dependency| switch (dependency.kind) {
         .resource => {
             const name = self.typeName(dependency.source_type);
@@ -176,10 +201,13 @@ pub fn rewriteRegistration(self: anytype, call: *Ast.Expression.Call, locals: an
         },
     };
 
-    const worker_safe = !platform_access and
-        try WorkerSafety.systemIsWorkerSafe(self, callback.value.identifier, callback.position);
+    const worker_safe = instance_method == null and !platform_access and
+        try WorkerSafety.systemIsWorkerSafe(self, target_name.?, callback.position);
 
-    const parallel_dependency = QueryParallel.independentQuery(self, callback.value.identifier, dependencies);
+    const parallel_dependency = if (instance_method == null)
+        QueryParallel.independentQuery(self, target_name.?, dependencies)
+    else
+        null;
     const adapter_name = try std.fmt.allocPrint(self.allocator, "__silex_system_adapter_{d}", .{self.functions.items.len});
     const worker_name = if (parallel_dependency != null)
         try std.fmt.allocPrint(self.allocator, "{s}_range", .{adapter_name})
@@ -194,8 +222,10 @@ pub fn rewriteRegistration(self: anytype, call: *Ast.Expression.Call, locals: an
         .parameters = try adapterParameters(self, callback.position, application_type, false),
         .return_type = .void,
         .intrinsic = .{ .system_adapter = .{
-            .target = callback.value.identifier,
+            .target = target_name.?,
             .target_position = callback.position,
+            .receiver = receiver_dependency,
+            .receiver_type = if (instance_method) |target| target.type else null,
             .dependencies = try self.allocator.dupe(Ast.SystemDependency, dependencies),
             .mode = if (parallel_dependency) |dependency| .{ .query_dispatch = .{
                 .dependency = dependency,
@@ -213,14 +243,16 @@ pub fn rewriteRegistration(self: anytype, call: *Ast.Expression.Call, locals: an
         .parameters = try adapterParameters(self, callback.position, application_type, true),
         .return_type = .void,
         .intrinsic = .{ .system_adapter = .{
-            .target = callback.value.identifier,
+            .target = target_name.?,
             .target_position = callback.position,
+            .receiver = receiver_dependency,
+            .receiver_type = if (instance_method) |target| target.type else null,
             .dependencies = dependencies,
             .mode = .{ .query_range = .{ .dependency = dependency } },
         } },
         .statements = &.{},
     });
-    call.arguments[1].value.identifier = adapter_name;
+    call.arguments[1].value = .{ .identifier = adapter_name };
     if (world_mutable) ecs_access = true;
     const arguments = try self.allocator.alloc(*Ast.Expression, 6);
     arguments[0] = call.arguments[0];
@@ -237,6 +269,46 @@ pub fn rewriteRegistration(self: anytype, call: *Ast.Expression.Call, locals: an
     call.compiler_generated = true;
     call.arguments = arguments;
     return true;
+}
+
+fn systemTargetName(allocator: std.mem.Allocator, expression: *const Ast.Expression) !?[]const u8 {
+    return switch (expression.value) {
+        .identifier => |name| name,
+        .field_access => |access| if (access.base.value == .identifier)
+            try std.fmt.allocPrint(allocator, "{s}.{s}", .{ access.base.value.identifier, access.name })
+        else
+            null,
+        else => null,
+    };
+}
+
+const InstanceSystemMethod = struct {
+    type: Ast.Type,
+    structure: Ast.Structure,
+    method: Ast.Function,
+};
+
+fn findInstanceSystemMethod(self: anytype, requested: []const u8) ?InstanceSystemMethod {
+    const dot = std.mem.lastIndexOfScalar(u8, requested, '.') orelse return null;
+    const owner_name = requested[0..dot];
+    const method_name = requested[dot + 1 ..];
+    var found: ?InstanceSystemMethod = null;
+    for (self.structures.items) |structure| {
+        if (!typeNameMatches(structure.name, owner_name)) continue;
+        for (structure.methods) |method| {
+            if (method.is_static or method.type_parameters.len != 0 or !std.mem.eql(u8, method.name, method_name)) continue;
+            if (found != null) return null;
+            const type_value = self.typeForName(structure.name) orelse return null;
+            found = .{ .type = type_value, .structure = structure, .method = method };
+        }
+    }
+    return found;
+}
+
+fn typeNameMatches(candidate: []const u8, requested: []const u8) bool {
+    if (std.mem.eql(u8, candidate, requested)) return true;
+    if (!std.mem.endsWith(u8, candidate, requested) or candidate.len == requested.len) return false;
+    return candidate[candidate.len - requested.len - 1] == '.';
 }
 
 fn registrationArguments(allocator: std.mem.Allocator, call: Ast.Expression.Call) !?[]const *Ast.Expression {

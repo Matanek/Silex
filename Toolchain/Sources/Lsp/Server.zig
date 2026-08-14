@@ -794,7 +794,7 @@ test "member completion never leaks the global language catalogue" {
     try std.testing.expect(std.mem.indexOf(u8, response, "\"label\":\"if\"") == null);
 }
 
-test "callback arguments insert function and static method references" {
+test "callback arguments insert function and method references" {
     var temporary = std.testing.tmpDir(.{});
     defer temporary.cleanup();
     try temporary.dir.writeFile(std.testing.io, .{
@@ -847,7 +847,7 @@ test "callback arguments insert function and static method references" {
     const method_source =
         \\use Api.Application
         \\func create_cube() {}
-        \\struct Systems { static func rotate_entities() {} }
+        \\class Systems { public func rotate_entities() {} }
         \\func main() {
         \\    Application()
         \\        ..add_system(schedule:0, callback:Systems.rot)

@@ -46,6 +46,7 @@ const Context = struct {
     after_conditional: bool = false,
     allow_conversion: bool = false,
     cascade: bool = false,
+    system_callback: bool = false,
     aggregate: ?AggregateContext = null,
 };
 
@@ -850,6 +851,7 @@ fn classifyContext(allocator: Allocator, source: []const u8, cursor: usize) !Con
             memberReceiver(source, tokens[tokens.len - 1].start),
         .in_loop = scope.in_loop,
         .cascade = tokens[tokens.len - 1].tag == .dot_dot,
+        .system_callback = insideSystemRegistration(tokens),
     };
 
     const nominal_relation = isNominalRelationPosition(line_tokens);
@@ -1232,7 +1234,8 @@ fn appendMembers(
             .detail = try std.fmt.allocPrint(allocator, "static {s}:{s}", .{ field.name, typeName(program, field.type) }),
         }, 0, false);
         for (structure.methods) |method| {
-            if (!method.is_static or !callAcceptsParameters(source, cursor, program, method.parameters)) continue;
+            if ((!method.is_static and !context.system_callback) or
+                !callAcceptsParameters(source, cursor, program, method.parameters)) continue;
             try appendCandidate(allocator, candidates, context, .{
                 .label = method.name,
                 .kind = CompletionKind.method,
@@ -1254,6 +1257,26 @@ fn appendMembers(
             .detail = try functionSignature(allocator, source, program, method),
         }, 0, true);
     }
+}
+
+fn insideSystemRegistration(tokens: []const Token) bool {
+    var depth: usize = 0;
+    var index = tokens.len;
+    while (index > 0) {
+        index -= 1;
+        switch (tokens[index].tag) {
+            .right_parenthesis => depth += 1,
+            .left_parenthesis => if (depth != 0) {
+                depth -= 1;
+            } else {
+                if (index == 0 or tokens[index - 1].tag != .identifier) return false;
+                const name = tokens[index - 1].lexeme;
+                return std.mem.eql(u8, name, "add_system") or std.mem.eql(u8, name, "add_after_system");
+            },
+            else => {},
+        }
+    }
+    return false;
 }
 
 const ResultArguments = struct {

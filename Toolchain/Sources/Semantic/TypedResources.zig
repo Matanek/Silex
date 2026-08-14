@@ -24,6 +24,7 @@ pub fn analyze(self: anytype, structure_index: usize, method_index: usize, metho
 
     switch (intrinsic) {
         .resource_insert => |field| try emitInsert(self, &builder, structure_index, field, method),
+        .resource_discard => try emitDiscard(self, &builder, method),
         .resource_has => |field| try emitHas(self, &builder, structure_index, field),
         .resource_get => |field| try emitGet(self, &builder, structure_index, field, method, false),
         .resource_get_mut => |field| try emitGet(self, &builder, structure_index, field, method, true),
@@ -49,6 +50,14 @@ pub fn analyze(self: anytype, structure_index: usize, method_index: usize, metho
         .local_types = try builder.local_types.toOwnedSlice(self.allocator),
         .blocks = blocks,
     };
+}
+
+fn emitDiscard(self: anytype, builder: anytype, method: Ast.Function) !void {
+    const discarded_type = method.parameters[0].type;
+    if (Ownership.needsDrop(self, discarded_type) or Ownership.containsClass(self, discarded_type)) {
+        try Ownership.emitDrop(self, builder, discarded_type, 1);
+    }
+    self.terminate(builder, .return_void);
 }
 
 fn emitInsert(self: anytype, builder: anytype, structure: usize, field: usize, method: Ast.Function) !void {

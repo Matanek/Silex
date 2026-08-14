@@ -153,7 +153,7 @@ pub const Specializer = struct {
         return result;
     }
 
-    fn internFunctionType(self: *Specializer, function: Ast.Function) Allocator.Error!Ast.Type {
+    pub fn internFunctionType(self: *Specializer, function: Ast.Function) Allocator.Error!Ast.Type {
         const parameters = try self.allocator.alloc(Ast.FunctionType.ParameterType, function.parameters.len);
         for (function.parameters, 0..) |parameter, index| parameters[index] = .{
             .type = parameter.type,
@@ -242,9 +242,18 @@ pub const Specializer = struct {
             for (@constCast(function.parameters)) |*parameter| parameter.type = Remap.concreteType(parameter.type, map);
             function.return_type = Remap.concreteType(function.return_type, map);
             if (function.intrinsic) |*intrinsic| switch (intrinsic.*) {
-                .system_adapter => |*adapter| for (@constCast(adapter.dependencies)) |*dependency| {
-                    dependency.type = Remap.concreteType(dependency.type, map);
-                    dependency.source_type = Remap.concreteType(dependency.source_type, map);
+                .system_adapter => |*adapter| {
+                    if (adapter.receiver) |*receiver| {
+                        receiver.type = Remap.concreteType(receiver.type, map);
+                        receiver.source_type = Remap.concreteType(receiver.source_type, map);
+                    }
+                    if (adapter.receiver_type) |receiver_type| {
+                        adapter.receiver_type = Remap.concreteType(receiver_type, map);
+                    }
+                    for (@constCast(adapter.dependencies)) |*dependency| {
+                        dependency.type = Remap.concreteType(dependency.type, map);
+                        dependency.source_type = Remap.concreteType(dependency.source_type, map);
+                    }
                 },
                 else => {},
             };
