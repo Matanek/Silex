@@ -1554,20 +1554,37 @@ fn appendLexicalSymbols(
     context: Context,
 ) !void {
     const tokens = try tokensUntil(allocator, source, cursor);
+    const LocalSymbol = struct { name: []const u8, depth: usize };
+    var locals: std.ArrayList(LocalSymbol) = .empty;
+    var depth: usize = 0;
     for (tokens, 0..) |token, index| {
+        if (token.tag == .left_brace) {
+            depth += 1;
+            continue;
+        }
+        if (token.tag == .right_brace) {
+            var local_index = locals.items.len;
+            while (local_index != 0) {
+                local_index -= 1;
+                if (locals.items[local_index].depth >= depth) _ = locals.orderedRemove(local_index);
+            }
+            depth -|= 1;
+            continue;
+        }
         if (token.tag != .identifier or index == 0) continue;
         const previous = tokens[index - 1].tag;
-        if (previous == .keyword_let or previous == .keyword_var) try appendCandidate(allocator, candidates, context, .{
-            .label = token.lexeme,
-            .kind = CompletionKind.variable,
-            .detail = "Silex local binding",
-        }, 10, false);
+        if (previous == .keyword_let or previous == .keyword_var) try locals.append(allocator, .{ .name = token.lexeme, .depth = depth });
         if (previous == .keyword_func) try appendCandidate(allocator, candidates, context, .{
             .label = token.lexeme,
             .kind = CompletionKind.function,
             .detail = "Silex function",
         }, 25, true);
     }
+    for (locals.items) |local| try appendCandidate(allocator, candidates, context, .{
+        .label = local.name,
+        .kind = CompletionKind.variable,
+        .detail = "Silex local binding",
+    }, 10, false);
     if (context.kind == .statement) try appendStatementKeywords(allocator, candidates, context);
 }
 
@@ -1834,7 +1851,69 @@ fn visibleLocals(allocator: Allocator, source: []const u8, program: Ast.Program,
             else => {},
         }
     }
+    try appendCurrentMatchBindings(allocator, tokens, &locals, depth);
     return locals.toOwnedSlice(allocator);
+}
+
+fn appendCurrentMatchBindings(
+    allocator: Allocator,
+    tokens: []const Token,
+    locals: *std.ArrayList(Local),
+    depth: usize,
+) !void {
+    var arrow: ?usize = null;
+    var guard_if: ?usize = null;
+    for (tokens, 0..) |token, token_index| {
+        if (token.tag == .fat_arrow) arrow = token_index;
+        if (token.tag == .keyword_if) guard_if = token_index;
+    }
+
+    const marker = if (arrow != null and (guard_if == null or arrow.? > guard_if.?)) arrow.? else guard_if orelse return;
+    if (arrow == null or marker != arrow.?) {
+        for (tokens[marker + 1 ..]) |token| if (token.tag == .semicolon or token.tag == .right_brace) return;
+    } else {
+        var body_depth: usize = 0;
+        var has_block = false;
+        for (tokens[marker + 1 ..]) |token| switch (token.tag) {
+            .left_brace => {
+                has_block = true;
+                body_depth += 1;
+            },
+            .right_brace => body_depth -|= 1,
+            .semicolon => if (!has_block) return,
+            else => {},
+        };
+        if (has_block and body_depth == 0) return;
+    }
+
+    var boundary: usize = 0;
+    for (tokens[0..marker], 0..) |token, token_index| switch (token.tag) {
+        .left_brace, .right_brace, .semicolon, .fat_arrow => boundary = token_index + 1,
+        else => {},
+    };
+    var opening: ?usize = null;
+    var cursor = boundary;
+    while (cursor + 1 < marker) : (cursor += 1) {
+        if (tokens[cursor].tag == .identifier and tokens[cursor + 1].tag == .left_parenthesis) {
+            opening = cursor + 1;
+            break;
+        }
+    }
+    const start = opening orelse return;
+    var nesting: usize = 1;
+    cursor = start + 1;
+    while (cursor < marker and nesting != 0) : (cursor += 1) switch (tokens[cursor].tag) {
+        .left_parenthesis => nesting += 1,
+        .right_parenthesis => nesting -= 1,
+        .identifier => if (nesting == 1 and !std.mem.eql(u8, tokens[cursor].lexeme, "_")) {
+            try locals.append(allocator, .{
+                .name = tokens[cursor].lexeme,
+                .type_name = null,
+                .depth = depth,
+            });
+        },
+        else => {},
+    };
 }
 
 fn inferDestructuredForType(program: Ast.Program, callable: ?Callable, tokens: []const Token, opening: usize) ?Ast.Type {
@@ -1864,8 +1943,9 @@ fn inferForElementType(
 ) ?[]const u8 {
     var index = binding + 1;
     while (index < tokens.len and tokens[index].tag != .keyword_in) : (index += 1) {}
-    if (index + 1 >= tokens.len or tokens[index].tag != .keyword_in or
-        (tokens[index + 1].tag != .identifier and tokens[index + 1].tag != .keyword_self)) return null;
+    if (index + 1 >= tokens.len or tokens[index].tag != .keyword_in) return null;
+    if (tokens[index + 1].tag == .string or tokens[index + 1].tag == .string_start) return "uint32";
+    if (tokens[index + 1].tag != .identifier and tokens[index + 1].tag != .keyword_self) return null;
     index += 1;
     const root = tokens[index].lexeme;
     var current: ?Ast.Type = null;
@@ -1926,8 +2006,29 @@ fn inferForElementType(
             };
         }
     }
-    const element = collectionElementType(program, current orelse return null) orelse return null;
+    const source_type = current orelse return null;
+    const element = if (source_type == .str)
+        Ast.Type.uint32
+    else
+        collectionElementType(program, source_type) orelse iteratorElementType(program, source_type) orelse return null;
     return typeName(program, element);
+}
+
+fn iteratorElementType(program: Ast.Program, type_value: Ast.Type) ?Ast.Type {
+    const structure = structureForType(program, type_value) orelse return null;
+    var result: ?Ast.Type = null;
+    for (structure.methods) |method| {
+        if (method.is_static or !std.mem.eql(u8, method.name, "next") or requiredParameterCount(method.parameters) != 0) continue;
+        const element = method.return_type.optionalChild() orelse continue;
+        if (result != null and result.? != element) return null;
+        result = element;
+    }
+    return result;
+}
+
+fn requiredParameterCount(parameters: []const Ast.Parameter) usize {
+    for (parameters, 0..) |parameter, index| if (parameter.default != null) return index;
+    return parameters.len;
 }
 
 fn typeForSpelling(program: Ast.Program, spelling: []const u8) ?Ast.Type {
@@ -2069,7 +2170,7 @@ fn inferDeclarationType(source: []const u8, tokens: []const Token) ?[]const u8 {
     return null;
 }
 
-fn resolveReceiverType(
+pub fn resolveReceiverType(
     allocator: Allocator,
     source: []const u8,
     program: Ast.Program,
@@ -3958,6 +4059,56 @@ test "keep for bindings inside their loop body" {
     try std.testing.expect(contains(items, "child"));
 }
 
+test "infer custom iterator bindings from next optional payload" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source =
+        \\struct Item { func inspect() {} }
+        \\struct Cursor { func next() Item? { return null } }
+        \\func build(cursor:Cursor) {
+        \\    for item in cursor {
+        \\        item.
+        \\    }
+        \\}
+    ;
+    const cursor = std.mem.indexOf(u8, source, "item.").? + "item.".len;
+    const items = try itemsAt(arena.allocator(), source, cursor, .trigger_character);
+    try std.testing.expect(contains(items, "inspect"));
+}
+
+test "infer string iterator bindings as uint32 scalars" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source =
+        \\func build() {
+        \\    for scalar in "A🙂é" {
+        \\        print(scalar)
+        \\    }
+        \\}
+    ;
+    const cursor = std.mem.indexOf(u8, source, "scalar)").? + "scalar".len;
+    const items = try itemsAt(arena.allocator(), source, cursor, .invoked);
+    const scalar = items[indexOf(items, "scalar").?];
+    try std.testing.expectEqualStrings("scalar:uint32", scalar.detail);
+}
+
+test "anonymous scopes expose locals only before their closing brace" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source =
+        \\func build() {
+        \\    { let scoped:int = 1; sco }
+        \\    sco
+        \\}
+    ;
+    const inside_cursor = std.mem.indexOf(u8, source, "sco }").? + "sco".len;
+    const inside = try itemsAt(arena.allocator(), source, inside_cursor, .invoked);
+    try std.testing.expect(contains(inside, "scoped"));
+    const outside_cursor = std.mem.lastIndexOf(u8, source, "sco\n").? + "sco".len;
+    const outside = try itemsAt(arena.allocator(), source, outside_cursor, .invoked);
+    try std.testing.expect(!contains(outside, "scoped"));
+}
+
 test "match visible symbols containing the typed text inside a function" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -4323,6 +4474,32 @@ test "remove locals whose lexical branch ended before the cursor" {
     try std.testing.expect(!contains(items, "branch"));
 }
 
+test "complete match payload bindings in their guard and branch only" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source =
+        \\enum Choice { value(int, int); empty }
+        \\func inspect(choice:Choice) int {
+        \\    return match choice {
+        \\        value(number, _) if number > 0 => number
+        \\        empty => 0
+        \\    }
+        \\}
+    ;
+    const guard_cursor = std.mem.indexOf(u8, source, "number >").? + "number".len;
+    const guard_items = try itemsAt(arena.allocator(), source, guard_cursor, .invoked);
+    try std.testing.expect(contains(guard_items, "number"));
+    try std.testing.expect(!contains(guard_items, "_"));
+
+    const body_start = std.mem.indexOf(u8, source, "=> number").? + 3;
+    const body_items = try itemsAt(arena.allocator(), source, body_start + "number".len, .invoked);
+    try std.testing.expect(contains(body_items, "number"));
+
+    const outside_cursor = std.mem.indexOf(u8, source, "empty =>").? + "empty".len;
+    const outside_items = try itemsAt(arena.allocator(), source, outside_cursor, .invoked);
+    try std.testing.expect(!contains(outside_items, "number"));
+}
+
 test "return an empty list for an unresolved member receiver" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -4343,6 +4520,18 @@ test "complete members after safe optional access" {
     const items = try itemsAt(arena.allocator(), source, cursor, .trigger_character);
     try std.testing.expect(contains(items, "name"));
     try std.testing.expect(contains(items, "rename"));
+}
+
+test "safe completion preserves directly nested optional layers" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source =
+        \\struct Box { let value:int }
+        \\func inspect(box:Box??) { print(box?.) }
+    ;
+    const cursor = std.mem.indexOf(u8, source, "?.").? + 2;
+    const items = try itemsAt(arena.allocator(), source, cursor, .trigger_character);
+    try std.testing.expect(!contains(items, "value"));
 }
 
 test "do not complete ordinary string text or comments" {

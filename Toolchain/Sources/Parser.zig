@@ -160,6 +160,12 @@ pub const Parser = struct {
             }
         }
         for (functions.items) |function| _ = try self.internFunctionType(function);
+        for (structures.items) |structure| for (structure.methods) |method| {
+            if (!method.is_static) _ = try self.internFunctionType(method);
+        };
+        for (extensions.items) |extension| for (extension.methods) |method| {
+            if (!method.is_static) _ = try self.internFunctionType(method);
+        };
         return .{
             .uses = try uses.toOwnedSlice(self.allocator),
             .type_names = try self.type_names.toOwnedSlice(self.allocator),
@@ -409,9 +415,19 @@ pub const Parser = struct {
             .keyword_continue => ControlFlow.parseLoopControl(self, true),
             .keyword_match => self.parseMatchStatement(),
             .keyword_try => self.parseMatchStatement(),
+            .left_brace => self.parseAnonymousScope(),
             .identifier, .keyword_self, .keyword_super => self.parseIdentifierStatement(),
             else => self.fail("expected statement"),
         };
+    }
+
+    fn parseAnonymousScope(self: *Parser) ParseError!Ast.Statement {
+        const position = self.current.position;
+        return .{ .mutex_statement = .{
+            .position = position,
+            .statements = try self.parseBlock(),
+            .synchronized = false,
+        } };
     }
 
     fn parseMatchStatement(self: *Parser) ParseError!Ast.Statement {
@@ -473,6 +489,7 @@ pub const Parser = struct {
         if (self.current.tag != .identifier) return self.fail("expected variable name");
         const name = self.current.lexeme;
         const name_position = self.current.position;
+        if (std.mem.eql(u8, name, "_")) return self.failAt(name_position, "'_' is reserved for ignored match payloads");
         if (std.mem.eql(u8, name, "map_error")) return self.failAt(name_position, "'map_error' is a reserved intrinsic function name");
         if (std.mem.eql(u8, name, "embed_text")) return self.failAt(name_position, "'embed_text' is a reserved intrinsic function name");
         if (std.mem.eql(u8, name, "embed_bytes")) return self.failAt(name_position, "'embed_bytes' is a reserved intrinsic function name");
@@ -591,6 +608,7 @@ pub const Parser = struct {
                 try fields.append(self.allocator, .{
                     .name_position = access.name_position,
                     .name = access.name,
+                    .safe = access.safe,
                 });
                 current = access.base;
             },
@@ -608,7 +626,15 @@ pub const Parser = struct {
     }
 
     pub fn parseExpression(self: *Parser, allow_line_breaks: bool) ParseError!*Ast.Expression {
-        return Cascades.parse(self, try self.parseLogicalOr(allow_line_breaks));
+        return Cascades.parse(self, try self.parseCoalesce(allow_line_breaks));
+    }
+
+    fn parseCoalesce(self: *Parser, allow_line_breaks: bool) ParseError!*Ast.Expression {
+        const left = try self.parseLogicalOr(allow_line_breaks);
+        if (self.current.tag != .question_question or !self.canContinueExpression(allow_line_breaks)) return left;
+        const operator = self.current;
+        try self.advance();
+        return self.newBinary(left, try self.parseCoalesce(allow_line_breaks), operator);
     }
 
     pub fn parseLogicalOr(self: *Parser, allow_line_breaks: bool) ParseError!*Ast.Expression {
@@ -809,6 +835,19 @@ pub const Parser = struct {
             if (self.current.tag == .left_bracket) {
                 const position = self.current.position;
                 expression = try Collections.parsePostfix(self, expression, position);
+                continue;
+            }
+            if (self.current.tag == .bang) {
+                const operator_position = self.current.position;
+                try self.advance();
+                expression = try self.newExpression(.{
+                    .position = expression.position,
+                    .value = .{ .unary = .{
+                        .operator = .force_optional,
+                        .operator_position = operator_position,
+                        .operand = expression,
+                    } },
+                });
                 continue;
             }
             if (self.current.tag == .dot or self.current.tag == .question_dot) {
@@ -1017,6 +1056,7 @@ pub const Parser = struct {
             .caret => .bit_xor,
             .shift_left => .shift_left,
             .shift_right => .shift_right,
+            .question_question => .coalesce,
             else => unreachable,
         };
         return self.newExpression(.{

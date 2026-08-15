@@ -61,6 +61,7 @@ pub fn statements(self: anytype, module: usize, source: []const Ast.Statement, t
         .mutex_statement => |mutex| .{ .mutex_statement = .{
             .position = mutex.position,
             .statements = try self.rewriteStatements(module, mutex.statements, type_map),
+            .synchronized = mutex.synchronized,
         } },
         .break_statement => |position| .{ .break_statement = position },
         .continue_statement => |position| .{ .continue_statement = position },

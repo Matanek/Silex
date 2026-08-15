@@ -1,0 +1,29 @@
+struct Position { var x:int }
+struct Profile { var position:Position?; var accepted:int }
+
+func fallback() int { return 9 }
+
+test "safe assignment forced extraction and fallback compose" {
+    var profile:Profile? = Profile(position:Position(x:1), accepted:0)
+    profile?.position?.x = 42
+    profile?.accepted++
+    if value = profile {
+        if position = value.position {
+            if position.x != 42 { panic("safe assignment") }
+        }
+        if value.accepted != 1 { panic("safe increment") }
+    }
+    let present:int? = 7
+    let missing:int?
+    if present! != 7 || (missing ?? fallback()) != 9 { panic("optional expressions") }
+}
+
+test "nested optionals preserve three distinct states" {
+    let pending:int?? = null
+    let missing:int? = null
+    let resolved_missing:int?? = missing
+    let found:int?? = 42
+    if pending != null { panic("outer absence") }
+    if resolved_missing == null { panic("present inner absence") }
+    if found!! != 42 { panic("nested presence") }
+}

@@ -52,6 +52,18 @@ test "server navigates local and imported function values" {
     try std.testing.expectEqualStrings(main_uri, second_local.uri);
     try std.testing.expectEqual(@as(usize, 1), second_local.range.start.line);
 
+    const bound_method = (try Support.serverDefinition(&server, allocator, main_uri,
+        \\struct Counter {
+        \\    func read() int { return 42 }
+        \\}
+        \\func main() {
+        \\    let counter = Counter()
+        \\    let read:func() int = counter.re<|>ad
+        \\}
+    )).?;
+    try std.testing.expectEqualStrings(main_uri, bound_method.uri);
+    try std.testing.expectEqual(@as(usize, 1), bound_method.range.start.line);
+
     const imported = (try Support.serverDefinition(&server, allocator, main_uri,
         \\use Systems.Frame.imported_system as frame_system
         \\func add_system(system:func()) {}

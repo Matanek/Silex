@@ -23,6 +23,7 @@ pub fn analyzeIdentifier(self: anytype, builder: anytype, position: @import("../
         .borrowed_mode = borrowed_mode,
         .reference = binding.reference,
         .lexical_captures = binding.lexical_captures,
+        .lexical_borrows = binding.lexical_borrows,
     };
     if (!binding.type.hasRuntimeValue()) {
         const message = try std.fmt.allocPrint(self.allocator, "values of type '{s}' are not executable yet", .{binding.type.name()});
@@ -31,14 +32,14 @@ pub fn analyzeIdentifier(self: anytype, builder: anytype, position: @import("../
     if (binding.local) |local| {
         const result = try self.newValue(builder, binding.type);
         try self.emit(builder, .{ .local_load = .{ .result = result, .local = local } });
-        return .{ .type = binding.type, .value = result, .borrowed_root = borrowed_root, .borrowed_mode = borrowed_mode, .reference = binding.reference, .lexical_captures = binding.lexical_captures };
+        return .{ .type = binding.type, .value = result, .borrowed_root = borrowed_root, .borrowed_mode = borrowed_mode, .reference = binding.reference, .lexical_captures = binding.lexical_captures, .lexical_borrows = binding.lexical_borrows };
     }
     if (binding.reference) |reference| {
         const result = try self.newValue(builder, binding.type);
         try self.emit(builder, .{ .reference_load = .{ .result = result, .reference = reference } });
-        return .{ .type = binding.type, .value = result, .borrowed_root = borrowed_root, .borrowed_mode = borrowed_mode, .reference = reference, .lexical_captures = binding.lexical_captures };
+        return .{ .type = binding.type, .value = result, .borrowed_root = borrowed_root, .borrowed_mode = borrowed_mode, .reference = reference, .lexical_captures = binding.lexical_captures, .lexical_borrows = binding.lexical_borrows };
     }
-    return .{ .type = binding.type, .value = binding.value.?, .borrowed_root = borrowed_root, .borrowed_mode = borrowed_mode, .reference = binding.reference, .lexical_captures = binding.lexical_captures };
+    return .{ .type = binding.type, .value = binding.value.?, .borrowed_root = borrowed_root, .borrowed_mode = borrowed_mode, .reference = binding.reference, .lexical_captures = binding.lexical_captures, .lexical_borrows = binding.lexical_borrows };
 }
 
 pub fn requireOwned(self: anytype, value: Model.TypedValue, position: @import("../Source.zig").Position, action: []const u8) !void {
@@ -140,6 +141,11 @@ pub fn ensureRootUnborrowed(self: anytype, builder: anytype, root: []const u8, p
         const message = try std.fmt.allocPrint(self.allocator, "cannot mutate or move '{s}' while alias '{s}' is alive", .{ root, binding.name });
         return self.fail(position, message);
     }
+    for (builder.bindings.items) |binding| for (binding.lexical_borrows) |borrow| {
+        if (!std.mem.eql(u8, borrow.root, root)) continue;
+        const message = try std.fmt.allocPrint(self.allocator, "cannot mutate or move '{s}' while bound method '{s}' is alive", .{ root, binding.name });
+        return self.fail(position, message);
+    };
 }
 
 pub fn ensureRootReadable(self: anytype, builder: anytype, root: []const u8, position: @import("../Source.zig").Position) !void {
@@ -149,6 +155,11 @@ pub fn ensureRootReadable(self: anytype, builder: anytype, root: []const u8, pos
         const message = try std.fmt.allocPrint(self.allocator, "cannot read '{s}' while mutable alias '{s}' is alive", .{ root, binding.name });
         return self.fail(position, message);
     }
+    for (builder.bindings.items) |binding| for (binding.lexical_borrows) |borrow| {
+        if (borrow.mode != .mutable or !std.mem.eql(u8, borrow.root, root)) continue;
+        const message = try std.fmt.allocPrint(self.allocator, "cannot read '{s}' while mutating bound method '{s}' is alive", .{ root, binding.name });
+        return self.fail(position, message);
+    };
 }
 
 pub fn rootName(expression: *const Ast.Expression) ?[]const u8 {
@@ -197,7 +208,14 @@ fn conflictsWithRead(expression: *const Ast.Expression, root: []const u8) bool {
             .expression => |value| if (conflictsWithRead(value, root)) break true,
             else => {},
         } else false,
-        .match_expression => |match_value| conflictsWithRead(match_value.subject, root),
+        .match_expression => |match_value| match_conflict: {
+            if (conflictsWithRead(match_value.subject, root)) break :match_conflict true;
+            for (match_value.branches) |branch| {
+                if (branch.guard) |guard| if (conflictsWithRead(guard, root)) break :match_conflict true;
+                if (branch.value) |value| if (conflictsWithRead(value, root)) break :match_conflict true;
+            }
+            break :match_conflict false;
+        },
         else => false,
     };
 }

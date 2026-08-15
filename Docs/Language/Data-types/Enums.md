@@ -32,6 +32,21 @@ func describe(connection:Connection) str {
 Every variant appears exactly once. The subject is evaluated once and is not
 consumed. Every branch produces exactly the same type.
 
+Write `_` for an associated value that the branch deliberately ignores:
+
+```sx
+let category = match token {
+    identifier(_, _) => "name"
+    integer(value, _) => integer_category(value)
+    end(_) => "end"
+}
+```
+
+Each `_` still occupies one payload position, but declares no variable. The
+payload remains owned by the matched enum and follows its ordinary lifetime.
+`let _` and `var _` are invalid; mutability has no meaning for an ignored
+value. `else` remains the only branch that absorbs every remaining variant.
+
 Use `else` to deliberately absorb remaining variants:
 
 ```sx
@@ -41,6 +56,26 @@ let vertical = match direction {
     else => false
 }
 ```
+
+Add `if` after a variant pattern to refine it in source order. Payload bindings
+are visible to the guard:
+
+```sx
+let category = match token {
+    integer(value, _) if value < 0 => "negative"
+    integer(value, _) if value == 0 => "zero"
+    integer(_, _) => "positive"
+    identifier(name, _) if name == "self" => "reserved"
+    identifier(_, _) => "name"
+    else => "other"
+}
+```
+
+A guard runs only after its variant matches and must produce `bool`. A false
+guard continues with the next branch. Guarded branches do not establish
+exhaustiveness: every variant ultimately needs an unguarded branch, unless
+`else` covers the remaining cases. An unguarded variant branch makes any later
+branch for that variant unreachable.
 
 ## Run statements in match branches
 

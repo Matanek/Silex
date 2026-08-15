@@ -26,15 +26,23 @@ pub fn parse(parser: anytype) !*Ast.Expression {
             if (parser.current.tag == .right_parenthesis) return parser.fail("an empty variant pattern does not use parentheses");
             while (true) {
                 var mutable = false;
+                var binding_keyword: ?[]const u8 = null;
                 if (parser.current.tag == .keyword_let or parser.current.tag == .keyword_var) {
                     mutable = parser.current.tag == .keyword_var;
+                    binding_keyword = parser.current.lexeme;
                     try parser.advance();
                 }
                 if (parser.current.tag != .identifier) return parser.fail("expected associated value binding");
+                const ignored = std.mem.eql(u8, parser.current.lexeme, "_");
+                if (ignored and binding_keyword != null) {
+                    const message = try std.fmt.allocPrint(parser.allocator, "ignored match payload cannot use '{s}'", .{binding_keyword.?});
+                    return parser.fail(message);
+                }
                 try bindings.append(parser.allocator, .{
                     .position = parser.current.position,
                     .name = parser.current.lexeme,
                     .mutable = mutable,
+                    .ignored = ignored,
                 });
                 try parser.advance();
                 if (parser.current.tag != .comma) break;
@@ -43,7 +51,12 @@ pub fn parse(parser: anytype) !*Ast.Expression {
             }
             try parser.expect(.right_parenthesis, "expected ')' after match bindings");
         }
-        try parser.expect(.fat_arrow, "expected '=>' after match pattern");
+        const guard = if (parser.current.tag == .keyword_if) guard: {
+            if (is_else) return parser.fail("else match branch cannot have a guard");
+            try parser.advance();
+            break :guard try parser.parseExpression(false);
+        } else null;
+        try parser.expect(.fat_arrow, "expected '=>' after match pattern or guard");
         const branch_imperative = parser.current.tag == .left_brace;
         if (imperative) |expected| {
             if (expected != branch_imperative) return parser.fail("match cannot mix expression and block branches");
@@ -56,6 +69,7 @@ pub fn parse(parser: anytype) !*Ast.Expression {
             .variant = variant,
             .is_else = is_else,
             .bindings = try bindings.toOwnedSlice(parser.allocator),
+            .guard = guard,
             .value = value,
             .statements = statements,
         });

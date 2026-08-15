@@ -1,12 +1,18 @@
-const optional_flag: u64 = 0x80000000;
+const type_base_mask: u64 = 0x00ffffff;
+const optional_depth_shift: u6 = 24;
 const structure_base: u64 = 0x100;
-const function_base: u64 = 0x10000000;
-const function_end: u64 = 0x20000000;
+const function_base: u64 = 0x00400000;
+const function_end: u64 = 0x00800000;
 const scalar_limit: u64 = 13;
 const entry_words: usize = 4;
 const class_header_words: usize = 4;
 const list_header_words: usize = 5;
 const page_bytes: usize = 0x4000;
+
+fn optionalChild(type_value: u64) ?u64 {
+    const depth = type_value >> optional_depth_shift;
+    return if (depth == 0) null else ((depth - 1) << optional_depth_shift) | (type_value & type_base_mask);
+}
 
 const Kind = enum(u64) { value, class, protocol, list, array, enumeration };
 
@@ -31,7 +37,7 @@ const Context = struct {
     }
 
     fn width(self: *const Context, type_value: u64) usize {
-        if (type_value & optional_flag != 0) return 1 + self.width(type_value & ~optional_flag);
+        if (optionalChild(type_value)) |child| return 1 + self.width(child);
         if (type_value <= scalar_limit) return if (type_value == 0) 0 else 1;
         if (type_value >= function_base and type_value < function_end) return 2;
         return @intCast(self.entry(type_value)[1]);
@@ -167,7 +173,7 @@ fn fieldsGraphKind(context: *const Context, fields: [*]const u64, count: usize, 
 
 fn typeGraphKind(context: *const Context, type_value: u64, target_structure: u64, path: *TypePath, depth: usize) GraphKind {
     if (depth > path.values.len) return .unsupported;
-    if (type_value & optional_flag != 0) return typeGraphKind(context, type_value & ~optional_flag, target_structure, path, depth + 1);
+    if (optionalChild(type_value)) |child| return typeGraphKind(context, child, target_structure, path, depth + 1);
     if (type_value <= scalar_limit) return .none;
     if (type_value >= function_base and type_value < function_end) return .none;
     if (type_value < structure_base or type_value >= function_base) return .unsupported;
@@ -313,9 +319,9 @@ fn grow(context: *Context) bool {
 }
 
 fn traceValue(context: *Context, value: [*]u64, type_value: u64) bool {
-    if (type_value & optional_flag != 0) {
+    if (optionalChild(type_value)) |child| {
         if (value[0] == 0) return true;
-        return traceValue(context, value + 1, type_value & ~optional_flag);
+        return traceValue(context, value + 1, child);
     }
     if (type_value <= scalar_limit) return true;
     if (type_value >= function_base and type_value < function_end) return true;

@@ -142,8 +142,12 @@ pub fn parseType(self: anytype) !Ast.Type {
     while (true) switch (self.current.tag) {
         .question => {
             if (result == .void) return self.fail("'void?' is not a valid type");
-            if (result.optionalChild() != null) return self.fail("nested optional types are not supported");
             result = .optional(result);
+            try self.advance();
+        },
+        .question_question => {
+            if (result == .void) return self.fail("'void?' is not a valid type");
+            result = .optional(.optional(result));
             try self.advance();
         },
         .left_bracket => {

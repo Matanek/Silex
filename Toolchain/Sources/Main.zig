@@ -1442,6 +1442,7 @@ test {
     _ = @import("ForIterationTests.zig");
     _ = @import("GenericTests.zig");
     _ = @import("MatchTests.zig");
+    _ = @import("ScopeTests.zig");
     _ = @import("MapErrorTests.zig");
     _ = @import("MainResultTests.zig");
     _ = @import("MoveTests.zig");

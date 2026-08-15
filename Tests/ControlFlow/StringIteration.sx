@@ -1,0 +1,45 @@
+struct TextFactory {
+    var calls:int
+
+    func text() str {
+        self.calls++
+        return "A🙂é"
+    }
+}
+
+test "string iteration yields Unicode scalars" {
+    let expected:uint32[] = [65 as uint32, 128578 as uint32, 233 as uint32]
+    var index = 0
+    for scalar in "A🙂é" {
+        if scalar != expected[index] { panic("Unicode scalar") }
+        index++
+    }
+    if index != expected.count() || index != "A🙂é".count() { panic("scalar count") }
+}
+
+test "string iteration covers two three four and combining scalars" {
+    let expected:uint32[] = [162 as uint32, 8364 as uint32, 66376 as uint32, 101 as uint32, 769 as uint32]
+    var index = 0
+    for scalar in "¢€𐍈é" {
+        if scalar != expected[index] { panic("UTF-8 width") }
+        index++
+    }
+    if index != expected.count() { panic("combining text") }
+}
+
+test "empty string skips its body" {
+    var count = 0
+    for scalar in "" { count += scalar as int }
+    if count != 0 { panic("empty string") }
+}
+
+test "string source is evaluated once and obeys loop control" {
+    var factory = TextFactory(calls:0)
+    var count = 0
+    for scalar in factory.text() {
+        if scalar == 65 { continue }
+        count++
+        if scalar == 128578 { break }
+    }
+    if factory.calls != 1 || count != 1 { panic("string loop control") }
+}

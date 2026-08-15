@@ -73,6 +73,7 @@ pub fn analyzeVariable(self: anytype, builder: anytype, declaration: Ast.Variabl
             .borrowed_root = initializer.borrowed_root,
             .borrowed_mode = alias_mode,
             .lexical_captures = initializer.lexical_captures,
+            .lexical_borrows = initializer.lexical_borrows,
         });
         return;
     }
@@ -111,12 +112,14 @@ pub fn analyzeVariable(self: anytype, builder: anytype, declaration: Ast.Variabl
             .local = local,
             .mutable = true,
             .lexical_captures = initializer.lexical_captures,
+            .lexical_borrows = initializer.lexical_borrows,
         });
     } else try builder.bindings.append(self.allocator, .{
         .name = declaration.name,
         .type = declared_type,
         .value = initializer.value,
         .lexical_captures = initializer.lexical_captures,
+        .lexical_borrows = initializer.lexical_borrows,
     });
 }
 

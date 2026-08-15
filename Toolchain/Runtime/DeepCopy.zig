@@ -6,10 +6,11 @@ const TestState = if (builtin.is_test) struct {
     var live_allocations: usize = 0;
 } else struct {};
 
-const optional_flag: u64 = 0x80000000;
+const type_base_mask: u64 = 0x00ffffff;
+const optional_depth_shift: u6 = 24;
 const structure_base: u64 = 0x100;
-const function_base: u64 = 0x10000000;
-const function_end: u64 = 0x20000000;
+const function_base: u64 = 0x00400000;
+const function_end: u64 = 0x00800000;
 const scalar_limit: u64 = 13;
 const string_type: u64 = 12;
 const dynamic_string_flag: u64 = 1 << 63;
@@ -17,6 +18,11 @@ const dynamic_string_prefix_words: usize = 2;
 const entry_words: usize = 4;
 const class_header_words: usize = 4;
 const list_header_words: usize = 5;
+
+fn optionalChild(type_value: u64) ?u64 {
+    const depth = type_value >> optional_depth_shift;
+    return if (depth == 0) null else ((depth - 1) << optional_depth_shift) | (type_value & type_base_mask);
+}
 
 const Kind = enum(u64) {
     value,
@@ -35,7 +41,7 @@ const Context = struct {
     }
 
     fn width(self: Context, type_value: u64) usize {
-        if (type_value & optional_flag != 0) return 1 + self.width(type_value & ~optional_flag);
+        if (optionalChild(type_value)) |child| return 1 + self.width(child);
         if (type_value <= scalar_limit) return if (type_value == 0) 0 else 1;
         if (type_value >= function_base and type_value < function_end) return 2;
         return @intCast(self.entry(type_value)[1]);
@@ -61,9 +67,8 @@ export fn silex_deep_copy(source: [*]const u64, destination: [*]u64, model: [*]c
 }
 
 fn cloneValue(context: Context, source: [*]const u64, destination: [*]u64, type_value: u64, edge: bool) bool {
-    if (type_value & optional_flag != 0) {
+    if (optionalChild(type_value)) |child| {
         destination[0] = source[0];
-        const child = type_value & ~optional_flag;
         if (source[0] != 0) return cloneValue(context, source + 1, destination + 1, child, edge);
         clear(destination + 1, context.width(child));
         return true;
@@ -200,8 +205,8 @@ fn cloneEnumeration(context: Context, source: [*]const u64, destination: [*]u64,
 }
 
 fn cleanupValue(context: Context, value: [*]u64, type_value: u64) void {
-    if (type_value & optional_flag != 0) {
-        if (value[0] != 0) cleanupValue(context, value + 1, type_value & ~optional_flag);
+    if (optionalChild(type_value)) |child| {
+        if (value[0] != 0) cleanupValue(context, value + 1, child);
         return;
     }
     if (type_value <= scalar_limit) return;
@@ -288,8 +293,8 @@ fn cleanupEnumeration(context: Context, value: [*]u64, data: [*]const u64) void 
 /// destination are walked together so class cycles are cut through the
 /// original object's scratch mapping before any clone allocation is unmapped.
 fn rollbackValue(context: Context, source: [*]const u64, destination: [*]u64, type_value: u64) void {
-    if (type_value & optional_flag != 0) {
-        if (destination[0] != 0) rollbackValue(context, source + 1, destination + 1, type_value & ~optional_flag);
+    if (optionalChild(type_value)) |child| {
+        if (destination[0] != 0) rollbackValue(context, source + 1, destination + 1, child);
         return;
     }
     if (type_value <= scalar_limit) {

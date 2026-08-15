@@ -17,10 +17,11 @@ pub const Type = enum(u32) {
     _,
 
     const structure_base = 0x100;
-    const function_base = 0x10000000;
-    const generic_instantiation_base = 0x20000000;
-    const generic_parameter_base = 0x40000000;
-    const optional_flag = 0x80000000;
+    const function_base = 0x00400000;
+    const generic_instantiation_base = 0x00800000;
+    const generic_parameter_base = 0x00c00000;
+    const base_mask = 0x00ffffff;
+    const optional_depth_shift = 24;
 
     pub fn structure(index: usize) Type {
         return @enumFromInt(structure_base + @as(u32, @intCast(index)));
@@ -55,16 +56,20 @@ pub const Type = enum(u32) {
 
     pub fn genericParameterIndex(self: Type) ?usize {
         const value = @intFromEnum(self);
-        return if (value >= generic_parameter_base and value < optional_flag) value - generic_parameter_base else null;
+        return if (value >= generic_parameter_base and value <= base_mask) value - generic_parameter_base else null;
     }
 
     pub fn optional(child: Type) Type {
-        return @enumFromInt(optional_flag | @intFromEnum(child));
+        const value = @intFromEnum(child);
+        const depth = value >> optional_depth_shift;
+        if (depth == 0xff) unreachable;
+        return @enumFromInt(((depth + 1) << optional_depth_shift) | (value & base_mask));
     }
 
     pub fn optionalChild(self: Type) ?Type {
         const value = @intFromEnum(self);
-        return if (value & optional_flag != 0) @enumFromInt(value & ~@as(u32, optional_flag)) else null;
+        const depth = value >> optional_depth_shift;
+        return if (depth != 0) @enumFromInt(((depth - 1) << optional_depth_shift) | (value & base_mask)) else null;
     }
 
     pub fn name(self: Type) []const u8 {

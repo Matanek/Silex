@@ -12,6 +12,7 @@ const Prepared = struct {
     enum_index: usize,
     variant_indices: []const ?usize,
     branch_blocks: []const Ir.BlockId,
+    next_blocks: []const ?Ir.BlockId,
     merge_block: Ir.BlockId,
 };
 
@@ -23,12 +24,13 @@ pub fn analyze(self: anytype, builder: anytype, match_value: Ast.Expression.Matc
     var exit_availabilities: std.ArrayList([]const bool) = .empty;
     var result: ?Ir.ValueId = null;
     var result_type: ?Ast.Type = null;
-    for (match_value.branches, prepared.branch_blocks, prepared.variant_indices) |branch, branch_block, variant_index| {
+    for (match_value.branches, prepared.branch_blocks, prepared.variant_indices, 0..) |branch, branch_block, variant_index, branch_index| {
         Availability.restore(builder.bindings.items, branch_availability);
         builder.current_block = branch_block;
         const binding_count = builder.bindings.items.len;
         defer builder.bindings.shrinkRetainingCapacity(binding_count);
         try bindBranch(self, builder, prepared, branch, variant_index);
+        try enterGuardedBody(self, builder, prepared, branch, branch_index, binding_count);
         const branch_value = try self.analyzeExpression(builder, branch.value.?);
         if (result_type) |expected| {
             if (branch_value.type != expected) {
@@ -93,12 +95,13 @@ pub fn analyzeStatementUsing(
     const branch_availability = try Availability.snapshot(self.allocator, builder.bindings.items, availability_count);
     var exit_availabilities: std.ArrayList([]const bool) = .empty;
     var all_terminated = true;
-    for (match_value.branches, prepared.branch_blocks, prepared.variant_indices) |branch, branch_block, variant_index| {
+    for (match_value.branches, prepared.branch_blocks, prepared.variant_indices, 0..) |branch, branch_block, variant_index, branch_index| {
         Availability.restore(builder.bindings.items, branch_availability);
         builder.current_block = branch_block;
         const binding_count = builder.bindings.items.len;
         defer builder.bindings.shrinkRetainingCapacity(binding_count);
         try bindBranch(self, builder, prepared, branch, variant_index);
+        try enterGuardedBody(self, builder, prepared, branch, branch_index, binding_count);
         const terminated = try analyze_branch(context, self, builder, function, branch.statements.?);
         if (!terminated) {
             try Resources.emitActiveDrops(self, builder, binding_count);
@@ -138,20 +141,9 @@ fn prepare(self: anytype, builder: anytype, match_value: Ast.Expression.Match) !
         if (branch_index + 1 != match_value.branches.len) return self.fail(branch.position, "else match branch must be last");
         else_index = branch_index;
     };
-    if (else_index == null and match_value.branches.len != enumeration.variants.len) {
-        for (enumeration.variants) |variant| {
-            var found = false;
-            for (match_value.branches) |branch| {
-                if (!branch.is_else and std.mem.eql(u8, branch.variant, variant.name)) found = true;
-            }
-            if (!found) {
-                const message = try std.fmt.allocPrint(self.allocator, "match is missing variant '{s}'", .{variant.name});
-                return self.fail(match_value.subject.position, message);
-            }
-        }
-    }
-
     const variant_indices = try self.allocator.alloc(?usize, match_value.branches.len);
+    const unguarded_variants = try self.allocator.alloc(bool, enumeration.variants.len);
+    @memset(unguarded_variants, false);
     for (match_value.branches, 0..) |branch, branch_index| {
         if (branch.is_else) {
             variant_indices[branch_index] = null;
@@ -165,10 +157,14 @@ fn prepare(self: anytype, builder: anytype, match_value: Ast.Expression.Match) !
             const message = try std.fmt.allocPrint(self.allocator, "enum '{s}' has no variant named '{s}'", .{ enumeration.name, branch.variant });
             return self.fail(branch.position, message);
         };
-        for (match_value.branches[0..branch_index]) |previous| if (!previous.is_else and std.mem.eql(u8, previous.variant, branch.variant)) {
-            const message = try std.fmt.allocPrint(self.allocator, "variant '{s}' is matched more than once", .{branch.variant});
+        for (match_value.branches[0..branch_index]) |previous| {
+            if (previous.is_else or !std.mem.eql(u8, previous.variant, branch.variant) or previous.guard != null) continue;
+            const message = if (branch.guard == null)
+                try std.fmt.allocPrint(self.allocator, "variant '{s}' is matched more than once", .{branch.variant})
+            else
+                try std.fmt.allocPrint(self.allocator, "guarded branch for variant '{s}' is unreachable after its unguarded branch", .{branch.variant});
             return self.fail(branch.position, message);
-        };
+        }
         const variant = enumeration.variants[variant_index];
         if (branch.bindings.len != variant.associated_types.len) {
             const message = try std.fmt.allocPrint(self.allocator, "variant '{s}' exposes {d} associated values, pattern binds {d}", .{
@@ -177,22 +173,42 @@ fn prepare(self: anytype, builder: anytype, match_value: Ast.Expression.Match) !
             return self.fail(branch.position, message);
         }
         for (branch.bindings, 0..) |binding, binding_index| {
+            if (binding.ignored) continue;
             if (Support.findBinding(builder.bindings.items, binding.name) != null) {
                 const message = try std.fmt.allocPrint(self.allocator, "variable '{s}' is already declared in this scope", .{binding.name});
                 return self.fail(binding.position, message);
             }
-            for (branch.bindings[0..binding_index]) |previous| if (std.mem.eql(u8, previous.name, binding.name)) {
+            for (branch.bindings[0..binding_index]) |previous| if (!previous.ignored and std.mem.eql(u8, previous.name, binding.name)) {
                 const message = try std.fmt.allocPrint(self.allocator, "variable '{s}' is already declared in this pattern", .{binding.name});
                 return self.fail(binding.position, message);
             };
         }
         variant_indices[branch_index] = variant_index;
+        if (branch.guard == null) unguarded_variants[variant_index] = true;
     }
-    if (else_index != null and match_value.branches.len - 1 == enumeration.variants.len) {
+    if (else_index == null) {
+        for (enumeration.variants, unguarded_variants) |variant, covered| if (!covered) {
+            var mentioned = false;
+            for (match_value.branches) |branch| if (!branch.is_else and std.mem.eql(u8, branch.variant, variant.name)) {
+                mentioned = true;
+                break;
+            };
+            const message = if (mentioned)
+                try std.fmt.allocPrint(self.allocator, "match is missing unguarded branch for variant '{s}'", .{variant.name})
+            else
+                try std.fmt.allocPrint(self.allocator, "match is missing variant '{s}'", .{variant.name});
+            return self.fail(match_value.subject.position, message);
+        };
+    }
+    var every_variant_covered = true;
+    for (unguarded_variants) |covered| every_variant_covered = every_variant_covered and covered;
+    if (else_index != null and every_variant_covered) {
         return self.fail(match_value.branches[else_index.?].position, "else match branch is unreachable because every variant is already covered");
     }
 
     const branch_blocks = try self.allocator.alloc(Ir.BlockId, match_value.branches.len);
+    const next_blocks = try self.allocator.alloc(?Ir.BlockId, match_value.branches.len);
+    @memset(next_blocks, null);
     for (branch_blocks) |*block| block.* = try self.newBlock(builder);
     for (branch_blocks[0 .. branch_blocks.len - 1], 0..) |branch_block, branch_index| {
         const test_value = try self.newValue(builder, .bool);
@@ -203,6 +219,7 @@ fn prepare(self: anytype, builder: anytype, match_value: Ast.Expression.Match) !
             .variant = variant_indices[branch_index].?,
         } });
         const next = try self.newBlock(builder);
+        next_blocks[branch_index] = next;
         self.terminate(builder, .{ .branch = .{ .condition = test_value, .then_block = branch_block, .else_block = next } });
         builder.current_block = next;
     }
@@ -213,8 +230,38 @@ fn prepare(self: anytype, builder: anytype, match_value: Ast.Expression.Match) !
         .enum_index = enum_index,
         .variant_indices = variant_indices,
         .branch_blocks = branch_blocks,
+        .next_blocks = next_blocks,
         .merge_block = merge_block,
     };
+}
+
+fn enterGuardedBody(
+    self: anytype,
+    builder: anytype,
+    prepared: Prepared,
+    branch: Ast.Expression.MatchBranch,
+    branch_index: usize,
+    binding_count: usize,
+) !void {
+    const guard = branch.guard orelse return;
+    const condition = try self.analyzeExpression(builder, guard);
+    if (condition.type != .bool) {
+        const message = try std.fmt.allocPrint(self.allocator, "match guard requires bool, found '{s}'", .{self.typeName(condition.type)});
+        return self.fail(guard.position, message);
+    }
+    const active = try Availability.snapshot(self.allocator, builder.bindings.items, builder.bindings.items.len);
+    const body_block = try self.newBlock(builder);
+    const cleanup_block = try self.newBlock(builder);
+    self.terminate(builder, .{ .branch = .{
+        .condition = condition.value,
+        .then_block = body_block,
+        .else_block = cleanup_block,
+    } });
+    builder.current_block = cleanup_block;
+    try Resources.emitActiveDrops(self, builder, binding_count);
+    self.terminate(builder, .{ .jump = prepared.next_blocks[branch_index].? });
+    Availability.restore(builder.bindings.items, active);
+    builder.current_block = body_block;
 }
 
 fn bindBranch(
@@ -235,6 +282,17 @@ fn bindBranch(
             .variant = optional_variant_index.?,
             .index = payload_index,
         } });
+        if (binding.ignored) {
+            if (!prepared.subject.transferred and Resources.requiresRetain(self, binding_type)) {
+                try Resources.retainValue(self, builder, binding_type, payload);
+            }
+            try builder.bindings.append(self.allocator, .{
+                .name = "__ignored_match_payload",
+                .type = binding_type,
+                .value = payload,
+            });
+            continue;
+        }
         if (binding.mutable) {
             if (!prepared.subject.transferred and Resources.requiresRetain(self, binding_type)) {
                 try Resources.retainValue(self, builder, binding_type, payload);

@@ -258,6 +258,8 @@ pub fn analyzeLiteral(
         return self.fail(position, message);
     };
     const fields = try self.allocator.alloc(Ir.ValueId, literal.values.len);
+    var lexical_captures = false;
+    var lexical_borrows: std.ArrayList(Model.LexicalBorrow) = .empty;
     for (literal.values, 0..) |expression, index| {
         var value = try self.analyzeExpressionExpected(builder, expression, collection.element);
         if (value.type != collection.element and self.canImplicitlyConvert(value.type, collection.element)) {
@@ -276,13 +278,21 @@ pub fn analyzeLiteral(
             try Resources.retainValue(self, builder, collection.element, value.value);
         }
         fields[index] = value.value;
+        lexical_captures = lexical_captures or value.lexical_captures;
+        try lexical_borrows.appendSlice(self.allocator, value.lexical_borrows);
     }
     const result = try self.newValue(builder, type_value);
     if (collection.length == null)
         try self.emit(builder, .{ .list_init = .{ .result = result, .values = fields } })
     else
         try self.emit(builder, .{ .structure_init = .{ .result = result, .structure = structure_index, .fields = fields } });
-    return .{ .type = type_value, .value = result, .transferred = collection.length == null };
+    return .{
+        .type = type_value,
+        .value = result,
+        .transferred = collection.length == null,
+        .lexical_captures = lexical_captures,
+        .lexical_borrows = try lexical_borrows.toOwnedSlice(self.allocator),
+    };
 }
 
 pub fn analyzeIndex(self: anytype, builder: anytype, access: Ast.Expression.IndexAccess) !Model.TypedValue {
@@ -309,6 +319,8 @@ pub fn analyzeIndex(self: anytype, builder: anytype, access: Ast.Expression.Inde
         .value = result,
         .borrowed_root = if (aliases_source) source.borrowed_root else null,
         .borrowed_mode = if (aliases_source) source.borrowed_mode else .value,
+        .lexical_captures = source.lexical_captures,
+        .lexical_borrows = source.lexical_borrows,
     };
 }
 

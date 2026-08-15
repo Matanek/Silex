@@ -59,6 +59,37 @@ value result. Callback parameters retain the ordinary Silex modes: value,
 read reference `@`, or mutable reference `&`. Overloaded function names are
 resolved from the expected callback signature.
 
+An instance method can also be extracted from its receiver. The resulting
+function value keeps that receiver lexically bound, so `self` is absent from
+the callback type and calls through the value remain positional:
+
+```sx
+var parser = Parser(source)
+let read_next:func() Token = parser.next_token
+
+let first = read_next()
+```
+
+The receiver is evaluated once when the method is extracted. A mutating method
+requires a stable mutable receiver and writes through to that same place on
+every call. The expected callback type selects an overload and may omit trailing
+parameters that have defaults. Like an anonymous function with captures, a
+bound method is lexical: it can be passed to synchronous code but cannot be
+returned beyond the scope that owns its receiver.
+
+The bound value also keeps its receiver borrowed. A read method prevents
+mutation of that receiver, while a mutating method reserves it exclusively.
+Use an anonymous scope when the receiver must be used directly afterward:
+
+```sx
+var counter = Counter(value:0)
+{
+    let increment:func() = counter.increment
+    increment()
+}
+print(counter.value)
+```
+
 Use an anonymous function when the callback is local to the call:
 
 ```sx

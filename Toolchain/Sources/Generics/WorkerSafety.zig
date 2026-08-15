@@ -258,7 +258,7 @@ fn Checker(comptime Self: type) type {
                     }
                     try checker.validateStatements(loop.statements, bindings, synchronized);
                 },
-                .mutex_statement => |mutex| try checker.validateStatements(mutex.statements, bindings, true),
+                .mutex_statement => |mutex| try checker.validateStatements(mutex.statements, bindings, synchronized or mutex.synchronized),
                 .break_statement, .continue_statement => {},
             };
         }
@@ -311,6 +311,7 @@ fn Checker(comptime Self: type) type {
                 .match_expression => |match| {
                     try checker.validateExpression(match.subject, bindings, synchronized);
                     for (match.branches) |branch| {
+                        if (branch.guard) |guard| try checker.validateExpression(guard, bindings, synchronized);
                         if (branch.value) |value| try checker.validateExpression(value, bindings, synchronized);
                         if (branch.statements) |body| try checker.validateStatements(body, bindings, synchronized);
                     }

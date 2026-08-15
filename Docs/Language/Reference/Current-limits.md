@@ -4,13 +4,8 @@ The current compiler intentionally keeps the language surface small.
 
 Not implemented yet:
 
-- custom iterators;
-- string iteration;
-- method extraction;
 - package lockfiles;
 - C++ interop and public general-purpose C interop;
-- safe optional assignment, forced extraction, and `??`;
-- wildcard or guarded `match` branches.
 
 List literal inference is currently syntactic. A non-empty list whose first
 element is a variable or another expression without an immediately visible

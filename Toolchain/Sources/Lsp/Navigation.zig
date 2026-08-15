@@ -47,6 +47,22 @@ pub fn definitionAtForTarget(
             );
         }
     }
+    if (std.mem.lastIndexOfScalar(u8, request.path, '.')) |separator| {
+        const receiver = request.path[0..separator];
+        const member_name = request.path[separator + 1 ..];
+        if (Completion.resolveReceiverType(allocator, source, program, request.end, receiver)) |receiver_type| {
+            for (program.structures) |structure| {
+                if (!std.mem.eql(u8, structure.name, receiver_type)) continue;
+                for (structure.methods) |method| if (std.mem.eql(u8, method.name, member_name)) {
+                    return location(allocator, document_path, source, method.name_position, method.name.len, encoding);
+                };
+                for (structure.fields) |field| if (std.mem.eql(u8, field.name, member_name)) {
+                    return location(allocator, document_path, source, field.name_position, field.name.len, encoding);
+                };
+                break;
+            }
+        }
+    }
     const root_hint = if (root_uri) |uri| try ProjectIndex.pathFromUri(allocator, uri) else null;
     const root = try ProjectIndex.projectRoot(allocator, io, document_path, root_hint);
     const project = try ProjectIndex.index(

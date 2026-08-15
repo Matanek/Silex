@@ -116,6 +116,7 @@ pub fn binaryOperatorText(operator: Ast.BinaryOperator) []const u8 {
         .bit_xor => "^",
         .shift_left => "<<",
         .shift_right => ">>",
+        .coalesce => "??",
     };
 }
 

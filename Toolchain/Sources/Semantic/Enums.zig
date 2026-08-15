@@ -74,6 +74,8 @@ pub fn analyzeInitializer(self: anytype, builder: anytype, call: Ast.Expression.
     }
     var values: std.ArrayList(Ir.ValueId) = .empty;
     var transfers: std.ArrayList(bool) = .empty;
+    var lexical_captures = false;
+    var lexical_borrows: std.ArrayList(Model.LexicalBorrow) = .empty;
     for (call.arguments, variant.associated_types, 0..) |argument, expected, index| {
         var value = try self.analyzeExpressionExpected(builder, argument, Optionals.expectedContext(expected, argument));
         if (value.type != expected) value = try self.coerce(builder, value, expected, argument.position);
@@ -86,6 +88,8 @@ pub fn analyzeInitializer(self: anytype, builder: anytype, call: Ast.Expression.
         try Borrowing.requireOwned(self, value, argument.position, "stored in an enum");
         try values.append(self.allocator, value.value);
         try transfers.append(self.allocator, value.transferred);
+        lexical_captures = lexical_captures or value.lexical_captures;
+        try lexical_borrows.appendSlice(self.allocator, value.lexical_borrows);
     }
     for (variant.associated_types, values.items, transfers.items) |payload_type, payload, transferred| {
         if (!Resources.requiresRetain(self, payload_type)) continue;
@@ -99,7 +103,13 @@ pub fn analyzeInitializer(self: anytype, builder: anytype, call: Ast.Expression.
         .variant = variant_index,
         .values = try values.toOwnedSlice(self.allocator),
     } });
-    return .{ .type = result_type, .value = result, .transferred = Resources.ownsValue(self, result_type) };
+    return .{
+        .type = result_type,
+        .value = result,
+        .transferred = Resources.ownsValue(self, result_type),
+        .lexical_captures = lexical_captures,
+        .lexical_borrows = try lexical_borrows.toOwnedSlice(self.allocator),
+    };
 }
 
 pub fn analyzeValue(

@@ -225,6 +225,10 @@ pub fn analyzeCall(
         } else null;
         try arguments.append(self.allocator, try self.analyzeExpressionExpected(builder, argument, expected));
     }
+    var lexical_captures = false;
+    var lexical_borrows: std.ArrayList(Model.LexicalBorrow) = .empty;
+    for (arguments.items) |argument| lexical_captures = lexical_captures or argument.lexical_captures;
+    for (arguments.items) |argument| try lexical_borrows.appendSlice(self.allocator, argument.lexical_borrows);
 
     var selected: ?usize = null;
     var selected_cost: usize = std.math.maxInt(usize);
@@ -295,6 +299,8 @@ pub fn analyzeCall(
         .type = result_type,
         .value = result,
         .transferred = Resources.ownsValue(self, result_type) and !Resources.isClassType(self, result_type),
+        .lexical_captures = lexical_captures,
+        .lexical_borrows = try lexical_borrows.toOwnedSlice(self.allocator),
     };
 }
 
@@ -335,6 +341,12 @@ fn analyzeNamedCall(
             null;
         typed[index] = try self.analyzeExpressionExpected(builder, source, expected);
     }
+    var lexical_captures = false;
+    var lexical_borrows: std.ArrayList(Model.LexicalBorrow) = .empty;
+    for (typed) |maybe_argument| if (maybe_argument) |argument| {
+        lexical_captures = lexical_captures or argument.lexical_captures;
+        try lexical_borrows.appendSlice(self.allocator, argument.lexical_borrows);
+    };
 
     var selected: ?usize = null;
     var best_cost: usize = std.math.maxInt(usize);
@@ -400,6 +412,8 @@ fn analyzeNamedCall(
         .type = result_type,
         .value = result,
         .transferred = Resources.ownsValue(self, result_type) and !Resources.isClassType(self, result_type),
+        .lexical_captures = lexical_captures,
+        .lexical_borrows = try lexical_borrows.toOwnedSlice(self.allocator),
     };
 }
 
@@ -452,11 +466,15 @@ fn analyzeStatements(
             .while_statement => return self.fail(statement.position(), "while is not available during constructor initialization yet"),
             .for_statement => return self.fail(statement.position(), "for is not available during constructor initialization yet"),
             .mutex_statement => |mutex| mutex_statement: {
-                try self.emit(builder, .mutex_lock);
-                builder.mutex_depth += 1;
-                defer builder.mutex_depth -= 1;
+                if (mutex.synchronized) {
+                    try self.emit(builder, .mutex_lock);
+                    builder.mutex_depth += 1;
+                }
+                defer if (mutex.synchronized) {
+                    builder.mutex_depth -= 1;
+                };
                 const terminated = try analyzeStatements(self, builder, function, structure, self_local, mutex.statements, initialized);
-                if (!terminated) try self.emit(builder, .mutex_unlock);
+                if (!terminated and mutex.synchronized) try self.emit(builder, .mutex_unlock);
                 break :mutex_statement terminated;
             },
             .break_statement, .continue_statement => return self.fail(statement.position(), "loop control is not valid in a constructor"),

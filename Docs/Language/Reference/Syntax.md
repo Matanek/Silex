@@ -18,6 +18,11 @@ constraints.
 | Enum variant | `caseName(Type)` inside `enum` |
 | Empty enum value | `Enum.caseName` |
 | Enum value with payload | `Enum.caseName(value)` |
+| Ignored match payload | `caseName(_)` |
+| Guarded match branch | `caseName(value) if condition => result` |
+| Safe assignment | `optional?.field = value` |
+| Forced optional extraction | `optional!` |
+| Optional fallback | `optional ?? fallback` |
 | Constructor | `init(value:type) { ... }` |
 | Import | `use Module.Path` |
 | C function binding | `let name = C.function<func(...) Return>(...)` |
@@ -26,6 +31,7 @@ constraints.
 | Package-internal declaration | `internal ...` |
 | File-local declaration | `local ...` |
 | Optional | `Type?` |
+| Nested optional | `Type??` |
 | Named tuple | `(width:int, height:int)` |
 | Positional tuple | `(int, int)` |
 | Borrowed access tuple pattern | `(@Velocity, &Transform)` |
@@ -42,6 +48,7 @@ constraints.
 | Recover success | `try operation()` |
 | Critical section | `mutex { ... }` |
 | Cascade method | `value..update()` |
+| Bound instance method | `receiver.method` |
 | Cascade field assignment | `value..field = replacement` |
 
 The type suffixes `?`, `[]`, and `[N]` apply from left to right, so `Type?[]`
@@ -73,12 +80,22 @@ mutex {
     update_shared_state()
 }
 
+{
+    let temporary = prepare()
+    consume(temporary)
+}
+
 return value
 print(value)
 assert(condition)
 assert(condition, "message")
 panic("message")
 ```
+
+A bare block is an anonymous lexical scope, not an expression. It runs once,
+has no trailing semicolon, hides its locals after `}`, and cleans them before
+normal or transferred control leaves the block. `break` and `continue` still
+target the nearest enclosing loop.
 
 ## Operators
 

@@ -176,6 +176,7 @@ pub fn activateExpression(self: anytype, module: usize, expression: *Ast.Express
         .match_expression => |match_value| {
             try self.activateExpression(module, match_value.subject);
             for (match_value.branches) |branch| {
+                if (branch.guard) |guard| try self.activateExpression(module, guard);
                 if (branch.value) |value| try self.activateExpression(module, value);
                 if (branch.statements) |statements| for (statements) |statement| try self.activateStatement(module, statement);
             }

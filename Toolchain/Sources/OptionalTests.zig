@@ -103,7 +103,6 @@ test "use optional parameter context and preserve overload selection" {
 
 test "reject invalid optional forms and context-free null" {
     try expectParseError("func invalid(value:void?) {} func main() {}", "'void?' is not a valid type");
-    try expectParseError("func invalid(value:int??) {} func main() {}", "nested optional types are not supported");
     try expectCompileError("func main() { let value = null }", "'null' requires an expected optional type");
     try expectCompileError(
         "func main() { let value:int = null }",
@@ -113,6 +112,35 @@ test "reject invalid optional forms and context-free null" {
         "func main() { let value:int? = 1; let required:int = value }",
         "variable 'required' expects 'int', found 'int?'",
     );
+}
+
+test "preserve every directly nested optional layer" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\func main() {
+        \\    let pending:int?? = null
+        \\    let missing:int? = null
+        \\    let resolved_missing:int?? = missing
+        \\    let found:int?? = 42
+        \\    let deep:int??? = 7
+        \\    if outer = pending { print("unexpected") } else { print("pending") }
+        \\    if inner = resolved_missing { print(inner == null) }
+        \\    if inner = found { if value = inner { print(value) } }
+        \\    print(found!!)
+        \\    print(deep!!!)
+        \\    let values:int??[] = [pending, resolved_missing, found]
+        \\    print(values.count())
+        \\    print(pending == null)
+        \\    print(resolved_missing == null)
+        \\}
+    );
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("pending\ntrue\n42\n42\n7\n3\ntrue\nfalse\n", result.stdout);
+    const text = try Ir.writeText(allocator, compilation.ir);
+    try std.testing.expect(std.mem.count(u8, text, "optional.some") >= 6);
 }
 
 test "compare all optional presence states with null on either side" {
@@ -296,5 +324,174 @@ test "diagnose invalid safe receivers and immutable mutating places" {
     try expectCompileError(
         "struct Position { var x:int; func translate() { self.x += 1 } } func main() { let value:Position? = Position(x:1); value?.translate() }",
         "mutating method 'translate' requires a var receiver",
+    );
+}
+
+test "short circuit safe assignments and mutate stored optional paths" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const source =
+        \\struct Position { var x:int }
+        \\struct Profile { var position:Position?; var accepted:int; var values:int[] }
+        \\func index() int { print("index"); return 0 }
+        \\func replacement() int { print("right"); return 9 }
+        \\func main() {
+        \\    var present:Profile? = Profile(position:Position(x:1), accepted:2, values:[3])
+        \\    var absent:Profile?
+        \\    present?.position?.x = 10
+        \\    present?.accepted += 1
+        \\    present?.values[index()] = replacement()
+        \\    absent?.position?.x = replacement()
+        \\    absent?.values[index()] = replacement()
+        \\    if profile = present {
+        \\        if position = profile.position { print(position.x) }
+        \\        print(profile.accepted, " ", profile.values[0])
+        \\    }
+        \\}
+    ;
+    var frontend = Frontend.Frontend.init(allocator);
+    const result = try Interpreter.runCapture(allocator, (try frontend.compile(source)).ir);
+    try std.testing.expectEqualStrings("index\nright\n10\n3 9\n", result.stdout);
+}
+
+test "diagnose immutable and non optional safe assignment paths" {
+    try expectCompileError(
+        "struct Position { var x:int } func main() { let position:Position? = Position(x:1); position?.x = 2 }",
+        "safe assignment requires a var root",
+    );
+    try expectCompileError(
+        "struct Position { var x:int } func main() { var position = Position(x:1); position?.x = 2 }",
+        "safe assignment '?.' requires an optional receiver, found 'Position'",
+    );
+    try expectCompileError(
+        "struct Position { var x:int } struct Profile { let position:Position? } func main() { var profile:Profile? = Profile(position:Position(x:1)); profile?.position?.x = 2 }",
+        "cannot assign through immutable field 'position'",
+    );
+}
+
+test "safe assignments mutate shared classes and clean replaced values" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\struct Resource { let name:str; drop { print("drop ", self.name) } }
+        \\struct Holder { var resource:Resource }
+        \\class Counter { public var value:int }
+        \\func main() {
+        \\    var holder:Holder? = Holder(resource:Resource(name:"old"))
+        \\    holder?.resource = Resource(name:"new")
+        \\    var counter:Counter? = Counter(value:1)
+        \\    var alias = counter
+        \\    counter?.value += 1
+        \\    if shared = alias { print(shared.value) }
+        \\}
+    );
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "drop old") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "2\n") != null);
+}
+
+test "force one present optional layer with postfix bang" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\struct Box { let value:int }
+        \\enum Choice { value(int); empty }
+        \\class Entity { public let value:int }
+        \\func observed() int? { print("source"); return 40 }
+        \\func main() {
+        \\    let number:int? = 2
+        \\    let box:Box? = Box(value:3)
+        \\    let choice:Choice? = Choice.value(4)
+        \\    var entity:Entity? = Entity(value:5)
+        \\    print(observed()! + number!)
+        \\    print(box!.value)
+        \\    match choice! { value(item) => { print(item) }; empty => {} }
+        \\    print(entity!.value)
+        \\    print(!false)
+        \\}
+    );
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("source\n42\n3\n4\n5\ntrue\n", result.stdout);
+    try expectCompileError("func main() { let value = 1! }", "postfix '!' expects an optional value, found 'int'");
+}
+
+test "forced optional failure matches panic diagnostics in the interpreter" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    var compilation = try frontend.compile(
+        \\func main() {
+        \\    let value:int?
+        \\    print(value!)
+        \\}
+    );
+    compilation.ir.files = &.{"Main.sx"};
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqual(@as(u8, 1), result.exit_code);
+    try std.testing.expectEqualStrings("Main.sx:3:16: runtime error: forced optional extraction failed\n", result.stderr);
+}
+
+test "coalesce optionals lazily with right associative fallback" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\func source(label:str, value:int?) int? { print(label); return value }
+        \\func fallback(label:str, value:int) int { print(label); return value }
+        \\func main() {
+        \\    print(source("present", 1) ?? fallback("skipped", 9))
+        \\    print(source("absent", null) ?? fallback("used", 2))
+        \\    print(source("first", null) ?? source("second", 3) ?? fallback("last", 4))
+        \\    let missing:int?
+        \\    let alternative:int? = 5
+        \\    let retained:int? = missing ?? alternative
+        \\    if value = retained { print(value) }
+        \\    let narrow:int8? = null
+        \\    print(narrow ?? 6)
+        \\}
+    );
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("present\n1\nabsent\nused\n2\nfirst\nsecond\n3\n5\n6\n", result.stdout);
+}
+
+test "diagnose invalid optional coalescing operands" {
+    try expectCompileError("func main() { print(1 ?? 2) }", "left operand of '??' must be optional, found 'int'");
+    try expectCompileError(
+        "func main() { let value:int? = 1; print(value ?? \"text\") }",
+        "right operand of '??' expects 'int' or 'int?', found 'str'",
+    );
+}
+
+test "coalescing composite values cleans only the selected owned result" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\struct Resource { let name:str; drop { print("drop ", self.name) } }
+        \\func fallback() Resource { print("compute"); return Resource(name:"fallback") }
+        \\func main() {
+        \\    { let present:Resource? = Resource(name:"present"); let selected = present ?? fallback(); print(selected.name) }
+        \\    { let absent:Resource?; let selected = absent ?? fallback(); print(selected.name) }
+        \\}
+    );
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "present") != null);
+    try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, result.stdout, "compute\n"));
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "drop present") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "drop fallback") != null);
+}
+
+test "nested optional safe access removes only one layer" {
+    try expectCompileError(
+        "struct Box { let value:int } func main() { let nested:Box?? = Box(value:1); print(nested?.value) }",
+        "type 'Box?' has no fields",
     );
 }

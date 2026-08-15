@@ -8,6 +8,7 @@ const Support = @import("Support.zig");
 const Collections = @import("Collections.zig");
 const Availability = @import("Availability.zig");
 const Resources = @import("Resources.zig");
+const StringIteration = @import("StringIteration.zig");
 
 pub const ConditionalValue = struct {
     condition: Model.TypedValue,
@@ -16,15 +17,19 @@ pub const ConditionalValue = struct {
 };
 
 pub fn analyzeMutex(self: anytype, builder: anytype, function: Ast.Function, mutex: Ast.MutexStatement) !bool {
-    try self.emit(builder, .mutex_lock);
-    builder.mutex_depth += 1;
-    defer builder.mutex_depth -= 1;
+    if (mutex.synchronized) {
+        try self.emit(builder, .mutex_lock);
+        builder.mutex_depth += 1;
+    }
+    defer if (mutex.synchronized) {
+        builder.mutex_depth -= 1;
+    };
 
     const binding_count = builder.bindings.items.len;
     const terminated = try self.analyzeStatements(builder, function, mutex.statements);
     if (!terminated) {
         try Resources.emitActiveDrops(self, builder, binding_count);
-        try self.emit(builder, .mutex_unlock);
+        if (mutex.synchronized) try self.emit(builder, .mutex_unlock);
     }
     builder.bindings.shrinkRetainingCapacity(binding_count);
     return terminated;
@@ -198,19 +203,22 @@ fn analyzeCollectionFor(self: anytype, builder: anytype, function: Ast.Function,
         break :ordinary source_expression;
     };
     const source = try self.analyzeExpression(builder, collection_expression);
+    if (source.type == .str and loop.index_name == null) {
+        return StringIteration.analyze(self, builder, function, loop, collection_expression, source);
+    }
     if (loop.index_name == null) {
-        if (source.type.structureIndex()) |structure_index| {
+        if (source.type.structureIndex()) |structure_index| if (structure_index < self.program.structures.len) {
             const structure = self.program.structures[structure_index];
             if (structure.query_pattern != null) return analyzeQueryFor(self, builder, function, loop, source_expression, source, structure) catch |err| {
                 if (self.diagnostic == null) return self.fail(loop.position, "internal ECS query lowering failed");
                 return err;
             };
-        }
+        };
     }
-    const collection = Collections.collectionForType(self.structures, source.type) orelse return self.fail(
-        collection_expression.position,
-        if (loop.index_name != null) "indexed() expects an array or list" else "for source expects an array or list",
-    );
+    const collection = Collections.collectionForType(self.structures, source.type) orelse {
+        if (loop.index_name != null) return self.fail(collection_expression.position, "indexed() expects an array or list");
+        return analyzeIteratorFor(self, builder, function, loop, collection_expression, source);
+    };
     if (loop.index_name != null and collection.view) return self.fail(collection_expression.position, "indexed() expects an array or list");
     const source_root: ?[]const u8 = switch (collection_expression.value) {
         .identifier => |name| name,
@@ -345,6 +353,137 @@ fn analyzeCollectionFor(self: anytype, builder: anytype, function: Ast.Function,
         try Resources.emitActiveDrops(self, builder, outer_binding_count);
         builder.bindings.shrinkRetainingCapacity(outer_binding_count);
     }
+    return false;
+}
+
+fn analyzeIteratorFor(
+    self: anytype,
+    builder: anytype,
+    function: Ast.Function,
+    loop: Ast.ForStatement,
+    source_expression: *Ast.Expression,
+    source: Model.TypedValue,
+) !bool {
+    if (loop.bindings.len != 0) return self.fail(loop.name_position, "custom iterator traversal requires one binding");
+    if (loop.mode == .mutable) return self.fail(loop.name_position, "for var is unavailable for values produced by a custom iterator");
+    const structure_index = source.type.structureIndex() orelse return self.fail(
+        source_expression.position,
+        "for source expects an array, list, range, or iterator exposing next() T?",
+    );
+    if (structure_index >= self.program.structures.len) return self.fail(
+        source_expression.position,
+        "for source expects an array, list, range, or iterator exposing next() T?",
+    );
+
+    const outer_binding_count = builder.bindings.items.len;
+    const cursor_local = builder.local_types.items.len;
+    try builder.local_types.append(self.allocator, source.type);
+    if (Resources.requiresRetain(self, source.type) and !source.transferred) {
+        try Resources.retainValue(self, builder, source.type, source.value);
+    }
+    try self.emit(builder, .{ .local_store = .{ .local = cursor_local, .operand = source.value } });
+    try builder.bindings.append(self.allocator, .{
+        .name = "$for-cursor",
+        .type = source.type,
+        .local = cursor_local,
+        .mutable = true,
+    });
+
+    var receiver: Ast.Expression = .{
+        .position = source_expression.position,
+        .value = .{ .identifier = "$for-cursor" },
+    };
+    const call: Ast.Expression.Call = .{
+        .name = "next",
+        .name_position = loop.position,
+        .receiver = &receiver,
+        .iterator_next = true,
+        .arguments = &.{},
+    };
+    const first = (try self.analyzeCall(builder, call)) orelse return self.fail(
+        loop.position,
+        "iterator next() must return an optional value",
+    );
+    const element_type = first.type.optionalChild() orelse {
+        const message = try std.fmt.allocPrint(
+            self.allocator,
+            "iterator next() must return 'T?', found '{s}'",
+            .{self.typeName(first.type)},
+        );
+        return self.fail(loop.position, message);
+    };
+    const current_local = builder.local_types.items.len;
+    try builder.local_types.append(self.allocator, first.type);
+    try self.emit(builder, .{ .local_store = .{ .local = current_local, .operand = first.value } });
+    const current_binding_index = builder.bindings.items.len;
+    try builder.bindings.append(self.allocator, .{
+        .name = "$for-current",
+        .type = first.type,
+        .local = current_local,
+    });
+
+    const availability_count = builder.bindings.items.len;
+    const header_availability = try Availability.snapshot(self.allocator, builder.bindings.items, availability_count);
+    const condition_block = try self.newBlock(builder);
+    const body_block = try self.newBlock(builder);
+    const update_block = try self.newBlock(builder);
+    const break_block = try self.newBlock(builder);
+    const exit_block = try self.newBlock(builder);
+    self.terminate(builder, .{ .jump = condition_block });
+
+    builder.current_block = condition_block;
+    const current = try loadLocalValue(self, builder, current_local, first.type);
+    const present = try Optionals.emitPresence(self, builder, .{ .type = first.type, .value = current });
+    self.terminate(builder, .{ .branch = .{ .condition = present.value, .then_block = body_block, .else_block = exit_block } });
+
+    builder.current_block = body_block;
+    const element = try Optionals.unwrap(self, builder, .{ .type = first.type, .value = current });
+    const body_binding_count = builder.bindings.items.len;
+    if (loop.mode == .copy and Resources.requiresRetain(self, element_type)) {
+        try Resources.retainValue(self, builder, element_type, element.value);
+    }
+    try builder.bindings.append(self.allocator, .{
+        .name = loop.name,
+        .type = element_type,
+        .value = element.value,
+        .borrowed_root = if (loop.mode == .read) "$for-current" else null,
+        .borrowed_mode = if (loop.mode == .read) .read else .value,
+    });
+    try builder.loops.append(self.allocator, .{
+        .continue_block = update_block,
+        .break_block = break_block,
+        .availability_count = availability_count,
+        .drop_binding_count = current_binding_index,
+        .header_availability = header_availability,
+        .mutex_depth = builder.mutex_depth,
+    });
+    const loop_index = builder.loops.items.len - 1;
+    const terminated = try self.analyzeStatements(builder, function, loop.statements);
+    const loop_context = builder.loops.items[loop_index];
+    builder.loops.items.len -= 1;
+    if (!terminated) try Resources.emitActiveDrops(self, builder, current_binding_index);
+    builder.bindings.shrinkRetainingCapacity(body_binding_count);
+    if (!terminated) {
+        try Availability.requireHeader(self, builder.bindings.items, header_availability, loop.position);
+        self.terminate(builder, .{ .jump = update_block });
+    }
+
+    builder.current_block = update_block;
+    const next = (try self.analyzeCall(builder, call)) orelse return error.InvalidSource;
+    try self.emit(builder, .{ .local_store = .{ .local = current_local, .operand = next.value } });
+    self.terminate(builder, .{ .jump = condition_block });
+
+    builder.current_block = break_block;
+    const absent = (try Optionals.intrinsic(self, builder, first.type)).?;
+    try self.emit(builder, .{ .local_store = .{ .local = current_local, .operand = absent.value } });
+    self.terminate(builder, .{ .jump = exit_block });
+
+    builder.current_block = exit_block;
+    const exit_availability = try self.allocator.dupe(bool, header_availability);
+    for (loop_context.break_availabilities.items) |state| Availability.merge(exit_availability, state);
+    Availability.restore(builder.bindings.items, exit_availability);
+    try Resources.emitActiveDrops(self, builder, outer_binding_count);
+    builder.bindings.shrinkRetainingCapacity(outer_binding_count);
     return false;
 }
 

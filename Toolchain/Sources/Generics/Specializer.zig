@@ -793,6 +793,7 @@ pub const Specializer = struct {
                 for (match_value.branches, 0..) |branch, index| {
                     branches[index] = branch;
                     const local_count = locals.items.len;
+                    if (branch.guard) |guard| branches[index].guard = try self.rewriteExpression(guard, arguments, locals);
                     if (branch.value) |nested| branches[index].value = try self.rewriteExpression(nested, arguments, locals);
                     if (branch.statements) |statements| branches[index].statements = try self.rewriteStatements(statements, arguments, locals);
                     locals.shrinkRetainingCapacity(local_count);
@@ -1750,6 +1751,11 @@ pub const Specializer = struct {
                 self.inferExpressionType(unary.operand, locals),
             .binary => |binary| switch (binary.operator) {
                 .less, .less_equal, .greater, .greater_equal, .equal, .not_equal, .logical_and, .logical_or => .bool,
+                .coalesce => coalesce: {
+                    const left = self.inferExpressionType(binary.left, locals) orelse break :coalesce null;
+                    const right = self.inferExpressionType(binary.right, locals);
+                    break :coalesce if (right != null and right.? == left) left else left.optionalChild();
+                },
                 else => self.inferExpressionType(binary.left, locals),
             },
             .conversion => |conversion| conversion.target,

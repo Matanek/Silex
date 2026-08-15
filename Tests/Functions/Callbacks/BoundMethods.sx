@@ -1,0 +1,67 @@
+struct Counter {
+    var value:int
+
+    func read(offset:int) int { return self.value + offset }
+    func increment() { self.value += 1 }
+    func add(amount:int) int {
+        self.value += amount
+        return self.value
+    }
+}
+
+struct Factory {
+    var calls:int
+
+    func make() Counter {
+        self.calls++
+        return Counter(value:40)
+    }
+}
+
+struct Converter {
+    func convert(value:int) int { return value + 1 }
+    func convert(value:str) str { return value + "!" }
+    func add(value:int, offset:int = 2) int { return value + offset }
+}
+
+func invoke(value:int, callback:func(int) int) int { return callback(value) }
+
+test "instance method extraction preserves parameters and result" {
+    var counter = Counter(value:40)
+    let read = counter.read
+
+    if read(2) != 42 { panic("bound read method") }
+    if invoke(1, read) != 41 { panic("bound method callback") }
+}
+
+test "bound mutating method writes through to its receiver" {
+    var counter = Counter(value:40)
+    {
+        let increment = counter.increment
+        increment()
+        increment()
+    }
+    {
+        let add:func(int) int = counter.add
+        if add(5) != 47 { panic("bound mutation result") }
+    }
+    if counter.value != 47 { panic("bound mutation visibility") }
+}
+
+test "temporary receiver is evaluated once when extracting a read method" {
+    var factory = Factory(calls:0)
+    let read:func(int) int = factory.make().read
+
+    if read(2) != 42 || factory.calls != 1 { panic("receiver evaluation") }
+}
+
+test "expected callback type selects overloads and callable defaults" {
+    let converter = Converter()
+    let convert_int:func(int) int = converter.convert
+    let convert_str:func(str) str = converter.convert
+    let add_default:func(int) int = converter.add
+
+    if convert_int(41) != 42 || convert_str("ok") != "ok!" || add_default(40) != 42 {
+        panic("bound overload selection")
+    }
+}

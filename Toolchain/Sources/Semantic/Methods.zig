@@ -398,11 +398,18 @@ fn analyzeCallWithReceiver(
     var inaccessible = false;
     var inaccessible_local = false;
     var inaccessible_internal = false;
+    var iterator_nonoptional: ?Ast.Type = null;
     for (candidates, 0..) |candidate, candidate_index| {
         if (!call.compiler_generated and !Visibility.memberVisible(self, candidate.owner, candidate.method, call.name_position)) {
             inaccessible = true;
             inaccessible_local = inaccessible_local or candidate.method.is_local;
             inaccessible_internal = inaccessible_internal or candidate.method.is_internal;
+            continue;
+        }
+        if (call.iterator_next and candidate.method.return_type.optionalChild() == null) {
+            if (Support.acceptsArity(candidate.method.parameters, call.arguments.len)) {
+                iterator_nonoptional = candidate.method.return_type;
+            }
             continue;
         }
         if (Support.acceptsArity(candidate.method.parameters, call.arguments.len)) {
@@ -411,6 +418,14 @@ fn analyzeCallWithReceiver(
         }
     }
     if (arity_count == 0) {
+        if (call.iterator_next) if (iterator_nonoptional) |found| {
+            const message = try std.fmt.allocPrint(
+                self.allocator,
+                "iterator next() must return 'T?', found '{s}'",
+                .{self.typeName(found)},
+            );
+            return self.fail(call.name_position, message);
+        };
         if (inaccessible) {
             const message = if (inaccessible_local)
                 try std.fmt.allocPrint(self.allocator, "method '{s}' is local to its source file", .{call.name})
@@ -442,6 +457,7 @@ fn analyzeCallWithReceiver(
     var ambiguous = false;
     for (candidates, 0..) |candidate, candidate_index| {
         const method = candidate.method;
+        if (call.iterator_next and method.return_type.optionalChild() == null) continue;
         if (!Support.acceptsArity(method.parameters, arguments.items.len)) continue;
         if (!call.compiler_generated and !Visibility.memberVisible(self, candidate.owner, method, call.name_position)) continue;
         var cost: usize = 0;
@@ -462,7 +478,10 @@ fn analyzeCallWithReceiver(
         } else if (cost == selected_cost) ambiguous = true;
     }
     if (ambiguous) {
-        const message = try std.fmt.allocPrint(self.allocator, "call to method '{s}' is ambiguous", .{call.name});
+        const message = if (call.iterator_next)
+            try std.fmt.allocPrint(self.allocator, "iterator next() is ambiguous", .{})
+        else
+            try std.fmt.allocPrint(self.allocator, "call to method '{s}' is ambiguous", .{call.name});
         return self.fail(call.name_position, message);
     }
     const selected_candidate = candidates[
@@ -1114,14 +1133,18 @@ fn analyzeMutatingStatements(
             .if_statement => |conditional| try analyzeMutatingIf(self, builder, method, structure_index, flat, self_local, conditional),
             .while_statement => |loop| try analyzeMutatingWhile(self, builder, method, structure_index, flat, self_local, loop),
             .mutex_statement => |mutex| protected: {
-                try self.emit(builder, .mutex_lock);
-                builder.mutex_depth += 1;
-                defer builder.mutex_depth -= 1;
+                if (mutex.synchronized) {
+                    try self.emit(builder, .mutex_lock);
+                    builder.mutex_depth += 1;
+                }
+                defer if (mutex.synchronized) {
+                    builder.mutex_depth -= 1;
+                };
                 const binding_count = builder.bindings.items.len;
                 const ended = try analyzeMutatingStatements(self, builder, method, structure_index, flat, self_local, mutex.statements);
                 if (!ended) {
                     try Resources.emitActiveDrops(self, builder, binding_count);
-                    try self.emit(builder, .mutex_unlock);
+                    if (mutex.synchronized) try self.emit(builder, .mutex_unlock);
                 }
                 builder.bindings.shrinkRetainingCapacity(binding_count);
                 break :protected ended;

@@ -3,6 +3,11 @@ const Ir = @import("../Ir.zig");
 const Types = @import("../Types.zig");
 const Ast = @import("../Ast.zig");
 
+pub const LexicalBorrow = struct {
+    root: []const u8,
+    mode: Ast.Parameter.Mode,
+};
+
 pub const Binding = struct {
     name: []const u8,
     type: Types.Type,
@@ -18,6 +23,7 @@ pub const Binding = struct {
     refined_type: ?Types.Type = null,
     refined_value: ?Ir.ValueId = null,
     lexical_captures: bool = false,
+    lexical_borrows: []const LexicalBorrow = &.{},
 };
 
 pub const TypedValue = struct {
@@ -28,6 +34,7 @@ pub const TypedValue = struct {
     borrowed_mode: Ast.Parameter.Mode = .value,
     reference: ?Ir.ValueId = null,
     lexical_captures: bool = false,
+    lexical_borrows: []const LexicalBorrow = &.{},
 };
 
 pub const BlockBuilder = struct {

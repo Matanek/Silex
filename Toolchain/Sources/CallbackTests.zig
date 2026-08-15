@@ -11,6 +11,14 @@ fn run(source: []const u8) ![]const u8 {
     return std.testing.allocator.dupe(u8, result.stdout);
 }
 
+fn expectCompileError(source: []const u8, message: []const u8) !void {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var frontend = Frontend.Frontend.init(arena.allocator());
+    try std.testing.expectError(error.InvalidSource, frontend.compile(source));
+    try std.testing.expectEqualStrings(message, frontend.diagnostic.?.message);
+}
+
 test "callbacks pass as values and remain distinct from shadowed functions" {
     const output = try run(
         \\func predicate(value:@int) bool { return false }
@@ -50,6 +58,84 @@ test "static methods pass as callback values" {
     );
     defer std.testing.allocator.free(output);
     try std.testing.expectEqualStrings("tick\n", output);
+}
+
+test "instance methods bind their receiver as callback values" {
+    const output = try run(
+        \\struct Counter {
+        \\    var value:int
+        \\    func read(offset:int) int { return self.value + offset }
+        \\    func increment() { self.value += 1 }
+        \\}
+        \\func main() {
+        \\    var counter = Counter(value:40)
+        \\    { let read:func(int) int = counter.read; print(read(2)) }
+        \\    { let increment:func() = counter.increment; increment(); increment() }
+        \\    print(counter.value)
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("42\n42\n", output);
+}
+
+test "bound methods match equivalent anonymous forwarding functions" {
+    const output = try run(
+        \\struct Counter { let value:int; func read(offset:int) int { return self.value + offset } }
+        \\func apply(callback:func(int) int) int { return callback(2) }
+        \\func main() {
+        \\    let counter = Counter(value:40)
+        \\    let bound:func(int) int = counter.read
+        \\    let forwarded:func(int) int = func(offset:int) int { return counter.read(offset) }
+        \\    print(apply(bound), " ", apply(forwarded))
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("42 42\n", output);
+}
+
+test "bound methods cannot escape directly or through composite values" {
+    const message = "capturing function value cannot be returned from its lexical scope";
+    try expectCompileError(
+        \\struct Counter { let value:int; func read() int { return self.value } }
+        \\func invalid() func() int { let counter = Counter(value:42); return counter.read }
+        \\func main() {}
+    , message);
+    try expectCompileError(
+        \\struct Counter { let value:int; func read() int { return self.value } }
+        \\struct Holder { let callback:func() int }
+        \\func invalid() Holder { let counter = Counter(value:42); return Holder(callback:counter.read) }
+        \\func main() {}
+    , message);
+    try expectCompileError(
+        \\struct Counter { let value:int; func read() int { return self.value } }
+        \\enum Holder { callback(func() int); empty }
+        \\func invalid() Holder { let counter = Counter(value:42); return Holder.callback(counter.read) }
+        \\func main() {}
+    , message);
+    try expectCompileError(
+        \\struct Counter { func tick() {} }
+        \\func invalid() func()? {
+        \\    let counter = Counter()
+        \\    let callback:func() = counter.tick
+        \\    return callback
+        \\}
+        \\func main() {}
+    , message);
+}
+
+test "bound mutating methods require a stable mutable receiver place" {
+    try expectCompileError(
+        \\struct Counter { var value:int; func increment() { self.value++ } }
+        \\func main() { let increment:func() = Counter(value:0).increment }
+    , "a bound mutating method requires a stable mutable receiver place");
+    try expectCompileError(
+        \\struct Counter { var value:int; func increment() { self.value++ } }
+        \\func main() {
+        \\    var counter = Counter(value:0)
+        \\    let increment:func() = counter.increment
+        \\    counter.value = 2
+        \\}
+    , "cannot mutate or move 'counter' while bound method 'increment' is alive");
 }
 
 test "anonymous functions execute as callbacks" {
@@ -124,6 +210,47 @@ test "capturing closures cannot outlive their lexical environment" {
     ));
     try std.testing.expectEqualStrings(
         "capturing function value cannot be returned from its lexical scope",
+        frontend.diagnostic.?.message,
+    );
+}
+
+test "bound method overloads require a unique expected callback type" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var frontend = Frontend.Frontend.init(arena.allocator());
+    try std.testing.expectError(error.InvalidSource, frontend.compile(
+        \\struct Converter {
+        \\    func convert(value:int) int { return value }
+        \\    func convert(value:str) str { return value }
+        \\}
+        \\func main() {
+        \\    let converter = Converter()
+        \\    let convert = converter.convert
+        \\}
+    ));
+    try std.testing.expectEqualStrings(
+        "method reference 'convert' is ambiguous",
+        frontend.diagnostic.?.message,
+    );
+}
+
+test "stored callback fields and methods with the same name are ambiguous" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var frontend = Frontend.Frontend.init(arena.allocator());
+    try std.testing.expectError(error.InvalidSource, frontend.compile(
+        \\func fallback(value:int) {}
+        \\struct Action {
+        \\    let run:func(int)
+        \\    public func run(value:int) {}
+        \\}
+        \\func main() {
+        \\    let action = Action(run:fallback)
+        \\    let run:func(int) = action.run
+        \\}
+    ));
+    try std.testing.expectEqualStrings(
+        "member reference 'run' is ambiguous between a stored field and a method",
         frontend.diagnostic.?.message,
     );
 }

@@ -24,6 +24,7 @@ const Collections = @import("Collections.zig");
 const Callbacks = @import("Callbacks.zig");
 const Model = @import("Model.zig");
 const Methods = @import("Methods.zig");
+const BoundMethods = @import("BoundMethods.zig");
 const Control = @import("Control.zig");
 const Enums = @import("Enums.zig");
 const Matches = @import("Matches.zig");
@@ -71,6 +72,7 @@ pub const Analyzer = struct {
     module_context: ?[]const u8 = null,
     owner_context: ?usize = null,
     anonymous_captures: []?[]const AnonymousCapture = &.{},
+    bound_methods: std.ArrayList(Callbacks.BoundMethod) = .empty,
     function_context: ?Ast.Function = null,
     target: ?Target = null,
     packages: ?Packages.Graph = null,
@@ -91,6 +93,7 @@ pub const Analyzer = struct {
     fn analyzeProgram(self: *Analyzer, program: Ast.Program, require_entry: bool) AnalyzeError!Ir.Program {
         self.program = program;
         self.diagnostic = null;
+        self.bound_methods.clearRetainingCapacity();
         self.anonymous_captures = try self.allocator.alloc(?[]const AnonymousCapture, program.functions.len);
         @memset(self.anonymous_captures, null);
         self.structures = try Declarations.prepareStructures(self);
@@ -136,6 +139,9 @@ pub const Analyzer = struct {
             const nominal = self.structureIndex(structure.name) orelse return error.InvalidSource;
             try generated_functions.append(self.allocator, try Resources.analyzeClassFields(self, nominal, structure));
         };
+        for (self.bound_methods.items) |bound| {
+            try generated_functions.append(self.allocator, try BoundMethods.analyze(self, bound));
+        }
         var remaining = program.functions.len;
         while (remaining != 0) {
             var progressed = false;
@@ -286,6 +292,12 @@ pub const Analyzer = struct {
                             const message = try std.fmt.allocPrint(self.allocator, "method '{s}' with these parameter types is already declared in '{s}'", .{ method.name, structure.name });
                             return self.fail(method.name_position, message);
                         }
+                        // Iterator discovery intentionally distinguishes the
+                        // observable result contract of overlapping `next`
+                        // overloads. Keep those declarations available so a
+                        // `for` source can select the unique `T?` form or
+                        // diagnose iterator ambiguity at the use site.
+                        if (std.mem.eql(u8, method.name, "next")) continue;
                         const signature = try self.effectiveSignature(method.name, method.parameters, arity);
                         const message = try std.fmt.allocPrint(self.allocator, "method '{s}' is already exposed in '{s}' by the declaration at {d}:{d}", .{ signature, structure.name, previous.name_position.line, previous.name_position.column });
                         return self.fail(method.name_position, message);
@@ -612,6 +624,9 @@ pub const Analyzer = struct {
             },
             .generic_reference => self.fail(expression.position, "generic type reference was not specialized"),
             .field_access => |access| function_reference: {
+                if (try Callbacks.memberReference(self, builder, access, expected)) |reference| {
+                    break :function_reference reference;
+                }
                 if (access.base.value == .identifier and Support.findBinding(builder.bindings.items, access.base.value.identifier) != null) {
                     break :function_reference try self.analyzeFieldAccess(builder, access);
                 }
@@ -651,6 +666,7 @@ pub const Analyzer = struct {
         if (unary.operator == .move) return Moves.analyze(self, builder, unary);
         if (unary.operator == .copy) return Copies.analyze(self, builder, unary);
         if (unary.operator == .borrow_read or unary.operator == .borrow_mutable) return Collections.analyzeView(self, builder, unary);
+        if (unary.operator == .force_optional) return self.analyzeForcedOptional(builder, unary);
         if (unary.operator == .logical_not) {
             const operand = try self.analyzeExpressionExpected(builder, unary.operand, .bool);
             if (operand.type != .bool) {
@@ -693,6 +709,32 @@ pub const Analyzer = struct {
         return .{ .type = operand.type, .value = result };
     }
 
+    fn analyzeForcedOptional(self: *Analyzer, builder: *FunctionBuilder, unary: Ast.Expression.Unary) AnalyzeError!TypedValue {
+        const operand = try self.analyzeExpression(builder, unary.operand);
+        const child = operand.type.optionalChild() orelse {
+            const message = try std.fmt.allocPrint(self.allocator, "postfix '!' expects an optional value, found '{s}'", .{self.typeName(operand.type)});
+            return self.fail(unary.operator_position, message);
+        };
+        const presence = try Optionals.emitPresence(self, builder, operand);
+        const present = try self.newBlock(builder);
+        const absent = try self.newBlock(builder);
+        self.terminate(builder, .{ .branch = .{ .condition = presence.value, .then_block = present, .else_block = absent } });
+        builder.current_block = absent;
+        const message = try self.emitString(builder, "forced optional extraction failed");
+        self.terminate(builder, .{ .panic = .{ .message = message.value, .position = unary.operator_position } });
+        builder.current_block = present;
+        const result = try Optionals.unwrap(self, builder, operand);
+        return .{
+            .type = child,
+            .value = result.value,
+            .transferred = result.transferred,
+            .borrowed_root = result.borrowed_root,
+            .borrowed_mode = result.borrowed_mode,
+            .lexical_captures = result.lexical_captures,
+            .lexical_borrows = result.lexical_borrows,
+        };
+    }
+
     fn analyzeBinary(
         self: *Analyzer,
         builder: *FunctionBuilder,
@@ -702,6 +744,7 @@ pub const Analyzer = struct {
         if (binary.operator == .logical_and or binary.operator == .logical_or) {
             return self.analyzeLogical(builder, binary);
         }
+        if (binary.operator == .coalesce) return self.analyzeCoalesce(builder, binary);
         const equality = binary.operator == .equal or binary.operator == .not_equal;
         var left: TypedValue = undefined;
         var right: TypedValue = undefined;
@@ -782,7 +825,7 @@ pub const Analyzer = struct {
                 .greater_equal => .greater_equal,
                 .equal => .equal,
                 .not_equal => .not_equal,
-                .logical_and, .logical_or => unreachable,
+                .logical_and, .logical_or, .coalesce => unreachable,
                 .bit_and => .bit_and,
                 .bit_xor => .bit_xor,
                 .shift_left => .shift_left,
@@ -798,6 +841,58 @@ pub const Analyzer = struct {
             try Resources.emitDrop(self, builder, right.type, right.value);
         }
         return .{ .type = result_type, .value = result };
+    }
+
+    fn analyzeCoalesce(self: *Analyzer, builder: *FunctionBuilder, binary: Ast.Expression.Binary) AnalyzeError!TypedValue {
+        const left = try self.analyzeExpression(builder, binary.left);
+        const child = left.type.optionalChild() orelse {
+            const message = try std.fmt.allocPrint(self.allocator, "left operand of '??' must be optional, found '{s}'", .{self.typeName(left.type)});
+            return self.fail(binary.operator_position, message);
+        };
+        const presence = try Optionals.emitPresence(self, builder, left);
+        const present = try self.newBlock(builder);
+        const absent = try self.newBlock(builder);
+        const merge = try self.newBlock(builder);
+        self.terminate(builder, .{ .branch = .{ .condition = presence.value, .then_block = present, .else_block = absent } });
+
+        builder.current_block = absent;
+        var right = try self.analyzeExpression(builder, binary.right);
+        const result_type = if (right.type == left.type)
+            left.type
+        else if (right.type == child)
+            child
+        else if (child.isNumeric() and right.type.isNumeric())
+            Numeric.commonNumeric(child, right.type) orelse {
+                const message = try std.fmt.allocPrint(self.allocator, "right operand of '??' expects '{s}' or '{s}', found '{s}'", .{ self.typeName(child), self.typeName(left.type), self.typeName(right.type) });
+                return self.fail(binary.right.position, message);
+            }
+        else {
+            const message = try std.fmt.allocPrint(self.allocator, "right operand of '??' expects '{s}' or '{s}', found '{s}'", .{ self.typeName(child), self.typeName(left.type), self.typeName(right.type) });
+            return self.fail(binary.right.position, message);
+        };
+        if (right.type != result_type) right = try self.coerce(builder, right, result_type, binary.right.position);
+        const result = try self.newValue(builder, result_type);
+        if (Resources.requiresRetain(self, result_type) and !right.transferred) try Resources.retainValue(self, builder, result_type, right.value);
+        try self.emit(builder, .{ .copy = .{ .result = result, .operand = right.value } });
+        self.terminate(builder, .{ .jump = merge });
+
+        builder.current_block = present;
+        var selected = if (result_type == left.type) left else try Optionals.unwrap(self, builder, left);
+        if (selected.type != result_type) selected = try self.coerce(builder, selected, result_type, binary.left.position);
+        if (Resources.requiresRetain(self, result_type) and !selected.transferred) try Resources.retainValue(self, builder, result_type, selected.value);
+        try self.emit(builder, .{ .copy = .{ .result = result, .operand = selected.value } });
+        self.terminate(builder, .{ .jump = merge });
+        builder.current_block = merge;
+        const lexical_borrows = try self.allocator.alloc(Model.LexicalBorrow, left.lexical_borrows.len + right.lexical_borrows.len);
+        @memcpy(lexical_borrows[0..left.lexical_borrows.len], left.lexical_borrows);
+        @memcpy(lexical_borrows[left.lexical_borrows.len..], right.lexical_borrows);
+        return .{
+            .type = result_type,
+            .value = result,
+            .transferred = Resources.ownsValue(self, result_type),
+            .lexical_captures = left.lexical_captures or right.lexical_captures,
+            .lexical_borrows = lexical_borrows,
+        };
     }
 
     fn analyzeLogical(self: *Analyzer, builder: *FunctionBuilder, binary: Ast.Expression.Binary) AnalyzeError!TypedValue {
@@ -951,7 +1046,7 @@ pub const Analyzer = struct {
         return result;
     }
 
-    fn analyzeFieldValue(
+    pub fn analyzeFieldValue(
         self: *Analyzer,
         builder: *FunctionBuilder,
         access: Ast.Expression.FieldAccess,
@@ -1022,7 +1117,7 @@ pub const Analyzer = struct {
                 } });
                 break :reference field_reference;
             } else null;
-            return .{ .type = field.type, .value = result, .borrowed_root = base.borrowed_root, .borrowed_mode = base.borrowed_mode, .reference = reference };
+            return .{ .type = field.type, .value = result, .borrowed_root = base.borrowed_root, .borrowed_mode = base.borrowed_mode, .reference = reference, .lexical_captures = base.lexical_captures, .lexical_borrows = base.lexical_borrows };
         }
         const message = try std.fmt.allocPrint(
             self.allocator,
@@ -1087,6 +1182,8 @@ pub const Analyzer = struct {
 
         var field_values: std.ArrayList(Ir.ValueId) = .empty;
         var field_transfers: std.ArrayList(bool) = .empty;
+        var lexical_captures = false;
+        var lexical_borrows: std.ArrayList(Model.LexicalBorrow) = .empty;
         if (structure.base) |base_index| {
             const base = try self.analyzeStructureInitializer(builder, .{
                 .name = self.structures[base_index].name,
@@ -1132,6 +1229,8 @@ pub const Analyzer = struct {
             try Borrowing.requireOwned(self, value, if (provided) |expression| expression.position else call.name_position, "stored");
             try field_values.append(self.allocator, value.value);
             try field_transfers.append(self.allocator, value.transferred);
+            lexical_captures = lexical_captures or value.lexical_captures;
+            try lexical_borrows.appendSlice(self.allocator, value.lexical_borrows);
         }
         for (self.structures[structure_index].fields, field_values.items, field_transfers.items) |field, field_value, transferred| {
             if (!Resources.requiresRetain(self, field.type)) continue;
@@ -1153,6 +1252,8 @@ pub const Analyzer = struct {
             .type = result_type,
             .value = result,
             .transferred = Resources.ownsValue(self, result_type) and !declaration.is_class,
+            .lexical_captures = lexical_captures,
+            .lexical_borrows = try lexical_borrows.toOwnedSlice(self.allocator),
         };
     }
 
@@ -1837,6 +1938,7 @@ fn expressionMentionsName(program: Ast.Program, expression: *const Ast.Expressio
         .match_expression => |match_value| mentions: {
             if (expressionMentionsName(program, match_value.subject, name)) break :mentions true;
             for (match_value.branches) |branch| {
+                if (branch.guard) |guard| if (expressionMentionsName(program, guard, name)) break :mentions true;
                 if (branch.value) |value| if (expressionMentionsName(program, value, name)) break :mentions true;
                 if (branch.statements) |statements| if (statementsMentionName(program, statements, name)) break :mentions true;
             }

@@ -12,15 +12,19 @@ const Resources = @import("Resources.zig");
 const Visibility = @import("Visibility.zig");
 const Inheritance = @import("Inheritance.zig");
 const StaticMembers = @import("StaticMembers.zig");
+const Model = @import("Model.zig");
 
 const PathStep = union(enum) {
     field: struct { base: Ir.ValueId, structure: usize, field: usize },
     collection: struct { base: Ir.ValueId, type: Ast.Type, index: Ir.ValueId, position: @import("../Source.zig").Position },
+    optional: struct { base: Ir.ValueId, type: Ast.Type },
 };
 
 const Replacement = struct {
     value: Ir.ValueId,
     transferred: bool = false,
+    lexical_captures: bool = false,
+    lexical_borrows: []const Model.LexicalBorrow = &.{},
 };
 
 pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.AssignmentStatement) !void {
@@ -35,6 +39,7 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
                 break :current value;
             };
             const replacement = try analyzeReplacement(self, builder, assignment, field.declaration.type, current, target.fields[0].name, false);
+            if (replacement.lexical_captures) return self.fail(assignment.position, "capturing function value cannot be stored in static state");
             if (Resources.requiresRetain(self, field.declaration.type) and !replacement.transferred) {
                 try Resources.retainValue(self, builder, field.declaration.type, replacement.value);
             }
@@ -87,6 +92,8 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
         }
         try storeBinding(self, builder, binding, replacement.value);
         builder.bindings.items[binding_index].available = true;
+        builder.bindings.items[binding_index].lexical_captures = replacement.lexical_captures;
+        builder.bindings.items[binding_index].lexical_borrows = replacement.lexical_borrows;
         Optionals.invalidateRefinement(builder, target.name);
         return;
     }
@@ -96,15 +103,20 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
     var current_type = binding.type;
     var current_value = root;
     var mutable_path = binding.mutable;
-    for (target.fields) |target_field| try analyzeFieldStep(
-        self,
-        builder,
-        &steps,
-        &current_type,
-        &current_value,
-        &mutable_path,
-        target_field,
-    );
+    var safe_merge: ?Ir.BlockId = null;
+    for (target.fields) |target_field| {
+        if (target_field.safe) try enterSafeAssignmentPath(
+            self,
+            builder,
+            &steps,
+            &current_type,
+            &current_value,
+            &safe_merge,
+            binding.mutable,
+            target_field,
+        );
+        try analyzeFieldStep(self, builder, &steps, &current_type, &current_value, &mutable_path, target_field);
+    }
 
     for (target.indices) |target_index| {
         const collection = Collections.collectionForType(self.structures, current_type) orelse {
@@ -133,15 +145,19 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
         current_value = element;
     }
 
-    for (target.indexed_fields) |target_field| try analyzeFieldStep(
-        self,
-        builder,
-        &steps,
-        &current_type,
-        &current_value,
-        &mutable_path,
-        target_field,
-    );
+    for (target.indexed_fields) |target_field| {
+        if (target_field.safe) try enterSafeAssignmentPath(
+            self,
+            builder,
+            &steps,
+            &current_type,
+            &current_value,
+            &safe_merge,
+            binding.mutable,
+            target_field,
+        );
+        try analyzeFieldStep(self, builder, &steps, &current_type, &current_value, &mutable_path, target_field);
+    }
 
     if (!mutable_path) return failImmutableBinding(self, assignment, binding.parameter, target.name, target.name_position);
 
@@ -160,6 +176,15 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
         final_name,
         target.indices.len == 0 or target.indexed_fields.len != 0,
     );
+    builder.bindings.items[binding_index].lexical_captures =
+        builder.bindings.items[binding_index].lexical_captures or analyzed_replacement.lexical_captures;
+    if (analyzed_replacement.lexical_borrows.len != 0) {
+        const previous = builder.bindings.items[binding_index].lexical_borrows;
+        const combined = try self.allocator.alloc(Model.LexicalBorrow, previous.len + analyzed_replacement.lexical_borrows.len);
+        @memcpy(combined[0..previous.len], previous);
+        @memcpy(combined[previous.len..], analyzed_replacement.lexical_borrows);
+        builder.bindings.items[binding_index].lexical_borrows = combined;
+    }
     // The replacement may mutate another field of the same value root. Keep
     // the target's original value for compound arithmetic, but rebuild its
     // owning path from the root as it exists after evaluating the right-hand
@@ -168,7 +193,7 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
     try refreshPathBases(self, builder, binding, steps.items);
     const class_owned_field = if (steps.items.len != 0) switch (steps.items[steps.items.len - 1]) {
         .field => |step| self.structures[step.structure].is_class,
-        .collection => false,
+        .collection, .optional => false,
     } else false;
     if (Resources.requiresRetain(self, current_type)) {
         if (class_owned_field) {
@@ -251,11 +276,49 @@ pub fn analyzeAssignment(self: anytype, builder: anytype, assignment: Ast.Assign
                 } });
                 replacement = result;
             },
+            .optional => |step| {
+                const result = try self.newValue(builder, step.type);
+                try self.emit(builder, .{ .optional_some = .{ .result = result, .operand = replacement } });
+                replacement = result;
+            },
         }
     }
     if (binding.local != null or binding.reference != null) {
         try storeBinding(self, builder, binding, replacement);
     }
+    if (safe_merge) |merge| {
+        self.terminate(builder, .{ .jump = merge });
+        builder.current_block = merge;
+    }
+}
+
+fn enterSafeAssignmentPath(
+    self: anytype,
+    builder: anytype,
+    steps: *std.ArrayList(PathStep),
+    current_type: *Ast.Type,
+    current_value: *Ir.ValueId,
+    safe_merge: *?Ir.BlockId,
+    root_mutable: bool,
+    target_field: Ast.AssignmentTarget.Field,
+) !void {
+    if (!root_mutable) return self.fail(target_field.name_position, "safe assignment requires a var root");
+    const child = current_type.*.optionalChild() orelse {
+        const message = try std.fmt.allocPrint(self.allocator, "safe assignment '?.' requires an optional receiver, found '{s}'", .{self.typeName(current_type.*)});
+        return self.fail(target_field.name_position, message);
+    };
+    const optional_value = Model.TypedValue{ .type = current_type.*, .value = current_value.* };
+    const presence = try Optionals.emitPresence(self, builder, optional_value);
+    const present = try self.newBlock(builder);
+    const absent = try self.newBlock(builder);
+    if (safe_merge.* == null) safe_merge.* = try self.newBlock(builder);
+    self.terminate(builder, .{ .branch = .{ .condition = presence.value, .then_block = present, .else_block = absent } });
+    builder.current_block = absent;
+    self.terminate(builder, .{ .jump = safe_merge.*.? });
+    builder.current_block = present;
+    try steps.append(self.allocator, .{ .optional = .{ .base = current_value.*, .type = current_type.* } });
+    current_value.* = (try Optionals.unwrap(self, builder, optional_value)).value;
+    current_type.* = child;
 }
 
 fn refreshPathBases(self: anytype, builder: anytype, binding: anytype, steps: []PathStep) !void {
@@ -282,6 +345,13 @@ fn refreshPathBases(self: anytype, builder: anytype, binding: anytype, steps: []
                 .index = collection.index,
                 .position = collection.position,
             } });
+            current = value;
+        },
+        .optional => |*optional| {
+            optional.base = current;
+            const child = optional.type.optionalChild().?;
+            const value = try self.newValue(builder, child);
+            try self.emit(builder, .{ .optional_unwrap = .{ .result = value, .operand = current } });
             current = value;
         },
     };
@@ -451,7 +521,12 @@ fn analyzeReplacement(
             return self.fail(assignment.value.?.position, message);
         }
         try Borrowing.requireOwned(self, value, assignment.value.?.position, "stored");
-        return .{ .value = value.value, .transferred = value.transferred };
+        return .{
+            .value = value.value,
+            .transferred = value.transferred,
+            .lexical_captures = value.lexical_captures,
+            .lexical_borrows = value.lexical_borrows,
+        };
     }
 
     if (assignment.operator == .add and target_type == .str) {

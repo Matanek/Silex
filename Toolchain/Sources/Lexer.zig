@@ -99,6 +99,7 @@ pub const TokenTag = enum {
     at,
     caret,
     question,
+    question_question,
     question_dot,
     pipe_pipe,
     colon,
@@ -197,6 +198,10 @@ pub const Lexer = struct {
         if (character == '.') return self.dotToken(start, position);
         if (character == '?') {
             self.advance();
+            if (self.index < self.source.len and self.source[self.index] == '?') {
+                self.advance();
+                return self.token(.question_question, start, position);
+            }
             if (self.index < self.source.len and self.source[self.index] == '.') {
                 self.advance();
                 return self.token(.question_dot, start, position);

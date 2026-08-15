@@ -1,0 +1,63 @@
+struct NumberCursor {
+    var current:int
+    let end:int
+
+    func next() int? {
+        if self.current >= self.end { return null }
+        let value = self.current
+        self.current++
+        return value
+    }
+}
+
+class SharedCursor {
+    public var current:int
+    public let end:int
+
+    public func next() int? {
+        if self.current >= self.end { return null }
+        let value = self.current
+        self.current++
+        return value
+    }
+}
+
+struct Factory {
+    var calls:int
+
+    func cursor() NumberCursor {
+        self.calls++
+        return NumberCursor(current:0, end:3)
+    }
+}
+
+test "custom structure iterator runs to completion" {
+    var total = 0
+    for value in NumberCursor(current:1, end:4) { total += value }
+    if total != 6 { panic("structure iterator") }
+}
+
+test "custom class iterator shares its visible progress" {
+    var cursor = SharedCursor(current:0, end:3)
+    var total = 0
+    for value in cursor { total += value }
+    if total != 3 || cursor.current != 3 { panic("class iterator") }
+}
+
+test "custom iterator source is evaluated once and honors control flow" {
+    var factory = Factory(calls:0)
+    var total = 0
+    for value in factory.cursor() {
+        if value == 0 { continue }
+        total += value
+        if value == 2 { break }
+    }
+    if factory.calls != 1 || total != 3 { panic("iterator control flow") }
+}
+
+test "custom iterator accepts explicit cursor transfer and copied values" {
+    var cursor = NumberCursor(current:40, end:43)
+    var total = 0
+    for let value in move cursor { total += value }
+    if total != 123 { panic("moved iterator") }
+}

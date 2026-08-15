@@ -41,6 +41,119 @@ test "evaluate exhaustive associated enum matches" {
     try std.testing.expect(std.mem.indexOf(u8, text, "enum.payload") != null);
 }
 
+test "ignore selected match payloads without declaring bindings" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\struct Tracer { let label:str; drop { print("drop ", self.label) } }
+        \\enum Token { identifier(str, int); traced(Tracer, int); end(int) }
+        \\func classify(token:Token) str {
+        \\    return match token {
+        \\        identifier(_, _) => "name"
+        \\        traced(value, _) => value.label
+        \\        end(_) => "end"
+        \\    }
+        \\}
+        \\func ignore_resource(token:Token) {
+        \\    match token { traced(_, _) => { print("ignored") }; else => {} }
+        \\}
+        \\func name_resource(token:Token) {
+        \\    match token { traced(value, _) => { print("named") }; else => {} }
+        \\}
+        \\func main() {
+        \\    print(classify(Token.identifier("silex", 1)))
+        \\    print(classify(Token.traced(Tracer(label:"kept"), 2)))
+        \\    print(classify(Token.end(3)))
+        \\    ignore_resource(Token.traced(Tracer(label:"ignored"), 4))
+        \\    name_resource(Token.traced(Tracer(label:"named"), 5))
+        \\}
+    );
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings(
+        "name\ndrop kept\ndrop kept\nkept\nend\nignored\ndrop ignored\ndrop ignored\nnamed\ndrop named\ndrop named\n",
+        result.stdout,
+    );
+}
+
+test "diagnose invalid ignored match payload forms" {
+    try expectCompileError(
+        "enum Choice { value(int); empty } func main() { let result = match Choice.value(1) { value(let _) => 1; empty => 0 } }",
+        "ignored match payload cannot use 'let'",
+    );
+    try expectCompileError(
+        "enum Choice { value(int); empty } func main() { let result = match Choice.value(1) { value(var _) => 1; empty => 0 } }",
+        "ignored match payload cannot use 'var'",
+    );
+    try expectCompileError(
+        "enum Choice { value(int); empty } func main() { let result = match Choice.value(1) { value(_) => _; empty => 0 } }",
+        "unknown variable '_'",
+    );
+    try expectCompileError("func main() { let _ = 1 }", "'_' is reserved for ignored match payloads");
+    try expectCompileError("func main() { var _:int }", "'_' is reserved for ignored match payloads");
+}
+
+test "evaluate ordered guarded match branches after binding payloads" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\enum Token { integer(int, int); identifier(str, int); end }
+        \\func source() Token { print("subject"); return Token.integer(0, 7) }
+        \\func permits(label:str, accepted:bool) bool { print(label); return accepted }
+        \\func classify(token:Token) str {
+        \\    return match token {
+        \\        integer(value, _) if permits("negative", value < 0) => "negative"
+        \\        integer(value, _) if permits("zero", value == 0) => "zero"
+        \\        integer(_, _) => "positive"
+        \\        identifier(name, _) if name == "self" => "reserved"
+        \\        identifier(_, _) => "name"
+        \\        else => "other"
+        \\    }
+        \\}
+        \\func announce(token:Token) {
+        \\    match token {
+        \\        integer(value, _) if value > 0 => { print("positive block") }
+        \\        integer(_, _) => { print("other block") }
+        \\        else => { print("non integer") }
+        \\    }
+        \\}
+        \\func main() {
+        \\    print(classify(source()))
+        \\    print(classify(Token.integer(3, 8)))
+        \\    print(classify(Token.identifier("self", 9)))
+        \\    announce(Token.integer(1, 10))
+        \\    announce(Token.integer(0, 11))
+        \\}
+    );
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings(
+        "subject\nnegative\nzero\nzero\nnegative\nzero\npositive\nreserved\npositive block\nother block\n",
+        result.stdout,
+    );
+}
+
+test "diagnose invalid guarded match coverage and types" {
+    try expectCompileError(
+        "enum Choice { value(int); empty } func main() { let result = match Choice.value(1) { value(number) if number => 1; value(_) => 2; empty => 0 } }",
+        "match guard requires bool, found 'int'",
+    );
+    try expectCompileError(
+        "enum Choice { value(int); empty } func main() { let result = match Choice.value(1) { value(number) if number > 0 => 1; empty => 0 } }",
+        "match is missing unguarded branch for variant 'value'",
+    );
+    try expectCompileError(
+        "enum Choice { value(int); empty } func main() { let result = match Choice.value(1) { value(_) => 1; value(number) if number > 0 => 2; empty => 0 } }",
+        "guarded branch for variant 'value' is unreachable after its unguarded branch",
+    );
+    try expectCompileError(
+        "enum Choice { value; empty } func main() { let result = match Choice.value { value => 1; else if true => 2 } }",
+        "else match branch cannot have a guard",
+    );
+}
+
 test "compile terminal match nested in a mutating method branch" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

@@ -9,6 +9,171 @@ const Optionals = @import("Optionals.zig");
 const Support = @import("Support.zig");
 const Resources = @import("Resources.zig");
 const Visibility = @import("Visibility.zig");
+const Inheritance = @import("Inheritance.zig");
+
+pub const BoundMethod = struct {
+    owner: usize,
+    method_index: usize,
+    function_type: Ast.Type,
+};
+
+pub fn memberReference(
+    self: anytype,
+    builder: anytype,
+    access: Ast.Expression.FieldAccess,
+    expected: ?Ast.Type,
+) !?Model.TypedValue {
+    if (access.safe) return null;
+    if (access.base.value == .identifier and Support.findBinding(builder.bindings.items, access.base.value.identifier) == null) return null;
+    if (access.base.value == .field_access and rootBinding(builder.bindings.items, access.base) == null) return null;
+    if (inferType(self, builder, access.base)) |known_type| if (known_type.structureIndex()) |known_structure| {
+        if (known_structure >= self.structures.len) return null;
+    };
+
+    const base = try self.analyzeExpression(builder, access.base);
+    const structure_index = base.type.structureIndex() orelse return @as(?Model.TypedValue, try self.analyzeFieldValue(builder, access, base));
+    if (structure_index >= self.program.structures.len) return null;
+    const candidates = try Inheritance.methodCandidates(self, self.allocator, structure_index, access.name);
+
+    var field_type: ?Ast.Type = null;
+    for (self.structures[structure_index].fields) |field| if (std.mem.eql(u8, field.name, access.name)) {
+        field_type = field.type;
+        break;
+    };
+
+    var selected: ?Inheritance.MethodCandidate = null;
+    var selected_type: ?Ast.Type = null;
+    for (candidates) |candidate| {
+        if (!Visibility.memberVisible(self, candidate.owner, candidate.method, access.name_position)) continue;
+        if (candidate.method.return_mode != .value) continue;
+        const function_type = functionTypeForMethod(self.program, candidate.method, expected);
+        if (expected != null and function_type == null) continue;
+        if (selected != null) {
+            const message = try std.fmt.allocPrint(self.allocator, "method reference '{s}' is ambiguous", .{access.name});
+            return self.fail(access.name_position, message);
+        }
+        selected = candidate;
+        selected_type = function_type;
+    }
+
+    const field_matches = if (expected) |target| field_type != null and field_type.? == target else field_type != null;
+    if (selected == null) return @as(?Model.TypedValue, try self.analyzeFieldValue(builder, access, base));
+    if (selected_type == null) return self.fail(access.name_position, "method reference has no representable callback signature");
+    if (field_matches) {
+        const message = try std.fmt.allocPrint(self.allocator, "member reference '{s}' is ambiguous between a stored field and a method", .{access.name});
+        return self.fail(access.name_position, message);
+    }
+
+    const method = selected.?.method;
+    const flat = flatMethodIndex(self.program, selected.?.owner, selected.?.index);
+    const mutating = self.method_mutability[flat];
+    if (mutating) switch (access.base.value) {
+        .identifier, .field_access, .index_access => {},
+        else => return self.fail(access.name_position, "a bound mutating method requires a stable mutable receiver place"),
+    };
+    const receiver_reference = if (mutating) mutable: {
+        const prepared = try MutableReferences.prepare(self, builder, access.base, base.type);
+        if (prepared.temporary != null) return self.fail(access.name_position, "a bound mutating method requires a stable mutable receiver place");
+        break :mutable prepared.reference;
+    } else try readReference(self, builder, access.base, base);
+
+    const wrapper_index = self.bound_methods.items.len;
+    try self.bound_methods.append(self.allocator, .{
+        .owner = selected.?.owner,
+        .method_index = selected.?.index,
+        .function_type = selected_type.?,
+    });
+    const wrapper = boundWrapperBase(self.program) + wrapper_index;
+    const result = try self.newValue(builder, selected_type.?);
+    try self.emit(builder, .{ .function_reference = .{
+        .result = result,
+        .function = wrapper,
+        .captures = try self.allocator.dupe(Ir.ValueId, &.{receiver_reference}),
+    } });
+    _ = method;
+    const lexical_borrows = if (Borrowing.rootName(access.base)) |root|
+        try self.allocator.dupe(Model.LexicalBorrow, &.{.{ .root = root, .mode = if (mutating) .mutable else .read }})
+    else
+        &.{};
+    return .{
+        .type = selected_type.?,
+        .value = result,
+        .lexical_captures = true,
+        .lexical_borrows = lexical_borrows,
+    };
+}
+
+fn readReference(self: anytype, builder: anytype, expression: *const Ast.Expression, value: Model.TypedValue) !Ir.ValueId {
+    if (expression.value == .identifier) if (Support.findBinding(builder.bindings.items, expression.value.identifier)) |binding| {
+        if (binding.reference) |existing_reference| return existing_reference;
+        if (binding.local) |local| {
+            const local_reference = try self.newValue(builder, .address);
+            try self.emit(builder, .{ .local_address = .{ .result = local_reference, .local = local } });
+            return local_reference;
+        }
+    };
+    const local = builder.local_types.items.len;
+    try builder.local_types.append(self.allocator, value.type);
+    try self.emit(builder, .{ .local_store = .{ .local = local, .operand = value.value } });
+    const local_reference = try self.newValue(builder, .address);
+    try self.emit(builder, .{ .local_address = .{ .result = local_reference, .local = local } });
+    return local_reference;
+}
+
+fn rootBinding(bindings: []const Model.Binding, expression: *const Ast.Expression) ?Model.Binding {
+    return switch (expression.value) {
+        .identifier => |name| Support.findBinding(bindings, name),
+        .field_access => |field| rootBinding(bindings, field.base),
+        .index_access => |index| rootBinding(bindings, index.base),
+        else => null,
+    };
+}
+
+fn functionTypeForMethod(program: Ast.Program, method: Ast.Function, expected: ?Ast.Type) ?Ast.Type {
+    if (expected) |target| {
+        const index = target.functionIndex() orelse return null;
+        if (index >= program.function_types.len or !callableMatches(program.function_types[index], method)) return null;
+        return target;
+    }
+    var found: ?Ast.Type = null;
+    for (program.function_types, 0..) |signature, index| if (matches(signature, method)) {
+        if (found != null) return null;
+        found = .function(index);
+    };
+    return found;
+}
+
+fn flatMethodIndex(program: Ast.Program, structure_index: usize, method_index: usize) usize {
+    var result = method_index;
+    for (program.structures[0..structure_index]) |structure| result += structure.methods.len;
+    return result;
+}
+
+fn callableMatches(signature: Ast.FunctionType, method: Ast.Function) bool {
+    if (signature.return_type != method.return_type or signature.return_mode != method.return_mode or signature.parameters.len > method.parameters.len) return false;
+    for (signature.parameters, method.parameters[0..signature.parameters.len]) |expected, actual| {
+        if (expected.type != actual.type or expected.mode != actual.mode) return false;
+    }
+    for (method.parameters[signature.parameters.len..]) |parameter| if (parameter.default == null) return false;
+    return true;
+}
+
+pub fn boundWrapperBase(program: Ast.Program) Ir.FunctionId {
+    var result = program.functions.len;
+    for (program.structures) |structure| if (!structure.is_protocol) {
+        result += structure.constructors.len;
+    };
+    for (program.structures) |structure| {
+        if (!structure.is_protocol) result += structure.methods.len;
+    }
+    for (program.structures) |structure| {
+        if (structure.drop != null) result += 1;
+    }
+    for (program.structures) |structure| {
+        if (structure.is_class and !structure.is_static) result += 1;
+    }
+    return result;
+}
 
 pub fn prepare(self: anytype) ![]const Ir.FunctionType {
     const result = try self.allocator.alloc(Ir.FunctionType, self.program.function_types.len);

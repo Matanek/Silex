@@ -115,6 +115,7 @@ pub fn expressionTypes(expression: *Ast.Expression, map: []const ?Ast.Type) void
         .match_expression => |match_value| {
             expressionTypes(match_value.subject, map);
             for (match_value.branches) |branch| {
+                if (branch.guard) |guard| expressionTypes(guard, map);
                 if (branch.value) |value| expressionTypes(value, map);
                 if (branch.statements) |statements| statementTypes(statements, map);
             }

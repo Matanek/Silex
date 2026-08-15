@@ -11,6 +11,7 @@ pub const UnaryOperator = enum {
     copy,
     borrow_read,
     borrow_mutable,
+    force_optional,
 };
 
 pub const BinaryOperator = enum {
@@ -31,6 +32,7 @@ pub const BinaryOperator = enum {
     bit_xor,
     shift_left,
     shift_right,
+    coalesce,
 };
 
 pub const Expression = struct {
@@ -67,6 +69,9 @@ pub const Expression = struct {
         /// Set only by compiler rewrites that deliberately target an internal
         /// runtime hook. Source calls never receive this privilege.
         compiler_generated: bool = false,
+        /// Restrict compiler-generated iterator lookup to `next()` overloads
+        /// whose result exposes one optional layer.
+        iterator_next: bool = false,
         safe: bool = false,
         arguments: []const *Expression,
         named_arguments: []const NamedArgument = &.{},
@@ -123,6 +128,7 @@ pub const Expression = struct {
         position: Source.Position,
         name: []const u8,
         mutable: bool = false,
+        ignored: bool = false,
     };
 
     pub const MatchBranch = struct {
@@ -130,6 +136,7 @@ pub const Expression = struct {
         variant: []const u8 = "",
         is_else: bool = false,
         bindings: []const MatchBinding = &.{},
+        guard: ?*Expression = null,
         value: ?*Expression = null,
         statements: ?[]const Statement = null,
     };
@@ -252,6 +259,7 @@ pub const AssignmentTarget = struct {
     pub const Field = struct {
         name_position: Source.Position,
         name: []const u8,
+        safe: bool = false,
     };
 
     pub const Index = struct {
@@ -348,6 +356,7 @@ pub const ForStatement = struct {
 pub const MutexStatement = struct {
     position: Source.Position,
     statements: []const Statement,
+    synchronized: bool = true,
 };
 
 pub const Statement = union(enum) {

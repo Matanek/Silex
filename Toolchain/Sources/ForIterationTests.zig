@@ -107,6 +107,126 @@ test "evaluate collection source and range bounds once from left to right" {
     try std.testing.expectEqualStrings("V\n7\n8\nS\nE\n0\n1\n", output);
 }
 
+test "diagnose invalid custom iterator contracts" {
+    try expectCompileError(
+        \\struct Cursor { func next() int { return 1 } }
+        \\func main() { for value in Cursor() {} }
+    , "iterator next() must return 'T?', found 'int'");
+    try expectCompileError(
+        \\struct Cursor { func next(value:int) int? { return value } }
+        \\func main() { for value in Cursor() {} }
+    , "structure 'Cursor' has no method named 'next' accepting 0 arguments");
+    try expectCompileError(
+        \\struct Cursor { func next() int? { return null } }
+        \\func main() { for var value in Cursor() {} }
+    , "for var is unavailable for values produced by a custom iterator");
+    try expectCompileError(
+        "func main() { for value in 42 {} }",
+        "for source expects an array, list, range, or iterator exposing next() T?",
+    );
+    try expectCompileError(
+        \\struct Cursor {
+        \\    func next() int? { return null }
+        \\    func next(step:int = 1) int? { return step }
+        \\}
+        \\func main() { for value in Cursor() {} }
+    , "iterator next() is ambiguous");
+}
+
+test "custom iterators select the unique zero argument optional overload" {
+    const output = try run(
+        \\struct Cursor {
+        \\    var value:int
+        \\    func next() int { return 99 }
+        \\    func next(step:int = 1) int? {
+        \\        if self.value >= 2 { return null }
+        \\        self.value += step
+        \\        return self.value
+        \\    }
+        \\}
+        \\func main() { for value in Cursor(value:0) { print(value) } }
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("1\n2\n", output);
+}
+
+test "custom iterators clean an immediately empty cursor" {
+    const output = try run(
+        \\struct Cursor {
+        \\    func next() int? { return null }
+        \\    drop { print("cursor drop") }
+        \\}
+        \\func main() { for value in Cursor() { print(value) } }
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("cursor drop\n", output);
+}
+
+test "reject mutable string scalar iteration" {
+    try expectCompileError(
+        "func main() { for var scalar in \"text\" {} }",
+        "for var is unavailable for immutable string scalars",
+    );
+}
+
+test "custom iterator values are cleaned on continue and break" {
+    const output = try run(
+        \\struct Item {
+        \\    let value:int
+        \\    drop { print("drop ", self.value) }
+        \\}
+        \\struct Cursor {
+        \\    var value:int
+        \\    func next() Item? {
+        \\        if self.value >= 3 { return null }
+        \\        self.value++
+        \\        return Item(value:self.value)
+        \\    }
+        \\}
+        \\func main() {
+        \\    for item in Cursor(value:0) {
+        \\        print("item ", item.value)
+        \\        if item.value == 1 { continue }
+        \\        if item.value == 2 { break }
+        \\    }
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("item 1\ndrop 1\nitem 2\ndrop 2\n", output);
+}
+
+test "custom iterator values and cursors clean before return and try propagation" {
+    const output = try run(
+        \\struct Item { let value:int; drop { print("drop item ", self.value) } }
+        \\struct Cursor {
+        \\    var value:int
+        \\    func next() Item? {
+        \\        if self.value != 0 { return null }
+        \\        self.value++
+        \\        return Item(value:self.value)
+        \\    }
+        \\    drop { print("drop cursor") }
+        \\}
+        \\func failure() Result<void,str> { return Result<void,str>.failure("stop") }
+        \\func early() int {
+        \\    for item in Cursor(value:0) { return item.value }
+        \\    return 0
+        \\}
+        \\func propagate() Result<void,str> {
+        \\    for item in Cursor(value:0) { print(item.value); try failure() }
+        \\    return Result<void,str>.success()
+        \\}
+        \\func main() {
+        \\    print(early())
+        \\    match propagate() { success => {}; failure(message) => { print(message) } }
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqual(@as(usize, 2), std.mem.count(u8, output, "drop item"));
+    try std.testing.expectEqual(@as(usize, 2), std.mem.count(u8, output, "drop cursor"));
+    try std.testing.expect(std.mem.indexOf(u8, output, "stop\n") != null);
+}
+
 test "collection for loops carry their proven bounds to the backend" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -287,7 +407,10 @@ test "reject invalid for sources bounds and mutable temporaries" {
     defer arena.deinit();
     var frontend = Frontend.Frontend.init(arena.allocator());
     try std.testing.expectError(error.InvalidSource, frontend.compile("func main() { for value in 42 { print(value) } }"));
-    try std.testing.expectEqualStrings("for source expects an array or list", frontend.diagnostic.?.message);
+    try std.testing.expectEqualStrings(
+        "for source expects an array, list, range, or iterator exposing next() T?",
+        frontend.diagnostic.?.message,
+    );
 
     frontend.diagnostic = null;
     try std.testing.expectError(error.InvalidSource, frontend.compile("func main() { for value in range(0, true) { print(value) } }"));

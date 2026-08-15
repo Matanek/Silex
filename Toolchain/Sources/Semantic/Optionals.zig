@@ -45,15 +45,21 @@ pub fn promote(
     value: Model.TypedValue,
     target: Types.Type,
 ) !?Model.TypedValue {
-    if (target.optionalChild() != value.type) return null;
+    const child = target.optionalChild() orelse return null;
+    const payload = if (child == value.type)
+        value
+    else
+        (try promote(self, builder, value, child)) orelse return null;
     const result = try self.newValue(builder, target);
-    try self.emit(builder, .{ .optional_some = .{ .result = result, .operand = value.value } });
+    try self.emit(builder, .{ .optional_some = .{ .result = result, .operand = payload.value } });
     return .{
         .type = target,
         .value = result,
-        .transferred = value.transferred,
-        .borrowed_root = value.borrowed_root,
-        .borrowed_mode = value.borrowed_mode,
+        .transferred = payload.transferred,
+        .borrowed_root = payload.borrowed_root,
+        .borrowed_mode = payload.borrowed_mode,
+        .lexical_captures = payload.lexical_captures,
+        .lexical_borrows = payload.lexical_borrows,
     };
 }
 
@@ -87,11 +93,20 @@ pub fn unwrap(self: anytype, builder: anytype, source: Model.TypedValue) !Model.
         .transferred = source.transferred,
         .borrowed_root = source.borrowed_root,
         .borrowed_mode = source.borrowed_mode,
+        .lexical_captures = source.lexical_captures,
+        .lexical_borrows = source.lexical_borrows,
     };
 }
 
 pub fn conversionCost(source: Types.Type, target: Types.Type) ?u8 {
-    return if (target.optionalChild() == source) 1 else null;
+    var current = target;
+    var cost: u8 = 0;
+    while (current.optionalChild()) |child| {
+        cost +|= 1;
+        if (child == source) return cost;
+        current = child;
+    }
+    return null;
 }
 
 pub fn canConvert(source: Types.Type, target: Types.Type) bool {

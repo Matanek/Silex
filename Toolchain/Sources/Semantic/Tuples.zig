@@ -36,6 +36,8 @@ pub fn analyzeLiteral(
 
     var values: std.ArrayList(Ir.ValueId) = .empty;
     var inferred_fields: std.ArrayList(Ir.StructureField) = .empty;
+    var lexical_captures = false;
+    var lexical_borrows: std.ArrayList(Model.LexicalBorrow) = .empty;
     for (literal.elements, 0..) |element, index| {
         if (expected != null and target.tuple_named and !std.mem.eql(u8, target.fields[index].name, element.name.?)) {
             const message = try std.fmt.allocPrint(
@@ -63,6 +65,8 @@ pub fn analyzeLiteral(
         }
         try Borrowing.requireOwned(self, value, element.value.position, "stored in a tuple");
         try values.append(self.allocator, value.value);
+        lexical_captures = lexical_captures or value.lexical_captures;
+        try lexical_borrows.appendSlice(self.allocator, value.lexical_borrows);
         if (expected == null) try inferred_fields.append(self.allocator, .{
             .name = element.name orelse target.fields[index].name,
             .type = value.type,
@@ -86,7 +90,7 @@ pub fn analyzeLiteral(
         .structure = result_type.structureIndex().?,
         .fields = try values.toOwnedSlice(self.allocator),
     } });
-    return .{ .type = result_type, .value = result };
+    return .{ .type = result_type, .value = result, .lexical_captures = lexical_captures, .lexical_borrows = try lexical_borrows.toOwnedSlice(self.allocator) };
 }
 
 fn tupleName(self: anytype, named: bool, fields: []const Ir.StructureField) ![]const u8 {

@@ -1619,6 +1619,7 @@ pub const Compiler = struct {
                 const branches = try self.allocator.alloc(Ast.Expression.MatchBranch, match_value.branches.len);
                 for (match_value.branches, 0..) |branch, branch_index| {
                     branches[branch_index] = branch;
+                    if (branch.guard) |guard| try self.rewriteExpression(module, guard, type_map);
                     if (branch.value) |value| try self.rewriteExpression(module, value, type_map);
                     if (branch.statements) |statements| {
                         branches[branch_index].statements = try self.rewriteStatements(module, statements, type_map);

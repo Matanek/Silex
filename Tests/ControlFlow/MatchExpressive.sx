@@ -1,0 +1,24 @@
+enum Token {
+    integer(int, int)
+    identifier(str, int)
+    end
+}
+
+func classify(token:Token) str {
+    return match token {
+        integer(value, _) if value < 0 => "negative"
+        integer(value, _) if value == 0 => "zero"
+        integer(_, _) => "positive"
+        identifier(name, _) if name == "self" => "reserved"
+        identifier(_, _) => "name"
+        else => "end"
+    }
+}
+
+test "ignored payloads and ordered guards classify complete matches" {
+    if classify(Token.integer(-1, 1)) != "negative" { panic("negative guard") }
+    if classify(Token.integer(0, 2)) != "zero" { panic("zero guard") }
+    if classify(Token.integer(1, 3)) != "positive" { panic("unguarded fallback") }
+    if classify(Token.identifier("self", 4)) != "reserved" { panic("identifier guard") }
+    if classify(Token.end) != "end" { panic("else fallback") }
+}

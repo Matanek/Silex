@@ -133,6 +133,74 @@ test "native effects match the reference output" {
     try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
 }
 
+test "native ignored match payloads agree with the reference interpreter" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const source =
+        \\enum Token { name(str, int); number(int, int); end(int) }
+        \\func classify(token:Token) str {
+        \\    return match token { name(_, _) => "name"; number(value, _) => "$(value)"; end(_) => "end" }
+        \\}
+        \\func main() { print(classify(Token.name("silex", 1))); print(classify(Token.number(42, 2))); print(classify(Token.end(3))) }
+    ;
+    var frontend = Frontend.Frontend.init(allocator);
+    const reference = try Interpreter.runCapture(allocator, (try frontend.compile(source)).ir);
+    const native = try compileAndRun(allocator, source);
+    try std.testing.expectEqual(reference.exit_code, exitCode(native));
+    try std.testing.expectEqualSlices(u8, reference.stdout, native.stdout);
+    try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
+}
+
+test "native guarded matches agree with ordered reference effects" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const source =
+        \\enum Token { number(int); text(str); end }
+        \\func allow(label:str, value:bool) bool { print(label); return value }
+        \\func classify(token:Token) str {
+        \\    return match token { number(value) if allow("first", value < 0) => "negative"; number(value) if allow("second", value == 0) => "zero"; number(_) => "positive"; text(_) => "text"; else => "end" }
+        \\}
+        \\func main() { print(classify(Token.number(0))); print(classify(Token.number(2))) }
+    ;
+    var frontend = Frontend.Frontend.init(allocator);
+    const reference = try Interpreter.runCapture(allocator, (try frontend.compile(source)).ir);
+    const native = try compileAndRun(allocator, source);
+    try std.testing.expectEqual(reference.exit_code, exitCode(native));
+    try std.testing.expectEqualSlices(u8, reference.stdout, native.stdout);
+    try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
+}
+
+test "native anonymous scopes and nested optionals agree with the reference interpreter" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const source =
+        \\struct Resource { let name:str; drop { print("drop ", self.name) } }
+        \\func fallback() int { print("fallback"); return 9 }
+        \\func main() {
+        \\    { let resource = Resource(name:"scope"); print(resource.name) }
+        \\    let inner:int? = null
+        \\    let nested:int?? = inner
+        \\    if value = nested { print(value == null) }
+        \\    let present:int? = 4
+        \\    print(present ?? fallback())
+        \\    let absent:int?
+        \\    print(absent ?? fallback())
+        \\}
+    ;
+    var frontend = Frontend.Frontend.init(allocator);
+    const reference = try Interpreter.runCapture(allocator, (try frontend.compile(source)).ir);
+    const native = try compileAndRun(allocator, source);
+    try std.testing.expectEqual(reference.exit_code, exitCode(native));
+    try std.testing.expectEqualSlices(u8, reference.stdout, native.stdout);
+    try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
+}
+
 test "native optional aggregates preserve callback layout" {
     if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
@@ -144,6 +212,135 @@ test "native optional aggregates preserve callback layout" {
         \\func main() {
         \\    var pending:Job? = Job(callback:increment)
         \\    if var job = pending { print(job.callback(41)) }
+        \\}
+    ;
+    var frontend = Frontend.Frontend.init(allocator);
+    const reference = try Interpreter.runCapture(allocator, (try frontend.compile(source)).ir);
+    const native = try compileAndRun(allocator, source);
+    try std.testing.expectEqual(reference.exit_code, exitCode(native));
+    try std.testing.expectEqualSlices(u8, reference.stdout, native.stdout);
+    try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
+}
+
+test "native safe optional assignments agree with the reference interpreter" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const source =
+        \\struct Position { var x:int }
+        \\struct Profile { var position:Position?; var count:int }
+        \\func right() int { print("right"); return 10 }
+        \\func main() {
+        \\    var present:Profile? = Profile(position:Position(x:1), count:2)
+        \\    var absent:Profile?
+        \\    present?.position?.x = right()
+        \\    present?.count++
+        \\    absent?.position?.x = right()
+        \\    if profile = present { if position = profile.position { print(position.x, " ", profile.count) } }
+        \\}
+    ;
+    var frontend = Frontend.Frontend.init(allocator);
+    const reference = try Interpreter.runCapture(allocator, (try frontend.compile(source)).ir);
+    const native = try compileAndRun(allocator, source);
+    try std.testing.expectEqual(reference.exit_code, exitCode(native));
+    try std.testing.expectEqualSlices(u8, reference.stdout, native.stdout);
+    try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
+}
+
+test "native forced optional extraction agrees with reference values and failure" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const present_source =
+        \\struct Box { let value:int }
+        \\func main() { let box:Box? = Box(value:42); print(box!.value) }
+    ;
+    var frontend = Frontend.Frontend.init(allocator);
+    const reference = try Interpreter.runCapture(allocator, (try frontend.compile(present_source)).ir);
+    const native = try compileAndRun(allocator, present_source);
+    try std.testing.expectEqualSlices(u8, reference.stdout, native.stdout);
+
+    const absent = try compileAndRun(allocator,
+        \\func main() {
+        \\    let value:int?
+        \\    print(value!)
+        \\}
+    );
+    try std.testing.expectEqual(@as(u8, 1), exitCode(absent));
+    try std.testing.expectEqualStrings("Main.sx:3:16: runtime error: forced optional extraction failed\n", absent.stderr);
+}
+
+test "native bound methods agree with the reference interpreter" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const source =
+        \\struct Counter {
+        \\    var value:int
+        \\    func read(offset:int) int { return self.value + offset }
+        \\    func add(amount:int) int {
+        \\        self.value += amount
+        \\        return self.value
+        \\    }
+        \\}
+        \\func main() {
+        \\    var counter = Counter(value:40)
+        \\    { let read:func(int) int = counter.read; print(read(2)) }
+        \\    { let add:func(int) int = counter.add; print(add(2)) }
+        \\    print(counter.value)
+        \\}
+    ;
+    var frontend = Frontend.Frontend.init(allocator);
+    const reference = try Interpreter.runCapture(allocator, (try frontend.compile(source)).ir);
+    const native = try compileAndRun(allocator, source);
+    try std.testing.expectEqual(reference.exit_code, exitCode(native));
+    try std.testing.expectEqualSlices(u8, reference.stdout, native.stdout);
+    try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
+}
+
+test "native custom iteration agrees with the reference interpreter" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const source =
+        \\struct Cursor {
+        \\    var value:int
+        \\    let end:int
+        \\    func next() int? {
+        \\        if self.value >= self.end { return null }
+        \\        let current = self.value
+        \\        self.value++
+        \\        return current
+        \\    }
+        \\}
+        \\func main() {
+        \\    for value in Cursor(value:0, end:4) {
+        \\        if value == 1 { continue }
+        \\        print(value)
+        \\        if value == 2 { break }
+        \\    }
+        \\}
+    ;
+    var frontend = Frontend.Frontend.init(allocator);
+    const reference = try Interpreter.runCapture(allocator, (try frontend.compile(source)).ir);
+    const native = try compileAndRun(allocator, source);
+    try std.testing.expectEqual(reference.exit_code, exitCode(native));
+    try std.testing.expectEqualSlices(u8, reference.stdout, native.stdout);
+    try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
+}
+
+test "native string iteration agrees with the reference interpreter" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const source =
+        \\func main() {
+        \\    for scalar in "A¢€𐍈é" { print(scalar) }
         \\}
     ;
     var frontend = Frontend.Frontend.init(allocator);
