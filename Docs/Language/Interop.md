@@ -12,6 +12,13 @@ system DLL functions. A named package may additionally own a private static
 provider declared in its manifest; that provider is unavailable to application
 code and to other packages.
 
+These two cases have different extension rules. A package author adds a
+`Boundary.<Provider>` through the package manifest and does not modify the
+compiler. The `MacOS`, `Linux`, and `Windows` providers are toolchain-owned
+system contracts: adding a new symbol to one of them currently requires native
+backend support and signature validation in the compiler. They are not the
+extension point for ordinary packages.
+
 ```sx
 use Interop.C
 use Interop.MacOS
@@ -107,7 +114,7 @@ The implemented surface is deliberately narrow:
 `Windows.ws2_32`, plus target-selected package-private static providers named
 as `Boundary.<Provider>` and authorized by the owning manifest for
 `macos-arm64`;
-- implemented capabilities: random seeding, monotonic clocks, byte console
+- implemented capabilities: random seeding, monotonic and local civil clocks, byte console
   I/O, terminal sessions, files, process metadata, subprocesses, filesystem
   operations, sockets, name resolution, operating-system threads, and the
   typed Objective-C messages needed by the macOS system WebView;

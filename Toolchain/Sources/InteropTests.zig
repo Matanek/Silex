@@ -495,6 +495,22 @@ test "reject incomplete and invalid C.function declarations" {
     try expectError(
         \\use Interop.C
         \\use Interop.MacOS
+        \\let localtime = C.function<func() int32>(library:MacOS.lib_system, name:"localtime_r")
+        \\func main() {}
+    ,
+        "localtime_r expects func(C.MutablePointer<int>, C.MutablePointer<uint>) C.Pointer<uint8>",
+    );
+    try expectWindowsError(
+        \\use Interop.C
+        \\use Interop.Windows
+        \\let localtime = C.function<func() void>(library:Windows.kernel32, name:"GetLocalTime")
+        \\func main() {}
+    ,
+        "GetLocalTime expects func(C.MutablePointer<uint>) void",
+    );
+    try expectError(
+        \\use Interop.C
+        \\use Interop.MacOS
         \\let write = C.function<func(int32, C.Pointer<uint8>, C.Size) C.SignedSize>(library:MacOS.lib_system, name:"write")
         \\func main() { write(1, C.pointer(42), 1 as C.Size) }
     ,
@@ -533,6 +549,20 @@ fn expectError(input_source: []const u8, message: []const u8) !void {
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = input_source });
     const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
     var compiler = Project.Compiler.init(allocator, std.testing.io);
+    try std.testing.expectError(error.InvalidSource, compiler.compile(input));
+    try std.testing.expectEqualStrings(message, compiler.diagnostic.?.message);
+}
+
+fn expectWindowsError(input_source: []const u8, message: []const u8) !void {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = input_source });
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    compiler.target = .windows_x64;
     try std.testing.expectError(error.InvalidSource, compiler.compile(input));
     try std.testing.expectEqualStrings(message, compiler.diagnostic.?.message);
 }

@@ -575,13 +575,18 @@ test "emit deterministic Windows system imports and patch X64 IAT calls" {
     try std.testing.expect(std.mem.readInt(i32, bytes[file_alignment + 2 .. file_alignment + 6], .little) != 0);
 }
 
-test "emit the Windows wall clock import used by UUIDv7" {
-    var code = [_]u8{ 0xff, 0x15, 0, 0, 0, 0, 0xc3 };
-    const sites = [_]Imports.X64Site{.{ .displacement_offset = 2, .symbol = .get_system_time_as_file_time }};
-    const bytes = try emitX64(std.testing.allocator, .x64, &code, 6, &sites);
+test "emit Windows system and local wall clock imports" {
+    var code = [_]u8{ 0xff, 0x15, 0, 0, 0, 0, 0xff, 0x15, 0, 0, 0, 0, 0xc3 };
+    const sites = [_]Imports.X64Site{
+        .{ .displacement_offset = 2, .symbol = .get_system_time_as_file_time },
+        .{ .displacement_offset = 8, .symbol = .get_local_time },
+    };
+    const bytes = try emitX64(std.testing.allocator, .x64, &code, 12, &sites);
     defer std.testing.allocator.free(bytes);
     try std.testing.expect(std.mem.indexOf(u8, bytes, "GetSystemTimeAsFileTime\x00") != null);
+    try std.testing.expect(std.mem.indexOf(u8, bytes, "GetLocalTime\x00") != null);
     try std.testing.expect(std.mem.readInt(i32, bytes[file_alignment + 2 .. file_alignment + 6], .little) != 0);
+    try std.testing.expect(std.mem.readInt(i32, bytes[file_alignment + 8 .. file_alignment + 12], .little) != 0);
 }
 
 test "patch an ARM64 import page and IAT load" {

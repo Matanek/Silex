@@ -1015,6 +1015,10 @@ fn supportedExternal(function: ExternalFunction) bool {
         const arguments = [_]AbiValue{.int32};
         return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .uint64;
     }
+    if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and std.mem.eql(u8, function.source_name, "localtime_r")) {
+        const arguments = [_]AbiValue{ .read_address, .read_address };
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .read_address;
+    }
     if (std.mem.eql(u8, function.provider, "Darwin.lib_system") and std.mem.eql(u8, function.source_name, "read")) {
         const arguments = [_]AbiValue{ .int32, .read_address, .uint64 };
         return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == .int64;
@@ -1394,6 +1398,10 @@ fn supportedExternal(function: ExternalFunction) bool {
     if (std.mem.eql(u8, function.provider, "Windows.kernel32") and
         std.mem.eql(u8, function.source_name, "GetSystemTimeAsFileTime"))
     {
+        const arguments = [_]AbiValue{.read_address};
+        return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == null;
+    }
+    if (std.mem.eql(u8, function.provider, "Windows.kernel32") and std.mem.eql(u8, function.source_name, "GetLocalTime")) {
         const arguments = [_]AbiValue{.read_address};
         return std.mem.eql(AbiValue, function.signature.arguments, &arguments) and function.signature.result == null;
     }

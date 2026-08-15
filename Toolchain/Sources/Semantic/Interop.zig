@@ -58,6 +58,10 @@ pub fn prepare(self: anytype) ![]const Boundary.Function {
             if (parameters.len != 1 or parameters[0] != .uint32 or return_type != .uint) {
                 return self.fail(external.position, "clock_gettime_nsec_np expects func(uint32) uint");
             }
+        } else if (std.mem.eql(u8, external.library, "MacOS.lib_system") and std.mem.eql(u8, external.source_name, "localtime_r")) {
+            if (parameters.len != 2 or parameters[0] != .address or parameters[1] != .address or return_type != .address) {
+                return self.fail(external.position, "localtime_r expects func(C.MutablePointer<int>, C.MutablePointer<uint>) C.Pointer<uint8>");
+            }
         } else if (std.mem.eql(u8, external.library, "MacOS.lib_system") and std.mem.eql(u8, external.source_name, "read")) {
             if (parameters.len != 3 or parameters[0] != .int32 or parameters[1] != .address or
                 parameters[2] != .uint or return_type != .int)
@@ -457,6 +461,10 @@ pub fn prepare(self: anytype) ![]const Boundary.Function {
         {
             if (parameters.len != 1 or parameters[0] != .address or return_type != .void) {
                 return self.fail(external.position, "GetSystemTimeAsFileTime expects func(C.MutablePointer<int>) void");
+            }
+        } else if (std.mem.eql(u8, external.library, "Windows.kernel32") and std.mem.eql(u8, external.source_name, "GetLocalTime")) {
+            if (parameters.len != 1 or parameters[0] != .address or return_type != .void) {
+                return self.fail(external.position, "GetLocalTime expects func(C.MutablePointer<uint>) void");
             }
         } else if (std.mem.eql(u8, external.library, "Windows.ucrtbase") and std.mem.eql(u8, external.source_name, "_write")) {
             if (parameters.len != 3 or parameters[0] != .int32 or parameters[1] != .address or
