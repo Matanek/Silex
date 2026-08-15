@@ -2,7 +2,15 @@ const std = @import("std");
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
-    const optimize = b.standardOptimizeOption(.{});
+    const optimize: std.builtin.OptimizeMode = b.option(
+        std.builtin.OptimizeMode,
+        "optimize",
+        "Prioritize performance, safety, or binary size",
+    ) orelse switch (b.release_mode) {
+        .fast => .ReleaseFast,
+        .small => .ReleaseSmall,
+        .off, .any, .safe => .ReleaseSafe,
+    };
 
     const package_version = manifestVersion();
     const build_options = b.addOptions();
@@ -151,7 +159,9 @@ pub fn build(b: *std.Build) void {
     lsp_test_step.dependOn(&lsp_test_command.step);
 
     const check_step = b.step("check", "Build and test the toolchain");
-    check_step.dependOn(b.getInstallStep());
+    // Validation must never replace the compiler used by `silex` or Zed.
+    // The language-test command already builds this executable in the
+    // requested mode without installing it into zig-out/bin.
     check_step.dependOn(&test_command.step);
     check_step.dependOn(&deep_copy_test_command.step);
     check_step.dependOn(&language_test_command.step);
