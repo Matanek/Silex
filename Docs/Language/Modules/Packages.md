@@ -303,8 +303,8 @@ installation command.
 
 ## Declare a private native boundary
 
-A package that implements a platform boundary may bundle one precompiled
-static archive per target and name the platform libraries it requires:
+A package that implements a platform boundary may bundle a precompiled static
+archive, name platform libraries or Apple frameworks, or combine these inputs:
 
 ```json
 {
@@ -323,8 +323,33 @@ static archive per target and name the platform libraries it requires:
 }
 ```
 
-The same provider can declare system libraries on Linux and Windows without
-exposing raw linker flags:
+An archive is not required when the provider calls only symbols supplied by
+the selected platform. STD can therefore describe its system provider without
+shipping a placeholder binary:
+
+```json
+{
+  "boundary": {
+    "macos-arm64": {
+      "providers": {
+        "System": {
+          "libraries": ["System"]
+        }
+      }
+    },
+    "linux-x64": {
+      "providers": {
+        "System": {
+          "libraries": ["c", "m", "pthread"]
+        }
+      }
+    }
+  }
+}
+```
+
+An archive-backed provider can additionally declare system libraries on Linux
+and Windows without exposing raw linker flags:
 
 ```json
 {
@@ -349,13 +374,14 @@ exposing raw linker flags:
 }
 ```
 
-The archive path is relative to and must remain inside the package. The
-compiler verifies that its object format and architecture match the manifest
-target: Mach-O ARM64 on macOS, ELF x64 on Linux, and COFF x64 or ARM64 on
-Windows. It selects only the matching declaration and supplies the archive,
-Apple frameworks, and named system libraries to the final link when one of its
-symbols is used. `frameworks` is restricted to macOS; `libraries` contains
-portable names rather than `-l` flags or paths.
+When present, the archive path is relative to and must remain inside the
+package. The compiler verifies that its object format and architecture match
+the manifest target: Mach-O ARM64 on macOS, ELF x64 on Linux, and COFF x64 or
+ARM64 on Windows. It selects only the matching declaration and supplies its
+archive, Apple frameworks, and named system libraries when one of its symbols
+is used. `frameworks` is restricted to macOS; `libraries` contains names rather
+than raw linker flags or paths. A provider must declare at least one effective
+input.
 
 Only source owned by that package may bind the provider through the
 target-independent `Boundary` namespace:
@@ -374,5 +400,5 @@ The active target selects the provider declaration from the manifest.
 Consumers depend on the ordinary Silex package and see only its
 public Silex API; they do not repeat archive paths, linker flags, framework
 lists, or the private foreign API. This bootstrap contract neither compiles
-foreign source nor grants access to transitive packages. Dynamic libraries are
-not part of this package contract.
+foreign source nor grants access to transitive packages. Arbitrary library
+paths and runtime loading remain outside this contract.

@@ -3,39 +3,37 @@
 `Interop` is the low-level boundary used to build Silex bindings. Application
 code should normally depend on a portable package such as `STD` instead.
 
-The current native backends expose a closed set of typed system contracts used
-by platform package fragments: entropy, monotonic time, console and terminal
-I/O, files, processes, filesystem operations, name resolution, and the initial
-macOS WebKit integration. macOS calls fixed libSystem or Objective-C runtime
-symbols, Linux X64 uses kernel syscalls, and Windows PE32+ imports the selected
-system DLL functions. A named package may additionally own a private static
-provider declared in its manifest; that provider is unavailable to application
-code and to other packages.
+A named package owns each foreign provider it uses. Its target-specific
+manifest branch may select a precompiled archive, named system libraries,
+Apple frameworks, or a combination of them. A provider that only calls the
+platform needs no placeholder archive. It remains private to the declaring
+package and is unavailable to applications and other packages.
 
-These two cases have different extension rules. A package author adds a
-`Boundary.<Provider>` through the package manifest and does not modify the
-compiler. The `MacOS`, `Linux`, and `Windows` providers are toolchain-owned
-system contracts: adding a new symbol to one of them currently requires native
-backend support and signature validation in the compiler. They are not the
-extension point for ordinary packages.
+The compiler validates whether the declared scalar and pointer signature can
+cross the selected target ABI. It does not keep a catalogue of package symbols:
+adding another function with an already supported ABI shape changes only the
+package source and, when necessary, its manifest. The historical `MacOS`,
+`Linux`, and `Windows` namespaces remain toolchain compatibility contracts;
+new package bindings use `Boundary.<Provider>`.
 
 ```sx
 use Interop.C
-use Interop.MacOS
+use Interop.Boundary
 
 let write = C.function<
     func(int32, C.Pointer<uint8>, C.Size) C.SignedSize
 >(
-    library:MacOS.lib_system,
+    library:Boundary.System,
     name:"write"
 )
 ```
 
+Here `System` is a provider declared by the package for every supported target.
 The module-level `let` is a compile-time foreign binding. It does not create
 mutable global state or run an initializer. `C.function` implies the C calling
 convention for the selected target. Write the documented source name `write`;
-the compiler produces the platform symbol, dynamic import, and executable
-without invoking an external linker.
+the selected provider supplies the link inputs without exposing them through
+the package's public Silex API.
 
 Call the binding like an ordinary function:
 
@@ -109,11 +107,10 @@ The implemented surface is deliberately narrow:
 
 - composed targets: `macos-arm64`, `linux-x64`, `windows-x64`, and
   `windows-arm64` for the implemented STD slices;
-- validated providers: `MacOS.lib_system`, `MacOS.web_kit`, `Linux.kernel`,
-  `Windows.kernel32`, `Windows.bcrypt_primitives`, `Windows.ucrtbase`, and
-`Windows.ws2_32`, plus target-selected package-private static providers named
-as `Boundary.<Provider>` and authorized by the owning manifest for
-`macos-arm64`;
+- providers: target-selected, package-private `Boundary.<Provider>` declarations
+  backed by archives, named system libraries, Apple frameworks, or any useful
+  combination of them; the legacy toolchain providers remain accepted for
+  compatibility;
 - implemented capabilities: random seeding, monotonic and local civil clocks, byte console
   I/O, terminal sessions, files, process metadata, subprocesses, filesystem
   operations, sockets, name resolution, operating-system threads, and the
@@ -141,9 +138,9 @@ explicit documented layout. The Linux X64 backend still rejects portable
 operations outside its implemented vertical slices; Windows execution remains
 unverified until the target matrix runs it.
 
-A provider bundled by the current package is independent of the system
-namespace used to implement the target. Import `Interop.Boundary` and name the
-provider selected from the active manifest branch:
+A provider owned by the current package is independent of the system namespace
+used to implement the target. Import `Interop.Boundary` and name the provider
+selected from the active manifest branch:
 
 ```sx
 use Interop.C
@@ -175,7 +172,7 @@ The qualifier identifies the physical origin without introducing a public
 
 ```sx
 let system_random = C.function<func() uint32>(
-    library:MacOS.lib_system,
+    library:Boundary.System,
     name:"arc4random"
 )
 
@@ -184,9 +181,8 @@ func system_seed() int {
 }
 ```
 
-The Linux variant calls the kernel `getrandom` capability through
-`Linux.kernel`; the Windows variant calls
-`ProcessPrng` from `Windows.bcrypt_primitives`. Both fill a private `uint32`
-owned by the platform module. Linux X64 has executed this path under Alpine;
-the Windows emitters produce typed imports for both architectures but remain
+The Linux variant resolves `getrandom` through its target-selected `System`
+provider; the Windows variant resolves `ProcessPrng` through its private
+`Crypto` provider. Both fill a private `uint32` owned by the platform module.
+The Windows objects and imports are produced for both architectures but remain
 provisional until execution on Windows.

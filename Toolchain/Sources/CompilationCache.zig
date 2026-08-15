@@ -256,16 +256,18 @@ pub fn nativeKey(
     }
     for (providers) |provider| {
         hasher.update(provider.name);
-        hasher.update(provider.archive);
-        if (provider.artifact_sha256.len == 64) {
-            hasher.update(provider.artifact_sha256);
-            const status = try Io.Dir.cwd().statFile(io, provider.archive, .{});
-            hasher.update(std.mem.asBytes(&status.size));
-            hasher.update(std.mem.asBytes(&status.mtime.nanoseconds));
-        } else {
-            const archive = try Io.Dir.cwd().readFileAlloc(io, provider.archive, allocator, .limited(512 * 1024 * 1024));
-            defer allocator.free(archive);
-            hasher.update(archive);
+        if (provider.archive) |archive_path| {
+            hasher.update(archive_path);
+            if (provider.artifact_sha256.len == 64) {
+                hasher.update(provider.artifact_sha256);
+                const status = try Io.Dir.cwd().statFile(io, archive_path, .{});
+                hasher.update(std.mem.asBytes(&status.size));
+                hasher.update(std.mem.asBytes(&status.mtime.nanoseconds));
+            } else {
+                const archive = try Io.Dir.cwd().readFileAlloc(io, archive_path, allocator, .limited(512 * 1024 * 1024));
+                defer allocator.free(archive);
+                hasher.update(archive);
+            }
         }
         for (provider.frameworks) |framework| hasher.update(framework);
         for (provider.libraries) |library| hasher.update(library);

@@ -134,7 +134,7 @@ pub const Origin = enum {
 
 pub const BoundaryProvider = struct {
     name: []const u8,
-    archive: []const u8,
+    archive: ?[]const u8 = null,
     artifact_sha256: []const u8 = "",
     frameworks: []const []const u8,
     libraries: []const []const u8,
@@ -1022,8 +1022,8 @@ pub const Resolver = struct {
                 .object => |object| object,
                 else => return self.fail("a boundary provider must be an object"),
             };
-            if (provider.count() == 0 or provider.count() > 3 or provider.get("archive") == null) {
-                return self.fail("a boundary provider requires archive and optionally frameworks or libraries");
+            if (provider.count() == 0 or provider.count() > 3) {
+                return self.fail("a boundary provider requires archive, frameworks, or libraries");
             }
             var field_iterator = provider.iterator();
             while (field_iterator.next()) |field| {
@@ -1034,16 +1034,20 @@ pub const Resolver = struct {
                     return self.fail("unsupported boundary provider field");
                 }
             }
-            const relative_archive = switch (provider.get("archive").?) {
-                .string => |archive| archive,
-                else => return self.fail("boundary archive must be a relative path string"),
-            };
-            if (!validRelativePath(relative_archive)) return self.fail("boundary archive must stay inside its package");
-            const archive = try std.fs.path.join(self.allocator, &.{ root, relative_archive });
-            if (!try exists(self.io, archive)) {
-                return self.fail("boundary archive is missing; run 'silex install <package-directory>'");
+            var relative_archive: ?[]const u8 = null;
+            var archive: ?[]const u8 = null;
+            if (provider.get("archive")) |archive_value| {
+                relative_archive = switch (archive_value) {
+                    .string => |path| path,
+                    else => return self.fail("boundary archive must be a relative path string"),
+                };
+                if (!validRelativePath(relative_archive.?)) return self.fail("boundary archive must stay inside its package");
+                archive = try std.fs.path.join(self.allocator, &.{ root, relative_archive.? });
+                if (!try exists(self.io, archive.?)) {
+                    return self.fail("boundary archive is missing; run 'silex install <package-directory>'");
+                }
+                if (!validArchive(self.io, archive.?, self.target)) return self.fail("boundary archive does not match its target");
             }
-            if (!validArchive(self.io, archive, self.target)) return self.fail("boundary archive does not match its target");
             var frameworks: std.ArrayList([]const u8) = .empty;
             if (provider.get("frameworks")) |framework_value| {
                 const array = switch (framework_value) {
@@ -1087,10 +1091,13 @@ pub const Resolver = struct {
                 }
                 std.mem.sort([]const u8, libraries.items, {}, stringLessThan);
             }
+            if (archive == null and frameworks.items.len == 0 and libraries.items.len == 0) {
+                return self.fail("a boundary provider requires archive, frameworks, or libraries");
+            }
             try providers.append(self.allocator, .{
                 .name = provider_name,
                 .archive = archive,
-                .artifact_sha256 = artifactSha256(artifacts, self.target.name(), relative_archive) orelse "",
+                .artifact_sha256 = if (relative_archive) |path| artifactSha256(artifacts, self.target.name(), path) orelse "" else "",
                 .frameworks = try frameworks.toOwnedSlice(self.allocator),
                 .libraries = try libraries.toOwnedSlice(self.allocator),
             });
@@ -1427,10 +1434,25 @@ test "resolve a target-private ARM64 archive and reject escaping paths" {
     try std.testing.expectEqual(@as(usize, 1), graph.packages[0].boundary_providers.len);
     const provider = graph.packages[0].boundary_providers[0];
     try std.testing.expectEqualStrings("Native", provider.name);
-    try std.testing.expect(std.mem.endsWith(u8, provider.archive, "Boundary/macos-arm64/libBridge.a"));
+    try std.testing.expect(std.mem.endsWith(u8, provider.archive.?, "Boundary/macos-arm64/libBridge.a"));
     try std.testing.expectEqualStrings("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", provider.artifact_sha256);
     try std.testing.expectEqualStrings("Cocoa", provider.frameworks[0]);
     try std.testing.expectEqualStrings("Metal", provider.frameworks[1]);
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Bridge/Package.json",
+        .data =
+        \\{"name":"Bridge","version":"1.0.0","boundary":{"macos-arm64":{"providers":{"System":{"libraries":["System"]},"Web":{"frameworks":["WebKit"]}}}}}
+        ,
+    });
+    resolver = Resolver.initForTarget(allocator, std.testing.io, null, .macos_arm64);
+    const system_graph = try resolver.resolve(base);
+    try std.testing.expectEqual(@as(usize, 2), system_graph.packages[0].boundary_providers.len);
+    try std.testing.expect(system_graph.packages[0].boundary_providers[0].archive == null);
+    try std.testing.expect(system_graph.packages[0].boundary_providers[1].archive == null);
+    try std.testing.expectEqualStrings("System", system_graph.packages[0].boundary_providers[0].name);
+    try std.testing.expectEqualStrings("System", system_graph.packages[0].boundary_providers[0].libraries[0]);
+    try std.testing.expectEqualStrings("WebKit", system_graph.packages[0].boundary_providers[1].frameworks[0]);
 
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Bridge/Package.json",

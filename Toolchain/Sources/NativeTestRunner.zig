@@ -268,6 +268,53 @@ test "link a package boundary provider into a native test" {
     try std.testing.expectEqual(@as(u8, 0), exitCode(result.term));
 }
 
+test "link an unlisted system symbol from a package manifest without an archive" {
+    const builtin = @import("builtin");
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "Bridge/Module");
+    try temporary.dir.createDirPath(std.testing.io, "Bridge/Tests");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Bridge/Package.json",
+        .data =
+        \\{"name":"Bridge","version":"1.0.0","boundary":{"macos-arm64":{"providers":{"System":{"libraries":["System"]}}}}}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Bridge/Tests/System.sx", .data =
+        \\use Interop.C
+        \\use Interop.Boundary
+        \\let get_user_id = C.function<func() uint32>(library:Boundary.System, name:"getuid")
+        \\test "system provider" { assert(get_user_id() == get_user_id()) }
+    });
+    const base = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Bridge" });
+    const input = try std.fs.path.join(allocator, &.{ base, "Tests/System.sx" });
+    const executable = try std.fs.path.join(allocator, &.{ base, "system-test" });
+    var compiler = @import("Project.zig").Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compileTests(input);
+    const machine = try lower(allocator, std.testing.io, compilation.ir, compilation.boundaries, false);
+    const providers = [_]Packages.BoundaryProvider{.{
+        .name = "System",
+        .libraries = &.{"System"},
+        .frameworks = &.{},
+    }};
+    const result = try executeAt(
+        allocator,
+        std.testing.io,
+        .macos_arm64,
+        "zig",
+        machine,
+        compilation.tests[0].function,
+        executable,
+        &providers,
+    );
+    try std.testing.expectEqual(@as(u8, 0), exitCode(result.term));
+}
+
 fn exitCode(term: std.process.Child.Term) u8 {
     return switch (term) {
         .exited => |code| code,

@@ -346,8 +346,6 @@ pub fn emit(
                     .query_performance_frequency
                 else if (std.mem.eql(u8, external.source_name, "GetSystemTimeAsFileTime"))
                     .get_system_time_as_file_time
-                else if (std.mem.eql(u8, external.source_name, "GetLocalTime"))
-                    .get_local_time
                 else if (std.mem.eql(u8, external.source_name, "GetStdHandle"))
                     .get_std_handle
                 else if (std.mem.eql(u8, external.source_name, "SetConsoleCP"))

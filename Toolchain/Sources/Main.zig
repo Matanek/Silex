@@ -1236,11 +1236,6 @@ fn compileNativeOptions(
                     {
                         break :symbol WindowsImports.Symbol.get_system_time_as_file_time;
                     }
-                    if (std.mem.eql(u8, external.provider, "Windows.kernel32") and
-                        std.mem.eql(u8, external.source_name, "GetLocalTime"))
-                    {
-                        break :symbol WindowsImports.Symbol.get_local_time;
-                    }
                     if (std.mem.eql(u8, external.provider, "Windows.ucrtbase") and std.mem.eql(u8, external.source_name, "_write")) break :symbol .crt_write;
                     if (std.mem.eql(u8, external.provider, "Windows.ucrtbase") and std.mem.eql(u8, external.source_name, "_read")) break :symbol .crt_read;
                     if (std.mem.eql(u8, external.provider, "Windows.ucrtbase") and std.mem.eql(u8, external.source_name, "_isatty")) break :symbol .crt_isatty;
@@ -1354,13 +1349,24 @@ fn requiredBoundaryProviders(
     for (boundaries) |boundary| {
         const provider = packages.boundaryProvider(boundary.owner, boundary.provider) orelse continue;
         var duplicate = false;
-        for (providers.items) |existing| if (std.mem.eql(u8, existing.archive, provider.archive)) {
+        for (providers.items) |existing| if (sameBoundaryProvider(existing, provider)) {
             duplicate = true;
             break;
         };
         if (!duplicate) try providers.append(allocator, provider);
     }
     return providers.toOwnedSlice(allocator);
+}
+
+fn sameBoundaryProvider(left: Packages.BoundaryProvider, right: Packages.BoundaryProvider) bool {
+    if (!std.mem.eql(u8, left.name, right.name)) return false;
+    if (left.archive == null or right.archive == null) {
+        if (left.archive != null or right.archive != null) return false;
+    } else if (!std.mem.eql(u8, left.archive.?, right.archive.?)) return false;
+    if (left.frameworks.len != right.frameworks.len or left.libraries.len != right.libraries.len) return false;
+    for (left.frameworks, right.frameworks) |a, b| if (!std.mem.eql(u8, a, b)) return false;
+    for (left.libraries, right.libraries) |a, b| if (!std.mem.eql(u8, a, b)) return false;
+    return true;
 }
 
 fn linkedObjectPath(
@@ -1370,7 +1376,7 @@ fn linkedObjectPath(
 ) ![]const u8 {
     var dependencies: std.ArrayList([]const u8) = .empty;
     try dependencies.appendSlice(allocator, &.{ options.source_path, options.output_path, @tagName(options.mode) });
-    for (providers) |provider| try dependencies.append(allocator, provider.archive);
+    for (providers) |provider| if (provider.archive) |archive| try dependencies.append(allocator, archive);
     const digest = CompilationCache.artifactKey("linked-object", dependencies.items);
     const hex = std.fmt.bytesToHex(digest, .lower);
     return std.fmt.allocPrint(allocator, ".silex/link/{s}.o", .{hex[0..16]});

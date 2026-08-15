@@ -21,12 +21,12 @@ pub fn executable(
     const library_path = try std.fs.path.join(allocator, &.{ sdk_path, "usr/lib" });
     var arguments: std.ArrayList([]const u8) = .empty;
     try arguments.appendSlice(allocator, &.{
-        linker_path,  "cc",         "-target",   "aarch64-macos",
+        linker_path, "cc",         "-target",   "aarch64-macos",
         "-isysroot", sdk_path,     "-F",        framework_path,
         "-L",        library_path, object_path, "-o",
         output_path,
     });
-    for (providers) |provider| try arguments.append(allocator, provider.archive);
+    for (providers) |provider| if (provider.archive) |archive| try arguments.append(allocator, archive);
     var frameworks: std.ArrayList([]const u8) = .empty;
     for (providers) |provider| for (provider.frameworks) |framework| {
         var duplicate = false;

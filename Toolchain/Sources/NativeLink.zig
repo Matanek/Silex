@@ -26,7 +26,7 @@ pub fn executable(
         return error.LinkFailed;
     var arguments: std.ArrayList([]const u8) = .empty;
     try arguments.appendSlice(allocator, &.{ linker_path, "cc", "-target", triple, object_path, "-o", output_path });
-    for (providers) |provider| try arguments.append(allocator, provider.archive);
+    for (providers) |provider| if (provider.archive) |archive| try arguments.append(allocator, archive);
     var libraries: std.ArrayList([]const u8) = .empty;
     for (providers) |provider| for (provider.libraries) |library| {
         var duplicate = false;
