@@ -1346,27 +1346,94 @@ fn requiredBoundaryProviders(
 ) ![]const Packages.BoundaryProvider {
     const packages = graph orelse return &.{};
     var providers: std.ArrayList(Packages.BoundaryProvider) = .empty;
+    var selections: std.ArrayList(BoundaryProviderKey) = .empty;
+    defer selections.deinit(allocator);
     for (boundaries) |boundary| {
         const provider = packages.boundaryProvider(boundary.owner, boundary.provider) orelse continue;
-        var duplicate = false;
-        for (providers.items) |existing| if (sameBoundaryProvider(existing, provider)) {
-            duplicate = true;
-            break;
-        };
-        if (!duplicate) try providers.append(allocator, provider);
+        try appendBoundaryProvider(allocator, packages, boundary.owner, provider, &selections, &providers);
     }
     return providers.toOwnedSlice(allocator);
 }
 
-fn sameBoundaryProvider(left: Packages.BoundaryProvider, right: Packages.BoundaryProvider) bool {
-    if (!std.mem.eql(u8, left.name, right.name)) return false;
-    if (left.archive == null or right.archive == null) {
-        if (left.archive != null or right.archive != null) return false;
-    } else if (!std.mem.eql(u8, left.archive.?, right.archive.?)) return false;
-    if (left.frameworks.len != right.frameworks.len or left.libraries.len != right.libraries.len) return false;
-    for (left.frameworks, right.frameworks) |a, b| if (!std.mem.eql(u8, a, b)) return false;
-    for (left.libraries, right.libraries) |a, b| if (!std.mem.eql(u8, a, b)) return false;
-    return true;
+const BoundaryProviderKey = struct {
+    owner: usize,
+    name: []const u8,
+};
+
+fn appendBoundaryProvider(
+    allocator: std.mem.Allocator,
+    graph: Packages.Graph,
+    owner: usize,
+    provider: Packages.BoundaryProvider,
+    selections: *std.ArrayList(BoundaryProviderKey),
+    providers: *std.ArrayList(Packages.BoundaryProvider),
+) !void {
+    for (selections.items) |selection| {
+        if (selection.owner == owner and std.mem.eql(u8, selection.name, provider.name)) return;
+    }
+    try selections.append(allocator, .{ .owner = owner, .name = provider.name });
+    try providers.append(allocator, provider);
+    for (provider.requires) |requirement| {
+        const required = graph.requiredBoundaryProvider(owner, requirement) orelse continue;
+        try appendBoundaryProvider(allocator, graph, required.owner, required.provider, selections, providers);
+    }
+}
+
+test "select required boundary providers after their owner" {
+    const dependency_provider: Packages.BoundaryProvider = .{
+        .name = "SDL3",
+        .frameworks = &.{"Metal"},
+        .libraries = &.{},
+    };
+    const root_provider: Packages.BoundaryProvider = .{
+        .name = "SDL3_mixer",
+        .frameworks = &.{},
+        .libraries = &.{},
+        .requires = &.{.{ .package = "GFX", .provider = "SDL3" }},
+    };
+    const dependencies = [_]Packages.Dependency{.{
+        .name = "GFX",
+        .package = 1,
+        .constraint = .{ .kind = .caret, .version = .{ .major = 1, .minor = 0, .patch = 0 } },
+    }};
+    const packages = [_]Packages.Package{
+        .{
+            .name = "GFX.Audio",
+            .version = .{ .major = 1, .minor = 0, .patch = 0 },
+            .origin = .project,
+            .root = "GFX.Audio",
+            .module_roots = &.{},
+            .inactive_modules = &.{},
+            .dependencies = &dependencies,
+            .boundary_providers = &.{root_provider},
+        },
+        .{
+            .name = "GFX",
+            .version = .{ .major = 1, .minor = 0, .patch = 0 },
+            .origin = .workspace_link,
+            .root = "GFX",
+            .module_roots = &.{},
+            .inactive_modules = &.{},
+            .dependencies = &.{},
+            .boundary_providers = &.{dependency_provider},
+        },
+    };
+    const boundaries = [_]Boundary.Function{.{
+        .name = "initialize",
+        .provider = "Boundary.SDL3_mixer",
+        .source_name = "MIX_Init",
+        .parameters = &.{},
+        .return_type = .int32,
+        .owner = 0,
+    }};
+    const selected = try requiredBoundaryProviders(std.testing.allocator, &boundaries, .{
+        .packages = &packages,
+        .explicit = true,
+    });
+    defer std.testing.allocator.free(selected);
+    try std.testing.expectEqual(@as(usize, 2), selected.len);
+    try std.testing.expectEqualStrings("SDL3_mixer", selected[0].name);
+    try std.testing.expectEqualStrings("SDL3", selected[1].name);
 }
 
 fn linkedObjectPath(

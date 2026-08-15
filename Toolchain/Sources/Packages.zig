@@ -138,6 +138,17 @@ pub const BoundaryProvider = struct {
     artifact_sha256: []const u8 = "",
     frameworks: []const []const u8,
     libraries: []const []const u8,
+    requires: []const BoundaryProviderRequirement = &.{},
+};
+
+pub const BoundaryProviderRequirement = struct {
+    package: []const u8,
+    provider: []const u8,
+};
+
+pub const BoundaryProviderSelection = struct {
+    owner: usize,
+    provider: BoundaryProvider,
 };
 
 pub const ModuleRoot = struct {
@@ -189,6 +200,24 @@ pub const Graph = struct {
         const name = library[separator + 1 ..];
         for (self.packages[owner].boundary_providers) |provider| {
             if (std.mem.eql(u8, provider.name, name)) return provider;
+        }
+        return null;
+    }
+
+    pub fn requiredBoundaryProvider(
+        self: Graph,
+        owner: usize,
+        requirement: BoundaryProviderRequirement,
+    ) ?BoundaryProviderSelection {
+        if (owner >= self.packages.len) return null;
+        for (self.packages[owner].dependencies) |dependency| {
+            if (!std.mem.eql(u8, dependency.name, requirement.package)) continue;
+            for (self.packages[dependency.package].boundary_providers) |provider| {
+                if (std.mem.eql(u8, provider.name, requirement.provider)) {
+                    return .{ .owner = dependency.package, .provider = provider };
+                }
+            }
+            return null;
         }
         return null;
     }
@@ -299,7 +328,9 @@ pub const Resolver = struct {
             builder.package.dependencies = try builder.dependencies.toOwnedSlice(self.allocator);
             packages[index] = builder.package;
         }
-        return .{ .packages = packages, .explicit = root_manifest != null };
+        const graph: Graph = .{ .packages = packages, .explicit = root_manifest != null };
+        try self.validateBoundaryRequirements(graph);
+        return graph;
     }
 
     pub fn inspectPackage(self: *Resolver, package_root: []const u8) !ManifestInfo {
@@ -850,6 +881,34 @@ pub const Resolver = struct {
         }
     }
 
+    fn validateBoundaryRequirements(self: *Resolver, graph: Graph) !void {
+        for (graph.packages, 0..) |package, owner| {
+            for (package.boundary_providers) |provider| {
+                for (provider.requires) |requirement| {
+                    var direct = false;
+                    for (package.dependencies) |dependency| {
+                        if (std.mem.eql(u8, dependency.name, requirement.package)) {
+                            direct = true;
+                            break;
+                        }
+                    }
+                    if (!direct) return self.fail(try std.fmt.allocPrint(
+                        self.allocator,
+                        "boundary provider '{s}.{s}' requires provider '{s}.{s}' from a package that is not a direct dependency",
+                        .{ package.name.?, provider.name, requirement.package, requirement.provider },
+                    ));
+                    if (graph.requiredBoundaryProvider(owner, requirement) == null) {
+                        return self.fail(try std.fmt.allocPrint(
+                            self.allocator,
+                            "boundary provider '{s}.{s}' requires unavailable provider '{s}.{s}' for target '{s}'",
+                            .{ package.name.?, provider.name, requirement.package, requirement.provider, self.target.name() },
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
     fn validateRootIdentity(self: *Resolver, manifest: ParsedManifest, root: []const u8) !void {
         if ((manifest.name == null) != (manifest.version == null)) {
             return self.fail("a manifest must declare name and version together");
@@ -1022,14 +1081,15 @@ pub const Resolver = struct {
                 .object => |object| object,
                 else => return self.fail("a boundary provider must be an object"),
             };
-            if (provider.count() == 0 or provider.count() > 3) {
-                return self.fail("a boundary provider requires archive, frameworks, or libraries");
+            if (provider.count() == 0 or provider.count() > 4) {
+                return self.fail("a boundary provider requires archive, frameworks, libraries, or another provider");
             }
             var field_iterator = provider.iterator();
             while (field_iterator.next()) |field| {
                 if (!std.mem.eql(u8, field.key_ptr.*, "archive") and
                     !std.mem.eql(u8, field.key_ptr.*, "frameworks") and
-                    !std.mem.eql(u8, field.key_ptr.*, "libraries"))
+                    !std.mem.eql(u8, field.key_ptr.*, "libraries") and
+                    !std.mem.eql(u8, field.key_ptr.*, "requires"))
                 {
                     return self.fail("unsupported boundary provider field");
                 }
@@ -1091,8 +1151,39 @@ pub const Resolver = struct {
                 }
                 std.mem.sort([]const u8, libraries.items, {}, stringLessThan);
             }
-            if (archive == null and frameworks.items.len == 0 and libraries.items.len == 0) {
-                return self.fail("a boundary provider requires archive, frameworks, or libraries");
+            var requirements: std.ArrayList(BoundaryProviderRequirement) = .empty;
+            if (provider.get("requires")) |requires_value| {
+                const array = switch (requires_value) {
+                    .array => |array| array,
+                    else => return self.fail("boundary provider requires must be an array of qualified provider names"),
+                };
+                for (array.items) |item| {
+                    const qualified = switch (item) {
+                        .string => |name| name,
+                        else => return self.fail("boundary provider requires must contain qualified provider names"),
+                    };
+                    const separator = std.mem.lastIndexOfScalar(u8, qualified, '.') orelse
+                        return self.fail("a required boundary provider must be qualified by its package name");
+                    const package = qualified[0..separator];
+                    const required_provider = qualified[separator + 1 ..];
+                    if (!Modules.validName(package) or
+                        !Modules.validName(required_provider) or
+                        std.mem.indexOfScalar(u8, required_provider, '.') != null)
+                    {
+                        return self.fail("invalid required boundary provider name");
+                    }
+                    for (requirements.items) |existing| {
+                        if (std.mem.eql(u8, existing.package, package) and
+                            std.mem.eql(u8, existing.provider, required_provider))
+                        {
+                            return self.fail("duplicate required boundary provider");
+                        }
+                    }
+                    try requirements.append(self.allocator, .{ .package = package, .provider = required_provider });
+                }
+            }
+            if (archive == null and frameworks.items.len == 0 and libraries.items.len == 0 and requirements.items.len == 0) {
+                return self.fail("a boundary provider requires archive, frameworks, libraries, or another provider");
             }
             try providers.append(self.allocator, .{
                 .name = provider_name,
@@ -1100,6 +1191,7 @@ pub const Resolver = struct {
                 .artifact_sha256 = if (relative_archive) |path| artifactSha256(artifacts, self.target.name(), path) orelse "" else "",
                 .frameworks = try frameworks.toOwnedSlice(self.allocator),
                 .libraries = try libraries.toOwnedSlice(self.allocator),
+                .requires = try requirements.toOwnedSlice(self.allocator),
             });
         }
         std.mem.sort(BoundaryProvider, providers.items, {}, boundaryProviderLessThan);
@@ -1547,6 +1639,50 @@ test "resolve ELF and COFF boundary archives with system libraries" {
     resolver = Resolver.initForTarget(allocator, std.testing.io, null, .windows_x64);
     try std.testing.expectError(error.InvalidPackageGraph, resolver.resolve(base));
     try std.testing.expectEqualStrings("boundary archive does not match its target", resolver.diagnostic.?);
+}
+
+test "resolve boundary provider requirements from direct package dependencies" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "Audio/Module");
+    try temporary.dir.createDirPath(std.testing.io, "GFX/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Audio/Package.json",
+        .data =
+        \\{"name":"Audio","version":"1.0.0","dependencies":{"GFX":"=1.0.0"},"boundary":{"macos-arm64":{"providers":{"Mixer":{"requires":["GFX.SDL3"]}}}}}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Package.json",
+        .data =
+        \\{"name":"GFX","version":"1.0.0","boundary":{"macos-arm64":{"providers":{"SDL3":{"libraries":["System"]}}}}}
+        ,
+    });
+    const base = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    try @import("Packages/TestFixtures.zig").prepareWorkspaceLinks(allocator, std.testing.io, base);
+    const audio = try std.fs.path.join(allocator, &.{ base, "Audio" });
+    var resolver = Resolver.initForTarget(allocator, std.testing.io, null, .macos_arm64);
+    const graph = try resolver.resolve(audio);
+    const requirement = graph.packages[0].boundary_providers[0].requires[0];
+    try std.testing.expectEqualStrings("GFX", requirement.package);
+    try std.testing.expectEqualStrings("SDL3", requirement.provider);
+    try std.testing.expectEqualStrings("SDL3", graph.requiredBoundaryProvider(0, requirement).?.provider.name);
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Audio/Package.json",
+        .data =
+        \\{"name":"Audio","version":"1.0.0","dependencies":{"GFX":"=1.0.0"},"boundary":{"macos-arm64":{"providers":{"Mixer":{"requires":["GFX.Missing"]}}}}}
+        ,
+    });
+    resolver = Resolver.initForTarget(allocator, std.testing.io, null, .macos_arm64);
+    try std.testing.expectError(error.InvalidPackageGraph, resolver.resolve(audio));
+    try std.testing.expectEqualStrings(
+        "boundary provider 'Audio.Mixer' requires unavailable provider 'GFX.Missing' for target 'macos-arm64'",
+        resolver.diagnostic.?,
+    );
 }
 
 test "ignore a colocated package and select the newest compatible installed version" {
