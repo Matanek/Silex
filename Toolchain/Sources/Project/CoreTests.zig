@@ -419,6 +419,52 @@ test "compose simple modules with an adjacent local package" {
     try std.testing.expectEqualStrings("MonPackage.Class1", compilation.interfaces[2].name);
 }
 
+test "compile a loose principal module with an installed package" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.createDirPath(std.testing.io, "Sandbox/MonModule");
+    try temporary.dir.createDirPath(std.testing.io, "Global/STD@0.16.2/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Sandbox/MonModule/@Module.sx",
+        .data =
+        \\use STD.Value
+        \\func answer() int { return Value.answer() }
+        \\func main() {}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Global/STD@0.16.2/Package.json",
+        .data = "{\"name\":\"STD\",\"version\":\"0.16.2\",\"requires\":{\"silex\":\">=0.38.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Global/STD@0.16.2/Module/Value.sx",
+        .data = "public func answer() int { return 42 }",
+    });
+    const base = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const input = try std.fs.path.join(allocator, &.{ base, "Sandbox", "MonModule", "@Module.sx" });
+    const global = try std.fs.path.join(allocator, &.{ base, "Global" });
+    var compiler = Compiler.initWithPackages(allocator, std.testing.io, global);
+    const compilation = try compiler.compile(input);
+
+    var answer_id: ?usize = null;
+    for (compilation.ir.functions, 0..) |function, id| {
+        if (std.mem.eql(u8, function.name, "MonModule.answer")) answer_id = id;
+    }
+    const answer = try @import("../Interpreter.zig").invoke(
+        allocator,
+        compilation.ir,
+        answer_id orelse return error.TestUnexpectedResult,
+        &.{},
+    );
+    try std.testing.expectEqual(@as(i64, 42), answer.integer);
+    try std.testing.expectEqualStrings("MonModule", compilation.interfaces[0].name);
+    try std.testing.expectEqualStrings("STD", compilation.packages.packages[1].name.?);
+}
+
 test "select named package module roots for the macOS platform" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

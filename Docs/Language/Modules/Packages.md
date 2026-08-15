@@ -171,6 +171,14 @@ inside the workspace. No installation, commit, tag, or push is involved.
 Dependencies are direct. Declare every package used by the application; a
 transitive dependency is not automatically visible.
 
+A loose program without `Package.json` needs no manifest merely to try Silex
+or run a short script. Its implicit development environment exposes compatible
+packages in the same order: adjacent sources, the nearest ancestor
+`Packages/` directory, sources registered with `silex link`, then installed
+versions. When several installed versions are compatible with the running
+toolchain, Silex selects the newest one. As soon as a program gains a manifest,
+its declared direct dependencies replace this implicit environment.
+
 ## Install a package
 
 Install a package from a local checkout:

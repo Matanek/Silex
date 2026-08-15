@@ -1471,6 +1471,7 @@ test {
     _ = @import("ProtocolTests.zig");
     _ = @import("ExtensionTests.zig");
     _ = @import("Packages.zig");
+    _ = @import("Packages/ImplicitTests.zig");
     _ = @import("ReadReferenceTests.zig");
     _ = @import("RecursiveResourceTests.zig");
     _ = @import("ResourceTests.zig");

@@ -275,6 +275,8 @@ pub const Resolver = struct {
             try self.resolveDependencies(0, manifest.dependencies);
         } else {
             try self.resolveAdjacent();
+            try self.resolveImplicitLinks();
+            try self.resolveImplicitGlobals();
         }
         self.builders.items[0].state = .done;
         try self.validateNamespaceExtensions();
@@ -368,6 +370,89 @@ pub const Resolver = struct {
         }
     }
 
+    fn resolveImplicitGlobals(self: *Resolver) !void {
+        const global_root = self.global_root orelse return;
+        var directory = Io.Dir.cwd().openDir(self.io, global_root, .{ .iterate = true }) catch |err| switch (err) {
+            error.FileNotFound, error.NotDir => return,
+            else => |other| return other,
+        };
+        defer directory.close(self.io);
+
+        var names: std.ArrayList([]const u8) = .empty;
+        var iterator = directory.iterateAssumeFirstIteration();
+        while (try iterator.next(self.io)) |entry| {
+            if (entry.kind != .directory) continue;
+            const separator = std.mem.lastIndexOfScalar(u8, entry.name, '@') orelse continue;
+            const name = entry.name[0..separator];
+            if (!Modules.validName(name) or separator + 1 == entry.name.len) continue;
+            _ = Version.parse(entry.name[separator + 1 ..]) catch continue;
+            try names.append(self.allocator, try self.allocator.dupe(u8, name));
+        }
+        std.mem.sort([]const u8, names.items, {}, stringLessThan);
+
+        var previous: ?[]const u8 = null;
+        for (names.items) |name| {
+            if (previous) |seen| if (std.mem.eql(u8, seen, name)) continue;
+            previous = name;
+            if (self.rootDependsOn(name)) continue;
+
+            const index = if (self.find(name)) |existing|
+                existing
+            else if (try self.bestImplicitGlobal(name)) |selected|
+                try self.resolveSelected(selected.root, selected.manifest, name, selected.version)
+            else
+                continue;
+            try self.appendImplicitRootDependency(name, index);
+        }
+    }
+
+    fn resolveImplicitLinks(self: *Resolver) !void {
+        const global_root = self.global_root orelse return;
+        const silex_root = std.fs.path.dirname(global_root) orelse return;
+        const links_root = try std.fs.path.join(self.allocator, &.{ silex_root, "links" });
+        var directory = Io.Dir.cwd().openDir(self.io, links_root, .{ .iterate = true }) catch |err| switch (err) {
+            error.FileNotFound, error.NotDir => return,
+            else => |other| return other,
+        };
+        defer directory.close(self.io);
+
+        var names: std.ArrayList([]const u8) = .empty;
+        var iterator = directory.iterateAssumeFirstIteration();
+        while (try iterator.next(self.io)) |entry| {
+            if (entry.kind != .file or !std.mem.endsWith(u8, entry.name, ".json")) continue;
+            const name = entry.name[0 .. entry.name.len - ".json".len];
+            if (!Modules.validName(name)) continue;
+            try names.append(self.allocator, try self.allocator.dupe(u8, name));
+        }
+        std.mem.sort([]const u8, names.items, {}, stringLessThan);
+        for (names.items) |name| {
+            if (self.rootDependsOn(name)) continue;
+            const index = if (self.find(name)) |existing|
+                existing
+            else if (try self.linkedNamed(name)) |selected|
+                try self.resolveSelected(selected.root, selected.manifest, name, selected.version)
+            else
+                continue;
+            try self.appendImplicitRootDependency(name, index);
+        }
+    }
+
+    fn rootDependsOn(self: *Resolver, name: []const u8) bool {
+        for (self.builders.items[0].dependencies.items) |dependency| {
+            if (std.mem.eql(u8, dependency.name, name)) return true;
+        }
+        return false;
+    }
+
+    fn appendImplicitRootDependency(self: *Resolver, name: []const u8, package: usize) !void {
+        const version = self.builders.items[package].package.version.?;
+        try self.builders.items[0].dependencies.append(self.allocator, .{
+            .name = name,
+            .package = package,
+            .constraint = .{ .kind = .exact, .version = version },
+        });
+    }
+
     fn resolveDependencies(self: *Resolver, owner: usize, dependencies: []const ManifestDependency) anyerror!void {
         for (dependencies) |request| {
             const package = try self.resolveRequest(owner, request);
@@ -431,16 +516,24 @@ pub const Resolver = struct {
     };
 
     fn linked(self: *Resolver, owner: usize, request: ManifestDependency) !?Selected {
+        const selected = try self.linkedNamed(request.name) orelse return null;
+        if (!request.constraint.accepts(selected.version)) {
+            return self.fail(try self.unresolvedDependencyDiagnostic(owner, request, selected.version));
+        }
+        return selected;
+    }
+
+    fn linkedNamed(self: *Resolver, name: []const u8) !?Selected {
         const global_root = self.global_root orelse return null;
         const silex_root = std.fs.path.dirname(global_root) orelse return null;
-        const file_name = try std.fmt.allocPrint(self.allocator, "{s}.json", .{request.name});
+        const file_name = try std.fmt.allocPrint(self.allocator, "{s}.json", .{name});
         const link_path = try std.fs.path.join(self.allocator, &.{ silex_root, "links", file_name });
         const source = Io.Dir.cwd().readFileAlloc(self.io, link_path, self.allocator, .limited(64 * 1024)) catch |err| switch (err) {
             error.FileNotFound, error.NotDir => return null,
             else => return self.fail(try std.fmt.allocPrint(
                 self.allocator,
                 "linked package '{s}' cannot be read; run 'silex unlink {s}'",
-                .{ request.name, request.name },
+                .{ name, name },
             )),
         };
         const link = std.json.parseFromSliceLeaky(Link, self.allocator, source, .{
@@ -449,20 +542,17 @@ pub const Resolver = struct {
         }) catch return self.fail(try std.fmt.allocPrint(
             self.allocator,
             "linked package '{s}' has an invalid link; run 'silex unlink {s}'",
-            .{ request.name, request.name },
+            .{ name, name },
         ));
         const manifest = self.loadRequired(link.path) catch |err| switch (err) {
             error.InvalidPackageGraph => return self.fail(try std.fmt.allocPrint(
                 self.allocator,
                 "linked package '{s}' is unavailable at '{s}'; run 'silex unlink {s}'",
-                .{ request.name, link.path, request.name },
+                .{ name, link.path, name },
             )),
             else => |other| return other,
         };
-        const version = try self.validateSelected(manifest, request.name, link.path, true);
-        if (!request.constraint.accepts(version)) {
-            return self.fail(try self.unresolvedDependencyDiagnostic(owner, request, version));
-        }
+        const version = try self.validateSelected(manifest, name, link.path, true);
         try self.validateToolchain(manifest);
         return .{ .root = link.path, .manifest = manifest, .version = version };
     }
@@ -501,6 +591,32 @@ pub const Resolver = struct {
         }
         if (best == null) {
             if (toolchain_incompatible) |selected| try self.validateToolchain(selected.manifest);
+        }
+        return best;
+    }
+
+    fn bestImplicitGlobal(self: *Resolver, name: []const u8) !?Selected {
+        const global_root = self.global_root orelse return null;
+        var directory = Io.Dir.cwd().openDir(self.io, global_root, .{ .iterate = true }) catch |err| switch (err) {
+            error.FileNotFound, error.NotDir => return null,
+            else => |other| return other,
+        };
+        defer directory.close(self.io);
+        const prefix = try std.fmt.allocPrint(self.allocator, "{s}@", .{name});
+        var best: ?Selected = null;
+        var iterator = directory.iterateAssumeFirstIteration();
+        while (try iterator.next(self.io)) |entry| {
+            if (entry.kind != .directory or !std.mem.startsWith(u8, entry.name, prefix)) continue;
+            const folder_version = Version.parse(entry.name[prefix.len..]) catch continue;
+            const root = try std.fs.path.join(self.allocator, &.{ global_root, entry.name });
+            var manifest = try self.loadRequired(root);
+            const version = try self.validateSelected(manifest, name, root, true);
+            manifest = try self.trustGlobalExtensions(root, manifest, name, version);
+            if (!folder_version.eql(version)) return self.fail("global package folder and manifest version differ");
+            if (!manifest.silex_requirement.?.accepts(self.toolchain_version)) continue;
+            if (best == null or version.order(best.?.version) == .gt) {
+                best = .{ .root = root, .manifest = manifest, .version = version };
+            }
         }
         return best;
     }

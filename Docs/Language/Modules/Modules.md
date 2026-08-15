@@ -72,7 +72,13 @@ GFX/Module/@module.sx                 -> GFX
 GFX/Module/GPU/@module.sx             -> GFX.GPU
 GFX/Module/GPU/@Module.sx             -> GFX.GPU (equivalent spelling)
 GFX/Module/GPU/Device.sx              -> GFX.GPU.Device
+Sandbox/MonModule/@Module.sx           -> MonModule (loose project)
 ```
+
+Without a `Package.json`, compiling or editing a principal module directly
+uses the parent of its folder as the implicit project root. This preserves the
+folder's module identity while keeping quick experiments and scripts free of
+project configuration.
 
 The file follows ordinary declaration and visibility rules. It may define a
 module facade with explicit public reexports, private helpers and ordinary

@@ -9,4 +9,5 @@ test {
     _ = @import("Lsp/Tests/ContextContracts.zig");
     _ = @import("Lsp/Tests/CallbackCompletion.zig");
     _ = @import("Lsp/Tests/WorkspaceContracts.zig");
+    _ = @import("Lsp/Tests/LoosePackages.zig");
 }

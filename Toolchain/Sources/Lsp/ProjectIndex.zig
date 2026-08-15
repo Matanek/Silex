@@ -3,6 +3,7 @@ const Ast = @import("../Ast.zig");
 const Modules = @import("../Modules.zig");
 const Packages = @import("../Packages.zig");
 const ParserModule = @import("../Parser.zig");
+const Paths = @import("../Project/Paths.zig");
 const TargetModule = @import("../Target.zig");
 const Types = @import("Types.zig");
 
@@ -97,17 +98,7 @@ pub fn loadProgram(
 }
 
 pub fn projectRoot(allocator: Allocator, io: Io, document_path: []const u8, root_hint: ?[]const u8) ![]const u8 {
-    var directory = std.fs.path.dirname(document_path) orelse ".";
-    const document_directory = directory;
-    const boundary = root_hint orelse directory;
-    while (true) {
-        const manifest = try std.fs.path.join(allocator, &.{ directory, "Package.json" });
-        if (fileExists(io, manifest)) return directory;
-        if (samePath(directory, boundary)) return document_directory;
-        const next = std.fs.path.dirname(directory) orelse return document_directory;
-        if (!pathInside(directory, boundary) or std.mem.eql(u8, next, directory)) return document_directory;
-        directory = next;
-    }
+    return Paths.findRootWithin(allocator, io, document_path, root_hint);
 }
 
 pub fn pathFromUri(allocator: Allocator, uri: []const u8) ![]const u8 {
@@ -134,16 +125,6 @@ pub fn pathFromUri(allocator: Allocator, uri: []const u8) ![]const u8 {
 
 fn samePath(left: []const u8, right: []const u8) bool {
     return std.mem.eql(u8, std.mem.trimEnd(u8, left, "/"), std.mem.trimEnd(u8, right, "/"));
-}
-
-fn pathInside(path: []const u8, directory: []const u8) bool {
-    if (!std.mem.startsWith(u8, path, directory) or path.len <= directory.len) return false;
-    return path[directory.len] == std.fs.path.sep;
-}
-
-fn fileExists(io: Io, path: []const u8) bool {
-    _ = Io.Dir.cwd().statFile(io, path, .{}) catch return false;
-    return true;
 }
 
 fn hex(character: u8) ?u8 {
