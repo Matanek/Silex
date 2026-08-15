@@ -107,12 +107,29 @@ pub const Dependency = struct {
 pub const Package = struct {
     name: ?[]const u8,
     version: ?Version,
+    origin: Origin,
     extensions: []const []const u8 = &.{},
     root: []const u8,
     module_roots: []const ModuleRoot,
     inactive_modules: []const []const u8,
     dependencies: []const Dependency,
     boundary_providers: []const BoundaryProvider = &.{},
+};
+
+pub const Origin = enum {
+    project,
+    workspace_link,
+    user_link,
+    installed,
+
+    pub fn label(self: Origin) []const u8 {
+        return switch (self) {
+            .project => "project",
+            .workspace_link => "workspace-link",
+            .user_link => "user-link",
+            .installed => "installed",
+        };
+    }
 };
 
 pub const BoundaryProvider = struct {
@@ -228,8 +245,7 @@ pub const Resolver = struct {
     global_root: ?[]const u8,
     target: TargetModule.Target,
     toolchain_version: Version = currentToolchainVersion(),
-    local_root: []const u8 = "",
-    shared_root: []const u8 = "",
+    workspace_links_root: ?[]const u8 = null,
     builders: std.ArrayList(Builder) = .empty,
     diagnostic: ?[]const u8 = null,
 
@@ -250,17 +266,14 @@ pub const Resolver = struct {
             try self.validateToolchain(manifest);
             try self.validateRootIdentity(manifest, project_root);
         }
-        self.local_root = if (root_manifest != null and root_manifest.?.name != null)
-            std.fs.path.dirname(project_root) orelse project_root
-        else
-            project_root;
-        self.shared_root = try self.findSharedRoot(project_root);
+        self.workspace_links_root = try self.findWorkspaceLinksRoot(project_root);
         const named_root = root_manifest != null and root_manifest.?.name != null;
         const roots = try self.moduleRoots(project_root, named_root);
         try self.builders.append(self.allocator, .{
             .package = .{
                 .name = if (root_manifest) |manifest| manifest.name else null,
                 .version = if (root_manifest) |manifest| manifest.version else null,
+                .origin = .project,
                 .extensions = if (root_manifest) |manifest| manifest.extensions else &.{},
                 .root = project_root,
                 .module_roots = roots.active,
@@ -274,8 +287,8 @@ pub const Resolver = struct {
         if (root_manifest) |manifest| {
             try self.resolveDependencies(0, manifest.dependencies);
         } else {
-            try self.resolveAdjacent();
-            try self.resolveImplicitLinks();
+            if (self.workspace_links_root) |root| try self.resolveImplicitLinksAt(root, .workspace_link);
+            if (try self.userLinksRoot()) |root| try self.resolveImplicitLinksAt(root, .user_link);
             try self.resolveImplicitGlobals();
         }
         self.builders.items[0].state = .done;
@@ -312,62 +325,26 @@ pub const Resolver = struct {
         };
     }
 
-    fn findSharedRoot(self: *Resolver, project_root: []const u8) ![]const u8 {
-        const parent = std.fs.path.dirname(project_root) orelse ".";
-        var directory = parent;
+    fn findWorkspaceLinksRoot(self: *Resolver, project_root: []const u8) !?[]const u8 {
+        const user_root = try self.userLinksRoot();
+        var directory = project_root;
         while (true) {
-            const candidate = try std.fs.path.join(self.allocator, &.{ directory, "Packages" });
-            if (try exists(self.io, candidate)) return candidate;
-
-            if (std.mem.eql(u8, directory, ".")) break;
-            const next = std.fs.path.dirname(directory) orelse ".";
+            const candidate = try std.fs.path.join(self.allocator, &.{ directory, ".silex", "links" });
+            if ((user_root == null or !std.mem.eql(u8, candidate, user_root.?)) and try exists(self.io, candidate)) {
+                return candidate;
+            }
+            const next = std.fs.path.dirname(directory) orelse break;
             if (std.mem.eql(u8, next, directory)) break;
             directory = next;
         }
-        return std.fs.path.join(self.allocator, &.{ parent, "Packages" });
+        return null;
     }
 
-    fn resolveAdjacent(self: *Resolver) !void {
-        try self.resolveAdjacentFrom(self.local_root);
-        try self.resolveAdjacentFrom(self.shared_root);
-    }
-
-    fn resolveAdjacentFrom(self: *Resolver, root_path: []const u8) !void {
-        var directory = Io.Dir.cwd().openDir(self.io, root_path, .{ .iterate = true }) catch |err| switch (err) {
-            error.FileNotFound, error.NotDir => return,
-            else => return err,
-        };
-        defer directory.close(self.io);
-        var names: std.ArrayList([]const u8) = .empty;
-        var iterator = directory.iterateAssumeFirstIteration();
-        while (try iterator.next(self.io)) |entry| {
-            if (entry.kind != .directory) continue;
-            const manifest_path = try std.fs.path.join(self.allocator, &.{ root_path, entry.name, "Package.json" });
-            if (!try exists(self.io, manifest_path)) continue;
-            try names.append(self.allocator, try self.allocator.dupe(u8, entry.name));
-        }
-        std.mem.sort([]const u8, names.items, {}, stringLessThan);
-        for (names.items) |name| {
-            const root = try std.fs.path.join(self.allocator, &.{ root_path, name });
-            const manifest = try self.loadRequired(root);
-            const identity = manifest.name orelse return self.fail("a sibling package requires name and version");
-            const version = manifest.version orelse return self.fail("a sibling package requires name and version");
-            if (!std.mem.eql(u8, identity, name)) return self.fail("local package folder and manifest name differ");
-            const index = try self.resolveSelected(root, manifest, identity, version);
-            var direct = false;
-            for (self.builders.items[0].dependencies.items) |dependency| {
-                if (std.mem.eql(u8, dependency.name, identity)) {
-                    direct = true;
-                    break;
-                }
-            }
-            if (direct) continue;
-            try self.builders.items[0].dependencies.append(self.allocator, .{
-                .name = identity,
-                .package = index,
-                .constraint = .{ .kind = .exact, .version = version },
-            });
-        }
+    fn userLinksRoot(self: *Resolver) !?[]const u8 {
+        const global_root = self.global_root orelse return null;
+        const silex_root = std.fs.path.dirname(global_root) orelse return null;
+        const links_root: []const u8 = try std.fs.path.join(self.allocator, &.{ silex_root, "links" });
+        return links_root;
     }
 
     fn resolveImplicitGlobals(self: *Resolver) !void {
@@ -399,17 +376,14 @@ pub const Resolver = struct {
             const index = if (self.find(name)) |existing|
                 existing
             else if (try self.bestImplicitGlobal(name)) |selected|
-                try self.resolveSelected(selected.root, selected.manifest, name, selected.version)
+                try self.resolveSelected(selected.root, selected.manifest, name, selected.version, selected.origin)
             else
                 continue;
             try self.appendImplicitRootDependency(name, index);
         }
     }
 
-    fn resolveImplicitLinks(self: *Resolver) !void {
-        const global_root = self.global_root orelse return;
-        const silex_root = std.fs.path.dirname(global_root) orelse return;
-        const links_root = try std.fs.path.join(self.allocator, &.{ silex_root, "links" });
+    fn resolveImplicitLinksAt(self: *Resolver, links_root: []const u8, origin: Origin) !void {
         var directory = Io.Dir.cwd().openDir(self.io, links_root, .{ .iterate = true }) catch |err| switch (err) {
             error.FileNotFound, error.NotDir => return,
             else => |other| return other,
@@ -429,8 +403,8 @@ pub const Resolver = struct {
             if (self.rootDependsOn(name)) continue;
             const index = if (self.find(name)) |existing|
                 existing
-            else if (try self.linkedNamed(name)) |selected|
-                try self.resolveSelected(selected.root, selected.manifest, name, selected.version)
+            else if (try self.linkedNamedAt(links_root, name, origin)) |selected|
+                try self.resolveSelected(selected.root, selected.manifest, name, selected.version, selected.origin)
             else
                 continue;
             try self.appendImplicitRootDependency(name, index);
@@ -475,32 +449,12 @@ pub const Resolver = struct {
         }
 
         var available: ?Version = null;
-        const local_root = try std.fs.path.join(self.allocator, &.{ self.local_root, request.name });
-        try self.rejectLegacy(local_root);
-        const local_manifest_path = try std.fs.path.join(self.allocator, &.{ local_root, "Package.json" });
-        if (try exists(self.io, local_manifest_path)) {
-            const manifest = try self.loadRequired(local_root);
-            const version = try self.validateSelected(manifest, request.name, local_root, false);
-            if (request.constraint.accepts(version)) return self.resolveSelected(local_root, manifest, request.name, version);
-            available = newest(available, version);
-        }
-
-        const shared_root = try std.fs.path.join(self.allocator, &.{ self.shared_root, request.name });
-        try self.rejectLegacy(shared_root);
-        const shared_manifest_path = try std.fs.path.join(self.allocator, &.{ shared_root, "Package.json" });
-        if (try exists(self.io, shared_manifest_path)) {
-            const manifest = try self.loadRequired(shared_root);
-            const version = try self.validateSelected(manifest, request.name, shared_root, false);
-            if (request.constraint.accepts(version)) return self.resolveSelected(shared_root, manifest, request.name, version);
-            available = newest(available, version);
-        }
-
         if (try self.linked(owner, request)) |selected| {
-            return self.resolveSelected(selected.root, selected.manifest, request.name, selected.version);
+            return self.resolveSelected(selected.root, selected.manifest, request.name, selected.version, selected.origin);
         }
 
         if (try self.bestGlobal(request, &available)) |selected| {
-            return self.resolveSelected(selected.root, selected.manifest, request.name, selected.version);
+            return self.resolveSelected(selected.root, selected.manifest, request.name, selected.version, selected.origin);
         }
         return self.fail(try self.unresolvedDependencyDiagnostic(owner, request, available));
     }
@@ -509,6 +463,7 @@ pub const Resolver = struct {
         root: []const u8,
         manifest: ParsedManifest,
         version: Version,
+        origin: Origin,
     };
 
     const Link = struct {
@@ -524,16 +479,22 @@ pub const Resolver = struct {
     }
 
     fn linkedNamed(self: *Resolver, name: []const u8) !?Selected {
-        const global_root = self.global_root orelse return null;
-        const silex_root = std.fs.path.dirname(global_root) orelse return null;
+        if (self.workspace_links_root) |root| {
+            if (try self.linkedNamedAt(root, name, .workspace_link)) |selected| return selected;
+        }
+        const root = try self.userLinksRoot() orelse return null;
+        return self.linkedNamedAt(root, name, .user_link);
+    }
+
+    fn linkedNamedAt(self: *Resolver, links_root: []const u8, name: []const u8, origin: Origin) !?Selected {
         const file_name = try std.fmt.allocPrint(self.allocator, "{s}.json", .{name});
-        const link_path = try std.fs.path.join(self.allocator, &.{ silex_root, "links", file_name });
+        const link_path = try std.fs.path.join(self.allocator, &.{ links_root, file_name });
         const source = Io.Dir.cwd().readFileAlloc(self.io, link_path, self.allocator, .limited(64 * 1024)) catch |err| switch (err) {
             error.FileNotFound, error.NotDir => return null,
             else => return self.fail(try std.fmt.allocPrint(
                 self.allocator,
-                "linked package '{s}' cannot be read; run 'silex unlink {s}'",
-                .{ name, name },
+                "linked package '{s}' cannot be read; remove or refresh the link in its scope",
+                .{name},
             )),
         };
         const link = std.json.parseFromSliceLeaky(Link, self.allocator, source, .{
@@ -541,20 +502,20 @@ pub const Resolver = struct {
             .ignore_unknown_fields = false,
         }) catch return self.fail(try std.fmt.allocPrint(
             self.allocator,
-            "linked package '{s}' has an invalid link; run 'silex unlink {s}'",
-            .{ name, name },
+            "linked package '{s}' has an invalid link; remove or refresh the link in its scope",
+            .{name},
         ));
         const manifest = self.loadRequired(link.path) catch |err| switch (err) {
             error.InvalidPackageGraph => return self.fail(try std.fmt.allocPrint(
                 self.allocator,
-                "linked package '{s}' is unavailable at '{s}'; run 'silex unlink {s}'",
-                .{ name, link.path, name },
+                "linked package '{s}' is unavailable at '{s}'; remove or refresh the link in its scope",
+                .{ name, link.path },
             )),
             else => |other| return other,
         };
-        const version = try self.validateSelected(manifest, name, link.path, true);
+        const version = try self.validateSelected(manifest, name, link.path, origin == .user_link);
         try self.validateToolchain(manifest);
-        return .{ .root = link.path, .manifest = manifest, .version = version };
+        return .{ .root = link.path, .manifest = manifest, .version = version, .origin = origin };
     }
 
     fn bestGlobal(self: *Resolver, request: ManifestDependency, available: *?Version) !?Selected {
@@ -581,12 +542,12 @@ pub const Resolver = struct {
             if (!request.constraint.accepts(version)) continue;
             if (!manifest.silex_requirement.?.accepts(self.toolchain_version)) {
                 if (toolchain_incompatible == null or version.order(toolchain_incompatible.?.version) == .gt) {
-                    toolchain_incompatible = .{ .root = root, .manifest = manifest, .version = version };
+                    toolchain_incompatible = .{ .root = root, .manifest = manifest, .version = version, .origin = .installed };
                 }
                 continue;
             }
             if (best == null or version.order(best.?.version) == .gt) {
-                best = .{ .root = root, .manifest = manifest, .version = version };
+                best = .{ .root = root, .manifest = manifest, .version = version, .origin = .installed };
             }
         }
         if (best == null) {
@@ -615,7 +576,7 @@ pub const Resolver = struct {
             if (!folder_version.eql(version)) return self.fail("global package folder and manifest version differ");
             if (!manifest.silex_requirement.?.accepts(self.toolchain_version)) continue;
             if (best == null or version.order(best.?.version) == .gt) {
-                best = .{ .root = root, .manifest = manifest, .version = version };
+                best = .{ .root = root, .manifest = manifest, .version = version, .origin = .installed };
             }
         }
         return best;
@@ -737,6 +698,7 @@ pub const Resolver = struct {
         manifest: ParsedManifest,
         name: []const u8,
         version: Version,
+        origin: Origin,
     ) anyerror!usize {
         if (self.find(name)) |existing| return existing;
         try self.validateToolchain(manifest);
@@ -746,6 +708,7 @@ pub const Resolver = struct {
             .package = .{
                 .name = name,
                 .version = version,
+                .origin = origin,
                 .extensions = manifest.extensions,
                 .root = root,
                 .module_roots = roots.active,
@@ -1564,7 +1527,7 @@ test "resolve ELF and COFF boundary archives with system libraries" {
     try std.testing.expectEqualStrings("boundary archive does not match its target", resolver.diagnostic.?);
 }
 
-test "prefer compatible sibling and otherwise select newest global version" {
+test "ignore a colocated package and select the newest compatible installed version" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -1596,7 +1559,7 @@ test "prefer compatible sibling and otherwise select newest global version" {
     var resolver = Resolver.init(allocator, std.testing.io, global);
     var graph = try resolver.resolve(app);
     try std.testing.expectEqualStrings("Math", graph.packages[1].name.?);
-    try std.testing.expect(graph.packages[1].version.?.eql(try Version.parse("1.4.1")));
+    try std.testing.expect(graph.packages[1].version.?.eql(try Version.parse("1.5.0")));
 
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "App/Package.json",
@@ -1611,7 +1574,7 @@ test "prefer compatible sibling and otherwise select newest global version" {
     try std.testing.expect(graph.packages[1].version.?.eql(try Version.parse("1.5.0")));
 }
 
-test "discover packages beside the source directory parent" {
+test "ignore relative Packages directories in a loose project" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -1633,33 +1596,8 @@ test "discover packages beside the source directory parent" {
     const sandbox = try std.fs.path.join(allocator, &.{ base, "Sandbox" });
     var resolver = Resolver.init(allocator, std.testing.io, null);
     const graph = try resolver.resolve(sandbox);
-    try std.testing.expectEqual(@as(usize, 3), graph.packages.len);
-    try std.testing.expectEqualStrings("GFX", graph.packages[1].name.?);
-    try std.testing.expect(std.mem.endsWith(u8, graph.packages[1].root, "Packages/GFX"));
-    try std.testing.expectEqualStrings("STD", graph.packages[2].name.?);
-    try std.testing.expectEqual(@as(usize, 2), graph.packages[0].dependencies.len);
-}
-
-test "discover shared packages above a nested application" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-    var temporary = std.testing.tmpDir(.{});
-    defer temporary.cleanup();
-
-    try temporary.dir.createDirPath(std.testing.io, "Sandbox/Lighting");
-    try temporary.dir.createDirPath(std.testing.io, "Packages/GFX/Module");
-    try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "Packages/GFX/Package.json",
-        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\"}",
-    });
-    const base = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
-    const application = try std.fs.path.join(allocator, &.{ base, "Sandbox", "Lighting" });
-    var resolver = Resolver.init(allocator, std.testing.io, null);
-    const graph = try resolver.resolve(application);
-    try std.testing.expectEqual(@as(usize, 2), graph.packages.len);
-    try std.testing.expectEqualStrings("GFX", graph.packages[1].name.?);
-    try std.testing.expect(std.mem.endsWith(u8, graph.packages[1].root, "Packages/GFX"));
+    try std.testing.expectEqual(@as(usize, 1), graph.packages.len);
+    try std.testing.expectEqual(@as(usize, 0), graph.packages[0].dependencies.len);
 }
 
 test "reject path fields conflicts and package cycles" {
@@ -1679,6 +1617,7 @@ test "reject path fields conflicts and package cycles" {
 
     try temporary.dir.createDirPath(std.testing.io, "A/Module");
     try temporary.dir.createDirPath(std.testing.io, "B/Module");
+    try temporary.dir.createDirPath(std.testing.io, ".silex/links");
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Package.json",
         .data = "{\"dependencies\":{\"A\":\"=1.0.0\"}}",
@@ -1690,6 +1629,16 @@ test "reject path fields conflicts and package cycles" {
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "B/Package.json",
         .data = "{\"name\":\"B\",\"version\":\"1.0.0\",\"dependencies\":{\"A\":\"=1.0.0\"}}",
+    });
+    const package_a = try std.fs.path.join(allocator, &.{ base, "A" });
+    const package_b = try std.fs.path.join(allocator, &.{ base, "B" });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = ".silex/links/A.json",
+        .data = try std.json.Stringify.valueAlloc(allocator, .{ .path = package_a }, .{}),
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = ".silex/links/B.json",
+        .data = try std.json.Stringify.valueAlloc(allocator, .{ .path = package_b }, .{}),
     });
     resolver = Resolver.init(allocator, std.testing.io, null);
     try std.testing.expectError(error.InvalidPackageGraph, resolver.resolve(base));
@@ -1777,6 +1726,7 @@ test "reject incompatible graph constraints missing packages and legacy manifest
         .sub_path = "Package.json",
         .data = "{\"dependencies\":{\"Missing\":\"=2.0.0\"}}",
     });
+    try @import("Packages/TestFixtures.zig").prepareWorkspaceLinks(allocator, std.testing.io, base);
     resolver = Resolver.init(allocator, std.testing.io, null);
     try std.testing.expectError(error.InvalidPackageGraph, resolver.resolve(base));
     try std.testing.expectEqualStrings(
@@ -1803,6 +1753,7 @@ test "reject incompatible graph constraints missing packages and legacy manifest
         .sub_path = "Common/Package.json",
         .data = "{\"name\":\"Common\",\"version\":\"1.5.0\"}",
     });
+    try @import("Packages/TestFixtures.zig").prepareWorkspaceLinks(allocator, std.testing.io, base);
     resolver = Resolver.init(allocator, std.testing.io, null);
     try std.testing.expectError(error.InvalidPackageGraph, resolver.resolve(base));
     try std.testing.expectEqualStrings(

@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const Ast = @import("Ast.zig");
 const Boundary = @import("Boundary.zig");
 const Interface = @import("Interface.zig");
@@ -8,6 +9,7 @@ const Ir = @import("Ir.zig");
 const Modules = @import("Modules.zig");
 const Names = @import("Project/Names.zig");
 const Packages = @import("Packages.zig");
+const PackageTestFixtures = @import("Packages/TestFixtures.zig");
 const Reexports = @import("Project/Reexports.zig");
 const TypeAliases = @import("Project/TypeAliases.zig");
 const GenericTypes = @import("Project/GenericTypes.zig");
@@ -123,6 +125,7 @@ pub const Compiler = struct {
         }
 
         const root_path = try Paths.findRoot(self.allocator, self.io, input_path);
+        if (builtin.is_test) try PackageTestFixtures.prepareWorkspaceLinks(self.allocator, self.io, root_path);
         var package_resolver = Packages.Resolver.initForTarget(self.allocator, self.io, self.global_packages_root, self.target);
         self.packages = package_resolver.resolve(root_path) catch |err| switch (err) {
             error.InvalidPackageGraph => return self.fail(

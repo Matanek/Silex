@@ -22,6 +22,7 @@ const WindowsImports = @import("Windows/Imports.zig");
 const NativeLink = @import("NativeLink.zig");
 const ReleaseOptimizer = @import("Optimize/Release.zig");
 const Project = @import("Project.zig");
+const ProjectPaths = @import("Project/Paths.zig");
 const Packages = @import("Packages.zig");
 const PackageRegistry = @import("PackageRegistry.zig");
 const PackagePublish = @import("PackagePublish.zig");
@@ -45,8 +46,10 @@ const usage =
     \\       silex install <package|package-directory> [--target <target>]
     \\       silex release <package-directory>
     \\       silex publish <package-directory>
-    \\       silex link <package-directory> [--target <target>]
-    \\       silex unlink <package-name>
+    \\       silex link <package-directory> [--workspace <directory>] [--target <target>]
+    \\       silex unlink <package-name> [--workspace <directory>]
+    \\       silex packages
+    \\       silex packages resolve [source.sx|project-directory]
     \\       silex setup
     \\       silex update
     \\       silex targets
@@ -100,6 +103,7 @@ fn runCli(init: std.process.Init) !u8 {
     if (std.mem.eql(u8, args[1], "publish")) return publishPackage(init, allocator, args[2..]);
     if (std.mem.eql(u8, args[1], "link")) return linkPackage(init, allocator, args[2..]);
     if (std.mem.eql(u8, args[1], "unlink")) return unlinkPackage(init, allocator, args[2..]);
+    if (std.mem.eql(u8, args[1], "packages")) return listPackages(init, allocator, args[2..]);
     if (std.mem.eql(u8, args[1], "setup")) return setupToolchain(init, allocator, args[2..]);
     if (std.mem.eql(u8, args[1], "update")) return updateSilex(init, allocator, args[2..]);
     if (std.mem.eql(u8, args[1], "targets")) return listTargets(init, allocator, args[2..]);
@@ -348,7 +352,7 @@ fn looksLikePath(text: []const u8) bool {
 }
 
 fn linkPackage(init: std.process.Init, allocator: std.mem.Allocator, args: []const []const u8) !u8 {
-    const options = switch (Cli.parseInstall(args)) {
+    const options = switch (Cli.parseLink(args)) {
         .options => |options| options,
         .diagnostic => |diagnostic| {
             printCliDiagnostic("link", diagnostic);
@@ -364,25 +368,29 @@ fn linkPackage(init: std.process.Init, allocator: std.mem.Allocator, args: []con
         return 1;
     };
     var store = PackageStore.Manager.init(allocator, init.gpa, init.io, packages_root);
-    const result = store.link(options.package_path, target) catch |err| switch (err) {
+    const result = (if (options.workspace) |workspace|
+        store.linkWorkspace(options.package_path, workspace, target)
+    else
+        store.link(options.package_path, target)) catch |err| switch (err) {
         error.InvalidPackageStore => {
             std.debug.print("silex: cannot link package: {s}\n", .{store.diagnostic orelse "invalid package"});
             return 1;
         },
         else => return err,
     };
-    std.debug.print("silex: linked {s}@{d}.{d}.{d} to {s}\n", .{
+    std.debug.print("silex: linked {s}@{d}.{d}.{d} to {s}{s}\n", .{
         result.package.name,
         result.package.version.major,
         result.package.version.minor,
         result.package.version.patch,
         result.source,
+        if (options.workspace != null) " for this workspace" else "",
     });
     return 0;
 }
 
 fn unlinkPackage(init: std.process.Init, allocator: std.mem.Allocator, args: []const []const u8) !u8 {
-    const options = switch (Cli.parsePackage(args)) {
+    const options = switch (Cli.parseUnlink(args)) {
         .options => |options| options,
         .diagnostic => |diagnostic| {
             printCliDiagnostic("unlink", diagnostic);
@@ -394,7 +402,10 @@ fn unlinkPackage(init: std.process.Init, allocator: std.mem.Allocator, args: []c
         return 1;
     };
     var store = PackageStore.Manager.init(allocator, init.gpa, init.io, packages_root);
-    const removed = store.unlink(options.package) catch |err| switch (err) {
+    const removed = (if (options.workspace) |workspace|
+        store.unlinkWorkspace(options.package, workspace)
+    else
+        store.unlink(options.package)) catch |err| switch (err) {
         error.InvalidPackageStore => {
             std.debug.print("silex: cannot unlink package: {s}\n", .{store.diagnostic orelse "invalid package name"});
             return 1;
@@ -406,6 +417,184 @@ fn unlinkPackage(init: std.process.Init, allocator: std.mem.Allocator, args: []c
         return 1;
     }
     std.debug.print("silex: unlinked {s}\n", .{options.package});
+    return 0;
+}
+
+fn listPackages(init: std.process.Init, allocator: std.mem.Allocator, args: []const []const u8) !u8 {
+    const options = switch (Cli.parsePackages(args)) {
+        .options => |options| options,
+        .diagnostic => |diagnostic| {
+            printCliDiagnostic("packages", diagnostic);
+            return 1;
+        },
+    };
+    return switch (options.action) {
+        .inventory => listAvailablePackages(init, allocator),
+        .resolve => |project_path| listResolvedPackages(init, allocator, project_path),
+    };
+}
+
+const AvailablePackage = struct {
+    name: []const u8,
+    version: []const u8,
+    parsed_version: Packages.Version,
+    origin: Packages.Origin,
+    source: []const u8,
+};
+
+fn listAvailablePackages(init: std.process.Init, allocator: std.mem.Allocator) !u8 {
+    const packages_root = try globalPackagesRoot(allocator, init.environ_map) orelse {
+        try Io.File.stdout().writeStreamingAll(init.io, "No global packages available.\n");
+        return 0;
+    };
+    var available: std.ArrayList(AvailablePackage) = .empty;
+    try appendUserLinks(allocator, init.io, packages_root, &available);
+    try appendInstalledPackages(allocator, init.io, packages_root, &available);
+    std.mem.sort(AvailablePackage, available.items, {}, availablePackageLessThan);
+
+    var output: std.ArrayList(u8) = .empty;
+    for (available.items) |package| try output.appendSlice(
+        allocator,
+        try std.fmt.allocPrint(allocator, "{s} {s} {s} {s}\n", .{
+            package.name,
+            package.version,
+            package.origin.label(),
+            package.source,
+        }),
+    );
+    if (output.items.len == 0) try output.appendSlice(allocator, "No global packages available.\n");
+    try Io.File.stdout().writeStreamingAll(init.io, output.items);
+    return 0;
+}
+
+fn appendUserLinks(
+    allocator: std.mem.Allocator,
+    io: Io,
+    packages_root: []const u8,
+    available: *std.ArrayList(AvailablePackage),
+) !void {
+    const silex_root = std.fs.path.dirname(packages_root) orelse return;
+    const links_root = try std.fs.path.join(allocator, &.{ silex_root, "links" });
+    var directory = Io.Dir.cwd().openDir(io, links_root, .{ .iterate = true }) catch |err| switch (err) {
+        error.FileNotFound, error.NotDir => return,
+        else => |other| return other,
+    };
+    defer directory.close(io);
+    const Link = struct { path: []const u8 };
+    const Identity = struct { name: ?[]const u8 = null, version: ?[]const u8 = null };
+    var iterator = directory.iterateAssumeFirstIteration();
+    while (try iterator.next(io)) |entry| {
+        if (entry.kind != .file or !std.mem.endsWith(u8, entry.name, ".json")) continue;
+        const name = entry.name[0 .. entry.name.len - ".json".len];
+        const link_path = try std.fs.path.join(allocator, &.{ links_root, entry.name });
+        const link_source = Io.Dir.cwd().readFileAlloc(io, link_path, allocator, .limited(64 * 1024)) catch continue;
+        const link = std.json.parseFromSliceLeaky(Link, allocator, link_source, .{
+            .allocate = .alloc_always,
+            .ignore_unknown_fields = false,
+        }) catch continue;
+        const manifest_path = try std.fs.path.join(allocator, &.{ link.path, "Package.json" });
+        const manifest_source = Io.Dir.cwd().readFileAlloc(io, manifest_path, allocator, .limited(1024 * 1024)) catch continue;
+        const identity = std.json.parseFromSliceLeaky(Identity, allocator, manifest_source, .{
+            .allocate = .alloc_always,
+            .ignore_unknown_fields = true,
+        }) catch continue;
+        const version = identity.version orelse continue;
+        if (identity.name) |manifest_name| if (!std.mem.eql(u8, manifest_name, name)) continue;
+        const parsed_version = Packages.Version.parse(version) catch continue;
+        try available.append(allocator, .{
+            .name = try allocator.dupe(u8, name),
+            .version = version,
+            .parsed_version = parsed_version,
+            .origin = .user_link,
+            .source = link.path,
+        });
+    }
+}
+
+fn appendInstalledPackages(
+    allocator: std.mem.Allocator,
+    io: Io,
+    packages_root: []const u8,
+    available: *std.ArrayList(AvailablePackage),
+) !void {
+    var directory = Io.Dir.cwd().openDir(io, packages_root, .{ .iterate = true }) catch |err| switch (err) {
+        error.FileNotFound, error.NotDir => return,
+        else => |other| return other,
+    };
+    defer directory.close(io);
+    var iterator = directory.iterateAssumeFirstIteration();
+    while (try iterator.next(io)) |entry| {
+        if (entry.kind != .directory) continue;
+        const separator = std.mem.lastIndexOfScalar(u8, entry.name, '@') orelse continue;
+        if (separator == 0 or separator + 1 == entry.name.len) continue;
+        const name = entry.name[0..separator];
+        const version = entry.name[separator + 1 ..];
+        const parsed_version = Packages.Version.parse(version) catch continue;
+        try available.append(allocator, .{
+            .name = try allocator.dupe(u8, name),
+            .version = try allocator.dupe(u8, version),
+            .parsed_version = parsed_version,
+            .origin = .installed,
+            .source = try std.fs.path.join(allocator, &.{ packages_root, entry.name }),
+        });
+    }
+}
+
+fn availablePackageLessThan(_: void, left: AvailablePackage, right: AvailablePackage) bool {
+    const name_order = std.mem.order(u8, left.name, right.name);
+    if (name_order != .eq) return name_order == .lt;
+    if (left.origin != right.origin) return left.origin == .user_link;
+    return left.parsed_version.order(right.parsed_version) == .gt;
+}
+
+fn listResolvedPackages(
+    init: std.process.Init,
+    allocator: std.mem.Allocator,
+    project_path: []const u8,
+) !u8 {
+    const canonical = Io.Dir.cwd().realPathFileAlloc(init.io, project_path, allocator) catch |err| {
+        std.debug.print("silex: cannot locate project path '{s}': {t}\n", .{ project_path, err });
+        return 1;
+    };
+    const input_stat = Io.Dir.cwd().statFile(init.io, canonical, .{}) catch |err| {
+        std.debug.print("silex: cannot inspect project path '{s}': {t}\n", .{ project_path, err });
+        return 1;
+    };
+    const input = if (input_stat.kind == .directory)
+        try std.fs.path.join(allocator, &.{ canonical, "__packages__.sx" })
+    else
+        canonical;
+    const project_root = try ProjectPaths.findRoot(allocator, init.io, input);
+    var resolver = Packages.Resolver.initForTarget(
+        allocator,
+        init.io,
+        try globalPackagesRoot(allocator, init.environ_map),
+        TargetModule.Target.host() orelse .macos_arm64,
+    );
+    const graph = resolver.resolve(project_root) catch |err| switch (err) {
+        error.InvalidPackageGraph => {
+            std.debug.print("silex: cannot resolve packages: {s}\n", .{resolver.diagnostic orelse "invalid package graph"});
+            return 1;
+        },
+        else => return err,
+    };
+    var output: std.ArrayList(u8) = .empty;
+    for (graph.packages[1..]) |package| {
+        const version = package.version.?;
+        try output.appendSlice(
+            allocator,
+            try std.fmt.allocPrint(allocator, "{s} {d}.{d}.{d} {s} {s}\n", .{
+                package.name.?,
+                version.major,
+                version.minor,
+                version.patch,
+                package.origin.label(),
+                package.root,
+            }),
+        );
+    }
+    if (output.items.len == 0) try output.appendSlice(allocator, "No packages resolved.\n");
+    try Io.File.stdout().writeStreamingAll(init.io, output.items);
     return 0;
 }
 
@@ -1302,6 +1491,9 @@ fn printCliDiagnostic(command: []const u8, diagnostic: Cli.Diagnostic) void {
         .missing_target => std.debug.print("silex: option '--target' expects a target name\n", .{}),
         .duplicate_target => std.debug.print("silex: target is specified more than once\n", .{}),
         .unknown_target => std.debug.print("silex: unknown target '{s}'; expected macos-arm64, linux-x64, windows-x64 or windows-arm64\n", .{diagnostic.argument.?}),
+        .missing_workspace => std.debug.print("silex: option '--workspace' expects a directory\n", .{}),
+        .duplicate_workspace => std.debug.print("silex: workspace is specified more than once\n", .{}),
+        .unknown_action => std.debug.print("silex: unknown '{s}' action '{s}'; expected 'resolve' or no action\n", .{ command, diagnostic.argument.? }),
         .conflicting_modes => std.debug.print("silex: Debug and Release modes are mutually exclusive near '{s}'\n", .{diagnostic.argument.?}),
         .option_unavailable => std.debug.print("silex: option '{s}' is unavailable for '{s}'\n", .{ diagnostic.argument.?, command }),
         .unknown_option => std.debug.print("silex: unknown option '{s}'\n", .{diagnostic.argument.?}),

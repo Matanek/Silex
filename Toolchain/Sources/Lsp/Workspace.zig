@@ -1,6 +1,8 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const Ast = @import("../Ast.zig");
 const Modules = @import("../Modules.zig");
+const PackageTestFixtures = @import("../Packages/TestFixtures.zig");
 const TargetModule = @import("../Target.zig");
 const ParserModule = @import("../Parser.zig");
 const Completion = @import("Completion.zig");
@@ -731,6 +733,7 @@ fn indexProject(
     root: []const u8,
     document_path: []const u8,
 ) !IndexedProject {
+    if (builtin.is_test) try PackageTestFixtures.prepareWorkspaceLinks(allocator, io, root);
     return ProjectIndex.index(allocator, io, global_packages_root, target, root, document_path);
 }
 

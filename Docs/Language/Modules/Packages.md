@@ -158,26 +158,26 @@ accepts `0.8.0` but rejects `1.0.0`.
 
 Silex resolves a dependency in this order:
 
-1. a compatible package beside the project;
-2. a compatible package in the nearest ancestor `Packages/` directory;
-3. a package registered with `silex link`;
-4. the newest compatible installed version under
+1. a package linked in the nearest workspace scope;
+2. a package linked for the current user;
+3. the newest compatible installed version under
    `~/.silex/packages/Name@MAJOR.MINOR.PATCH/`.
 
-The `SilexProject/Packages/` workspace therefore remains live by default:
-editing `Packages/STD` or `Packages/GFX` is visible immediately to projects
-inside the workspace. No installation, commit, tag, or push is involved.
+A directory named `Packages/` has no special meaning to the resolver. Merely
+placing STD, GFX, or HTML there never exposes them to a project. Register a
+checkout explicitly with `silex link` when its sources must remain live.
 
 Dependencies are direct. Declare every package used by the application; a
 transitive dependency is not automatically visible.
 
 A loose program without `Package.json` needs no manifest merely to try Silex
 or run a short script. Its implicit development environment exposes compatible
-packages in the same order: adjacent sources, the nearest ancestor
-`Packages/` directory, sources registered with `silex link`, then installed
-versions. When several installed versions are compatible with the running
-toolchain, Silex selects the newest one. As soon as a program gains a manifest,
-its declared direct dependencies replace this implicit environment.
+packages through workspace links, user links, then installed versions. Its
+location and the directory from which `silex run` is launched never make a
+nearby `Packages/` directory visible. When several installed versions are
+compatible with the running toolchain, Silex selects the newest one. As soon
+as a program gains a manifest, its declared direct dependencies replace this
+implicit environment.
 
 ## Install a package
 
@@ -218,8 +218,7 @@ silex install path/to/GFX --target windows-x64
 
 ### Work on a package live
 
-For a package checkout outside the consumer's ancestor `Packages/` directory,
-register its source directory once:
+Register a package checkout once for the current user:
 
 ~~~sh
 silex link path/to/STD
@@ -235,10 +234,46 @@ with `--target`. Remove the override with:
 silex unlink STD
 ~~~
 
+To keep the override local to one workspace, name that workspace explicitly:
+
+~~~sh
+silex link path/to/STD --workspace path/to/MyApplication
+silex unlink STD --workspace path/to/MyApplication
+~~~
+
+The link is stored as package identity and canonical source path under the
+workspace's ignored `.silex/links/` state. It applies to projects below that
+workspace, including loose scripts without a `Package.json`, and never leaks
+into another workspace. Only the nearest workspace scope is used, and its
+links win over the current user's links for the same package. This keeps the
+package editable in place without requiring filesystem symbolic links or
+making the consumer itself a package.
+
 The resolver then falls back to a compatible installed version. While the link
 exists it is an intentional override: if its version no longer satisfies the
 consumer or its `requires.silex` no longer accepts the toolchain, Silex reports
 the incompatibility instead of silently selecting an installed copy.
+
+List every package available globally to the current user, independently of
+the current directory, with:
+
+~~~sh
+silex packages
+~~~
+
+This inventory includes every installed version and every user link. Each line
+reports the package identity, version, origin (`user-link` or `installed`), and
+canonical source path.
+
+Inspect the exact graph selected for a source file or project directory
+separately with:
+
+~~~sh
+silex packages resolve path/to/MyApplication
+~~~
+
+The resolved graph may additionally report the `workspace-link` origin.
+Without a path, `silex packages resolve` inspects the current directory.
 
 ## Declare verified package artifacts
 

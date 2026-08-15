@@ -174,6 +174,24 @@ pub const Manager = struct {
     }
 
     pub fn link(self: *Manager, source: []const u8, target: TargetModule.Target) !LinkResult {
+        return self.linkAt(source, target, try self.userLinksRoot());
+    }
+
+    pub fn linkWorkspace(
+        self: *Manager,
+        source: []const u8,
+        workspace: []const u8,
+        target: TargetModule.Target,
+    ) !LinkResult {
+        return self.linkAt(source, target, try self.workspaceLinksRoot(workspace));
+    }
+
+    fn linkAt(
+        self: *Manager,
+        source: []const u8,
+        target: TargetModule.Target,
+        links_root: []const u8,
+    ) !LinkResult {
         self.diagnostic = null;
         const canonical = Io.Dir.cwd().realPathFileAlloc(self.io, source, self.allocator) catch {
             return self.failFmt("cannot locate package directory '{s}'", .{source});
@@ -187,7 +205,6 @@ pub const Manager = struct {
             ),
             else => |other| return other,
         };
-        const links_root = try self.linksRoot();
         try Io.Dir.cwd().createDirPath(self.io, links_root);
         const link_name = try std.fmt.allocPrint(self.allocator, "{s}.json", .{package.name});
         const destination = try std.fs.path.join(self.allocator, &.{ links_root, link_name });
@@ -203,9 +220,16 @@ pub const Manager = struct {
     }
 
     pub fn unlink(self: *Manager, name: []const u8) !bool {
+        return self.unlinkAt(name, try self.userLinksRoot());
+    }
+
+    pub fn unlinkWorkspace(self: *Manager, name: []const u8, workspace: []const u8) !bool {
+        return self.unlinkAt(name, try self.workspaceLinksRoot(workspace));
+    }
+
+    fn unlinkAt(self: *Manager, name: []const u8, links_root: []const u8) !bool {
         self.diagnostic = null;
         if (!Modules.validName(name)) return self.failFmt("invalid package name '{s}'", .{name});
-        const links_root = try self.linksRoot();
         const link_name = try std.fmt.allocPrint(self.allocator, "{s}.json", .{name});
         const path = try std.fs.path.join(self.allocator, &.{ links_root, link_name });
         Io.Dir.cwd().deleteFile(self.io, path) catch |err| switch (err) {
@@ -264,10 +288,17 @@ pub const Manager = struct {
         }
     }
 
-    fn linksRoot(self: *Manager) ![]const u8 {
+    fn userLinksRoot(self: *Manager) ![]const u8 {
         const silex_root = std.fs.path.dirname(self.packages_root) orelse
             return self.failFmt("invalid package store path '{s}'", .{self.packages_root});
         return std.fs.path.join(self.allocator, &.{ silex_root, "links" });
+    }
+
+    fn workspaceLinksRoot(self: *Manager, workspace: []const u8) ![]const u8 {
+        const canonical = Io.Dir.cwd().realPathFileAlloc(self.io, workspace, self.allocator) catch {
+            return self.failFmt("cannot locate workspace directory '{s}'", .{workspace});
+        };
+        return std.fs.path.join(self.allocator, &.{ canonical, ".silex", "links" });
     }
 
     fn failFmt(self: *Manager, comptime format: []const u8, arguments: anytype) error{InvalidPackageStore} {
@@ -445,4 +476,17 @@ test "link exposes live package sources and unlink removes the override" {
     try std.testing.expectEqualStrings("STD", installed_graph.packages[1].name.?);
     try std.testing.expect(installed_graph.packages[1].version.?.eql(try Packages.Version.parse("1.2.0")));
     try std.testing.expect(!(try manager.unlink("STD")));
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Checkout/Package.json",
+        .data =
+        \\{"name":"STD","version":"1.2.0","requires":{"silex":">=0.38.0 <0.39.0"}}
+        ,
+    });
+    _ = try manager.linkWorkspace(source, base, .macos_arm64);
+    resolver = Packages.Resolver.init(allocator, std.testing.io, packages_root);
+    const workspace_graph = try resolver.resolve(app);
+    try std.testing.expectEqual(Packages.Origin.workspace_link, workspace_graph.packages[1].origin);
+    try std.testing.expect(try manager.unlinkWorkspace("STD", base));
+    try std.testing.expect(!(try manager.unlinkWorkspace("STD", base)));
 }

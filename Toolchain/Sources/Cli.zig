@@ -17,6 +17,9 @@ pub const Diagnostic = struct {
         missing_target,
         duplicate_target,
         unknown_target,
+        missing_workspace,
+        duplicate_workspace,
+        unknown_action,
         conflicting_modes,
         option_unavailable,
         unknown_option,
@@ -49,6 +52,26 @@ pub const InstallOptions = struct {
     target: ?TargetModule.Target,
 };
 
+pub const LinkOptions = struct {
+    package_path: []const u8,
+    target: ?TargetModule.Target,
+    workspace: ?[]const u8,
+};
+
+pub const UnlinkOptions = struct {
+    package: []const u8,
+    workspace: ?[]const u8,
+};
+
+pub const PackagesOptions = struct {
+    action: Action,
+
+    pub const Action = union(enum) {
+        inventory,
+        resolve: []const u8,
+    };
+};
+
 pub const PackageOptions = struct {
     package: []const u8,
 };
@@ -70,6 +93,21 @@ pub const InterpretResult = union(enum) {
 
 pub const InstallResult = union(enum) {
     options: InstallOptions,
+    diagnostic: Diagnostic,
+};
+
+pub const LinkResult = union(enum) {
+    options: LinkOptions,
+    diagnostic: Diagnostic,
+};
+
+pub const UnlinkResult = union(enum) {
+    options: UnlinkOptions,
+    diagnostic: Diagnostic,
+};
+
+pub const PackagesResult = union(enum) {
+    options: PackagesOptions,
     diagnostic: Diagnostic,
 };
 
@@ -223,6 +261,81 @@ pub fn parseInstall(args: []const []const u8) InstallResult {
     } };
 }
 
+pub fn parseLink(args: []const []const u8) LinkResult {
+    var package_path: ?[]const u8 = null;
+    var target: ?TargetModule.Target = null;
+    var workspace: ?[]const u8 = null;
+    var index: usize = 0;
+
+    while (index < args.len) : (index += 1) {
+        const argument = args[index];
+        if (std.mem.eql(u8, argument, "--target")) {
+            if (target != null) return failure(LinkResult, .duplicate_target, argument);
+            index += 1;
+            if (index >= args.len or std.mem.startsWith(u8, args[index], "-")) {
+                return failure(LinkResult, .missing_target, argument);
+            }
+            target = TargetModule.Target.parse(args[index]) catch
+                return failure(LinkResult, .unknown_target, args[index]);
+        } else if (std.mem.eql(u8, argument, "--workspace")) {
+            if (workspace != null) return failure(LinkResult, .duplicate_workspace, argument);
+            index += 1;
+            if (index >= args.len or std.mem.startsWith(u8, args[index], "-")) {
+                return failure(LinkResult, .missing_workspace, argument);
+            }
+            workspace = args[index];
+        } else if (std.mem.startsWith(u8, argument, "-")) {
+            return failure(LinkResult, .unknown_option, argument);
+        } else if (package_path != null) {
+            return failure(LinkResult, .multiple_packages, argument);
+        } else {
+            package_path = argument;
+        }
+    }
+
+    return .{ .options = .{
+        .package_path = package_path orelse return failure(LinkResult, .missing_package, null),
+        .target = target,
+        .workspace = workspace,
+    } };
+}
+
+pub fn parseUnlink(args: []const []const u8) UnlinkResult {
+    var package: ?[]const u8 = null;
+    var workspace: ?[]const u8 = null;
+    var index: usize = 0;
+    while (index < args.len) : (index += 1) {
+        const argument = args[index];
+        if (std.mem.eql(u8, argument, "--workspace")) {
+            if (workspace != null) return failure(UnlinkResult, .duplicate_workspace, argument);
+            index += 1;
+            if (index >= args.len or std.mem.startsWith(u8, args[index], "-")) {
+                return failure(UnlinkResult, .missing_workspace, argument);
+            }
+            workspace = args[index];
+        } else if (std.mem.startsWith(u8, argument, "-")) {
+            return failure(UnlinkResult, .unknown_option, argument);
+        } else if (package != null) {
+            return failure(UnlinkResult, .multiple_packages, argument);
+        } else {
+            package = argument;
+        }
+    }
+    return .{ .options = .{
+        .package = package orelse return failure(UnlinkResult, .missing_package, null),
+        .workspace = workspace,
+    } };
+}
+
+pub fn parsePackages(args: []const []const u8) PackagesResult {
+    if (args.len == 0) return .{ .options = .{ .action = .inventory } };
+    if (!std.mem.eql(u8, args[0], "resolve")) {
+        return failure(PackagesResult, .unknown_action, args[0]);
+    }
+    if (args.len > 2) return failure(PackagesResult, .multiple_sources, args[2]);
+    return .{ .options = .{ .action = .{ .resolve = if (args.len == 2) args[1] else "." } } };
+}
+
 pub fn parsePackage(args: []const []const u8) PackageResult {
     var package: ?[]const u8 = null;
     for (args) |argument| {
@@ -291,6 +404,31 @@ test "package commands accept exactly one path or name" {
     try expectPackageDiagnostic(parsePackage(&.{}), .missing_package, null);
     try expectPackageDiagnostic(parsePackage(&.{ "STD", "GFX" }), .multiple_packages, "GFX");
     try expectPackageDiagnostic(parsePackage(&.{"--force"}), .unknown_option, "--force");
+}
+
+test "link and unlink accept an explicit workspace" {
+    const linked = parseLink(&.{ "Packages/STD", "--workspace", "Sandbox", "--target", "macos-arm64" }).options;
+    try std.testing.expectEqualStrings("Packages/STD", linked.package_path);
+    try std.testing.expectEqualStrings("Sandbox", linked.workspace.?);
+    try std.testing.expect(linked.target.?.eql(.macos_arm64));
+    try expectLinkDiagnostic(parseLink(&.{ "STD", "--workspace" }), .missing_workspace, "--workspace");
+    try expectLinkDiagnostic(parseLink(&.{ "STD", "--workspace", "A", "--workspace", "B" }), .duplicate_workspace, "--workspace");
+
+    const unlinked = parseUnlink(&.{ "STD", "--workspace", "Sandbox" }).options;
+    try std.testing.expectEqualStrings("STD", unlinked.package);
+    try std.testing.expectEqualStrings("Sandbox", unlinked.workspace.?);
+    try expectUnlinkDiagnostic(parseUnlink(&.{ "STD", "--workspace" }), .missing_workspace, "--workspace");
+}
+
+test "packages separates global inventory from contextual resolution" {
+    try std.testing.expect(parsePackages(&.{}).options.action == .inventory);
+    try std.testing.expectEqualStrings(".", parsePackages(&.{"resolve"}).options.action.resolve);
+    try std.testing.expectEqualStrings(
+        "Sandbox/Main.sx",
+        parsePackages(&.{ "resolve", "Sandbox/Main.sx" }).options.action.resolve,
+    );
+    try expectPackagesDiagnostic(parsePackages(&.{"Sandbox/Main.sx"}), .unknown_action, "Sandbox/Main.sx");
+    try expectPackagesDiagnostic(parsePackages(&.{ "resolve", "A", "B" }), .multiple_sources, "B");
 }
 
 test "publish accepts exactly one package directory" {
@@ -386,6 +524,24 @@ fn expectInterpretDiagnostic(result: InterpretResult, kind: Diagnostic.Kind, arg
 }
 
 fn expectInstallDiagnostic(result: InstallResult, kind: Diagnostic.Kind, argument: ?[]const u8) !void {
+    const diagnostic = result.diagnostic;
+    try std.testing.expectEqual(kind, diagnostic.kind);
+    if (argument) |expected| try std.testing.expectEqualStrings(expected, diagnostic.argument.?);
+}
+
+fn expectLinkDiagnostic(result: LinkResult, kind: Diagnostic.Kind, argument: ?[]const u8) !void {
+    const diagnostic = result.diagnostic;
+    try std.testing.expectEqual(kind, diagnostic.kind);
+    if (argument) |expected| try std.testing.expectEqualStrings(expected, diagnostic.argument.?);
+}
+
+fn expectUnlinkDiagnostic(result: UnlinkResult, kind: Diagnostic.Kind, argument: ?[]const u8) !void {
+    const diagnostic = result.diagnostic;
+    try std.testing.expectEqual(kind, diagnostic.kind);
+    if (argument) |expected| try std.testing.expectEqualStrings(expected, diagnostic.argument.?);
+}
+
+fn expectPackagesDiagnostic(result: PackagesResult, kind: Diagnostic.Kind, argument: ?[]const u8) !void {
     const diagnostic = result.diagnostic;
     try std.testing.expectEqual(kind, diagnostic.kind);
     if (argument) |expected| try std.testing.expectEqualStrings(expected, diagnostic.argument.?);

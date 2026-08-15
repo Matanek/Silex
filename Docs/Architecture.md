@@ -153,8 +153,9 @@ open Silex document
   unwrapped child, and a flat optional result merged with the absent edge.
   Arguments and mutating write-back live exclusively on the present edge.
 - Package manifests locate no source by consumer-provided path. The resolver
-  derives canonical local and global locations from package identities, builds
-  a single-version dependency graph, and enforces direct visibility.
+  derives canonical local, workspace-link, user-link, and installed locations
+  from package identities, builds a single-version dependency graph, and
+  enforces direct visibility.
 - Module interfaces preserve structured declaration identities (owner, module,
   name and complete parameter signature), the required parameter count that
   defines their effective call signatures, public nominal structures, fields,
