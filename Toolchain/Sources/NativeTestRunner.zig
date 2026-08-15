@@ -55,6 +55,7 @@ pub fn execute(
         CompilationCache.artifactKey("native-test", &.{ source_path, function_text });
     const executable = try artifactPath(allocator, source_path, digest, target);
     if (reusable and exists(io, executable)) return run(allocator, io, executable);
+    defer if (!reusable) Io.Dir.cwd().deleteFile(io, executable) catch {};
     return executeAt(allocator, io, target, linker_path, program, function, executable, providers);
 }
 
@@ -72,6 +73,7 @@ fn executeAt(
     if (target.eql(.macos_arm64) and (providers.len != 0 or MacOSLink.requiresSystemLink(program.external_functions))) {
         const object = try MachOObject.emitFunction(allocator, program, function);
         const object_path = try std.fmt.allocPrint(allocator, "{s}.o", .{executable});
+        defer Io.Dir.cwd().deleteFile(io, object_path) catch {};
         {
             const file = try Io.Dir.cwd().createFile(io, object_path, .{});
             defer file.close(io);
@@ -91,6 +93,7 @@ fn executeAt(
         else
             try X64Object.emitCoff(allocator, program, image);
         const object_path = try std.fmt.allocPrint(allocator, "{s}.o", .{executable});
+        defer Io.Dir.cwd().deleteFile(io, object_path) catch {};
         {
             const file = try Io.Dir.cwd().createFile(io, object_path, .{});
             defer file.close(io);

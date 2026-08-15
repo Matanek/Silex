@@ -45,6 +45,7 @@ pub const Compilation = struct {
     interfaces: []const Interface.Module,
     packages: Packages.Graph,
     files: []const []const u8,
+    cache_files: []const []const u8,
     tests: []const TestCase = &.{},
 };
 pub const TestCase = struct {
@@ -91,10 +92,10 @@ pub const Compiler = struct {
         global_packages_root: ?[]const u8,
         cache_modules: bool,
     ) Compiler {
-        // The serialized module AST currently loses extension activation
-        // context across package facades. Keep complete IR and native caches
-        // enabled at the command layer, but parse modules until that format
-        // carries the full public-use contract.
+        // JSON AST entries are currently slower and larger than reparsing the
+        // source on GFX-sized graphs. Keep the explicit test hook available,
+        // but do not pay that cost on command-line builds. Package-level
+        // binary interfaces will replace this transitional cache.
         _ = cache_modules;
         return .{
             .allocator = allocator,
@@ -190,6 +191,13 @@ pub const Compiler = struct {
         }
         ir.files = self.files;
 
+        var dependency_files: std.ArrayList([]const u8) = .empty;
+        for (self.units, 0..) |unit, module| {
+            if (unit.state == .loaded) try dependency_files.append(self.allocator, self.index.providers[module].path);
+        }
+        try dependency_files.appendSlice(self.allocator, analyzer.shader_files.items);
+        try dependency_files.appendSlice(self.allocator, analyzer.embedded_files.items);
+
         var tests: std.ArrayList(TestCase) = .empty;
         for (ast.functions, 0..) |function, function_id| {
             if (!function.is_test_entry) continue;
@@ -207,6 +215,7 @@ pub const Compiler = struct {
             .interfaces = interfaces,
             .packages = self.packages,
             .files = self.files,
+            .cache_files = try dependency_files.toOwnedSlice(self.allocator),
             .tests = try tests.toOwnedSlice(self.allocator),
         };
     }

@@ -417,6 +417,10 @@ fn testSource(init: std.process.Init, allocator: std.mem.Allocator, args: []cons
             return 1;
         },
     };
+    if (options.cache) {
+        CompilationCache.maintain(allocator, init.io);
+        defer CompilationCache.maintainAfterMutation(allocator, init.io);
+    }
     const target = TargetModule.Target.host() orelse {
         std.debug.print("silex: 'test' requires a recognized host target\n", .{});
         return 1;
@@ -692,7 +696,7 @@ fn interpretSource(init: std.process.Init, allocator: std.mem.Allocator, args: [
             init.io,
             options.source_path,
             target.name(),
-            compilation.files,
+            compilation.cache_files,
             compilation.ir,
         );
         break :program compilation.ir;
@@ -748,23 +752,41 @@ fn compileNativeOptions(
     options: Cli.CompileOptions,
     emit_ir: bool,
 ) !u8 {
+    if (options.cache) CompilationCache.maintain(allocator, init.io);
     const target = options.target orelse TargetModule.Target.host() orelse {
         std.debug.print("silex: 'compile' requires --target on this host\n", .{});
         return 1;
     };
     var progress = CliProgress.Build.init(init.io);
     progress.source(.analyze, options.source_path);
+    const executable_kind = if (target.eql(.macos_arm64)) "macho" else if (target.eql(.linux_x64)) "elf" else "pe";
+    const native_variant = try std.fmt.allocPrint(allocator, "{s}:{s}:{s}", .{ target.name(), @tagName(options.mode), options.source_path });
+    if (options.cache) if (CompilationCache.loadNativeState(allocator, init.io, options.source_path, target.name())) |state| {
+        const digest = CompilationCache.nativeKey(
+            allocator,
+            init.io,
+            state.files,
+            state.providers,
+            "compile",
+            native_variant,
+        ) catch null;
+        if (digest) |key| if (CompilationCache.executableExists(allocator, init.io, key, executable_kind)) {
+            progress.target(target.name(), @tagName(options.mode));
+            progress.stage(.cache);
+            progress.source(.write, options.output_path);
+            CompilationCache.materializeExecutable(allocator, init.io, key, executable_kind, options.output_path) catch |err| {
+                std.debug.print("silex: unable to materialize cached executable: {t}\n", .{err});
+                return 1;
+            };
+            progress.source(.ready, options.output_path);
+            progress.finish();
+            return 0;
+        };
+    };
     var boundaries: []const Boundary.Function = &.{};
     var boundary_providers: []const Packages.BoundaryProvider = &.{};
-    const cached_input = if (options.cache)
-        CompilationCache.loadNativeInput(allocator, init.io, options.source_path, target.name())
-    else
-        null;
-    const program = if (cached_input) |cached| program: {
-        boundaries = cached.boundaries;
-        boundary_providers = cached.providers;
-        break :program cached.program;
-    } else program: {
+    var dependency_files: []const []const u8 = &.{};
+    const program = program: {
         var compiler = Project.Compiler.initWithPackagesAndCache(
             allocator,
             init.io,
@@ -782,23 +804,27 @@ fn compileNativeOptions(
         };
         boundaries = compilation.boundaries;
         boundary_providers = try requiredBoundaryProviders(allocator, boundaries, compilation.packages);
+        dependency_files = compilation.cache_files;
         if (options.cache and boundaries.len == 0) {
-            CompilationCache.storeIr(allocator, init.io, options.source_path, target.name(), compilation.files, compilation.ir);
+            CompilationCache.storeIr(allocator, init.io, options.source_path, target.name(), compilation.cache_files, compilation.ir);
         }
-        if (options.cache) CompilationCache.storeNativeInput(
+        if (options.cache) CompilationCache.storeNativeState(
             allocator,
             init.io,
             options.source_path,
             target.name(),
-            compilation.files,
-            .{
-                .program = compilation.ir,
-                .boundaries = boundaries,
-                .providers = boundary_providers,
-            },
+            compilation.cache_files,
+            boundary_providers,
         );
         break :program compilation.ir;
     };
+
+    // A cache miss may write frontend, machine and executable entries. Keep
+    // cleanup off the cache-hit path and enforce the disk budget once after
+    // the mutating compilation has completed.
+    if (options.cache) {
+        defer CompilationCache.maintainAfterMutation(allocator, init.io);
+    }
 
     if (emit_ir) {
         const text = try Ir.writeText(allocator, program);
@@ -813,22 +839,31 @@ fn compileNativeOptions(
 
     progress.target(target.name(), @tagName(options.mode));
 
-    const native_variant = try std.fmt.allocPrint(allocator, "{s}:{s}:{s}", .{ target.name(), @tagName(options.mode), options.source_path });
-    const cache_files = try nativeCacheFiles(allocator, program.files, boundary_providers);
     const cache_key = if (options.cache)
-        CompilationCache.key(allocator, init.io, cache_files, "compile", native_variant) catch null
+        CompilationCache.nativeKey(allocator, init.io, dependency_files, boundary_providers, "compile", native_variant) catch null
     else
         null;
-    const executable_kind = if (target.eql(.macos_arm64)) "macho" else if (target.eql(.linux_x64)) "elf" else "pe";
-    if (cache_key) |digest| if (CompilationCache.load(allocator, init.io, digest, executable_kind)) |cached| {
+    if (cache_key) |digest| if (CompilationCache.executableExists(allocator, init.io, digest, executable_kind)) {
         progress.stage(.cache);
         progress.source(.write, options.output_path);
-        const status = writeExecutable(init, options.output_path, cached);
-        if (status == 0) {
-            progress.source(.ready, options.output_path);
-            progress.finish();
-        }
-        return status;
+        CompilationCache.materializeExecutable(allocator, init.io, digest, executable_kind, options.output_path) catch |err| {
+            std.debug.print("silex: unable to materialize cached executable: {t}\n", .{err});
+            return 1;
+        };
+        progress.source(.ready, options.output_path);
+        progress.finish();
+        return 0;
+    };
+
+    // Cached outputs are hard links to their canonical artifact. Detach the
+    // requested path before a linker or emitter overwrites it so an older
+    // content-addressed entry can never be mutated in place.
+    Io.Dir.cwd().deleteFile(init.io, options.output_path) catch |err| switch (err) {
+        error.FileNotFound => {},
+        else => {
+            std.debug.print("silex: unable to replace '{s}': {t}\n", .{ options.output_path, err });
+            return 1;
+        },
     };
 
     const native_ir = switch (options.mode) {
@@ -858,6 +893,7 @@ fn compileNativeOptions(
             return 1;
         };
         const object_path = try linkedObjectPath(allocator, options, boundary_providers);
+        defer Io.Dir.cwd().deleteFile(init.io, object_path) catch {};
         if (std.fs.path.dirname(object_path)) |directory| try Io.Dir.cwd().createDirPath(init.io, directory);
         {
             const file = try Io.Dir.cwd().createFile(init.io, object_path, .{});
@@ -900,6 +936,7 @@ fn compileNativeOptions(
             return 1;
         };
         const object_path = try linkedObjectPath(allocator, options, boundary_providers);
+        defer Io.Dir.cwd().deleteFile(init.io, object_path) catch {};
         if (std.fs.path.dirname(object_path)) |directory| try Io.Dir.cwd().createDirPath(init.io, directory);
         {
             const file = try Io.Dir.cwd().createFile(init.io, object_path, .{});
@@ -923,6 +960,7 @@ fn compileNativeOptions(
             return 1;
         };
         const object_path = try linkedObjectPath(allocator, options, boundary_providers);
+        defer Io.Dir.cwd().deleteFile(init.io, object_path) catch {};
         if (std.fs.path.dirname(object_path)) |directory| try Io.Dir.cwd().createDirPath(init.io, directory);
         {
             const file = try Io.Dir.cwd().createFile(init.io, object_path, .{});
@@ -1086,25 +1124,20 @@ fn compileNativeOptions(
         unreachable;
     };
 
-    if (cache_key) |digest| CompilationCache.store(allocator, init.io, digest, executable_kind, executable);
     progress.source(.write, options.output_path);
     const status = writeExecutable(init, options.output_path, executable);
     if (status == 0) {
+        if (cache_key) |digest| CompilationCache.storeExecutableFile(
+            allocator,
+            init.io,
+            digest,
+            executable_kind,
+            options.output_path,
+        );
         progress.source(.ready, options.output_path);
         progress.finish();
     }
     return status;
-}
-
-fn nativeCacheFiles(
-    allocator: std.mem.Allocator,
-    source_files: []const []const u8,
-    providers: []const Packages.BoundaryProvider,
-) ![]const []const u8 {
-    const files = try allocator.alloc([]const u8, source_files.len + providers.len);
-    @memcpy(files[0..source_files.len], source_files);
-    for (providers, source_files.len..) |provider, index| files[index] = provider.archive;
-    return files;
 }
 
 fn storeLinkedExecutable(
@@ -1114,8 +1147,7 @@ fn storeLinkedExecutable(
     executable_kind: []const u8,
     output_path: []const u8,
 ) void {
-    const executable = Io.Dir.cwd().readFileAlloc(io, output_path, allocator, .limited(512 * 1024 * 1024)) catch return;
-    CompilationCache.store(allocator, io, digest, executable_kind, executable);
+    CompilationCache.storeExecutableFile(allocator, io, digest, executable_kind, output_path);
 }
 
 fn requiredBoundaryProviders(

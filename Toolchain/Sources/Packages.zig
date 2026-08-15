@@ -118,6 +118,7 @@ pub const Package = struct {
 pub const BoundaryProvider = struct {
     name: []const u8,
     archive: []const u8,
+    artifact_sha256: []const u8 = "",
     frameworks: []const []const u8,
     libraries: []const []const u8,
 };
@@ -804,7 +805,12 @@ pub const Resolver = struct {
     fn parseManifest(self: *Resolver, path: []const u8) !ParsedManifest {
         const raw = try self.readManifest(path);
         var manifest = try self.parseManifestCore(raw);
-        manifest.boundary_providers = try self.parseBoundary(raw.boundary, raw.name, std.fs.path.dirname(path) orelse ".");
+        manifest.boundary_providers = try self.parseBoundary(
+            raw.boundary,
+            raw.artifacts,
+            raw.name,
+            std.fs.path.dirname(path) orelse ".",
+        );
         return manifest;
     }
 
@@ -904,6 +910,7 @@ pub const Resolver = struct {
     fn parseBoundary(
         self: *Resolver,
         value: ?std.json.Value,
+        artifacts: ?std.json.Value,
         package_name: ?[]const u8,
         root: []const u8,
     ) ![]const BoundaryProvider {
@@ -1004,6 +1011,7 @@ pub const Resolver = struct {
             try providers.append(self.allocator, .{
                 .name = provider_name,
                 .archive = archive,
+                .artifact_sha256 = artifactSha256(artifacts, self.target.name(), relative_archive) orelse "",
                 .frameworks = try frameworks.toOwnedSlice(self.allocator),
                 .libraries = try libraries.toOwnedSlice(self.allocator),
             });
@@ -1024,6 +1032,34 @@ pub const Resolver = struct {
         return error.InvalidPackageGraph;
     }
 };
+
+fn artifactSha256(artifacts: ?std.json.Value, target_name: []const u8, relative_path: []const u8) ?[]const u8 {
+    const targets = switch (artifacts orelse return null) {
+        .object => |object| object,
+        else => return null,
+    };
+    const entries = switch (targets.get(target_name) orelse return null) {
+        .object => |object| object,
+        else => return null,
+    };
+    var iterator = entries.iterator();
+    while (iterator.next()) |entry| {
+        const artifact = switch (entry.value_ptr.*) {
+            .object => |object| object,
+            else => continue,
+        };
+        const path = switch (artifact.get("path") orelse continue) {
+            .string => |text| text,
+            else => continue,
+        };
+        if (!std.mem.eql(u8, path, relative_path)) continue;
+        return switch (artifact.get("sha256") orelse return null) {
+            .string => |text| if (text.len == 64) text else null,
+            else => null,
+        };
+    }
+    return null;
+}
 
 fn belongsTo(module_name: []const u8, package_name: []const u8) bool {
     return std.mem.eql(u8, module_name, package_name) or
@@ -1303,7 +1339,7 @@ test "resolve a target-private ARM64 archive and reject escaping paths" {
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Bridge/Package.json",
         .data =
-        \\{"name":"Bridge","version":"1.0.0","boundary":{"macos-arm64":{"providers":{"Native":{"archive":"Boundary/macos-arm64/libBridge.a","frameworks":["Metal","Cocoa"]}}}}}
+        \\{"name":"Bridge","version":"1.0.0","artifacts":{"macos-arm64":{"Bridge":{"path":"Boundary/macos-arm64/libBridge.a","url":"https://example.com/libBridge.a","sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}}},"boundary":{"macos-arm64":{"providers":{"Native":{"archive":"Boundary/macos-arm64/libBridge.a","frameworks":["Metal","Cocoa"]}}}}}
         ,
     });
     const base = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Bridge" });
@@ -1313,6 +1349,7 @@ test "resolve a target-private ARM64 archive and reject escaping paths" {
     const provider = graph.packages[0].boundary_providers[0];
     try std.testing.expectEqualStrings("Native", provider.name);
     try std.testing.expect(std.mem.endsWith(u8, provider.archive, "Boundary/macos-arm64/libBridge.a"));
+    try std.testing.expectEqualStrings("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", provider.artifact_sha256);
     try std.testing.expectEqualStrings("Cocoa", provider.frameworks[0]);
     try std.testing.expectEqualStrings("Metal", provider.frameworks[1]);
 
