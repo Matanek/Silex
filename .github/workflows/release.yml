@@ -38,7 +38,7 @@ jobs:
 
       - name: Build the standalone compiler
         working-directory: Toolchain
-        run: zig build -Doptimize=ReleaseSafe --prefix "$RUNNER_TEMP/silex-prefix"
+        run: zig build -Doptimize=ReleaseFast --prefix "$RUNNER_TEMP/silex-prefix"
 
       - name: Assemble and smoke-test the artifact
         shell: bash
@@ -92,7 +92,7 @@ jobs:
 
       - name: Build the standalone compiler
         working-directory: Toolchain
-        run: zig build -Doptimize=ReleaseSafe -Dcpu=baseline --prefix "$RUNNER_TEMP/silex-prefix"
+        run: zig build -Doptimize=ReleaseFast -Dcpu=baseline --prefix "$RUNNER_TEMP/silex-prefix"
 
       - name: Assemble and smoke-test the artifact
         shell: bash
@@ -155,7 +155,7 @@ jobs:
       - name: Build the standalone compiler
         working-directory: Toolchain
         shell: pwsh
-        run: zig build -Doptimize=ReleaseSafe -Dcpu=baseline --prefix "$env:RUNNER_TEMP/silex-prefix"
+        run: zig build -Doptimize=ReleaseFast -Dcpu=baseline --prefix "$env:RUNNER_TEMP/silex-prefix"
 
       - name: Assemble and smoke-test the artifact
         shell: pwsh

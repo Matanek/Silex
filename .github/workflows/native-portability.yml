@@ -64,7 +64,7 @@ jobs:
           set -euo pipefail
           export HOME="$RUNNER_TEMP/home"
           mkdir -p "$HOME"
-          zig build -Doptimize=ReleaseSafe -Dcpu=baseline --prefix "$RUNNER_TEMP/silex-prefix" --build-file Toolchain/build.zig
+          zig build -Doptimize=ReleaseFast -Dcpu=baseline --prefix "$RUNNER_TEMP/silex-prefix" --build-file Toolchain/build.zig
           silex="$RUNNER_TEMP/silex-prefix/bin/silex"
           "$silex" setup
           "$silex" install STD
@@ -97,7 +97,7 @@ jobs:
           $env:SDL_AUDIODRIVER = "dummy"
           $env:SDL_VIDEODRIVER = "dummy"
           New-Item -ItemType Directory -Force $env:USERPROFILE | Out-Null
-          zig build -Doptimize=ReleaseSafe -Dcpu=baseline --prefix "$env:RUNNER_TEMP/silex-prefix" --build-file Toolchain/build.zig
+          zig build -Doptimize=ReleaseFast -Dcpu=baseline --prefix "$env:RUNNER_TEMP/silex-prefix" --build-file Toolchain/build.zig
           $silex = Join-Path $env:RUNNER_TEMP "silex-prefix/bin/silex.exe"
           & $silex setup
           & $silex install STD

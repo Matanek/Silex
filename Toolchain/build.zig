@@ -8,8 +8,9 @@ pub fn build(b: *std.Build) void {
         "Prioritize performance, safety, or binary size",
     ) orelse switch (b.release_mode) {
         .fast => .ReleaseFast,
+        .safe => .ReleaseSafe,
         .small => .ReleaseSmall,
-        .off, .any, .safe => .ReleaseSafe,
+        .off, .any => .ReleaseFast,
     };
 
     const package_version = manifestVersion();

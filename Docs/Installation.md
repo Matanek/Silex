@@ -95,7 +95,7 @@ Building the compiler requires the Zig version declared by
 
 ```sh
 cd Toolchain
-zig build -Doptimize=ReleaseSafe
+zig build -Doptimize=ReleaseFast
 ./zig-out/bin/silex --version
 ```
 
