@@ -121,6 +121,61 @@ test "native ARM64 agrees with the reference interpreter on fundamental values" 
     try compare(allocator, compilation.ir, machine, "exactRemainder", &.{});
 }
 
+test "native ARM64 release preserves floats returned from list-contained aggregates" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\public struct Clip {
+        \\    public let name:str
+        \\    public let frames:int[]
+        \\    public let rate:float
+        \\    public init(name:str, frames:int[], rate:float) {
+        \\        self.name = name
+        \\        self.frames = frames
+        \\        self.rate = rate
+        \\    }
+        \\    public func fps() float { return self.rate }
+        \\}
+        \\public struct Sheet {
+        \\    public var clips:Clip[]
+        \\    public init() { self.clips = [] }
+        \\    public func clip(name:str, rate:float) {
+        \\        self.clips.append(Clip(name, [0, 1, 2], rate))
+        \\    }
+        \\    public func require(name:str) Clip {
+        \\        for clip in self.clips {
+        \\            if clip.name == name { return clip }
+        \\        }
+        \\        panic("missing")
+        \\    }
+        \\}
+        \\public class Entry {
+        \\    public let sheet:Sheet
+        \\    public init(sheet:Sheet) { self.sheet = sheet }
+        \\}
+        \\public class Store {
+        \\    public var entries:Entry[]
+        \\    public init() { self.entries = [] }
+        \\    public func add(sheet:Sheet) { self.entries.append(Entry(sheet)) }
+        \\    public func get() @Sheet { return self.entries[0].sheet }
+        \\}
+        \\func read_rate() float {
+        \\    var store = Store()
+        \\    store.add(Sheet()..clip("idle", 4.0)..clip("move", 10.0))
+        \\    let sheet = store.get()
+        \\    let clip = sheet.require("idle")
+        \\    return clip.fps()
+        \\}
+        \\func main() {}
+    );
+    const machine = try Lower.lowerWithMode(allocator, compilation.ir, .release);
+    try compare(allocator, compilation.ir, machine, "read_rate", &.{});
+}
+
 test "native ARM64 agrees with indexed array and list iteration" {
     if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);

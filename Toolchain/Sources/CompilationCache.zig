@@ -11,7 +11,7 @@ const Packages = @import("Packages.zig");
 // Bump it whenever an optimizer, lowering or register-allocation contract
 // changes: source-only cache keys cannot distinguish machine plans emitted by
 // two versions of the compiler.
-pub const format = "silex-cache-v78-reachable-modules";
+pub const format = "silex-cache-v79-arm64-float-returns";
 const State = struct { files: []const []const u8 };
 
 pub const NativeState = struct {

@@ -456,6 +456,14 @@ fn spilled(allocator: Allocator, function: Machine.Function) Allocator.Error!Res
 }
 
 fn inferFloatSlots(function: Machine.Function, result: []bool) void {
+    if (function.return_type.isFloat()) {
+        for (function.instructions) |instruction| switch (instruction) {
+            .return_value => |value| if (!value.aggregate and value.width == 1) {
+                result[value.start] = true;
+            },
+            else => {},
+        };
+    }
     for (function.instructions) |instruction| switch (instruction) {
         .constant_float32 => |value| result[value.result] = true,
         .constant_float64 => |value| result[value.result] = true,
