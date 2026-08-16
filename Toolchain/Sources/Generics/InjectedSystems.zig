@@ -352,9 +352,9 @@ fn appendUnique(allocator: std.mem.Allocator, values: *std.ArrayList([]const u8)
 
 fn mainThreadType(name: []const u8) bool {
     return std.mem.eql(u8, name, "GFX.Window") or
-        std.mem.eql(u8, name, "GFX.Rendering.GPU") or
+        std.mem.eql(u8, name, "GFX.GPU") or
         std.mem.startsWith(u8, name, "GFX.Window.") or
-        std.mem.startsWith(u8, name, "GFX.Rendering.GPU.");
+        std.mem.startsWith(u8, name, "GFX.GPU.");
 }
 
 fn stringSequence(self: anytype, values: []const []const u8, position: Source.Position) !*Ast.Expression {

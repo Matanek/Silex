@@ -1,5 +1,9 @@
-use GFX.Display
+use GFX.Window.Display
 
 func main() {
     var displays = Display.Displays()
+    let available = displays.all()
+    if available.count() == 0 {
+        panic("GFX.Window did not enumerate a display")
+    }
 }

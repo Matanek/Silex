@@ -127,6 +127,11 @@ let health = Player.default_health()
 Static members are selected through the complete type name. They are not
 inherited or dynamically dispatched.
 
+Static field initializers follow the same compile-time evaluation rules as
+[structure static members](Structures.md#add-static-members). They may compose
+intrinsic constant expressions and proven compile-time functions, but cannot
+depend on mutable static state or runtime effects.
+
 Use `static class` when the type contains no instances:
 
 ```sx

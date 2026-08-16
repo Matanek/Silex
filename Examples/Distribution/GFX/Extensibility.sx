@@ -1,0 +1,18 @@
+use GFX.FrameGraph
+use GFX.GPU
+use GFX.Scene3D.Rotator as Rotator3D
+
+func main() {
+    let program = GPU.ShaderProgram.hlsl(file:"Shaders/Alternative.hlsl")
+    let rotator = Rotator3D(x_speed:0.0, y_speed:0.5, z_speed:0.0)
+
+    var graph = FrameGraph()
+    let scene = graph.add_pass("Alternative.Scene")
+    let overlay = graph.add_pass("Application.Overlay")
+    graph.depends(overlay, scene)
+    graph.require_compiled()
+
+    if graph.pass_name(graph.plan_pass(0)) != "Alternative.Scene" {
+        panic("a GFX consumer could not define its own FrameGraph passes")
+    }
+}

@@ -82,7 +82,7 @@ pub fn systemIsWorkerSafe(self: anytype, target_name: []const u8, target_positio
         findSystemFunction(self.source.functions, target_name, target_position) orelse return false;
 
     if (std.mem.startsWith(u8, target.name, "GFX.Window.") or
-        std.mem.startsWith(u8, target.name, "GFX.Rendering.GPU.")) return false;
+        std.mem.startsWith(u8, target.name, "GFX.GPU.")) return false;
 
     var checker = Checker(@TypeOf(self.*)){
         .self = self,

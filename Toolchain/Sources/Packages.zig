@@ -210,6 +210,15 @@ pub const Graph = struct {
         requirement: BoundaryProviderRequirement,
     ) ?BoundaryProviderSelection {
         if (owner >= self.packages.len) return null;
+        const package = self.packages[owner];
+        if (package.name != null and std.mem.eql(u8, package.name.?, requirement.package)) {
+            for (package.boundary_providers) |provider| {
+                if (std.mem.eql(u8, provider.name, requirement.provider)) {
+                    return .{ .owner = owner, .provider = provider };
+                }
+            }
+            return null;
+        }
         for (self.packages[owner].dependencies) |dependency| {
             if (!std.mem.eql(u8, dependency.name, requirement.package)) continue;
             for (self.packages[dependency.package].boundary_providers) |provider| {
@@ -885,7 +894,7 @@ pub const Resolver = struct {
         for (graph.packages, 0..) |package, owner| {
             for (package.boundary_providers) |provider| {
                 for (provider.requires) |requirement| {
-                    var direct = false;
+                    var direct = std.mem.eql(u8, package.name.?, requirement.package);
                     for (package.dependencies) |dependency| {
                         if (std.mem.eql(u8, dependency.name, requirement.package)) {
                             direct = true;
@@ -1683,6 +1692,30 @@ test "resolve boundary provider requirements from direct package dependencies" {
         "boundary provider 'Audio.Mixer' requires unavailable provider 'GFX.Missing' for target 'macos-arm64'",
         resolver.diagnostic.?,
     );
+}
+
+test "resolve boundary provider requirements from the same package" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "GFX/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Package.json",
+        .data =
+        \\{"name":"GFX","version":"1.0.0","boundary":{"macos-arm64":{"providers":{"SDL3":{"libraries":["System"]},"Mixer":{"requires":["GFX.SDL3"]}}}}}
+        ,
+    });
+    const base = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    try @import("Packages/TestFixtures.zig").prepareWorkspaceLinks(allocator, std.testing.io, base);
+    const gfx = try std.fs.path.join(allocator, &.{ base, "GFX" });
+    var resolver = Resolver.initForTarget(allocator, std.testing.io, null, .macos_arm64);
+    const graph = try resolver.resolve(gfx);
+    const requirement = graph.packages[0].boundary_providers[0].requires[0];
+    const selected = graph.requiredBoundaryProvider(0, requirement).?;
+    try std.testing.expectEqual(@as(usize, 0), selected.owner);
+    try std.testing.expectEqualStrings("SDL3", selected.provider.name);
 }
 
 test "ignore a colocated package and select the newest compatible installed version" {

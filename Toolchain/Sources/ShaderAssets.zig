@@ -6,8 +6,8 @@ const Optionals = @import("Semantic/Optionals.zig");
 const Source = @import("Source.zig");
 const Target = @import("Target.zig").Target;
 
-const graphics_program = "GFX.Rendering.GPU.Pipelines.ShaderProgram";
-const compute_program = "GFX.Rendering.GPU.Pipelines.ComputeProgram";
+const graphics_program = "GFX.GPU.Pipelines.ShaderProgram";
+const compute_program = "GFX.GPU.Pipelines.ComputeProgram";
 
 const Stage = enum { vertex, fragment, compute };
 const Format = enum { msl, spirv, dxil };

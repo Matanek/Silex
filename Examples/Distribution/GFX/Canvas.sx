@@ -1,0 +1,17 @@
+use GFX.Color
+use GFX.Canvas
+use STD.Math
+
+func main() {
+    var canvas = Canvas()
+    canvas.paint(func(painter:&Canvas.Painter) {
+        painter.fill(
+            Canvas.Rect(Math.Vec2(), Math.Vec2(96.0, 28.0)),
+            Canvas.Fill.solid(Color.blue_500())
+        )
+    })
+    var commands = canvas.commands()
+    if commands.count() != 1 {
+        panic("GFX.Canvas did not retain the drawing intention")
+    }
+}

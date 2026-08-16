@@ -127,7 +127,7 @@ fn statementsAreIndependent(
 fn effectIsSafe(self: anytype, expression: *const Ast.Expression, mutable_bindings: []const []const u8, command_names: []const []const u8, locals: []const []const u8) bool {
     if (expression.value != .call) return false;
     const call = expression.value.call;
-    const receiver = call.receiver orelse return false;
+    const receiver = call.receiver orelse return helperCallIsIndependent(self, call, mutable_bindings, 0);
     const root = expressionRoot(receiver) orelse return false;
     if (!contains(command_names, root) and !contains(mutable_bindings, root)) return false;
     for (call.arguments) |argument| if (!expressionIsSafe(self, argument, mutable_bindings, command_names, locals)) return false;
@@ -165,11 +165,41 @@ fn expressionIsSafe(self: anytype, expression: *const Ast.Expression, mutable_bi
                 if (contains(mutable_bindings, root) or contains(command_names, root) or contains(locals, root)) break :safe true;
                 if (std.mem.eql(u8, call.name, "count") or std.mem.eql(u8, call.name, "is_empty")) break :safe true;
             };
-            if (helperCallIsReadOnly(self, call, 0)) break :safe true;
+            if (helperCallIsIndependent(self, call, mutable_bindings, 0)) break :safe true;
             break :safe WorkerSafety.readOnlyCallIsWorkerSafe(self, call) catch false;
         },
         .interpolated_string, .generic_reference, .cascade, .match_expression => false,
     };
+}
+
+fn helperCallIsIndependent(
+    self: anytype,
+    call: Ast.Expression.Call,
+    mutable_bindings: []const []const u8,
+    depth: usize,
+) bool {
+    if (depth == 32 or call.receiver != null) return false;
+    const function = findFunction(self.functions.items, call.name) orelse return false;
+    if (function.parameters.len != call.arguments.len + call.named_arguments.len) return false;
+    var bindings: std.ArrayList([]const u8) = .empty;
+    defer bindings.deinit(self.allocator);
+    for (function.parameters, 0..) |parameter, index| {
+        if (parameter.mode == .mutable) {
+            const argument = argumentForParameter(call, parameter, index) orelse return false;
+            const root = expressionRoot(argument) orelse return false;
+            if (!contains(mutable_bindings, root)) return false;
+        }
+        bindings.append(self.allocator, parameter.name) catch return false;
+    }
+    return helperStatementsAreReadOnly(self, function.statements, &bindings, depth + 1);
+}
+
+fn argumentForParameter(call: Ast.Expression.Call, parameter: Ast.Parameter, index: usize) ?*Ast.Expression {
+    if (index < call.arguments.len) return call.arguments[index];
+    for (call.named_arguments) |argument| {
+        if (std.mem.eql(u8, argument.name, parameter.name)) return argument.value;
+    }
+    return parameter.default;
 }
 
 fn helperCallIsReadOnly(self: anytype, call: Ast.Expression.Call, depth: usize) bool {

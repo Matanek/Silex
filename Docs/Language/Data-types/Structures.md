@@ -76,6 +76,8 @@ receiver.
 ```sx
 struct Position {
     static let origin_x:int = 0
+    static let tile_width:int = 32
+    static let half_tile:float = Position.tile_width as float * 0.5
 
     static func origin() Position {
         return Position()
@@ -86,6 +88,28 @@ let origin = Position.origin()
 ```
 
 Static members are selected through the complete type name, never an instance.
+
+A static field initializer is evaluated completely at compile time. It may use
+intrinsic literals, operators, numeric conversions, immutable static fields,
+and functions that the compiler proves compile-time evaluable:
+
+```sx
+struct Layout {
+    static let width:int = 960
+    static let margin:float = 8.0
+    static let half_width:float = Layout.extent(Layout.width, Layout.margin)
+
+    static func extent(size:int, margin:float) float {
+        let half:float = size as float * 0.5
+        return half - margin
+    }
+}
+```
+
+Compile-time functions operate only on intrinsic scalar values, immutable
+locals, and other compile-time calls. Initializers cannot read `static var`,
+perform effects, allocate runtime resources, or form dependency cycles. This
+keeps static initialization deterministic and gives it no runtime cost.
 
 ## Nest a type
 

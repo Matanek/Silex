@@ -418,11 +418,79 @@ test "static members use type-qualified shared storage" {
     try std.testing.expectEqualStrings("2 5 99\n7\n", output);
 }
 
-test "static members reject instance selection and dynamic initializers" {
-    try expectCompileError(
-        "func seed() int { return 1 } struct Values { static var current:int = seed() } func main() {}",
-        "static initializer must be a deterministic intrinsic value",
+test "static let evaluates deterministic intrinsic expressions and functions" {
+    const output = try run(
+        \\struct Constants {
+        \\    static let width:int = 960
+        \\    static let margin:float = 8.0
+        \\    static let half:float = Constants.extent(Constants.width, Constants.margin)
+        \\    static let enabled:bool = Constants.width > 0 && Constants.half == 472.0
+        \\    static func half_of(size:int) float { return size as float * 0.5 }
+        \\    static func extent(size:int, margin:float) float {
+        \\        let half:float = Constants.half_of(size)
+        \\        return half - margin
+        \\    }
+        \\}
+        \\func doubled(value:int) int { return value * 2 }
+        \\func doubled(value:float) float { return value * 2.0 }
+        \\struct More { static let count:int = doubled(value:21) }
+        \\func main() {
+        \\    print(Constants.half, " ", Constants.enabled, " ", More.count)
+        \\}
     );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("472.0 true 42\n", output);
+}
+
+test "immutable intrinsic static members lower directly to constants" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\struct Values {
+        \\    static let integer:int = 42
+        \\    static let ratio:float = 1.5
+        \\    static let ready:bool = true
+        \\    static var mutable:int = 3
+        \\}
+        \\func main() {
+        \\    print(Values.integer, " ", Values.ratio, " ", Values.ready, " ", Values.mutable)
+        \\}
+    );
+    var saw_integer = false;
+    var saw_float = false;
+    var saw_boolean = false;
+    var global_loads: usize = 0;
+    for (compilation.ir.functions[0].blocks) |block| for (block.instructions) |instruction| switch (instruction) {
+        .constant_int => |value| if (value.bits == 42) { saw_integer = true; },
+        .constant_float32 => |value| if (value.bits == @as(u32, @bitCast(@as(f32, 1.5)))) { saw_float = true; },
+        .constant_bool => |value| if (value.value) { saw_boolean = true; },
+        .global_load => global_loads += 1,
+        else => {},
+    };
+    try std.testing.expect(saw_integer);
+    try std.testing.expect(saw_float);
+    try std.testing.expect(saw_boolean);
+    try std.testing.expectEqual(@as(usize, 1), global_loads);
+}
+
+test "static initializers reject effects mutable dependencies and cycles" {
+    try expectCompileError(
+        "func seed() int { print(1); return 1 } struct Values { static let current:int = seed() } func main() {}",
+        "static initializer calls a function that is not compile-time evaluable",
+    );
+    try expectCompileError(
+        "struct Values { static var seed:int = 1; static let current:int = Values.seed } func main() {}",
+        "static initializer cannot read mutable static field 'seed'",
+    );
+    try expectCompileError(
+        "struct Values { static let first:int = Values.second; static let second:int = Values.first } func main() {}",
+        "static initializer dependency forms a cycle",
+    );
+}
+
+test "static members reject instance selection and immutable assignment" {
     try expectCompileError(
         "struct Values { static let current:int = 1 } func main() { Values.current = 2 }",
         "cannot assign to immutable static field",

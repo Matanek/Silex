@@ -383,20 +383,20 @@ is used. `frameworks` is restricted to macOS; `libraries` contains names rather
 than raw linker flags or paths. A provider must declare at least one effective
 input.
 
-A provider can require providers owned by direct package dependencies. This
-models a private native link dependency without copying the dependency's
-archive or exposing its foreign API:
+A provider can require another provider from the same package or from a direct
+package dependency. This models a private native link dependency without
+duplicating an archive or exposing its foreign API:
 
 ```json
 {
-  "name": "GFX.Audio",
+  "name": "GFX",
   "version": "0.1.0",
-  "dependencies": {
-    "GFX": "^0.28.0"
-  },
   "boundary": {
     "macos-arm64": {
       "providers": {
+        "SDL3": {
+          "archive": "Boundary/macos-arm64/libSDL3.a"
+        },
         "SDL3_mixer": {
           "archive": "Boundary/macos-arm64/libSDL3_mixer.a",
           "requires": ["GFX.SDL3"]
@@ -407,11 +407,11 @@ archive or exposing its foreign API:
 }
 ```
 
-Each entry in `requires` has the form `Package.Provider`. The package must be a
-direct dependency and must provide the named boundary for the active target.
-When `GFX.Audio.SDL3_mixer` is selected, the linker places its inputs before
-those of `GFX.SDL3` and includes every required provider only once. Requirements
-may themselves require other providers.
+Each entry in `requires` has the form `Package.Provider`. The package must be
+the owner itself or a direct dependency, and must provide the named boundary
+for the active target. When `GFX.SDL3_mixer` is selected, the linker places its
+inputs before those of `GFX.SDL3` and includes every required provider only
+once. Requirements may themselves require other providers.
 
 Only source owned by that package may bind the provider through the
 target-independent `Boundary` namespace:
@@ -431,5 +431,6 @@ Consumers depend on the ordinary Silex package and see only its
 public Silex API; they do not repeat archive paths, linker flags, framework
 lists, or the private foreign API. This bootstrap contract neither compiles
 foreign source nor grants source access to another package's private boundary.
-Provider requirements affect only native linking; arbitrary library paths and
-runtime loading remain outside this contract.
+Provider requirements may target another provider from the same package or
+from one of its direct dependencies. They affect only native linking;
+arbitrary library paths and runtime loading remain outside this contract.
