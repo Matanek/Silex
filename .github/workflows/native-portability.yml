@@ -77,14 +77,17 @@ jobs:
           cp -R "$gfx_install" "$RUNNER_TEMP/packages/GFX"
           cd "$RUNNER_TEMP/packages"
           "$silex" test GFX/Tests/Color.sx
-          "$silex" test GFX/Tests/TransformCamera.sx
-          "$silex" test GFX/Tests/CollectionFieldMutation.sx
-          "$silex" compile GFX/Smokes/NativeLibraries.sx -o "$RUNNER_TEMP/gfx-native-libraries"
-          timeout 30s env SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=dummy "$RUNNER_TEMP/gfx-native-libraries"
+          "$silex" test GFX/Tests/Scene2D/ViewportCamera.sx
+          "$silex" test GFX/Tests/Application/CollectionFieldMutation.sx
+          "$silex" compile GFX/Smokes/Audio.sx -o "$RUNNER_TEMP/gfx-audio"
+          timeout 30s env SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=dummy "$RUNNER_TEMP/gfx-audio"
+          "$silex" compile GFX/Smokes/Text.sx -o "$RUNNER_TEMP/gfx-text"
+          timeout 30s env SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=dummy "$RUNNER_TEMP/gfx-text"
           "$silex" compile "$GITHUB_WORKSPACE/Examples/Distribution/GFX/Runtime.sx" -o "$RUNNER_TEMP/gfx-runtime"
           timeout 30s env SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=dummy "$RUNNER_TEMP/gfx-runtime"
           "$silex" compile "$GITHUB_WORKSPACE/Examples/Distribution/GFX/Window.sx" -o "$RUNNER_TEMP/gfx-window"
-          "$silex" compile "$GITHUB_WORKSPACE/Examples/Distribution/GFX/Drawing.sx" -o "$RUNNER_TEMP/gfx-drawing"
+          "$silex" compile "$GITHUB_WORKSPACE/Examples/Distribution/GFX/Canvas.sx" -o "$RUNNER_TEMP/gfx-canvas"
+          "$silex" compile "$GITHUB_WORKSPACE/Examples/Distribution/GFX/Extensibility.sx" -o "$RUNNER_TEMP/gfx-extensibility"
 
       - name: Build and validate on Windows
         if: runner.os == 'Windows'
@@ -114,13 +117,16 @@ jobs:
           Set-Location $packages
           $gfx = Join-Path $packages "GFX"
           & $silex test (Join-Path $gfx "Tests/Color.sx")
-          & $silex test (Join-Path $gfx "Tests/TransformCamera.sx")
-          & $silex test (Join-Path $gfx "Tests/CollectionFieldMutation.sx")
-          $nativeLibraries = Join-Path $gfx "Smokes/NativeLibraries.sx"
-          $nativeExecutable = Join-Path $env:RUNNER_TEMP "gfx-native-libraries.exe"
-          & $silex compile $nativeLibraries -o $nativeExecutable
-          & $nativeExecutable
+          & $silex test (Join-Path $gfx "Tests/Scene2D/ViewportCamera.sx")
+          & $silex test (Join-Path $gfx "Tests/Application/CollectionFieldMutation.sx")
+          $audio = Join-Path $env:RUNNER_TEMP "gfx-audio.exe"
+          & $silex compile (Join-Path $gfx "Smokes/Audio.sx") -o $audio
+          & $audio
+          $text = Join-Path $env:RUNNER_TEMP "gfx-text.exe"
+          & $silex compile (Join-Path $gfx "Smokes/Text.sx") -o $text
+          & $text
           & $silex compile (Join-Path $env:GITHUB_WORKSPACE "Examples/Distribution/GFX/Runtime.sx") -o "$env:RUNNER_TEMP/gfx-runtime.exe"
           & "$env:RUNNER_TEMP/gfx-runtime.exe"
           & $silex compile (Join-Path $env:GITHUB_WORKSPACE "Examples/Distribution/GFX/Window.sx") -o "$env:RUNNER_TEMP/gfx-window.exe"
-          & $silex compile (Join-Path $env:GITHUB_WORKSPACE "Examples/Distribution/GFX/Drawing.sx") -o "$env:RUNNER_TEMP/gfx-drawing.exe"
+          & $silex compile (Join-Path $env:GITHUB_WORKSPACE "Examples/Distribution/GFX/Canvas.sx") -o "$env:RUNNER_TEMP/gfx-canvas.exe"
+          & $silex compile (Join-Path $env:GITHUB_WORKSPACE "Examples/Distribution/GFX/Extensibility.sx") -o "$env:RUNNER_TEMP/gfx-extensibility.exe"

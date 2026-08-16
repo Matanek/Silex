@@ -52,20 +52,25 @@ jobs:
           cd "$RUNNER_TEMP/packages"
 
           if [ "${{ matrix.execution }}" = "run" ]; then
-            "$SILEX_INSTALL_DIR/silex" compile "$package/Smokes/NativeLibraries.sx" -o "$RUNNER_TEMP/gfx-native-libraries"
-            timeout 30s env SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=dummy "$RUNNER_TEMP/gfx-native-libraries"
+            "$SILEX_INSTALL_DIR/silex" compile "$package/Smokes/Audio.sx" -o "$RUNNER_TEMP/gfx-audio"
+            timeout 30s env SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=dummy "$RUNNER_TEMP/gfx-audio"
+            "$SILEX_INSTALL_DIR/silex" compile "$package/Smokes/Text.sx" -o "$RUNNER_TEMP/gfx-text"
+            timeout 30s env SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=dummy "$RUNNER_TEMP/gfx-text"
             "$SILEX_INSTALL_DIR/silex" test "$package/Tests/Color.sx"
-            "$SILEX_INSTALL_DIR/silex" test "$package/Tests/TransformCamera.sx"
-            "$SILEX_INSTALL_DIR/silex" test "$package/Tests/CollectionFieldMutation.sx"
+            "$SILEX_INSTALL_DIR/silex" test "$package/Tests/Scene2D/ViewportCamera.sx"
+            "$SILEX_INSTALL_DIR/silex" test "$package/Tests/Application/CollectionFieldMutation.sx"
             "$SILEX_INSTALL_DIR/silex" compile "$repository/Examples/Distribution/GFX/Runtime.sx" -o "$RUNNER_TEMP/gfx-runtime-smoke"
             timeout 30s env SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=dummy "$RUNNER_TEMP/gfx-runtime-smoke"
             "$SILEX_INSTALL_DIR/silex" compile "$repository/Examples/Distribution/GFX/Window.sx" -o "$RUNNER_TEMP/gfx-window-smoke"
-            "$SILEX_INSTALL_DIR/silex" compile "$repository/Examples/Distribution/GFX/Drawing.sx" -o "$RUNNER_TEMP/gfx-drawing-smoke"
+            "$SILEX_INSTALL_DIR/silex" compile "$repository/Examples/Distribution/GFX/Canvas.sx" -o "$RUNNER_TEMP/gfx-canvas-smoke"
+            "$SILEX_INSTALL_DIR/silex" compile "$repository/Examples/Distribution/GFX/Extensibility.sx" -o "$RUNNER_TEMP/gfx-extensibility-smoke"
           else
-            "$SILEX_INSTALL_DIR/silex" compile "$package/Smokes/NativeLibraries.sx" -o "$RUNNER_TEMP/gfx-native-libraries"
+            "$SILEX_INSTALL_DIR/silex" compile "$package/Smokes/Audio.sx" -o "$RUNNER_TEMP/gfx-audio"
+            "$SILEX_INSTALL_DIR/silex" compile "$package/Smokes/Text.sx" -o "$RUNNER_TEMP/gfx-text"
             "$SILEX_INSTALL_DIR/silex" compile "$repository/Examples/Distribution/GFX/Runtime.sx" -o "$RUNNER_TEMP/gfx-runtime-smoke"
             "$SILEX_INSTALL_DIR/silex" compile "$repository/Examples/Distribution/GFX/Window.sx" -o "$RUNNER_TEMP/gfx-window-smoke"
-            "$SILEX_INSTALL_DIR/silex" compile "$repository/Examples/Distribution/GFX/Drawing.sx" -o "$RUNNER_TEMP/gfx-drawing-smoke"
+            "$SILEX_INSTALL_DIR/silex" compile "$repository/Examples/Distribution/GFX/Canvas.sx" -o "$RUNNER_TEMP/gfx-canvas-smoke"
+            "$SILEX_INSTALL_DIR/silex" compile "$repository/Examples/Distribution/GFX/Extensibility.sx" -o "$RUNNER_TEMP/gfx-extensibility-smoke"
           fi
 
   windows-x64:
@@ -106,11 +111,14 @@ jobs:
           $package = Join-Path $packages "GFX"
           Set-Location $packages
           & $silex test (Join-Path $package "Tests/Color.sx")
-          & $silex test (Join-Path $package "Tests/TransformCamera.sx")
-          & $silex test (Join-Path $package "Tests/CollectionFieldMutation.sx")
-          $nativeLibraries = Join-Path $env:RUNNER_TEMP "gfx-native-libraries.exe"
-          & $silex compile (Join-Path $package "Smokes/NativeLibraries.sx") -o $nativeLibraries
-          & $nativeLibraries
+          & $silex test (Join-Path $package "Tests/Scene2D/ViewportCamera.sx")
+          & $silex test (Join-Path $package "Tests/Application/CollectionFieldMutation.sx")
+          $audio = Join-Path $env:RUNNER_TEMP "gfx-audio.exe"
+          & $silex compile (Join-Path $package "Smokes/Audio.sx") -o $audio
+          & $audio
+          $text = Join-Path $env:RUNNER_TEMP "gfx-text.exe"
+          & $silex compile (Join-Path $package "Smokes/Text.sx") -o $text
+          & $text
           $runtime = Join-Path $env:RUNNER_TEMP "gfx-runtime-smoke.exe"
           & $silex compile (Join-Path $env:GITHUB_WORKSPACE "Examples/Distribution/GFX/Runtime.sx") -o $runtime
           $process = Start-Process -FilePath $runtime -NoNewWindow -PassThru
@@ -122,4 +130,5 @@ jobs:
             throw "The linked SDL3 runtime exited with code $($process.ExitCode)"
           }
           & $silex compile (Join-Path $env:GITHUB_WORKSPACE "Examples/Distribution/GFX/Window.sx") -o (Join-Path $env:RUNNER_TEMP "gfx-window-smoke.exe")
-          & $silex compile (Join-Path $env:GITHUB_WORKSPACE "Examples/Distribution/GFX/Drawing.sx") -o (Join-Path $env:RUNNER_TEMP "gfx-drawing-smoke.exe")
+          & $silex compile (Join-Path $env:GITHUB_WORKSPACE "Examples/Distribution/GFX/Canvas.sx") -o (Join-Path $env:RUNNER_TEMP "gfx-canvas-smoke.exe")
+          & $silex compile (Join-Path $env:GITHUB_WORKSPACE "Examples/Distribution/GFX/Extensibility.sx") -o (Join-Path $env:RUNNER_TEMP "gfx-extensibility-smoke.exe")
