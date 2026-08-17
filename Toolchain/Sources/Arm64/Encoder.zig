@@ -14,6 +14,7 @@ const DeepCopyRuntime = @import("DeepCopyRuntime.zig");
 const CycleRuntime = @import("CycleRuntime.zig");
 const ExternalCalls = @import("ExternalCalls.zig");
 const Allocation = @import("Allocation.zig");
+const Pairing = @import("Pairing.zig");
 const Register = A64.Register;
 const Condition = A64.Condition;
 const enable_cycle_collector = true;
@@ -1183,6 +1184,35 @@ fn encodeFunction(
                 try storeCachedValue(allocator, words, function, &scalar_cache, .x11, unary.result);
             },
             .binary => |binary| {
+                if (Pairing.floatDivisionFollower(function, instruction_index, binary)) |pair| {
+                    const numerator: Register = @enumFromInt(pair.numerator);
+                    const destination = floatResultRegister(function, binary.result) orelse .x11;
+                    try words.append(allocator, A64.duplicateFloat32Lane(destination, numerator, 1));
+                    if (floatResultRegister(function, binary.result) == null) {
+                        try storeFloatValue(allocator, words, function, destination, binary.result, false);
+                    }
+                    continue;
+                }
+                if (Pairing.floatDivisionLeader(function, instruction_index, binary)) |pair| {
+                    const numerator: Register = @enumFromInt(pair.numerator);
+                    const scratch: Register = if (numerator == .x9) .x10 else .x9;
+                    try loadFloatValue(allocator, words, function, scratch, binary.right, false);
+                    try words.append(allocator, A64.duplicateFloat32Lane(scratch, scratch, 0));
+                    try words.append(allocator, floatArithmetic2(
+                        numerator,
+                        numerator,
+                        scratch,
+                        .divide,
+                    ));
+                    const destination = floatResultRegister(function, binary.result) orelse .x11;
+                    if (destination != numerator) {
+                        try words.append(allocator, moveFloat(destination, numerator, false));
+                    }
+                    if (floatResultRegister(function, binary.result) == null) {
+                        try storeFloatValue(allocator, words, function, destination, binary.result, false);
+                    }
+                    continue;
+                }
                 if (horizontalFloatPairAdd(function, binary)) |source| {
                     const destination = floatResultRegister(function, binary.result) orelse .x11;
                     try words.append(allocator, A64.horizontalAddFloat32Pair(destination, source));
