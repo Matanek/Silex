@@ -328,6 +328,76 @@ test "native ARM64 preserves IEEE arithmetic comparisons arguments and returns" 
     });
 }
 
+test "native ARM64 release preserves branched float accumulator recurrences" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\func accumulate(limit:int) float {
+        \\    var center_x = 0.0
+        \\    var center_y = 0.0
+        \\    var heading_x = 0.0
+        \\    var heading_y = 0.0
+        \\    var separation_x = 0.0
+        \\    var separation_y = 0.0
+        \\    for index in 0...limit {
+        \\        let sample_x = (index % 17) as float * 7.0
+        \\        let sample_y = (index % 13) as float * 5.0
+        \\        let offset_x = 40.0 - sample_x
+        \\        let offset_y = 30.0 - sample_y
+        \\        let distance_squared = offset_x * offset_x + offset_y * offset_y
+        \\        if distance_squared > 0.0 && distance_squared < 5_184.0 {
+        \\            center_x += sample_x
+        \\            center_y += sample_y
+        \\            heading_x += sample_x + 55.0
+        \\            heading_y += sample_y - 8.0
+        \\            if distance_squared < 784.0 {
+        \\                var divisor = 1.0
+        \\                if distance_squared > 1.0 { divisor = distance_squared }
+        \\                separation_x += offset_x / divisor
+        \\                separation_y += offset_y / divisor
+        \\            }
+        \\        }
+        \\    }
+        \\    return center_x + center_y + heading_x + heading_y + separation_x + separation_y
+        \\}
+        \\func main() {}
+    );
+    const machine = try Lower.lowerWithMode(allocator, compilation.ir, .release);
+    for ([_]i64{ 0, 1, 32, 257 }) |limit| {
+        try compare(allocator, compilation.ir, machine, "accumulate", &.{.{ .integer = limit }});
+    }
+}
+
+test "native ARM64 release initializes resident float aggregate parameters" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\struct Point { let x:float; let y:float }
+        \\func distance_squared(current:Point, sample:Point) float {
+        \\    let offset_x = current.x - sample.x
+        \\    let offset_y = current.y - sample.y
+        \\    return offset_x * offset_x + offset_y * offset_y
+        \\}
+        \\func paired_parameter() float {
+        \\    return distance_squared(
+        \\        Point(x:37.25, y:-12.5),
+        \\        Point(x:-8.75, y:19.0)
+        \\    )
+        \\}
+        \\func main() {}
+    );
+    const machine = try Lower.lowerWithMode(allocator, compilation.ir, .release);
+    try compare(allocator, compilation.ir, machine, "paired_parameter", &.{});
+}
+
 test "native ARM64 transports and compares flattened structure values" {
     if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);

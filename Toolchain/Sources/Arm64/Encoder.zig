@@ -611,14 +611,16 @@ fn encodeFunction(
     for (function.parameters, 0..) |parameter, index| {
         const incoming: Register = @enumFromInt(index);
         if (!parameter.aggregate) {
-            if (floatResidence(function, parameter.start) != null) {
+            if (floatResidence(function, parameter.start) != null or
+                floatLaneResidence(function, parameter.start) != null)
+            {
                 try words.append(allocator, moveGeneralToFloat(.x9, incoming, true));
                 try storeFloatValue(allocator, words, function, .x9, parameter.start, true);
             } else try storeValue(allocator, words, function, incoming, parameter.start);
         } else for (0..parameter.width) |leaf| {
             try emitLoadAtOffset(allocator, words, .x9, incoming, leaf * Machine.slot_size);
             const slot: Machine.Slot = @intCast(@as(usize, parameter.start) + leaf);
-            if (floatResidence(function, slot) != null) {
+            if (floatResidence(function, slot) != null or floatLaneResidence(function, slot) != null) {
                 try words.append(allocator, moveGeneralToFloat(.x10, .x9, true));
                 try storeFloatValue(allocator, words, function, .x10, slot, true);
             } else try storeValue(allocator, words, function, .x9, slot);
@@ -766,12 +768,16 @@ fn encodeFunction(
                 if (floatPairLeader(function, copy.result) != null) continue;
                 if (floatLaneResidence(function, copy.result)) |pair| {
                     if (pair.lane != 1) return error.InvalidMachineProgram;
-                    const first_copy = definingCopy(function.instructions, pair.partner) orelse return error.InvalidMachineProgram;
+                    const first_operand = definingTransferOperandBefore(
+                        function.instructions,
+                        instruction_index,
+                        pair.partner,
+                    ) orelse return error.InvalidMachineProgram;
                     const source = try prepareFloatPairOperand(
                         allocator,
                         words,
                         function,
-                        first_copy.operand,
+                        first_operand,
                         copy.operand,
                         .x9,
                         .x10,
@@ -804,13 +810,40 @@ fn encodeFunction(
                 }
             },
             .copy_range => |copy| for (0..copy.result.width) |leaf| {
-                try emitRegisteredCopy(
-                    allocator,
-                    words,
-                    function,
-                    @intCast(@as(usize, copy.result.start) + leaf),
-                    @intCast(@as(usize, copy.operand.start) + leaf),
-                );
+                const result: Machine.Slot = @intCast(@as(usize, copy.result.start) + leaf);
+                const operand: Machine.Slot = @intCast(@as(usize, copy.operand.start) + leaf);
+                if ((floatResidence(function, result) != null or floatLaneResidence(function, result) != null) and
+                    !slotHasUse(function.instructions, result)) continue;
+                if (floatLaneResidence(function, operand)) |source| if (floatLaneResidence(function, result)) |destination| {
+                    if (source.register == destination.register and source.lane == destination.lane) continue;
+                };
+                if (floatLaneResidence(function, result)) |pair| {
+                    if (pair.lane == 0) {
+                        if (definingTransferOperandAfter(
+                            function.instructions,
+                            instruction_index,
+                            pair.partner,
+                        ) != null) continue;
+                    } else if (definingTransferOperandBefore(
+                        function.instructions,
+                        instruction_index,
+                        pair.partner,
+                    )) |first_operand| {
+                        const source = try prepareFloatPairOperand(
+                            allocator,
+                            words,
+                            function,
+                            first_operand,
+                            operand,
+                            .x9,
+                            .x10,
+                        );
+                        const destination: Register = @enumFromInt(pair.register);
+                        if (source != destination) try words.append(allocator, moveFloat(destination, source, true));
+                        continue;
+                    }
+                }
+                try emitRegisteredCopy(allocator, words, function, result, operand);
             },
             .deep_copy => |copy| {
                 try emitStackAddress(allocator, words, .x0, copy.operand.start);
@@ -2568,6 +2601,11 @@ fn firstSlotUseAfter(
     return null;
 }
 
+fn slotHasUse(instructions: []const Machine.Instruction, slot: Machine.Slot) bool {
+    for (instructions) |instruction| if (instructionUsesSlot(instruction, slot)) return true;
+    return false;
+}
+
 fn emitDeferredCollectionLoads(
     allocator: Allocator,
     words: *std.ArrayList(u32),
@@ -2680,6 +2718,42 @@ fn definingBinary(instructions: []const Machine.Instruction, slot: Machine.Slot)
 fn definingCopy(instructions: []const Machine.Instruction, slot: Machine.Slot) ?Machine.Instruction.Copy {
     for (instructions) |instruction| switch (instruction) {
         .copy => |copy| if (copy.result == slot) return copy,
+        else => {},
+    };
+    return null;
+}
+
+fn definingTransferOperandBefore(
+    instructions: []const Machine.Instruction,
+    before: usize,
+    slot: Machine.Slot,
+) ?Machine.Slot {
+    var index = before;
+    while (index != 0) {
+        index -= 1;
+        switch (instructions[index]) {
+            .copy => |copy| if (copy.result == slot) return copy.operand,
+            .copy_range => |copy| if (spanContainsSlot(copy.result, slot)) {
+                return copy.operand.start + slot - copy.result.start;
+            },
+            .jump, .branch, .return_value, .return_void => return null,
+            else => {},
+        }
+    }
+    return null;
+}
+
+fn definingTransferOperandAfter(
+    instructions: []const Machine.Instruction,
+    after: usize,
+    slot: Machine.Slot,
+) ?Machine.Slot {
+    for (instructions[after + 1 ..]) |instruction| switch (instruction) {
+        .copy => |copy| if (copy.result == slot) return copy.operand,
+        .copy_range => |copy| if (spanContainsSlot(copy.result, slot)) {
+            return copy.operand.start + slot - copy.result.start;
+        },
+        .jump, .branch, .return_value, .return_void => return null,
         else => {},
     };
     return null;

@@ -555,12 +555,22 @@ fn allocateFloatPairs(
     defer allocator.free(planned);
     @memset(planned, false);
 
-    // Loop recurrences need CFG-aware interference before they can safely
-    // share destructive SIMD destinations. Reserve their lanes as scalar for
-    // now; independent XY/XYZ/XYZW expressions remain eligible below.
+    const eligible_recurrence_slots = try allocator.alloc(bool, function.slot_count);
+    defer allocator.free(eligible_recurrence_slots);
+    @memset(eligible_recurrence_slots, false);
+    for (function.float_lane_groups) |group| {
+        if (!group.recurrence or !group.in_loop or group.priority < 8) continue;
+        for (0..group.width) |lane| eligible_recurrence_slots[group.slots[lane]] = true;
+    }
+
+    // Keep control-flow recurrences scalar unless they are hot loop-local
+    // chains. Those chains are colored with full CFG liveness below.
     for (function.float_lane_groups) |group| {
         if (!group.recurrence) continue;
-        for (0..group.width) |lane| partners[group.slots[lane]] = group.slots[lane];
+        for (0..group.width) |lane| {
+            const slot = group.slots[lane];
+            if (!eligible_recurrence_slots[slot]) partners[slot] = slot;
+        }
     }
 
     // Prefer affinity discovered while scalar values still have their IR
@@ -568,7 +578,8 @@ fn allocateFloatPairs(
     // is lowered as XY plus a scalar Z until a profitable .4s realization is
     // selected by this backend.
     for (function.float_lane_groups) |group| {
-        if (group.priority == 0 or group.recurrence) continue;
+        if (group.priority == 0 or
+            (group.recurrence and (!group.in_loop or group.priority < 8))) continue;
         var lane: usize = 0;
         while (lane + 1 < group.width) : (lane += 2) {
             const first = group.slots[lane];
@@ -577,9 +588,21 @@ fn allocateFloatPairs(
                 partners[first] == null and partners[second] == null)
             {
                 pairSlots(partners, first, second);
-                if (group.in_loop and group.recurrence and group.priority >= 8) {
+                if (group.in_loop and group.priority >= 8) {
                     planned[first] = true;
                     planned[second] = true;
+                }
+                const first_instruction = definingInstruction(function.instructions, first);
+                const second_instruction = definingInstruction(function.instructions, second);
+                if (first_instruction != null and second_instruction != null) {
+                    pairDefinitionOperands(
+                        function.instructions,
+                        partners,
+                        first,
+                        second,
+                        first_instruction.?,
+                        second_instruction.?,
+                    );
                 }
             }
         }
@@ -668,7 +691,12 @@ fn allocateFloatPairs(
             .weight = weight,
         });
     }
-    const pair_registers = [_]u5{ 0, 1, 2, 3, 4, 5, 6, 7 };
+    const pair_registers = [_]u5{
+        16, 17, 18, 19, 20, 21, 22, 23,
+        24, 25, 26, 27, 28, 29, 30, 31,
+        8,  13, 14, 15, 0,  1,  2,  3,
+        4,  5,  6,  7,
+    };
     const leaders = try allocator.alloc(?u5, function.slot_count);
     defer allocator.free(leaders);
     @memset(leaders, null);
@@ -725,11 +753,111 @@ fn allocatePairGraph(
             });
         }
     }
+    const live = try allocator.alloc(bool, instructions.len * slot_count);
+    defer allocator.free(live);
+    @memset(live, false);
+    var live_changed = true;
+    while (live_changed) {
+        live_changed = false;
+        var reverse = instructions.len;
+        while (reverse != 0) {
+            reverse -= 1;
+            for (0..slot_count) |slot| {
+                const out = successorLive(instructions, live, slot_count, reverse, slot);
+                const value = instructionUses(instructions[reverse], slot) or
+                    (out and !instructionDefines(instructions[reverse], slot));
+                const at = reverse * slot_count + slot;
+                if (live[at] != value) {
+                    live[at] = value;
+                    live_changed = true;
+                }
+            }
+        }
+    }
+
     const component_colors = try allocator.alloc(?u5, slot_count);
     defer allocator.free(component_colors);
     @memset(component_colors, null);
-    try allocateIntervals(component_colors, component_intervals.items, registers);
+    std.mem.sort(Interval, component_intervals.items, {}, heavierThan);
+    for (component_intervals.items) |interval| {
+        for (registers) |register| {
+            if (pairComponentColorConflicts(
+                interval.slot,
+                register,
+                component_colors,
+                components,
+                partners,
+                live,
+                instructions,
+                slot_count,
+            )) continue;
+            component_colors[interval.slot] = register;
+            break;
+        }
+    }
     for (intervals) |interval| leaders[interval.slot] = component_colors[findPairComponent(components, interval.slot)];
+}
+
+fn pairComponentColorConflicts(
+    component: Machine.Slot,
+    register: u5,
+    colors: []const ?u5,
+    components: []const Machine.Slot,
+    partners: []const ?Machine.Slot,
+    live: []const bool,
+    instructions: []const Machine.Instruction,
+    slot_count: usize,
+) bool {
+    for (colors, 0..) |color, other| {
+        if (color == null or color.? != register or other == component) continue;
+        for (instructions, 0..) |instruction, index| {
+            const left_live = pairComponentLiveAt(components, partners, live, slot_count, component, index);
+            const right_live = pairComponentLiveAt(components, partners, live, slot_count, @intCast(other), index);
+            if (left_live and right_live) return true;
+            if (pairComponentDefinedBy(components, partners, component, instruction) and right_live) return true;
+            if (pairComponentDefinedBy(components, partners, @intCast(other), instruction) and left_live) return true;
+        }
+    }
+    return false;
+}
+
+fn pairComponentLiveAt(
+    components: []const Machine.Slot,
+    partners: []const ?Machine.Slot,
+    live: []const bool,
+    slot_count: usize,
+    component: Machine.Slot,
+    instruction: usize,
+) bool {
+    for (0..slot_count) |slot| {
+        if (!slotBelongsToPairComponent(components, partners, @intCast(slot), component)) continue;
+        if (live[instruction * slot_count + slot]) return true;
+    }
+    return false;
+}
+
+fn pairComponentDefinedBy(
+    components: []const Machine.Slot,
+    partners: []const ?Machine.Slot,
+    component: Machine.Slot,
+    instruction: Machine.Instruction,
+) bool {
+    for (components, 0..) |_, slot| {
+        if (slotBelongsToPairComponent(components, partners, @intCast(slot), component) and
+            instructionDefines(instruction, slot)) return true;
+    }
+    return false;
+}
+
+fn slotBelongsToPairComponent(
+    components: []const Machine.Slot,
+    partners: []const ?Machine.Slot,
+    slot: Machine.Slot,
+    component: Machine.Slot,
+) bool {
+    if (findPairComponent(components, slot) == component) return true;
+    const partner = partners[slot] orelse return false;
+    return findPairComponent(components, partner) == component;
 }
 
 fn buildPairComponents(
@@ -739,8 +867,13 @@ fn buildPairComponents(
 ) void {
     for (instructions) |instruction| switch (instruction) {
         .copy => |copy| unionPairedTransfer(components, partners, copy.result, copy.operand),
-        .binary => |binary| if (binaryCanShareOperand(binary)) {
-            unionPairedTransfer(components, partners, binary.result, binary.left);
+        .copy_range => |copy| for (0..copy.result.width) |leaf| {
+            unionPairedTransfer(
+                components,
+                partners,
+                @intCast(@as(usize, copy.result.start) + leaf),
+                @intCast(@as(usize, copy.operand.start) + leaf),
+            );
         },
         else => {},
     };
@@ -857,6 +990,14 @@ fn pairDefinitionReady(
             .copy => |right| slotsResidentInOrderOrEqual(residences, left.operand, right.operand),
             else => false,
         },
+        .copy_range => |left| switch (second.?) {
+            .copy_range => |right| slotsResidentInOrderOrEqual(
+                residences,
+                left.operand.start + first_slot - left.result.start,
+                right.operand.start + second_slot - right.result.start,
+            ),
+            else => false,
+        },
         .collection_load => |left| switch (second.?) {
             .collection_load => |right| left.result.start == right.result.start and left.result.width == right.result.width,
             else => false,
@@ -902,6 +1043,16 @@ fn markPairDependencies(
         },
         .copy => |left| switch (second) {
             .copy => |right| markOperandDependency(instructions, residences, required, left.operand, right.operand),
+            else => {},
+        },
+        .copy_range => |left| switch (second) {
+            .copy_range => |right| markOperandDependency(
+                instructions,
+                residences,
+                required,
+                left.operand.start + first_slot - left.result.start,
+                right.operand.start + second_slot - right.result.start,
+            ),
             else => {},
         },
         else => {},
@@ -972,25 +1123,72 @@ fn pairBinaryOperands(
     if (left.right != right.right) pairResidentOperandTree(instructions, partners, left.right, right.right);
 }
 
+fn pairDefinitionOperands(
+    instructions: []const Machine.Instruction,
+    partners: []?Machine.Slot,
+    first_slot: Machine.Slot,
+    second_slot: Machine.Slot,
+    first: Machine.Instruction,
+    second: Machine.Instruction,
+) void {
+    switch (first) {
+        .binary => switch (second) {
+            .binary => pairBinaryOperands(instructions, partners, first, second),
+            else => {},
+        },
+        .copy => |left| switch (second) {
+            .copy => |right| if (left.operand != right.operand) {
+                pairResidentOperandTree(instructions, partners, left.operand, right.operand);
+            },
+            else => {},
+        },
+        .copy_range => |left| switch (second) {
+            .copy_range => |right| {
+                const left_offset = first_slot - left.result.start;
+                const right_offset = second_slot - right.result.start;
+                pairResidentOperandTree(
+                    instructions,
+                    partners,
+                    left.operand.start + left_offset,
+                    right.operand.start + right_offset,
+                );
+            },
+            else => {},
+        },
+        else => {},
+    }
+}
+
 fn pairResidentOperandTree(
     instructions: []const Machine.Instruction,
     partners: []?Machine.Slot,
     first: Machine.Slot,
     second: Machine.Slot,
 ) void {
+    if (partners[first] == first) partners[first] = null;
+    if (partners[second] == second) partners[second] = null;
     pairSlots(partners, first, second);
+    if (partners[first] != second or partners[second] != first) return;
     const first_definition = definingInstruction(instructions, first) orelse return;
     const second_definition = definingInstruction(instructions, second) orelse return;
-    const first_copy = switch (first_definition) {
-        .copy => |value| value,
-        else => return,
-    };
-    const second_copy = switch (second_definition) {
-        .copy => |value| value,
-        else => return,
-    };
-    if (operandPairCanBecomeResident(instructions, first_copy.operand, second_copy.operand, partners)) {
-        pairResidentOperandTree(instructions, partners, first_copy.operand, second_copy.operand);
+    switch (first_definition) {
+        .copy => |left| switch (second_definition) {
+            .copy => |right| if (operandPairCanBecomeResident(instructions, left.operand, right.operand, partners)) {
+                pairResidentOperandTree(instructions, partners, left.operand, right.operand);
+            },
+            else => {},
+        },
+        .copy_range => |left| switch (second_definition) {
+            .copy_range => |right| {
+                const left_operand = left.operand.start + first - left.result.start;
+                const right_operand = right.operand.start + second - right.result.start;
+                if (operandPairCanBecomeResident(instructions, left_operand, right_operand, partners)) {
+                    pairResidentOperandTree(instructions, partners, left_operand, right_operand);
+                }
+            },
+            else => {},
+        },
+        else => {},
     }
 }
 
@@ -1028,6 +1226,14 @@ fn operandPairCanBecomeResident(
     return switch (first_definition.?) {
         .copy => switch (second_definition.?) {
             .copy => true,
+            else => false,
+        },
+        .copy_range => |left| switch (second_definition.?) {
+            .copy_range => |right| blk: {
+                const left_operand = left.operand.start + first - left.result.start;
+                const right_operand = right.operand.start + second - right.result.start;
+                break :blk first + 1 == second and left_operand + 1 == right_operand;
+            },
             else => false,
         },
         .collection_load => |left| switch (second_definition.?) {
@@ -1456,7 +1662,7 @@ test "profitable float32 xy arithmetic remains resident in neon lanes" {
     try std.testing.expectEqual(@as(Machine.Slot, 4), y.partner);
 }
 
-test "loop recurrences remain scalar until SIMD allocation is CFG-aware" {
+test "hot loop recurrence chains use CFG-aware SIMD residences" {
     const instructions = [_]Machine.Instruction{
         .{ .binary = .{ .result = 4, .operator = .add, .left = 0, .right = 2, .type = .float32 } },
         .{ .binary = .{ .result = 5, .operator = .add, .left = 1, .right = 3, .type = .float32 } },
@@ -1493,10 +1699,7 @@ test "loop recurrences remain scalar until SIMD allocation is CFG-aware" {
     defer std.testing.allocator.free(result.float_residences);
     defer std.testing.allocator.free(result.float_lane_residences);
 
-    for (4..10) |slot| {
-        try std.testing.expectEqual(@as(?Machine.FloatLaneResidence, null), result.float_lane_residences[slot]);
-    }
-    for (4..8) |slot| try std.testing.expect(result.float_residences[slot] != null);
+    for (4..10) |slot| try std.testing.expect(result.float_lane_residences[slot] != null);
 }
 
 test "independent XYZ group keeps XY paired and Z scalar" {
