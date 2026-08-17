@@ -785,8 +785,14 @@ pub fn emitCursorAddress(
     index_slot: Machine.Slot,
     stride: u8,
     cursor: A64.Register,
+    end: ?A64.Register,
 ) Error!void {
     const base = try residentOrLoadedValue(allocator, words, function, cursor, collection.start);
+    if (end) |end_register| {
+        if (collection.width != 2) return error.InvalidMachineProgram;
+        const count = try residentOrLoadedValue(allocator, words, function, .x9, collection.start + 1);
+        try emitElementAddress(allocator, words, end_register, base, count, stride);
+    }
     const index = try residentOrLoadedValue(allocator, words, function, .x9, index_slot);
     try emitElementAddress(allocator, words, cursor, base, index, stride);
 }

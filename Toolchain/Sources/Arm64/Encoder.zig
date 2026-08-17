@@ -647,6 +647,10 @@ fn encodeFunction(
         instruction_offsets[instruction_index] = words.items.len;
         try emitDeferredCollectionLoads(allocator, words, function, instruction_index, collection_cursor);
         if (!scalarCacheInstruction(instruction)) scalar_cache.clear();
+        if (collection_cursor) |cursor| if (cursor.termination) |termination| {
+            if (instruction_index >= termination.increment_start and
+                instruction_index < termination.backedge) continue;
+        };
         switch (instruction) {
             .constant_int => |constant| {
                 if (constant.bits == 0 and zeroConstantFeedsNextComparison(function, instruction_index, constant.result)) continue;
@@ -1395,7 +1399,26 @@ fn encodeFunction(
                         cursor.initial_index,
                         cursor.stride,
                         @enumFromInt(cursor.register),
+                        if (cursor.termination) |termination|
+                            @enumFromInt(termination.register)
+                        else
+                            null,
                     );
+                };
+                if (collection_cursor) |cursor| if (cursor.termination) |termination| {
+                    if (termination.backedge == instruction_index) {
+                        try words.append(allocator, compareRegisters(
+                            @enumFromInt(cursor.register),
+                            @enumFromInt(termination.register),
+                        ));
+                        try control_fixups.append(allocator, .{
+                            .at = words.items.len,
+                            .target = termination.body,
+                            .width = .imm19,
+                        });
+                        try words.append(allocator, conditionalBranch(.carry_clear));
+                        continue;
+                    }
                 };
                 if (loopBackedgeComparison(function, instruction_index, target)) |backedge| {
                     const header = resolveJumpTarget(function.instructions, target);
