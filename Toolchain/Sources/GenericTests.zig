@@ -15,13 +15,13 @@ fn expectCompileError(source: []const u8, message: []const u8) !void {
 
 const worker_job_prelude =
     \\protocol Job { func execute() }
-    \\class Executor { public func submit<T:Job>(job:T) {} }
+    \\class Executor { func submit<T:Job>(job:T) {} }
 ;
 
 const parallel_job_prelude =
     \\protocol ParallelJob { func execute(start:int, end:int) }
-    \\class Fence { public func complete() {} }
-    \\class Executor { public func submit_parallel<T:ParallelJob>(count:int, job:T) Fence { return Fence() } }
+    \\class Fence { func complete() {} }
+    \\class Executor { func submit_parallel<T:ParallelJob>(count:int, job:T) Fence { return Fence() } }
 ;
 
 test "parallel jobs accept fixed indexed writes and reject structural collection mutation" {
@@ -29,7 +29,7 @@ test "parallel jobs accept fixed indexed writes and reject structural collection
     defer arena.deinit();
     var frontend = Frontend.Frontend.init(arena.allocator());
     _ = try frontend.compile(parallel_job_prelude ++
-        \\class Values { public var items:int[] }
+        \\class Values { var items:int[] }
         \\struct Fill:ParallelJob {
         \\    var values:Values
         \\    func execute(start:int, end:int) { var index = start; while index < end { self.values.items[index] = index; index++ } }
@@ -38,7 +38,7 @@ test "parallel jobs accept fixed indexed writes and reject structural collection
     );
     try expectCompileError(
         parallel_job_prelude ++
-            \\class Values { public var items:int[]; public func grow() { self.items.append(1) } }
+            \\class Values { var items:int[]; func grow() { self.items.append(1) } }
             \\struct Grow:ParallelJob { var values:Values; func execute(start:int, end:int) { self.values.grow() } }
             \\func main() { var executor = Executor(); executor.submit_parallel(8, Grow(values:Values(items:[]))) }
         ,
@@ -65,13 +65,13 @@ test "worker-safe jobs may wait on fences but not consume job handles" {
     defer arena.deinit();
     var frontend = Frontend.Frontend.init(arena.allocator());
     _ = try frontend.compile(worker_job_prelude ++
-        \\class Fence { public func complete() {} }
+        \\class Fence { func complete() {} }
         \\struct Waits:Job { var fence:Fence; func execute() { self.fence.complete() } }
         \\func main() { var executor = Executor(); executor.submit(Waits(fence:Fence())) }
     );
     try expectCompileError(
         worker_job_prelude ++
-            \\class JobHandle { public func complete() {} }
+            \\class JobHandle { func complete() {} }
             \\struct Consumes:Job { var handle:JobHandle; func execute() { self.handle.complete() } }
             \\func main() { var executor = Executor(); executor.submit(Consumes(handle:JobHandle())) }
         ,
@@ -89,7 +89,7 @@ test "worker-safe job analysis rejects main-thread static and executor effects" 
     );
     try expectCompileError(
         worker_job_prelude ++
-            \\struct Globals { public static var count:int = 0 }
+            \\struct Globals { static var count:int = 0 }
             \\struct GlobalWrite:Job { func execute() { Globals.count++ } }
             \\func main() { var executor = Executor(); executor.submit(GlobalWrite()) }
         ,
@@ -163,7 +163,7 @@ test "borrowed tuple patterns accept class components without storing them" {
     defer arena.deinit();
     var frontend = Frontend.Frontend.init(arena.allocator());
     _ = try frontend.compile(
-        \\class Actor { public func update() {} }
+        \\class Actor { func update() {} }
         \\struct Query<Pattern> {}
         \\func visit(query:Query<(@Actor, &Actor)>) {}
         \\func main() {}
@@ -211,7 +211,7 @@ test "reuse a generic nominal type already named by a collection" {
         \\struct Number:Value { let value:int; func read() int { return self.value } }
         \\struct Box<T:Value> { let value:T }
         \\class Maker {
-        \\    public func make<T:Value>(value:T) Box<T> { return Box<T>(value:value) }
+        \\    func make<T:Value>(value:T) Box<T> { return Box<T>(value:value) }
         \\}
         \\func main() {
         \\    var pending:Box<Number>[] = []
@@ -483,7 +483,7 @@ test "compose generic structures through aliases and reexports" {
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Api.sx",
-        .data = "public struct Pair<T> { public let first:T; public let second:T }",
+        .data = "public struct Pair<T> { let first:T; let second:T }",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Facade.sx",
@@ -748,7 +748,7 @@ test "compose public generic methods through modules" {
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Api.sx",
-        .data = "public struct Catalog { public func identity<T>(value:T) T { return value } }",
+        .data = "public struct Catalog { func identity<T>(value:T) T { return value } }",
     });
     const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
     var compiler = Project.Compiler.init(allocator, std.testing.io);
@@ -824,9 +824,9 @@ test "generic classes specialize storage methods identity and lifetime" {
     var frontend = Frontend.Frontend.init(allocator);
     const compilation = try frontend.compile(
         \\class Box<T> {
-        \\    public let value:T
-        \\    public init(value:T) { self.value = value }
-        \\    public func get() T { return self.value }
+        \\    let value:T
+        \\    init(value:T) { self.value = value }
+        \\    func get() T { return self.value }
         \\    drop { print("drop") }
         \\}
         \\func main() {
@@ -847,15 +847,15 @@ test "generic classes specialize generic bases overrides and static storage" {
     var frontend = Frontend.Frontend.init(allocator);
     const compilation = try frontend.compile(
         \\class Base<T> {
-        \\    public let value:T
-        \\    public static var count:int = 0
-        \\    public static func set_count(value:int) { Base<T>.count = value }
-        \\    public init(value:T) { self.value = value }
-        \\    public func get() T { return self.value }
+        \\    let value:T
+        \\    static var count:int = 0
+        \\    static func set_count(value:int) { Base<T>.count = value }
+        \\    init(value:T) { self.value = value }
+        \\    func get() T { return self.value }
         \\}
         \\class Child<T> : Base<T> {
-        \\    public init(value:T) : super(value) {}
-        \\    override public func get() T { return self.value }
+        \\    init(value:T) : super(value) {}
+        \\    override func get() T { return self.value }
         \\}
         \\func read(value:Base<int>) int { return value.get() }
         \\func main() {
@@ -892,8 +892,8 @@ test "compose generic classes through aliases and reexports" {
         .sub_path = "Api.sx",
         .data =
         \\public class Box<T> {
-        \\    public let value:T
-        \\    public init(value:T) { self.value = value }
+        \\    let value:T
+        \\    init(value:T) { self.value = value }
         \\}
         ,
     });

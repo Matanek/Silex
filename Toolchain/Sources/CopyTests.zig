@@ -14,7 +14,7 @@ fn run(source: []const u8) ![]const u8 {
 
 test "copy detaches classes while ordinary copies preserve identity" {
     const output = try run(
-        \\class State { public var value:int }
+        \\class State { var value:int }
         \\struct Foo { var value:int; var instance:State }
         \\func main() {
         \\    var original = Foo(value:10, instance:State(value:5))
@@ -33,7 +33,7 @@ test "copy detaches classes while ordinary copies preserve identity" {
 test "copy keeps scalar values and gives cloned resources independent lifetimes" {
     const output = try run(
         \\class State {
-        \\    public let value:int
+        \\    let value:int
         \\    drop { print("state ", self.value) }
         \\}
         \\struct Holder {
@@ -57,13 +57,13 @@ test "copy preserves graph aliases cycles dynamic classes and private fields" {
     const output = try run(
         \\class Node {
         \\    private let secret:int
-        \\    public var next:Node? = null
-        \\    public init(secret:int) { self.secret = secret }
-        \\    public func value() int { return self.secret }
+        \\    var next:Node? = null
+        \\    init(secret:int) { self.secret = secret }
+        \\    func value() int { return self.secret }
         \\}
         \\class Special : Node {
-        \\    public init(secret:int) : super(secret) {}
-        \\    override public func value() int { return super.value() + 100 }
+        \\    init(secret:int) : super(secret) {}
+        \\    override func value() int { return super.value() + 100 }
         \\}
         \\struct Graph { var first:Node; var again:Node }
         \\func cyclic(node:Node) bool {
@@ -88,7 +88,7 @@ test "copy preserves graph aliases cycles dynamic classes and private fields" {
 
 test "copy traverses containers protocols and borrowed operands" {
     const output = try run(
-        \\class State { public var value:int }
+        \\class State { var value:int }
         \\protocol Boxed { func current() int; func change(value:int) }
         \\struct Holder : Boxed {
         \\    var state:State
@@ -123,7 +123,7 @@ test "copy traverses containers protocols and borrowed operands" {
 
 test "copy leaves the source available and remains distinct from move" {
     const output = try run(
-        \\class State { public var value:int }
+        \\class State { var value:int }
         \\func main() {
         \\    var source = State(value:4)
         \\    var clone = copy source
@@ -143,7 +143,7 @@ test "copy rejects borrowed view results and emits deterministic IR" {
     try std.testing.expectError(error.InvalidSource, frontend.compile("func main() { var values = [1, 2]; let clone = copy @values[0:2] }"));
     try std.testing.expectEqualStrings("'copy' cannot produce an owned borrowed-view type", frontend.diagnostic.?.message);
 
-    const source = "class State { public var value:int } func main() { var value = State(value:1); var clone = copy value }";
+    const source = "class State { var value:int } func main() { var value = State(value:1); var clone = copy value }";
     var first = Frontend.Frontend.init(arena.allocator());
     var second = Frontend.Frontend.init(arena.allocator());
     const first_text = try Ir.writeText(arena.allocator(), (try first.compile(source)).ir);

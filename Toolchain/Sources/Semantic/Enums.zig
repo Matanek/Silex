@@ -52,7 +52,7 @@ pub fn analyzeInitializer(self: anytype, builder: anytype, call: Ast.Expression.
         return self.fail(call.name_position, message);
     }
     if (enumeration.is_internal and self.owner_context != enumeration.owner) {
-        const message = try std.fmt.allocPrint(self.allocator, "enum '{s}' is internal to its package", .{enumeration.name});
+        const message = try std.fmt.allocPrint(self.allocator, "enum '{s}' is package-visible and unavailable outside its package", .{enumeration.name});
         return self.fail(call.name_position, message);
     }
     var selected: ?usize = null;
@@ -125,7 +125,7 @@ pub fn analyzeValue(
         return self.fail(position, message);
     }
     if (enumeration.is_internal and self.owner_context != enumeration.owner) {
-        const message = try std.fmt.allocPrint(self.allocator, "enum '{s}' is internal to its package", .{enumeration.name});
+        const message = try std.fmt.allocPrint(self.allocator, "enum '{s}' is package-visible and unavailable outside its package", .{enumeration.name});
         return self.fail(position, message);
     }
     var selected: ?usize = null;

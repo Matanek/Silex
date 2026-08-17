@@ -322,10 +322,9 @@ pub fn scopeItemsAtForTarget(
                                 structure.constructors.len != 0) continue;
                             native_initializer = true;
                             for (structure.fields) |field| {
-                                if (field.is_local or field.is_private or field.is_protected or
+                                if (!importedMemberVisible(project, provider, field) or
                                     Completion.suppliedAggregateField(context, field.name) or
                                     !matchesPrefix(field.name, prefix)) continue;
-                                if (field.is_internal and provider.owner != project.current_owner) continue;
                                 try appendRanked(allocator, &ranked, .{
                                     .label = field.name,
                                     .kind = CompletionKind.field,
@@ -1204,8 +1203,7 @@ fn appendImportedMembersDepth(
         if (!structure.is_public) return;
         if (query.static_receiver) {
             for (structure.static_fields) |field| {
-                if (field.is_local or field.is_private or field.is_protected) continue;
-                if (field.is_internal and provider.owner != project.current_owner) continue;
+                if (!importedMemberVisible(project, provider, field)) continue;
                 if (!std.mem.startsWith(u8, field.name, query.prefix)) continue;
                 try appendRanked(allocator, ranked, .{
                     .label = field.name,
@@ -1217,8 +1215,7 @@ fn appendImportedMembersDepth(
                 }, 0, false);
             }
             for (structure.methods) |method| {
-                if (!method.is_static or method.is_local or method.is_private or method.is_protected) continue;
-                if (method.is_internal and provider.owner != project.current_owner) continue;
+                if (!method.is_static or !importedMemberVisible(project, provider, method)) continue;
                 if (!std.mem.startsWith(u8, method.name, query.prefix)) continue;
                 if (!Completion.callAcceptsParameters(
                     current_source,
@@ -1235,8 +1232,7 @@ fn appendImportedMembersDepth(
             return;
         }
         for (structure.fields) |field| {
-            if (field.is_local or field.is_private or field.is_protected) continue;
-            if (field.is_internal and provider.owner != project.current_owner) continue;
+            if (!importedMemberVisible(project, provider, field)) continue;
             if (!std.mem.startsWith(u8, field.name, query.prefix)) continue;
             try appendRanked(allocator, ranked, .{
                 .label = field.name,
@@ -1248,8 +1244,7 @@ fn appendImportedMembersDepth(
             }, 0, false);
         }
         for (structure.methods) |method| {
-            if (method.is_static or method.is_local or method.is_private or method.is_protected) continue;
-            if (method.is_internal and provider.owner != project.current_owner) continue;
+            if (method.is_static or !importedMemberVisible(project, provider, method)) continue;
             if (!std.mem.startsWith(u8, method.name, query.prefix)) continue;
             if (!Completion.callAcceptsParameters(
                 current_source,
@@ -1270,7 +1265,7 @@ fn appendImportedMembersDepth(
             query,
             loaded,
             structure,
-            provider.owner,
+            provider,
             ranked,
         );
         try appendCurrentExtensionMethods(
@@ -1278,7 +1273,6 @@ fn appendImportedMembersDepth(
             project,
             current_source,
             query,
-            structure,
             ranked,
         );
         return;
@@ -1321,7 +1315,7 @@ fn appendProviderExtensionMethods(
     query: ImportedMemberQuery,
     loaded: LoadedProgram,
     target: Ast.Structure,
-    provider_owner: usize,
+    provider: Modules.Provider,
     ranked: *std.ArrayList(RankedItem),
 ) !void {
     for (loaded.program.extensions) |extension| {
@@ -1336,10 +1330,10 @@ fn appendProviderExtensionMethods(
             false;
         if (!matches_imported_target) continue;
         for (extension.methods) |method| {
-            if (method.is_static or method.is_private or method.is_protected) continue;
-            if (method.is_local) continue;
-            if (method.is_internal and provider_owner != project.current_owner) continue;
-            if (target.is_class and !method.visibility_explicit) continue;
+            if (method.is_static) continue;
+            if (method.visibility_explicit) {
+                if (!importedMemberVisible(project, provider, method)) continue;
+            } else if (!importedMemberVisible(project, provider, target)) continue;
             if (!std.mem.startsWith(u8, method.name, query.prefix)) continue;
             if (!Completion.callAcceptsParameters(source, query.cursor, loaded.program, method.parameters)) continue;
             try appendRanked(allocator, ranked, .{
@@ -1356,7 +1350,6 @@ fn appendCurrentExtensionMethods(
     project: IndexedProject,
     source: []const u8,
     query: ImportedMemberQuery,
-    target: Ast.Structure,
     ranked: *std.ArrayList(RankedItem),
 ) !void {
     const program = try parseCurrentAtCompletion(
@@ -1372,8 +1365,7 @@ fn appendCurrentExtensionMethods(
         if (!std.mem.eql(u8, resolved, query.type_path)) continue;
         for (extension.methods) |method| {
             if (method.is_static or !std.mem.startsWith(u8, method.name, query.prefix)) continue;
-            const private_by_default = target.is_class and !method.visibility_explicit;
-            if ((method.is_private or private_by_default) and !query.inside_extension) continue;
+            if (method.is_private and !query.inside_extension) continue;
             if (!Completion.callAcceptsParameters(source, query.cursor, program, method.parameters)) continue;
             try appendRanked(allocator, ranked, .{
                 .label = method.name,
@@ -1780,10 +1772,7 @@ fn importedConstructorCallTypePath(
             !std.mem.eql(u8, structure.name, target.declaration)) continue;
         if (structure.constructors.len == 0) return if (call.arity == 0) use.path else null;
         for (structure.constructors) |constructor| {
-            if (constructor.is_local or constructor.is_private or constructor.is_protected) continue;
-            if (constructor.is_internal) {
-                if (provider.owner != project.current_owner) continue;
-            } else if (!constructor.is_public) continue;
+            if (!importedMemberVisible(project, provider, constructor)) continue;
             if (parametersAcceptArity(constructor.parameters, call.arity)) return use.path;
         }
         return null;
@@ -1903,10 +1892,9 @@ fn importedQualifiedCallReturnTypePath(
     for (loaded.program.structures) |structure| {
         if (!std.mem.eql(u8, structure.name, target.declaration) or !structure.is_public) continue;
         for (structure.methods) |method| {
-            if (!method.is_static or method.is_local or method.is_private or method.is_protected or
+            if (!method.is_static or !importedMemberVisible(project, provider, method) or
                 !std.mem.eql(u8, method.name, call.name) or
                 !parametersAcceptArity(method.parameters, call.arity)) continue;
-            if (method.is_internal and provider.owner != project.current_owner) continue;
             const candidate = returnTypeName(loaded.program, method.return_type) orelse continue;
             if (return_name != null and !std.mem.eql(u8, return_name.?, candidate)) return null;
             return_name = candidate;
@@ -1924,10 +1912,7 @@ fn importedQualifiedCallReturnTypePath(
                 !std.mem.eql(u8, structure.name, exported_target.declaration)) continue;
             if (structure.constructors.len == 0) return if (call.arity == 0) exported.path else null;
             for (structure.constructors) |constructor| {
-                if (constructor.is_local or constructor.is_private or constructor.is_protected) continue;
-                if (constructor.is_internal) {
-                    if (exported_provider.owner != project.current_owner) continue;
-                } else if (!constructor.is_public) continue;
+                if (!importedMemberVisible(project, exported_provider, constructor)) continue;
                 if (parametersAcceptArity(constructor.parameters, call.arity)) return exported.path;
             }
         }
@@ -1966,12 +1951,9 @@ fn importedInstanceCallReturnTypePath(
             matched_structure = true;
             var return_name: ?[]const u8 = null;
             for (structure.methods) |method| {
-                if (method.is_static or method.is_local or method.is_private or method.is_protected or
+                if (method.is_static or !importedMemberVisible(project, provider, method) or
                     !std.mem.eql(u8, method.name, call.name) or
                     !parametersAcceptArity(method.parameters, call.arity)) continue;
-                if (method.is_internal) {
-                    if (provider.owner != project.current_owner) continue;
-                } else if (!method.is_public) continue;
                 const candidate = returnTypeName(loaded.program, method.return_type) orelse continue;
                 if (return_name != null and !std.mem.eql(u8, return_name.?, candidate)) return null;
                 return_name = candidate;
@@ -2155,6 +2137,17 @@ fn lastSegment(path: []const u8) []const u8 {
     return path[separator + 1 ..];
 }
 
+fn importedMemberVisible(project: IndexedProject, provider: Modules.Provider, member: anytype) bool {
+    if (member.is_public) return true;
+    if (member.is_local or member.is_private or member.is_protected) return false;
+    if (member.is_internal) return provider.owner == project.current_owner;
+    for (project.index.providers) |current| {
+        if (!samePath(current.path, project.current_path)) continue;
+        return std.mem.eql(u8, current.name, provider.name);
+    }
+    return false;
+}
+
 fn projectRoot(allocator: Allocator, io: Io, document_path: []const u8, root_hint: ?[]const u8) ![]const u8 {
     return ProjectIndex.projectRoot(allocator, io, document_path, root_hint);
 }
@@ -2180,7 +2173,7 @@ test "complete simple modules before declarations in a use path" {
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Module1.sx",
-        .data = "struct Hidden {} public struct Visible {} internal func inside() int { return 1 }",
+        .data = "struct Hidden {} public struct Visible {} package func inside() int { return 1 }",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Module1.SubModule.Foo.sx",
@@ -2321,29 +2314,29 @@ test "complete public package APIs module aliases members and overlays" {
     const operations_source =
         \\public struct Vector {
         \\    local var hidden_value:int
-        \\    internal var package_value:int
+        \\    package var package_value:int
         \\    var value:int
         \\    init(value:int) { self.value = value }
         \\    local func hidden_method() int { return self.hidden_value }
-        \\    internal func package_method() int { return self.package_value }
+        \\    package func package_method() int { return self.package_value }
         \\    func to_str() str { return "vector" }
         \\}
         \\public protocol Operation { func execute() }
         \\public class BuildHandle<T> {
-        \\    public func complete() T { panic("unused") }
-        \\    public func complete(callback:func(T)) {}
+        \\    func complete() T { panic("unused") }
+        \\    func complete(callback:func(T)) {}
         \\}
         \\public class BuildWaitHandle<T> {
-        \\    public func complete() {}
+        \\    func complete() {}
         \\}
         \\public static class Builder {
-        \\    public static func build<T>(value:T) BuildHandle<T> { panic("unused") }
-        \\    public static func build<T>(value:T, callback:func(T)) BuildWaitHandle<T> { panic("unused") }
+        \\    static func build<T>(value:T) BuildHandle<T> { panic("unused") }
+        \\    static func build<T>(value:T, callback:func(T)) BuildWaitHandle<T> { panic("unused") }
         \\}
         \\public func add(left:int, right:int = 1) int { return left + right }
         \\public func add(value:str) str { return value }
         \\func hidden() int { return 0 }
-        \\internal func package_only() int { return 0 }
+        \\package func package_only() int { return 0 }
         \\local func file_only() int { return 0 }
     ;
     try temporary.dir.writeFile(std.testing.io, .{
@@ -2708,16 +2701,16 @@ test "complete imported application members in a cascade" {
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Module/Application.sx",
         .data =
-        \\public intrinsic class Resources { public func insert() }
+        \\public intrinsic class Resources { func insert() }
         \\public enum Schedule { startup; update }
         \\public class Application {
-        \\    public func install() Application { return self }
-        \\    public func resources() Resources { return Resources() }
-        \\    public func add_system(schedule:Schedule, callback:func()) Application { return self }
-        \\    public func add_system<System>(schedule:Schedule, callback:System) Application { panic("unspecialized") }
-        \\    public func run() int { return 0 }
-        \\    internal func __silex_add_system() Application { return self }
-        \\    internal func __silex_run_query() {}
+        \\    func install() Application { return self }
+        \\    func resources() Resources { return Resources() }
+        \\    func add_system(schedule:Schedule, callback:func()) Application { return self }
+        \\    func add_system<System>(schedule:Schedule, callback:System) Application { panic("unspecialized") }
+        \\    func run() int { return 0 }
+        \\    package func __silex_add_system() Application { return self }
+        \\    package func __silex_run_query() {}
         \\}
         ,
     });
@@ -2732,8 +2725,8 @@ test "complete imported application members in a cascade" {
         .sub_path = "GFX/Module/Window/@Module.sx",
         .data =
         \\public class Window {
-        \\    public init(settings:int = 0) {}
-        \\    public func show() {}
+        \\    init(settings:int = 0) {}
+        \\    func show() {}
         \\}
         ,
     });
@@ -3120,11 +3113,11 @@ test "complete imported members on borrowed function parameters" {
         .sub_path = "GFX/Module/Input.sx",
         .data =
         \\public class State {
-        \\    public func is_quit_requested() bool { return false }
+        \\    func is_quit_requested() bool { return false }
         \\}
         \\public class Input {
-        \\    public func is_quit_requested() bool { return false }
-        \\    public func update() {}
+        \\    func is_quit_requested() bool { return false }
+        \\    func update() {}
         \\}
         \\public struct Entry<Key, Value> {
         \\    let key:Key
@@ -3241,8 +3234,8 @@ test "complete a module facade together with its child namespace" {
         .sub_path = "STD/Module/Randomizer.sx",
         .data =
         \\public class Randomizer {
-        \\    public init() {}
-        \\    public init(seed:int) {}
+        \\    init() {}
+        \\    init(seed:int) {}
         \\}
         ,
     });
@@ -3417,7 +3410,7 @@ test "workspace indexes the selected package platform root" {
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Bridge/Platform/MacOS/Module/Combined.sx",
-        .data = "public func macos_fragment() {}\nfunc platform_private() {}\ninternal func platform_internal() {}",
+        .data = "public func macos_fragment() {}\nfunc platform_module() {}\npackage func platform_package() {}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Bridge/Platform/Linux/Module/Combined.sx",
@@ -3577,8 +3570,8 @@ test "workspace indexes the selected package platform root" {
         contextual_platform_cursor,
     )).?;
     try std.testing.expect(hasLabel(contextual_platform_items, "macos_fragment"));
-    try std.testing.expect(hasLabel(contextual_platform_items, "platform_private"));
-    try std.testing.expect(hasLabel(contextual_platform_items, "platform_internal"));
+    try std.testing.expect(hasLabel(contextual_platform_items, "platform_module"));
+    try std.testing.expect(hasLabel(contextual_platform_items, "platform_package"));
     try std.testing.expect(!hasLabel(contextual_platform_items, "portable"));
 
     const contextual_target_source = "func portable() { Target. }";
@@ -3595,7 +3588,7 @@ test "workspace indexes the selected package platform root" {
         contextual_target_cursor,
     )).?;
     try std.testing.expect(hasLabel(contextual_target_items, "target_private"));
-    try std.testing.expect(!hasLabel(contextual_target_items, "platform_private"));
+    try std.testing.expect(!hasLabel(contextual_target_items, "platform_module"));
 }
 
 fn labelCount(items: []const Types.CompletionItem, label: []const u8) usize {

@@ -996,7 +996,7 @@ pub const Specializer = struct {
         }
         if (call.type_arguments.len == 0) {
             for (structure.methods) |method| {
-                if (!std.mem.eql(u8, method.name, call.name) or !methodVisible(call, method)) continue;
+                if (!std.mem.eql(u8, method.name, call.name) or !methodVisible(call, source_structure, method)) continue;
                 const ordered = try self.orderNamedMethodArguments(method.parameters, call, actual_types) orelse continue;
                 if (self.argumentsMatch(method.parameters, ordered, &.{})) return null;
             }
@@ -1007,7 +1007,7 @@ pub const Specializer = struct {
         var saw_generic = false;
         var saw_type_arity = false;
         for (source_structure.methods) |method| {
-            if (method.type_parameters.len == 0 or !std.mem.eql(u8, method.name, call.name) or !methodVisible(call, method)) continue;
+            if (method.type_parameters.len == 0 or !std.mem.eql(u8, method.name, call.name) or !methodVisible(call, source_structure, method)) continue;
             saw_generic = true;
             const ordered = try self.orderNamedMethodArguments(method.parameters, call, actual_types) orelse continue;
             if (call.type_arguments.len != 0) {
@@ -2058,10 +2058,15 @@ fn functionVisible(call: Ast.Expression.Call, function: Ast.Function) bool {
     return std.mem.eql(u8, logicalModule(call.module), logicalModule(function.name[0..separator]));
 }
 
-fn methodVisible(call: Ast.Expression.Call, method: Ast.Function) bool {
+fn methodVisible(call: Ast.Expression.Call, structure: Ast.Structure, method: Ast.Function) bool {
     if (call.compiler_generated and method.is_internal) return true;
     if (method.is_local) return call.name_position.file == method.position.file;
-    return method.is_public or call.owner == method.owner;
+    if (method.is_public) return true;
+    if (method.is_internal) return call.owner == method.owner;
+    if (method.is_private or method.is_protected) return call.owner == method.owner;
+    if (call.name_position.file == method.position.file) return true;
+    const separator = std.mem.lastIndexOfScalar(u8, structure.name, '.') orelse return false;
+    return std.mem.eql(u8, logicalModule(call.module), logicalModule(structure.name[0..separator]));
 }
 
 fn logicalModule(module: []const u8) []const u8 {

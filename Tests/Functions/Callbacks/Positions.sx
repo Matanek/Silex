@@ -3,7 +3,7 @@ struct Transformer {
 }
 
 class Pipeline {
-    public let transform:func(int) int
+    let transform:func(int) int
 }
 
 func double(value:int) int { return value * 2 }

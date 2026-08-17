@@ -3,7 +3,7 @@ struct IntegerFields {
 }
 
 class IntegerState {
-    public var count:int
+    var count:int
 }
 
 struct IntegerTransform {

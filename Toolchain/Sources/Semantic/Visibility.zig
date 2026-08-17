@@ -3,6 +3,7 @@ const Source = @import("../Source.zig");
 const Inheritance = @import("Inheritance.zig");
 
 pub fn memberVisible(self: anytype, structure_index: usize, member: anytype, position: Source.Position) bool {
+    if (!typeVisible(self, structure_index, position)) return false;
     if (comptime @hasField(@TypeOf(member), "extension")) {
         if (member.extension) |extension| {
             const active_file = self.specialization_file orelse position.file;
@@ -23,10 +24,13 @@ pub fn memberVisible(self: anytype, structure_index: usize, member: anytype, pos
     if (member.is_internal) {
         return self.owner_context != null and self.owner_context.? == self.program.structures[structure_index].owner;
     }
+    if (!member.is_private and !member.is_protected) {
+        return position.file == member.position.file or sameModule(self, structure_index);
+    }
     if (self.extension_context) return false;
     const context = self.member_context orelse return false;
     if (sameFamily(self, context, structure_index)) return true;
-    return member.is_protected and Inheritance.isDescendant(self, context, structure_index);
+    return member.is_protected and Inheritance.isDescendant(self, context, protectedAnchor(self, structure_index));
 }
 
 pub fn typeVisible(self: anytype, structure_index: usize, position: Source.Position) bool {
@@ -36,17 +40,28 @@ pub fn typeVisible(self: anytype, structure_index: usize, position: Source.Posit
         const owner = self.structureIndex(owner_name) orelse return false;
         if (!typeVisible(self, owner, position)) return false;
         if (declaration.is_public) return true;
-        if (declaration.is_local) return position.file == declaration.position.file or active_file == declaration.position.file;
+        if (declaration.is_local) return position.file == declaration.position.file;
         if (declaration.is_internal) return self.owner_context != null and self.owner_context.? == declaration.owner;
+        if (!declaration.is_private and !declaration.is_protected) {
+            return position.file == declaration.position.file or sameModule(self, structure_index);
+        }
         const context = self.member_context orelse return false;
         if (sameFamily(self, context, structure_index)) return true;
         return declaration.is_protected and Inheritance.isDescendant(self, context, owner);
     }
     if (declaration.is_public) return true;
-    if (position.file == declaration.position.file or active_file == declaration.position.file) return true;
+    if (position.file == declaration.position.file) return true;
     if (declaration.is_local) return false;
+    if (active_file == declaration.position.file) return true;
     if (declaration.is_internal) return self.owner_context != null and self.owner_context.? == declaration.owner;
     return sameModule(self, structure_index);
+}
+
+fn protectedAnchor(self: anytype, structure_index: usize) usize {
+    const declaration = declarationAt(self, structure_index) orelse return structure_index;
+    if (!declaration.is_protected) return structure_index;
+    const owner_name = declaration.enclosing orelse return structure_index;
+    return self.structureIndex(owner_name) orelse structure_index;
 }
 
 fn sameModule(self: anytype, structure_index: usize) bool {
@@ -95,8 +110,9 @@ fn declarationAt(self: anytype, structure_index: usize) ?@import("../Ast.zig").S
 
 pub fn name(member: anytype) []const u8 {
     if (member.is_public) return "public";
-    if (member.is_internal) return "internal";
+    if (member.is_internal) return "package";
     if (member.is_local) return "local";
     if (member.is_protected) return "protected";
-    return "private";
+    if (member.is_private) return "private";
+    return "module";
 }

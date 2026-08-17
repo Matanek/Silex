@@ -102,7 +102,15 @@ fn definitionForPath(
     const provider = project.index.providers[target.provider];
     if (!project.graph.canAccess(project.current_owner, provider.owner, provider.name)) return null;
     const loaded = try ProjectIndex.loadProgram(allocator, io, documents, provider) orelse return null;
-    if (declarationPosition(loaded.program, provider, target.declaration, project.current_owner)) |definition| {
+    const current_module = currentModule(project);
+    if (declarationPosition(
+        loaded.program,
+        provider,
+        target.declaration,
+        project.current_owner,
+        current_module,
+        project.current_path,
+    )) |definition| {
         return location(allocator, provider.path, loaded.source, definition.position, definition.name.len, encoding);
     }
     for (loaded.program.uses) |use| {
@@ -124,6 +132,8 @@ fn declarationPosition(
     provider: Modules.Provider,
     declaration: []const u8,
     current_owner: usize,
+    current_module: ?[]const u8,
+    current_path: []const u8,
 ) ?Definition {
     const separator = std.mem.indexOfScalar(u8, declaration, '.');
     const nominal_name = if (separator) |index| declaration[0..index] else declaration;
@@ -134,23 +144,23 @@ fn declarationPosition(
             std.mem.eql(u8, structure.name, lastSegment(provider.name)) and
             !std.mem.eql(u8, structure.name, nominal_name);
         if (!std.mem.eql(u8, structure.name, nominal_name) and !principal_member) continue;
-        if (!visible(structure.is_public, structure.is_internal, structure.is_local, provider, current_owner)) return null;
+        if (!visible(structure.is_public, structure.is_internal, structure.is_local, provider, current_owner, current_module, current_path)) return null;
         const requested_member = member_name orelse if (principal_member) nominal_name else return .{
             .position = structure.name_position,
             .name = structure.name,
         };
         for (structure.fields) |field| if (std.mem.eql(u8, field.name, requested_member) and
-            memberVisible(field.is_local, field.is_internal, field.is_private, field.is_protected, provider, current_owner)) return .{
+            memberVisible(field.is_public, field.is_local, field.is_internal, field.is_private, field.is_protected, provider, current_owner, current_module, current_path)) return .{
             .position = field.name_position,
             .name = field.name,
         };
         for (structure.static_fields) |field| if (std.mem.eql(u8, field.name, requested_member) and
-            memberVisible(field.is_local, field.is_internal, field.is_private, field.is_protected, provider, current_owner)) return .{
+            memberVisible(field.is_public, field.is_local, field.is_internal, field.is_private, field.is_protected, provider, current_owner, current_module, current_path)) return .{
             .position = field.name_position,
             .name = field.name,
         };
         for (structure.methods) |method| if (std.mem.eql(u8, method.name, requested_member) and
-            memberVisible(method.is_local, method.is_internal, method.is_private, method.is_protected, provider, current_owner)) return .{
+            memberVisible(method.is_public, method.is_local, method.is_internal, method.is_private, method.is_protected, provider, current_owner, current_module, current_path)) return .{
             .position = method.name_position,
             .name = method.name,
         };
@@ -161,7 +171,7 @@ fn declarationPosition(
             std.mem.eql(u8, enumeration.name, lastSegment(provider.name)) and
             !std.mem.eql(u8, enumeration.name, nominal_name);
         if (!std.mem.eql(u8, enumeration.name, nominal_name) and !principal_member) continue;
-        if (!visible(enumeration.is_public, enumeration.is_internal, enumeration.is_local, provider, current_owner)) return null;
+        if (!visible(enumeration.is_public, enumeration.is_internal, enumeration.is_local, provider, current_owner, current_module, current_path)) return null;
         const requested_member = member_name orelse if (principal_member) nominal_name else return .{
             .position = enumeration.name_position,
             .name = enumeration.name,
@@ -174,7 +184,7 @@ fn declarationPosition(
     }
     for (program.functions) |function| {
         if (!std.mem.eql(u8, function.name, declaration)) continue;
-        if (!visible(function.is_public, function.is_internal, function.is_local, provider, current_owner)) return null;
+        if (!visible(function.is_public, function.is_internal, function.is_local, provider, current_owner, current_module, current_path)) return null;
         return .{ .position = function.name_position, .name = function.name };
     }
     const target_name = if (member_name != null)
@@ -188,16 +198,32 @@ fn declarationPosition(
         if (!std.mem.eql(u8, Completion.typeName(program, extension.target), target_name)) continue;
         for (extension.methods) |method| {
             if (!std.mem.eql(u8, method.name, requested_member)) continue;
-            if (!memberVisible(
-                method.is_local,
-                method.is_internal,
-                method.is_private,
-                method.is_protected,
-                provider,
-                current_owner,
-            )) return null;
+            const accessible = if (method.visibility_explicit)
+                memberVisible(
+                    method.is_public,
+                    method.is_local,
+                    method.is_internal,
+                    method.is_private,
+                    method.is_protected,
+                    provider,
+                    current_owner,
+                    current_module,
+                    current_path,
+                )
+            else if (structureNamed(program, target_name)) |target|
+                visible(target.is_public, target.is_internal, target.is_local, provider, current_owner, current_module, current_path)
+            else
+                current_module != null and std.mem.eql(u8, provider.name, current_module.?);
+            if (!accessible) return null;
             return .{ .position = method.name_position, .name = method.name };
         }
+    }
+    return null;
+}
+
+fn structureNamed(program: Ast.Program, name: []const u8) ?Ast.Structure {
+    for (program.structures) |structure| {
+        if (std.mem.eql(u8, structure.name, name)) return structure;
     }
     return null;
 }
@@ -208,22 +234,39 @@ fn visible(
     is_local: bool,
     provider: Modules.Provider,
     current_owner: usize,
+    current_module: ?[]const u8,
+    current_path: []const u8,
 ) bool {
-    if (is_local) return provider.owner == current_owner;
+    if (is_local) return samePath(provider.path, current_path);
     if (is_internal) return provider.owner == current_owner;
-    return is_public or provider.owner == current_owner;
+    return is_public or (current_module != null and std.mem.eql(u8, provider.name, current_module.?));
 }
 
 fn memberVisible(
+    is_public: bool,
     is_local: bool,
     is_internal: bool,
     is_private: bool,
     is_protected: bool,
     provider: Modules.Provider,
     current_owner: usize,
+    current_module: ?[]const u8,
+    current_path: []const u8,
 ) bool {
-    if (is_local or is_private or is_protected) return false;
-    return !is_internal or provider.owner == current_owner;
+    if (is_public) return true;
+    if (is_private or is_protected) return false;
+    if (is_local) return samePath(provider.path, current_path);
+    if (is_internal) return provider.owner == current_owner;
+    return current_module != null and std.mem.eql(u8, provider.name, current_module.?);
+}
+
+fn currentModule(project: ProjectIndex.IndexedProject) ?[]const u8 {
+    for (project.index.providers) |provider| if (samePath(provider.path, project.current_path)) return provider.name;
+    return null;
+}
+
+fn samePath(left: []const u8, right: []const u8) bool {
+    return std.mem.eql(u8, std.mem.trimEnd(u8, left, "/"), std.mem.trimEnd(u8, right, "/"));
 }
 
 fn resolveImportedPath(allocator: Allocator, program: Ast.Program, path: []const u8) ![]const u8 {

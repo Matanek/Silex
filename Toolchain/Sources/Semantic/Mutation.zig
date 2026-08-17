@@ -411,7 +411,7 @@ fn analyzeFieldStep(
     if (source_structure.is_internal and self.owner_context != source_structure.owner) {
         const message = try std.fmt.allocPrint(
             self.allocator,
-            "members of internal structure '{s}' are unavailable outside its package",
+            "members of package-visible structure '{s}' are unavailable outside its package",
             .{source_structure.name},
         );
         return self.fail(target_field.name_position, message);

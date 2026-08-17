@@ -4,7 +4,7 @@ struct Position {
 }
 
 class State {
-    public var value:int
+    var value:int
 }
 
 struct Owner {

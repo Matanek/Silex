@@ -130,23 +130,23 @@ test "native ARM64 release preserves floats returned from list-contained aggrega
     var frontend = Frontend.Frontend.init(allocator);
     const compilation = try frontend.compile(
         \\public struct Clip {
-        \\    public let name:str
-        \\    public let frames:int[]
-        \\    public let rate:float
-        \\    public init(name:str, frames:int[], rate:float) {
+        \\    let name:str
+        \\    let frames:int[]
+        \\    let rate:float
+        \\    init(name:str, frames:int[], rate:float) {
         \\        self.name = name
         \\        self.frames = frames
         \\        self.rate = rate
         \\    }
-        \\    public func fps() float { return self.rate }
+        \\    func fps() float { return self.rate }
         \\}
         \\public struct Sheet {
-        \\    public var clips:Clip[]
-        \\    public init() { self.clips = [] }
-        \\    public func clip(name:str, rate:float) {
+        \\    var clips:Clip[]
+        \\    init() { self.clips = [] }
+        \\    func clip(name:str, rate:float) {
         \\        self.clips.append(Clip(name, [0, 1, 2], rate))
         \\    }
-        \\    public func require(name:str) Clip {
+        \\    func require(name:str) Clip {
         \\        for clip in self.clips {
         \\            if clip.name == name { return clip }
         \\        }
@@ -154,14 +154,14 @@ test "native ARM64 release preserves floats returned from list-contained aggrega
         \\    }
         \\}
         \\public class Entry {
-        \\    public let sheet:Sheet
-        \\    public init(sheet:Sheet) { self.sheet = sheet }
+        \\    let sheet:Sheet
+        \\    init(sheet:Sheet) { self.sheet = sheet }
         \\}
         \\public class Store {
-        \\    public var entries:Entry[]
-        \\    public init() { self.entries = [] }
-        \\    public func add(sheet:Sheet) { self.entries.append(Entry(sheet)) }
-        \\    public func get() @Sheet { return self.entries[0].sheet }
+        \\    var entries:Entry[]
+        \\    init() { self.entries = [] }
+        \\    func add(sheet:Sheet) { self.entries.append(Entry(sheet)) }
+        \\    func get() @Sheet { return self.entries[0].sheet }
         \\}
         \\func read_rate() float {
         \\    var store = Store()
@@ -459,7 +459,7 @@ test "native ARM64 agrees on recursive enum equality" {
 
     var frontend = Frontend.Frontend.init(allocator);
     const compilation = try frontend.compile(
-        \\class Token { public let name:str }
+        \\class Token { let name:str }
         \\enum Inner { number(int); empty }
         \\enum Choice { empty; text(str); number(int); nested(Inner); token(Token) }
         \\enum Direction:int { north = 1; south = -2 }
@@ -604,8 +604,8 @@ test "native ARM64 agrees on dynamic protocol erasure and mutation" {
         \\protocol Counter { func advance() int }
         \\struct Step : Counter { var value:int; func advance() int { self.value++; return self.value } }
         \\class Shared : Counter {
-        \\    public var value:int = 10
-        \\    public func advance() int { self.value++; return self.value }
+        \\    var value:int = 10
+        \\    func advance() int { self.value++; return self.value }
         \\}
         \\func structural() int { var value:Counter = Step(value:4); return value.advance() }
         \\func shared() int {

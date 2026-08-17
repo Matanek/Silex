@@ -60,7 +60,7 @@ test "compose Result identities and transparent aliases through modules" {
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Api.sx",
         .data =
-        \\public struct Failure { public let message:str }
+        \\public struct Failure { let message:str }
         \\public func parse() Result<int, Failure> {
         \\    return Result<int, Failure>.success(42)
         \\}
@@ -178,5 +178,5 @@ test "reject private Result error types in public contracts" {
     const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
     var compiler = Project.Compiler.init(allocator, std.testing.io);
     try std.testing.expectError(error.InvalidSource, compiler.compile(input));
-    try std.testing.expectEqualStrings("public function 'parse' exposes private structure 'Failure'", compiler.diagnostic.?.message);
+    try std.testing.expectEqualStrings("public function 'parse' exposes module structure 'Failure'", compiler.diagnostic.?.message);
 }

@@ -85,7 +85,7 @@ test "drop structures remain inspectable through read references" {
 test "copies with drop preserve shared class fields" {
     const output = try run(
         \\class State {
-        \\    public var value:int
+        \\    var value:int
         \\    drop { print("state ", self.value) }
         \\}
         \\struct Box {

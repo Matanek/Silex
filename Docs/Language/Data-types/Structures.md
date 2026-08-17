@@ -115,8 +115,8 @@ keeps static initialization deterministic and gives it no runtime cost.
 
 ```sx
 public struct Catalog {
-    public struct Entry {
-        public let value:int
+    struct Entry {
+        let value:int
     }
 }
 

@@ -1089,7 +1089,7 @@ pub const Analyzer = struct {
         if (declaration.is_internal and self.owner_context != declaration.owner) {
             const message = try std.fmt.allocPrint(
                 self.allocator,
-                "members of internal structure '{s}' are unavailable outside its package",
+                "members of package-visible structure '{s}' are unavailable outside its package",
                 .{structure.name},
             );
             return self.fail(access.name_position, message);
@@ -1370,9 +1370,9 @@ pub const Analyzer = struct {
             const message = if (has_local)
                 try std.fmt.allocPrint(self.allocator, "function '{s}' is local to its source file", .{call.name})
             else if (has_internal)
-                try std.fmt.allocPrint(self.allocator, "function '{s}' is internal to its package", .{call.name})
+                try std.fmt.allocPrint(self.allocator, "function '{s}' is package-visible and unavailable outside its package", .{call.name})
             else
-                try std.fmt.allocPrint(self.allocator, "function '{s}' is private outside its module", .{call.name});
+                try std.fmt.allocPrint(self.allocator, "function '{s}' is module-visible and unavailable outside its module", .{call.name});
             return self.fail(call.name_position, message);
         }
         if (arity_count == 0) {

@@ -378,7 +378,7 @@ test "safe assignments mutate shared classes and clean replaced values" {
     const compilation = try frontend.compile(
         \\struct Resource { let name:str; drop { print("drop ", self.name) } }
         \\struct Holder { var resource:Resource }
-        \\class Counter { public var value:int }
+        \\class Counter { var value:int }
         \\func main() {
         \\    var holder:Holder? = Holder(resource:Resource(name:"old"))
         \\    holder?.resource = Resource(name:"new")
@@ -401,7 +401,7 @@ test "force one present optional layer with postfix bang" {
     const compilation = try frontend.compile(
         \\struct Box { let value:int }
         \\enum Choice { value(int); empty }
-        \\class Entity { public let value:int }
+        \\class Entity { let value:int }
         \\func observed() int? { print("source"); return 40 }
         \\func main() {
         \\    let number:int? = 2

@@ -27,8 +27,8 @@ test "extend structures and classes with instance static default and mutating me
         \\    func add(amount:int = 1) int { self.value += amount; return self.value }
         \\    static func zero() Counter { return Counter(value:0) }
         \\}
-        \\class Box { public var value:int = 4 }
-        \\extend Box { public func double() int { self.value *= 2; return self.value } }
+        \\class Box { var value:int = 4 }
+        \\extend Box { func double() int { self.value *= 2; return self.value } }
         \\func main() {
         \\    var counter = Counter.zero()
         \\    print(counter.add(), " ", counter.add(2))
@@ -44,8 +44,8 @@ test "class extension lookup uses the exact declared receiver type" {
     const output = try run(
         \\class Entity {}
         \\class Player : Entity {}
-        \\extend Entity { public func label() str { return "entity" } }
-        \\extend Player { public func label() str { return "player" } }
+        \\extend Entity { func label() str { return "entity" } }
+        \\extend Player { func label() str { return "player" } }
         \\func main() {
         \\    var player = Player()
         \\    var entity:Entity = player
@@ -58,7 +58,7 @@ test "class extension lookup uses the exact declared receiver type" {
 
 test "do not inherit extension methods from a class base" {
     try expectCompileError(
-        "class Entity {} class Player : Entity {} extend Entity { public func label() str { return \"entity\" } } func main() { var player = Player(); player.label() }",
+        "class Entity {} class Player : Entity {} extend Entity { func label() str { return \"entity\" } } func main() { var player = Player(); player.label() }",
         "structure 'Player' has no method named 'label' accepting 0 arguments",
     );
 }
@@ -85,7 +85,7 @@ test "diagnose extension targets declarations collisions and access" {
         "generic extension targets and specializations are not supported",
     );
     try expectCompileError(
-        "class Vault { private let value:int = 4 } extend Vault { public func reveal() int { return self.value } } func main() {}",
+        "class Vault { private let value:int = 4 } extend Vault { func reveal() int { return self.value } } func main() {}",
         "field 'value' is private and unavailable here",
     );
 }
@@ -103,11 +103,11 @@ test "activate public extensions through direct and transitive use closure" {
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Core.sx",
-        .data = "public struct Value { public let value:int }",
+        .data = "public struct Value { let value:int }",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Extensions.sx",
-        .data = "use Core; extend Core.Value { public func label() int { return self.value } }",
+        .data = "use Core; extend Core.Value { func label() int { return self.value } }",
     });
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Bridge.sx", .data = "use Extensions" });
     const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
@@ -130,7 +130,7 @@ test "leave extensions inactive without a dependency" {
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Core.sx", .data = "public struct Value {}" });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Unused.sx",
-        .data = "use Core; extend Core.Value { public func extra() {} }",
+        .data = "use Core; extend Core.Value { func extra() {} }",
     });
     const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
     var compiler = Project.Compiler.init(allocator, std.testing.io);
@@ -151,11 +151,11 @@ test "diagnose two extension providers visible in the same use closure" {
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Core.sx", .data = "public struct Value {}" });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "First.sx",
-        .data = "use Core; extend Core.Value { public func read() int { return 1 } }",
+        .data = "use Core; extend Core.Value { func read() int { return 1 } }",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Second.sx",
-        .data = "use Core; extend Core.Value { public func read() int { return 2 } }",
+        .data = "use Core; extend Core.Value { func read() int { return 2 } }",
     });
     const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
     var compiler = Project.Compiler.init(allocator, std.testing.io);
@@ -252,7 +252,7 @@ test "activate generic extension specializations through use" {
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Core.sx", .data = "public struct Adapter {}" });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Algorithms.sx",
-        .data = "use Core; extend Core.Adapter { public func identity<T>(value:T) T { return value } }",
+        .data = "use Core; extend Core.Adapter { func identity<T>(value:T) T { return value } }",
     });
     const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
     var compiler = Project.Compiler.init(allocator, std.testing.io);
@@ -268,7 +268,7 @@ test "add exact protocol conformances with structure and class extensions" {
         \\struct Item { let value:int; func name() str { return "item" } }
         \\extend Item : Named, Counted { func count() int { return self.value } }
         \\class Box {}
-        \\extend Box : Named { public func name() str { return "box" } }
+        \\extend Box : Named { func name() str { return "box" } }
         \\func describe<T:Named>(value:T) str { return value.name() }
         \\func main() {
         \\    let item = Item(value:7)
@@ -283,12 +283,16 @@ test "add exact protocol conformances with structure and class extensions" {
 
 test "do not inherit a class extension conformance" {
     try expectCompileError(
-        "protocol Named { func name() str } class Entity {} class Player : Entity {} extend Entity : Named { public func name() str { return \"entity\" } } func describe<T:Named>(value:T) str { return value.name() } func main() { describe(Player()) }",
+        "protocol Named { func name() str } class Entity {} class Player : Entity {} extend Entity : Named { func name() str { return \"entity\" } } func describe<T:Named>(value:T) str { return value.name() } func main() { describe(Player()) }",
         "type 'Player' does not conform to protocol 'Named' required by 'T'",
     );
 }
 
 test "diagnose invalid duplicate and incomplete extension conformances" {
+    try expectCompileError(
+        "struct Box {} extend Box { public func leak() {} } func main() {}",
+        "member requests 'public' visibility, but container 'Box' is 'module'; 'public' crosses the 'module' boundary",
+    );
     try expectCompileError(
         "struct Item {} struct Marker {} extend Item : Marker {} func main() {}",
         "an extension conformance must name a protocol",
@@ -300,10 +304,6 @@ test "diagnose invalid duplicate and incomplete extension conformances" {
     try expectCompileError(
         "protocol Named { func name() str } struct Item {} extend Item : Named {} func main() {}",
         "type 'Item' does not implement protocol requirement 'Named.name'",
-    );
-    try expectCompileError(
-        "protocol Named { func name() str } class Item {} extend Item : Named { func name() str { return \"item\" } } func main() {}",
-        "method 'name' satisfying protocol 'Named' must be public",
     );
     try expectCompileError(
         "protocol Named { func name() str } struct Item {} extend Item : Named { func name() str { return \"first\" } } extend Item : Named { func other() {} } func main() {}",
@@ -334,11 +334,11 @@ test "activate extension conformances through direct and transitive use" {
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Model.sx",
-        .data = "public struct Item { public let value:int }",
+        .data = "public struct Item { let value:int }",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Adapt.sx",
-        .data = "use Api; use Model; extend Model.Item : Api.Named { public func name() str { return \"adapted\" } }",
+        .data = "use Api; use Model; extend Model.Item : Api.Named { func name() str { return \"adapted\" } }",
     });
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Bridge.sx", .data = "use Adapt" });
     try temporary.dir.writeFile(std.testing.io, .{
@@ -369,7 +369,7 @@ test "leave extension conformances inactive without a dependency" {
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Model.sx", .data = "public struct Item {}" });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Adapt.sx",
-        .data = "use Api; use Model; extend Model.Item : Api.Named { public func name() str { return \"adapted\" } }",
+        .data = "use Api; use Model; extend Model.Item : Api.Named { func name() str { return \"adapted\" } }",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Algorithms.sx",
@@ -398,11 +398,11 @@ test "reject dynamic erasure in a loaded sibling without activation" {
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Model.sx", .data = "public struct Item {}" });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Adapt.sx",
-        .data = "use Api; use Model; extend Model.Item : Api.Named { public func name() str { return \"adapted\" } }",
+        .data = "use Api; use Model; extend Model.Item : Api.Named { func name() str { return \"adapted\" } }",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Helper.sx",
-        .data = "use Api; use Model; public func erase() { var value:Api.Named = Model.Item() }",
+        .data = "use Api; use Model; func erase() { var value:Api.Named = Model.Item() }",
     });
     const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
     var compiler = Project.Compiler.init(allocator, std.testing.io);
@@ -427,11 +427,11 @@ test "reject duplicate extension conformances across modules globally" {
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Model.sx", .data = "public struct Item {}" });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "First.sx",
-        .data = "use Api; use Model; extend Model.Item : Api.Named { public func name() str { return \"first\" } }",
+        .data = "use Api; use Model; extend Model.Item : Api.Named { func name() str { return \"first\" } }",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Second.sx",
-        .data = "use Api; use Model; extend Model.Item : Api.Named { public func other() {} }",
+        .data = "use Api; use Model; extend Model.Item : Api.Named { func other() {} }",
     });
     const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
     var compiler = Project.Compiler.init(allocator, std.testing.io);
@@ -452,12 +452,12 @@ test "reject inaccessible extension conformance targets" {
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Model.sx", .data = "struct Hidden {}" });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Adapt.sx",
-        .data = "use Api; use Model; extend Model.Hidden : Api.Named { public func name() str { return \"hidden\" } }",
+        .data = "use Api; use Model; extend Model.Hidden : Api.Named { func name() str { return \"hidden\" } }",
     });
     const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
     var compiler = Project.Compiler.init(allocator, std.testing.io);
     try std.testing.expectError(error.InvalidSource, compiler.compile(input));
-    try std.testing.expectEqualStrings("structure 'Hidden' is private outside its module", compiler.diagnostic.?.message);
+    try std.testing.expectEqualStrings("structure 'Hidden' is module-visible and unavailable outside its module", compiler.diagnostic.?.message);
 }
 
 test "reject inaccessible extension conformance protocols" {
@@ -471,10 +471,10 @@ test "reject inaccessible extension conformance protocols" {
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Model.sx", .data = "public struct Item {}" });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Adapt.sx",
-        .data = "use Api; use Model; extend Model.Item : Api.Hidden { public func name() str { return \"item\" } }",
+        .data = "use Api; use Model; extend Model.Item : Api.Hidden { func name() str { return \"item\" } }",
     });
     const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
     var compiler = Project.Compiler.init(allocator, std.testing.io);
     try std.testing.expectError(error.InvalidSource, compiler.compile(input));
-    try std.testing.expectEqualStrings("structure 'Hidden' is private outside its module", compiler.diagnostic.?.message);
+    try std.testing.expectEqualStrings("structure 'Hidden' is module-visible and unavailable outside its module", compiler.diagnostic.?.message);
 }

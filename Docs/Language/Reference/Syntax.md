@@ -28,7 +28,8 @@ constraints.
 | C function binding | `let name = C.function<func(...) Return>(...)` |
 | Alias | `use Existing.Type as LocalName` |
 | Public declaration | `public ...` |
-| Package-internal declaration | `internal ...` |
+| Package-visible declaration | `package ...` |
+| Explicit module-visible declaration | `module ...` |
 | File-local declaration | `local ...` |
 | Optional | `Type?` |
 | Nested optional | `Type??` |

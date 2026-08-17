@@ -58,6 +58,8 @@ pub const TokenTag = enum {
     keyword_use,
     keyword_private,
     keyword_internal,
+    keyword_package,
+    keyword_module,
     keyword_local,
     keyword_protected,
     keyword_public,
@@ -655,6 +657,8 @@ fn keywordTag(lexeme: []const u8) ?TokenTag {
         .{ "use", TokenTag.keyword_use },
         .{ "private", TokenTag.keyword_private },
         .{ "internal", TokenTag.keyword_internal },
+        .{ "package", TokenTag.keyword_package },
+        .{ "module", TokenTag.keyword_module },
         .{ "local", TokenTag.keyword_local },
         .{ "protected", TokenTag.keyword_protected },
         .{ "public", TokenTag.keyword_public },
@@ -708,9 +712,11 @@ test "reserve extend keyword" {
 }
 
 test "reserve visibility keywords" {
-    var lexer = Lexer.init("private internal local protected public pub sub");
+    var lexer = Lexer.init("private internal package module local protected public pub sub");
     try std.testing.expectEqual(TokenTag.keyword_private, (try lexer.next()).tag);
     try std.testing.expectEqual(TokenTag.keyword_internal, (try lexer.next()).tag);
+    try std.testing.expectEqual(TokenTag.keyword_package, (try lexer.next()).tag);
+    try std.testing.expectEqual(TokenTag.keyword_module, (try lexer.next()).tag);
     try std.testing.expectEqual(TokenTag.keyword_local, (try lexer.next()).tag);
     try std.testing.expectEqual(TokenTag.keyword_protected, (try lexer.next()).tag);
     try std.testing.expectEqual(TokenTag.keyword_public, (try lexer.next()).tag);

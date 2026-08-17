@@ -7,7 +7,7 @@ struct Panel {
 }
 
 class Configuration {
-    public var text:str
+    var text:str
 }
 
 func read(value:str) str { return value }

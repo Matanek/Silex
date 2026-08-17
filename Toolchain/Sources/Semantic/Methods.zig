@@ -382,7 +382,7 @@ fn analyzeCallWithReceiver(
     if (receiver_structure.is_internal and self.owner_context != receiver_structure.owner) {
         const message = try std.fmt.allocPrint(
             self.allocator,
-            "members of internal structure '{s}' are unavailable outside its package",
+            "members of package-visible structure '{s}' are unavailable outside its package",
             .{receiver_structure.name},
         );
         return self.fail(call.name_position, message);
@@ -430,7 +430,7 @@ fn analyzeCallWithReceiver(
             const message = if (inaccessible_local)
                 try std.fmt.allocPrint(self.allocator, "method '{s}' is local to its source file", .{call.name})
             else if (inaccessible_internal)
-                try std.fmt.allocPrint(self.allocator, "method '{s}' is internal to its package", .{call.name})
+                try std.fmt.allocPrint(self.allocator, "method '{s}' is package-visible and unavailable outside its package", .{call.name})
             else
                 try std.fmt.allocPrint(self.allocator, "method '{s}' is private and unavailable here", .{call.name});
             return self.fail(call.name_position, message);
@@ -557,7 +557,7 @@ fn analyzeCallWithReceiver(
     const arguments_slice = try argument_ids.toOwnedSlice(self.allocator);
     const dispatchable = method.extension == null and class_receiver and !super_call and
         !(self.constructor_context != null and receiver_expression.value == .identifier and std.mem.eql(u8, receiver_expression.value.identifier, "self")) and
-        (method.is_public or method.is_protected);
+        !method.is_private;
     const implementations = if (dispatchable)
         try Inheritance.implementations(self, self.allocator, structure_index, method_index)
     else
@@ -772,7 +772,7 @@ fn analyzeNamedCall(
     const arguments_slice = try ids.toOwnedSlice(self.allocator);
     const dispatchable = method.extension == null and class_receiver and !super_call and
         !(self.constructor_context != null and receiver_expression.value == .identifier and std.mem.eql(u8, receiver_expression.value.identifier, "self")) and
-        (method.is_public or method.is_protected);
+        !method.is_private;
     const implementations = if (dispatchable)
         try Inheritance.implementations(self, self.allocator, structure_index, method_index)
     else

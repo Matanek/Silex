@@ -202,7 +202,8 @@ pub fn itemsAt(
         .module_declaration => try appendKeywords(allocator, &candidates, context, &.{
             .{ "use", "Silex module import" },
             .{ "public", "Silex visibility" },
-            .{ "internal", "Silex package visibility" },
+            .{ "package", "Silex package visibility" },
+            .{ "module", "Silex module visibility" },
             .{ "local", "Silex file visibility" },
             .{ "struct", "Silex value type declaration" },
             .{ "class", "Silex reference type declaration" },
@@ -215,9 +216,11 @@ pub fn itemsAt(
         }, 70),
         .structure_declaration => try appendKeywords(allocator, &candidates, context, &.{
             .{ "public", "Silex visibility" },
-            .{ "internal", "Silex package visibility" },
+            .{ "package", "Silex package visibility" },
+            .{ "module", "Silex module visibility" },
             .{ "local", "Silex file visibility" },
             .{ "private", "Silex type visibility" },
+            .{ "protected", "Silex descendant visibility" },
             .{ "let", "Silex immutable field" },
             .{ "var", "Silex mutable field" },
             .{ "init", "Silex value constructor" },
@@ -3064,7 +3067,7 @@ test "complete the first field of native structure and class initializers" {
     defer arena.deinit();
     const source =
         \\struct Error { let message:str }
-        \\class Failure { public let message:str }
+        \\class Failure { let message:str }
         \\struct Explicit {
         \\    let message:str
         \\    init(value:str) { self.message = value }
@@ -3174,8 +3177,8 @@ test "complete members of the original receiver in a cascade" {
     defer arena.deinit();
     const source =
         \\class Application {
-        \\    public func install() Application { return self }
-        \\    public func run() int { return 0 }
+        \\    func install() Application { return self }
+        \\    func run() int { return 0 }
         \\}
         \\func main() {
         \\    var app = Application()
@@ -3191,8 +3194,8 @@ test "complete members of the original receiver in a cascade" {
 
     const continued_source =
         \\class Application {
-        \\    public func install() Application { return self }
-        \\    public func run() int { return 0 }
+        \\    func install() Application { return self }
+        \\    func run() int { return 0 }
         \\}
         \\func main() {
         \\    var app = Application()
@@ -3215,8 +3218,8 @@ test "resume an outer cascade after a nested cascade argument" {
         \\}
         \\struct Plugin {}
         \\class Application {
-        \\    public func install(plugin:Plugin) Application { return self }
-        \\    public func run() int { return 0 }
+        \\    func install(plugin:Plugin) Application { return self }
+        \\    func run() int { return 0 }
         \\}
         \\func main() {
         \\    Application()
@@ -3345,7 +3348,7 @@ test "complete loop element members inside string interpolation" {
         \\struct Attribute { var key:str; var value:str }
         \\class Element {
         \\    var attributes:Attribute[]
-        \\    public func get_attributes() Attribute[] { return self.attributes }
+        \\    func get_attributes() Attribute[] { return self.attributes }
         \\}
         \\func format(e:Element) str {
         \\    var result = ""
@@ -3441,9 +3444,9 @@ test "complete an inline cascade" {
     const source =
         \\struct Tag {
         \\    private var hidden:int
-        \\    public var visible:int
+        \\    var visible:int
         \\    private func secret() {}
-        \\    public func show() {}
+        \\    func show() {}
         \\}
         \\func main() { var tag = Tag().. }
     ;
@@ -3697,7 +3700,7 @@ test "complete direct nested types from their declaring owner" {
     const source =
         \\struct Api {
         \\    struct Entry {}
-        \\    static class State { public static var count:int = 0 }
+        \\    static class State { static var count:int = 0 }
         \\}
         \\func main() { print(Api.) }
     ;
@@ -4304,8 +4307,8 @@ test "complete a contextual match method" {
     defer arena.deinit();
     const source =
         \\struct Regex {
-        \\    public func match(text:str) bool { return true }
-        \\    public func contains(text:str) bool { return true }
+        \\    func match(text:str) bool { return true }
+        \\    func contains(text:str) bool { return true }
         \\}
         \\func main() {
         \\    let regex = Regex()
@@ -4323,7 +4326,7 @@ test "hide reserved compiler hooks from local member completion" {
     defer arena.deinit();
     const source =
         \\class Application {
-        \\    internal func __silex_add_system() {}
+        \\    func __silex_add_system() {}
         \\    func add_system() {}
         \\}
         \\func main() { Application(). }
@@ -4440,8 +4443,10 @@ test "complete local declarations and members inside their file" {
     const helper_items = try itemsAt(arena.allocator(), source, helper_cursor, .invoked);
     try std.testing.expect(contains(helper_items, "helper"));
 
-    const internal_items = try itemsAt(arena.allocator(), "inte", "inte".len, .invoked);
-    try std.testing.expect(contains(internal_items, "internal"));
+    const package_items = try itemsAt(arena.allocator(), "pack", "pack".len, .invoked);
+    try std.testing.expect(contains(package_items, "package"));
+    const module_items = try itemsAt(arena.allocator(), "mod", "mod".len, .invoked);
+    try std.testing.expect(contains(module_items, "module"));
     const local_items = try itemsAt(arena.allocator(), "loc", "loc".len, .invoked);
     try std.testing.expect(contains(local_items, "local"));
 }

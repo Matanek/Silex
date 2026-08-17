@@ -57,13 +57,7 @@ fn validateOne(self: anytype, structure_index: usize, declaration: Ast.Structure
             });
             return self.fail(declaration.name_position, message);
         };
-        if (!implementation.is_public) {
-            const message = try std.fmt.allocPrint(self.allocator, "method '{s}' satisfying protocol '{s}' must be public", .{
-                implementation.name,
-                protocol.name,
-            });
-            return self.fail(implementation.name_position, message);
-        }
+        _ = implementation;
     }
 }
 

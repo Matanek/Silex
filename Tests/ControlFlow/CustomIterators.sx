@@ -11,10 +11,10 @@ struct NumberCursor {
 }
 
 class SharedCursor {
-    public var current:int
-    public let end:int
+    var current:int
+    let end:int
 
-    public func next() int? {
+    func next() int? {
         if self.current >= self.end { return null }
         let value = self.current
         self.current++

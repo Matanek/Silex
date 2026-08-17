@@ -801,7 +801,7 @@ test "callback arguments insert function and method references" {
         .sub_path = "Api.sx",
         .data =
         \\public class Application {
-        \\    public func add_system(schedule:int, callback:func()) Application { return self }
+        \\    func add_system(schedule:int, callback:func()) Application { return self }
         \\}
         ,
     });
@@ -847,7 +847,7 @@ test "callback arguments insert function and method references" {
     const method_source =
         \\use Api.Application
         \\func create_cube() {}
-        \\class Systems { public func rotate_entities() {} }
+        \\class Systems { func rotate_entities() {} }
         \\func main() {
         \\    Application()
         \\        ..add_system(schedule:0, callback:Systems.rot)
@@ -884,8 +884,8 @@ test "server resumes an imported outer cascade after a nested cascade" {
         .sub_path = "GFX/Module/Application.sx",
         .data =
         \\public class Application {
-        \\    public func install() Application { return self }
-        \\    public func run() int { return 0 }
+        \\    func install() Application { return self }
+        \\    func run() int { return 0 }
         \\}
         ,
     });
@@ -935,7 +935,7 @@ test "project completion exposes module children before accessible declarations"
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Module1.sx",
-        .data = "internal func inside() int { return 1 }",
+        .data = "package func inside() int { return 1 }",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Module1.SubModule.Foo.sx",

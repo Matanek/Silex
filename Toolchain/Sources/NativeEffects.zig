@@ -47,13 +47,13 @@ test "native recursive copy preserves detached graph topology" {
     const source =
         \\class Node {
         \\    private let secret:int
-        \\    public var next:Node? = null
-        \\    public init(secret:int) { self.secret = secret }
-        \\    public func value() int { return self.secret }
+        \\    var next:Node? = null
+        \\    init(secret:int) { self.secret = secret }
+        \\    func value() int { return self.secret }
         \\}
         \\class Special : Node {
-        \\    public init(secret:int) : super(secret) {}
-        \\    override public func value() int { return super.value() + 100 }
+        \\    init(secret:int) : super(secret) {}
+        \\    override func value() int { return super.value() + 100 }
         \\}
         \\struct Graph { var first:Node; var again:Node; var values:Node[] }
         \\func main() {
@@ -82,7 +82,7 @@ test "native class heap crosses allocation segments without corrupting objects" 
     defer arena.deinit();
     const allocator = arena.allocator();
     const source =
-        \\class Box { public let value:int }
+        \\class Box { let value:int }
         \\func main() {
         \\    var index = 0
         \\    while index < 2000 {
@@ -812,9 +812,9 @@ test "native field list iteration retains storage until replacement" {
     const allocator = arena.allocator();
     const source =
         \\class Values {
-        \\    public var items:int[]
-        \\    public init() { self.items = [1, 2, 3] }
-        \\    public func consume() {
+        \\    var items:int[]
+        \\    init() { self.items = [1, 2, 3] }
+        \\    func consume() {
         \\        for item in self.items { print(item) }
         \\        for item in self.items { print(item) }
         \\        self.items = []
@@ -1440,11 +1440,11 @@ test "native class identity matches the reference interpreter" {
     const source =
         \\class Counter {
         \\    private var value:int
-        \\    public init(start:int = 0) { self.value = start }
-        \\    public func increment() { self.value++ }
-        \\    public func current() int { return self.value }
+        \\    init(start:int = 0) { self.value = start }
+        \\    func increment() { self.value++ }
+        \\    func current() int { return self.value }
         \\}
-        \\struct Holder { public var counter:Counter }
+        \\struct Holder { var counter:Counter }
         \\func update(counter:Counter) Counter { counter.increment(); return counter }
         \\func main() {
         \\    var first = Counter()
@@ -1472,7 +1472,7 @@ test "native class parameter modes match the reference interpreter" {
     defer arena.deinit();
     const allocator = arena.allocator();
     const source =
-        \\class Counter { public var value:int }
+        \\class Counter { var value:int }
         \\func inspect(counter:@Counter) int { return counter.value }
         \\func modify(counter:Counter) { counter.value = 10 }
         \\func replace(counter:&Counter) { counter = Counter(value:20) }
@@ -1526,12 +1526,12 @@ test "native class inheritance matches the reference interpreter" {
     const source =
         \\class Entity {
         \\    protected var value:int
-        \\    public init(value:int) { self.value = value }
-        \\    public func current() int { return self.value }
+        \\    init(value:int) { self.value = value }
+        \\    func current() int { return self.value }
         \\}
         \\class Counter : Entity {
-        \\    public init(value:int) : super(value) {}
-        \\    public func increment() { self.value++ }
+        \\    init(value:int) : super(value) {}
+        \\    func increment() { self.value++ }
         \\}
         \\func base(value:Counter) Entity { return value }
         \\func main() {
@@ -1557,18 +1557,18 @@ test "native class overrides match the reference interpreter" {
     const source =
         \\class Entity {
         \\    protected var count:int = 0
-        \\    public func label() str { return "entity" }
-        \\    public func bump() { self.count++ }
-        \\    public func current() int { return self.count }
+        \\    func label() str { return "entity" }
+        \\    func bump() { self.count++ }
+        \\    func current() int { return self.count }
         \\}
         \\class Player : Entity {
-        \\    override public func label() str { return "$(super.label()) player" }
-        \\    override public func bump() { super.bump(); super.bump() }
+        \\    override func label() str { return "$(super.label()) player" }
+        \\    override func bump() { super.bump(); super.bump() }
         \\}
         \\class Observer : Entity {
-        \\    override public func bump() { print("observed") }
+        \\    override func bump() { print("observed") }
         \\}
-        \\class Captain : Player { override public func label() str { return "captain" } }
+        \\class Captain : Player { override func label() str { return "captain" } }
         \\func label(value:Entity) str { return value.label() }
         \\func bump(value:Entity) { value.bump() }
         \\func main() {
@@ -1596,8 +1596,8 @@ test "native static storage matches the reference interpreter" {
     const allocator = arena.allocator();
     const source =
         \\static class Counter {
-        \\    public static var total:int = 4
-        \\    public static func add(value:int) int { Counter.total += value; return Counter.total }
+        \\    static var total:int = 4
+        \\    static func add(value:int) int { Counter.total += value; return Counter.total }
         \\}
         \\func main() { print(Counter.total, " ", Counter.add(3), " ", Counter.total) }
     ;
@@ -1616,7 +1616,7 @@ test "native nested types match the reference interpreter" {
     const allocator = arena.allocator();
     const source =
         \\struct Api { struct Entry { let value:int } }
-        \\class Box { public class Item { public var value:int } }
+        \\class Box { class Item { var value:int } }
         \\func main() {
         \\    let entry = Api.Entry(value:20)
         \\    var item = Box.Item(value:22)
@@ -1640,12 +1640,12 @@ test "native class drop matches the reference interpreter" {
         \\struct Resource { let name:str; drop { print("resource ", self.name) } }
         \\class Base { drop { print("base") } }
         \\class Owner : Base {
-        \\    public let resource:Resource
-        \\    public init(name:str) : super() { self.resource = Resource(name:name) }
+        \\    let resource:Resource
+        \\    init(name:str) : super() { self.resource = Resource(name:name) }
         \\    drop { print("owner") }
         \\}
         \\class Tracer { drop { print("static") } }
-        \\static class Roots { public static var current:Tracer? = null }
+        \\static class Roots { static var current:Tracer? = null }
         \\func main() {
         \\    var owner = Owner("native")
         \\    if true { var alias = owner; print(alias.resource.name) }
@@ -1672,10 +1672,10 @@ test "native returned class collections survive for binding copies" {
         \\class Node {
         \\    var parent:Node?
         \\    var children:Node[]
-        \\    public init() { self.children = [] }
-        \\    public init(parent:Node) { self.parent = parent; self.children = []; parent.add(self) }
+        \\    init() { self.children = [] }
+        \\    init(parent:Node) { self.parent = parent; self.children = []; parent.add(self) }
         \\    protected func add(child:Node) { self.children.append(child) }
-        \\    public func get_children() Node[] { return self.children }
+        \\    func get_children() Node[] { return self.children }
         \\}
         \\func make() Node {
         \\    var root = Node()
@@ -1705,21 +1705,21 @@ test "native class cycles finalize once across direct list and protocol edges" {
     const allocator = arena.allocator();
     const source =
         \\class DirectNode {
-        \\    public let name:str
-        \\    public var next:DirectNode? = null
+        \\    let name:str
+        \\    var next:DirectNode? = null
         \\    drop { print("direct ", self.name) }
         \\}
         \\class CollectionNode {
-        \\    public let name:str
-        \\    public var links:CollectionNode[]
-        \\    public init(name:str) { self.name = name; self.links = [] }
+        \\    let name:str
+        \\    var links:CollectionNode[]
+        \\    init(name:str) { self.name = name; self.links = [] }
         \\    drop { print("collection ", self.name) }
         \\}
         \\protocol Link { func label() str }
         \\class ProtocolNode : Link {
-        \\    public let name:str
-        \\    public var next:Link? = null
-        \\    public func label() str { return self.name }
+        \\    let name:str
+        \\    var next:Link? = null
+        \\    func label() str { return self.name }
         \\    drop { print("protocol ", self.name) }
         \\}
         \\func direct_cycle() {
@@ -1790,14 +1790,14 @@ test "native generic classes match the reference interpreter" {
     const allocator = arena.allocator();
     const source =
         \\class Base<T> {
-        \\    public let value:T
-        \\    public init(value:T) { self.value = value }
-        \\    public func get() T { return self.value }
+        \\    let value:T
+        \\    init(value:T) { self.value = value }
+        \\    func get() T { return self.value }
         \\    drop { print("base") }
         \\}
         \\class Child<T> : Base<T> {
-        \\    public init(value:T) : super(value) {}
-        \\    override public func get() T { return self.value }
+        \\    init(value:T) : super(value) {}
+        \\    override func get() T { return self.value }
         \\    drop { print("child") }
         \\}
         \\func read(value:Base<int>) int { return value.get() }
@@ -1823,7 +1823,7 @@ test "native constrained generics match the reference interpreter" {
     const source =
         \\protocol Named { func name() str }
         \\struct Item : Named { func name() str { return "native" } }
-        \\class Entity : Named { public func name() str { return "class" } }
+        \\class Entity : Named { func name() str { return "class" } }
         \\func label<T : Named>(value:T) str { return value.name() }
         \\func main() { let item = Item(); var entity = Entity(); print(label(item), " ", label(entity)) }
     ;

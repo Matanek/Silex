@@ -5,17 +5,17 @@ Declare the data and operations that belong to an object:
 ```sx
 public class Player {
     private let name:str
-    public var health:int = 100
+    var health:int = 100
 
-    public init(name:str) {
+    init(name:str) {
         self.name = name
     }
 
-    public func damage(amount:int) {
+    func damage(amount:int) {
         self.health -= amount
     }
 
-    public func description() str {
+    func description() str {
         return "$(self.name): $(self.health)"
     }
 }
@@ -34,8 +34,8 @@ Without a custom constructor, initialize visible fields by name:
 
 ```sx
 class Position {
-    public var x:int
-    public var y:int
+    var x:int
+    var y:int
 }
 
 var position = Position(x:2, y:3)
@@ -45,10 +45,10 @@ Declare `init` when construction must establish an invariant:
 
 ```sx
 class Counter {
-    let minimum:int
-    public var value:int
+    private let minimum:int
+    var value:int
 
-    public init(minimum:int) {
+    init(minimum:int) {
         self.minimum = minimum
         self.value = minimum
     }
@@ -64,13 +64,13 @@ be initialized on every normal path before `self` escapes.
 
 ```sx
 class Counter {
-    public var value:int
+    var value:int
 
-    public func increment(amount:int = 1) {
+    func increment(amount:int = 1) {
         self.value += amount
     }
 
-    public func current() int {
+    func current() int {
         return self.value
     }
 }
@@ -85,18 +85,18 @@ trailing defaults like ordinary functions.
 
 ## Choose member visibility
 
-Class fields, constructors, and methods are private by default:
+Class fields, constructors, and methods inherit the class visibility:
 
 ```sx
 public class Session {
     private let token:str
     local var requests:int
 
-    public init(token:str) {
+    init(token:str) {
         self.token = token
     }
 
-    public func text() str {
+    func text() str {
         return self.token
     }
 }
@@ -104,19 +104,21 @@ public class Session {
 
 - `public` exposes a member through the class API.
 - `protected` exposes it to the class and its descendants.
-- `internal` exposes it to the package implementation.
+- `package` exposes it to the package implementation.
+- `module` exposes it to the logical module.
 - `local` restricts it to the exact source file.
-- `private` states the default explicitly.
+- `private` restricts a member to its declaring type.
 
-The class visibility always caps the visibility of its members.
+The class visibility always caps the visibility of its members. A modifier may
+restrict that boundary but cannot enlarge it.
 
 ## Add static members
 
 ```sx
 class Player {
-    public static let maximum_health:int = 100
+    static let maximum_health:int = 100
 
-    public static func default_health() int {
+    static func default_health() int {
         return Player.maximum_health
     }
 }
@@ -136,9 +138,9 @@ Use `static class` when the type contains no instances:
 
 ```sx
 public static class Tasks {
-    static var submitted:int
+    private static var submitted:int
 
-    public static func submit() {
+    static func submit() {
         Tasks.submitted++
     }
 }
@@ -151,17 +153,17 @@ or `drop`.
 
 ```sx
 class Entity {
-    public let position:int
+    let position:int
 
-    public init(position:int) {
+    init(position:int) {
         self.position = position
     }
 }
 
 class Player:Entity {
-    public let name:str
+    let name:str
 
-    public init(name:str, position:int):super(position) {
+    init(name:str, position:int):super(position) {
         self.name = name
     }
 }
@@ -174,22 +176,22 @@ Omitting `:super(...)` is equivalent to `:super()`.
 
 ```sx
 class Entity {
-    public func update() {
+    func update() {
         print("entity")
     }
 }
 
 class Player:Entity {
-    override public func update() {
+    override func update() {
         super.update()
         print("player")
     }
 }
 ```
 
-Public and protected instance methods may be overridden. Overload selection
-uses the receiver's visible type; the selected method dispatches on the
-instance's real class. Constructors, private methods, static methods, and
+Every inherited non-private instance method may be overridden. Overload
+selection uses the receiver's visible type; the selected method dispatches on
+the instance's real class. Constructors, private methods, static methods, and
 extension methods are not virtual.
 
 Receiver mutation belongs to the inherited method contract. An override cannot
@@ -228,7 +230,7 @@ explicit `super` call.
 class Box<T> {
     let value:T
 
-    public init(value:T) {
+    init(value:T) {
         self.value = value
     }
 }

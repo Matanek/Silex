@@ -22,10 +22,10 @@ fn expectCompileError(source: []const u8, message: []const u8) !void {
 test "classes preserve shared identity through transport and containers" {
     const output = try run(
         \\class Player {
-        \\    public var health:int = 100
-        \\    public func damage(amount:int) { self.health -= amount }
+        \\    var health:int = 100
+        \\    func damage(amount:int) { self.health -= amount }
         \\}
-        \\struct Holder { public var player:Player }
+        \\struct Holder { var player:Player }
         \\func touch(player:Player) Player { player.damage(1); return player }
         \\func health(player:Player?) int {
         \\    if var present = player { return present.health }
@@ -53,8 +53,8 @@ test "classes preserve shared identity through transport and containers" {
 test "class parameter modes separate instance mutation observation and reference replacement" {
     const output = try run(
         \\class Counter {
-        \\    public var value:int
-        \\    public func increment() { self.value++ }
+        \\    var value:int
+        \\    func increment() { self.value++ }
         \\}
         \\struct Holder { var counter:Counter }
         \\func inspect(counter:@Counter) int { return counter.value }
@@ -83,30 +83,30 @@ test "class parameter modes separate instance mutation observation and reference
 
 test "read-reference class parameters reject direct transitive and dynamic mutation" {
     try expectCompileError(
-        "class Counter { public var value:int } func change(counter:@Counter) { counter.value = 1 } func main() {}",
+        "class Counter { var value:int } func change(counter:@Counter) { counter.value = 1 } func main() {}",
         "cannot mutate through read-reference parameter 'counter'",
     );
     try expectCompileError(
-        "class Counter { public var value:int; public func increment() { self.value++ } } func change(counter:@Counter) { counter.increment() } func main() {}",
+        "class Counter { var value:int; func increment() { self.value++ } } func change(counter:@Counter) { counter.increment() } func main() {}",
         "mutating method 'increment' cannot be called through a read reference",
     );
     try expectCompileError(
-        "class Counter { public var value:int; public func increment() { self.value++ } } struct Holder { var counter:Counter } func change(holder:@Holder) { holder.counter.increment() } func main() {}",
+        "class Counter { var value:int; func increment() { self.value++ } } struct Holder { var counter:Counter } func change(holder:@Holder) { holder.counter.increment() } func main() {}",
         "mutating method 'increment' cannot be called through a read reference",
     );
     try expectCompileError(
-        "class Counter { public var value:int } func conflict(read:@Counter, write:Counter) { write.value = 1 } func main() { var value = Counter(value:0); conflict(value, value) }",
+        "class Counter { var value:int } func conflict(read:@Counter, write:Counter) { write.value = 1 } func main() { var value = Counter(value:0); conflict(value, value) }",
         "cannot pass 'value' as both a read reference and a mutation-capable class value",
     );
     try expectCompileError(
-        "class Base { public func inspect() {} } class Child : Base { public var value:int = 0; override public func inspect() { self.value++ } } func main() {}",
+        "class Base { func inspect() {} } class Child : Base { var value:int = 0; override func inspect() { self.value++ } } func main() {}",
         "an override cannot introduce receiver mutation",
     );
 }
 
 test "classes allow recursive optional links" {
     const output = try run(
-        \\class Node { public var value:int; public var next:Node? = null }
+        \\class Node { var value:int; var next:Node? = null }
         \\func value(node:Node?) int {
         \\    if var present = node { return present.value }
         \\    return 0
@@ -145,12 +145,12 @@ test "class constructors establish private invariants and overloads" {
         \\class Session {
         \\    let token:str
         \\    private var uses:int = 0
-        \\    public init(value:str) { self.token = value }
-        \\    public init(value:int, suffix:str = "!") { self.token = "$(value)$(suffix)" }
-        \\    public func text() str { return self.token }
+        \\    init(value:str) { self.token = value }
+        \\    init(value:int, suffix:str = "!") { self.token = "$(value)$(suffix)" }
+        \\    func text() str { return self.token }
         \\    local func mark() { self.uses++ }
         \\}
-        \\class Settings { var hidden:int = 1; public var visible:int }
+        \\class Settings { var hidden:int = 1; var visible:int }
         \\func main() {
         \\    var first = Session("abc")
         \\    var second = Session(7)
@@ -166,14 +166,14 @@ test "class constructors establish private invariants and overloads" {
 test "class constructor parameters survive when retained by the new instance" {
     const output = try run(
         \\class Token {
-        \\    public let label:str
+        \\    let label:str
         \\    drop { print("drop ", self.label) }
         \\}
         \\struct Lifetime { var token:Token? = null }
         \\class Owner {
         \\    private var lifetime:Lifetime = Lifetime()
-        \\    public init(token:Token) { self.lifetime = Lifetime(token:token) }
-        \\    public func label() str {
+        \\    init(token:Token) { self.lifetime = Lifetime(token:token) }
+        \\    func label() str {
         \\        if var token = self.lifetime.token { return token.label }
         \\        return "missing"
         \\    }
@@ -191,11 +191,11 @@ test "class constructor parameters survive when retained by the new instance" {
 test "constructed values transfer nested class roots through bindings returns and arguments" {
     const output = try run(
         \\class Token {
-        \\    public let label:str
+        \\    let label:str
         \\    drop { print("drop ", self.label) }
         \\}
         \\struct Holder { var token:Token }
-        \\class Sink { public func accept(holder:Holder) {} }
+        \\class Sink { func accept(holder:Holder) {} }
         \\func wrap(token:Token) Holder { return Holder(token:token) }
         \\func accept(holder:Holder) {}
         \\func main() {
@@ -224,11 +224,7 @@ test "conditional binding consumes a transferred optional class root" {
     try std.testing.expectEqualStrings("true\ndrop\n", output);
 }
 
-test "class visibility closes construction and private state" {
-    try expectCompileError(
-        "class Vault { init() {} } func main() { var value = Vault() }",
-        "constructor of 'Vault' is unavailable here",
-    );
+test "class visibility inherits its container and explicit restrictions remain closed" {
     try expectCompileError(
         "class Vault { private var secret:int = 1 } func main() { var value = Vault(); print(value.secret) }",
         "field 'secret' is private and unavailable here",
@@ -238,11 +234,11 @@ test "class visibility closes construction and private state" {
         "field 'value' is protected and unavailable here",
     );
     try expectCompileError(
-        "class Settings { private var hidden:int = 1; public var visible:int } func main() { var value = Settings(hidden:2, visible:3) }",
+        "class Settings { private var hidden:int = 1; var visible:int } func main() { var value = Settings(hidden:2, visible:3) }",
         "field 'hidden' is private and unavailable here",
     );
     try expectCompileError(
-        "class Settings { private var hidden:int; public var visible:int } func main() { var value = Settings(visible:3) }",
+        "class Settings { private var hidden:int; var visible:int } func main() { var value = Settings(visible:3) }",
         "private field 'hidden' requires a default or a constructor",
     );
 }
@@ -251,14 +247,14 @@ test "derived classes construct their base and preserve identity through upcasts
     const output = try run(
         \\class Entity {
         \\    protected var position:int
-        \\    public init(position:int) { self.position = position }
-        \\    public func current() int { return self.position }
+        \\    init(position:int) { self.position = position }
+        \\    func current() int { return self.position }
         \\}
         \\class Player : Entity {
         \\    let name:str
-        \\    public init(name:str, position:int) : super(position) { self.name = name }
-        \\    public func shift() { self.position += 1 }
-        \\    public func label() str { return self.name }
+        \\    init(name:str, position:int) : super(position) { self.name = name }
+        \\    func shift() { self.position += 1 }
+        \\    func label() str { return self.name }
         \\}
         \\func entity(player:Player) Entity { return player }
         \\func position(value:Entity) int { return value.current() }
@@ -298,16 +294,16 @@ test "class inheritance rejects invalid bases, cycles, and inherited field colli
 test "overrides dispatch on the dynamic class and super stays direct" {
     const output = try run(
         \\class Entity {
-        \\    public func label() str { return "entity" }
-        \\    public func code(value:int) str { return "base $(value)" }
-        \\    public func code(value:str) str { return "text $(value)" }
+        \\    func label() str { return "entity" }
+        \\    func code(value:int) str { return "base $(value)" }
+        \\    func code(value:str) str { return "text $(value)" }
         \\}
         \\class Player : Entity {
-        \\    override public func label() str { return "$(super.label()) player" }
-        \\    override public func code(value:int) str { return "player $(value)" }
+        \\    override func label() str { return "$(super.label()) player" }
+        \\    override func code(value:int) str { return "player $(value)" }
         \\}
         \\class Captain : Player {
-        \\    override public func label() str { return "captain" }
+        \\    override func label() str { return "captain" }
         \\}
         \\func label(value:Entity) str { return value.label() }
         \\func code(value:Entity) str { return value.code(7) }
@@ -327,36 +323,42 @@ test "overrides dispatch on the dynamic class and super stays direct" {
 
 test "override declarations preserve inherited signatures and visibility" {
     try expectCompileError(
-        "class Base { public func value() int { return 1 } } class Child : Base { public func value() int { return 2 } } func main() {}",
+        "class Base { func value() int { return 1 } } class Child : Base { func value() int { return 2 } } func main() {}",
         "an overriding method must declare 'override'",
     );
     try expectCompileError(
-        "class Base {} class Child : Base { override public func value() int { return 2 } } func main() {}",
+        "class Base {} class Child : Base { override func value() int { return 2 } } func main() {}",
         "override does not match an inherited method signature",
     );
     try expectCompileError(
-        "class Base { public func value() int { return 1 } } class Child : Base { override protected func value() int { return 2 } } func main() {}",
-        "an override cannot reduce public visibility",
-    );
-    try expectCompileError(
-        "class Base { public func value() int { return 1 } } class Child : Base { override public func value() str { return \"x\" } } func main() {}",
+        "class Base { func value() int { return 1 } } class Child : Base { override func value() str { return \"x\" } } func main() {}",
         "override does not match an inherited method signature",
     );
+}
+
+test "override implementations keep the concrete type visibility" {
+    const output = try run(
+        \\public class Base { func value() int { return 1 } }
+        \\package class Child : Base { override func value() int { return 42 } }
+        \\func main() { var value:Base = Child(); print(value.value()) }
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("42\n", output);
 }
 
 test "mutating overrides and constructor calls bind at the required phase" {
     const output = try run(
         \\class Base {
         \\    protected var value:int = 0
-        \\    public init() { self.trace() }
-        \\    public func trace() { print("base init") }
-        \\    public func bump() { self.value++ }
-        \\    public func current() int { return self.value }
+        \\    init() { self.trace() }
+        \\    func trace() { print("base init") }
+        \\    func bump() { self.value++ }
+        \\    func current() int { return self.value }
         \\}
         \\class Child : Base {
-        \\    public init() : super() { self.trace() }
-        \\    override public func trace() { print("child init") }
-        \\    override public func bump() { super.bump(); super.bump() }
+        \\    init() : super() { self.trace() }
+        \\    override func trace() { print("child init") }
+        \\    override func bump() { super.bump(); super.bump() }
         \\}
         \\func bump(value:Base) { value.bump() }
         \\func main() {
@@ -374,12 +376,12 @@ test "nonmutating override bodies preserve a mutating receiver contract" {
     const output = try run(
         \\class Base {
         \\    protected var value:int = 0
-        \\    public func hook() { self.value++ }
-        \\    public func run() { self.hook(); self.value++ }
-        \\    public func current() int { return self.value }
+        \\    func hook() { self.value++ }
+        \\    func run() { self.hook(); self.value++ }
+        \\    func current() int { return self.value }
         \\}
         \\class Child : Base {
-        \\    override public func hook() { print("child") }
+        \\    override func hook() { print("child") }
         \\}
         \\func main() {
         \\    var value:Base = Child()
@@ -404,9 +406,9 @@ test "static members use type-qualified shared storage" {
         \\    }
         \\}
         \\class Token {
-        \\    public var value:int
+        \\    var value:int
         \\    private static func seed() int { return 7 }
-        \\    public static func create() Token { return Token(value:Token.seed()) }
+        \\    static func create() Token { return Token(value:Token.seed()) }
         \\}
         \\func main() {
         \\    print(Counter.value(), " ", Counter.add(Counter.step), " ", Counter().value())
@@ -504,10 +506,10 @@ test "static members reject instance selection and immutable assignment" {
 test "static classes group state without creating instances" {
     const output = try run(
         \\static class Tasks {
-        \\    public static var submitted:int = 0
+        \\    static var submitted:int = 0
         \\    private static func next() int { return Tasks.submitted + 1 }
-        \\    public static func submit() { Tasks.submitted = Tasks.next() }
-        \\    public static func identity<T>(value:T) T { return value }
+        \\    static func submit() { Tasks.submitted = Tasks.next() }
+        \\    static func identity<T>(value:T) T { return value }
         \\}
         \\func main() {
         \\    Tasks.submit()
@@ -555,12 +557,12 @@ test "nested nominal types qualify without capturing an owner" {
         \\struct Api {
         \\    struct Entry { let value:int }
         \\    static class State {
-        \\        public static var count:int = 0
-        \\        public static func bump() { State.count++ }
+        \\        static var count:int = 0
+        \\        static func bump() { State.count++ }
         \\    }
         \\}
         \\class Container {
-        \\    public class Item { public let label:str }
+        \\    class Item { let label:str }
         \\}
         \\func main() {
         \\    let entry:Api.Entry = Api.Entry(value:7)
@@ -581,8 +583,8 @@ test "nested families share private access without leaking private types" {
         \\        private let value:int
         \\        func shifted() int { return self.value + Vault.seed }
         \\    }
-        \\    public static func key() Key { return Key(value:2) }
-        \\    public static func read(key:Key) int { return key.shifted() }
+        \\    static func key() Key { return Key(value:2) }
+        \\    static func read(key:Key) int { return key.shifted() }
         \\}
         \\func main() { var key = Vault.key(); print(Vault.read(key)) }
     );
@@ -590,7 +592,7 @@ test "nested families share private access without leaking private types" {
     try std.testing.expectEqualStrings("42\n", output);
 
     try expectCompileError(
-        "class Vault { class Key {} } func main() { var key = Vault.Key() }",
+        "class Vault { private class Key {} } func main() { var key = Vault.Key() }",
         "type 'Vault.Key' is unavailable in this context",
     );
     try expectCompileError(
@@ -601,17 +603,17 @@ test "nested families share private access without leaking private types" {
 
 test "protected nested classes require qualification and are not inherited" {
     const output = try run(
-        \\class Base { protected class Token { public let value:int } }
+        \\class Base { protected class Token { let value:int } }
         \\class Child : Base {
-        \\    public static func token() Base.Token { return Base.Token(value:9) }
+        \\    static func token() int { return Base.Token(value:9).value }
         \\}
-        \\func main() { var token = Child.token(); print(token.value) }
+        \\func main() { print(Child.token()) }
     );
     defer std.testing.allocator.free(output);
     try std.testing.expectEqualStrings("9\n", output);
 
     try expectCompileError(
-        "class Base { public class Token {} } class Child : Base { public static func token() Token { return Token() } } func main() {}",
+        "class Base { class Token {} } class Child : Base { static func token() Token { return Token() } } func main() {}",
         "unknown function 'Token'",
     );
 }
@@ -619,7 +621,7 @@ test "protected nested classes require qualification and are not inherited" {
 test "class drop waits for the last scoped alias and runs once" {
     const output = try run(
         \\class Tracer {
-        \\    public let label:str
+        \\    let label:str
         \\    drop { print("drop ", self.label) }
         \\}
         \\func main() {
@@ -634,7 +636,7 @@ test "class drop waits for the last scoped alias and runs once" {
 
 test "replacing the last class root drops the old instance immediately" {
     const output = try run(
-        \\class Tracer { public let label:str; drop { print("drop ", self.label) } }
+        \\class Tracer { let label:str; drop { print("drop ", self.label) } }
         \\func main() {
         \\    var value = Tracer(label:"old")
         \\    value = Tracer(label:"new")
@@ -647,8 +649,8 @@ test "replacing the last class root drops the old instance immediately" {
 
 test "resetting a static optional root releases its class graph" {
     const output = try run(
-        \\class Tracer { public let label:str; drop { print("drop ", self.label) } }
-        \\static class Roots { public static var current:Tracer? = null }
+        \\class Tracer { let label:str; drop { print("drop ", self.label) } }
+        \\static class Roots { static var current:Tracer? = null }
         \\func main() {
         \\    Roots.current = Tracer(label:"shared")
         \\    print("held")
@@ -666,7 +668,7 @@ test "class drop follows derived base and owned field order" {
         \\class Base { drop { print("base") } }
         \\class Owner : Base {
         \\    let resource:Resource
-        \\    public init(name:str) : super() { self.resource = Resource(name:name) }
+        \\    init(name:str) : super() { self.resource = Resource(name:name) }
         \\    drop { print("owner") }
         \\}
         \\func main() { var owner = Owner("file") }
@@ -688,8 +690,8 @@ test "class drop follows the dynamic type after an upcast" {
 test "last released root finalizes its unreachable cycle once while the graph is readable" {
     const output = try run(
         \\class Node {
-        \\    public let name:str
-        \\    public var next:Node? = null
+        \\    let name:str
+        \\    var next:Node? = null
         \\    drop { print("drop ", self.name, " linked=", self.next != null) }
         \\}
         \\func main() {
@@ -706,9 +708,9 @@ test "last released root finalizes its unreachable cycle once while the graph is
 test "unreachable cycles crossing dynamic collections finalize every class once" {
     const output = try run(
         \\class Node {
-        \\    public let name:str
-        \\    public var links:Node[]
-        \\    public init(name:str) { self.name = name; self.links = [] }
+        \\    let name:str
+        \\    var links:Node[]
+        \\    init(name:str) { self.name = name; self.links = [] }
         \\    drop { print("drop ", self.name, " links=", self.links.count()) }
         \\}
         \\func main() {
@@ -726,9 +728,9 @@ test "unreachable cycles crossing protocol values finalize every class once" {
     const output = try run(
         \\protocol Link { func label() str }
         \\class Node : Link {
-        \\    public let name:str
-        \\    public var next:Link? = null
-        \\    public func label() str { return self.name }
+        \\    let name:str
+        \\    var next:Link? = null
+        \\    func label() str { return self.name }
         \\    drop { print("drop ", self.name) }
         \\}
         \\func main() {

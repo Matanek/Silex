@@ -9,7 +9,7 @@ struct Theme {
 }
 
 class Settings {
-    public var background:Color
+    var background:Color
 }
 
 func red(color:Color) uint8 { return color.red }

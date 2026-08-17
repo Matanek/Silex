@@ -516,7 +516,7 @@ test "worker-safe job analysis rejects an unclassified external boundary" {
         \\use Interop.MacOS
         \\let process_id = C.function<func() int32>(library:MacOS.lib_system, name:"getpid")
         \\protocol Job { func execute() }
-        \\class Executor { public func submit<T:Job>(job:T) {} }
+        \\class Executor { func submit<T:Job>(job:T) {} }
         \\struct ExternalJob:Job { func execute() { process_id() } }
         \\func main() { var executor = Executor(); executor.submit(ExternalJob()) }
     ,

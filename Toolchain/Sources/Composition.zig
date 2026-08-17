@@ -186,7 +186,7 @@ test "load qualified package modules without use through principal module files"
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Math/Module/Vec2.sx",
-        .data = "public struct Vec2 { let x:int; let y:int; public init(x:int, y:int) { self.x = x; self.y = y } }",
+        .data = "public struct Vec2 { let x:int; let y:int; init(x:int, y:int) { self.x = x; self.y = y } }",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Math/Module/Mode.sx",

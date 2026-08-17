@@ -6,28 +6,28 @@ const Lower = @import("Arm64/Lower.zig");
 
 const resources_source =
     \\public intrinsic class Resources {
-    \\    public func insert<T>(value:T)
-    \\    internal func retain_class<T>(value:T)
-    \\    public func has<T>() bool
-    \\    public func get<T>() @T
-    \\    public func get_mut<T>() &T
-    \\    public func try_get<T>() @T?
-    \\    public func try_get_mut<T>() &T?
-    \\    public func remove<T>() T?
-    \\    public func clear()
+    \\    func insert<T>(value:T)
+    \\    package func retain_class<T>(value:T)
+    \\    func has<T>() bool
+    \\    func get<T>() @T
+    \\    func get_mut<T>() &T
+    \\    func try_get<T>() @T?
+    \\    func try_get_mut<T>() &T?
+    \\    func remove<T>() T?
+    \\    func clear()
     \\}
 ;
 
 const application_declaration =
     \\public class Application {
     \\    private var store:Resources
-    \\    public init() { self.store = Resources() }
-    \\    public func resources() Resources { return self.store }
-    \\    public func add_system(schedule:int, callback:func(Application)) { callback(self) }
-    \\    public func add_system<System>(schedule:int, callback:System) { panic("unspecialized system") }
-    \\    public func add_after_system(schedule:int, callback:func(Application)) { callback(self) }
-    \\    public func add_after_system<System>(schedule:int, callback:System) { panic("unspecialized system") }
-    \\    internal func __silex_add_system(schedule:int, callback:func(Application, int), after:bool, reads:str[], writes:str[], flags:uint) { callback(self, 0) }
+    \\    init() { self.store = Resources() }
+    \\    func resources() Resources { return self.store }
+    \\    func add_system(schedule:int, callback:func(Application)) { callback(self) }
+    \\    func add_system<System>(schedule:int, callback:System) { panic("unspecialized system") }
+    \\    func add_after_system(schedule:int, callback:func(Application)) { callback(self) }
+    \\    func add_after_system<System>(schedule:int, callback:System) { panic("unspecialized system") }
+    \\    package func __silex_add_system(schedule:int, callback:func(Application, int), after:bool, reads:str[], writes:str[], flags:uint) { callback(self, 0) }
     \\    drop { self.store.clear() }
     \\}
 ;
@@ -59,15 +59,15 @@ test "typed resources require the exact compiler-provided intrinsic contract" {
         .sub_path = "GFX/Module/Application.sx",
         .data =
         \\public intrinsic class Resources {
-        \\    public func insert<T>(value:T) { panic("placeholder") }
-        \\    internal func retain_class<T>(value:T)
-        \\    public func has<T>() bool
-        \\    public func get<T>() @T
-        \\    public func get_mut<T>() &T
-        \\    public func try_get<T>() @T?
-        \\    public func try_get_mut<T>() &T?
-        \\    public func remove<T>() T?
-        \\    public func clear()
+        \\    func insert<T>(value:T) { panic("placeholder") }
+        \\    package func retain_class<T>(value:T)
+        \\    func has<T>() bool
+        \\    func get<T>() @T
+        \\    func get_mut<T>() &T
+        \\    func try_get<T>() @T?
+        \\    func try_get_mut<T>() &T?
+        \\    func remove<T>() T?
+        \\    func clear()
         \\}
         ++ application_declaration,
     });
@@ -98,7 +98,7 @@ test "reject intrinsic classes without a compiler implementation" {
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Demo/Module/Magic.sx",
-        .data = "public intrinsic class Magic { public func run() }",
+        .data = "public intrinsic class Magic { func run() }",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Demo/Smokes/Main.sx",
@@ -124,10 +124,10 @@ test "typed application resources isolate canonical concrete types and destroy i
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Module/Model.sx",
         .data =
-        \\public struct State { public var value:int }
-        \\public struct Cache<T> { public let value:T }
-        \\public struct First { public let value:int; public init(value:int) { self.value = value } drop { print("first ", self.value) } }
-        \\public struct Second { public let value:int; public init(value:int) { self.value = value } drop { print("second ", self.value) } }
+        \\public struct State { var value:int }
+        \\public struct Cache<T> { let value:T }
+        \\public struct First { let value:int; init(value:int) { self.value = value } drop { print("first ", self.value) } }
+        \\public struct Second { let value:int; init(value:int) { self.value = value } drop { print("second ", self.value) } }
         ,
     });
     try temporary.dir.writeFile(std.testing.io, .{
@@ -303,15 +303,15 @@ test "class instance methods register as stateful system callbacks" {
         \\struct Counter { var value:int }
         \\class Game {
         \\    var updates:int
-        \\    public init() { self.updates = 0 }
-        \\    public func build(application:Application) {
+        \\    init() { self.updates = 0 }
+        \\    func build(application:Application) {
         \\        application.add_system(0, Game.update)
         \\    }
         \\    func update(counter:&Counter) {
         \\        self.updates++
         \\        counter.value += 2
         \\    }
-        \\    public func update_count() int { return self.updates }
+        \\    func update_count() int { return self.updates }
         \\}
         \\func main() {
         \\    var application = Application()
@@ -375,14 +375,14 @@ test "structure methods register system callbacks declared later in their module
         .data = resources_source ++
             \\public class Application {
             \\    private var store:Resources
-            \\    public init() { self.store = Resources() }
-            \\    public func resources() Resources { return self.store }
-            \\    public func add_system(schedule:int, callback:func(Application)) { callback(self) }
-            \\    public func add_system<System>(schedule:int, callback:System) { panic("unspecialized system") }
-            \\    public func add_after_system(schedule:int, callback:func(Application)) { callback(self) }
-            \\    public func add_after_system<System>(schedule:int, callback:System) { panic("unspecialized system") }
-            \\    internal func __silex_add_system(schedule:int, callback:func(Application, int), after:bool, reads:str[], writes:str[], flags:uint) { callback(self, 0) }
-            \\    public func run() { self.add_after_system(0, flush) }
+            \\    init() { self.store = Resources() }
+            \\    func resources() Resources { return self.store }
+            \\    func add_system(schedule:int, callback:func(Application)) { callback(self) }
+            \\    func add_system<System>(schedule:int, callback:System) { panic("unspecialized system") }
+            \\    func add_after_system(schedule:int, callback:func(Application)) { callback(self) }
+            \\    func add_after_system<System>(schedule:int, callback:System) { panic("unspecialized system") }
+            \\    package func __silex_add_system(schedule:int, callback:func(Application, int), after:bool, reads:str[], writes:str[], flags:uint) { callback(self, 0) }
+            \\    func run() { self.add_after_system(0, flush) }
             \\    drop { self.store.clear() }
             \\}
             \\func flush() { print("flushed") }
@@ -421,18 +421,18 @@ test "query iteration releases its compiler-owned component list on every exit" 
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Module/ECS/Entity.sx",
-        .data = "public struct Entity { public let value:int }",
+        .data = "public struct Entity { let value:int }",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Module/ECS/World.sx",
         .data =
         \\use GFX.ECS.Entity.Entity
         \\public class World {
-        \\    internal func query_archetype_count() int { return 0 }
-        \\    internal func query_matches(archetype:int, required:@int[]) bool { return false }
-        \\    internal func query_entity(archetype:int, row:int) Entity { return Entity(value:0) }
-        \\    internal func query_row_start(archetype:int, required:@int[], range_start:int) int { return 0 }
-        \\    internal func query_row_end(archetype:int, required:@int[], range_end:int) int { return 0 }
+        \\    package func query_archetype_count() int { return 0 }
+        \\    package func query_matches(archetype:int, required:@int[]) bool { return false }
+        \\    package func query_entity(archetype:int, row:int) Entity { return Entity(value:0) }
+        \\    package func query_row_start(archetype:int, required:@int[], range_start:int) int { return 0 }
+        \\    package func query_row_end(archetype:int, required:@int[], range_end:int) int { return 0 }
         \\}
         ,
     });
@@ -441,11 +441,11 @@ test "query iteration releases its compiler-owned component list on every exit" 
         .data =
         \\use GFX.ECS.World.World
         \\public class Query<Pattern> {
-        \\    internal var world:World
-        \\    internal let range_start:int
-        \\    internal let range_end:int
-        \\    internal init(world:World) { self.world = world; self.range_start = 0; self.range_end = -1 }
-        \\    internal init(world:World, range_start:int, range_end:int) { self.world = world; self.range_start = range_start; self.range_end = range_end }
+        \\    package var world:World
+        \\    package let range_start:int
+        \\    package let range_end:int
+        \\    package init(world:World) { self.world = world; self.range_start = 0; self.range_end = -1 }
+        \\    package init(world:World, range_start:int, range_end:int) { self.world = world; self.range_start = range_start; self.range_end = range_end }
         \\}
         ,
     });
@@ -484,7 +484,7 @@ test "system callbacks keep their declaring module identity" {
         .sub_path = "GFX/Module/Feature.sx",
         .data =
         \\use GFX.Application
-        \\public struct State { public var value:int }
+        \\public struct State { var value:int }
         \\func update(state:&State) { state.value += 2 }
         \\public func install(application:Application) { application.add_system(0, update) }
         ,

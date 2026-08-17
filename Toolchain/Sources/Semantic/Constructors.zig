@@ -204,7 +204,7 @@ pub fn analyzeCall(
             const message = if (inaccessible_local)
                 try std.fmt.allocPrint(self.allocator, "constructor of '{s}' is local to its source file", .{declaration.name})
             else if (inaccessible_internal)
-                try std.fmt.allocPrint(self.allocator, "constructor of '{s}' is internal to its package", .{declaration.name})
+                try std.fmt.allocPrint(self.allocator, "constructor of '{s}' is package-visible and unavailable outside its package", .{declaration.name})
             else
                 try std.fmt.allocPrint(self.allocator, "constructor of '{s}' is unavailable here", .{declaration.name});
             return self.fail(call.name_position, message);

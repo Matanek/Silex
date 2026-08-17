@@ -62,7 +62,8 @@ pub fn parseType(self: anytype) !Ast.Type {
                 if (self.current.tag == .right_parenthesis) break;
             };
             try self.expect(.right_parenthesis, "expected ')' after function parameter types");
-            const has_return_type = startsType(self.current.tag) or self.current.tag == .at or self.current.tag == .amp;
+            const has_return_type = self.current.position.line == self.previous.position.line and
+                (startsType(self.current.tag) or self.current.tag == .at or self.current.tag == .amp);
             const return_mode: Ast.Parameter.Mode = if (!has_return_type) .value else switch (self.current.tag) {
                 .at => mode: {
                     try self.advance();

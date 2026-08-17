@@ -1,5 +1,5 @@
 class CollectionOwner {
-    public var values:int[]
+    var values:int[]
 }
 
 enum CollectionOutcome { success(int[]); failure }

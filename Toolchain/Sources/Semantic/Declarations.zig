@@ -137,7 +137,7 @@ fn validateInheritance(self: anytype, index: usize, states: []StructureState) !v
             return self.fail(declaration.base_position, "local base class is unavailable outside its source file");
         }
         if (base_declaration.is_internal and base_declaration.owner != declaration.owner) {
-            return self.fail(declaration.base_position, "internal base class is unavailable outside its package");
+            return self.fail(declaration.base_position, "package-visible base class is unavailable outside its package");
         }
         try validateInheritance(self, base_index, states);
         const inherited = self.structures[base_index].fields;

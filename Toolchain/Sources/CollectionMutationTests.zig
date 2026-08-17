@@ -84,9 +84,9 @@ test "preserve edge ownership while replacing a class-owned list" {
     var frontend = Frontend.Frontend.init(allocator);
     const compilation = try frontend.compile(
         \\class Values {
-        \\    public var items:int[]
-        \\    public init() { self.items = [1, 2, 3] }
-        \\    public func reorder() { self.items.swap(0, 2) }
+        \\    var items:int[]
+        \\    init() { self.items = [1, 2, 3] }
+        \\    func reorder() { self.items.swap(0, 2) }
         \\}
         \\func main() { var values = Values(); values.reorder(); print(values.items[0]) }
     );

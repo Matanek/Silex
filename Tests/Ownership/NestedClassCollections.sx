@@ -1,13 +1,13 @@
 class Node {
-    public var children:Node[]
+    var children:Node[]
 
     init(children:Node[]) {
         self.children = children
     }
 
-    public static func leaf() Node { return Node([]) }
+    static func leaf() Node { return Node([]) }
 
-    public static func from_members(members:Member[]) Node {
+    static func from_members(members:Member[]) Node {
         var children:Node[] = []
         for member in members { children.append(member.value) }
         return Node(children)
@@ -19,9 +19,9 @@ struct Member { var value:Node }
 class ByteCollector {
     var offset:int
 
-    public init(initial:int) { self.offset = initial }
+    init(initial:int) { self.offset = initial }
 
-    public func collect() uint8[] {
+    func collect() uint8[] {
         var output:uint8[] = []
         while self.offset < 4 {
             self.offset++

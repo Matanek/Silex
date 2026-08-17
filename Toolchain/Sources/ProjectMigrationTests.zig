@@ -131,7 +131,7 @@ test "reexport the homonymous principal declaration of a module" {
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Rendering.Renderer.sx",
-        .data = "public struct Renderer { let value:int; public init(value:int) { self.value = value } }",
+        .data = "public struct Renderer { let value:int; init(value:int) { self.value = value } }",
     });
 
     const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
@@ -383,7 +383,7 @@ test "reject local functions and structures from sibling files and packages" {
     try std.testing.expectEqualStrings("function 'Library.Api.hidden' is local to its source file", compiler.diagnostic.?.message);
 }
 
-test "share internal declarations across one package without exporting them" {
+test "share package declarations across modules without exporting them" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -397,21 +397,21 @@ test "share internal declarations across one package without exporting them" {
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Library/Package.json",
-        .data = "{\"name\":\"Library\",\"version\":\"1.0.0\"}",
+        .data = "{\"name\":\"Library\",\"version\":\"1.0.0\",\"extensions\":[\"Library.Tools\"]}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Library/Module/Internals.sx",
         .data =
-        \\internal struct Token {
-        \\    internal var value:int
-        \\    internal init(value:int) { self.value = value }
-        \\    internal func read() int { return self.value }
+        \\package struct Token {
+        \\    var value:int
+        \\    init(value:int) { self.value = value }
+        \\    func read() int { return self.value }
         \\}
-        \\internal func offset() int { return 2 }
+        \\package func offset() int { return 2 }
         \\public struct Box {
-        \\    internal var hidden:int
-        \\    public var value:int
-        \\    internal func secret() int { return self.hidden }
+        \\    package var hidden:int
+        \\    var value:int
+        \\    package func secret() int { return self.hidden }
         \\}
         \\public func make() Box { return Box(hidden:20, value:22) }
         ,
@@ -445,7 +445,7 @@ test "share internal declarations across one package without exporting them" {
     compiler = Project.Compiler.init(allocator, std.testing.io);
     try std.testing.expectError(error.InvalidSource, compiler.compile(input));
     try std.testing.expectEqualStrings(
-        "function 'Library.Internals.offset' is internal to its package",
+        "function 'Library.Internals.offset' is package-visible and unavailable outside its package",
         compiler.diagnostic.?.message,
     );
 
@@ -455,7 +455,69 @@ test "share internal declarations across one package without exporting them" {
     });
     compiler = Project.Compiler.init(allocator, std.testing.io);
     try std.testing.expectError(error.InvalidSource, compiler.compile(input));
-    try std.testing.expectEqualStrings("method 'secret' is internal to its package", compiler.diagnostic.?.message);
+    try std.testing.expectEqualStrings("method 'secret' is package-visible and unavailable outside its package", compiler.diagnostic.?.message);
+
+    try temporary.dir.createDirPath(std.testing.io, "Library.Tools/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Package.json",
+        .data = "{\"dependencies\":{\"Library\":\"=1.0.0\",\"Library.Tools\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Library.Tools/Package.json",
+        .data = "{\"name\":\"Library.Tools\",\"version\":\"1.0.0\",\"dependencies\":{\"Library\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Library.Tools/Module/Bridge.sx",
+        .data = "use Library.Internals\npublic func answer() int { return Internals.offset() }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "use Library.Tools.Bridge\nfunc main() { print(Bridge.answer()) }",
+    });
+    compiler = Project.Compiler.init(allocator, std.testing.io);
+    try std.testing.expectError(error.InvalidSource, compiler.compile(input));
+    try std.testing.expectEqualStrings(
+        "function 'Library.Internals.offset' is package-visible and unavailable outside its package",
+        compiler.diagnostic.?.message,
+    );
+}
+
+test "consume public class members inherited without redundant modifiers" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.createDirPath(std.testing.io, "Library/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Package.json",
+        .data = "{\"dependencies\":{\"Library\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Library/Package.json",
+        .data = "{\"name\":\"Library\",\"version\":\"1.0.0\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Library/Module/Services.sx",
+        .data =
+        \\public class Service {
+        \\    let value:int
+        \\    init(value:int) { self.value = value }
+        \\    func answer() int { return self.value }
+        \\}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "use Library.Services\nfunc main() { var service = Services.Service(42); print(service.answer()) }",
+    });
+
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(input);
+    const result = try @import("Interpreter.zig").runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("42\n", result.stdout);
 }
 
 test "keep local return values opaque and reject public input leaks" {

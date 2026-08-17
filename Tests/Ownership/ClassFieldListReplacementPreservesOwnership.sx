@@ -1,11 +1,11 @@
 class OrderedValues {
-    public var items:int[]
+    var items:int[]
 
-    public init() {
+    init() {
         self.items = [0, 1, 2, 3]
     }
 
-    public func rotate() {
+    func rotate() {
         self.items.swap(0, 1)
         self.items.swap(1, 2)
         self.items.swap(2, 3)

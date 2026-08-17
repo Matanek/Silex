@@ -86,7 +86,7 @@ test "copy a read-reference parameter into a value return and reject escaping ca
 
     frontend.diagnostic = null;
     try std.testing.expectError(error.InvalidSource, frontend.compile(
-        "class State { public var value:int } func leak(value:@State) State { return value } func main() {}",
+        "class State { var value:int } func leak(value:@State) State { return value } func main() {}",
     ));
     try std.testing.expectEqualStrings("read-reference parameter 'value' cannot be returned", frontend.diagnostic.?.message);
 }

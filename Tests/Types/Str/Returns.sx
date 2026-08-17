@@ -3,7 +3,7 @@ struct Message {
 }
 
 class Source {
-    public let text:str
+    let text:str
 }
 
 func literal_value() str { return "literal" }

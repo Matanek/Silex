@@ -91,7 +91,7 @@ test "compare enum variants and associated values recursively" {
     var frontend = Frontend.Frontend.init(allocator);
     const compilation = try frontend.compile(
         \\class Token {
-        \\    public let name:str
+        \\    let name:str
         \\}
         \\enum Inner { number(int); empty }
         \\enum Choice { empty; pair(int, str); nested(Inner); token(Token) }

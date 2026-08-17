@@ -241,8 +241,8 @@ test "stored callback fields and methods with the same name are ambiguous" {
     try std.testing.expectError(error.InvalidSource, frontend.compile(
         \\func fallback(value:int) {}
         \\struct Action {
-        \\    let run:func(int)
-        \\    public func run(value:int) {}
+        \\    let run:func(int);
+        \\    func run(value:int) {}
         \\}
         \\func main() {
         \\    let action = Action(run:fallback)
@@ -292,8 +292,8 @@ test "anonymous callbacks survive generic handle specialization" {
         \\protocol Task { func execute() }
         \\class Handle<T:Task> {
         \\    var task:T
-        \\    public init(task:T) { self.task = task }
-        \\    public func complete() T { return self.task }
+        \\    init(task:T) { self.task = task }
+        \\    func complete() T { return self.task }
         \\}
         \\func submit<T:Task>(task:T, callback:func(T)) Handle<T> {
         \\    callback(task)

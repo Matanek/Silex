@@ -3,7 +3,7 @@ struct BoolFields {
 }
 
 class BoolState {
-    public var enabled:bool
+    var enabled:bool
 }
 
 struct BoolPredicate {

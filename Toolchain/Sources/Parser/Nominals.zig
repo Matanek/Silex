@@ -87,23 +87,34 @@ fn parseType(
             member_override = true;
             try self.advance();
         }
-        var member_public = !is_class;
-        var member_internal = false;
-        var member_local = false;
-        var member_private = is_class;
-        var member_protected = false;
+        var member_public = is_public;
+        var member_internal = is_internal;
+        var member_local = is_local;
+        var member_private = is_private;
+        var member_protected = is_protected;
         var member_visibility = false;
-        if (self.current.tag == .keyword_public or self.current.tag == .keyword_internal or self.current.tag == .keyword_local or
-            self.current.tag == .keyword_private or self.current.tag == .keyword_protected)
+        if (self.current.tag == .keyword_public or self.current.tag == .keyword_internal or self.current.tag == .keyword_package or
+            self.current.tag == .keyword_module or self.current.tag == .keyword_local or self.current.tag == .keyword_private or
+            self.current.tag == .keyword_protected)
         {
             member_visibility = true;
-            member_public = self.current.tag == .keyword_public;
-            member_internal = self.current.tag == .keyword_internal;
-            member_local = self.current.tag == .keyword_local;
-            member_private = self.current.tag == .keyword_private;
-            member_protected = self.current.tag == .keyword_protected;
+            const requested = visibilityFromToken(self.current.tag);
+            const container = visibilityFromFlags(is_public, is_internal, is_local, is_private, is_protected);
+            if (!visibilityFits(requested, container)) {
+                const message = try std.fmt.allocPrint(
+                    self.allocator,
+                    "member requests '{s}' visibility, but container '{s}' is '{s}'; '{s}' crosses the '{s}' boundary",
+                    .{ visibilityName(requested), short_name, visibilityName(container), visibilityName(requested), visibilityName(container) },
+                );
+                return self.failAt(self.current.position, message);
+            }
+            member_public = requested == .public;
+            member_internal = requested == .package;
+            member_local = requested == .local;
+            member_private = requested == .private;
+            member_protected = requested == .protected;
             if (is_static_class and member_protected) return self.fail("static classes do not support protected members");
-            if (!is_class and member_protected) return self.fail("structures only support public, internal, local, or private members");
+            if (!is_class and member_protected) return self.fail("structures only support public, package, module, local, or private members");
             try self.advance();
         }
         var member_static = false;
@@ -153,8 +164,10 @@ fn parseType(
             var constructor = try parseConstructor(self, member_internal, member_local, base != null);
             constructor.is_public = member_public;
             constructor.is_internal = member_internal;
+            constructor.is_local = member_local;
             constructor.is_private = member_private;
             constructor.is_protected = member_protected;
+            constructor.visibility_explicit = member_visibility;
             try constructors.append(self.allocator, constructor);
             continue;
         }
@@ -169,6 +182,7 @@ fn parseType(
             method.is_override = member_override;
             method.is_private = member_private;
             method.is_protected = member_protected;
+            method.visibility_explicit = member_visibility;
             if (member_static) for (nested_names.items) |nested_name| if (std.mem.eql(u8, nested_name, method.name)) {
                 return self.failAt(method.name_position, "a nested type and static member cannot share a name");
             };
@@ -220,6 +234,7 @@ fn parseType(
             .is_local = member_local,
             .is_private = member_private,
             .is_protected = member_protected,
+            .visibility_explicit = member_visibility,
             .position = field_position,
             .name_position = field_name_position,
             .name = field_name,
@@ -253,6 +268,44 @@ fn parseType(
         .methods = try methods.toOwnedSlice(self.allocator),
         .drop = drop,
     };
+}
+
+const Visibility = enum { public, package, module, local, private, protected };
+
+fn visibilityFromToken(tag: @import("../Lexer.zig").TokenTag) Visibility {
+    return switch (tag) {
+        .keyword_public => .public,
+        .keyword_internal, .keyword_package => .package,
+        .keyword_module => .module,
+        .keyword_local => .local,
+        .keyword_private => .private,
+        .keyword_protected => .protected,
+        else => unreachable,
+    };
+}
+
+fn visibilityFromFlags(is_public: bool, is_internal: bool, is_local: bool, is_private: bool, is_protected: bool) Visibility {
+    if (is_public) return .public;
+    if (is_internal) return .package;
+    if (is_local) return .local;
+    if (is_private) return .private;
+    if (is_protected) return .protected;
+    return .module;
+}
+
+fn visibilityFits(requested: Visibility, container: Visibility) bool {
+    return switch (container) {
+        .public => true,
+        .package => requested != .public,
+        .module => requested != .public and requested != .package,
+        .local => requested == .local or requested == .private or requested == .protected,
+        .private => requested == .private,
+        .protected => requested == .protected or requested == .private,
+    };
+}
+
+fn visibilityName(visibility: Visibility) []const u8 {
+    return @tagName(visibility);
 }
 
 fn parseConstructor(self: anytype, is_internal: bool, is_local: bool, has_base: bool) !Ast.Constructor {

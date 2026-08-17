@@ -1,39 +1,39 @@
 struct Ledger {
     var values:int[]
 
-    public init() {
+    init() {
         self.values = []
     }
 
-    public func append(value:int) {
+    func append(value:int) {
         self.values.append(value)
     }
 
-    public func count() int {
+    func count() int {
         return self.values.count()
     }
 
-    public func last() int {
+    func last() int {
         return self.values[self.values.count() - 1]
     }
 }
 
 class LedgerOwner {
-    public var ledger:Ledger
+    var ledger:Ledger
 
-    public init() {
+    init() {
         self.ledger = Ledger()
     }
 
-    public func append_by_method(value:int) {
+    func append_by_method(value:int) {
         self.ledger.append(value)
     }
 
-    public func count() int {
+    func count() int {
         return self.ledger.count()
     }
 
-    public func last() int {
+    func last() int {
         return self.ledger.last()
     }
 }

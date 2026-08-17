@@ -167,14 +167,14 @@ test "server navigates package extensions call chains fields and cascades" {
         },
         .{ .path = "Kit/Module/Geometry/Cube.sx", .source =
         \\use Kit.Geometry.Mesh as Mesh
-        \\public struct Cube { public static func make() Mesh { return Mesh() } }
+        \\public struct Cube { static func make() Mesh { return Mesh() } }
         },
         .{ .path = "Kit/Module/Geometry/Mesh.sx", .source =
         \\use Kit.Math
-        \\public struct Mesh { public func translated(offset:Math.Vec3) Mesh { return self } }
+        \\public struct Mesh { func translated(offset:Math.Vec3) Mesh { return self } }
         },
         .{ .path = "Kit/Module/ECS/EntityRecipe.sx", .source =
-        \\public class EntityRecipe { public func with<T>(component:T) EntityRecipe { return self } }
+        \\public class EntityRecipe { func with<T>(component:T) EntityRecipe { return self } }
         },
         .{ .path = "Kit/Module/ECS/Query.sx", .source = "public class Query<T> {}" },
     };
@@ -204,24 +204,24 @@ test "server navigates package extensions call chains fields and cascades" {
         \\    print(Math.Quat.angle_axis())
         \\}
     ;
-    const zero = (try Support.serverDefinition(&server, allocator, main_uri, static_source)).?;
+    const zero = (try Support.serverDefinition(&server, allocator, main_uri, static_source)) orelse return error.MissingZeroDefinition;
     try std.testing.expect(std.mem.endsWith(u8, zero.uri, "/Kit/Module/Math/Vec3.sx"));
     const identity = (try Support.serverDefinition(&server, allocator, main_uri,
         \\use Kit.Math
         \\func main() { print(Math.Quat.ident<|>ity()) }
-    )).?;
+    )) orelse return error.MissingIdentityDefinition;
     try std.testing.expect(std.mem.endsWith(u8, identity.uri, "/Kit/Module/Math/Quat.sx"));
     const angle_axis = (try Support.serverDefinition(&server, allocator, main_uri,
         \\use Kit.Math
         \\func main() { print(Math.Quat.angle_<|>axis()) }
-    )).?;
+    )) orelse return error.MissingAngleAxisDefinition;
     try std.testing.expect(std.mem.endsWith(u8, angle_axis.uri, "/Kit/Module/Math/Quat.sx"));
 
     const translated = (try Support.serverDefinition(&server, allocator, main_uri,
         \\use Kit.Geometry
         \\use Kit.Math
         \\func main() { print(Geometry.Cube.make().trans<|>lated(Math.Vec3())) }
-    )).?;
+    )) orelse return error.MissingTranslatedDefinition;
     try std.testing.expect(std.mem.endsWith(u8, translated.uri, "/Kit/Module/Geometry/Mesh.sx"));
 
     const field_chain_source =
@@ -233,7 +233,7 @@ test "server navigates package extensions call chains fields and cascades" {
         \\    }
         \\}
     ;
-    const multiply = (try Support.serverDefinition(&server, allocator, main_uri, field_chain_source)).?;
+    const multiply = (try Support.serverDefinition(&server, allocator, main_uri, field_chain_source)) orelse return error.MissingMultiplyDefinition;
     try std.testing.expect(std.mem.endsWith(u8, multiply.uri, "/Kit/Module/Math/Quat.sx"));
 
     const rotation = (try Support.serverDefinition(&server, allocator, main_uri,
@@ -242,7 +242,7 @@ test "server navigates package extensions call chains fields and cascades" {
         \\func rotate(rotators:ECS.Query<(@Rotator, &Kit.Transform.Transform3D)>) {
         \\    for (rotator, transform) in rotators { print(transform.rot<|>ation) }
         \\}
-    )).?;
+    )) orelse return error.MissingRotationDefinition;
     try std.testing.expect(std.mem.endsWith(u8, rotation.uri, "/Kit/Module/Transform/Transform3D.sx"));
 
     const cascade = (try Support.serverDefinition(&server, allocator, main_uri,
@@ -251,7 +251,7 @@ test "server navigates package extensions call chains fields and cascades" {
         \\    var recipe = ECS.EntityRecipe()
         \\        ..wi<|>th(1)
         \\}
-    )).?;
+    )) orelse return error.MissingCascadeDefinition;
     try std.testing.expect(std.mem.endsWith(u8, cascade.uri, "/Kit/Module/ECS/EntityRecipe.sx"));
 }
 
@@ -294,7 +294,7 @@ test "server ranks imported method parameter labels before scope symbols" {
         .sub_path = "WebView.sx",
         .data =
         \\public static class Asset {
-        \\    public static func javascript(source:str, path:str) str { return source }
+        \\    static func javascript(source:str, path:str) str { return source }
         \\}
         ,
     });

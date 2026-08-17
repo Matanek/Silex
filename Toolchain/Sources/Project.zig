@@ -58,6 +58,18 @@ pub const TestCase = struct {
 const Binding = Reexports.Binding;
 const Unit = Reexports.Unit;
 
+const GeographicScope = enum(u8) { local, module, package, public };
+
+fn geographicScope(declaration: anytype) GeographicScope {
+    if (declaration.is_public) return .public;
+    if (declaration.is_internal) return .package;
+    if (declaration.is_local) return .local;
+    if (comptime @hasField(@TypeOf(declaration), "is_private")) {
+        if (declaration.is_private or declaration.is_protected) return .local;
+    }
+    return .module;
+}
+
 pub const Compiler = struct {
     allocator: Allocator,
     io: Io,
@@ -481,13 +493,19 @@ pub const Compiler = struct {
             else if (structure.is_internal)
                 try std.fmt.allocPrint(
                     self.allocator,
-                    "public type alias '{s}' exposes internal structure '{s}'",
+                    "public type alias '{s}' exposes package structure '{s}'",
+                    .{ alias, structure.name },
+                )
+            else if (structure.is_private)
+                try std.fmt.allocPrint(
+                    self.allocator,
+                    "public type alias '{s}' exposes private structure '{s}'",
                     .{ alias, structure.name },
                 )
             else
                 try std.fmt.allocPrint(
                     self.allocator,
-                    "public type alias '{s}' exposes private structure '{s}'",
+                    "public type alias '{s}' exposes module structure '{s}'",
                     .{ alias, structure.name },
                 );
             return self.fail(position, message);
@@ -503,13 +521,13 @@ pub const Compiler = struct {
         else if (enumeration.is_internal)
             try std.fmt.allocPrint(
                 self.allocator,
-                "public type alias '{s}' exposes internal enum '{s}'",
+                "public type alias '{s}' exposes package enum '{s}'",
                 .{ alias, enumeration.name },
             )
         else
             try std.fmt.allocPrint(
                 self.allocator,
-                "public type alias '{s}' exposes private enum '{s}'",
+                "public type alias '{s}' exposes module enum '{s}'",
                 .{ alias, enumeration.name },
             );
         return self.fail(position, message);
@@ -1200,6 +1218,103 @@ pub const Compiler = struct {
             }
             try self.requirePublicOutputType(module, function.return_type, function.name_position, "public function", function.name);
         }
+        for (program.structures) |structure| {
+            const structure_scope = geographicScope(structure);
+            if (structure_scope == .package or structure_scope == .module) {
+                if (structure.base) |base| try self.requireTypeScope(module, base, structure.base_position, structure_scope, "type", structure.name);
+                for (structure.conformances) |conformance| try self.requireTypeScope(module, conformance, structure.name_position, structure_scope, "type", structure.name);
+            }
+            for (structure.fields) |field| try self.validateMemberTypeScope(module, field, field.type, field.name_position, structure.name, field.name);
+            for (structure.static_fields) |field| try self.validateMemberTypeScope(module, field, field.type, field.name_position, structure.name, field.name);
+            for (structure.constructors) |constructor| {
+                const scope = geographicScope(constructor);
+                if (scope != .package and scope != .module) continue;
+                for (constructor.parameters) |parameter| try self.requireTypeScope(module, parameter.type, parameter.position, scope, "constructor of", structure.name);
+            }
+            for (structure.methods) |method| {
+                const scope = geographicScope(method);
+                if (scope != .package and scope != .module) continue;
+                for (method.parameters) |parameter| try self.requireTypeScope(module, parameter.type, parameter.position, scope, "method of", structure.name);
+                try self.requireTypeScope(module, method.return_type, method.name_position, scope, "method of", structure.name);
+            }
+        }
+        for (program.enums) |enumeration| {
+            const scope = geographicScope(enumeration);
+            for (enumeration.variants) |variant| for (variant.associated_types) |associated| {
+                try self.requireTypeScope(module, associated, variant.position, scope, "enum", enumeration.name);
+            };
+        }
+        for (program.functions) |function| {
+            const scope = geographicScope(function);
+            if (scope != .package and scope != .module) continue;
+            for (function.parameters) |parameter| try self.requireTypeScope(module, parameter.type, parameter.position, scope, "function", function.name);
+            try self.requireTypeScope(module, function.return_type, function.name_position, scope, "function", function.name);
+        }
+    }
+
+    fn validateMemberTypeScope(
+        self: *Compiler,
+        module: usize,
+        member: anytype,
+        type_value: Ast.Type,
+        position: Source.Position,
+        owner: []const u8,
+        name: []const u8,
+    ) Error!void {
+        const scope = geographicScope(member);
+        if (scope != .package and scope != .module) return;
+        const label = try std.fmt.allocPrint(self.allocator, "member {s}.{s}", .{ owner, name });
+        try self.requireTypeScope(module, type_value, position, scope, label, name);
+    }
+
+    fn requireTypeScope(
+        self: *Compiler,
+        module: usize,
+        type_value: Ast.Type,
+        position: Source.Position,
+        required: GeographicScope,
+        declaration_kind: []const u8,
+        declaration_name: []const u8,
+    ) Error!void {
+        if (required == .public) return self.requirePublicType(module, type_value, position, declaration_kind, declaration_name);
+        if (required == .local) return;
+        if (type_value.optionalChild()) |child| return self.requireTypeScope(module, child, position, required, declaration_kind, declaration_name);
+        if (type_value.functionIndex()) |function_index| {
+            const program = self.units[module].program.?;
+            if (function_index >= program.function_types.len) return;
+            const function_type = program.function_types[function_index];
+            for (function_type.parameters) |parameter| try self.requireTypeScope(module, parameter.type, position, required, declaration_kind, declaration_name);
+            return self.requireTypeScope(module, function_type.return_type, position, required, declaration_kind, declaration_name);
+        }
+        if (type_value.genericInstantiationIndex()) |generic_index| {
+            const program = self.units[module].program.?;
+            if (generic_index >= program.generic_types.len) return;
+            const generic = program.generic_types[generic_index];
+            try self.requireTypeScope(module, generic.base, position, required, declaration_kind, declaration_name);
+            for (generic.arguments) |argument| try self.requireTypeScope(module, argument, position, required, declaration_kind, declaration_name);
+            return;
+        }
+        const index = type_value.structureIndex() orelse return;
+        const program = self.units[module].program.?;
+        if (index >= program.type_names.len) return;
+        const target = try self.structureTarget(module, program.type_names[index]) orelse try self.enumTarget(module, program.type_names[index]) orelse return;
+        const target_program = self.units[target.module].program.?;
+        const target_scope: GeographicScope = if (findStructure(target_program, target.declaration)) |structure| scope: {
+            if (structure.is_tuple) {
+                for (structure.fields) |field| try self.requireTypeScope(target.module, field.type, position, required, declaration_kind, declaration_name);
+                return;
+            }
+            if (structure.collection) |collection| return self.requireTypeScope(module, collection.element, position, required, declaration_kind, declaration_name);
+            if (Reexports.structureExported(target_program, structure)) break :scope .public;
+            break :scope geographicScope(structure);
+        } else geographicScope(findEnum(target_program, target.declaration).?);
+        if (@intFromEnum(target_scope) >= @intFromEnum(required)) return;
+        const message = try std.fmt.allocPrint(
+            self.allocator,
+            "{s} '{s}' with {s} visibility exposes {s} type '{s}'",
+            .{ declaration_kind, declaration_name, @tagName(required), @tagName(target_scope), target.declaration },
+        );
+        return self.fail(position, message);
     }
 
     fn requirePublicOutputType(
@@ -1277,13 +1392,19 @@ pub const Compiler = struct {
             else if (structure.is_internal)
                 try std.fmt.allocPrint(
                     self.allocator,
-                    "{s} '{s}' exposes internal structure '{s}'",
+                    "{s} '{s}' exposes package structure '{s}'",
+                    .{ declaration_kind, declaration_name, structure.name },
+                )
+            else if (structure.is_private)
+                try std.fmt.allocPrint(
+                    self.allocator,
+                    "{s} '{s}' exposes private structure '{s}'",
                     .{ declaration_kind, declaration_name, structure.name },
                 )
             else
                 try std.fmt.allocPrint(
                     self.allocator,
-                    "{s} '{s}' exposes private structure '{s}'",
+                    "{s} '{s}' exposes module structure '{s}'",
                     .{ declaration_kind, declaration_name, structure.name },
                 );
             return self.fail(position, message);
@@ -1299,13 +1420,13 @@ pub const Compiler = struct {
         else if (enumeration.is_internal)
             try std.fmt.allocPrint(
                 self.allocator,
-                "{s} '{s}' exposes internal enum '{s}'",
+                "{s} '{s}' exposes package enum '{s}'",
                 .{ declaration_kind, declaration_name, enumeration.name },
             )
         else
             try std.fmt.allocPrint(
                 self.allocator,
-                "{s} '{s}' exposes private enum '{s}'",
+                "{s} '{s}' exposes module enum '{s}'",
                 .{ declaration_kind, declaration_name, enumeration.name },
             );
         return self.fail(position, message);

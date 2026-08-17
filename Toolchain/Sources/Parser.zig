@@ -99,8 +99,9 @@ pub const Parser = struct {
                         else => return self.fail("expected use, enum, struct, class, intrinsic class, protocol, or function declaration after 'public'"),
                     }
                 },
-                .keyword_internal, .keyword_local => {
-                    const is_internal = self.current.tag == .keyword_internal;
+                .keyword_internal, .keyword_package, .keyword_module, .keyword_local => {
+                    const visibility_name = self.current.lexeme;
+                    const is_internal = self.current.tag == .keyword_internal or self.current.tag == .keyword_package;
                     const is_local = self.current.tag == .keyword_local;
                     try self.advance();
                     switch (self.current.tag) {
@@ -110,11 +111,23 @@ pub const Parser = struct {
                         .keyword_enum => try enums.append(self.allocator, try EnumParser.parse(self, false, is_internal, is_local)),
                         .keyword_protocol => try structures.append(self.allocator, try Protocols.parse(self, false, is_internal, is_local)),
                         .keyword_func => try functions.append(self.allocator, try self.parseFunction(false, is_internal, is_local)),
-                        else => return self.fail(if (is_internal)
-                            "expected enum, struct, class, protocol, or function declaration after 'internal'"
-                        else
-                            "expected enum, struct, class, protocol, or function declaration after 'local'"),
+                        else => {
+                            const message = try std.fmt.allocPrint(
+                                self.allocator,
+                                "expected enum, struct, class, protocol, or function declaration after '{s}'",
+                                .{visibility_name},
+                            );
+                            return self.fail(message);
+                        },
                     }
+                },
+                .keyword_private, .keyword_protected => {
+                    const message = try std.fmt.allocPrint(
+                        self.allocator,
+                        "'{s}' visibility is relative to a type and cannot be used at module level",
+                        .{self.current.lexeme},
+                    );
+                    return self.fail(message);
                 },
                 else => return self.fail("expected use, enum, struct, class, protocol, function, or test declaration"),
             }
@@ -1464,7 +1477,7 @@ test "parse methods and chained member calls" {
         \\struct Counter {
         \\    var value:int
         \\    func increment() { self.value++ }
-        \\    public func current() int { return self.value }
+        \\    func current() int { return self.value }
         \\}
         \\func make() Counter { return Counter(value:1) }
         \\func main() {
@@ -1488,7 +1501,7 @@ test "treat match as a contextual method name" {
     defer arena.deinit();
     var parser = Parser.init(arena.allocator(),
         \\struct Pattern {
-        \\    public func match(text:str) bool { return true }
+        \\    func match(text:str) bool { return true }
         \\}
         \\func main() {
         \\    let expression = Pattern()
@@ -1506,7 +1519,7 @@ test "reject legacy and malformed structure syntax" {
     try expectParseError("struct Position { var x:int } func main() { let value = Position { x:1 } }", "expected ';' or line break");
 }
 
-test "parse public functions and keep functions private by default" {
+test "parse public functions and keep functions module-visible by default" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     var parser = Parser.init(arena.allocator(),
@@ -1518,14 +1531,14 @@ test "parse public functions and keep functions private by default" {
     try std.testing.expect(!program.functions[1].is_public);
 }
 
-test "parse public default internal local and private structure members" {
+test "parse package module local and inherited structure members" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     var parser = Parser.init(arena.allocator(),
         \\public struct Vec2 {
-        \\    public var x:int
+        \\    var x:int
         \\    let y:int
-        \\    internal func packageOnly() {}
+        \\    package func packageOnly() {}
         \\    local func fileOnly() {}
         \\    private init() {}
         \\    private struct Storage {}
@@ -1543,6 +1556,51 @@ test "parse public default internal local and private structure members" {
     try std.testing.expect(program.structures[1].is_private);
     const type_index = program.functions[0].parameters[0].type.structureIndex().?;
     try std.testing.expectEqualStrings("Geometry.Point", program.type_names[type_index]);
+}
+
+test "accept explicit module and the temporary internal package alias" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(),
+        \\package struct PackageType { func value() int { return 1 } }
+        \\internal enum LegacyPackage { value }
+        \\module class ModuleType { init() {} func value() int { return 2 } }
+        \\class ImplicitModuleType { init() {} func value() int { return 3 } }
+        \\func main() {}
+    );
+    const program = try parser.parse();
+    var package_type: ?Ast.Structure = null;
+    var module_type: ?Ast.Structure = null;
+    var implicit_type: ?Ast.Structure = null;
+    for (program.structures) |structure| {
+        if (std.mem.eql(u8, structure.name, "PackageType")) package_type = structure;
+        if (std.mem.eql(u8, structure.name, "ModuleType")) module_type = structure;
+        if (std.mem.eql(u8, structure.name, "ImplicitModuleType")) implicit_type = structure;
+    }
+    try std.testing.expect(package_type.?.is_internal);
+    try std.testing.expect(package_type.?.methods[0].is_internal);
+    try std.testing.expect(program.enums[0].is_internal);
+    try std.testing.expect(!module_type.?.is_public and !module_type.?.methods[0].is_public);
+    try std.testing.expect(!implicit_type.?.is_public and !implicit_type.?.methods[0].is_public);
+}
+
+test "reject type-relative module declarations and member visibility widening" {
+    try expectParseError(
+        "private class Hidden {}",
+        "'private' visibility is relative to a type and cannot be used at module level",
+    );
+    try expectParseError(
+        "protected class Hidden {}",
+        "'protected' visibility is relative to a type and cannot be used at module level",
+    );
+    try expectParseError(
+        "module class Service { public func expose() {} }",
+        "member requests 'public' visibility, but container 'Service' is 'module'; 'public' crosses the 'module' boundary",
+    );
+    try expectParseError(
+        "package struct Cache { public var value:int }",
+        "member requests 'public' visibility, but container 'Cache' is 'package'; 'public' crosses the 'package' boundary",
+    );
 }
 
 test "apply optional and collection type suffixes from left to right" {
@@ -1573,7 +1631,7 @@ test "apply optional and collection type suffixes from left to right" {
 test "reject protected structure members" {
     try expectParseError(
         "struct Value { protected var value:int } func main() {}",
-        "structures only support public, internal, local, or private members",
+        "structures only support public, package, module, local, or private members",
     );
 }
 

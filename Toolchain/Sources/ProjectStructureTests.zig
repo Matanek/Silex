@@ -29,7 +29,7 @@ test "compose principal secondary qualified and aliased public structures" {
         .sub_path = "Geometry/Vec2.sx",
         .data =
         \\public struct Vec2 {
-        \\    public let x:int
+        \\    let x:int
         \\    let y:int
         \\    init(x:int, y:int) { self.x = x; self.y = y }
         \\    func sum() int { return self.x + self.y }
@@ -95,8 +95,8 @@ test "resolve a principal structure through its parent namespace" {
         .sub_path = "Math/State.sx",
         .data =
         \\public class State {
-        \\    public var value:int
-        \\    public init(value:int) { self.value = value }
+        \\    var value:int
+        \\    init(value:int) { self.value = value }
         \\}
         ,
     });
@@ -127,8 +127,8 @@ test "public constructor remains available when a class owns a drop" {
         .data =
         \\public class Resource {
         \\    private let handle:int
-        \\    public init(handle:int) { self.handle = handle }
-        \\    public func value() int { return self.handle }
+        \\    init(handle:int) { self.handle = handle }
+        \\    func value() int { return self.handle }
         \\    drop {}
         \\}
         ,
@@ -163,7 +163,7 @@ test "reject private structure access and public signature leaks" {
     const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
     var compiler = Project.Compiler.init(allocator, std.testing.io);
     try std.testing.expectError(error.InvalidSource, compiler.compile(input));
-    try std.testing.expectEqualStrings("structure 'Secret' is private outside its module", compiler.diagnostic.?.message);
+    try std.testing.expectEqualStrings("structure 'Secret' is module-visible and unavailable outside its module", compiler.diagnostic.?.message);
 
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Api.sx",
@@ -175,7 +175,55 @@ test "reject private structure access and public signature leaks" {
     });
     compiler = Project.Compiler.init(allocator, std.testing.io);
     try std.testing.expectError(error.InvalidSource, compiler.compile(input));
-    try std.testing.expectEqualStrings("public function 'reveal' exposes private structure 'Hidden'", compiler.diagnostic.?.message);
+    try std.testing.expectEqualStrings("public function 'reveal' exposes module structure 'Hidden'", compiler.diagnostic.?.message);
+}
+
+test "compare package and module signature exposure scopes" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Api.sx",
+        .data = "local struct FileOnly {} func leak(value:FileOnly) {}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "use Api\nfunc main() {}",
+    });
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    try std.testing.expectError(error.InvalidSource, compiler.compile(input));
+    try std.testing.expectEqualStrings(
+        "function 'leak' with module visibility exposes local type 'FileOnly'",
+        compiler.diagnostic.?.message,
+    );
+
+    try temporary.dir.createDirPath(std.testing.io, "Library/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Package.json",
+        .data = "{\"dependencies\":{\"Library\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Library/Package.json",
+        .data = "{\"name\":\"Library\",\"version\":\"1.0.0\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Library/Module/Api.sx",
+        .data = "struct ModuleOnly {} package func share(value:ModuleOnly) {}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "use Library.Api\nfunc main() {}",
+    });
+    compiler = Project.Compiler.init(allocator, std.testing.io);
+    try std.testing.expectError(error.InvalidSource, compiler.compile(input));
+    try std.testing.expectEqualStrings(
+        "function 'share' with package visibility exposes module type 'ModuleOnly'",
+        compiler.diagnostic.?.message,
+    );
 }
 
 test "reject colliding canonical structure identities" {
@@ -283,7 +331,7 @@ test "use a package child namespace without a principal module" {
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Module/Geometry/Cube.sx",
-        .data = "public struct Cube { public static func corners() int { return 8 } }",
+        .data = "public struct Cube { static func corners() int { return 8 } }",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Main.sx",

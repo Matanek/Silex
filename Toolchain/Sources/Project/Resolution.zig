@@ -161,11 +161,11 @@ pub fn requirePublicStructure(self: anytype, source_module: usize, target: Targe
     else if (structure.is_internal)
         try std.fmt.allocPrint(
             self.allocator,
-            "structure '{s}' is internal to package '{s}'",
+            "structure '{s}' is package-visible and unavailable outside package '{s}'",
             .{ target.declaration, self.packages.label(self.index.providers[target.module].owner) },
         )
     else
-        try std.fmt.allocPrint(self.allocator, "structure '{s}' is private outside its module", .{target.declaration});
+        try std.fmt.allocPrint(self.allocator, "structure '{s}' is module-visible and unavailable outside its module", .{target.declaration});
     return self.fail(position, message);
 }
 
@@ -180,11 +180,11 @@ pub fn requirePublicEnum(self: anytype, source_module: usize, target: Target, po
     else if (enumeration.is_internal)
         try std.fmt.allocPrint(
             self.allocator,
-            "enum '{s}' is internal to package '{s}'",
+            "enum '{s}' is package-visible and unavailable outside package '{s}'",
             .{ target.declaration, self.packages.label(self.index.providers[target.module].owner) },
         )
     else
-        try std.fmt.allocPrint(self.allocator, "enum '{s}' is private outside its module", .{target.declaration});
+        try std.fmt.allocPrint(self.allocator, "enum '{s}' is module-visible and unavailable outside its module", .{target.declaration});
     return self.fail(position, message);
 }
 

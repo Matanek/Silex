@@ -30,7 +30,7 @@ test "qualify local types used to read static storage" {
         \\    static let count:int = 100
         \\}
         \\class ClassTest {
-        \\    public static let count:int = 200
+        \\    static let count:int = 200
         \\}
         \\struct GenericTest<T> {
         \\    static let count:int = 300
@@ -64,7 +64,7 @@ test "compile only the explicit local module closure" {
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Math/Operations.sx",
-        .data = "internal func add(left:int, right:int) int { return left + right }",
+        .data = "package func add(left:int, right:int) int { return left + right }",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Unused.sx",
@@ -199,7 +199,7 @@ test "resolve explicit module aliases direct declarations and grouping namespace
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Math/Operations.sx",
-        .data = "internal func add(left:int, right:int) int { return left + right }",
+        .data = "package func add(left:int, right:int) int { return left + right }",
     });
 
     const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
@@ -257,11 +257,11 @@ test "allow dependency cycles under one logical parent" {
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Group/A.sx",
-        .data = "use Group.B\ninternal func run() { B.touch() }",
+        .data = "use Group.B\npackage func run() { B.touch() }",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Group/B.sx",
-        .data = "use Group.A\ninternal func touch() {}",
+        .data = "use Group.A\npackage func touch() {}",
     });
 
     const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
@@ -376,7 +376,7 @@ test "do not propagate private module access through a dependency" {
     const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
     var compiler = Compiler.init(allocator, std.testing.io);
     try std.testing.expectError(error.InvalidSource, compiler.compile(input));
-    try std.testing.expectEqualStrings("function 'Layer.B.hidden' is private outside its module", compiler.diagnostic.?.message);
+    try std.testing.expectEqualStrings("function 'Layer.B.hidden' is module-visible and unavailable outside its module", compiler.diagnostic.?.message);
 }
 
 test "compose simple modules with an adjacent local package" {
@@ -399,7 +399,7 @@ test "compose simple modules with an adjacent local package" {
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Foo/Bar.sx",
-        .data = "internal func value() int { return 20 }",
+        .data = "package func value() int { return 20 }",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "MonPackage/Package.json",
@@ -1152,7 +1152,7 @@ test "enforce public package interfaces and direct dependency visibility" {
     var compiler = Compiler.init(allocator, std.testing.io);
     try std.testing.expectError(error.InvalidSource, compiler.compile(input));
     try std.testing.expectEqualStrings(
-        "function 'A.Api.hidden' is private outside its module",
+        "function 'A.Api.hidden' is module-visible and unavailable outside its module",
         compiler.diagnostic.?.message,
     );
 
@@ -1163,7 +1163,7 @@ test "enforce public package interfaces and direct dependency visibility" {
     compiler = Compiler.init(allocator, std.testing.io);
     try std.testing.expectError(error.InvalidSource, compiler.compile(input));
     try std.testing.expectEqualStrings(
-        "function 'A.Api.hidden' is private outside its module",
+        "function 'A.Api.hidden' is module-visible and unavailable outside its module",
         compiler.diagnostic.?.message,
     );
 
@@ -1215,8 +1215,8 @@ test "compose public nested types while their owner caps visibility" {
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Api.sx",
         .data =
-        \\public struct Catalog { public struct Entry { public let value:int } }
-        \\struct Hidden { public struct Leaked {} }
+        \\public struct Catalog { struct Entry { let value:int } }
+        \\struct Hidden { struct Leaked {} }
         ,
     });
     try temporary.dir.writeFile(std.testing.io, .{

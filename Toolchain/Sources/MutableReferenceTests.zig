@@ -51,16 +51,16 @@ test "mutating class methods write reconstructed state through a mutable referen
     const output = try run(
         \\class Counter {
         \\    private var value:int
-        \\    public init() { self.value = 0 }
-        \\    public func increment() { self.value += 1 }
-        \\    public func add(amount:int) int { self.value += amount; return self.value }
+        \\    init() { self.value = 0 }
+        \\    func increment() { self.value += 1 }
+        \\    func add(amount:int) int { self.value += amount; return self.value }
         \\}
         \\class Bucket {
         \\    private var values:int[]
-        \\    public init() { self.values = [] }
-        \\    public func append(value:int) { self.values.append(value) }
-        \\    public func append_twice(value:int) { self.append(value); self.append(value) }
-        \\    public func count() int { return self.values.count() }
+        \\    init() { self.values = [] }
+        \\    func append(value:int) { self.values.append(value) }
+        \\    func append_twice(value:int) { self.append(value); self.append(value) }
+        \\    func count() int { return self.values.count() }
         \\}
         \\func update(counter:&Counter) { counter.increment() }
         \\func add(counter:&Counter, amount:int) int { return counter.add(amount) }
@@ -96,7 +96,7 @@ test "mutable references copy value returns and reject immutable places and esca
 
     frontend.diagnostic = null;
     try std.testing.expectError(error.InvalidSource, frontend.compile(
-        "class State { public var value:int } func leak(value:&State) State { return value } func main() {}",
+        "class State { var value:int } func leak(value:&State) State { return value } func main() {}",
     ));
     try std.testing.expectEqualStrings("mutable-reference parameter 'value' cannot be returned", frontend.diagnostic.?.message);
 

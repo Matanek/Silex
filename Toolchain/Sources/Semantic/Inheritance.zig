@@ -105,18 +105,12 @@ pub fn validateOverrides(self: anytype) !void {
             if (method.is_override and inherited == null) {
                 return self.fail(method.name_position, "override does not match an inherited method signature");
             }
-            if (!method.is_override and inherited != null and (inherited.?.method.is_public or inherited.?.method.is_protected)) {
+            if (!method.is_override and inherited != null and !inherited.?.method.is_private) {
                 return self.fail(method.name_position, "an overriding method must declare 'override'");
             }
             if (inherited) |base| {
-                if (!base.method.is_public and !base.method.is_protected) {
-                    return self.fail(method.name_position, "only public or protected methods can be overridden");
-                }
-                if (base.method.is_public and !method.is_public) {
-                    return self.fail(method.name_position, "an override cannot reduce public visibility");
-                }
-                if (base.method.is_protected and !method.is_public and !method.is_protected) {
-                    return self.fail(method.name_position, "an override cannot reduce protected visibility");
+                if (base.method.is_private) {
+                    return self.fail(method.name_position, "private methods cannot be overridden");
                 }
                 const method_flat = flatMethodIndex(self.program, structure_index, method_index);
                 const base_flat = flatMethodIndex(self.program, base.owner, base.index);

@@ -3,7 +3,7 @@ struct FloatFields {
 }
 
 class FloatState {
-    public var ratio:float64
+    var ratio:float64
 }
 
 struct FloatTransform {

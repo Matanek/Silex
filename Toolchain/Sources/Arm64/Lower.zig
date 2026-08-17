@@ -1421,8 +1421,8 @@ test "lower trivial aggregate copies without the deep-copy runtime" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const program = try compile(arena.allocator(),
-        \\struct Quaternion { public let x:float; public let y:float; public let z:float; public let w:float }
-        \\class State { public var value:int }
+        \\struct Quaternion { let x:float; let y:float; let z:float; let w:float }
+        \\class State { var value:int }
         \\func main() {
         \\    let rotation = Quaternion(x:0.0, y:0.0, z:0.0, w:1.0)
         \\    let rotation_copy = copy rotation

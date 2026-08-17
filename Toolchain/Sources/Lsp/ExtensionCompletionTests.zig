@@ -502,8 +502,8 @@ test "complete static members of a module principal type" {
         .sub_path = "STD/Module/UUID.sx",
         .data =
         \\public struct UUID {
-        \\    public static func random() UUID { return UUID() }
-        \\    public func to_str() str { return "uuid" }
+        \\    static func random() UUID { return UUID() }
+        \\    func to_str() str { return "uuid" }
         \\}
         \\public func is_supported() bool { return true }
         ,
@@ -688,7 +688,7 @@ test "complete an imported module in a function return type" {
         .sub_path = "STD/Module/Math/Vec3.sx",
         .data =
         \\public struct Vec3 {
-        \\    public init(value:float) {}
+        \\    init(value:float) {}
         \\}
         \\public func scalar(value:float) float { return value }
         ,

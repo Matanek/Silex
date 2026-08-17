@@ -164,8 +164,8 @@ test "compile terminal match nested in a mutating method branch" {
         \\func outcome() Outcome { return Outcome.success(7) }
         \\class Parser {
         \\    var offset:int
-        \\    public init(offset:int) { self.offset = offset }
-        \\    public func run() Result<int, str> {
+        \\    init(offset:int) { self.offset = offset }
+        \\    func run() Result<int, str> {
         \\        if self.offset == 0 {
         \\            match outcome() {
         \\                success(value) => { return Result<int, str>.success(value) }

@@ -83,10 +83,25 @@ pub const Merger = struct {
                 }
                 var method = source_method;
                 if (!method.visibility_explicit) {
-                    method.is_public = !target.is_class;
-                    method.is_private = target.is_class;
-                } else if (!target.is_class and method.is_private) {
-                    return self.fail(method.name_position, "structure extension methods only support public, internal, or local visibility");
+                    method.is_public = target.is_public;
+                    method.is_internal = target.is_internal;
+                    method.is_local = target.is_local;
+                    method.is_private = target.is_private;
+                    method.is_protected = target.is_protected;
+                } else {
+                    if (!visibilityFits(scopeOf(method), scopeOf(target))) {
+                        const requested = @tagName(scopeOf(method));
+                        const container = @tagName(scopeOf(target));
+                        const message = try std.fmt.allocPrint(
+                            self.allocator,
+                            "member requests '{s}' visibility, but container '{s}' is '{s}'; '{s}' crosses the '{s}' boundary",
+                            .{ requested, target.name, container, requested, container },
+                        );
+                        return self.fail(method.name_position, message);
+                    }
+                    if (!target.is_class and method.is_private) {
+                        return self.fail(method.name_position, "structure extension methods only support public, package, module, or local visibility");
+                    }
                 }
                 method.extension = .{ .provider = extension.provider, .visible_files = visible_files };
                 for (methods.items) |existing| {
@@ -118,6 +133,28 @@ pub const Merger = struct {
         return error.InvalidSource;
     }
 };
+
+const Scope = enum { public, package, module, local, private, protected };
+
+fn scopeOf(declaration: anytype) Scope {
+    if (declaration.is_public) return .public;
+    if (declaration.is_internal) return .package;
+    if (declaration.is_local) return .local;
+    if (declaration.is_private) return .private;
+    if (declaration.is_protected) return .protected;
+    return .module;
+}
+
+fn visibilityFits(requested: Scope, container: Scope) bool {
+    return switch (container) {
+        .public => true,
+        .package => requested != .public,
+        .module => requested != .public and requested != .package,
+        .local => requested == .local or requested == .private or requested == .protected,
+        .private => requested == .private,
+        .protected => requested == .protected or requested == .private,
+    };
+}
 
 fn declaresConformance(target: Ast.Structure, protocol: Ast.Type) bool {
     if (target.base == protocol) return true;

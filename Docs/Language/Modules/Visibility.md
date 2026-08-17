@@ -1,6 +1,8 @@
 # Expose or hide declarations
 
-Top-level declarations are private by default:
+A declaration at module level is `module` by default. It is available from
+every selected fragment of the same logical module, including its portable,
+`Platform`, and `Target` fragments:
 
 ```sx
 func helper() {}
@@ -10,72 +12,75 @@ public func start() {
 }
 ```
 
-Use `public` for a declaration available through a module or package API:
+Use `public` for declarations that package consumers may name, `package` for
+implementation shared by the modules of exactly one package, and `local` for a
+declaration restricted to its source file:
 
 ```sx
 public struct Position {
-    public var x:int
+    var x:int
 }
-```
 
-Use `internal` for implementation shared by the modules of one package without
-exposing it to package consumers:
+package struct DecodeState {}
+package func decode() {}
 
-```sx
-internal struct DecodeState {}
-internal func decode() {}
-```
-
-Use `local` for a declaration restricted to its exact source file:
-
-```sx
 local struct ParserState {}
 local func advance() {}
 ```
 
-The visibility order is `public`, `internal`, `private`, then `local`.
-Neighboring modules in the same package can name an `internal` declaration but
-not a private one. Fragments of one logical module remain distinct source
-files, so a `local` declaration is unavailable from another fragment. An
-ordinary private declaration in a specialized fragment is accessible from
-portable code through `Platform.name` or `Target.name`, never as an unqualified
-name. Packages sharing a namespace prefix never share internal visibility.
+The explicit `module` modifier is accepted when a boundary needs emphasis, but
+omitting it is the ordinary style:
 
-## Class members
+```sx
+module class ExplicitHelper {}
+class Helper {}
+```
 
-Class members are private by default:
+Packages sharing a namespace prefix do not share `package` visibility. A
+`local` declaration never crosses its exact source-file boundary. Module
+fragments share `module` declarations without merging lexical scopes:
+platform and target declarations still use their contextual qualifications.
+
+`private` and `protected` are relative to a type, so the compiler rejects them
+at module level. `private` is available to the declaring nested-type family;
+`protected` is reserved for class members and is also available to descendants.
+
+## Members inherit their type
+
+A field, constructor, method, static member, or nested type without a
+modifier inherits the visibility of its containing type. Classes and
+structures follow the same rule:
 
 ```sx
 public class Session {
     private let token:str
 
-    public func text() str {
+    init(token:str) {
+        self.token = token
+    }
+
+    func text() str {
         return self.token
     }
+
+    package func debug() {}
+}
+
+class Compiler {
+    init() {}
+    func run() {}
 }
 ```
 
-`protected` makes a member available to the class and its descendants.
-`internal` makes it available throughout the package, while `local` keeps it in
-the source file. The containing type always caps member visibility.
+`Session.init` and `Session.text` are public by inheritance. `Compiler` and its
+members are module-visible. The containing type always caps its members: an
+explicit modifier may preserve or restrict the inherited visibility, never
+enlarge it. For example, `public func` inside a module-visible class is a
+compile-time error rather than a silently capped declaration.
 
-## Structure members
+An override or protocol implementation keeps the visibility of its concrete
+type. Calling through an already accessible base type or protocol keeps the
+visibility of that contract; implementations do not need to republish it.
 
-Structure members are public by default. Explicit `public` is accepted when it
-makes the API easier to scan. Use `internal` to share a member throughout the
-package, `local` to restrict it to the exact source file, or `private` to
-restrict it to the structure and its nested type family:
-
-```sx
-public struct Iterator<T> {
-    private var values:T?[]
-
-    func isEmpty() bool {
-        return self.values.count() == 0
-    }
-}
-```
-
-Fields, constructors, methods, static members, and nested types accept
-`public`, `internal`, `local`, or `private`. Structures do not support
-`protected`, which is reserved for class inheritance.
+`use` introduces a name in the consuming file and `public use` explicitly
+reexports it. Other visibility modifiers do not apply to `use`.

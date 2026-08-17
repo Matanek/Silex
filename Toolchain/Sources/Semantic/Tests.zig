@@ -126,7 +126,7 @@ test "lower nominal structure aggregates and chained field reads" {
     try std.testing.expect(std.mem.indexOf(u8, text, "field %4, .layer") != null);
 }
 
-test "enforce private structure fields and methods while keeping defaults public" {
+test "enforce private structure members while defaults inherit module visibility" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();

@@ -68,8 +68,8 @@ test "infer and accept explicit generic method arguments in a cascade" {
         \\protocol Plugin {}
         \\struct FooPlugin:Plugin {}
         \\class Application {
-        \\    public func install<T:Plugin>(plugin:T) {}
-        \\    public func run() int { return 42 }
+        \\    func install<T:Plugin>(plugin:T) {}
+        \\    func run() int { return 42 }
         \\}
         \\func main() {
         \\    print(Application()
@@ -89,8 +89,8 @@ test "keep a temporary class cascade alive through its terminal call" {
     var frontend = Frontend.Frontend.init(allocator);
     const compilation = try frontend.compile(
         \\class Application {
-        \\    public func install() Application { return self }
-        \\    public func run() { print("run") }
+        \\    func install() Application { return self }
+        \\    func run() { print("run") }
         \\    drop { print("drop") }
         \\}
         \\func main() { Application()..install()..install().run() }
@@ -106,7 +106,7 @@ test "a stable class cascade leaves ownership with its binding" {
     var frontend = Frontend.Frontend.init(allocator);
     const compilation = try frontend.compile(
         \\class Application {
-        \\    public func install() Application { return self }
+        \\    func install() Application { return self }
         \\    drop { print("drop") }
         \\}
         \\func main() {
@@ -179,8 +179,8 @@ test "compose a cascade whose receiver is a qualified package type" {
         .data =
         \\public struct Application {
         \\    var running:bool = false
-        \\    public func run() { self.running = true }
-        \\    public func is_running() bool { return self.running }
+        \\    func run() { self.running = true }
+        \\    func is_running() bool { return self.running }
         \\}
         ,
     });

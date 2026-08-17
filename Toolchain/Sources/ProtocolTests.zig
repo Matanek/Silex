@@ -42,13 +42,13 @@ test "classes conform with or without a base and inherit conformances" {
         \\protocol Named { func name() str }
         \\protocol AlsoNamed { func name() str }
         \\class Entity : Named {
-        \\    public func name() str { return "entity" }
+        \\    func name() str { return "entity" }
         \\}
         \\class Player : Entity, Drawable, AlsoNamed {
-        \\    public func draw() str { return "player" }
+        \\    func draw() str { return "player" }
         \\}
         \\class Icon : Drawable {
-        \\    public func draw() str { return "icon" }
+        \\    func draw() str { return "icon" }
         \\}
         \\func main() { var player = Player(); var icon = Icon(); print(player.name(), " ", icon.draw()) }
     );
@@ -64,8 +64,8 @@ test "dynamic protocol values copy structures and preserve class identity" {
         \\    func advance() int { self.value += 1; return self.value }
         \\}
         \\class Shared : Counter {
-        \\    public var value:int = 10
-        \\    public func advance() int { self.value += 1; return self.value }
+        \\    var value:int = 10
+        \\    func advance() int { self.value += 1; return self.value }
         \\}
         \\func main() {
         \\    let source = Step(value:1)
@@ -151,7 +151,7 @@ test "dynamic protocol values retain one shared class identity until final drop"
     const output = try run(
         \\protocol Live { func touch() }
         \\class Resource : Live {
-        \\    public func touch() { print("alive") }
+        \\    func touch() { print("alive") }
         \\    drop { print("drop") }
         \\}
         \\func main() {
@@ -195,7 +195,7 @@ test "compose dynamic protocol values across module boundaries" {
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Model.sx",
-        .data = "use Api; public struct Number : Api.Readable { public let value:int; public func read() int { return self.value } }",
+        .data = "use Api; public struct Number : Api.Readable { let value:int; func read() int { return self.value } }",
     });
     const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
     var compiler = Project.Compiler.init(allocator, std.testing.io);
@@ -204,14 +204,44 @@ test "compose dynamic protocol values across module boundaries" {
     try std.testing.expectEqualStrings("9\n", result.stdout);
 }
 
-test "diagnose missing private and mismatched protocol requirements" {
+test "public protocol contract does not republish a package implementation" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "Library/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Package.json",
+        .data = "{\"dependencies\":{\"Library\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Library/Package.json",
+        .data = "{\"name\":\"Library\",\"version\":\"1.0.0\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Library/Module/Api.sx",
+        .data =
+        \\public protocol Named { func name() str }
+        \\package class Concrete : Named { func name() str { return "package" } }
+        \\public func make() Named { return Concrete() }
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "use Library.Api\nfunc main() { var value:Api.Named = Api.make(); print(value.name()) }",
+    });
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(input);
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("package\n", result.stdout);
+}
+
+test "diagnose missing and mismatched protocol requirements" {
     try expectCompileError(
         "protocol Drawable { func draw() } struct Sprite : Drawable {} func main() {}",
         "type 'Sprite' does not implement protocol requirement 'Drawable.draw'",
-    );
-    try expectCompileError(
-        "protocol Drawable { func draw() } class Sprite : Drawable { func draw() {} } func main() {}",
-        "method 'draw' satisfying protocol 'Drawable' must be public",
     );
     try expectCompileError(
         "protocol Named { func name(value:@int) str } struct Item : Named { func name(value:&int) str { return \"x\" } } func main() {}",
@@ -267,7 +297,7 @@ test "compose protocol aliases reexports and dependent conformances" {
         .sub_path = "Types.sx",
         .data =
         \\use Facade.Shape as Drawable
-        \\public struct Sprite : Drawable { public func draw() str { return "sprite" } }
+        \\public struct Sprite : Drawable { func draw() str { return "sprite" } }
         ,
     });
     const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
@@ -281,7 +311,7 @@ test "generic constraints specialize requirements for every supported family" {
     const output = try run(
         \\protocol Describable { func describe() str }
         \\struct User : Describable { func describe() str { return "user" } }
-        \\class Entity : Describable { public func describe() str { return "entity" } }
+        \\class Entity : Describable { func describe() str { return "entity" } }
         \\class Child : Entity {}
         \\func describe<T : Describable>(value:T) str { return value.describe() }
         \\struct Wrapper<T : Describable> {
@@ -290,9 +320,9 @@ test "generic constraints specialize requirements for every supported family" {
         \\}
         \\enum Choice<T : Describable> { some(T); none }
         \\class Box<T : Describable> {
-        \\    public let value:T
-        \\    public init(value:T) { self.value = value }
-        \\    public func text() str { return self.value.describe() }
+        \\    let value:T
+        \\    init(value:T) { self.value = value }
+        \\    func text() str { return self.value.describe() }
         \\}
         \\struct Helper { func text<T : Describable>(value:T) str { return value.describe() } }
         \\func choice_text(value:Choice<User>) str {
@@ -350,7 +380,7 @@ test "compose a constrained generic through a protocol reexport" {
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Model.sx",
-        .data = "use Facade.Named; public struct Item : Named { public func name() str { return \"item\" } }",
+        .data = "use Facade.Named; public struct Item : Named { func name() str { return \"item\" } }",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Render.sx",
