@@ -148,6 +148,22 @@ pub fn loadVector64(destination: Register, base: Register, byte_offset: u12) u32
         registerBits(destination);
 }
 
+pub fn loadVector64PostIndex(destination: Register, base: Register, byte_offset: i9) u32 {
+    const immediate: u9 = @bitCast(byte_offset);
+    return 0xfc400400 |
+        (@as(u32, immediate) << 12) |
+        (registerBits(base) << 5) |
+        registerBits(destination);
+}
+
+pub fn loadVector64Unscaled(destination: Register, base: Register, byte_offset: i9) u32 {
+    const immediate: u9 = @bitCast(byte_offset);
+    return 0xfc400000 |
+        (@as(u32, immediate) << 12) |
+        (registerBits(base) << 5) |
+        registerBits(destination);
+}
+
 pub fn loadFloat64Pair(
     first: Register,
     second: Register,
@@ -500,6 +516,8 @@ test "encode zero vector immediate for scalar float registers" {
 test "encode compact 32-bit collection accesses" {
     try std.testing.expectEqual(@as(u32, 0xb9400d4c), load32Offset(.x12, .x10, 12));
     try std.testing.expectEqual(@as(u32, 0xb9000dc5), store32Offset(.x5, .x14, 12));
+    try std.testing.expectEqual(@as(u32, 0xfc410453), loadVector64PostIndex(.x19, .x2, 16));
+    try std.testing.expectEqual(@as(u32, 0xfc5f8055), loadVector64Unscaled(.x21, .x2, -8));
 }
 
 test "encode direct float32 stack accesses" {

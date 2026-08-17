@@ -777,6 +777,43 @@ pub fn emitLoad(
     try Fixups.patch26(words.items, complete, words.items.len);
 }
 
+pub fn emitCursorAddress(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    function: Machine.Function,
+    collection: Machine.Span,
+    index_slot: Machine.Slot,
+    stride: u8,
+    cursor: A64.Register,
+) Error!void {
+    const base = try residentOrLoadedValue(allocator, words, function, cursor, collection.start);
+    const index = try residentOrLoadedValue(allocator, words, function, .x9, index_slot);
+    try emitElementAddress(allocator, words, cursor, base, index, stride);
+}
+
+pub fn emitCursorLoad(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    function: Machine.Function,
+    value: Machine.Instruction.CollectionLoad,
+    leaf_count: u12,
+    cursor: A64.Register,
+) Error!void {
+    const stride = elementStride(value.result.width, value.element_stride);
+    if (value.checked or !value.dynamic or !value.view or leaf_count != 2 or
+        stride != @as(u64, value.result.width) * 4 or stride > std.math.maxInt(i9))
+        return error.InvalidMachineProgram;
+    const first = function.float_lane_slots[value.result.start] orelse return error.InvalidMachineProgram;
+    const second = function.float_lane_slots[value.result.start + 1] orelse return error.InvalidMachineProgram;
+    if (first.register != second.register or first.lane != 0 or second.lane != 1)
+        return error.InvalidMachineProgram;
+    try words.append(allocator, A64.loadVector64PostIndex(
+        @enumFromInt(first.register),
+        cursor,
+        @intCast(stride),
+    ));
+}
+
 fn allFloatResident(function: Machine.Function, span: Machine.Span) bool {
     for (0..span.width) |leaf| {
         const slot: Machine.Slot = @intCast(@as(usize, span.start) + leaf);
@@ -815,6 +852,34 @@ pub fn emitDeferredLoad(
         value.result.width,
         stride,
     );
+}
+
+pub fn emitCursorDeferredLoad(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    function: Machine.Function,
+    value: Machine.Instruction.CollectionLoad,
+    first_leaf: u12,
+    cursor: A64.Register,
+) Error!void {
+    const stride = elementStride(value.result.width, value.element_stride);
+    if (value.checked or !value.dynamic or !value.view or
+        first_leaf + 2 != value.result.width or
+        stride != @as(u64, value.result.width) * 4) return error.InvalidMachineProgram;
+    const first_slot: Machine.Slot = @intCast(@as(usize, value.result.start) + first_leaf);
+    const second_slot = first_slot + 1;
+    const first = function.float_lane_slots[first_slot] orelse return error.InvalidMachineProgram;
+    const second = function.float_lane_slots[second_slot] orelse return error.InvalidMachineProgram;
+    if (first.register != second.register or first.lane != 0 or second.lane != 1)
+        return error.InvalidMachineProgram;
+    const byte_offset = @as(i64, first_leaf) * 4 - @as(i64, @intCast(stride));
+    if (byte_offset < std.math.minInt(i9) or byte_offset > std.math.maxInt(i9))
+        return error.InvalidMachineProgram;
+    try words.append(allocator, A64.loadVector64Unscaled(
+        @enumFromInt(first.register),
+        cursor,
+        @intCast(byte_offset),
+    ));
 }
 
 fn emitResidentFloatLoads(

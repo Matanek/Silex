@@ -15,6 +15,7 @@ const CycleRuntime = @import("CycleRuntime.zig");
 const ExternalCalls = @import("ExternalCalls.zig");
 const Allocation = @import("Allocation.zig");
 const Pairing = @import("Pairing.zig");
+const LoopCursor = @import("LoopCursor.zig");
 const Register = A64.Register;
 const Condition = A64.Condition;
 const enable_cycle_collector = true;
@@ -577,6 +578,11 @@ fn encodeFunction(
     var scalar_cache = ScalarCache{ .enabled = function.register_slots.len == 0 and function.float_register_slots.len == 0 };
     const instruction_offsets = try allocator.alloc(usize, function.instructions.len);
     defer allocator.free(instruction_offsets);
+    var collection_cursor = try LoopCursor.find(allocator, function);
+    if (collection_cursor) |cursor| {
+        const load = function.instructions[cursor.load_index].collection_load;
+        if (eagerCollectionWidth(function, cursor.load_index, load) != 2) collection_cursor = null;
+    }
     const runtime_frame_size: u16 = if (enable_cycle_collector) 16 else 0;
     const saved_register_count = calleeSavedRegisterCount(function);
     const saved_register_size: u16 = @intCast(std.mem.alignForward(usize, saved_register_count * Machine.slot_size, 16));
@@ -639,7 +645,7 @@ fn encodeFunction(
 
     for (function.instructions, 0..) |instruction, instruction_index| {
         instruction_offsets[instruction_index] = words.items.len;
-        try emitDeferredCollectionLoads(allocator, words, function, instruction_index);
+        try emitDeferredCollectionLoads(allocator, words, function, instruction_index, collection_cursor);
         if (!scalarCacheInstruction(instruction)) scalar_cache.clear();
         switch (instruction) {
             .constant_int => |constant| {
@@ -1102,7 +1108,30 @@ fn encodeFunction(
                 try patch19(words.items, skip_true, words.items.len);
                 try words.append(allocator, storeStack(.x11, test_value.result));
             },
-            .collection_load => |access| if (access.dynamic)
+            .collection_load => |access| if (collection_cursor) |cursor|
+                if (cursor.load_index == instruction_index)
+                    try ListRuntime.emitCursorLoad(
+                        allocator,
+                        words,
+                        function,
+                        access,
+                        eagerCollectionWidth(function, instruction_index, access),
+                        @enumFromInt(cursor.register),
+                    )
+                else if (access.dynamic)
+                    try ListRuntime.emitLoad(
+                        allocator,
+                        words,
+                        data_fixups,
+                        &fixups.epilogue,
+                        program,
+                        function,
+                        access,
+                        eagerCollectionWidth(function, instruction_index, access),
+                    )
+                else
+                    try encodeCollectionLoad(allocator, words, data_fixups, &fixups, program, access)
+            else if (access.dynamic)
                 try ListRuntime.emitLoad(
                     allocator,
                     words,
@@ -1357,6 +1386,17 @@ fn encodeFunction(
                 try appendFixup(allocator, words, &fixups.epilogue, branch(), .imm26);
             },
             .jump => |target| {
+                if (collection_cursor) |cursor| if (cursor.entry_jump == instruction_index) {
+                    try ListRuntime.emitCursorAddress(
+                        allocator,
+                        words,
+                        function,
+                        cursor.collection,
+                        cursor.initial_index,
+                        cursor.stride,
+                        @enumFromInt(cursor.register),
+                    );
+                };
                 if (loopBackedgeComparison(function, instruction_index, target)) |backedge| {
                     const header = resolveJumpTarget(function.instructions, target);
                     if (instruction_offsets[header] == instruction_offsets[backedge.comparison_index]) {
@@ -2641,6 +2681,7 @@ fn emitDeferredCollectionLoads(
     words: *std.ArrayList(u32),
     function: Machine.Function,
     instruction_index: usize,
+    collection_cursor: ?LoopCursor.Cursor,
 ) Error!void {
     for (function.instructions[0..instruction_index], 0..) |instruction, load_index| {
         const load = switch (instruction) {
@@ -2651,6 +2692,19 @@ fn emitDeferredCollectionLoads(
         if (eager_width >= load.result.width) continue;
         const first_slot: Machine.Slot = @intCast(@as(usize, load.result.start) + eager_width);
         if (firstSlotUseAfter(function.instructions, load_index, first_slot) == instruction_index) {
+            if (collection_cursor) |cursor| {
+                if (cursor.load_index == load_index) {
+                    try ListRuntime.emitCursorDeferredLoad(
+                        allocator,
+                        words,
+                        function,
+                        load,
+                        eager_width,
+                        @enumFromInt(cursor.register),
+                    );
+                    continue;
+                }
+            }
             try ListRuntime.emitDeferredLoad(allocator, words, function, load, eager_width);
         }
     }
