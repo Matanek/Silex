@@ -34,11 +34,15 @@ fn resolve(program: Ir.Program, information: []Info, function_index: usize) void
         info.state = .rejected;
         return;
     }
-    for (function.parameter_types) |parameter_type| if (!isValueType(program, parameter_type, 0)) {
+    for (function.parameter_types) |parameter_type| if (!isParameterType(program, parameter_type)) {
         info.state = .rejected;
         return;
     };
-    for (function.value_types) |value_type| if (!isValueType(program, value_type, 0)) {
+    if (function.value_types.len < function.parameter_types.len) {
+        info.state = .rejected;
+        return;
+    }
+    for (function.value_types[function.parameter_types.len..]) |value_type| if (!isValueType(program, value_type, 0)) {
         info.state = .rejected;
         return;
     };
@@ -98,6 +102,14 @@ fn resolve(program: Ir.Program, information: []Info, function_index: usize) void
     }
     info.cost = cost;
     info.state = .eligible;
+}
+
+fn isParameterType(program: Ir.Program, value_type: Ir.Type) bool {
+    if (isValueType(program, value_type, 0)) return true;
+    const structure_index = value_type.structureIndex() orelse return false;
+    if (structure_index >= program.structures.len) return false;
+    const structure = program.structures[structure_index];
+    return !structure.is_class and !structure.is_static and structure.collection == null;
 }
 
 fn isValueType(program: Ir.Program, value_type: Ir.Type, depth: usize) bool {
@@ -395,4 +407,72 @@ test "inline small void memory writers" {
     const body = text[start..];
     try std.testing.expect(!std.mem.containsAtLeast(u8, body, 1, "call @write_float"));
     try std.testing.expect(std.mem.containsAtLeast(u8, body, 1, "boundary.store"));
+}
+
+test "inline numeric reads from aggregates that contain resources" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const resource_type = Ir.Type.structure(0);
+    const drawing_type = Ir.Type.structure(1);
+    const structures = [_]Ir.Structure{
+        .{
+            .name = "Resource",
+            .fields = &.{.{ .name = "value", .type = .int, .mutable = false }},
+            .is_class = true,
+        },
+        .{
+            .name = "Drawing",
+            .fields = &.{
+                .{ .name = "resource", .type = resource_type, .mutable = false },
+                .{ .name = "width", .type = .int, .mutable = false },
+            },
+        },
+    };
+    const read_values = [_]Ir.Type{ drawing_type, .int };
+    const read_instructions = [_]Ir.Instruction{.{ .field_load = .{
+        .result = 1,
+        .base = 0,
+        .field = 1,
+    } }};
+    const read_blocks = [_]Ir.Block{.{
+        .instructions = &read_instructions,
+        .terminator = .{ .return_value = 1 },
+    }};
+    const main_values = [_]Ir.Type{ drawing_type, .int };
+    const main_instructions = [_]Ir.Instruction{.{ .call = .{
+        .result = 1,
+        .function = 0,
+        .arguments = &.{0},
+    } }};
+    const main_blocks = [_]Ir.Block{.{
+        .instructions = &main_instructions,
+        .terminator = .{ .return_value = 1 },
+    }};
+    const program: Ir.Program = .{
+        .structures = &structures,
+        .functions = &.{
+            .{
+                .name = "width",
+                .parameter_types = &.{drawing_type},
+                .return_type = .int,
+                .value_types = &read_values,
+                .blocks = &read_blocks,
+            },
+            .{
+                .name = "main",
+                .parameter_types = &.{drawing_type},
+                .return_type = .int,
+                .value_types = &main_values,
+                .blocks = &main_blocks,
+            },
+        },
+    };
+
+    const optimized = try optimize(allocator, program);
+    const text = try Ir.writeText(allocator, optimized);
+    const start = std.mem.indexOf(u8, text, "func @main") orelse return error.TestUnexpectedResult;
+    const body = text[start..];
+    try std.testing.expect(!std.mem.containsAtLeast(u8, body, 1, "call @width"));
+    try std.testing.expect(std.mem.containsAtLeast(u8, body, 1, "field %0, .width"));
 }
