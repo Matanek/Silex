@@ -4299,6 +4299,25 @@ test "recover member completion in an unfinished conditional" {
     try std.testing.expect(contains(items, "pressed"));
 }
 
+test "complete a contextual match method" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source =
+        \\struct Regex {
+        \\    public func match(text:str) bool { return true }
+        \\    public func contains(text:str) bool { return true }
+        \\}
+        \\func main() {
+        \\    let regex = Regex()
+        \\    regex.
+        \\}
+    ;
+    const cursor = std.mem.indexOf(u8, source, "regex.\n").? + "regex.".len;
+    const items = try itemsAt(arena.allocator(), source, cursor, .trigger_character);
+    try std.testing.expect(contains(items, "match"));
+    try std.testing.expect(contains(items, "contains"));
+}
+
 test "hide reserved compiler hooks from local member completion" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

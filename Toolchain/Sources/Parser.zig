@@ -215,7 +215,7 @@ pub const Parser = struct {
     fn parseFunctionDeclaration(self: *Parser, is_public: bool, is_internal: bool, is_local: bool, allow_bodyless: bool) ParseError!Ast.Function {
         const position = self.current.position;
         try self.expect(.keyword_func, "expected 'func'");
-        if (self.current.tag != .identifier and self.current.tag != .keyword_copy) return self.fail("expected function name");
+        if (self.current.tag != .identifier and self.current.tag != .keyword_copy and self.current.tag != .keyword_match) return self.fail("expected function name");
         const source_name = self.current.lexeme;
         const name = self.testLocalFunctionName(source_name) orelse source_name;
         const name_position = self.current.position;
@@ -853,7 +853,7 @@ pub const Parser = struct {
             if (self.current.tag == .dot or self.current.tag == .question_dot) {
                 const safe = self.current.tag == .question_dot;
                 try self.advance();
-                if (self.current.tag != .identifier and self.current.tag != .keyword_copy) return self.fail(if (safe)
+                if (self.current.tag != .identifier and self.current.tag != .keyword_copy and self.current.tag != .keyword_match) return self.fail(if (safe)
                     "expected member name after '?.'"
                 else
                     "expected member name after '.'");
@@ -1481,6 +1481,24 @@ test "parse methods and chained member calls" {
     const chained = program.functions[1].statements[2].print_statement.values[0].value.call;
     try std.testing.expectEqualStrings("current", chained.name);
     try std.testing.expect(chained.receiver.?.value == .call);
+}
+
+test "treat match as a contextual method name" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(),
+        \\struct Pattern {
+        \\    public func match(text:str) bool { return true }
+        \\}
+        \\func main() {
+        \\    let expression = Pattern()
+        \\    assert(expression.match("Silex"))
+        \\}
+    );
+    const program = try parser.parse();
+    try std.testing.expectEqualStrings("match", program.structures[0].methods[0].name);
+    const invocation = program.functions[0].statements[1].assert_statement.condition.value.call;
+    try std.testing.expectEqualStrings("match", invocation.name);
 }
 
 test "reject legacy and malformed structure syntax" {

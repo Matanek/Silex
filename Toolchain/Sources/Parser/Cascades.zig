@@ -8,7 +8,7 @@ pub fn parse(self: anytype, receiver: *Ast.Expression) !*Ast.Expression {
     var operations: std.ArrayList(Ast.Expression.Cascade.Operation) = .empty;
     while (self.current.tag == .dot_dot) {
         try self.advance();
-        if (self.current.tag != .identifier) return self.fail("expected member name after '..'");
+        if (self.current.tag != .identifier and self.current.tag != .keyword_match) return self.fail("expected member name after '..'");
         const member = self.current;
         try self.advance();
         const type_arguments = if (self.current.tag == .less)

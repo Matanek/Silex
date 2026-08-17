@@ -25,6 +25,12 @@ struct Meter {
     var source:TickSource
 }
 
+struct Pattern {
+    let expected:str
+
+    func match(text:str) bool { return text == self.expected }
+}
+
 test "structure instance and static methods" {
     var counter = Counter.starting(at:10)
     counter.increment()
@@ -49,4 +55,10 @@ test "compound field assignment preserves sibling method mutation" {
 
     if meter.elapsed != 1 { panic("compound field result") }
     if meter.source.ticks != 1 { panic("sibling method mutation") }
+}
+
+test "match is a contextual method name" {
+    let pattern = Pattern(expected:"Silex")
+    assert(pattern.match("Silex"), "contextual method call")
+    assert(!pattern.match("other"), "contextual method result")
 }

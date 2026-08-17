@@ -51,6 +51,10 @@ constraints.
 | Bound instance method | `receiver.method` |
 | Cascade field assignment | `value..field = replacement` |
 
+`match` remains a control-flow keyword in expression position, but it is
+contextual after `func`, `.`, `?.`, or `..`. It can therefore name and select a
+method naturally: `func match(...)` and `pattern.match(text)`.
+
 The type suffixes `?`, `[]`, and `[N]` apply from left to right, so `Type?[]`
 and `Type[]?` are distinct types.
 
