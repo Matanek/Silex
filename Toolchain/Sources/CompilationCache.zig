@@ -7,12 +7,21 @@ const Ir = @import("Ir.zig");
 const Ast = @import("Ast.zig");
 const Packages = @import("Packages.zig");
 
-// This identity covers every serialized frontend, Release and machine artifact.
-// Bump it whenever an optimizer, lowering or register-allocation contract
-// changes: source-only cache keys cannot distinguish machine plans emitted by
-// two versions of the compiler.
-pub const format = "silex-cache-v79-arm64-float-returns";
+// This identity describes the on-disk schema only. Compiler implementation
+// changes are covered automatically by the digest of the running executable.
+pub const format = "silex-cache-v80-compiler-identity";
 const State = struct { files: []const []const u8 };
+
+const generated_cache_roots = [_][]const u8{
+    ".silex/cache/v4",
+    ".silex/artifacts/v1",
+    ".silex/run",
+    ".silex/test",
+};
+
+// Cache entry helpers do not carry Io through every backend layer. CLI cache
+// entry points initialize this once, before any cache key is computed.
+var active_compiler_identity: ?[Blake3.digest_length]u8 = null;
 
 pub const NativeState = struct {
     files: []const []const u8,
@@ -26,6 +35,16 @@ const RetainedFile = struct {
 };
 
 pub fn maintain(allocator: Allocator, io: Io) void {
+    const identity = ensureCompilerIdentity(io) catch {
+        // If the running executable cannot be identified, preserving old
+        // generated code would be unsafe. Keep caching usable for this process,
+        // but start it from an empty generation on every invocation.
+        clearGeneratedCache(io);
+        active_compiler_identity = fallbackCompilerIdentity();
+        return;
+    };
+    synchronizeCompilerGeneration(allocator, io, ".silex", identity);
+
     // These locations used to retain one large object or executable per output
     // path. They are disposable compiler state and are superseded by v4 and
     // the content-addressed artifact store.
@@ -133,6 +152,67 @@ fn oldestFirst(_: void, left: RetainedFile, right: RetainedFile) bool {
     return left.modified < right.modified;
 }
 
+fn ensureCompilerIdentity(io: Io) ![Blake3.digest_length]u8 {
+    if (active_compiler_identity) |identity| return identity;
+    const executable = try std.process.openExecutable(io, .{});
+    defer executable.close(io);
+    var hasher = Blake3.init(.{});
+    var buffer: [64 * 1024]u8 = undefined;
+    var offset: u64 = 0;
+    while (true) {
+        const amount = try executable.readPositionalAll(io, &buffer, offset);
+        if (amount == 0) break;
+        hasher.update(buffer[0..amount]);
+        offset += amount;
+    }
+    var identity: [Blake3.digest_length]u8 = undefined;
+    hasher.final(&identity);
+    active_compiler_identity = identity;
+    return identity;
+}
+
+fn fallbackCompilerIdentity() [Blake3.digest_length]u8 {
+    var identity: [Blake3.digest_length]u8 = undefined;
+    Blake3.hash(format, &identity, .{});
+    return identity;
+}
+
+fn synchronizeCompilerGeneration(
+    allocator: Allocator,
+    io: Io,
+    root: []const u8,
+    identity: [Blake3.digest_length]u8,
+) void {
+    const marker = std.fs.path.join(allocator, &.{ root, "compiler-identity-v1" }) catch return;
+    defer allocator.free(marker);
+    const hex = std.fmt.bytesToHex(identity, .lower);
+    const current = Io.Dir.cwd().readFileAlloc(io, marker, allocator, .limited(hex.len + 1)) catch null;
+    if (current) |contents| {
+        defer allocator.free(contents);
+        if (std.mem.eql(u8, contents, &hex)) return;
+    }
+
+    clearGeneratedCacheAt(allocator, io, root);
+    Io.Dir.cwd().createDirPath(io, root) catch return;
+    var atomic = Io.Dir.cwd().createFileAtomic(io, marker, .{ .make_path = true, .replace = true }) catch return;
+    defer atomic.deinit(io);
+    atomic.file.writeStreamingAll(io, &hex) catch return;
+    atomic.replace(io) catch return;
+}
+
+fn clearGeneratedCache(io: Io) void {
+    for (generated_cache_roots) |path| Io.Dir.cwd().deleteTree(io, path) catch {};
+}
+
+fn clearGeneratedCacheAt(allocator: Allocator, io: Io, root: []const u8) void {
+    const relative_roots = [_][]const u8{ "cache/v4", "artifacts/v1", "run", "test" };
+    for (relative_roots) |relative| {
+        const path = std.fs.path.join(allocator, &.{ root, relative }) catch continue;
+        defer allocator.free(path);
+        Io.Dir.cwd().deleteTree(io, path) catch {};
+    }
+}
+
 pub fn loadIr(allocator: Allocator, io: Io, source_path: []const u8, target_name: []const u8) ?Ir.Program {
     const state_digest = artifactKey("frontend-state", &.{ source_path, target_name });
     const state_bytes = load(allocator, io, state_digest, "state") orelse return null;
@@ -184,7 +264,7 @@ pub fn storeAst(allocator: Allocator, io: Io, path: []const u8, source: []const 
 
 fn contentIdentity(namespace: []const u8, path: []const u8, source: []const u8) [Blake3.digest_length]u8 {
     var hasher = Blake3.init(.{});
-    hasher.update(format);
+    updateCompilerIdentity(&hasher);
     hasher.update(namespace);
     hasher.update(path);
     hasher.update(source);
@@ -194,8 +274,18 @@ fn contentIdentity(namespace: []const u8, path: []const u8, source: []const u8) 
 }
 
 pub fn artifactKey(namespace: []const u8, parts: []const []const u8) [Blake3.digest_length]u8 {
+    const identity = active_compiler_identity orelse fallbackCompilerIdentity();
+    return artifactKeyForCompiler(identity, namespace, parts);
+}
+
+fn artifactKeyForCompiler(
+    identity: [Blake3.digest_length]u8,
+    namespace: []const u8,
+    parts: []const []const u8,
+) [Blake3.digest_length]u8 {
     var hasher = Blake3.init(.{});
     hasher.update(format);
+    hasher.update(&identity);
     hasher.update(namespace);
     for (parts) |part| hasher.update(part);
     var digest: [Blake3.digest_length]u8 = undefined;
@@ -214,7 +304,7 @@ pub fn key(
     defer allocator.free(paths);
     std.mem.sort([]const u8, paths, {}, lessThan);
     var hasher = Blake3.init(.{});
-    hasher.update(format);
+    updateCompilerIdentity(&hasher);
     hasher.update(command);
     hasher.update(variant);
     for (paths) |path| {
@@ -244,7 +334,7 @@ pub fn nativeKey(
     defer allocator.free(paths);
     std.mem.sort([]const u8, paths, {}, lessThan);
     var hasher = Blake3.init(.{});
-    hasher.update(format);
+    updateCompilerIdentity(&hasher);
     hasher.update(command);
     hasher.update(variant);
     for (paths) |path| {
@@ -275,6 +365,12 @@ pub fn nativeKey(
     var digest: [Blake3.digest_length]u8 = undefined;
     hasher.final(&digest);
     return digest;
+}
+
+fn updateCompilerIdentity(hasher: *Blake3) void {
+    hasher.update(format);
+    const identity = active_compiler_identity orelse fallbackCompilerIdentity();
+    hasher.update(&identity);
 }
 
 pub fn executablePath(allocator: Allocator, digest: [Blake3.digest_length]u8, kind: []const u8) ![]const u8 {
@@ -424,6 +520,53 @@ test "entry cache key distinguishes programs sharing one source set" {
         "macos-arm64",
     );
     try std.testing.expect(!std.mem.eql(u8, &arithmetic, &objects));
+}
+
+test "artifact keys distinguish compiler executables" {
+    const first: [Blake3.digest_length]u8 = @splat(0x11);
+    const second: [Blake3.digest_length]u8 = @splat(0x22);
+    const first_key = artifactKeyForCompiler(first, "machine", &.{"same-input"});
+    const second_key = artifactKeyForCompiler(second, "machine", &.{"same-input"});
+    try std.testing.expect(!std.mem.eql(u8, &first_key, &second_key));
+}
+
+test "compiler generation rotation removes old generated code only once" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "cache/v4");
+    try temporary.dir.createDirPath(std.testing.io, "cache/shaders/kept");
+    try temporary.dir.createDirPath(std.testing.io, "artifacts/v1");
+    try temporary.dir.createDirPath(std.testing.io, "run");
+    try temporary.dir.createDirPath(std.testing.io, "test");
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "cache/v4/old", .data = "old" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "cache/shaders/kept/output", .data = "shader" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "artifacts/v1/old", .data = "old" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "run/old", .data = "old" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "test/old", .data = "old" });
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const first: [Blake3.digest_length]u8 = @splat(0x11);
+    const second: [Blake3.digest_length]u8 = @splat(0x22);
+
+    synchronizeCompilerGeneration(allocator, std.testing.io, root, first);
+    try std.testing.expect(!pathExists(temporary.dir, std.testing.io, "cache/v4/old"));
+    try std.testing.expect(pathExists(temporary.dir, std.testing.io, "cache/shaders/kept/output"));
+
+    try temporary.dir.createDirPath(std.testing.io, "cache/v4");
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "cache/v4/current", .data = "current" });
+    synchronizeCompilerGeneration(allocator, std.testing.io, root, first);
+    try std.testing.expect(pathExists(temporary.dir, std.testing.io, "cache/v4/current"));
+
+    synchronizeCompilerGeneration(allocator, std.testing.io, root, second);
+    try std.testing.expect(!pathExists(temporary.dir, std.testing.io, "cache/v4/current"));
+    try std.testing.expect(pathExists(temporary.dir, std.testing.io, "cache/shaders/kept/output"));
+}
+
+fn pathExists(directory: Io.Dir, io: Io, path: []const u8) bool {
+    directory.access(io, path, .{}) catch return false;
+    return true;
 }
 
 test "flat cache maintenance enforces its byte budget" {

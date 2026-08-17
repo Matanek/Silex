@@ -830,6 +830,7 @@ fn runSource(init: std.process.Init, allocator: std.mem.Allocator, args: []const
         std.debug.print("silex: 'run' requires a recognized host target\n", .{});
         return 1;
     };
+    if (options.cache) CompilationCache.maintain(allocator, init.io);
     const output_path = try runArtifactPath(allocator, options, target);
     const status = try compileNativeOptions(init, allocator, .{
         .source_path = options.source_path,
@@ -858,6 +859,10 @@ fn interpretSource(init: std.process.Init, allocator: std.mem.Allocator, args: [
         std.debug.print("silex: 'interpret' requires a recognized host target\n", .{});
         return 1;
     };
+    if (options.cache) {
+        CompilationCache.maintain(allocator, init.io);
+        defer CompilationCache.maintainAfterMutation(allocator, init.io);
+    }
     var boundaries: []const Boundary.Function = &.{};
     const cached_ir = if (options.cache) CompilationCache.loadIr(allocator, init.io, options.source_path, target.name()) else null;
     const portable_ir = if (cached_ir) |cached| if (containsBoundaryCall(cached)) null else cached else null;
@@ -932,6 +937,7 @@ fn compileNative(init: std.process.Init, allocator: std.mem.Allocator, args: []c
             return 1;
         },
     };
+    if (options.cache) CompilationCache.maintain(allocator, init.io);
     return compileNativeOptions(init, allocator, options, false);
 }
 
@@ -941,7 +947,6 @@ fn compileNativeOptions(
     options: Cli.CompileOptions,
     emit_ir: bool,
 ) !u8 {
-    if (options.cache) CompilationCache.maintain(allocator, init.io);
     const target = options.target orelse TargetModule.Target.host() orelse {
         std.debug.print("silex: 'compile' requires --target on this host\n", .{});
         return 1;
