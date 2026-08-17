@@ -169,18 +169,28 @@ fn allocateGraph(
         }
     }
 
+    const alias_roots = try allocator.alloc(Machine.Slot, slot_count);
+    defer allocator.free(alias_roots);
+    try buildPureAliasRoots(allocator, alias_roots, instructions, live, slot_count);
+
     std.mem.sort(Interval, intervals, {}, heavierThan);
     for (intervals) |interval| {
+        if (preferredAliasResidence(interval.slot, residences, alias_roots)) |preferred| {
+            if (!colorConflicts(interval.slot, preferred, residences, alias_roots, live, instructions, slot_count)) {
+                residences[interval.slot] = preferred;
+                continue;
+            }
+        }
         if (copyPartner(interval.slot, instructions)) |partner| {
             if (residences[partner]) |preferred| {
-                if (!colorConflicts(interval.slot, preferred, residences, live, instructions, slot_count)) {
+                if (!colorConflicts(interval.slot, preferred, residences, alias_roots, live, instructions, slot_count)) {
                     residences[interval.slot] = preferred;
                     continue;
                 }
             }
         }
         for (registers) |register| {
-            if (!colorConflicts(interval.slot, register, residences, live, instructions, slot_count)) {
+            if (!colorConflicts(interval.slot, register, residences, alias_roots, live, instructions, slot_count)) {
                 residences[interval.slot] = register;
                 break;
             }
@@ -296,13 +306,14 @@ fn colorConflicts(
     slot: Machine.Slot,
     register: u5,
     residences: []const ?u5,
+    alias_roots: []const Machine.Slot,
     live: []const bool,
     instructions: []const Machine.Instruction,
     slot_count: usize,
 ) bool {
     for (residences, 0..) |residence, other| {
         if (residence == null or residence.? != register or other == slot) continue;
-        if (slotsArePureAliases(instructions, live, slot_count, slot, @intCast(other))) continue;
+        if (alias_roots[slot] == alias_roots[other]) continue;
         for (0..live.len / slot_count) |instruction| {
             if (instructionCanShareResidence(
                 instructions,
@@ -320,53 +331,67 @@ fn colorConflicts(
     return false;
 }
 
-fn slotsArePureAliases(
+fn preferredAliasResidence(
+    slot: Machine.Slot,
+    residences: []const ?u5,
+    alias_roots: []const Machine.Slot,
+) ?u5 {
+    for (residences, 0..) |residence, other| {
+        if (residence != null and alias_roots[slot] == alias_roots[other]) return residence;
+    }
+    return null;
+}
+
+fn buildPureAliasRoots(
+    allocator: Allocator,
+    roots: []Machine.Slot,
     instructions: []const Machine.Instruction,
     live: []const bool,
     slot_count: usize,
-    left: Machine.Slot,
-    right: Machine.Slot,
-) bool {
-    const pair = for (instructions, 0..) |instruction, index| {
-        if (pureAliasPair(instruction, left, right)) |alias| break .{ .alias = alias, .index = index };
-    } else return false;
-    var result_definitions: usize = 0;
-    for (instructions, 0..) |instruction, index| {
-        if (instructionDefines(instruction, pair.alias.result)) {
-            result_definitions += 1;
-            if (index != pair.index) return false;
-        }
-        if (instructionDefines(instruction, pair.alias.operand) and
-            (live[index * slot_count + pair.alias.result] or
-                successorLive(instructions, live, slot_count, index, pair.alias.result))) return false;
+) Allocator.Error!void {
+    const operands = try allocator.alloc(?Machine.Slot, slot_count);
+    defer allocator.free(operands);
+    @memset(operands, null);
+    for (0..slot_count) |slot| {
+        operands[slot] = safePureAliasOperand(instructions, live, slot_count, @intCast(slot));
     }
-    return result_definitions == 1;
+    for (roots, 0..) |*root, slot| {
+        root.* = @intCast(slot);
+        var steps: usize = 0;
+        while (operands[root.*]) |operand| {
+            root.* = operand;
+            steps += 1;
+            if (steps == slot_count) break;
+        }
+    }
 }
 
-const PureAlias = struct { result: Machine.Slot, operand: Machine.Slot };
-
-fn pureAliasPair(instruction: Machine.Instruction, left: Machine.Slot, right: Machine.Slot) ?PureAlias {
-    return switch (instruction) {
-        .copy => |copy| if ((copy.result == left and copy.operand == right) or
-            (copy.result == right and copy.operand == left))
-            .{ .result = copy.result, .operand = copy.operand }
-        else
-            null,
-        .copy_range => |copy| for (0..copy.result.width) |leaf| {
-            const result: Machine.Slot = @intCast(@as(usize, copy.result.start) + leaf);
-            const operand: Machine.Slot = @intCast(@as(usize, copy.operand.start) + leaf);
-            if ((result == left and operand == right) or (result == right and operand == left)) {
-                break .{ .result = result, .operand = operand };
-            }
-        } else null,
-        .collection_count => |count| if (count.view and
-            ((count.result == left and count.collection.start + 1 == right) or
-                (count.result == right and count.collection.start + 1 == left)))
-            .{ .result = count.result, .operand = count.collection.start + 1 }
-        else
-            null,
-        else => null,
-    };
+fn safePureAliasOperand(
+    instructions: []const Machine.Instruction,
+    live: []const bool,
+    slot_count: usize,
+    result: Machine.Slot,
+) ?Machine.Slot {
+    var definition_index: ?usize = null;
+    var operand: ?Machine.Slot = null;
+    for (instructions, 0..) |instruction, index| {
+        if (!instructionDefines(instruction, result)) continue;
+        if (definition_index != null) return null;
+        definition_index = index;
+        operand = switch (instruction) {
+            .copy => |copy| copy.operand,
+            .copy_range => |copy| @intCast(@as(usize, copy.operand.start) + result - copy.result.start),
+            .collection_count => |count| if (count.view) count.collection.start + 1 else null,
+            else => null,
+        };
+        if (operand == null) return null;
+    }
+    if (definition_index == null or operand == null) return null;
+    for (instructions, 0..) |instruction, index| {
+        if (instructionDefines(instruction, operand.?) and
+            (live[index * slot_count + result] or successorLive(instructions, live, slot_count, index, result))) return null;
+    }
+    return operand;
 }
 
 fn instructionCanShareResidence(
@@ -530,12 +555,20 @@ fn allocateFloatPairs(
     defer allocator.free(planned);
     @memset(planned, false);
 
+    // Loop recurrences need CFG-aware interference before they can safely
+    // share destructive SIMD destinations. Reserve their lanes as scalar for
+    // now; independent XY/XYZ/XYZW expressions remain eligible below.
+    for (function.float_lane_groups) |group| {
+        if (!group.recurrence) continue;
+        for (0..group.width) |lane| partners[group.slots[lane]] = group.slots[lane];
+    }
+
     // Prefer affinity discovered while scalar values still have their IR
     // identity. ARM64 consumes pairs today; XYZ remains one portable group and
     // is lowered as XY plus a scalar Z until a profitable .4s realization is
     // selected by this backend.
     for (function.float_lane_groups) |group| {
-        if (group.priority == 0) continue;
+        if (group.priority == 0 or group.recurrence) continue;
         var lane: usize = 0;
         while (lane + 1 < group.width) : (lane += 2) {
             const first = group.slots[lane];
@@ -805,7 +838,6 @@ fn pruneUnprofitableFloatPairs(
         residences[slot] = null;
     };
 }
-
 fn pairDefinitionReady(
     instructions: []const Machine.Instruction,
     residences: []const ?Machine.FloatLaneResidence,
@@ -1361,6 +1393,33 @@ test "numeric conversion operands and results stay in their register banks" {
     try std.testing.expect(result.float_residences[1] != null);
 }
 
+test "transitive pure float copies share one scalar register" {
+    const instructions = [_]Machine.Instruction{
+        .{ .constant_float32 = .{ .result = 1, .bits = 1065353216 } },
+        .{ .copy = .{ .result = 2, .operand = 0 } },
+        .{ .copy = .{ .result = 3, .operand = 2 } },
+        .{ .binary = .{ .result = 4, .operator = .add, .left = 3, .right = 1, .type = .float32 } },
+        .{ .return_value = .{ .start = 4, .width = 1 } },
+    };
+    const function: Machine.Function = .{
+        .name = "copy_chain",
+        .parameter_count = 1,
+        .parameters = &.{.{ .start = 0, .width = 1 }},
+        .return_type = .float32,
+        .return_width = 1,
+        .slot_count = 5,
+        .frame_size = try Machine.frameSize(5),
+        .instructions = &instructions,
+    };
+    const result = try allocate(std.testing.allocator, function);
+    defer std.testing.allocator.free(result.residences);
+    defer std.testing.allocator.free(result.float_residences);
+    defer std.testing.allocator.free(result.float_lane_residences);
+
+    try std.testing.expectEqual(result.float_residences[0], result.float_residences[2]);
+    try std.testing.expectEqual(result.float_residences[0], result.float_residences[3]);
+}
+
 test "profitable float32 xy arithmetic remains resident in neon lanes" {
     const instructions = [_]Machine.Instruction{
         .{ .binary = .{ .result = 4, .operator = .add, .left = 0, .right = 2, .type = .float32 } },
@@ -1397,7 +1456,7 @@ test "profitable float32 xy arithmetic remains resident in neon lanes" {
     try std.testing.expectEqual(@as(Machine.Slot, 4), y.partner);
 }
 
-test "SLP copies and destructive arithmetic keep one physical register" {
+test "loop recurrences remain scalar until SIMD allocation is CFG-aware" {
     const instructions = [_]Machine.Instruction{
         .{ .binary = .{ .result = 4, .operator = .add, .left = 0, .right = 2, .type = .float32 } },
         .{ .binary = .{ .result = 5, .operator = .add, .left = 1, .right = 3, .type = .float32 } },
@@ -1434,9 +1493,49 @@ test "SLP copies and destructive arithmetic keep one physical register" {
     defer std.testing.allocator.free(result.float_residences);
     defer std.testing.allocator.free(result.float_lane_residences);
 
-    const register = (result.float_lane_residences[4] orelse return error.TestUnexpectedResult).register;
-    for (4..10) |slot| try std.testing.expectEqual(
-        register,
-        (result.float_lane_residences[slot] orelse return error.TestUnexpectedResult).register,
-    );
+    for (4..10) |slot| {
+        try std.testing.expectEqual(@as(?Machine.FloatLaneResidence, null), result.float_lane_residences[slot]);
+    }
+    for (4..8) |slot| try std.testing.expect(result.float_residences[slot] != null);
+}
+
+test "independent XYZ group keeps XY paired and Z scalar" {
+    const instructions = [_]Machine.Instruction{
+        .{ .binary = .{ .result = 2, .operator = .multiply, .left = 0, .right = 1, .type = .float32 } },
+        .{ .binary = .{ .result = 3, .operator = .multiply, .left = 0, .right = 1, .type = .float32 } },
+        .{ .binary = .{ .result = 4, .operator = .multiply, .left = 0, .right = 1, .type = .float32 } },
+        .{ .binary = .{ .result = 5, .operator = .add, .left = 2, .right = 3, .type = .float32 } },
+        .{ .binary = .{ .result = 6, .operator = .add, .left = 5, .right = 4, .type = .float32 } },
+        .{ .return_value = .{ .start = 6, .width = 1 } },
+    };
+    const groups = [_]Machine.FloatLaneGroup{.{
+        .slots = .{ 2, 3, 4, 0 },
+        .width = 3,
+        .priority = 8,
+        .recurrence = false,
+        .in_loop = false,
+    }};
+    const function: Machine.Function = .{
+        .name = "xyz",
+        .parameter_count = 2,
+        .parameters = &.{ .{ .start = 0, .width = 1 }, .{ .start = 1, .width = 1 } },
+        .return_type = .float32,
+        .return_width = 1,
+        .slot_count = 7,
+        .frame_size = try Machine.frameSize(7),
+        .float_lane_groups = &groups,
+        .instructions = &instructions,
+    };
+    const result = try allocate(std.testing.allocator, function);
+    defer std.testing.allocator.free(result.residences);
+    defer std.testing.allocator.free(result.float_residences);
+    defer std.testing.allocator.free(result.float_lane_residences);
+
+    const x = result.float_lane_residences[2] orelse return error.TestUnexpectedResult;
+    const y = result.float_lane_residences[3] orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(x.register, y.register);
+    try std.testing.expectEqual(@as(u1, 0), x.lane);
+    try std.testing.expectEqual(@as(u1, 1), y.lane);
+    try std.testing.expectEqual(@as(?Machine.FloatLaneResidence, null), result.float_lane_residences[4]);
+    try std.testing.expect(result.float_residences[4] != null);
 }

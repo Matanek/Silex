@@ -1294,6 +1294,28 @@ fn encodeFunction(
                 try appendFixup(allocator, words, &fixups.epilogue, branch(), .imm26);
             },
             .jump => |target| {
+                if (loopBackedgeComparison(function, instruction_index, target)) |backedge| {
+                    const header = resolveJumpTarget(function.instructions, target);
+                    if (instruction_offsets[header] == instruction_offsets[backedge.comparison_index]) {
+                        try encodeComparisonFlags(
+                            allocator,
+                            words,
+                            function,
+                            backedge.comparison_index,
+                            backedge.comparison,
+                        );
+                        try control_fixups.append(allocator, .{
+                            .at = words.items.len,
+                            .target = backedge.body,
+                            .width = .imm19,
+                        });
+                        const false_condition = comparisonFalseCondition(backedge.comparison);
+                        try words.append(allocator, conditionalBranch(
+                            if (backedge.body_on_true) invertCondition(false_condition) else false_condition,
+                        ));
+                        continue;
+                    }
+                }
                 try control_fixups.append(allocator, .{ .at = words.items.len, .target = target, .width = .imm26 });
                 try words.append(allocator, branch());
             },
@@ -1310,9 +1332,17 @@ fn encodeFunction(
                         conjunction.second.left,
                         double,
                     );
+                    const right = try prepareFloatOperand(
+                        allocator,
+                        words,
+                        function,
+                        .x10,
+                        conjunction.right,
+                        double,
+                    );
                     try words.append(allocator, floatConditionalCompare(
                         left,
-                        conjunction.right,
+                        right,
                         invertCondition(comparisonFalseCondition(conjunction.first)),
                         falseFlagsForCondition(comparisonFalseCondition(conjunction.second)),
                         double,
@@ -2361,11 +2391,78 @@ fn comparisonForBranch(function: Machine.Function, branch_index: usize) ?Machine
     return null;
 }
 
+const LoopBackedgeComparison = struct {
+    comparison_index: usize,
+    branch_index: usize,
+    comparison: Machine.Instruction.Binary,
+    body: usize,
+    body_on_true: bool,
+};
+
+fn loopBackedgeComparison(
+    function: Machine.Function,
+    jump_index: usize,
+    initial_target: usize,
+) ?LoopBackedgeComparison {
+    const header = resolveJumpTarget(function.instructions, initial_target);
+    if (header >= jump_index or jump_index + 1 >= function.instructions.len) return null;
+    for (function.instructions[header..jump_index], header..) |instruction, branch_index| {
+        const branch_value = switch (instruction) {
+            .branch => |value| value,
+            else => continue,
+        };
+        const comparison_index = if (branch_index != 0 and
+            function.instructions[branch_index - 1] == .binary and
+            comparisonBranchIndex(
+                function,
+                branch_index - 1,
+                function.instructions[branch_index - 1].binary,
+            ) == branch_index)
+            branch_index - 1
+        else if (branch_index >= 2 and
+            function.instructions[branch_index - 2] == .binary and
+            comparisonBranchIndex(
+                function,
+                branch_index - 2,
+                function.instructions[branch_index - 2].binary,
+            ) == branch_index)
+            branch_index - 2
+        else
+            continue;
+        const comparison = function.instructions[comparison_index].binary;
+        const then_instruction = resolveJumpTarget(function.instructions, branch_value.then_instruction);
+        const else_instruction = resolveJumpTarget(function.instructions, branch_value.else_instruction);
+        if (else_instruction == jump_index + 1 and then_instruction > branch_index and
+            then_instruction <= jump_index)
+        {
+            return .{
+                .comparison_index = comparison_index,
+                .branch_index = branch_index,
+                .comparison = comparison,
+                .body = then_instruction,
+                .body_on_true = true,
+            };
+        }
+        if (then_instruction == jump_index + 1 and else_instruction > branch_index and
+            else_instruction <= jump_index)
+        {
+            return .{
+                .comparison_index = comparison_index,
+                .branch_index = branch_index,
+                .comparison = comparison,
+                .body = else_instruction,
+                .body_on_true = false,
+            };
+        }
+    }
+    return null;
+}
+
 const FusedFloatConjunction = struct {
     first: Machine.Instruction.Binary,
     second: Machine.Instruction.Binary,
     branch: Machine.Instruction.Branch,
-    right: Register,
+    right: Machine.Slot,
 };
 
 fn fusedFloatConjunction(function: Machine.Function, first_branch_index: usize) ?FusedFloatConjunction {
@@ -2380,6 +2477,7 @@ fn fusedFloatConjunction(function: Machine.Function, first_branch_index: usize) 
     if (second_start + 1 >= function.instructions.len) return null;
     const second_index = switch (function.instructions[second_start]) {
         .constant_float32, .constant_float64 => second_start + 1,
+        .binary => second_start,
         else => return null,
     };
     const second = switch (function.instructions[second_index]) {
@@ -2393,12 +2491,11 @@ fn fusedFloatConjunction(function: Machine.Function, first_branch_index: usize) 
         else => return null,
     };
     if (resolveJumpTarget(function.instructions, second_branch.else_instruction) != short_circuit) return null;
-    const right = comparisonHasElidedCachedRight(function, second_index, second) orelse return null;
     return .{
         .first = first,
         .second = second,
         .branch = second_branch,
-        .right = right,
+        .right = second.right,
     };
 }
 
@@ -3567,4 +3664,31 @@ test "resolve calls and append a native test entry" {
     const encoded_call = std.mem.readInt(u32, image.code[call_word * 4 ..][0..4], .little);
     try std.testing.expectEqual(@as(u32, 0xa9bf7bfd), entry_word);
     try std.testing.expectEqual(expected, encoded_call);
+}
+
+test "recognize a comparison-only while header at its back edge" {
+    const instructions = [_]Machine.Instruction{
+        .{ .jump = 1 },
+        .{ .binary = .{ .result = 2, .operator = .less, .left = 0, .right = 1, .type = .int } },
+        .{ .branch = .{ .condition = 2, .then_instruction = 3, .else_instruction = 5 } },
+        .{ .copy = .{ .result = 0, .operand = 0 } },
+        .{ .jump = 1 },
+        .return_void,
+    };
+    const function: Machine.Function = .{
+        .name = "while_loop",
+        .parameter_count = 2,
+        .parameters = &.{ .{ .start = 0, .width = 1 }, .{ .start = 1, .width = 1 } },
+        .return_type = .void,
+        .slot_count = 3,
+        .frame_size = try Machine.frameSize(3),
+        .register_slots = &.{ 19, 20, 21 },
+        .instructions = &instructions,
+    };
+    const backedge = loopBackedgeComparison(function, 4, 1) orelse
+        return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(usize, 1), backedge.comparison_index);
+    try std.testing.expectEqual(@as(usize, 2), backedge.branch_index);
+    try std.testing.expectEqual(@as(usize, 3), backedge.body);
+    try std.testing.expect(backedge.body_on_true);
 }
