@@ -1,5 +1,6 @@
 const std = @import("std");
 const Ast = @import("../Ast.zig");
+const ModuleScopes = @import("../ModuleScopes.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -33,26 +34,20 @@ pub fn effectiveSignatureCollision(left: []const Ast.Parameter, right: []const A
     return null;
 }
 
-pub fn findVisibleFunctionByName(program: Ast.Program, call: Ast.Expression.Call) ?Ast.Function {
+pub fn findVisibleFunctionByName(module_scope_roots: []const []const u8, program: Ast.Program, call: Ast.Expression.Call) ?Ast.Function {
     for (program.functions) |function| {
-        if (std.mem.eql(u8, function.name, call.name) and functionVisible(call, function)) return function;
+        if (std.mem.eql(u8, function.name, call.name) and functionVisible(module_scope_roots, call, function)) return function;
     }
     return null;
 }
 
-pub fn functionVisible(call: Ast.Expression.Call, function: Ast.Function) bool {
+pub fn functionVisible(module_scope_roots: []const []const u8, call: Ast.Expression.Call, function: Ast.Function) bool {
     if (function.is_local) return call.name_position.file == function.position.file;
     if (function.is_public) return true;
     if (function.is_internal) return call.owner == function.owner;
     if (call.name_position.file == function.position.file) return true;
     const separator = std.mem.lastIndexOfScalar(u8, function.name, '.') orelse return false;
-    return std.mem.eql(u8, logicalModule(call.module), logicalModule(function.name[0..separator]));
-}
-
-fn logicalModule(module: []const u8) []const u8 {
-    if (std.mem.endsWith(u8, module, ".$Platform")) return module[0 .. module.len - ".$Platform".len];
-    if (std.mem.endsWith(u8, module, ".$Target")) return module[0 .. module.len - ".$Target".len];
-    return module;
+    return ModuleScopes.same(module_scope_roots, call.module, function.name[0..separator]);
 }
 
 pub fn memberVisible(position: @import("../Source.zig").Position, declaration_position: @import("../Source.zig").Position, is_local: bool) bool {

@@ -1,4 +1,5 @@
 const std = @import("std");
+const ModuleScopes = @import("../ModuleScopes.zig");
 const Ast = @import("../Ast.zig");
 const Ir = @import("../Ir.zig");
 const Model = @import("Model.zig");
@@ -345,13 +346,7 @@ fn visible(self: anytype, function: Ast.Function, file: usize) bool {
     if (function.is_internal) return self.owner_context != null and self.owner_context.? == function.owner;
     const context = self.module_context orelse return false;
     const separator = std.mem.lastIndexOfScalar(u8, function.name, '.') orelse return false;
-    return std.mem.eql(u8, logicalModule(function.name[0..separator]), logicalModule(context));
-}
-
-fn logicalModule(module: []const u8) []const u8 {
-    if (std.mem.endsWith(u8, module, ".$Platform")) return module[0 .. module.len - ".$Platform".len];
-    if (std.mem.endsWith(u8, module, ".$Target")) return module[0 .. module.len - ".$Target".len];
-    return module;
+    return ModuleScopes.same(self.module_scope_roots, function.name[0..separator], context);
 }
 
 fn nameMatches(candidate: []const u8, requested: []const u8) bool {

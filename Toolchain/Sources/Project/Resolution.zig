@@ -1,5 +1,6 @@
 const std = @import("std");
 const Modules = @import("../Modules.zig");
+const ModuleScopes = @import("../ModuleScopes.zig");
 const Source = @import("../Source.zig");
 const Fragments = @import("Fragments.zig");
 const Names = @import("Names.zig");
@@ -154,7 +155,7 @@ pub fn requirePublicStructure(self: anytype, source_module: usize, target: Targe
     const target_program = self.units[target.module].program.?;
     const structure = Names.findStructure(target_program, target.declaration).?;
     if (structure.is_internal and samePackage(self, source_module, target.module)) return;
-    if (!structure.is_local and !structure.is_internal and Fragments.same(self.index, source_module, target.module)) return;
+    if (!structure.is_local and !structure.is_internal and sameModuleScope(self, source_module, target.module)) return;
     if (Reexports.structureExported(target_program, structure)) return;
     const message = if (structure.is_local)
         try std.fmt.allocPrint(self.allocator, "structure '{s}' is local to its source file", .{target.declaration})
@@ -173,7 +174,7 @@ pub fn requirePublicEnum(self: anytype, source_module: usize, target: Target, po
     if (source_module == target.module) return;
     const enumeration = Names.findEnum(self.units[target.module].program.?, target.declaration).?;
     if (enumeration.is_internal and samePackage(self, source_module, target.module)) return;
-    if (!enumeration.is_local and !enumeration.is_internal and Fragments.same(self.index, source_module, target.module)) return;
+    if (!enumeration.is_local and !enumeration.is_internal and sameModuleScope(self, source_module, target.module)) return;
     if (enumeration.is_public) return;
     const message = if (enumeration.is_local)
         try std.fmt.allocPrint(self.allocator, "enum '{s}' is local to its source file", .{target.declaration})
@@ -190,6 +191,14 @@ pub fn requirePublicEnum(self: anytype, source_module: usize, target: Target, po
 
 fn samePackage(self: anytype, left: usize, right: usize) bool {
     return self.index.providers[left].owner == self.index.providers[right].owner;
+}
+
+fn sameModuleScope(self: anytype, left: usize, right: usize) bool {
+    return ModuleScopes.same(
+        self.module_scope_roots,
+        self.index.providers[left].name,
+        self.index.providers[right].name,
+    );
 }
 
 pub fn functionModule(self: anytype, target: Target) ![]const u8 {

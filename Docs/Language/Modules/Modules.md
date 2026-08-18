@@ -75,6 +75,13 @@ GFX/Module/GPU/Device.sx              -> GFX.GPU.Device
 Sandbox/MonModule/@Module.sx           -> MonModule (loose project)
 ```
 
+The principal module also owns the implementation modules below its folder for
+visibility purposes. Consequently, an unqualified declaration in
+`GFX/Module/GPU/Device.sx` is available to the other files under `GFX.GPU`,
+while remaining unavailable to `GFX.Scene` and to package consumers. The child
+paths remain distinct import paths; this ownership does not merge files or
+change their module names.
+
 Without a `Package.json`, compiling or editing a principal module directly
 uses the parent of its folder as the implicit project root. This preserves the
 folder's module identity while keeping quick experiments and scripts free of

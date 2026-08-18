@@ -449,6 +449,14 @@ test "complete common STD Text operations" {
         \\public func split(text:@str, separator:@str) str[] { return [] }
         \\public func join(values:@str[], separator:@str) str { return "" + separator }
         \\public func titlecase(text:@str) str { return "" + text }
+        \\package func package_helper() int { return 1 }
+        \\func module_helper() int { return 2 }
+        \\local func local_helper() int { return 3 }
+        \\public class Inspector {
+        \\    private func hidden() int { return 4 }
+        \\    func visible() int { return 5 }
+        \\}
+        \\public func inspector() Inspector { return Inspector() }
         ,
     });
     const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
@@ -473,14 +481,89 @@ test "complete common STD Text operations" {
         cursor,
     )).?;
     const expected = [_][]const u8{
-        "is_empty", "contains", "starts_with", "ends_with", "trim", "trim_start", "trim_end", "replace", "index_of",
-        "slice", "split", "join", "titlecase",
+        "is_empty", "contains", "starts_with", "ends_with", "trim",      "trim_start", "trim_end", "replace", "index_of",
+        "slice",    "split",    "join",        "titlecase", "inspector",
     };
     for (expected) |label| try std.testing.expect(hasLabel(items, label));
+    try std.testing.expect(!hasLabel(items, "package_helper"));
+    try std.testing.expect(!hasLabel(items, "module_helper"));
+    try std.testing.expect(!hasLabel(items, "local_helper"));
     try std.testing.expectEqualStrings(
         "index_of(${1:text}, ${2:expected})$0",
         itemWithLabel(items, "index_of").?.insertText.?,
     );
+
+    const member_source =
+        \\use STD.Text
+        \\func main() {
+        \\    print(Text.inspector().)
+        \\}
+    ;
+    const member_cursor = std.mem.indexOf(u8, member_source, "Text.inspector().").? + "Text.inspector().".len;
+    const member_items = (try Workspace.itemsAt(
+        allocator,
+        std.testing.io,
+        null,
+        root_uri,
+        uri,
+        &.{},
+        member_source,
+        member_cursor,
+    )).?;
+    try std.testing.expect(hasLabel(member_items, "visible"));
+    try std.testing.expect(!hasLabel(member_items, "hidden"));
+}
+
+test "complete implicit module declarations across principal module files" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "STD/Module/Text");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "STD/Package.json",
+        .data = "{\"name\":\"STD\",\"version\":\"0.1.0\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "STD/Module/Text/@Module.sx",
+        .data = "",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "STD/Module/Text/Data.sx",
+        .data =
+        \\func module_helper() int { return 1 }
+        \\package func package_helper() int { return 2 }
+        \\local func local_helper() int { return 3 }
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "STD/Module/Text/Syntax.sx",
+        .data = "func placeholder() {}",
+    });
+
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const syntax_path = try std.fs.path.join(allocator, &.{ root, "STD", "Module", "Text", "Syntax.sx" });
+    const uri = try std.fmt.allocPrint(allocator, "file://{s}", .{syntax_path});
+    const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
+    const source =
+        \\use STD.Text.Data
+        \\func parse() { print(Data.) }
+    ;
+    const cursor = std.mem.indexOf(u8, source, "Data.").? + "Data.".len;
+    const items = (try Workspace.itemsAt(
+        allocator,
+        std.testing.io,
+        null,
+        root_uri,
+        uri,
+        &.{},
+        source,
+        cursor,
+    )).?;
+    try std.testing.expect(hasLabel(items, "module_helper"));
+    try std.testing.expect(hasLabel(items, "package_helper"));
+    try std.testing.expect(!hasLabel(items, "local_helper"));
 }
 
 test "complete static members of a module principal type" {

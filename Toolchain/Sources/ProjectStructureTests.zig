@@ -226,6 +226,33 @@ test "compare package and module signature exposure scopes" {
     );
 }
 
+test "validate signatures against an explicit member scope instead of its public container" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Api.sx",
+        .data =
+        \\struct Hidden {}
+        \\public class Service {
+        \\    module init(value:Hidden) {}
+        \\    module func echo(value:Hidden) Hidden { return value }
+        \\}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "use Api\nfunc main() {}",
+    });
+
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    _ = try compiler.compile(input);
+}
+
 test "reject colliding canonical structure identities" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -343,4 +370,52 @@ test "use a package child namespace without a principal module" {
     const compilation = try compiler.compile(input);
     const result = try @import("Interpreter.zig").runCapture(allocator, compilation.ir);
     try std.testing.expectEqualStrings("8\n", result.stdout);
+}
+
+test "implicit module visibility spans files owned by a principal module" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.createDirPath(std.testing.io, "Library/Module/Feature");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Package.json",
+        .data = "{\"dependencies\":{\"Library\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Library/Package.json",
+        .data = "{\"name\":\"Library\",\"version\":\"1.0.0\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Library/Module/Feature/@Module.sx",
+        .data = "",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Library/Module/Feature/Engine.sx",
+        .data = "struct Raw { let value:int }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Library/Module/Feature/Api.sx",
+        .data = "use Library.Feature.Engine.Raw\npublic func answer() int { return Raw(value:42).value }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "use Library.Feature.Api.answer\nfunc main() { print(answer()) }",
+    });
+
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(input);
+    const result = try @import("Interpreter.zig").runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("42\n", result.stdout);
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "use Library.Feature.Engine.Raw\nfunc main() { let raw = Raw(value:42) }",
+    });
+    compiler = Project.Compiler.init(allocator, std.testing.io);
+    try std.testing.expectError(error.InvalidSource, compiler.compile(input));
+    try std.testing.expectEqualStrings("structure 'Raw' is module-visible and unavailable outside its module", compiler.diagnostic.?.message);
 }

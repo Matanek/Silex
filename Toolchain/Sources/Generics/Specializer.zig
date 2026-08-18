@@ -10,6 +10,7 @@ const TypedResources = @import("TypedResources.zig");
 const InjectedSystems = @import("InjectedSystems.zig");
 const EcsComponents = @import("EcsComponents.zig");
 const WorkerSafety = @import("WorkerSafety.zig");
+const ModuleScopes = @import("../ModuleScopes.zig");
 
 const Allocator = std.mem.Allocator;
 const SpecializeError = Source.Error || Allocator.Error;
@@ -17,6 +18,11 @@ const SpecializeError = Source.Error || Allocator.Error;
 const Binding = struct {
     name: []const u8,
     type: Ast.Type,
+};
+
+const GenericContract = struct {
+    argument: Ast.Type,
+    protocol: Ast.Type,
 };
 
 fn nestedNameMatches(candidate: []const u8, short_name: []const u8) bool {
@@ -75,6 +81,8 @@ pub const Specializer = struct {
     enum_specializations: std.ArrayList(EnumSpecialization) = .empty,
     method_specializations: std.ArrayList(MethodSpecialization) = .empty,
     specialization_file: ?usize = null,
+    active_contracts: []const GenericContract = &.{},
+    module_scope_roots: []const []const u8 = &.{},
     diagnostic: ?Source.Diagnostic = null,
 
     pub fn init(allocator: Allocator) Specializer {
@@ -571,6 +579,9 @@ pub const Specializer = struct {
                 const type_arguments = try self.allocator.alloc(Ast.Type, copy.type_arguments.len);
                 for (copy.type_arguments, 0..) |type_argument, index| type_arguments[index] = try self.rewriteType(type_argument, arguments, copy.name_position);
                 copy.type_arguments = type_arguments;
+                if (copy.receiver != null and self.callUsesGenericContract(copy, locals.items)) {
+                    copy.compiler_generated = true;
+                }
                 if (copy.receiver == null and std.mem.eql(u8, copy.name, "C.function_address") and copy.type_arguments.len != 0) {
                     if (copy.arguments.len != 1 or copy.named_arguments.len != 0 or copy.arguments[0].value != .identifier) {
                         return self.fail(copy.name_position, "C.function_address<T...> expects one named generic function");
@@ -582,7 +593,7 @@ pub const Specializer = struct {
                             (candidate.name.len > function_name.len and std.mem.endsWith(u8, candidate.name, function_name) and
                                 candidate.name[candidate.name.len - function_name.len - 1] == '.');
                         if (!name_matches or
-                            candidate.type_parameters.len != copy.type_arguments.len or !functionVisible(copy, candidate)) continue;
+                            candidate.type_parameters.len != copy.type_arguments.len or !functionVisible(self.module_scope_roots, copy, candidate)) continue;
                         if (selected != null) {
                             const message = try std.fmt.allocPrint(
                                 self.allocator,
@@ -831,7 +842,7 @@ pub const Specializer = struct {
                 var contextual: ?Ast.Type = null;
                 for (self.source.functions) |function| {
                     if (!std.mem.eql(u8, function.name, call.name) or function.type_parameters.len != call.type_arguments.len or
-                        !parametersAcceptArity(function.parameters, call.arguments.len) or !functionVisible(call, function)) continue;
+                        !parametersAcceptArity(function.parameters, call.arguments.len) or !functionVisible(self.module_scope_roots, call, function)) continue;
                     const candidate = try self.rewriteType(function.parameters[index].type, call.type_arguments, call.arguments[index].position);
                     if (contextual != null and contextual.? != candidate) {
                         contextual = null;
@@ -852,7 +863,7 @@ pub const Specializer = struct {
         var saw_generic = false;
         var saw_arity = false;
         for (self.source.functions) |*function| {
-            if (function.type_parameters.len == 0 or !std.mem.eql(u8, function.name, call.name) or !functionVisible(call, function.*)) continue;
+            if (function.type_parameters.len == 0 or !std.mem.eql(u8, function.name, call.name) or !functionVisible(self.module_scope_roots, call, function.*)) continue;
             saw_generic = true;
             if (call.type_arguments.len != 0) {
                 if (call.type_arguments.len != function.type_parameters.len) continue;
@@ -996,7 +1007,7 @@ pub const Specializer = struct {
         }
         if (call.type_arguments.len == 0) {
             for (structure.methods) |method| {
-                if (!std.mem.eql(u8, method.name, call.name) or !methodVisible(call, source_structure, method)) continue;
+                if (!std.mem.eql(u8, method.name, call.name) or !methodVisible(self.module_scope_roots, call, source_structure, method)) continue;
                 const ordered = try self.orderNamedMethodArguments(method.parameters, call, actual_types) orelse continue;
                 if (self.argumentsMatch(method.parameters, ordered, &.{})) return null;
             }
@@ -1007,7 +1018,7 @@ pub const Specializer = struct {
         var saw_generic = false;
         var saw_type_arity = false;
         for (source_structure.methods) |method| {
-            if (method.type_parameters.len == 0 or !std.mem.eql(u8, method.name, call.name) or !methodVisible(call, source_structure, method)) continue;
+            if (method.type_parameters.len == 0 or !std.mem.eql(u8, method.name, call.name) or !methodVisible(self.module_scope_roots, call, source_structure, method)) continue;
             saw_generic = true;
             const ordered = try self.orderNamedMethodArguments(method.parameters, call, actual_types) orelse continue;
             if (call.type_arguments.len != 0) {
@@ -1184,10 +1195,45 @@ pub const Specializer = struct {
         var locals: std.ArrayList(Binding) = .empty;
         concrete.parameters = try self.rewriteParameters(template.parameters, arguments, &locals);
         concrete.return_type = try self.rewriteType(template.return_type, arguments, template.name_position);
+        const previous_contracts = self.active_contracts;
+        self.active_contracts = try self.genericContracts(template.type_parameters, arguments);
+        defer self.active_contracts = previous_contracts;
         concrete.statements = try self.rewriteStatements(template.statements, arguments, &locals);
         self.specializations.items[specialization_index].visiting = false;
         try self.functions.append(self.allocator, concrete);
         return name;
+    }
+
+    fn genericContracts(
+        self: *Specializer,
+        parameters: []const Ast.TypeParameter,
+        arguments: []const Ast.Type,
+    ) Allocator.Error![]const GenericContract {
+        var contracts: std.ArrayList(GenericContract) = .empty;
+        for (parameters, arguments) |parameter, argument| if (parameter.constraint) |protocol| {
+            try contracts.append(self.allocator, .{ .argument = argument, .protocol = protocol });
+        };
+        return contracts.toOwnedSlice(self.allocator);
+    }
+
+    fn callUsesGenericContract(
+        self: *Specializer,
+        call: Ast.Expression.Call,
+        locals: []const Binding,
+    ) bool {
+        const receiver = call.receiver orelse return false;
+        const inferred = self.inferExpressionType(receiver, locals) orelse return false;
+        const receiver_type = inferred.optionalChild() orelse inferred;
+        for (self.active_contracts) |contract| {
+            if (receiver_type != contract.argument) continue;
+            const protocol = self.sourceStructureForType(contract.protocol) orelse continue;
+            if (!protocol.is_protocol) continue;
+            for (protocol.methods) |requirement| {
+                if (!std.mem.eql(u8, requirement.name, call.name)) continue;
+                if (parametersAcceptArity(requirement.parameters, call.arguments.len + call.named_arguments.len)) return true;
+            }
+        }
+        return false;
     }
 
     pub fn rewriteType(
@@ -1509,7 +1555,7 @@ pub const Specializer = struct {
 
     fn hasCompatibleConcrete(self: *Specializer, call: Ast.Expression.Call, actual: []const Ast.Type) bool {
         for (self.functions.items) |function| {
-            if (!std.mem.eql(u8, function.name, call.name) or !functionVisible(call, function)) continue;
+            if (!std.mem.eql(u8, function.name, call.name) or !functionVisible(self.module_scope_roots, call, function)) continue;
             if (!parametersAcceptArity(function.parameters, actual.len)) continue;
             if (self.argumentsMatch(function.parameters, actual, &.{})) return true;
         }
@@ -1519,7 +1565,7 @@ pub const Specializer = struct {
         // available through `name<T>(...)`.
         for (self.source.functions) |function| {
             if (function.type_parameters.len != 0 or !std.mem.eql(u8, function.name, call.name) or
-                !functionVisible(call, function)) continue;
+                !functionVisible(self.module_scope_roots, call, function)) continue;
             if (!parametersAcceptArity(function.parameters, actual.len)) continue;
             if (self.argumentsMatch(function.parameters, actual, &.{})) return true;
         }
@@ -2049,16 +2095,16 @@ fn parametersAcceptArity(parameters: []const Ast.Parameter, arity: usize) bool {
     return arity >= required and arity <= parameters.len;
 }
 
-fn functionVisible(call: Ast.Expression.Call, function: Ast.Function) bool {
+fn functionVisible(module_scope_roots: []const []const u8, call: Ast.Expression.Call, function: Ast.Function) bool {
     if (function.is_local) return call.name_position.file == function.position.file;
     if (function.is_public) return true;
     if (function.is_internal) return call.owner == function.owner;
     if (call.name_position.file == function.position.file) return true;
     const separator = std.mem.lastIndexOfScalar(u8, function.name, '.') orelse return false;
-    return std.mem.eql(u8, logicalModule(call.module), logicalModule(function.name[0..separator]));
+    return ModuleScopes.same(module_scope_roots, call.module, function.name[0..separator]);
 }
 
-fn methodVisible(call: Ast.Expression.Call, structure: Ast.Structure, method: Ast.Function) bool {
+fn methodVisible(module_scope_roots: []const []const u8, call: Ast.Expression.Call, structure: Ast.Structure, method: Ast.Function) bool {
     if (call.compiler_generated and method.is_internal) return true;
     if (method.is_local) return call.name_position.file == method.position.file;
     if (method.is_public) return true;
@@ -2066,13 +2112,7 @@ fn methodVisible(call: Ast.Expression.Call, structure: Ast.Structure, method: As
     if (method.is_private or method.is_protected) return call.owner == method.owner;
     if (call.name_position.file == method.position.file) return true;
     const separator = std.mem.lastIndexOfScalar(u8, structure.name, '.') orelse return false;
-    return std.mem.eql(u8, logicalModule(call.module), logicalModule(structure.name[0..separator]));
-}
-
-fn logicalModule(module: []const u8) []const u8 {
-    if (std.mem.endsWith(u8, module, ".$Platform")) return module[0 .. module.len - ".$Platform".len];
-    if (std.mem.endsWith(u8, module, ".$Target")) return module[0 .. module.len - ".$Target".len];
-    return module;
+    return ModuleScopes.same(module_scope_roots, call.module, structure.name[0..separator]);
 }
 
 fn samePosition(left: Source.Position, right: Source.Position) bool {

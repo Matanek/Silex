@@ -70,12 +70,18 @@ fn geographicScope(declaration: anytype) GeographicScope {
     return .module;
 }
 
+fn memberGeographicScope(member: anytype, container: Ast.Structure) GeographicScope {
+    if (!member.visibility_explicit) return geographicScope(container);
+    return geographicScope(member);
+}
+
 pub const Compiler = struct {
     allocator: Allocator,
     io: Io,
     global_packages_root: ?[]const u8 = null,
     packages: Packages.Graph = undefined,
     index: Modules.Index = undefined,
+    module_scope_roots: []const []const u8 = &.{},
     units: []Unit = &.{},
     files: []const []const u8 = &.{},
     entry_module: usize = 0,
@@ -157,6 +163,7 @@ pub const Compiler = struct {
             ),
             else => |other| return other,
         };
+        self.module_scope_roots = try self.collectModuleScopeRoots();
         self.units = try self.allocator.alloc(Unit, self.index.providers.len);
         @memset(self.units, .{});
         try Fragments.install(self.allocator, self.index, self.units);
@@ -179,6 +186,7 @@ pub const Compiler = struct {
             return err;
         };
         var specializer = GenericSpecializer.init(self.allocator);
+        specializer.module_scope_roots = self.module_scope_roots;
         const ast = specializer.specialize(composition.program) catch |err| {
             self.diagnostic = specializer.diagnostic;
             return err;
@@ -189,6 +197,7 @@ pub const Compiler = struct {
         analyzer.packages = self.packages;
         analyzer.io = self.io;
         analyzer.source_files = self.files;
+        analyzer.module_scope_roots = self.module_scope_roots;
         analyzer.shadercross_path = self.shadercross_path;
         var ir = (if (self.include_tests) analyzer.analyzeUnit(ast) else analyzer.analyze(ast)) catch |err| {
             self.diagnostic = analyzer.diagnostic;
@@ -233,6 +242,22 @@ pub const Compiler = struct {
             .cache_files = try dependency_files.toOwnedSlice(self.allocator),
             .tests = try tests.toOwnedSlice(self.allocator),
         };
+    }
+
+    fn collectModuleScopeRoots(self: *Compiler) Allocator.Error![]const []const u8 {
+        var roots: std.ArrayList([]const u8) = .empty;
+        for (self.index.providers) |provider| {
+            const basename = std.fs.path.basename(provider.path);
+            if (!std.mem.eql(u8, basename, Modules.principal_file) and
+                !std.mem.eql(u8, basename, Modules.principal_file_capitalized)) continue;
+            var found = false;
+            for (roots.items) |root| if (std.mem.eql(u8, root, provider.name)) {
+                found = true;
+                break;
+            };
+            if (!found) try roots.append(self.allocator, provider.name);
+        }
+        return roots.toOwnedSlice(self.allocator);
     }
 
     pub fn diagnosticPath(self: Compiler, fallback: []const u8) []const u8 {
@@ -1184,21 +1209,21 @@ pub const Compiler = struct {
             };
             if (structure.base) |base| try self.requirePublicType(module, base, structure.base_position, "public class", structure.name);
             for (structure.fields) |field| {
-                if (field.is_internal or field.is_local or field.is_private or field.is_protected) continue;
+                if (memberGeographicScope(field, structure) != .public) continue;
                 try self.requirePublicType(module, field.type, field.name_position, "public structure", structure.name);
             }
             for (structure.static_fields) |field| {
-                if (field.is_internal or field.is_local or field.is_private or field.is_protected) continue;
+                if (memberGeographicScope(field, structure) != .public) continue;
                 try self.requirePublicType(module, field.type, field.name_position, "public structure", structure.name);
             }
             for (structure.constructors) |constructor| {
-                if (constructor.is_internal or constructor.is_local or constructor.is_private or constructor.is_protected) continue;
+                if (memberGeographicScope(constructor, structure) != .public) continue;
                 for (constructor.parameters) |parameter| {
                     try self.requirePublicType(module, parameter.type, parameter.position, "constructor of", structure.name);
                 }
             }
             for (structure.methods) |method| {
-                if (method.is_internal or method.is_local or method.is_private or method.is_protected) continue;
+                if (memberGeographicScope(method, structure) != .public) continue;
                 for (method.type_parameters) |parameter| if (parameter.constraint) |constraint| {
                     try self.requirePublicType(module, constraint, parameter.position, "method of", structure.name);
                 };
@@ -1224,15 +1249,15 @@ pub const Compiler = struct {
                 if (structure.base) |base| try self.requireTypeScope(module, base, structure.base_position, structure_scope, "type", structure.name);
                 for (structure.conformances) |conformance| try self.requireTypeScope(module, conformance, structure.name_position, structure_scope, "type", structure.name);
             }
-            for (structure.fields) |field| try self.validateMemberTypeScope(module, field, field.type, field.name_position, structure.name, field.name);
-            for (structure.static_fields) |field| try self.validateMemberTypeScope(module, field, field.type, field.name_position, structure.name, field.name);
+            for (structure.fields) |field| try self.validateMemberTypeScope(module, structure, field, field.type, field.name_position, structure.name, field.name);
+            for (structure.static_fields) |field| try self.validateMemberTypeScope(module, structure, field, field.type, field.name_position, structure.name, field.name);
             for (structure.constructors) |constructor| {
-                const scope = geographicScope(constructor);
+                const scope = memberGeographicScope(constructor, structure);
                 if (scope != .package and scope != .module) continue;
                 for (constructor.parameters) |parameter| try self.requireTypeScope(module, parameter.type, parameter.position, scope, "constructor of", structure.name);
             }
             for (structure.methods) |method| {
-                const scope = geographicScope(method);
+                const scope = memberGeographicScope(method, structure);
                 if (scope != .package and scope != .module) continue;
                 for (method.parameters) |parameter| try self.requireTypeScope(module, parameter.type, parameter.position, scope, "method of", structure.name);
                 try self.requireTypeScope(module, method.return_type, method.name_position, scope, "method of", structure.name);
@@ -1255,13 +1280,14 @@ pub const Compiler = struct {
     fn validateMemberTypeScope(
         self: *Compiler,
         module: usize,
+        container: Ast.Structure,
         member: anytype,
         type_value: Ast.Type,
         position: Source.Position,
         owner: []const u8,
         name: []const u8,
     ) Error!void {
-        const scope = geographicScope(member);
+        const scope = memberGeographicScope(member, container);
         if (scope != .package and scope != .module) return;
         const label = try std.fmt.allocPrint(self.allocator, "member {s}.{s}", .{ owner, name });
         try self.requireTypeScope(module, type_value, position, scope, label, name);

@@ -1,6 +1,7 @@
 const std = @import("std");
 const Source = @import("../Source.zig");
 const Inheritance = @import("Inheritance.zig");
+const ModuleScopes = @import("../ModuleScopes.zig");
 
 pub fn memberVisible(self: anytype, structure_index: usize, member: anytype, position: Source.Position) bool {
     if (!typeVisible(self, structure_index, position)) return false;
@@ -68,11 +69,11 @@ fn sameModule(self: anytype, structure_index: usize) bool {
     const target_root = root(self, structure_index);
     const target = declarationAt(self, target_root) orelse return false;
     const target_module = moduleName(target.name) orelse return false;
-    if (self.module_context) |context| return std.mem.eql(u8, logicalModule(context), target_module);
+    if (self.module_context) |context| return ModuleScopes.same(self.module_scope_roots, context, target_module);
     const context = self.member_context orelse return false;
     const context_declaration = declarationAt(self, root(self, context)) orelse return false;
     const context_module = moduleName(context_declaration.name) orelse return false;
-    return std.mem.eql(u8, context_module, target_module);
+    return ModuleScopes.same(self.module_scope_roots, context_module, target_module);
 }
 
 fn moduleName(name_value: []const u8) ?[]const u8 {

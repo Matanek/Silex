@@ -238,6 +238,43 @@ test "public protocol contract does not republish a package implementation" {
     try std.testing.expectEqualStrings("package\n", result.stdout);
 }
 
+test "generic protocol calls use the contract without republishing a consumer implementation" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "Library/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Package.json",
+        .data = "{\"dependencies\":{\"Library\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Library/Package.json",
+        .data = "{\"name\":\"Library\",\"version\":\"1.0.0\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Library/Module/Jobs.sx",
+        .data =
+        \\public protocol Job { func execute() }
+        \\public func run<T:Job>(job:T) { job.execute() }
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data =
+        \\use Library.Jobs
+        \\class Task : Jobs.Job { func execute() { print("done") } }
+        \\func main() { Jobs.run(Task()) }
+        ,
+    });
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(input);
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("done\n", result.stdout);
+}
+
 test "diagnose missing and mismatched protocol requirements" {
     try expectCompileError(
         "protocol Drawable { func draw() } struct Sprite : Drawable {} func main() {}",

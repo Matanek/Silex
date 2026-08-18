@@ -2,6 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const Ast = @import("../Ast.zig");
 const Modules = @import("../Modules.zig");
+const ModuleScopes = @import("../ModuleScopes.zig");
 const PackageTestFixtures = @import("../Packages/TestFixtures.zig");
 const TargetModule = @import("../Target.zig");
 const ParserModule = @import("../Parser.zig");
@@ -415,7 +416,7 @@ pub fn scopeItemsAtForTarget(
             var matched = false;
             for (loaded.program.structures) |structure| {
                 if (!std.mem.eql(u8, structure.name, target.declaration)) continue;
-                if (!structure.is_public) continue;
+                if (structure.is_local or (!structure.is_public and !providerInCurrentModule(project, provider))) continue;
                 if (type_only or structure.is_protocol or structure.is_static) {
                     try appendRanked(allocator, &ranked, .{
                         .label = label,
@@ -449,7 +450,7 @@ pub fn scopeItemsAtForTarget(
                 if (function.is_local) continue;
                 if (function.is_internal) {
                     if (provider.owner != project.current_owner) continue;
-                } else if (!function.is_public) continue;
+                } else if (!function.is_public and !providerInCurrentModule(project, provider)) continue;
                 if (!Completion.callAcceptsParameters(source, cursor, loaded.program, function.parameters)) continue;
                 try appendRanked(allocator, &ranked, .{
                     .label = label,
@@ -763,6 +764,10 @@ fn appendPathItems(
             null
     else
         null;
+    const module_context = if (exact_provider) |provider|
+        providerInCurrentModule(project, provider)
+    else
+        false;
     const child_priority: u8 = if (call_source != null and exact_provider != null) 30 else 0;
 
     for (project.index.providers) |provider| {
@@ -811,7 +816,7 @@ fn appendPathItems(
             if (structure.is_local) continue;
             if (structure.is_internal) {
                 if (provider.owner != project.current_owner) continue;
-            } else if (contextual_provider == null and !structure.is_public) continue;
+            } else if (!module_context and contextual_provider == null and !structure.is_public) continue;
             if (!matchesPrefix(structure.name, query.prefix)) continue;
             if (query.type_only or call_source == null) {
                 try appendRanked(allocator, ranked, .{
@@ -855,7 +860,7 @@ fn appendPathItems(
             if (enumeration.is_local or !matchesPrefix(enumeration.name, query.prefix)) continue;
             if (enumeration.is_internal) {
                 if (provider.owner != project.current_owner) continue;
-            } else if (contextual_provider == null and !enumeration.is_public) continue;
+            } else if (!module_context and contextual_provider == null and !enumeration.is_public) continue;
             try appendRanked(allocator, ranked, .{
                 .label = enumeration.name,
                 .kind = CompletionKind.enum_type,
@@ -867,7 +872,7 @@ fn appendPathItems(
                 if (function.is_local) continue;
                 if (function.is_internal) {
                     if (provider.owner != project.current_owner) continue;
-                } else if (contextual_provider == null and !function.is_public) continue;
+                } else if (!module_context and contextual_provider == null and !function.is_public) continue;
                 if (call_source) |text| if (!Completion.callAcceptsParameters(
                     text,
                     call_cursor,
@@ -1884,7 +1889,7 @@ fn importedQualifiedCallReturnTypePath(
             !parametersAcceptArity(function.parameters, call.arity)) continue;
         if (function.is_internal) {
             if (provider.owner != project.current_owner) continue;
-        } else if (!function.is_public) continue;
+        } else if (!function.is_public and !providerInCurrentModule(project, provider)) continue;
         const candidate = returnTypeName(loaded.program, function.return_type) orelse continue;
         if (return_name != null and !std.mem.eql(u8, return_name.?, candidate)) return null;
         return_name = candidate;
@@ -2141,9 +2146,14 @@ fn importedMemberVisible(project: IndexedProject, provider: Modules.Provider, me
     if (member.is_public) return true;
     if (member.is_local or member.is_private or member.is_protected) return false;
     if (member.is_internal) return provider.owner == project.current_owner;
+    return providerInCurrentModule(project, provider);
+}
+
+fn providerInCurrentModule(project: IndexedProject, provider: Modules.Provider) bool {
     for (project.index.providers) |current| {
         if (!samePath(current.path, project.current_path)) continue;
-        return std.mem.eql(u8, current.name, provider.name);
+        return current.owner == provider.owner and
+            ModuleScopes.sameProviders(project.index.providers, current.name, provider.name);
     }
     return false;
 }
