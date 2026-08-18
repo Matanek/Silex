@@ -156,6 +156,20 @@ pub const Server = struct {
                 source,
                 cursor,
             ) catch false;
+            const assignment_expected_type = if (self.workspace_root_uri != null)
+                Workspace.assignmentExpectedTypeAtForTarget(
+                    allocator,
+                    self.io,
+                    self.global_packages_root,
+                    self.target,
+                    self.workspace_root_uri,
+                    uri,
+                    self.documents.items,
+                    source,
+                    cursor,
+                ) catch null
+            else
+                null;
             const completing_try_error = Completion.isTryErrorBindingPositionAt(allocator, source, cursor) catch false;
             const completing_try_alternative = Completion.isTryAlternativePositionAt(allocator, source, cursor) catch false;
             const local_parameters = try Completion.parameterItemsAt(allocator, source, cursor);
@@ -208,9 +222,15 @@ pub const Server = struct {
                     return try self.reply(allocator, id, .{ .isIncomplete = false, .items = contextual });
                 }
             }
-            const items = try Completion.itemsAt(allocator, source, cursor, trigger_kind);
+            const items = try Completion.itemsAtWithExpectedType(
+                allocator,
+                source,
+                cursor,
+                trigger_kind,
+                assignment_expected_type,
+            );
             if (needs_workspace) {
-                const imported = Workspace.scopeItemsAtForTarget(
+                const imported = Workspace.scopeItemsAtForTargetExpected(
                     allocator,
                     self.io,
                     self.global_packages_root,
@@ -220,6 +240,7 @@ pub const Server = struct {
                     self.documents.items,
                     source,
                     cursor,
+                    assignment_expected_type,
                 ) catch &.{};
                 const scoped = try mergeCompletionItems(allocator, items, imported);
                 const merged = try mergeCompletionItems(allocator, parameters, scoped);

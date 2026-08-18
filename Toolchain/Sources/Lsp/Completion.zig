@@ -24,6 +24,9 @@ const CompletionKind = struct {
     const keyword: u8 = 14;
 };
 
+pub const memberFieldPriority: u8 = 0;
+pub const memberMethodPriority: u8 = 10;
+
 const ContextKind = enum {
     none,
     member,
@@ -83,6 +86,16 @@ pub fn itemsAt(
     cursor: usize,
     trigger_kind: Types.CompletionTriggerKind,
 ) ![]const CompletionItem {
+    return itemsAtWithExpectedType(allocator, source, cursor, trigger_kind, null);
+}
+
+pub fn itemsAtWithExpectedType(
+    allocator: Allocator,
+    source: []const u8,
+    cursor: usize,
+    trigger_kind: Types.CompletionTriggerKind,
+    contextual_expected_type: ?[]const u8,
+) ![]const CompletionItem {
     _ = trigger_kind;
     if (cursor > source.len or !cursorAllowsCode(source, cursor)) return allocator.alloc(CompletionItem, 0);
 
@@ -92,7 +105,12 @@ pub fn itemsAt(
     var candidates: std.ArrayList(Candidate) = .empty;
     const completing_try_alternative = try isTryAlternativePositionAt(allocator, source, context.prefix_start);
     const program = try parseForCompletion(allocator, source, cursor, context);
-    const expected_type = if (program) |parsed| expectedTypeAt(source, parsed, cursor, context) else null;
+    const expected_type: ?ExpectedType = if (contextual_expected_type) |name|
+        .{ .name = name, .strict = true }
+    else if (program) |parsed|
+        expectedTypeAt(source, parsed, cursor, context)
+    else
+        null;
     const completing_try_error = try isTryErrorBindingPositionAt(allocator, source, context.prefix_start);
 
     if (completing_try_error) {
@@ -290,8 +308,11 @@ pub fn itemsAt(
                 context,
                 expected_type,
             );
-            if (context.kind == .statement) try appendStatementKeywords(allocator, &candidates, context);
-            if (context.kind == .expression) try appendKeywords(allocator, &candidates, context, &.{
+            const strict_expected_type = if (expected_type) |expected| expected.strict else false;
+            if (context.kind == .statement and !strict_expected_type) {
+                try appendStatementKeywords(allocator, &candidates, context);
+            }
+            if (context.kind == .expression and !strict_expected_type) try appendKeywords(allocator, &candidates, context, &.{
                 .{ "try", "Silex result propagation" },
             }, 50);
             if (context.allow_conversion) try appendKeywords(allocator, &candidates, context, &.{
@@ -1270,7 +1291,7 @@ fn appendMembers(
             .label = field.name,
             .kind = CompletionKind.field,
             .detail = try std.fmt.allocPrint(allocator, "static {s}:{s}", .{ field.name, typeName(program, field.type) }),
-        }, 0, false);
+        }, memberFieldPriority, false);
         for (structure.methods) |method| {
             if ((!method.is_static and !context.system_callback) or
                 !callAcceptsParameters(source, cursor, program, method.parameters)) continue;
@@ -1278,7 +1299,7 @@ fn appendMembers(
                 .label = method.name,
                 .kind = CompletionKind.method,
                 .detail = try functionSignature(allocator, source, program, method),
-            }, 0, true);
+            }, memberMethodPriority, true);
         }
         return;
     }
@@ -1286,14 +1307,14 @@ fn appendMembers(
         .label = field.name,
         .kind = CompletionKind.field,
         .detail = try std.fmt.allocPrint(allocator, "{s}:{s}", .{ field.name, typeName(program, field.type) }),
-    }, 0, false);
+    }, memberFieldPriority, false);
     for (structure.methods) |method| {
         if (!callAcceptsParameters(source, cursor, program, method.parameters)) continue;
         try appendCandidate(allocator, candidates, context, .{
             .label = method.name,
             .kind = CompletionKind.method,
             .detail = try functionSignature(allocator, source, program, method),
-        }, 0, true);
+        }, memberMethodPriority, true);
     }
 }
 
@@ -2201,7 +2222,14 @@ fn inferDeclarationType(source: []const u8, tokens: []const Token) ?[]const u8 {
             .keyword_true, .keyword_false => "bool",
             .integer => "int",
             .floating => "float",
-            .identifier => if (index + 2 < tokens.len and tokens[index + 2].tag == .left_parenthesis) value.lexeme else null,
+            .identifier => qualified_initializer: {
+                var end = index + 1;
+                while (end + 2 < tokens.len and tokens[end + 1].tag == .dot and tokens[end + 2].tag == .identifier) {
+                    end += 2;
+                }
+                if (end + 1 >= tokens.len or tokens[end + 1].tag != .left_parenthesis) break :qualified_initializer null;
+                break :qualified_initializer source[value.start..tokens[end].end];
+            },
             else => null,
         };
     }
@@ -2488,11 +2516,19 @@ fn parseForCompletion(
     });
     parser = ParserModule.Parser.init(allocator, recovered);
     const program = parser.parse() catch blk: {
-        if (context.kind != .type_name and !context.nominal_relation) return null;
         const line_end = if (std.mem.indexOfScalarPos(u8, source, cursor, '\n')) |newline|
             newline + 1
         else
             source.len;
+        if (std.mem.startsWith(u8, std.mem.trimStart(u8, source[line_start..line_end], " \t\r\n"), "..")) {
+            const without_incomplete_cascade = try std.fmt.allocPrint(allocator, "{s}{s}", .{
+                source[0..line_start],
+                source[line_end..],
+            });
+            parser = ParserModule.Parser.init(allocator, without_incomplete_cascade);
+            if (parser.parse()) |parsed| break :blk parsed else |_| {}
+        }
+        if (context.kind != .type_name and !context.nominal_relation) return null;
         const without_incomplete_declaration = try std.fmt.allocPrint(allocator, "{s}{s}", .{
             source[0..line_start],
             source[line_end..],
@@ -3157,6 +3193,42 @@ test "complete an instance with only its own members" {
     try std.testing.expect(!contains(items, "if"));
     try std.testing.expect(!contains(items, "float"));
     try std.testing.expect(!contains(items, "ignore"));
+}
+
+test "rank fields before methods for instance and static member completion" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const instance_source =
+        \\struct Vector3 {
+        \\    static let z_axis:int = 2
+        \\    var z_value:int
+        \\    static func build() Vector3 { return Vector3() }
+        \\    func advance() {}
+        \\}
+        \\func main() {
+        \\    let value = Vector3()
+        \\    print(value.)
+        \\}
+    ;
+
+    const instance_cursor = std.mem.indexOf(u8, instance_source, "value.").? + "value.".len;
+    const instance_items = try itemsAt(arena.allocator(), instance_source, instance_cursor, .trigger_character);
+    try std.testing.expect(instance_items.len != 0);
+    try std.testing.expectEqualStrings("z_value", instance_items[0].label);
+    try std.testing.expect(contains(instance_items, "advance"));
+
+    const static_source =
+        \\struct Vector3 {
+        \\    static let z_axis:int = 2
+        \\    static func build() Vector3 { return Vector3() }
+        \\}
+        \\func main() { print(Vector3.) }
+    ;
+    const static_cursor = std.mem.indexOf(u8, static_source, "Vector3.)").? + "Vector3.".len;
+    const static_items = try itemsAt(arena.allocator(), static_source, static_cursor, .trigger_character);
+    try std.testing.expect(static_items.len != 0);
+    try std.testing.expectEqualStrings("z_axis", static_items[0].label);
+    try std.testing.expect(contains(static_items, "build"));
 }
 
 test "complete indexed collection traversal while writing a for source" {

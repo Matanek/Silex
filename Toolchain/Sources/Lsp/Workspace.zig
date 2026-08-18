@@ -270,6 +270,106 @@ pub fn scopeItemsAt(
     );
 }
 
+pub fn assignmentExpectedTypeAtForTarget(
+    allocator: Allocator,
+    io: Io,
+    global_packages_root: ?[]const u8,
+    selected_target: TargetModule.Target,
+    root_uri: ?[]const u8,
+    document_uri: []const u8,
+    documents: []const Types.Document,
+    source: []const u8,
+    cursor: usize,
+) !?[]const u8 {
+    if (cursor > source.len) return null;
+    const prefix_start = prefixStart(source, cursor);
+    const assignment = assignmentFieldAt(source, prefix_start) orelse return null;
+    const program = try parseCurrentAtScope(allocator, source, cursor, prefix_start, false, false) orelse return null;
+    const document_path = try pathFromUri(allocator, document_uri);
+    const root_hint = if (root_uri) |uri| try pathFromUri(allocator, uri) else null;
+    const root = try projectRoot(allocator, io, document_path, root_hint);
+    const project = try indexProject(allocator, io, global_packages_root, selected_target, root, document_path);
+
+    const receiver_type = if (Completion.qualifiedCall(assignment.receiver)) |call|
+        try importedQualifiedCallReturnTypePath(allocator, io, documents, project, program, call)
+    else if (Completion.directCall(assignment.receiver)) |call|
+        try importedConstructorCallTypePath(allocator, io, documents, project, program, call)
+    else
+        try importedFieldReceiverTypePath(
+            allocator,
+            io,
+            documents,
+            project,
+            program,
+            source,
+            cursor,
+            assignment.receiver,
+        );
+    const imported_receiver = receiver_type orelse return null;
+    const imported_expected = try importedFieldTypePath(
+        allocator,
+        io,
+        documents,
+        project,
+        imported_receiver,
+        assignment.field,
+    ) orelse return null;
+    return try localTypePath(allocator, program, imported_expected);
+}
+
+const AssignmentField = struct {
+    receiver: []const u8,
+    field: []const u8,
+};
+
+fn assignmentFieldAt(source: []const u8, prefix_start: usize) ?AssignmentField {
+    var tokens: [128]LexerModule.Token = undefined;
+    var count: usize = 0;
+    var lexer = LexerModule.Lexer.init(source[0..prefix_start]);
+    while (true) {
+        const token = lexer.next() catch return null;
+        if (token.tag == .end) break;
+        if (count == tokens.len) return null;
+        tokens[count] = token;
+        count += 1;
+    }
+    if (count < 3 or tokens[count - 1].tag != .equal or tokens[count - 2].tag != .identifier) return null;
+    const separator = tokens[count - 3];
+    if (separator.tag != .dot and separator.tag != .dot_dot) return null;
+    const receiver = if (separator.tag == .dot_dot)
+        Completion.cascadeReceiver(source, separator.start)
+    else
+        Completion.memberReceiver(source, separator.start);
+    return .{
+        .receiver = receiver orelse return null,
+        .field = tokens[count - 2].lexeme,
+    };
+}
+
+test "recognize a cascade field assignment before its value" {
+    const source =
+        \\func main() {
+        \\    Components.Overlay2D(10)
+        \\        ..position =
+        \\}
+    ;
+    const cursor = std.mem.indexOf(u8, source, "\n}").?;
+    const assignment = assignmentFieldAt(source, cursor) orelse return error.MissingAssignmentField;
+    try std.testing.expectEqualStrings("Components.Overlay2D(10)", assignment.receiver);
+    try std.testing.expectEqualStrings("position", assignment.field);
+}
+
+fn localTypePath(allocator: Allocator, program: Ast.Program, imported_path: []const u8) ![]const u8 {
+    for (program.uses) |use| {
+        if (!std.mem.startsWith(u8, imported_path, use.path)) continue;
+        if (imported_path.len != use.path.len and imported_path[use.path.len] != '.') continue;
+        const local = use.alias orelse lastSegment(use.path);
+        if (imported_path.len == use.path.len) return local;
+        return std.fmt.allocPrint(allocator, "{s}{s}", .{ local, imported_path[use.path.len..] });
+    }
+    return imported_path;
+}
+
 pub fn scopeItemsAtForTarget(
     allocator: Allocator,
     io: Io,
@@ -280,6 +380,32 @@ pub fn scopeItemsAtForTarget(
     documents: []const Types.Document,
     source: []const u8,
     cursor: usize,
+) ![]const Types.CompletionItem {
+    return scopeItemsAtForTargetExpected(
+        allocator,
+        io,
+        global_packages_root,
+        selected_target,
+        root_uri,
+        document_uri,
+        documents,
+        source,
+        cursor,
+        null,
+    );
+}
+
+pub fn scopeItemsAtForTargetExpected(
+    allocator: Allocator,
+    io: Io,
+    global_packages_root: ?[]const u8,
+    selected_target: TargetModule.Target,
+    root_uri: ?[]const u8,
+    document_uri: []const u8,
+    documents: []const Types.Document,
+    source: []const u8,
+    cursor: usize,
+    expected_type: ?[]const u8,
 ) ![]const Types.CompletionItem {
     if (cursor > source.len) return allocator.alloc(Types.CompletionItem, 0);
     const prefix_start = prefixStart(source, cursor);
@@ -401,6 +527,10 @@ pub fn scopeItemsAtForTarget(
     for (program.uses) |use| {
         const label = use.alias orelse lastSegment(use.path);
         if (!matchesPrefix(label, prefix)) continue;
+        if (expected_type) |expected| {
+            if (!std.mem.eql(u8, expected, label) and
+                !(expected.len > label.len and std.mem.startsWith(u8, expected, label) and expected[label.len] == '.')) continue;
+        }
         if (fundamentalAliasTarget(program, use, 0)) |type_target| {
             if (type_only) try appendRanked(allocator, &ranked, .{
                 .label = label,
@@ -646,6 +776,11 @@ fn queryAt(
                 .static_receiver = true,
             } };
         }
+        if (Completion.resolveReceiverType(allocator, source, program, cursor, receiver)) |local_type| {
+            if (try importedNominalTypePath(allocator, io, documents, program, project, local_type)) |resolved| {
+                return .{ .imported_member = .{ .type_path = resolved, .prefix = prefix, .cursor = cursor } };
+            }
+        }
         if (try declaredCallReturnTypePath(
             allocator,
             io,
@@ -674,16 +809,6 @@ fn queryAt(
             .prefix = prefix,
             .cursor = cursor,
         } };
-        if (parameterTypePathAt(source, program, cursor, receiver)) |type_path| {
-            if (try importedTypePath(allocator, program, project, type_path)) |resolved| {
-                return .{ .imported_member = .{ .type_path = resolved, .prefix = prefix, .cursor = cursor } };
-            }
-        }
-        if (try declaredTypePath(allocator, source, cursor, receiver)) |type_path| {
-            if (try importedTypePath(allocator, program, project, type_path)) |resolved| {
-                return .{ .imported_member = .{ .type_path = resolved, .prefix = prefix, .cursor = cursor } };
-            }
-        }
         if (std.mem.eql(u8, receiver, "self")) {
             if (extensionTargetAt(source, program, cursor)) |type_path| {
                 if (try importedTypePath(allocator, program, project, type_path)) |resolved| {
@@ -1219,7 +1344,7 @@ fn appendImportedMembersDepth(
                         field.name,
                         Completion.typeName(loaded.program, field.type),
                     }),
-                }, 0, false);
+                }, Completion.memberFieldPriority, false);
             }
             for (structure.methods) |method| {
                 if (!method.is_static or !importedMemberVisible(project, provider, method)) continue;
@@ -1234,7 +1359,7 @@ fn appendImportedMembersDepth(
                     .label = method.name,
                     .kind = CompletionKind.method,
                     .detail = try Completion.functionSignature(allocator, loaded.source, loaded.program, method),
-                }, 0, true);
+                }, Completion.memberMethodPriority, true);
             }
             return;
         }
@@ -1248,7 +1373,7 @@ fn appendImportedMembersDepth(
                     field.name,
                     Completion.typeName(loaded.program, field.type),
                 }),
-            }, 0, false);
+            }, Completion.memberFieldPriority, false);
         }
         for (structure.methods) |method| {
             if (method.is_static or !importedMemberVisible(project, provider, method)) continue;
@@ -1263,7 +1388,7 @@ fn appendImportedMembersDepth(
                 .label = method.name,
                 .kind = CompletionKind.method,
                 .detail = try Completion.functionSignature(allocator, loaded.source, loaded.program, method),
-            }, 0, true);
+            }, Completion.memberMethodPriority, true);
         }
         try appendProviderExtensionMethods(
             allocator,
@@ -1347,7 +1472,7 @@ fn appendProviderExtensionMethods(
                 .label = method.name,
                 .kind = 2,
                 .detail = try Completion.functionSignature(allocator, loaded.source, loaded.program, method),
-            }, 0, true);
+            }, Completion.memberMethodPriority, true);
         }
     }
 }
@@ -1378,7 +1503,7 @@ fn appendCurrentExtensionMethods(
                 .label = method.name,
                 .kind = 2,
                 .detail = try Completion.functionSignature(allocator, source, program, method),
-            }, 0, true);
+            }, Completion.memberMethodPriority, true);
         }
     }
 }
@@ -1501,77 +1626,6 @@ fn findUseByAlias(program: Ast.Program, alias: []const u8) ?Ast.Use {
     return null;
 }
 
-fn declaredTypePath(
-    allocator: Allocator,
-    source: []const u8,
-    cursor: usize,
-    receiver: []const u8,
-) !?[]const u8 {
-    var tokens: std.ArrayList(LexerModule.Token) = .empty;
-    var lexer = LexerModule.Lexer.init(source[0..cursor]);
-    while (true) {
-        const token = lexer.next() catch break;
-        if (token.tag == .end) break;
-        try tokens.append(allocator, token);
-    }
-    var found: ?[]const u8 = null;
-    var index: usize = 0;
-    while (index + 2 < tokens.items.len) : (index += 1) {
-        if (tokens.items[index].tag != .keyword_let and tokens.items[index].tag != .keyword_var) continue;
-        if (tokens.items[index + 1].tag != .identifier or
-            !std.mem.eql(u8, tokens.items[index + 1].lexeme, receiver)) continue;
-        const operator = tokens.items[index + 2].tag;
-        if (operator != .colon and operator != .equal) continue;
-        const start = index + 3;
-        if (start >= tokens.items.len or tokens.items[start].tag != .identifier) continue;
-        var end = start;
-        while (end + 2 < tokens.items.len and tokens.items[end + 1].tag == .dot and
-            tokens.items[end + 2].tag == .identifier)
-        {
-            end += 2;
-        }
-        if (operator == .equal and (end + 1 >= tokens.items.len or tokens.items[end + 1].tag != .left_parenthesis)) continue;
-        found = try joinQualified(allocator, tokens.items[start .. end + 1]);
-    }
-    return found;
-}
-
-fn parameterTypePathAt(
-    source: []const u8,
-    program: Ast.Program,
-    cursor: usize,
-    receiver: []const u8,
-) ?[]const u8 {
-    for (program.functions) |function| {
-        if (!bodyContainsCursor(source, function.position.offset, cursor)) continue;
-        if (parameterTypePath(program, function.parameters, receiver)) |type_path| return type_path;
-    }
-    for (program.structures) |structure| {
-        for (structure.methods) |method| {
-            if (!bodyContainsCursor(source, method.position.offset, cursor)) continue;
-            if (parameterTypePath(program, method.parameters, receiver)) |type_path| return type_path;
-        }
-        for (structure.constructors) |constructor| {
-            if (!bodyContainsCursor(source, constructor.position.offset, cursor)) continue;
-            if (parameterTypePath(program, constructor.parameters, receiver)) |type_path| return type_path;
-        }
-    }
-    for (program.extensions) |extension| {
-        for (extension.methods) |method| {
-            if (!bodyContainsCursor(source, method.position.offset, cursor)) continue;
-            if (parameterTypePath(program, method.parameters, receiver)) |type_path| return type_path;
-        }
-    }
-    return null;
-}
-
-fn parameterTypePath(program: Ast.Program, parameters: []const Ast.Parameter, receiver: []const u8) ?[]const u8 {
-    for (parameters) |parameter| {
-        if (std.mem.eql(u8, parameter.name, receiver)) return returnTypeName(program, parameter.type);
-    }
-    return null;
-}
-
 fn importedFieldReceiverTypePath(
     allocator: Allocator,
     io: Io,
@@ -1584,9 +1638,7 @@ fn importedFieldReceiverTypePath(
 ) !?[]const u8 {
     const separator = std.mem.indexOfScalar(u8, receiver, '.') orelse receiver.len;
     const root = receiver[0..separator];
-    const local_type = parameterTypePathAt(source, program, cursor, root) orelse
-        loopBindingTypePathAt(source, program, cursor, root) orelse
-        try declaredTypePath(allocator, source, cursor, root) orelse return null;
+    const local_type = Completion.resolveReceiverType(allocator, source, program, cursor, root) orelse return null;
     var resolved = try importedTypePath(allocator, program, project, local_type) orelse return null;
     var field_start = separator;
     while (field_start < receiver.len) {
@@ -1627,138 +1679,6 @@ fn importedFieldTypePath(
         return null;
     }
     return null;
-}
-
-fn loopBindingTypePathAt(
-    source: []const u8,
-    program: Ast.Program,
-    cursor: usize,
-    receiver: []const u8,
-) ?[]const u8 {
-    for (program.functions) |function| {
-        if (!bodyContainsCursor(source, function.position.offset, cursor)) continue;
-        return loopBindingTypeInStatements(
-            source,
-            program,
-            cursor,
-            receiver,
-            function.parameters,
-            function.statements,
-        );
-    }
-    return null;
-}
-
-fn loopBindingTypeInStatements(
-    source: []const u8,
-    program: Ast.Program,
-    cursor: usize,
-    receiver: []const u8,
-    parameters: []const Ast.Parameter,
-    statements: []const Ast.Statement,
-) ?[]const u8 {
-    for (statements) |statement| switch (statement) {
-        .for_statement => |loop| {
-            if (!bodyContainsCursor(source, loop.position.offset, cursor)) continue;
-            const collection = switch (loop.source) {
-                .collection => |value| value,
-                .range => null,
-            };
-            const collection_name = if (collection) |value| switch (value.value) {
-                .identifier => |name| name,
-                else => null,
-            } else null;
-            if (collection_name) |name| {
-                for (parameters) |parameter| {
-                    if (!std.mem.eql(u8, parameter.name, name)) continue;
-                    for (loop.bindings, 0..) |binding, binding_index| {
-                        if (!std.mem.eql(u8, binding.name, receiver)) continue;
-                        return queryBindingTypeName(program, parameter.type, binding_index);
-                    }
-                }
-            }
-            if (loopBindingTypeInStatements(
-                source,
-                program,
-                cursor,
-                receiver,
-                parameters,
-                loop.statements,
-            )) |type_name| return type_name;
-        },
-        .if_statement => |conditional| {
-            for (conditional.branches) |branch| if (loopBindingTypeInStatements(
-                source,
-                program,
-                cursor,
-                receiver,
-                parameters,
-                branch.statements,
-            )) |type_name| return type_name;
-            if (conditional.else_statements) |alternative| if (loopBindingTypeInStatements(
-                source,
-                program,
-                cursor,
-                receiver,
-                parameters,
-                alternative,
-            )) |type_name| return type_name;
-        },
-        .while_statement => |loop| if (loopBindingTypeInStatements(
-            source,
-            program,
-            cursor,
-            receiver,
-            parameters,
-            loop.statements,
-        )) |type_name| return type_name,
-        .mutex_statement => |mutex| if (loopBindingTypeInStatements(
-            source,
-            program,
-            cursor,
-            receiver,
-            parameters,
-            mutex.statements,
-        )) |type_name| return type_name,
-        else => {},
-    };
-    return null;
-}
-
-fn queryBindingTypeName(program: Ast.Program, query_type: Ast.Type, binding_index: usize) ?[]const u8 {
-    const query_index = query_type.genericInstantiationIndex() orelse return null;
-    if (query_index >= program.generic_types.len) return null;
-    const query = program.generic_types[query_index];
-    if (query.arguments.len == 0) return null;
-    const pattern_name = Completion.typeName(program, query.arguments[0]);
-    for (program.structures) |pattern| {
-        if (!pattern.is_tuple or !std.mem.eql(u8, pattern.name, pattern_name)) continue;
-        if (binding_index >= pattern.fields.len) return null;
-        return Completion.typeName(program, pattern.fields[binding_index].type);
-    }
-    return null;
-}
-
-test "infer destructured ECS query binding types for member navigation" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const source =
-        \\use GFX.ECS
-        \\struct Rotator {}
-        \\func rotate(rotators:ECS.Query<(@Rotator, &GFX.Transform.Transform3D)>) {
-        \\    for (rotator, transform) in rotators {
-        \\        print(transform.rotation)
-        \\    }
-        \\}
-    ;
-    const program = (try parseCurrent(arena.allocator(), source)).?;
-    const cursor = std.mem.indexOf(u8, source, "transform.rotation").? + "transform".len;
-    const inferred = loopBindingTypePathAt(source, program, cursor, "transform");
-    try std.testing.expect(inferred != null);
-    try std.testing.expectEqualStrings(
-        "GFX.Transform.Transform3D",
-        inferred.?,
-    );
 }
 
 fn importedConstructorCallTypePath(
@@ -1942,9 +1862,7 @@ fn importedInstanceCallReturnTypePath(
     cursor: usize,
     call: Completion.QualifiedCall,
 ) !?[]const u8 {
-    const local_type = parameterTypePathAt(source, current, cursor, call.owner) orelse
-        loopBindingTypePathAt(source, current, cursor, call.owner) orelse
-        try declaredTypePath(allocator, source, cursor, call.owner) orelse return null;
+    const local_type = Completion.resolveReceiverType(allocator, source, current, cursor, call.owner) orelse return null;
     var owner_path = try importedTypePath(allocator, current, project, local_type) orelse return null;
     var depth: usize = 0;
     while (depth <= project.index.providers.len) : (depth += 1) {
@@ -2021,6 +1939,44 @@ fn importedTypePath(
     else
         try std.fmt.allocPrint(allocator, "{s}.{s}", .{ use.path, suffix });
     return if (declarationTarget(project.index, full) != null) full else null;
+}
+
+fn importedNominalTypePath(
+    allocator: Allocator,
+    io: Io,
+    documents: []const Types.Document,
+    program: Ast.Program,
+    project: IndexedProject,
+    local_path: []const u8,
+) !?[]const u8 {
+    const resolved = try importedTypePath(allocator, program, project, local_path) orelse return null;
+    return if (try importedPathIsNominal(allocator, io, documents, project, resolved, 0)) resolved else null;
+}
+
+fn importedPathIsNominal(
+    allocator: Allocator,
+    io: Io,
+    documents: []const Types.Document,
+    project: IndexedProject,
+    path: []const u8,
+    depth: usize,
+) !bool {
+    if (depth > project.index.providers.len) return false;
+    const target = declarationTarget(project.index, path) orelse return false;
+    const provider = project.index.providers[target.provider];
+    if (!project.graph.canAccess(project.current_owner, provider.owner, provider.name)) return false;
+    const loaded = try loadProgram(allocator, io, documents, provider) orelse return false;
+    for (loaded.program.structures) |structure| {
+        if (std.mem.eql(u8, structure.name, target.declaration)) return true;
+    }
+    for (loaded.program.enums) |enumeration| {
+        if (std.mem.eql(u8, enumeration.name, target.declaration)) return true;
+    }
+    for (loaded.program.uses) |use| {
+        if (!use.is_public or use.alias == null or !std.mem.eql(u8, use.alias.?, target.declaration)) continue;
+        return importedPathIsNominal(allocator, io, documents, project, use.path, depth + 1);
+    }
+    return false;
 }
 
 fn extensionTargetAt(source: []const u8, program: Ast.Program, cursor: usize) ?[]const u8 {
@@ -2111,18 +2067,6 @@ fn rankedLessThan(_: void, left: RankedItem, right: RankedItem) bool {
 fn findProvider(index: Modules.Index, name: []const u8) ?Modules.Provider {
     for (index.providers) |provider| if (std.mem.eql(u8, provider.name, name)) return provider;
     return null;
-}
-
-fn joinQualified(allocator: Allocator, tokens: []const LexerModule.Token) ![]const u8 {
-    var result: []const u8 = "";
-    for (tokens) |token| {
-        if (token.tag == .dot) continue;
-        result = if (result.len == 0)
-            token.lexeme
-        else
-            try std.fmt.allocPrint(allocator, "{s}.{s}", .{ result, token.lexeme });
-    }
-    return result;
 }
 
 fn trimPathQualifier(path: []const u8) []const u8 {

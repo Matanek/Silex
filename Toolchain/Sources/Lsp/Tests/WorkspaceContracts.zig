@@ -1,6 +1,7 @@
 const std = @import("std");
 const ServerModule = @import("../Server.zig");
 const Support = @import("Support.zig");
+const Workspace = @import("../Workspace.zig");
 
 test "server navigates local and imported function values" {
     var temporary = std.testing.tmpDir(.{});
@@ -281,6 +282,122 @@ test "server preserves prefix ranking in the response consumed by Zed" {
     try Support.expectExactLabels(&.{ "let", "Result" }, items);
     try Support.expectFirst("let", items);
     try Support.expectNoDuplicates(items);
+}
+
+test "server completes the value of a reexported cascade field from its declared type" {
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "Animator/Module");
+    try temporary.dir.createDirPath(std.testing.io, "GFX/Module/Scene2D");
+    try temporary.dir.createDirPath(std.testing.io, "STD/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Package.json",
+        .data = "{\"dependencies\":{\"Animator\":\"=1.0.0\",\"GFX\":\"=1.0.0\",\"STD\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Animator/Package.json",
+        .data = "{\"name\":\"Animator\",\"version\":\"1.0.0\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Animator/Module/@Module.sx",
+        .data = "public struct Timeline { func advance(delta:float) Timeline { return self } }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Package.json",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"dependencies\":{\"STD\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "STD/Package.json",
+        .data = "{\"name\":\"STD\",\"version\":\"1.0.0\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "STD/Module/Math.sx",
+        .data =
+        \\public struct Vec2 {
+        \\    var x:float
+        \\    init(value:float = 0.0) { self.x = value }
+        \\    func length() float { return x }
+        \\}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/Scene2D/Overlay.sx",
+        .data =
+        \\use STD.Math
+        \\public struct Overlay {
+        \\    var position:Math.Vec2
+        \\    init(size:int) { self.position = Math.Vec2(size as float) }
+        \\}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/Components.sx",
+        .data = "public use GFX.Scene2D.Overlay as Overlay2D",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = "func main() {}" });
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const uri = try std.fmt.allocPrint(allocator, "file://{s}/Main.sx", .{root});
+    const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
+
+    var server = ServerModule.Server.init(std.testing.allocator, std.testing.io);
+    defer server.deinit();
+    try Support.initializeServer(&server, allocator, root_uri);
+    const marked_source =
+        \\use GFX.Components
+        \\use STD.Math
+        \\func make_position() Math.Vec2 { return Math.Vec2() }
+        \\func main() {
+        \\    var position:Math.Vec2 = Math.Vec2()
+        \\    Components.Overlay2D(10)
+        \\        ..position = <|>
+        \\}
+    ;
+    const marked = try Support.removeMarker(allocator, marked_source);
+    try Support.openDocument(&server, allocator, uri, 1, marked.text);
+    const expected = try Workspace.assignmentExpectedTypeAtForTarget(
+        allocator,
+        std.testing.io,
+        null,
+        .macos_arm64,
+        root_uri,
+        uri,
+        server.documents.items,
+        marked.text,
+        marked.cursor,
+    );
+    try std.testing.expectEqualStrings("Math.Vec2", expected orelse return error.MissingAssignmentExpectedType);
+    const items = try Support.serverCompletionInOpenDocument(&server, allocator, uri, marked);
+    try Support.expectPresent("position", items);
+    try Support.expectPresent("make_position", items);
+    try Support.expectPresent("Math", items);
+    try Support.expectAbsent("Components", items);
+    try Support.expectAbsent("Result", items);
+    try Support.expectAbsent("if", items);
+    try Support.expectNoDuplicates(items);
+
+    const member_source =
+        \\use Animator
+        \\use STD.Math
+        \\struct Motion { var position:Animator.Timeline }
+        \\func main() {
+        \\    var positions:Math.Vec2[] = [Math.Vec2()]
+        \\    for position in positions {
+        \\        position.<|>
+        \\    }
+        \\}
+    ;
+    const member_marked = try Support.removeMarker(allocator, member_source);
+    try Support.changeDocument(&server, allocator, uri, 2, member_marked.text);
+    const members = try Support.serverCompletionInOpenDocument(&server, allocator, uri, member_marked);
+    try Support.expectPresent("x", members);
+    try Support.expectPresent("length", members);
+    try Support.expectFirst("x", members);
+    try Support.expectAbsent("advance", members);
+    try Support.expectNoDuplicates(members);
 }
 
 test "server ranks imported method parameter labels before scope symbols" {
