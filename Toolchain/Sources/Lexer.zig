@@ -19,8 +19,6 @@ pub const TokenTag = enum {
     keyword_try,
     keyword_move,
     keyword_copy,
-    keyword_deferred,
-    keyword_isolated,
     keyword_struct,
     keyword_class,
     keyword_protocol,
@@ -618,8 +616,6 @@ fn keywordTag(lexeme: []const u8) ?TokenTag {
         .{ "try", TokenTag.keyword_try },
         .{ "move", TokenTag.keyword_move },
         .{ "copy", TokenTag.keyword_copy },
-        .{ "deferred", TokenTag.keyword_deferred },
-        .{ "isolated", TokenTag.keyword_isolated },
         .{ "struct", TokenTag.keyword_struct },
         .{ "class", TokenTag.keyword_class },
         .{ "protocol", TokenTag.keyword_protocol },
@@ -778,16 +774,10 @@ test "recognize reserved copy keyword" {
     try std.testing.expectEqual(TokenTag.identifier, (try lexer.next()).tag);
 }
 
-test "recognize deferred keyword" {
-    var lexer = Lexer.init("deferred func");
-    try std.testing.expectEqual(TokenTag.keyword_deferred, (try lexer.next()).tag);
-    try std.testing.expectEqual(TokenTag.keyword_func, (try lexer.next()).tag);
-}
-
-test "recognize isolated keyword" {
-    var lexer = Lexer.init("isolated func");
-    try std.testing.expectEqual(TokenTag.keyword_isolated, (try lexer.next()).tag);
-    try std.testing.expectEqual(TokenTag.keyword_func, (try lexer.next()).tag);
+test "keep removed callback modifiers as identifiers" {
+    var lexer = Lexer.init("deferred isolated");
+    try std.testing.expectEqual(TokenTag.identifier, (try lexer.next()).tag);
+    try std.testing.expectEqual(TokenTag.identifier, (try lexer.next()).tag);
 }
 
 test "recognize mutex keyword" {
