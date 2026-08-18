@@ -21,16 +21,18 @@ pub const LinkResult = struct {
 };
 
 pub const PublicationProof = struct {
-    repository: ?[]const u8,
+    repository: []const u8,
+    commit: []const u8,
     archive_sha256: []const u8,
     extensions: []const []const u8,
 };
 
 const Receipt = struct {
-    schema: u8 = 1,
+    schema: u8 = 2,
     name: []const u8,
     version: []const u8,
-    repository: ?[]const u8,
+    repository: []const u8,
+    commit: []const u8,
     archive_sha256: []const u8,
     manifest_sha256: []const u8,
     extensions: []const []const u8,
@@ -79,7 +81,7 @@ pub const Manager = struct {
         self.diagnostic = null;
         const package = try self.inspect(source);
         if (proof) |publication| if (!equalStrings(package.extensions, publication.extensions)) {
-            return self.failFmt("package '{s}' extensions do not match its registry proof", .{package.name});
+            return self.failFmt("package '{s}' extensions do not match its source proof", .{package.name});
         };
         const folder = try packageFolder(self.allocator, package);
         const destination = try std.fs.path.join(self.allocator, &.{ self.packages_root, folder });
@@ -127,7 +129,7 @@ pub const Manager = struct {
     fn writeReceipt(self: *Manager, root: []const u8, package: Packages.ManifestInfo, proof: PublicationProof) !void {
         const metadata_root = try std.fs.path.join(self.allocator, &.{ root, ".silex" });
         try Io.Dir.cwd().createDirPath(self.io, metadata_root);
-        const path = try std.fs.path.join(self.allocator, &.{ metadata_root, "registry.json" });
+        const path = try std.fs.path.join(self.allocator, &.{ metadata_root, "source.json" });
         const manifest_path = try std.fs.path.join(self.allocator, &.{ root, "Package.json" });
         const manifest_sha256 = try fileSha256(self.allocator, self.io, manifest_path);
         const version = try std.fmt.allocPrint(
@@ -139,6 +141,7 @@ pub const Manager = struct {
             .name = package.name,
             .version = version,
             .repository = proof.repository,
+            .commit = proof.commit,
             .archive_sha256 = proof.archive_sha256,
             .manifest_sha256 = manifest_sha256,
             .extensions = proof.extensions,
@@ -147,13 +150,13 @@ pub const Manager = struct {
     }
 
     fn verifyReceipt(self: *Manager, root: []const u8, package: Packages.ManifestInfo, proof: PublicationProof) !void {
-        const path = try std.fs.path.join(self.allocator, &.{ root, ".silex", "registry.json" });
+        const path = try std.fs.path.join(self.allocator, &.{ root, ".silex", "source.json" });
         const source = Io.Dir.cwd().readFileAlloc(self.io, path, self.allocator, .limited(1024 * 1024)) catch
-            return self.failFmt("installed package '{s}' has no registry proof; remove it and reinstall", .{package.name});
+            return self.failFmt("installed package '{s}' has no source proof; remove it and reinstall", .{package.name});
         const receipt = std.json.parseFromSliceLeaky(Receipt, self.allocator, source, .{
             .allocate = .alloc_always,
             .ignore_unknown_fields = false,
-        }) catch return self.failFmt("installed package '{s}' has an invalid registry proof", .{package.name});
+        }) catch return self.failFmt("installed package '{s}' has an invalid source proof", .{package.name});
         const version = try std.fmt.allocPrint(
             self.allocator,
             "{d}.{d}.{d}",
@@ -161,15 +164,16 @@ pub const Manager = struct {
         );
         const manifest_path = try std.fs.path.join(self.allocator, &.{ root, "Package.json" });
         const manifest_sha256 = try fileSha256(self.allocator, self.io, manifest_path);
-        if (receipt.schema != 1 or
+        if (receipt.schema != 2 or
             !std.mem.eql(u8, receipt.name, package.name) or
             !std.mem.eql(u8, receipt.version, version) or
-            !optionalStringEqual(receipt.repository, proof.repository) or
+            !std.mem.eql(u8, receipt.repository, proof.repository) or
+            !std.mem.eql(u8, receipt.commit, proof.commit) or
             !std.mem.eql(u8, receipt.archive_sha256, proof.archive_sha256) or
             !std.mem.eql(u8, receipt.manifest_sha256, manifest_sha256) or
             !equalStrings(receipt.extensions, proof.extensions))
         {
-            return self.failFmt("installed package '{s}' does not match its registry proof; remove it and reinstall", .{package.name});
+            return self.failFmt("installed package '{s}' does not match its source proof; remove it and reinstall", .{package.name});
         }
     }
 
@@ -371,7 +375,7 @@ test "install copies an immutable package without repository state" {
     try std.testing.expect(!repeated.installed);
 }
 
-test "published package extensions require an intact registry proof" {
+test "published package extensions require an intact source proof" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -401,11 +405,13 @@ test "published package extensions require an intact registry proof" {
     var manager = Manager.init(allocator, std.testing.allocator, std.testing.io, packages_root);
     const gfx_result = try manager.installPublished(gfx, .macos_arm64, .{
         .repository = "Matanek/Silex-Lib-GFX",
+        .commit = "0123456789abcdef0123456789abcdef01234567",
         .archive_sha256 = digest,
         .extensions = &.{"GFX.UI"},
     });
     _ = try manager.installPublished(ui, .macos_arm64, .{
         .repository = "Matanek/Silex-Lib-GFX-UI",
+        .commit = "1123456789abcdef0123456789abcdef01234567",
         .archive_sha256 = digest,
         .extensions = &.{},
     });
@@ -420,11 +426,12 @@ test "published package extensions require an intact registry proof" {
     resolver = Packages.Resolver.init(allocator, std.testing.io, packages_root);
     try std.testing.expectError(error.InvalidPackageGraph, resolver.resolve(app));
     try std.testing.expectEqualStrings(
-        "installed package does not match its registry proof; remove it and reinstall",
+        "installed package does not match its source proof; remove it and reinstall",
         resolver.diagnostic.?,
     );
     try std.testing.expectError(error.InvalidPackageStore, manager.installPublished(gfx, .macos_arm64, .{
         .repository = "Matanek/Silex-Lib-GFX",
+        .commit = "0123456789abcdef0123456789abcdef01234567",
         .archive_sha256 = digest,
         .extensions = &.{"GFX.UI"},
     }));

@@ -631,16 +631,17 @@ pub const Resolver = struct {
     ) !ParsedManifest {
         var trusted = manifest;
         trusted.extensions = &.{};
-        const receipt_path = try std.fs.path.join(self.allocator, &.{ root, ".silex", "registry.json" });
+        const receipt_path = try std.fs.path.join(self.allocator, &.{ root, ".silex", "source.json" });
         const source = Io.Dir.cwd().readFileAlloc(self.io, receipt_path, self.allocator, .limited(1024 * 1024)) catch |err| switch (err) {
             error.FileNotFound, error.NotDir => return trusted,
-            else => return self.fail("installed package registry proof cannot be read"),
+            else => return self.fail("installed package source proof cannot be read"),
         };
         const Receipt = struct {
             schema: u8,
             name: []const u8,
             version: []const u8,
-            repository: ?[]const u8,
+            repository: []const u8,
+            commit: []const u8,
             archive_sha256: []const u8,
             manifest_sha256: []const u8,
             extensions: []const []const u8,
@@ -648,7 +649,7 @@ pub const Resolver = struct {
         const receipt = std.json.parseFromSliceLeaky(Receipt, self.allocator, source, .{
             .allocate = .alloc_always,
             .ignore_unknown_fields = false,
-        }) catch return self.fail("installed package has an invalid registry proof; remove it and reinstall");
+        }) catch return self.fail("installed package has an invalid source proof; remove it and reinstall");
         const version_text = try std.fmt.allocPrint(
             self.allocator,
             "{d}.{d}.{d}",
@@ -656,16 +657,17 @@ pub const Resolver = struct {
         );
         const manifest_path = try std.fs.path.join(self.allocator, &.{ root, "Package.json" });
         const manifest_sha256 = try fileSha256(self.allocator, self.io, manifest_path);
-        if (receipt.schema != 1 or
+        if (receipt.schema != 2 or
             !std.mem.eql(u8, receipt.name, name) or
             !std.mem.eql(u8, receipt.version, version_text) or
+            receipt.repository.len == 0 or
+            !validObjectId(receipt.commit) or
             !validSha256(receipt.archive_sha256) or
             !std.mem.eql(u8, receipt.manifest_sha256, manifest_sha256) or
             !equalStrings(receipt.extensions, manifest.extensions))
         {
-            return self.fail("installed package does not match its registry proof; remove it and reinstall");
+            return self.fail("installed package does not match its source proof; remove it and reinstall");
         }
-        _ = receipt.repository;
         trusted.extensions = receipt.extensions;
         return trusted;
     }
@@ -1281,6 +1283,12 @@ fn validSha256(text: []const u8) bool {
     return true;
 }
 
+fn validObjectId(text: []const u8) bool {
+    if (text.len != 40 and text.len != 64) return false;
+    for (text) |character| if (!std.ascii.isHex(character)) return false;
+    return true;
+}
+
 fn fileSha256(allocator: Allocator, io: Io, path: []const u8) ![]const u8 {
     const source = Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(1024 * 1024)) catch
         return error.InvalidPackageGraph;
@@ -1876,10 +1884,10 @@ test "resolve qualified identities literally from an injected global root" {
     const silex_manifest = try std.fs.path.join(allocator, &.{ global, "Silex@0.1.0", "Package.json" });
     const manifest_sha256 = try fileSha256(allocator, std.testing.io, silex_manifest);
     try temporary.dir.writeFile(std.testing.io, .{
-        .sub_path = "Global/Silex@0.1.0/.silex/registry.json",
+        .sub_path = "Global/Silex@0.1.0/.silex/source.json",
         .data = try std.fmt.allocPrint(
             allocator,
-            "{{\"schema\":1,\"name\":\"Silex\",\"version\":\"0.1.0\",\"repository\":\"Matanek/Silex\",\"archive_sha256\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\",\"manifest_sha256\":\"{s}\",\"extensions\":[\"Silex.Bootstrap\"]}}",
+            "{{\"schema\":2,\"name\":\"Silex\",\"version\":\"0.1.0\",\"repository\":\"https://github.com/Matanek/Silex.git\",\"commit\":\"0123456789abcdef0123456789abcdef01234567\",\"archive_sha256\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\",\"manifest_sha256\":\"{s}\",\"extensions\":[\"Silex.Bootstrap\"]}}",
             .{manifest_sha256},
         ),
     });

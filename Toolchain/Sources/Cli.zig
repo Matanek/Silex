@@ -431,14 +431,14 @@ test "packages separates global inventory from contextual resolution" {
     try expectPackagesDiagnostic(parsePackages(&.{ "resolve", "A", "B" }), .multiple_sources, "B");
 }
 
-test "publish accepts exactly one package directory" {
+test "check accepts exactly one package directory" {
     try std.testing.expectEqualStrings("Packages/GFX", parsePackage(&.{"Packages/GFX"}).options.package);
     try expectPackageDiagnostic(parsePackage(&.{}), .missing_package, null);
     try expectPackageDiagnostic(parsePackage(&.{ "Packages/GFX", "Packages/STD" }), .multiple_packages, "Packages/STD");
     try expectPackageDiagnostic(parsePackage(&.{"--registry"}), .unknown_option, "--registry");
 }
 
-test "release accepts exactly one package directory" {
+test "register accepts exactly one package directory" {
     try std.testing.expectEqualStrings("Packages/GFX", parsePackage(&.{"Packages/GFX"}).options.package);
     try expectPackageDiagnostic(parsePackage(&.{}), .missing_package, null);
     try expectPackageDiagnostic(parsePackage(&.{ "Packages/GFX", "Packages/STD" }), .multiple_packages, "Packages/STD");

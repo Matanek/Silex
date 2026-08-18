@@ -25,8 +25,8 @@ const Project = @import("Project.zig");
 const ProjectPaths = @import("Project/Paths.zig");
 const Packages = @import("Packages.zig");
 const PackageRegistry = @import("PackageRegistry.zig");
-const PackagePublish = @import("PackagePublish.zig");
-const GitHubPublish = @import("GitHubPublish.zig");
+const PackageRegistration = @import("PackageRegistration.zig");
+const GitHubRegistration = @import("GitHubRegistration.zig");
 const PackageStore = @import("PackageStore.zig");
 const NativeTestRunner = @import("NativeTestRunner.zig");
 const TestDiscovery = @import("TestDiscovery.zig");
@@ -44,8 +44,8 @@ const usage =
     \\       silex test <source.sx|directory> [-n|--nocache] [--emit-ir]
     \\       silex compile <source.sx> [--target <target>] [-d|--debug|-r|--release] [-n|--nocache] -o|--output <executable>
     \\       silex install <package|package-directory> [--target <target>]
-    \\       silex release <package-directory>
-    \\       silex publish <package-directory>
+    \\       silex check <package-directory>
+    \\       silex register <package-directory>
     \\       silex link <package-directory> [--workspace <directory>] [--target <target>]
     \\       silex unlink <package-name> [--workspace <directory>]
     \\       silex packages
@@ -56,7 +56,7 @@ const usage =
     \\       silex version
     \\       silex lsp
     \\
-    \\Builds and runs native Silex programs, manages package releases, executes
+    \\Builds and runs native Silex programs, validates and registers packages, executes
     \\portable IR through the reference interpreter, or serves editor requests.
     \\
 ;
@@ -74,8 +74,8 @@ test {
     _ = CliProgress;
     _ = PackageStore;
     _ = PackageRegistry;
-    _ = PackagePublish;
-    _ = GitHubPublish;
+    _ = PackageRegistration;
+    _ = GitHubRegistration;
     _ = SelfUpdate;
 }
 
@@ -99,8 +99,8 @@ fn runCli(init: std.process.Init) !u8 {
     if (std.mem.eql(u8, args[1], "test")) return testSource(init, allocator, args[2..]);
     if (std.mem.eql(u8, args[1], "compile")) return compileNative(init, allocator, args[2..]);
     if (std.mem.eql(u8, args[1], "install")) return installPackage(init, allocator, args[2..]);
-    if (std.mem.eql(u8, args[1], "release")) return releasePackage(init, allocator, args[2..]);
-    if (std.mem.eql(u8, args[1], "publish")) return publishPackage(init, allocator, args[2..]);
+    if (std.mem.eql(u8, args[1], "check")) return checkPackage(init, allocator, args[2..]);
+    if (std.mem.eql(u8, args[1], "register")) return registerPackage(init, allocator, args[2..]);
     if (std.mem.eql(u8, args[1], "link")) return linkPackage(init, allocator, args[2..]);
     if (std.mem.eql(u8, args[1], "unlink")) return unlinkPackage(init, allocator, args[2..]);
     if (std.mem.eql(u8, args[1], "packages")) return listPackages(init, allocator, args[2..]);
@@ -138,76 +138,80 @@ fn updateSilex(init: std.process.Init, allocator: std.mem.Allocator, args: []con
     return 0;
 }
 
-fn releasePackage(init: std.process.Init, allocator: std.mem.Allocator, args: []const []const u8) !u8 {
+fn checkPackage(init: std.process.Init, allocator: std.mem.Allocator, args: []const []const u8) !u8 {
     const options = switch (Cli.parsePackage(args)) {
         .options => |options| options,
         .diagnostic => |diagnostic| {
-            printCliDiagnostic("release", diagnostic);
+            printCliDiagnostic("check", diagnostic);
             return 1;
         },
     };
-    var publisher = PackagePublish.Publisher.init(allocator, init.gpa, init.io);
-    const result = publisher.release(options.package) catch |err| switch (err) {
-        error.InvalidPublication, error.InvalidPackageGraph => {
-            std.debug.print("silex: cannot release package: {s}\n", .{publisher.diagnostic orelse "invalid release"});
+    var publisher = PackageRegistration.Manager.init(allocator, init.gpa, init.io);
+    const result = publisher.check(options.package) catch |err| switch (err) {
+        error.InvalidPackageOperation, error.InvalidPackageGraph => {
+            std.debug.print("silex: package check failed: {s}\n", .{publisher.diagnostic orelse "invalid package"});
             return 1;
         },
         else => return err,
     };
     std.debug.print(
-        "silex: {s} {s}@{d}.{d}.{d} at {s}\n",
-        .{ if (result.created) "released" else "already released", result.name, result.version.major, result.version.minor, result.version.patch, result.url },
+        "silex: package {s}@{d}.{d}.{d} is valid; its release tag is {s}\n",
+        .{ result.name, result.version.major, result.version.minor, result.version.patch, result.expected_tag },
     );
     return 0;
 }
 
-fn publishPackage(init: std.process.Init, allocator: std.mem.Allocator, args: []const []const u8) !u8 {
+fn registerPackage(init: std.process.Init, allocator: std.mem.Allocator, args: []const []const u8) !u8 {
     const options = switch (Cli.parsePackage(args)) {
         .options => |options| options,
         .diagnostic => |diagnostic| {
-            printCliDiagnostic("publish", diagnostic);
+            printCliDiagnostic("register", diagnostic);
             return 1;
         },
     };
     const explicit_registry = init.environ_map.get("SILEX_REGISTRY_SOURCE");
     const registry_root = explicit_registry orelse (try globalRegistryRoot(allocator, init.environ_map) orelse {
-        std.debug.print("silex: cannot publish package: cannot locate the user home directory\n", .{});
+        std.debug.print("silex: cannot register package: cannot locate the user home directory\n", .{});
         return 1;
     });
-    var publisher = PackagePublish.Publisher.init(allocator, init.gpa, init.io);
+    var publisher = PackageRegistration.Manager.init(allocator, init.gpa, init.io);
     const result = if (explicit_registry != null)
-        publisher.prepare(options.package, registry_root)
+        publisher.prepareRegistration(options.package, registry_root)
     else
-        publisher.prepareManaged(options.package, registry_root);
+        publisher.prepareRegistrationManaged(options.package, registry_root);
     const prepared = result catch |err| switch (err) {
-        error.InvalidPublication, error.InvalidPackageGraph => {
-            std.debug.print("silex: cannot publish package: {s}\n", .{publisher.diagnostic orelse "invalid publication"});
+        error.InvalidPackageOperation, error.InvalidPackageGraph => {
+            std.debug.print("silex: cannot register package: {s}\n", .{publisher.diagnostic orelse "invalid registration"});
             return 1;
         },
         else => return err,
     };
+    if (!prepared.registration_required) {
+        std.debug.print("silex: package {s} is already registered\n", .{prepared.name});
+        return 0;
+    }
     if (explicit_registry != null) {
         std.debug.print(
-            "silex: prepared {s}@{d}.{d}.{d} for registry review in {s}\n",
-            .{ prepared.name, prepared.version.major, prepared.version.minor, prepared.version.patch, prepared.manifest_path },
+            "silex: prepared registration of {s} for registry review in {s}\n",
+            .{ prepared.name, prepared.registration_path },
         );
         return 0;
     }
     const authorization_path = try globalGitHubAuthorizationPath(allocator, init.environ_map) orelse {
-        std.debug.print("silex: cannot publish package: cannot locate the user home directory\n", .{});
+        std.debug.print("silex: cannot register package: cannot locate the user home directory\n", .{});
         return 1;
     };
-    var github = GitHubPublish.Publisher.init(allocator, init.gpa, init.io);
+    var github = GitHubRegistration.Registrar.init(allocator, init.gpa, init.io);
     const submitted = github.submit(registry_root, authorization_path, prepared, init.environ_map) catch |err| switch (err) {
-        error.InvalidPublication => {
-            std.debug.print("silex: cannot publish package: {s}\n", .{github.diagnostic orelse "GitHub publication failed"});
+        error.InvalidRegistration => {
+            std.debug.print("silex: cannot register package: {s}\n", .{github.diagnostic orelse "GitHub registration failed"});
             return 1;
         },
         else => return err,
     };
     std.debug.print(
-        "silex: published {s}@{d}.{d}.{d} for registry review at {s}\n",
-        .{ prepared.name, prepared.version.major, prepared.version.minor, prepared.version.patch, submitted.pull_request_url },
+        "silex: submitted registration of {s} for registry review at {s}\n",
+        .{ prepared.name, submitted.pull_request_url },
     );
     return 0;
 }

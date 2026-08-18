@@ -114,11 +114,12 @@ This policy concerns separate package identities. Modules owned directly by
 `GFX`, including a module named `GFX.UI`, remain valid without authorization
 because they belong to the same package.
 
-For registry packages, extension grants are copied into the immutable release
-manifest and checked against the archived `Package.json`. The installed package
-keeps an internal proof of that release. Editing a global package manifest does
-not grant another namespace: Silex rejects a manifest whose checksum or
-extension policy no longer matches its proof and asks for reinstallation.
+For registered packages, extension grants come directly from `Package.json` in
+the selected tagged commit. The installed package keeps a source proof binding
+that manifest to its repository, commit, and checksums. Editing a global
+package manifest does not grant another namespace: Silex rejects a manifest
+whose checksum or extension policy no longer matches its proof and asks for
+reinstallation.
 Sibling workspace packages and packages selected with `silex link` remain live
 development sources and therefore use their current manifests directly.
 
@@ -195,13 +196,14 @@ silex install STD
 silex install STD@0.16.0
 ~~~
 
-Published packages come from the Silex registry. Their source archive is
-verified against its registry SHA-256 before extraction, and its manifest must
-match the selected name, version, and `requires.silex` range. Silex resolves
-and installs every declared dependency first, selecting the newest published
-version that satisfies both its package constraint and the running toolchain.
-Dependency cycles and unavailable compatible releases are diagnosed before the
-requested package is installed.
+The Silex registry assigns each package name to its canonical Git repository.
+Silex discovers `vMAJOR.MINOR.PATCH` tags there, reads their manifests, and
+selects the newest tagged version satisfying both the package constraint and
+the running toolchain. It creates the source archive from the exact selected
+commit and records its repository, commit, and checksums in the installation
+proof. Every declared dependency is resolved and installed first. Dependency
+cycles and unavailable compatible releases are diagnosed before the requested
+package is installed.
 
 Silex validates its identity, version, and `requires.silex`, then copies it to
 `~/.silex/packages/Name@MAJOR.MINOR.PATCH/`. Git metadata and local `.silex`
