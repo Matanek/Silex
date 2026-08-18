@@ -15,6 +15,10 @@ pub fn sameProviders(providers: anytype, left_value: []const u8, right_value: []
 fn scope(roots: []const []const u8, module: []const u8) []const u8 {
     var result: ?[]const u8 = null;
     for (roots) |root| {
+        if (std.mem.eql(u8, module, root)) {
+            if (result == null or root.len > result.?.len) result = root;
+            continue;
+        }
         if (root.len >= module.len) continue;
         if (!std.mem.startsWith(u8, module, root)) continue;
         if (module[root.len] != '.') continue;
@@ -43,6 +47,7 @@ fn logical(module: []const u8) []const u8 {
 
 test "share module scope through a declared parent module only" {
     const roots = &.{ "STD.Regex", "STD.Text" };
+    try std.testing.expect(same(roots, "STD.Regex", "STD.Regex.Engine"));
     try std.testing.expect(same(roots, "STD.Regex.Engine", "STD.Regex.Regex"));
     try std.testing.expect(same(roots, "STD.Regex", "STD.Regex.Unicode"));
     try std.testing.expect(same(roots, "STD.Text", "STD.Text.$Platform"));

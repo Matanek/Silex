@@ -68,12 +68,17 @@ fn protectedAnchor(self: anytype, structure_index: usize) usize {
 fn sameModule(self: anytype, structure_index: usize) bool {
     const target_root = root(self, structure_index);
     const target = declarationAt(self, target_root) orelse return false;
-    const target_module = moduleName(target.name) orelse return false;
+    const target_module = declarationModule(self.module_scope_roots, target.name) orelse return false;
     if (self.module_context) |context| return ModuleScopes.same(self.module_scope_roots, context, target_module);
     const context = self.member_context orelse return false;
     const context_declaration = declarationAt(self, root(self, context)) orelse return false;
-    const context_module = moduleName(context_declaration.name) orelse return false;
+    const context_module = declarationModule(self.module_scope_roots, context_declaration.name) orelse return false;
     return ModuleScopes.same(self.module_scope_roots, context_module, target_module);
+}
+
+fn declarationModule(roots: []const []const u8, name_value: []const u8) ?[]const u8 {
+    for (roots) |module_root| if (std.mem.eql(u8, module_root, name_value)) return module_root;
+    return moduleName(name_value);
 }
 
 fn moduleName(name_value: []const u8) ?[]const u8 {

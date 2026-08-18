@@ -1150,6 +1150,9 @@ pub const Specializer = struct {
         }
         const structure_index = self.structureIndexForType(structure_type) orelse return error.InvalidSource;
         const method_index = try self.appendMethod(structure_index, concrete);
+        const previous_contracts = self.active_contracts;
+        self.active_contracts = try self.genericContracts(template.type_parameters, arguments);
+        defer self.active_contracts = previous_contracts;
         concrete.statements = try self.rewriteStatements(template.statements, arguments, &locals);
         @constCast(self.structures.items[structure_index].methods)[method_index] = concrete;
         self.method_specializations.items[specialization_index].visiting = false;

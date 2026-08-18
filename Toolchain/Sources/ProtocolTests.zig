@@ -258,6 +258,7 @@ test "generic protocol calls use the contract without republishing a consumer im
         .data =
         \\public protocol Job { func execute() }
         \\public func run<T:Job>(job:T) { job.execute() }
+        \\public class Runner { init() {} func run<T:Job>(job:T) { job.execute() } }
         ,
     });
     try temporary.dir.writeFile(std.testing.io, .{
@@ -265,14 +266,14 @@ test "generic protocol calls use the contract without republishing a consumer im
         .data =
         \\use Library.Jobs
         \\class Task : Jobs.Job { func execute() { print("done") } }
-        \\func main() { Jobs.run(Task()) }
+        \\func main() { Jobs.run(Task()); Jobs.Runner().run(Task()) }
         ,
     });
     const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
     var compiler = Project.Compiler.init(allocator, std.testing.io);
     const compilation = try compiler.compile(input);
     const result = try Interpreter.runCapture(allocator, compilation.ir);
-    try std.testing.expectEqualStrings("done\n", result.stdout);
+    try std.testing.expectEqualStrings("done\ndone\n", result.stdout);
 }
 
 test "diagnose missing and mismatched protocol requirements" {

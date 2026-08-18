@@ -7,7 +7,7 @@ const Lower = @import("Arm64/Lower.zig");
 const resources_source =
     \\public intrinsic class Resources {
     \\    func insert<T>(value:T)
-    \\    package func retain_class<T>(value:T)
+    \\    module func retain_class<T>(value:T)
     \\    func has<T>() bool
     \\    func get<T>() @T
     \\    func get_mut<T>() &T
@@ -60,7 +60,7 @@ test "typed resources require the exact compiler-provided intrinsic contract" {
         .data =
         \\public intrinsic class Resources {
         \\    func insert<T>(value:T) { panic("placeholder") }
-        \\    package func retain_class<T>(value:T)
+        \\    module func retain_class<T>(value:T)
         \\    func has<T>() bool
         \\    func get<T>() @T
         \\    func get_mut<T>() &T

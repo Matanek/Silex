@@ -3641,3 +3641,91 @@ test "prefer every callable overload over a homonymous module" {
     try std.testing.expectEqual(@as(usize, 2), module_last.items.len);
     for (module_last.items) |item| try std.testing.expect(item.item.kind == CompletionKind.class);
 }
+
+test "complete representative GFX members at their package and module boundaries" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.createDirPath(std.testing.io, "GFX/Module/Canvas");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Package.json",
+        .data = "{\"dependencies\":{\"GFX\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Package.json",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/Canvas/@Module.sx",
+        .data =
+        \\public class Font {
+        \\    init() {}
+        \\    func load() int { return 0 }
+        \\    package func cached_face_count() int { return 1 }
+        \\    module func cached_face() int { return 2 }
+        \\}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "GFX/Module/Probe.sx", .data = "" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "GFX/Module/Canvas/Rasterizer.sx", .data = "" });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = "" });
+
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
+    const source =
+        \\use GFX.Canvas.Font
+        \\func main() { let font = Font(); font. }
+    ;
+    const cursor = std.mem.indexOf(u8, source, "font.").? + "font.".len;
+
+    const consumer_path = try std.fs.path.join(allocator, &.{ root, "Main.sx" });
+    const consumer_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{consumer_path});
+    const consumer_items = (try itemsAt(
+        allocator,
+        std.testing.io,
+        null,
+        root_uri,
+        consumer_uri,
+        &.{},
+        source,
+        cursor,
+    )).?;
+    try std.testing.expect(hasLabel(consumer_items, "load"));
+    try std.testing.expect(!hasLabel(consumer_items, "cached_face_count"));
+    try std.testing.expect(!hasLabel(consumer_items, "cached_face"));
+
+    const probe_path = try std.fs.path.join(allocator, &.{ root, "GFX", "Module", "Probe.sx" });
+    const probe_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{probe_path});
+    const probe_items = (try itemsAt(
+        allocator,
+        std.testing.io,
+        null,
+        root_uri,
+        probe_uri,
+        &.{},
+        source,
+        cursor,
+    )).?;
+    try std.testing.expect(hasLabel(probe_items, "load"));
+    try std.testing.expect(hasLabel(probe_items, "cached_face_count"));
+    try std.testing.expect(!hasLabel(probe_items, "cached_face"));
+
+    const rasterizer_path = try std.fs.path.join(allocator, &.{ root, "GFX", "Module", "Canvas", "Rasterizer.sx" });
+    const rasterizer_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{rasterizer_path});
+    const rasterizer_items = (try itemsAt(
+        allocator,
+        std.testing.io,
+        null,
+        root_uri,
+        rasterizer_uri,
+        &.{},
+        source,
+        cursor,
+    )).?;
+    try std.testing.expect(hasLabel(rasterizer_items, "load"));
+    try std.testing.expect(hasLabel(rasterizer_items, "cached_face_count"));
+    try std.testing.expect(hasLabel(rasterizer_items, "cached_face"));
+}

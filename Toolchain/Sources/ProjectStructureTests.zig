@@ -390,15 +390,26 @@ test "implicit module visibility spans files owned by a principal module" {
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Library/Module/Feature/@Module.sx",
-        .data = "",
+        .data =
+        \\public use Library.Feature.Engine.Service
+        \\public struct Feature { module static func value() int { return 42 } }
+        ,
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Library/Module/Feature/Engine.sx",
-        .data = "struct Raw { let value:int }",
+        .data =
+        \\struct Raw { let value:int }
+        \\public struct Service { module static func answer() int { return 42 } }
+        ,
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Library/Module/Feature/Api.sx",
-        .data = "use Library.Feature.Engine.Raw\npublic func answer() int { return Raw(value:42).value }",
+        .data =
+        \\use Library.Feature.Engine.Raw
+        \\use Library.Feature.Service
+        \\use Library.Feature
+        \\public func answer() int { return Raw(value:Service.answer() + Feature.value() - 42).value }
+        ,
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Main.sx",
@@ -418,4 +429,77 @@ test "implicit module visibility spans files owned by a principal module" {
     compiler = Project.Compiler.init(allocator, std.testing.io);
     try std.testing.expectError(error.InvalidSource, compiler.compile(input));
     try std.testing.expectEqualStrings("structure 'Raw' is module-visible and unavailable outside its module", compiler.diagnostic.?.message);
+}
+
+test "enforce representative GFX package and module member boundaries" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.createDirPath(std.testing.io, "GFX/Module/Canvas");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Package.json",
+        .data = "{\"dependencies\":{\"GFX\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Package.json",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/Canvas/@Module.sx",
+        .data =
+        \\public class Font {
+        \\    init() {}
+        \\    package func cached_face_count() int { return 1 }
+        \\    module func cached_face() int { return 2 }
+        \\}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/Canvas/Rasterizer.sx",
+        .data =
+        \\use GFX.Canvas.Font
+        \\func rasterize(font:Font) int { return font.cached_face() }
+        \\func main() { print(rasterize(Font())) }
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/Probe.sx",
+        .data =
+        \\use GFX.Canvas.Font
+        \\func main() { print(Font().cached_face()) }
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data =
+        \\use GFX.Canvas.Font
+        \\func main() { print(Font().cached_face_count()) }
+        ,
+    });
+
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const rasterizer = try std.fs.path.join(allocator, &.{ root, "GFX", "Module", "Canvas", "Rasterizer.sx" });
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(rasterizer);
+    const result = try @import("Interpreter.zig").runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("2\n", result.stdout);
+
+    const probe = try std.fs.path.join(allocator, &.{ root, "GFX", "Module", "Probe.sx" });
+    compiler = Project.Compiler.init(allocator, std.testing.io);
+    try std.testing.expectError(error.InvalidSource, compiler.compile(probe));
+    try std.testing.expectEqualStrings(
+        "method 'cached_face' is module-visible and unavailable outside its module",
+        compiler.diagnostic.?.message,
+    );
+
+    const consumer = try std.fs.path.join(allocator, &.{ root, "Main.sx" });
+    compiler = Project.Compiler.init(allocator, std.testing.io);
+    try std.testing.expectError(error.InvalidSource, compiler.compile(consumer));
+    try std.testing.expectEqualStrings(
+        "method 'cached_face_count' is package-visible and unavailable outside its package",
+        compiler.diagnostic.?.message,
+    );
 }

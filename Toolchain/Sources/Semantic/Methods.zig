@@ -398,12 +398,16 @@ fn analyzeCallWithReceiver(
     var inaccessible = false;
     var inaccessible_local = false;
     var inaccessible_internal = false;
+    var inaccessible_module = false;
     var iterator_nonoptional: ?Ast.Type = null;
     for (candidates, 0..) |candidate, candidate_index| {
         if (!call.compiler_generated and !Visibility.memberVisible(self, candidate.owner, candidate.method, call.name_position)) {
             inaccessible = true;
             inaccessible_local = inaccessible_local or candidate.method.is_local;
             inaccessible_internal = inaccessible_internal or candidate.method.is_internal;
+            inaccessible_module = inaccessible_module or
+                (!candidate.method.is_public and !candidate.method.is_internal and !candidate.method.is_local and
+                    !candidate.method.is_private and !candidate.method.is_protected);
             continue;
         }
         if (call.iterator_next and candidate.method.return_type.optionalChild() == null) {
@@ -431,6 +435,8 @@ fn analyzeCallWithReceiver(
                 try std.fmt.allocPrint(self.allocator, "method '{s}' is local to its source file", .{call.name})
             else if (inaccessible_internal)
                 try std.fmt.allocPrint(self.allocator, "method '{s}' is package-visible and unavailable outside its package", .{call.name})
+            else if (inaccessible_module)
+                try std.fmt.allocPrint(self.allocator, "method '{s}' is module-visible and unavailable outside its module", .{call.name})
             else
                 try std.fmt.allocPrint(self.allocator, "method '{s}' is private and unavailable here", .{call.name});
             return self.fail(call.name_position, message);

@@ -83,7 +83,13 @@ fn validateStoreContract(self: anytype, structure: Ast.Structure) !void {
     }
     for (structure.methods) |method| {
         const retain_class = application_resources and std.mem.eql(u8, method.name, "retain_class");
-        if ((!method.is_public and !retain_class) or method.is_static or !method.is_intrinsic_declaration) {
+        const visibility_matches = if (retain_class)
+            !method.is_public and !method.is_internal and !method.is_local and !method.is_private and !method.is_protected
+        else if (application_resources)
+            method.is_public
+        else
+            !method.is_public and !method.is_internal and !method.is_local and !method.is_private and !method.is_protected;
+        if (!visibility_matches or method.is_static or !method.is_intrinsic_declaration) {
             return invalidContract(self, structure.name, method.name_position);
         }
         const generic = Ast.Type.genericParameter(0);
