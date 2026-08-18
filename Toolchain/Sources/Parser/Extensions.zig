@@ -24,14 +24,14 @@ pub fn parse(self: anytype) !Ast.Extension {
         var is_local = false;
         var is_private = false;
         var explicit = false;
-        if (self.current.tag == .keyword_public or self.current.tag == .keyword_internal or self.current.tag == .keyword_package or
+        if (self.current.tag == .keyword_public or self.current.tag == .keyword_package or
             self.current.tag == .keyword_module or self.current.tag == .keyword_local or self.current.tag == .keyword_private or
             self.current.tag == .keyword_protected)
         {
             explicit = true;
             if (self.current.tag == .keyword_protected) return self.fail("extension methods cannot be protected");
             is_public = self.current.tag == .keyword_public;
-            is_internal = self.current.tag == .keyword_internal or self.current.tag == .keyword_package;
+            is_internal = self.current.tag == .keyword_package;
             is_local = self.current.tag == .keyword_local;
             is_private = self.current.tag == .keyword_private;
             try self.advance();

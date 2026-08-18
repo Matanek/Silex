@@ -20,7 +20,7 @@ pub fn parse(self: anytype, is_public: bool, is_internal: bool, is_local: bool) 
         var member_local = is_local;
         var member_private = false;
         var explicit = false;
-        if (self.current.tag == .keyword_public or self.current.tag == .keyword_internal or self.current.tag == .keyword_package or
+        if (self.current.tag == .keyword_public or self.current.tag == .keyword_package or
             self.current.tag == .keyword_module or self.current.tag == .keyword_local or self.current.tag == .keyword_private or
             self.current.tag == .keyword_protected)
         {
@@ -30,14 +30,14 @@ pub fn parse(self: anytype, is_public: bool, is_internal: bool, is_local: bool) 
             const container_rank: u8 = if (is_public) 3 else if (is_internal) 2 else if (is_local) 0 else 1;
             const requested_rank: u8 = if (requested == .keyword_public)
                 3
-            else if (requested == .keyword_internal or requested == .keyword_package)
+            else if (requested == .keyword_package)
                 2
             else if (requested == .keyword_module)
                 1
             else
                 0;
             if (requested != .keyword_private and requested_rank > container_rank) {
-                const requested_name = if (requested == .keyword_internal) "package" else self.current.lexeme;
+                const requested_name = self.current.lexeme;
                 const container_name = if (is_public) "public" else if (is_internal) "package" else if (is_local) "local" else "module";
                 const message = try std.fmt.allocPrint(
                     self.allocator,
@@ -47,7 +47,7 @@ pub fn parse(self: anytype, is_public: bool, is_internal: bool, is_local: bool) 
                 return self.failAt(self.current.position, message);
             }
             member_public = requested == .keyword_public;
-            member_internal = requested == .keyword_internal or requested == .keyword_package;
+            member_internal = requested == .keyword_package;
             member_local = requested == .keyword_local;
             member_private = requested == .keyword_private;
             try self.advance();

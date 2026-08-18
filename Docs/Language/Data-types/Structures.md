@@ -89,6 +89,31 @@ let origin = Position.origin()
 
 Static members are selected through the complete type name, never an instance.
 
+When a structure exists only to qualify constants, shared state, or operations,
+declare the container itself `static`. Every field and method then becomes
+implicitly static:
+
+```sx
+public static struct Constants {
+    let canvas_width:int = 960
+    let canvas_height:int = 640
+
+    func area() int {
+        return Constants.canvas_width * Constants.canvas_height
+    }
+}
+
+print(Constants.area())
+```
+
+A `static struct` cannot be constructed and has no constructor, `self`,
+`drop`, base, protocol conformance, `protected` member, extension, or container
+type parameters. Its methods may declare their own type parameters. The
+canonical style omits `static` on every field and method; an explicit redundant
+modifier remains accepted for source compatibility. Nested ordinary structures
+and classes remain constructible unless their own declaration also starts with
+`static`.
+
 A static field initializer is evaluated completely at compile time. It may use
 intrinsic literals, operators, numeric conversions, immutable static fields,
 and functions that the compiler proves compile-time evaluable:

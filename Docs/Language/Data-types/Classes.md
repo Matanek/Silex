@@ -138,16 +138,19 @@ Use `static class` when the type contains no instances:
 
 ```sx
 public static class Tasks {
-    private static var submitted:int
+    private var submitted:int
 
-    static func submit() {
+    func submit() {
         Tasks.submitted++
     }
 }
 ```
 
 A `static class` has no constructor, `self`, base class, protocol conformance,
-or `drop`.
+or `drop`. Every field and method is implicitly static, so the canonical style
+omits `static` on its members. An explicit member `static` remains accepted for
+source compatibility. Use an ordinary class when instances are part of the
+type's intention.
 
 ## Inherit from a class
 

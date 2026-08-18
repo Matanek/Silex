@@ -465,9 +465,15 @@ test "immutable intrinsic static members lower directly to constants" {
     var saw_boolean = false;
     var global_loads: usize = 0;
     for (compilation.ir.functions[0].blocks) |block| for (block.instructions) |instruction| switch (instruction) {
-        .constant_int => |value| if (value.bits == 42) { saw_integer = true; },
-        .constant_float32 => |value| if (value.bits == @as(u32, @bitCast(@as(f32, 1.5)))) { saw_float = true; },
-        .constant_bool => |value| if (value.value) { saw_boolean = true; },
+        .constant_int => |value| if (value.bits == 42) {
+            saw_integer = true;
+        },
+        .constant_float32 => |value| if (value.bits == @as(u32, @bitCast(@as(f32, 1.5)))) {
+            saw_float = true;
+        },
+        .constant_bool => |value| if (value.value) {
+            saw_boolean = true;
+        },
         .global_load => global_loads += 1,
         else => {},
     };
@@ -506,37 +512,59 @@ test "static members reject instance selection and immutable assignment" {
 test "static classes group state without creating instances" {
     const output = try run(
         \\static class Tasks {
-        \\    static var submitted:int = 0
-        \\    private static func next() int { return Tasks.submitted + 1 }
-        \\    static func submit() { Tasks.submitted = Tasks.next() }
-        \\    static func identity<T>(value:T) T { return value }
+        \\    var submitted:int = 0
+        \\    private func next() int { return Tasks.submitted + 1 }
+        \\    func submit() { Tasks.submitted = Tasks.next() }
+        \\    func identity<T>(value:T) T { return value }
+        \\    static func explicit_compatibility() int { return 3 }
         \\}
         \\func main() {
         \\    Tasks.submit()
         \\    Tasks.submit()
-        \\    print(Tasks.submitted, " ", Tasks.identity("ready"))
+        \\    print(Tasks.submitted, " ", Tasks.identity("ready"), " ", Tasks.explicit_compatibility())
         \\}
     );
     defer std.testing.allocator.free(output);
-    try std.testing.expectEqualStrings("2 ready\n", output);
+    try std.testing.expectEqualStrings("2 ready 3\n", output);
 }
 
-test "static classes reject instance features" {
+test "static structures group constants state methods and ordinary nested types" {
+    const output = try run(
+        \\public static struct Constants {
+        \\    let width:int = 960
+        \\    private var reads:int = 0
+        \\    struct Entry { let value:int }
+        \\    static struct Nested { let value:int = 2 }
+        \\    func half(value:int) int { Constants.reads++; return value }
+        \\    func identity<T>(value:T) T { return value }
+        \\    func read_count() int { return Constants.reads }
+        \\}
+        \\func main() {
+        \\    let half = Constants.half(Constants.width / 2)
+        \\    let entry = Constants.Entry(value:half)
+        \\    print(entry.value, " ", Constants.Nested.value, " ", Constants.identity("ok"), " ", Constants.read_count())
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("480 2 ok 1\n", output);
+}
+
+test "static containers reject instance features" {
     try expectCompileError(
         "static class Tasks {} func main() { var tasks = Tasks() }",
         "static classes cannot be constructed",
     );
     try expectCompileError(
-        "static class Tasks { var count:int } func main() {}",
-        "static class fields must start with 'static let' or 'static var'",
-    );
-    try expectCompileError(
-        "static class Tasks { func run() {} } func main() {}",
-        "static class methods must start with 'static func'",
+        "static struct Constants {} func main() { var constants = Constants() }",
+        "static structures cannot be constructed",
     );
     try expectCompileError(
         "static class Tasks { init() {} } func main() {}",
         "static classes cannot declare constructors",
+    );
+    try expectCompileError(
+        "static struct Constants { init() {} } func main() {}",
+        "static structures cannot declare constructors",
     );
     try expectCompileError(
         "static class Tasks { drop {} } func main() {}",
@@ -547,8 +575,44 @@ test "static classes reject instance features" {
         "static classes cannot be generic",
     );
     try expectCompileError(
+        "static struct Constants<T> {} func main() {}",
+        "static structures cannot be generic",
+    );
+    try expectCompileError(
+        "class Base {} static class Tasks : Base {} func main() {}",
+        "static classes cannot declare a base or conformances",
+    );
+    try expectCompileError(
+        "protocol Named { func name() str } static struct Constants : Named {} func main() {}",
+        "static structures cannot declare a base or conformances",
+    );
+    try expectCompileError(
+        "static class Tasks { protected func run() {} } func main() {}",
+        "static classes do not support protected members",
+    );
+    try expectCompileError(
+        "static struct Constants { protected let value:int = 1 } func main() {}",
+        "static structures do not support protected members",
+    );
+    try expectCompileError(
+        "static class Tasks { func current() int { return self.value } } func main() {}",
+        "static class methods have no 'self'",
+    );
+    try expectCompileError(
+        "static struct Constants { func current() int { return self.value } } func main() {}",
+        "static structure methods have no 'self'",
+    );
+    try expectCompileError(
         "static class Tasks {} class Child : Tasks {} func main() {}",
-        "a class can only inherit from another class",
+        "static classes cannot serve as a base",
+    );
+    try expectCompileError(
+        "static struct Constants {} class Child : Constants {} func main() {}",
+        "static structures cannot serve as a base",
+    );
+    try expectCompileError(
+        "struct Ordinary { func value() int { return 1 } } func main() { print(Ordinary.value()) }",
+        "type has no visible static method accepting these arguments",
     );
 }
 
@@ -557,8 +621,8 @@ test "nested nominal types qualify without capturing an owner" {
         \\struct Api {
         \\    struct Entry { let value:int }
         \\    static class State {
-        \\        static var count:int = 0
-        \\        static func bump() { State.count++ }
+        \\        var count:int = 0
+        \\        func bump() { State.count++ }
         \\    }
         \\}
         \\class Container {
@@ -650,7 +714,7 @@ test "replacing the last class root drops the old instance immediately" {
 test "resetting a static optional root releases its class graph" {
     const output = try run(
         \\class Tracer { let label:str; drop { print("drop ", self.label) } }
-        \\static class Roots { static var current:Tracer? = null }
+        \\static class Roots { var current:Tracer? = null }
         \\func main() {
         \\    Roots.current = Tracer(label:"shared")
         \\    print("held")

@@ -1141,7 +1141,9 @@ pub const Analyzer = struct {
             const message = try std.fmt.allocPrint(self.allocator, "type '{s}' is unavailable in this context", .{structure.name});
             return self.fail(call.name_position, message);
         }
-        if (declaration.is_static) return self.fail(call.name_position, "static classes cannot be constructed");
+        if (declaration.is_static) {
+            return self.fail(call.name_position, if (declaration.is_class) "static classes cannot be constructed" else "static structures cannot be constructed");
+        }
         if (declaration.constructors.len != 0) {
             return Constructors.analyzeCall(self, builder, structure_index, declaration, call);
         }

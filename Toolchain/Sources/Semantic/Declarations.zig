@@ -128,7 +128,10 @@ fn validateInheritance(self: anytype, index: usize, states: []StructureState) !v
         return self.fail(declaration.base_position, "a class base must be a non-optional class type");
     }
     if (self.structures[index].base) |base_index| {
-        if (base_index >= self.structures.len or !self.structures[base_index].is_class or self.structures[base_index].is_static) {
+        if (base_index < self.structures.len and self.structures[base_index].is_static) {
+            return self.fail(declaration.base_position, if (self.structures[base_index].is_class) "static classes cannot serve as a base" else "static structures cannot serve as a base");
+        }
+        if (base_index >= self.structures.len or !self.structures[base_index].is_class) {
             return self.fail(declaration.base_position, "a class can only inherit from another class");
         }
         const base_declaration = findAstStructure(self, self.structures[base_index].name) orelse

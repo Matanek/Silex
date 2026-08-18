@@ -997,8 +997,10 @@ fn nominalCompletionKind(structure: Ast.Structure) u8 {
 fn nominalCompletionDetail(allocator: Allocator, structure: Ast.Structure) ![]const u8 {
     const declaration = if (structure.is_protocol)
         "protocol"
-    else if (structure.is_static)
+    else if (structure.is_static and structure.is_class)
         "static class"
+    else if (structure.is_static)
+        "static struct"
     else if (structure.is_class)
         "class"
     else
@@ -2340,8 +2342,8 @@ test "complete public package APIs module aliases members and overlays" {
         \\    func complete() {}
         \\}
         \\public static class Builder {
-        \\    static func build<T>(value:T) BuildHandle<T> { panic("unused") }
-        \\    static func build<T>(value:T, callback:func(T)) BuildWaitHandle<T> { panic("unused") }
+        \\    func build<T>(value:T) BuildHandle<T> { panic("unused") }
+        \\    func build<T>(value:T, callback:func(T)) BuildWaitHandle<T> { panic("unused") }
         \\}
         \\public func add(left:int, right:int = 1) int { return left + right }
         \\public func add(value:str) str { return value }

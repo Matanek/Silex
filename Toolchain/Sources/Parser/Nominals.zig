@@ -12,10 +12,14 @@ pub fn parseIntrinsicClass(self: anytype, is_public: bool) !Ast.Structure {
     return parseType(self, is_public, false, false, false, false, true, false, true);
 }
 
-pub fn parseStaticClass(self: anytype, is_public: bool, is_internal: bool, is_local: bool) !Ast.Structure {
+pub fn parseStaticType(self: anytype, is_public: bool, is_internal: bool, is_local: bool) !Ast.Structure {
     try self.advance();
-    if (self.current.tag != .keyword_class) return self.fail("expected 'class' after 'static'");
-    return parseType(self, is_public, is_internal, is_local, false, false, true, true, false);
+    const is_class = switch (self.current.tag) {
+        .keyword_class => true,
+        .keyword_struct => false,
+        else => return self.fail("expected 'class' or 'struct' after 'static'"),
+    };
+    return parseType(self, is_public, is_internal, is_local, false, false, is_class, true, false);
 }
 
 fn parseType(
@@ -26,7 +30,7 @@ fn parseType(
     is_private: bool,
     is_protected: bool,
     is_class: bool,
-    is_static_class: bool,
+    is_static_container: bool,
     is_intrinsic: bool,
 ) !Ast.Structure {
     const position = self.current.position;
@@ -40,7 +44,10 @@ fn parseType(
     _ = try self.internTypeName(name);
     try self.advance();
     const own_type_parameters = try Generics.parseTypeParameters(self);
-    if (is_static_class and own_type_parameters.len != 0) return self.failAt(name_position, "static classes cannot be generic");
+    if (is_static_container and own_type_parameters.len != 0) {
+        const message = try std.fmt.allocPrint(self.allocator, "static {s}s cannot be generic", .{if (is_class) "classe" else "structure"});
+        return self.failAt(name_position, message);
+    }
     const enclosing_type_parameters = self.type_parameters;
     const type_parameters = try self.allocator.alloc(Ast.TypeParameter, enclosing_type_parameters.len + own_type_parameters.len);
     @memcpy(type_parameters[0..enclosing_type_parameters.len], enclosing_type_parameters);
@@ -60,7 +67,10 @@ fn parseType(
     var base_position = name_position;
     if (self.current.tag == .colon) {
         if (is_intrinsic) return self.fail("intrinsic classes cannot declare a base or conformances");
-        if (is_static_class) return self.fail("static classes cannot declare a base");
+        if (is_static_container) {
+            const message = try std.fmt.allocPrint(self.allocator, "static {s}s cannot declare a base or conformances", .{if (is_class) "classe" else "structure"});
+            return self.fail(message);
+        }
         try self.advance();
         while (true) {
             const relation_position = self.current.position;
@@ -93,7 +103,7 @@ fn parseType(
         var member_private = is_private;
         var member_protected = is_protected;
         var member_visibility = false;
-        if (self.current.tag == .keyword_public or self.current.tag == .keyword_internal or self.current.tag == .keyword_package or
+        if (self.current.tag == .keyword_public or self.current.tag == .keyword_package or
             self.current.tag == .keyword_module or self.current.tag == .keyword_local or self.current.tag == .keyword_private or
             self.current.tag == .keyword_protected)
         {
@@ -113,20 +123,23 @@ fn parseType(
             member_local = requested == .local;
             member_private = requested == .private;
             member_protected = requested == .protected;
-            if (is_static_class and member_protected) return self.fail("static classes do not support protected members");
+            if (is_static_container and member_protected) {
+                const message = try std.fmt.allocPrint(self.allocator, "static {s}s do not support protected members", .{if (is_class) "classe" else "structure"});
+                return self.fail(message);
+            }
             if (!is_class and member_protected) return self.fail("structures only support public, package, module, local, or private members");
             try self.advance();
         }
-        var member_static = false;
+        var member_static_explicit = false;
         if (self.current.tag == .keyword_static) {
-            member_static = true;
+            member_static_explicit = true;
             try self.advance();
         }
+        const member_static = is_static_container or member_static_explicit;
         if (self.current.tag == .keyword_struct or self.current.tag == .keyword_class) {
             if (member_override) return self.fail("nested types cannot declare override");
             const nested_is_class = self.current.tag == .keyword_class;
-            const nested_is_static = member_static;
-            if (nested_is_static and !nested_is_class) return self.fail("'static' before a nested type requires 'class'");
+            const nested_is_static = member_static_explicit;
             if (member_protected and (!nested_is_class or nested_is_static)) {
                 return self.fail("protected nested types must be ordinary classes");
             }
@@ -158,7 +171,10 @@ fn parseType(
         }
         if (self.current.tag == .keyword_init) {
             if (is_intrinsic) return self.fail("intrinsic classes cannot declare constructors");
-            if (is_static_class) return self.fail("static classes cannot declare constructors");
+            if (is_static_container) {
+                const message = try std.fmt.allocPrint(self.allocator, "static {s}s cannot declare constructors", .{if (is_class) "classe" else "structure"});
+                return self.fail(message);
+            }
             if (member_static) return self.fail("constructors cannot be static");
             if (member_override) return self.fail("constructors cannot declare override");
             var constructor = try parseConstructor(self, member_internal, member_local, base != null);
@@ -172,7 +188,6 @@ fn parseType(
             continue;
         }
         if (self.current.tag == .keyword_func) {
-            if (is_static_class and !member_static) return self.fail("static class methods must start with 'static func'");
             if (member_override and member_static) return self.fail("static methods cannot declare override");
             var method = if (is_intrinsic)
                 try self.parseIntrinsicMethod(member_public, member_internal, member_local)
@@ -191,7 +206,10 @@ fn parseType(
         }
         if (self.current.tag == .keyword_drop) {
             if (is_intrinsic) return self.fail("intrinsic classes cannot declare drop");
-            if (is_static_class) return self.fail("static classes cannot declare drop");
+            if (is_static_container) {
+                const message = try std.fmt.allocPrint(self.allocator, "static {s}s cannot declare drop", .{if (is_class) "classe" else "structure"});
+                return self.fail(message);
+            }
             if (member_static) return self.fail("drop cannot be static");
             if (member_override) return self.fail("drop cannot declare override");
             if (member_visibility) return self.fail("drop cannot declare visibility");
@@ -208,7 +226,6 @@ fn parseType(
             else => return self.fail("structure field must start with 'let' or 'var'"),
         };
         if (is_intrinsic) return self.fail("intrinsic classes cannot declare fields");
-        if (is_static_class and !member_static) return self.fail("static class fields must start with 'static let' or 'static var'");
         if (member_override) return self.fail("fields cannot declare override");
         const field_position = self.current.position;
         try self.advance();
@@ -253,7 +270,7 @@ fn parseType(
         .is_protected = is_protected,
         .is_class = is_class,
         .is_intrinsic = is_intrinsic,
-        .is_static = is_static_class,
+        .is_static = is_static_container,
         .enclosing = enclosing,
         .position = position,
         .name_position = name_position,
@@ -275,7 +292,7 @@ const Visibility = enum { public, package, module, local, private, protected };
 fn visibilityFromToken(tag: @import("../Lexer.zig").TokenTag) Visibility {
     return switch (tag) {
         .keyword_public => .public,
-        .keyword_internal, .keyword_package => .package,
+        .keyword_package => .package,
         .keyword_module => .module,
         .keyword_local => .local,
         .keyword_private => .private,

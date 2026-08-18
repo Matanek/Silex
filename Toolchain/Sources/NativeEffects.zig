@@ -1105,6 +1105,35 @@ test "native branches and short-circuit match the reference output" {
     try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
 }
 
+test "native cached float thresholds in short-circuit loops match the reference" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const source =
+        \\static struct Constants {
+        \\    let limit:float = 5184.0
+        \\}
+        \\func classified_count() int {
+        \\    var count = 0
+        \\    for index in 0...2 {
+        \\        let value:float = (index + 1) as float * 10.0
+        \\        let squared:float = value * value + value * value
+        \\        if squared > 0.0 && squared < Constants.limit { count++ }
+        \\    }
+        \\    return count
+        \\}
+        \\func main() { print(classified_count()) }
+    ;
+    var frontend = Frontend.Frontend.init(allocator);
+    const reference = try Interpreter.runCapture(allocator, (try frontend.compile(source)).ir);
+    const native = try compileAndRun(allocator, source);
+    try std.testing.expectEqualStrings("2\n", reference.stdout);
+    try std.testing.expectEqual(reference.exit_code, exitCode(native));
+    try std.testing.expectEqualSlices(u8, reference.stdout, native.stdout);
+    try std.testing.expectEqualSlices(u8, reference.stderr, native.stderr);
+}
+
 test "native mutable locals match every current reference value family" {
     if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
@@ -1596,8 +1625,8 @@ test "native static storage matches the reference interpreter" {
     const allocator = arena.allocator();
     const source =
         \\static class Counter {
-        \\    static var total:int = 4
-        \\    static func add(value:int) int { Counter.total += value; return Counter.total }
+        \\    var total:int = 4
+        \\    func add(value:int) int { Counter.total += value; return Counter.total }
         \\}
         \\func main() { print(Counter.total, " ", Counter.add(3), " ", Counter.total) }
     ;
@@ -1645,7 +1674,7 @@ test "native class drop matches the reference interpreter" {
         \\    drop { print("owner") }
         \\}
         \\class Tracer { drop { print("static") } }
-        \\static class Roots { static var current:Tracer? = null }
+        \\static class Roots { var current:Tracer? = null }
         \\func main() {
         \\    var owner = Owner("native")
         \\    if true { var alias = owner; print(alias.resource.name) }

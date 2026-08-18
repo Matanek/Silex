@@ -6,6 +6,12 @@ const Resources = @import("Resources.zig");
 
 pub fn analyzeIdentifier(self: anytype, builder: anytype, position: @import("../Source.zig").Position, name: []const u8) !Model.TypedValue {
     const binding = Support.findBinding(builder.bindings.items, name) orelse {
+        if (std.mem.eql(u8, name, "self")) if (self.member_context) |structure_index| {
+            const structure = self.program.structures[structure_index];
+            if (structure.is_static) {
+                return self.fail(position, if (structure.is_class) "static class methods have no 'self'" else "static structure methods have no 'self'");
+            }
+        };
         const message = try std.fmt.allocPrint(self.allocator, "unknown variable '{s}'", .{name});
         return self.fail(position, message);
     };

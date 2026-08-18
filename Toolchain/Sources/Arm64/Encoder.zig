@@ -1458,14 +1458,17 @@ fn encodeFunction(
                         conjunction.second.left,
                         double,
                     );
-                    const right = try prepareFloatOperand(
-                        allocator,
-                        words,
-                        function,
-                        .x10,
-                        conjunction.right,
-                        double,
-                    );
+                    const right = switch (conjunction.right) {
+                        .register => |register| register,
+                        .slot => |slot| try prepareFloatOperand(
+                            allocator,
+                            words,
+                            function,
+                            .x10,
+                            slot,
+                            double,
+                        ),
+                    };
                     try words.append(allocator, floatConditionalCompare(
                         left,
                         right,
@@ -2584,11 +2587,16 @@ fn loopBackedgeComparison(
     return null;
 }
 
+const FusedFloatRight = union(enum) {
+    register: Register,
+    slot: Machine.Slot,
+};
+
 const FusedFloatConjunction = struct {
     first: Machine.Instruction.Binary,
     second: Machine.Instruction.Binary,
     branch: Machine.Instruction.Branch,
-    right: Machine.Slot,
+    right: FusedFloatRight,
 };
 
 fn fusedFloatConjunction(function: Machine.Function, first_branch_index: usize) ?FusedFloatConjunction {
@@ -2617,11 +2625,16 @@ fn fusedFloatConjunction(function: Machine.Function, first_branch_index: usize) 
         else => return null,
     };
     if (resolveJumpTarget(function.instructions, second_branch.else_instruction) != short_circuit) return null;
+    const right: FusedFloatRight = switch (function.instructions[second_start]) {
+        .constant_float32, .constant_float64 => .{ .register = comparisonHasElidedCachedRight(function, second_index, second) orelse return null },
+        .binary => .{ .slot = second.right },
+        else => unreachable,
+    };
     return .{
         .first = first,
         .second = second,
         .branch = second_branch,
-        .right = second.right,
+        .right = right,
     };
 }
 

@@ -81,6 +81,10 @@ test "diagnose extension targets declarations collisions and access" {
         "a static class cannot be extended",
     );
     try expectCompileError(
+        "static struct Tools {} extend Tools { static func make() {} } func main() {}",
+        "a static structure cannot be extended",
+    );
+    try expectCompileError(
         "struct Box<T> { let value:T } extend Box<int> { func read() int { return 1 } } func main() {}",
         "generic extension targets and specializations are not supported",
     );

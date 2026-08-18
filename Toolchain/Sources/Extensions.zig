@@ -30,7 +30,7 @@ pub const Merger = struct {
             };
             const target = structures[structure_index];
             if (target.is_protocol) return self.fail(extension.target_position, "a protocol cannot be extended");
-            if (target.is_static) return self.fail(extension.target_position, "a static class cannot be extended");
+            if (target.is_static) return self.fail(extension.target_position, if (target.is_class) "a static class cannot be extended" else "a static structure cannot be extended");
             if (target.collection != null) return self.fail(extension.target_position, "a collection type cannot be extended");
             if (target.type_parameters.len != 0) {
                 return self.fail(extension.target_position, "generic extension targets and specializations are not supported");

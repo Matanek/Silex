@@ -47,6 +47,7 @@ const Context = struct {
     allow_conversion: bool = false,
     cascade: bool = false,
     system_callback: bool = false,
+    static_container: bool = false,
     aggregate: ?AggregateContext = null,
 };
 
@@ -207,29 +208,43 @@ pub fn itemsAt(
             .{ "local", "Silex file visibility" },
             .{ "struct", "Silex value type declaration" },
             .{ "class", "Silex reference type declaration" },
-            .{ "static", "Silex static class declaration" },
+            .{ "static", "Silex static type declaration" },
             .{ "protocol", "Silex nominal contract declaration" },
             .{ "enum", "Silex enumeration declaration" },
             .{ "func", "Silex function declaration" },
             .{ "test", "Silex source-local test" },
             .{ "extend", "Silex type extension" },
         }, 70),
-        .structure_declaration => try appendKeywords(allocator, &candidates, context, &.{
-            .{ "public", "Silex visibility" },
-            .{ "package", "Silex package visibility" },
-            .{ "module", "Silex module visibility" },
-            .{ "local", "Silex file visibility" },
-            .{ "private", "Silex type visibility" },
-            .{ "protected", "Silex descendant visibility" },
-            .{ "let", "Silex immutable field" },
-            .{ "var", "Silex mutable field" },
-            .{ "init", "Silex value constructor" },
-            .{ "func", "Silex method declaration" },
-            .{ "static", "Silex static member" },
-            .{ "struct", "Silex nested value type" },
-            .{ "class", "Silex nested reference type" },
-            .{ "drop", "Silex deterministic destruction" },
-        }, 70),
+        .structure_declaration => if (context.static_container)
+            try appendKeywords(allocator, &candidates, context, &.{
+                .{ "public", "Silex visibility" },
+                .{ "package", "Silex package visibility" },
+                .{ "module", "Silex module visibility" },
+                .{ "local", "Silex file visibility" },
+                .{ "private", "Silex type visibility" },
+                .{ "let", "Silex implicit static immutable field" },
+                .{ "var", "Silex implicit static mutable field" },
+                .{ "func", "Silex implicit static method declaration" },
+                .{ "struct", "Silex nested value type" },
+                .{ "class", "Silex nested reference type" },
+            }, 70)
+        else
+            try appendKeywords(allocator, &candidates, context, &.{
+                .{ "public", "Silex visibility" },
+                .{ "package", "Silex package visibility" },
+                .{ "module", "Silex module visibility" },
+                .{ "local", "Silex file visibility" },
+                .{ "private", "Silex type visibility" },
+                .{ "protected", "Silex descendant visibility" },
+                .{ "let", "Silex immutable field" },
+                .{ "var", "Silex mutable field" },
+                .{ "init", "Silex value constructor" },
+                .{ "func", "Silex method declaration" },
+                .{ "static", "Silex static member" },
+                .{ "struct", "Silex nested value type" },
+                .{ "class", "Silex nested reference type" },
+                .{ "drop", "Silex deterministic destruction" },
+            }, 70),
         .aggregate_field => if (program) |parsed| {
             const aggregate = context.aggregate.?;
             var native_initializer = false;
@@ -898,6 +913,7 @@ fn classifyContext(allocator: Allocator, source: []const u8, cursor: usize) !Con
         .kind = if (scope.in_structure) .structure_declaration else .module_declaration,
         .prefix = prefix,
         .prefix_start = prefix_start,
+        .static_container = scope.in_static_container,
     };
 }
 
@@ -974,17 +990,19 @@ fn followsConditional(tokens: []const Token) bool {
 const Scope = struct {
     in_callable: bool = false,
     in_structure: bool = false,
+    in_static_container: bool = false,
     in_loop: bool = false,
     interpolation_depth: usize = 0,
     pending_callable: bool = false,
 };
 
 fn scopeAt(tokens: []const Token) Scope {
-    const Block = enum { plain, structure, callable, loop };
+    const Block = enum { plain, structure, static_structure, callable, loop };
     var blocks: [128]Block = undefined;
     var count: usize = 0;
     var pending: Block = .plain;
     var pending_callable = false;
+    var pending_static = false;
     var interpolation_depth: usize = 0;
     for (tokens) |token| {
         if (count == 0 and token.tag == .identifier and std.mem.eql(u8, token.lexeme, "test")) {
@@ -993,11 +1011,21 @@ fn scopeAt(tokens: []const Token) Scope {
             continue;
         }
         switch (token.tag) {
-            .keyword_struct, .keyword_extend => pending = .structure,
+            .keyword_static => pending_static = true,
+            .keyword_struct, .keyword_class => {
+                pending = if (pending_static) .static_structure else .structure;
+                pending_static = false;
+            },
+            .keyword_extend => {
+                pending = .structure;
+                pending_static = false;
+            },
             .keyword_func, .keyword_init => {
                 pending = .callable;
                 pending_callable = true;
+                pending_static = false;
             },
+            .keyword_let, .keyword_var => pending_static = false,
             .keyword_while, .keyword_for => pending = .loop,
             .left_brace => {
                 if (count < blocks.len) {
@@ -1017,7 +1045,14 @@ fn scopeAt(tokens: []const Token) Scope {
     }
     var result: Scope = .{ .interpolation_depth = interpolation_depth, .pending_callable = pending_callable };
     for (blocks[0..count]) |block| switch (block) {
-        .structure => result.in_structure = true,
+        .structure => {
+            result.in_structure = true;
+            result.in_static_container = false;
+        },
+        .static_structure => {
+            result.in_structure = true;
+            result.in_static_container = true;
+        },
         .callable => result.in_callable = true,
         .loop => {
             result.in_callable = true;
@@ -4382,7 +4417,7 @@ test "complete the next method parameter after a nested positional argument" {
     defer arena.deinit();
     const source =
         \\static class Asset {
-        \\    static func javascript(source:str, path:str) Asset { return Asset() }
+        \\    func javascript(source:str, path:str) str { return source }
         \\}
         \\func wrap(value:str) str { return value }
         \\func main() {
@@ -4449,6 +4484,21 @@ test "complete local declarations and members inside their file" {
     try std.testing.expect(contains(module_items, "module"));
     const local_items = try itemsAt(arena.allocator(), "loc", "loc".len, .invoked);
     try std.testing.expect(contains(local_items, "local"));
+}
+
+test "offer canonical implicit members inside static containers" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source = "static struct Constants { \n}";
+    const cursor = std.mem.indexOfScalar(u8, source, '\n').?;
+    const items = try itemsAt(arena.allocator(), source, cursor, .invoked);
+    try std.testing.expect(contains(items, "let"));
+    try std.testing.expect(contains(items, "var"));
+    try std.testing.expect(contains(items, "func"));
+    try std.testing.expect(!contains(items, "init"));
+    try std.testing.expect(!contains(items, "drop"));
+    try std.testing.expect(!contains(items, "protected"));
+    try std.testing.expect(!contains(items, "static"));
 }
 
 test "offer branch continuations only after a conditional block" {

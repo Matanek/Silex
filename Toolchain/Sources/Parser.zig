@@ -70,7 +70,7 @@ pub const Parser = struct {
                 .keyword_use => try uses.append(self.allocator, try Uses.parse(self, false)),
                 .keyword_struct => try structures.append(self.allocator, try Nominals.parse(self, false, false, false, false)),
                 .keyword_class => try structures.append(self.allocator, try Nominals.parse(self, false, false, false, true)),
-                .keyword_static => try structures.append(self.allocator, try Nominals.parseStaticClass(self, false, false, false)),
+                .keyword_static => try structures.append(self.allocator, try Nominals.parseStaticType(self, false, false, false)),
                 .keyword_protocol => try structures.append(self.allocator, try Protocols.parse(self, false, false, false)),
                 .keyword_enum => try enums.append(self.allocator, try EnumParser.parse(self, false, false, false)),
                 .keyword_func => try functions.append(self.allocator, try self.parseFunction(false, false, false)),
@@ -92,22 +92,22 @@ pub const Parser = struct {
                             try structures.append(self.allocator, try Nominals.parseIntrinsicClass(self, true))
                         else
                             return self.fail("expected use, enum, struct, class, intrinsic class, protocol, or function declaration after 'public'"),
-                        .keyword_static => try structures.append(self.allocator, try Nominals.parseStaticClass(self, true, false, false)),
+                        .keyword_static => try structures.append(self.allocator, try Nominals.parseStaticType(self, true, false, false)),
                         .keyword_enum => try enums.append(self.allocator, try EnumParser.parse(self, true, false, false)),
                         .keyword_protocol => try structures.append(self.allocator, try Protocols.parse(self, true, false, false)),
                         .keyword_func => try functions.append(self.allocator, try self.parseFunction(true, false, false)),
                         else => return self.fail("expected use, enum, struct, class, intrinsic class, protocol, or function declaration after 'public'"),
                     }
                 },
-                .keyword_internal, .keyword_package, .keyword_module, .keyword_local => {
+                .keyword_package, .keyword_module, .keyword_local => {
                     const visibility_name = self.current.lexeme;
-                    const is_internal = self.current.tag == .keyword_internal or self.current.tag == .keyword_package;
+                    const is_internal = self.current.tag == .keyword_package;
                     const is_local = self.current.tag == .keyword_local;
                     try self.advance();
                     switch (self.current.tag) {
                         .keyword_struct => try structures.append(self.allocator, try Nominals.parse(self, false, is_internal, is_local, false)),
                         .keyword_class => try structures.append(self.allocator, try Nominals.parse(self, false, is_internal, is_local, true)),
-                        .keyword_static => try structures.append(self.allocator, try Nominals.parseStaticClass(self, false, is_internal, is_local)),
+                        .keyword_static => try structures.append(self.allocator, try Nominals.parseStaticType(self, false, is_internal, is_local)),
                         .keyword_enum => try enums.append(self.allocator, try EnumParser.parse(self, false, is_internal, is_local)),
                         .keyword_protocol => try structures.append(self.allocator, try Protocols.parse(self, false, is_internal, is_local)),
                         .keyword_func => try functions.append(self.allocator, try self.parseFunction(false, is_internal, is_local)),
@@ -1123,6 +1123,9 @@ pub const Parser = struct {
             self.diagnostic = self.lexer.diagnostic;
             return err;
         };
+        if (next.tag == .legacy_internal) {
+            return self.failAt(next.position, "'internal' visibility was removed; use 'package' instead");
+        }
         if (self.started) {
             self.previous = self.current;
         } else {
@@ -1558,12 +1561,12 @@ test "parse package module local and inherited structure members" {
     try std.testing.expectEqualStrings("Geometry.Point", program.type_names[type_index]);
 }
 
-test "accept explicit module and the temporary internal package alias" {
+test "accept explicit package and module visibility" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     var parser = Parser.init(arena.allocator(),
         \\package struct PackageType { func value() int { return 1 } }
-        \\internal enum LegacyPackage { value }
+        \\package enum PackageEnum { value }
         \\module class ModuleType { init() {} func value() int { return 2 } }
         \\class ImplicitModuleType { init() {} func value() int { return 3 } }
         \\func main() {}
@@ -1582,6 +1585,17 @@ test "accept explicit module and the temporary internal package alias" {
     try std.testing.expect(program.enums[0].is_internal);
     try std.testing.expect(!module_type.?.is_public and !module_type.?.methods[0].is_public);
     try std.testing.expect(!implicit_type.?.is_public and !implicit_type.?.methods[0].is_public);
+}
+
+test "reject removed internal visibility with a migration diagnostic" {
+    try expectParseError(
+        "internal struct Legacy {}",
+        "'internal' visibility was removed; use 'package' instead",
+    );
+    try expectParseError(
+        "public struct Container { internal func legacy() {} }",
+        "'internal' visibility was removed; use 'package' instead",
+    );
 }
 
 test "reject type-relative module declarations and member visibility widening" {

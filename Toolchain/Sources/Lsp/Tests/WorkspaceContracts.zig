@@ -294,7 +294,7 @@ test "server ranks imported method parameter labels before scope symbols" {
         .sub_path = "WebView.sx",
         .data =
         \\public static class Asset {
-        \\    static func javascript(source:str, path:str) str { return source }
+        \\    func javascript(source:str, path:str) str { return source }
         \\}
         ,
     });
