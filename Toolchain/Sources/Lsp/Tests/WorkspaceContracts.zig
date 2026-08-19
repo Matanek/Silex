@@ -603,6 +603,95 @@ test "field parameter and generic annotations expose module paths to types" {
     }
 }
 
+test "every type mode completes reexported umbrella types at the trigger point" {
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "GFX/Module");
+    try temporary.dir.createDirPath(std.testing.io, "GFX/Examples/Scene3D");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Package.json",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\"}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/Input.sx",
+        .data =
+        \\public class State {}
+        \\public func poll() State { return State() }
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/Resources.sx",
+        .data =
+        \\public use GFX.Input.State as InputState
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Examples/Scene3D/World.sx",
+        .data = "use GFX.Resources\nfunc main() {}",
+    });
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const uri = try std.fmt.allocPrint(allocator, "file://{s}/GFX/Examples/Scene3D/World.sx", .{root});
+    const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
+
+    var server = ServerModule.Server.init(std.testing.allocator, std.testing.io);
+    defer server.deinit();
+    try Support.initializeServer(&server, allocator, root_uri);
+    const sources = [_][]const u8{
+        "use GFX.Resources\nfunc inspect(input:Resources.<|>) {}",
+        "use GFX.Resources\nfunc inspect(input:@Resources.<|>) {}",
+        "use GFX.Resources\nfunc inspect(input:&Resources.<|>) {}",
+        "use GFX.Resources\nfunc inspect() { let input:@Resources.<|> }",
+        "use GFX.Resources\nfunc inspect() { var input:&Resources.<|> }",
+        "use GFX.Resources\nfunc inspect(callback:func(Resources.<|>)) {}",
+        "use GFX.Resources\nfunc inspect(callback:func(@Resources.<|>)) {}",
+        "use GFX.Resources\nfunc inspect(callback:func(int, &Resources.<|>)) {}",
+        "use GFX.Resources\nfunc inspect(input:(Resources.<|>, int)) {}",
+        "use GFX.Resources\nfunc inspect(input:(int, Resources.<|>)) {}",
+        "use GFX.Resources\nfunc inspect(input:@Resources.InputState) @Resources.<|> { return input }",
+        "use GFX.Resources\nfunc inspect(input:&Resources.InputState) &Resources.<|> { return input }",
+    };
+    for (sources) |source| {
+        const items = try Support.serverCompletionAfterTrigger(&server, allocator, uri, source, ".");
+        try Support.expectExactLabels(&.{"InputState"}, items);
+        try Support.expectItem(.{
+            .label = "InputState",
+            .kind = 7,
+            .detail = "class State",
+            .insert_text = "InputState",
+            .insert_text_format = null,
+        }, items);
+        try Support.expectAbsent("poll", items);
+        try Support.expectAbsent("if", items);
+        try Support.expectNoDuplicates(items);
+    }
+
+    const prefixes = [_][]const u8{
+        "use GFX.Resources\nfunc inspect(input:@Resources.I<|>) {}",
+        "use GFX.Resources\nfunc inspect(input:@Resources.In<|>) {}",
+        "use GFX.Resources\nfunc inspect(input:@Resources.Input<|>) {}",
+    };
+    for (prefixes) |source| {
+        const items = try Support.serverCompletion(&server, allocator, uri, source);
+        try Support.expectExactLabels(&.{"InputState"}, items);
+        try Support.expectNoDuplicates(items);
+    }
+
+    const expression_items = try Support.serverCompletionAfterTrigger(
+        &server,
+        allocator,
+        uri,
+        "use GFX.Input\nfunc inspect(flags:int) { let value = flags & Input.<|> }",
+        ".",
+    );
+    try Support.expectPresent("State", expression_items);
+    try Support.expectPresent("poll", expression_items);
+    try Support.expectNoDuplicates(expression_items);
+}
+
 test "workspace completion uses the unsaved contents of imported documents" {
     var temporary = std.testing.tmpDir(.{});
     defer temporary.cleanup();

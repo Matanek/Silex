@@ -166,6 +166,7 @@ pub fn build(b: *std.Build) void {
     check_step.dependOn(&test_command.step);
     check_step.dependOn(&deep_copy_test_command.step);
     check_step.dependOn(&language_test_command.step);
+    check_step.dependOn(&lsp_test_command.step);
 }
 
 fn manifestVersion() []const u8 {

@@ -1100,6 +1100,15 @@ fn isTypePosition(
 ) bool {
     if (tokens.len == 0) return false;
     const previous = tokens[tokens.len - 1].tag;
+    if (isTypeModeToken(previous)) {
+        const before_mode = tokens[0 .. tokens.len - 1];
+        return isTypePosition(
+            before_mode,
+            lineTokensBefore(tokens, line_tokens, tokens.len - 1),
+            pending_callable,
+            nominal_relation,
+        );
+    }
     if (previous == .keyword_as) return true;
     if (nominal_relation and (previous == .colon or previous == .comma)) return true;
     if (previous == .colon) {
@@ -1115,8 +1124,51 @@ fn isTypePosition(
         for (line_tokens) |token| if (token.tag == .keyword_let or token.tag == .keyword_var) return true;
         return false;
     }
+    if (isParenthesizedTypeElementPosition(tokens, line_tokens, pending_callable, nominal_relation)) return true;
     if (!pending_callable or previous != .right_parenthesis) return false;
     return true;
+}
+
+fn isTypeModeToken(tag: TokenTag) bool {
+    return tag == .at or tag == .amp;
+}
+
+fn isParenthesizedTypeElementPosition(
+    tokens: []const Token,
+    line_tokens: []const Token,
+    pending_callable: bool,
+    nominal_relation: bool,
+) bool {
+    const opening = lastUnclosedParenthesis(tokens) orelse return false;
+    var depth: usize = 0;
+    var segment_start = opening + 1;
+    for (tokens[opening + 1 ..], opening + 1..) |token, index| switch (token.tag) {
+        .left_parenthesis, .left_bracket => depth += 1,
+        .right_parenthesis, .right_bracket => depth -|= 1,
+        .comma => if (depth == 0) {
+            segment_start = index + 1;
+        },
+        else => {},
+    };
+    if (segment_start != tokens.len) return false;
+    if (opening != 0 and tokens[opening - 1].tag == .keyword_func) return true;
+    const before_opening = tokens[0..opening];
+    return isTypePosition(
+        before_opening,
+        lineTokensBefore(tokens, line_tokens, opening),
+        pending_callable,
+        nominal_relation,
+    );
+}
+
+fn lineTokensBefore(
+    tokens: []const Token,
+    line_tokens: []const Token,
+    end: usize,
+) []const Token {
+    const line_start = tokens.len - line_tokens.len;
+    if (end <= line_start) return &.{};
+    return tokens[line_start..end];
 }
 
 fn isNominalRelationPosition(line_tokens: []const Token) bool {
@@ -1153,8 +1205,9 @@ fn lineIsExpression(tokens: []const Token) bool {
         for (tokens) |token| if (token.tag == .equal) return true;
         return false;
     }
+    if (isControlConditionKeyword(first)) return true;
     return switch (first) {
-        .keyword_return, .keyword_if, .keyword_while, .keyword_for => true,
+        .keyword_return, .keyword_for => true,
         .keyword_print, .keyword_assert, .keyword_panic => true,
         .identifier, .keyword_self, .integer, .floating, .keyword_true, .keyword_false, .string, .string_start => true,
         else => false,
@@ -2456,7 +2509,7 @@ fn expectedTypeAt(source: []const u8, program: Ast.Program, cursor: usize, conte
     }
     const tokens = line_tokens[0..count];
     if (tokens.len == 0) return null;
-    if (tokens[0].tag == .keyword_if or tokens[0].tag == .keyword_while) return .{ .name = "bool" };
+    if (isControlConditionKeyword(tokens[0].tag)) return .{ .name = "bool" };
     if (tokens[0].tag == .keyword_return) {
         if (expectedCallArgumentType(source[tokens[0].end..context.prefix_start], program)) |expected| return expected;
         return if (callable) |current| .{
@@ -2624,7 +2677,7 @@ fn parseForCompletion(
         .type_name => "int",
         .aggregate_field => "__completion:true",
         .statement => "print(true)",
-        .expression => if (for_source and !for_body_follows)
+        .expression => if (control_body_missing or (for_source and !for_body_follows))
             "true {}"
         else if (before_prefix.len == 0)
             "print(true)"
@@ -2678,14 +2731,18 @@ fn isForSourceLine(line: []const u8) bool {
 }
 
 pub fn lineStartsControlCondition(line: []const u8) bool {
-    return std.mem.startsWith(u8, line, "if ") or
-        std.mem.startsWith(u8, line, "elif ") or
-        std.mem.startsWith(u8, line, "while ");
+    var lexer = LexerModule.Lexer.init(line);
+    const first = lexer.next() catch return false;
+    return isControlConditionKeyword(first.tag);
+}
+
+fn isControlConditionKeyword(tag: TokenTag) bool {
+    return tag == .keyword_if or tag == .keyword_elif or tag == .keyword_while;
 }
 
 fn blockFollowsCompletion(source: []const u8, cursor: usize) bool {
     var index = cursor;
-    while (index < source.len and (source[index] == ' ' or source[index] == '\t' or source[index] == '\r')) index += 1;
+    while (index < source.len and std.ascii.isWhitespace(source[index])) index += 1;
     return index < source.len and source[index] == '{';
 }
 
@@ -4067,6 +4124,36 @@ test "complete every accessible local type after a colon" {
     try std.testing.expect(contains(items, "State"));
     try std.testing.expect(contains(items, "Axis"));
     try std.testing.expect(!contains(items, "func"));
+}
+
+test "distinguish qualified type modes from reference expressions" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const type_sources = [_][]const u8{
+        "func inspect(input:Resources.In) {}",
+        "func inspect(input:@Resources.In) {}",
+        "func inspect(input:&Resources.In) {}",
+        "func inspect() { let input:@Resources.In }",
+        "func inspect(callback:func(Resources.In)) {}",
+        "func inspect(callback:func(int, &Resources.In)) {}",
+        "func inspect(input:(Resources.In, int)) {}",
+        "func inspect(input:(int, Resources.In)) {}",
+        "func inspect(input:@Resources.In) @Resources.In { return input }",
+    };
+    for (type_sources) |source| {
+        const cursor = std.mem.lastIndexOf(u8, source, "Resources.In").? + "Resources.In".len;
+        try std.testing.expect(try isQualifiedTypePositionAt(allocator, source, cursor));
+    }
+
+    const expression_sources = [_][]const u8{
+        "func inspect(flags:int) { let value = flags & Resources.In }",
+        "func inspect(input:Resources.In) { let value = @input.Resources.In }",
+    };
+    for (expression_sources) |source| {
+        const cursor = std.mem.lastIndexOf(u8, source, "Resources.In").? + "Resources.In".len;
+        try std.testing.expect(!try isQualifiedTypePositionAt(allocator, source, cursor));
+    }
 }
 
 test "complete an incomplete function return and its generic type arguments" {

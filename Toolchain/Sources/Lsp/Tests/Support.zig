@@ -122,6 +122,29 @@ pub fn serverCompletionInOpenDocument(
     uri: []const u8,
     source: MarkedSource,
 ) ![]const Types.CompletionItem {
+    return serverCompletionRequest(server, allocator, uri, source, 1, null);
+}
+
+pub fn serverCompletionAfterTrigger(
+    server: *ServerModule.Server,
+    allocator: std.mem.Allocator,
+    uri: []const u8,
+    marked_source: []const u8,
+    trigger_character: []const u8,
+) ![]const Types.CompletionItem {
+    const source = try removeMarker(allocator, marked_source);
+    try openDocument(server, allocator, uri, 1, source.text);
+    return serverCompletionRequest(server, allocator, uri, source, 2, trigger_character);
+}
+
+fn serverCompletionRequest(
+    server: *ServerModule.Server,
+    allocator: std.mem.Allocator,
+    uri: []const u8,
+    source: MarkedSource,
+    trigger_kind: u8,
+    trigger_character: ?[]const u8,
+) ![]const Types.CompletionItem {
     const position = Protocol.positionAtByteOffset(source.text, source.cursor, .utf16) orelse
         return error.InvalidCompletionPosition;
     const request = try std.json.Stringify.valueAlloc(allocator, .{
@@ -131,7 +154,7 @@ pub fn serverCompletionInOpenDocument(
         .params = .{
             .textDocument = .{ .uri = uri },
             .position = position,
-            .context = .{ .triggerKind = 1 },
+            .context = .{ .triggerKind = trigger_kind, .triggerCharacter = trigger_character },
         },
     }, .{});
     const response = (try server.handleBody(allocator, request)) orelse return error.MissingLspResponse;

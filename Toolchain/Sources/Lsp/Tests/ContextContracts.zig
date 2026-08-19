@@ -168,6 +168,65 @@ test "completion is deterministic for incomplete source" {
     try Support.expectNoDuplicates(first);
 }
 
+test "incomplete control conditions preserve every lexical parameter" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const sources = [_][]const u8{
+        \\func update(input:bool) {
+        \\    if i<|>
+        \\}
+        ,
+        \\func update(input:bool) {
+        \\    if in<|>
+        \\}
+        ,
+        \\func update(input:bool) {
+        \\    if inp<|>
+        \\}
+        ,
+        \\func update(input:bool) {
+        \\    if input<|>
+        \\}
+        ,
+        \\func update(input:bool) {
+        \\    while in<|>
+        \\}
+        ,
+        \\func update(input:bool, ready:bool) {
+        \\    if ready && in<|>
+        \\}
+        ,
+        \\func update(input:bool) {
+        \\    if false {}
+        \\    elif in<|>
+        \\}
+        ,
+        \\func update(input:bool) {
+        \\    if let value = in<|>
+        \\}
+        ,
+        \\func update(input:bool) {
+        \\    if in<|>
+        \\    {
+        \\        print(true)
+        \\    }
+        \\}
+        ,
+    };
+    for (sources) |source| {
+        const items = try Support.complete(allocator, source);
+        try Support.expectExactLabels(&.{"input"}, items);
+        try Support.expectItem(.{
+            .label = "input",
+            .kind = 6,
+            .detail = "input:bool",
+            .insert_text = "input",
+        }, items);
+        try Support.expectNoDuplicates(items);
+    }
+}
+
 test "offer the implicit try error binding while its required name is being typed" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
