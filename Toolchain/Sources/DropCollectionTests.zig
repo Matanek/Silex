@@ -34,6 +34,27 @@ test "collection insertion extraction replacement and clear preserve exact drops
     );
 }
 
+test "collection insertion transfers resource-bearing temporaries" {
+    const output = try run(
+        \\class Token {
+        \\    let id:int
+        \\    init(id:int) { self.id = id }
+        \\    drop { print("drop ", self.id) }
+        \\}
+        \\struct Holder { var token:Token }
+        \\func make(id:int) Holder { return Holder(token:Token(id)) }
+        \\func main() {
+        \\    var values:Holder[] = []
+        \\    values.append(make(1))
+        \\    values.prepend(make(2))
+        \\    values.insert(1, make(3))
+        \\    print("done")
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("done\ndrop 1\ndrop 3\ndrop 2\n", output);
+}
+
 test "collection loops copy drop elements and write mutable copies back" {
     const output = try run(
         \\struct File { var id:int; drop { print("drop ", self.id) } }

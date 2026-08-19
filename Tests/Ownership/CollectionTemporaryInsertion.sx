@@ -1,0 +1,32 @@
+class DropCounter {
+    var count:int
+
+    init() { self.count = 0 }
+}
+
+class Token {
+    var counter:DropCounter
+
+    init(counter:DropCounter) { self.counter = counter }
+
+    drop { self.counter.count++ }
+}
+
+struct Holder {
+    var token:Token
+}
+
+func make_holder(counter:DropCounter) Holder {
+    return Holder(token:Token(counter))
+}
+
+test "collection insertion transfers resource-bearing temporaries" {
+    var counter = DropCounter()
+    {
+        var values:Holder[] = []
+        values.append(make_holder(counter))
+        values.prepend(make_holder(counter))
+        values.insert(1, make_holder(counter))
+    }
+    assert(counter.count == 3)
+}

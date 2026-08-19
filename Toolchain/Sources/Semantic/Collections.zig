@@ -221,11 +221,13 @@ pub fn analyzeMutation(self: anytype, builder: anytype, call: Ast.Expression.Cal
             kind = .append;
             argument = value.value;
             argument_type = collection.element;
+            argument_transferred = value.transferred;
         } else if (self.canImplicitlyConvert(value.type, collection.element)) {
             const converted = try self.coerce(builder, value, collection.element, call.arguments[0].position);
             kind = .append;
             argument = converted.value;
             argument_type = collection.element;
+            argument_transferred = converted.transferred;
         } else if (collectionForType(self.structures, value.type)) |other| {
             if (other.element != collection.element) return self.fail(call.arguments[0].position, "append sequence element type is incompatible");
             kind = .append_sequence;
@@ -236,14 +238,18 @@ pub fn analyzeMutation(self: anytype, builder: anytype, call: Ast.Expression.Cal
     } else if (std.mem.eql(u8, call.name, "prepend")) {
         try requireArity(self, call, 1);
         kind = .prepend;
-        argument = (try self.analyzeExpressionExpected(builder, call.arguments[0], collection.element)).value;
+        const value = try self.analyzeExpressionExpected(builder, call.arguments[0], collection.element);
+        argument = value.value;
         argument_type = collection.element;
+        argument_transferred = value.transferred;
     } else if (std.mem.eql(u8, call.name, "insert")) {
         try requireArity(self, call, 2);
         kind = .insert;
         index = (try requireIndex(self, builder, call.arguments[0])).value;
-        argument = (try self.analyzeExpressionExpected(builder, call.arguments[1], collection.element)).value;
+        const value = try self.analyzeExpressionExpected(builder, call.arguments[1], collection.element);
+        argument = value.value;
         argument_type = collection.element;
+        argument_transferred = value.transferred;
     } else {
         return_type = collection.element;
         removed = try self.newValue(builder, collection.element);
@@ -259,7 +265,7 @@ pub fn analyzeMutation(self: anytype, builder: anytype, call: Ast.Expression.Cal
             kind = .take_last;
         }
     }
-    if (argument) |value| if (Resources.requiresRetain(self, argument_type.?)) {
+    if (argument) |value| if (Resources.requiresRetain(self, argument_type.?) and !argument_transferred) {
         try Resources.retainValueOwned(self, builder, argument_type.?, value, ownership);
     };
     const updated = try self.newValue(builder, binding.type);
