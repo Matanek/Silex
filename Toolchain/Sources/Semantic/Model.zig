@@ -13,6 +13,7 @@ pub const Binding = struct {
     type: Types.Type,
     value: ?Ir.ValueId = null,
     local: ?Ir.LocalId = null,
+    global: ?usize = null,
     reference: ?Ir.ValueId = null,
     mutable: bool = false,
     parameter: bool = false,

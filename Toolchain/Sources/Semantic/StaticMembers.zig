@@ -11,6 +11,7 @@ const Model = @import("Model.zig");
 const Resources = @import("Resources.zig");
 const ShaderAssets = @import("../ShaderAssets.zig");
 const GenericSyntax = @import("../Parser/Generics.zig");
+const StaticInitialization = @import("StaticInitialization.zig");
 const EvaluateError = Source.Error || std.mem.Allocator.Error;
 
 pub const Field = struct {
@@ -21,12 +22,19 @@ pub const Field = struct {
 
 pub fn ownerIndex(self: anytype, name: []const u8) ?usize {
     for (self.program.structures, 0..) |structure, index| if (std.mem.eql(u8, structure.name, name)) return index;
-    const nominal = self.resolveStructureIndex(name) orelse return null;
-    if (nominal >= self.structures.len) return null;
+    if (self.resolveStructureIndex(name)) |nominal| if (nominal < self.structures.len) {
+        for (self.program.structures, 0..) |structure, index| {
+            if (std.mem.eql(u8, structure.name, self.structures[nominal].name)) return index;
+        }
+    };
+    var suffix_match: ?usize = null;
     for (self.program.structures, 0..) |structure, index| {
-        if (std.mem.eql(u8, structure.name, self.structures[nominal].name)) return index;
+        if (!std.mem.endsWith(u8, structure.name, name) or structure.name.len == name.len or
+            structure.name[structure.name.len - name.len - 1] != '.') continue;
+        if (suffix_match != null) return null;
+        suffix_match = index;
     }
-    return null;
+    return suffix_match;
 }
 
 pub fn prepare(self: anytype) ![]const Ir.Global {
@@ -41,12 +49,25 @@ pub fn prepare(self: anytype) ![]const Ir.Global {
     var globals: std.ArrayList(Ir.Global) = .empty;
     var global: usize = 0;
     for (self.program.structures) |structure| for (structure.static_fields) |field| {
+        if (StaticInitialization.requiresRuntime(self, field.type)) {
+            try globals.append(self.allocator, .{
+                .name = try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ structure.name, field.name }),
+                .type = field.type,
+                .mutable = field.mutable,
+                .runtime_initialized = true,
+            });
+            global += 1;
+            continue;
+        }
         if (!supportedType(self, field.type)) return self.fail(field.name_position, "static field type is not supported by the bootstrap runtime yet");
+        const value = try evaluateField(self, &evaluation, global);
+        const bits = try flattenConstant(self, value);
         try globals.append(self.allocator, .{
             .name = try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ structure.name, field.name }),
             .type = field.type,
             .mutable = field.mutable,
-            .bits = (try evaluateField(self, &evaluation, global)).bits,
+            .bits = if (bits.len == 0) 0 else bits[0],
+            .extra_bits = if (bits.len <= 1) &.{} else bits[1..],
         });
         global += 1;
     };
@@ -70,6 +91,9 @@ pub fn find(self: anytype, structure_index: usize, name: []const u8) ?Field {
 
 pub fn analyzeLoad(self: anytype, builder: anytype, structure_index: usize, name: []const u8, position: @import("../Source.zig").Position) !?@import("Model.zig").TypedValue {
     const field = find(self, structure_index, name) orelse return null;
+    if (self.static_initialization_limit) |limit| if (self.globals[field.global].runtime_initialized and field.global >= limit) {
+        return self.fail(position, "runtime static initializer can only read runtime fields declared earlier");
+    };
     if (!Visibility.memberVisible(self, field.owner, field.declaration, position)) {
         const message = try std.fmt.allocPrint(self.allocator, "static field '{s}' is {s} and unavailable here", .{ name, Visibility.name(field.declaration) });
         return self.fail(position, message);
@@ -234,8 +258,21 @@ fn methodFunctionId(program: Ast.Program, structure_index: usize, method_index: 
 
 fn supportedType(self: anytype, type_value: Ast.Type) bool {
     if (type_value.isNumeric() or type_value == .bool) return true;
-    const child = type_value.optionalChild() orelse return false;
-    return isClassType(self, child);
+    if (type_value.optionalChild()) |child| return isClassType(self, child);
+    return supportedValueStructure(self, type_value, 0);
+}
+
+fn supportedValueStructure(self: anytype, type_value: Ast.Type, depth: usize) bool {
+    if (depth >= 64) return false;
+    const index = type_value.structureIndex() orelse return false;
+    if (index >= self.structures.len) return false;
+    const structure = self.structures[index];
+    if (structure.is_class or structure.is_protocol or structure.is_static or structure.collection != null or structure.fields.len == 0) return false;
+    for (structure.fields) |field| {
+        if (field.type.isNumeric() or field.type == .bool) continue;
+        if (!supportedValueStructure(self, field.type, depth + 1)) return false;
+    }
+    return true;
 }
 
 fn isClassType(self: anytype, type_value: Ast.Type) bool {
@@ -245,8 +282,23 @@ fn isClassType(self: anytype, type_value: Ast.Type) bool {
 
 const Constant = struct {
     type: Ast.Type,
-    bits: u64,
+    bits: u64 = 0,
+    fields: []const Constant = &.{},
 };
+
+fn flattenConstant(self: anytype, value: Constant) ![]const u64 {
+    var bits: std.ArrayList(u64) = .empty;
+    try appendConstantBits(self, &bits, value);
+    return bits.toOwnedSlice(self.allocator);
+}
+
+fn appendConstantBits(self: anytype, bits: *std.ArrayList(u64), value: Constant) !void {
+    if (value.fields.len == 0) {
+        try bits.append(self.allocator, value.bits);
+        return;
+    }
+    for (value.fields) |field| try appendConstantBits(self, bits, field);
+}
 
 const Evaluation = struct {
     const State = enum { pending, evaluating, resolved };
@@ -286,7 +338,7 @@ fn evaluateField(self: anytype, evaluation: *Evaluation, global: usize) Evaluate
     const value = if (entry.field.default) |expression|
         try evaluateExpression(self, evaluation, expression, entry.field.type, &.{})
     else
-        Constant{ .type = entry.field.type, .bits = 0 };
+        try zeroConstant(self, entry.field.type);
     evaluation.values[global] = value;
     evaluation.states[global] = .resolved;
     return value;
@@ -326,7 +378,7 @@ fn evaluateExpression(
             for (locals) |local_value| if (std.mem.eql(u8, local_value.name, name)) break :identifier local_value.value;
             return self.fail(expression.position, "constant expression can only read immutable local values and static let fields");
         },
-        .field_access => |access| try evaluateStaticLoad(self, evaluation, access),
+        .field_access => |access| try evaluateFieldAccess(self, evaluation, access, locals),
         .unary => |unary| try evaluateUnary(self, evaluation, unary, expected, locals),
         .binary => |binary| try evaluateBinary(self, evaluation, binary, expected, locals),
         .conversion => |conversion| conversion: {
@@ -344,6 +396,17 @@ fn evaluateExpression(
         value = try convertConstant(self, value, target, expression.position, false);
     };
     return value;
+}
+
+fn zeroConstant(self: anytype, type_value: Ast.Type) EvaluateError!Constant {
+    if (type_value.isNumeric() or type_value == .bool or type_value.optionalChild() != null) {
+        return .{ .type = type_value };
+    }
+    const structure_index = type_value.structureIndex() orelse return error.InvalidSource;
+    if (structure_index >= self.structures.len) return error.InvalidSource;
+    const fields = try self.allocator.alloc(Constant, self.structures[structure_index].fields.len);
+    for (self.structures[structure_index].fields, 0..) |field, index| fields[index] = try zeroConstant(self, field.type);
+    return .{ .type = type_value, .fields = fields };
 }
 
 fn integerLiteral(self: anytype, lexeme: []const u8, expected: ?Ast.Type, position: Source.Position) EvaluateError!Constant {
@@ -364,7 +427,21 @@ fn floatingLiteral(self: anytype, lexeme: []const u8, expected: ?Ast.Type, posit
         self.fail(position, "static initializer type does not match its field");
 }
 
-fn evaluateStaticLoad(self: anytype, evaluation: *Evaluation, access: Ast.Expression.FieldAccess) EvaluateError!Constant {
+fn evaluateFieldAccess(
+    self: anytype,
+    evaluation: *Evaluation,
+    access: Ast.Expression.FieldAccess,
+    locals: []const Local,
+) EvaluateError!Constant {
+    if (access.base.value == .identifier) {
+        for (locals) |local_value| if (std.mem.eql(u8, local_value.name, access.base.value.identifier)) {
+            return constantField(self, local_value.value, access.name, access.name_position);
+        };
+    }
+    if (access.base.value == .field_access or access.base.value == .call) {
+        const base = try evaluateExpression(self, evaluation, access.base, null, locals);
+        if (base.fields.len != 0) return constantField(self, base, access.name, access.name_position);
+    }
     const owner_name = (try GenericSyntax.qualifiedName(self.allocator, access.base)) orelse
         return self.fail(access.name_position, "constant expression can only read type-qualified static let fields");
     const owner = ownerIndex(self, owner_name) orelse
@@ -383,6 +460,18 @@ fn evaluateStaticLoad(self: anytype, evaluation: *Evaluation, access: Ast.Expres
         return self.fail(access.name_position, message);
     }
     return evaluateField(self, evaluation, field.global);
+}
+
+fn constantField(self: anytype, value: Constant, name: []const u8, position: Source.Position) EvaluateError!Constant {
+    const structure_index = value.type.structureIndex() orelse
+        return self.fail(position, "compile-time field access requires a structure value");
+    if (structure_index >= self.structures.len or value.fields.len != self.structures[structure_index].fields.len) {
+        return error.InvalidSource;
+    }
+    for (self.structures[structure_index].fields, 0..) |field, index| {
+        if (std.mem.eql(u8, field.name, name)) return value.fields[index];
+    }
+    return self.fail(position, "compile-time structure value has no field with this name");
 }
 
 fn evaluateUnary(self: anytype, evaluation: *Evaluation, unary: Ast.Expression.Unary, expected: ?Ast.Type, locals: []const Local) EvaluateError!Constant {
@@ -598,6 +687,9 @@ fn convertConstant(self: anytype, value: Constant, target: Ast.Type, position: S
 }
 
 fn evaluateCall(self: anytype, evaluation: *Evaluation, call: Ast.Expression.Call, locals: []const Local) EvaluateError!Constant {
+    if (try constructorTarget(self, call)) |structure_index| {
+        return evaluateConstructor(self, evaluation, structure_index, call, locals);
+    }
     var candidates: std.ArrayList(Callable) = .empty;
     if (call.receiver) |receiver| {
         const owner_name = (try GenericSyntax.qualifiedName(self.allocator, receiver)) orelse
@@ -623,6 +715,183 @@ fn evaluateCall(self: anytype, evaluation: *Evaluation, call: Ast.Expression.Cal
     const selected = try selectCallable(self, evaluation, candidates.items, call, locals);
     if (!constantFunctionShape(selected.function)) return self.fail(call.name_position, "static initializer calls a function that is not compile-time evaluable");
     return evaluateFunction(self, evaluation, selected, call, locals);
+}
+
+fn constructorTarget(self: anytype, call: Ast.Expression.Call) !?usize {
+    if (call.receiver) |receiver| {
+        const receiver_name = (try GenericSyntax.qualifiedName(self.allocator, receiver)) orelse return null;
+        const qualified = try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ receiver_name, call.name });
+        return self.resolveStructureIndex(qualified);
+    }
+    return self.resolveStructureIndex(call.name);
+}
+
+fn evaluateConstructor(
+    self: anytype,
+    evaluation: *Evaluation,
+    structure_index: usize,
+    call: Ast.Expression.Call,
+    caller_locals: []const Local,
+) EvaluateError!Constant {
+    if (structure_index >= self.structures.len) return error.InvalidSource;
+    const runtime_structure = self.structures[structure_index];
+    const declaration = astStructure(self.program, runtime_structure.name) orelse return error.InvalidSource;
+    if (!Visibility.typeVisible(self, structure_index, call.name_position)) {
+        return self.fail(call.name_position, "static initializer constructor type is unavailable here");
+    }
+    if (!supportedValueStructure(self, .structure(structure_index), 0) or declaration.base != null) {
+        return self.fail(call.name_position, "static initializer can only construct plain compile-time value structures");
+    }
+    if (declaration.constructors.len == 0) {
+        return evaluateAggregateInitializer(self, evaluation, structure_index, declaration, call, caller_locals);
+    }
+
+    var candidates: std.ArrayList(usize) = .empty;
+    for (declaration.constructors, 0..) |constructor, index| {
+        if (!Visibility.memberVisible(self, structure_index, constructor, call.name_position)) continue;
+        if (try mappedArguments(self, constructor.parameters, call)) |_| try candidates.append(self.allocator, index);
+    }
+    if (candidates.items.len == 0) return self.fail(call.name_position, "static initializer constructor has no visible overload accepting these arguments");
+
+    var selected: ?usize = null;
+    var best_cost: usize = std.math.maxInt(usize);
+    var ambiguous = false;
+    for (candidates.items) |index| {
+        const constructor = declaration.constructors[index];
+        const mapped = (try mappedArguments(self, constructor.parameters, call)).?;
+        var cost: usize = 0;
+        for (constructor.parameters, mapped) |parameter, maybe_argument| {
+            const argument = maybe_argument orelse continue;
+            const value = try evaluateExpression(self, evaluation, argument, null, caller_locals);
+            if (!self.canImplicitlyConvert(value.type, parameter.type)) break;
+            if (value.type != parameter.type) cost += 1;
+        } else if (cost < best_cost) {
+            selected = index;
+            best_cost = cost;
+            ambiguous = false;
+        } else if (cost == best_cost) ambiguous = true;
+    }
+    if (ambiguous) return self.fail(call.name_position, "static initializer constructor call is ambiguous");
+    const constructor_index = selected orelse return self.fail(call.name_position, "no static initializer constructor matches the argument types");
+    const constructor = declaration.constructors[constructor_index];
+    const mapped = (try mappedArguments(self, constructor.parameters, call)).?;
+
+    var bindings: std.ArrayList(Local) = .empty;
+    for (constructor.parameters, mapped) |parameter, maybe_argument| {
+        if (parameter.mode != .value) return self.fail(call.name_position, "compile-time constructors require value parameters");
+        const source = maybe_argument orelse parameter.default orelse
+            return self.fail(call.name_position, "static initializer constructor call is missing an argument");
+        const source_locals = if (maybe_argument != null) caller_locals else bindings.items;
+        const value = try evaluateExpression(self, evaluation, source, parameter.type, source_locals);
+        try bindings.append(self.allocator, .{ .name = parameter.name, .value = value });
+    }
+
+    var result = try initializeStructureFields(self, evaluation, structure_index, declaration, bindings.items);
+    try bindings.append(self.allocator, .{ .name = "self", .value = result });
+    for (constructor.statements) |statement| switch (statement) {
+        .variable_declaration => |local| {
+            if (local.mutable or local.initializer == null or local.destructuring.len != 0) {
+                return self.fail(local.position, "static initializer constructor is not compile-time evaluable");
+            }
+            const value = try evaluateExpression(self, evaluation, local.initializer.?, local.annotation, bindings.items);
+            try bindings.append(self.allocator, .{ .name = local.name, .value = value });
+        },
+        .assignment_statement => |assignment| {
+            if (!std.mem.eql(u8, assignment.target.name, "self") or assignment.target.fields.len != 1 or
+                assignment.target.indices.len != 0 or assignment.target.indexed_fields.len != 0 or
+                assignment.operator != .assign or assignment.value == null)
+            {
+                return self.fail(assignment.position, "static initializer constructor is not compile-time evaluable");
+            }
+            const field_name = assignment.target.fields[0].name;
+            var field_index: ?usize = null;
+            for (runtime_structure.fields, 0..) |field, index| if (std.mem.eql(u8, field.name, field_name)) {
+                field_index = index;
+                break;
+            };
+            const index = field_index orelse return error.InvalidSource;
+            const value = try evaluateExpression(self, evaluation, assignment.value.?, runtime_structure.fields[index].type, bindings.items);
+            const fields = try self.allocator.dupe(Constant, result.fields);
+            fields[index] = value;
+            result.fields = fields;
+            for (bindings.items) |*binding| {
+                if (std.mem.eql(u8, binding.name, "self")) binding.value = result;
+            }
+        },
+        else => return self.fail(statement.position(), "static initializer constructor is not compile-time evaluable"),
+    };
+    return result;
+}
+
+fn evaluateAggregateInitializer(
+    self: anytype,
+    evaluation: *Evaluation,
+    structure_index: usize,
+    declaration: Ast.Structure,
+    call: Ast.Expression.Call,
+    locals: []const Local,
+) EvaluateError!Constant {
+    if (call.arguments.len != 0) return self.fail(call.name_position, "compile-time aggregate initializer requires named fields");
+    for (call.named_arguments, 0..) |argument, argument_index| {
+        for (call.named_arguments[0..argument_index]) |previous| {
+            if (std.mem.eql(u8, previous.name, argument.name)) {
+                return self.fail(argument.position, "compile-time aggregate field is provided more than once");
+            }
+        }
+        var known = false;
+        for (declaration.fields) |field| if (std.mem.eql(u8, field.name, argument.name)) {
+            if (!Visibility.memberVisible(self, structure_index, field, argument.position)) {
+                return self.fail(argument.position, "compile-time aggregate field is unavailable here");
+            }
+            known = true;
+            break;
+        };
+        if (!known) return self.fail(argument.position, "compile-time aggregate initializer names an unknown field");
+    }
+    const fields = try self.allocator.alloc(Constant, declaration.fields.len);
+    for (declaration.fields, 0..) |field, index| {
+        var source = field.default;
+        for (call.named_arguments) |argument| {
+            if (std.mem.eql(u8, field.name, argument.name)) source = argument.value;
+        }
+        fields[index] = if (source) |expression|
+            try evaluateExpression(self, evaluation, expression, field.type, locals)
+        else
+            try zeroConstant(self, field.type);
+    }
+    return .{ .type = .structure(structure_index), .fields = fields };
+}
+
+fn initializeStructureFields(
+    self: anytype,
+    evaluation: *Evaluation,
+    structure_index: usize,
+    declaration: Ast.Structure,
+    locals: []const Local,
+) EvaluateError!Constant {
+    const fields = try self.allocator.alloc(Constant, declaration.fields.len);
+    for (declaration.fields, 0..) |field, index| fields[index] = if (field.default) |expression|
+        try evaluateExpression(self, evaluation, expression, field.type, locals)
+    else
+        try zeroConstant(self, field.type);
+    return .{ .type = .structure(structure_index), .fields = fields };
+}
+
+fn mappedArguments(self: anytype, parameters: []const Ast.Parameter, call: Ast.Expression.Call) !?[]const ?*Ast.Expression {
+    if (call.named_arguments.len != 0) return switch (try Arguments.map(self.allocator, parameters, call.arguments, call.named_arguments)) {
+        .arguments => |arguments| arguments,
+        .problem => null,
+    };
+    if (!Support.acceptsArity(parameters, call.arguments.len)) return null;
+    const result = try self.allocator.alloc(?*Ast.Expression, parameters.len);
+    @memset(result, null);
+    for (call.arguments, 0..) |argument, index| result[index] = argument;
+    return result;
+}
+
+fn astStructure(program: Ast.Program, name: []const u8) ?Ast.Structure {
+    for (program.structures) |structure| if (std.mem.eql(u8, structure.name, name)) return structure;
+    return null;
 }
 
 const Callable = struct {

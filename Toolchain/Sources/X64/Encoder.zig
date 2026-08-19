@@ -168,7 +168,9 @@ fn encode(
         while (bytes.items.len % Machine.slot_size != 0) try bytes.append(allocator, 0);
         global_offsets[index] = bytes.items.len;
         try appendInt(allocator, &bytes, u64, global.bits);
-        for (1..global.width) |_| try appendInt(allocator, &bytes, u64, 0);
+        if (global.extra_bits.len + 1 > global.width) return error.InvalidMachineProgram;
+        for (global.extra_bits) |bits| try appendInt(allocator, &bytes, u64, bits);
+        for (global.extra_bits.len + 1..global.width) |_| try appendInt(allocator, &bytes, u64, 0);
     }
     for (global_fixups.items) |fixup| {
         if (fixup.global >= global_offsets.len or fixup.byte_offset >= @as(usize, program.globals[fixup.global].width) * Machine.slot_size) {

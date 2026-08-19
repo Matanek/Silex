@@ -595,7 +595,11 @@ pub const ExternalFunction = struct {
     };
 };
 
-pub const Global = struct { bits: u64, width: u12 = 1 };
+pub const Global = struct {
+    bits: u64,
+    extra_bits: []const u64 = &.{},
+    width: u12 = 1,
+};
 
 pub fn checkedSlot(value: usize) Error!Slot {
     if (value > max_slots) return error.FrameTooLarge;
@@ -618,6 +622,9 @@ pub fn slotOffset(slot: Slot) u16 {
 }
 
 pub fn validate(program: Program) Error!void {
+    for (program.globals) |global| {
+        if (global.width == 0 or global.extra_bits.len + 1 > global.width) return error.InvalidMachineProgram;
+    }
     for (program.functions) |function| {
         if (function.parameter_count > max_register_arguments) return error.TooManyArguments;
         if (function.register_slots.len == 0 and function.float_register_slots.len == 0) {
@@ -678,10 +685,12 @@ pub fn validate(program: Program) Error!void {
                 .global_load => |value| {
                     try requireSpan(function, value.result);
                     if (value.global >= program.globals.len) return error.InvalidMachineProgram;
+                    if (value.result.width != program.globals[value.global].width) return error.InvalidMachineProgram;
                 },
                 .global_store => |value| {
                     try requireSpan(function, value.operand);
                     if (value.global >= program.globals.len) return error.InvalidMachineProgram;
+                    if (value.operand.width != program.globals[value.global].width) return error.InvalidMachineProgram;
                 },
                 .local_address => |value| {
                     try requireSlot(function, value.result);

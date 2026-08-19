@@ -37,6 +37,7 @@ const Inheritance = @import("Inheritance.zig");
 const Interop = @import("Interop.zig");
 const EmbeddedFiles = @import("../EmbeddedFiles.zig");
 const StaticMembers = @import("StaticMembers.zig");
+const StaticInitialization = @import("StaticInitialization.zig");
 const Protocols = @import("Protocols.zig");
 const Conversions = @import("Conversions.zig");
 const GenericSyntax = @import("../Parser/Generics.zig");
@@ -75,6 +76,7 @@ pub const Analyzer = struct {
     anonymous_captures: []?[]const AnonymousCapture = &.{},
     bound_methods: std.ArrayList(Callbacks.BoundMethod) = .empty,
     function_context: ?Ast.Function = null,
+    static_initialization_limit: ?usize = null,
     target: ?Target = null,
     packages: ?Packages.Graph = null,
     io: ?std.Io = null,
@@ -164,6 +166,11 @@ pub const Analyzer = struct {
             try functions.append(self.allocator, source_functions[function_id].?);
         }
         try functions.appendSlice(self.allocator, generated_functions.items);
+        if (try StaticInitialization.analyze(self)) |initializer| {
+            const initializer_id = functions.items.len;
+            try functions.append(self.allocator, initializer);
+            try StaticInitialization.attachToEntries(self, &functions, initializer_id);
+        }
         return .{
             .globals = self.globals,
             .structures = self.structures,
@@ -1306,7 +1313,7 @@ pub const Analyzer = struct {
         if (try EmbeddedFiles.analyze(self, builder, call)) |value| return value;
         if (try Interop.analyzeIntrinsic(self, builder, call)) |value| return value;
         if (call.receiver) |receiver_expression| {
-            if (Collections.isMutation(call.name) and Collections.receiverIsCollection(self.structures, builder, receiver_expression)) {
+            if (Collections.isMutation(call.name) and Collections.receiverIsCollection(self, builder, receiver_expression)) {
                 return try Collections.analyzeMutation(self, builder, call);
             }
             if (try Collections.analyzeCall(self, builder, call)) |value| return value;
@@ -1334,6 +1341,7 @@ pub const Analyzer = struct {
         if (self.resolveStructureIndex(call.name)) |structure_index| {
             return try self.analyzeStructureInitializer(builder, call, structure_index);
         }
+        if (try Collections.analyzeQualifiedStaticCall(self, builder, call)) |handled| return handled.value;
         if (std.mem.endsWith(u8, call.name, ".count") and call.arguments.len == 0) {
             const receiver_name = call.name[0 .. call.name.len - ".count".len];
             if (Support.findBinding(builder.bindings.items, receiver_name)) |binding| {

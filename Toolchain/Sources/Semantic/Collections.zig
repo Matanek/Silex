@@ -7,6 +7,8 @@ const Model = @import("Model.zig");
 const Support = @import("Support.zig");
 const Borrowing = @import("Borrowing.zig");
 const Resources = @import("Resources.zig");
+const StaticMembers = @import("StaticMembers.zig");
+const GenericSyntax = @import("../Parser/Generics.zig");
 
 pub fn isMutation(name: []const u8) bool {
     return std.mem.eql(u8, name, "swap") or std.mem.eql(u8, name, "reverse") or std.mem.eql(u8, name, "replace") or
@@ -15,9 +17,54 @@ pub fn isMutation(name: []const u8) bool {
         std.mem.eql(u8, name, "clear");
 }
 
-pub fn receiverIsCollection(structures: []const Ir.Structure, builder: anytype, expression: *const Ast.Expression) bool {
-    const type_value = inferReceiverType(structures, builder, expression) orelse return false;
-    return collectionForType(structures, type_value) != null;
+pub fn receiverIsCollection(self: anytype, builder: anytype, expression: *const Ast.Expression) bool {
+    if (inferReceiverType(self.structures, builder, expression)) |type_value| {
+        return collectionForType(self.structures, type_value) != null;
+    }
+    if (expression.value == .field_access) {
+        const access = expression.value.field_access;
+        const maybe_owner_name = GenericSyntax.qualifiedName(self.allocator, access.base) catch return false;
+        const owner_name = maybe_owner_name orelse return false;
+        const owner = StaticMembers.ownerIndex(self, owner_name) orelse return false;
+        const field = StaticMembers.find(self, owner, access.name) orelse return false;
+        return collectionForType(self.structures, field.declaration.type) != null;
+    }
+    return false;
+}
+
+pub const QualifiedStaticCall = struct { value: ?Model.TypedValue };
+
+pub fn analyzeQualifiedStaticCall(self: anytype, builder: anytype, call: Ast.Expression.Call) !?QualifiedStaticCall {
+    if (call.receiver != null) return null;
+    const method_separator = std.mem.lastIndexOfScalar(u8, call.name, '.') orelse return null;
+    const receiver_name = call.name[0..method_separator];
+    const field_separator = std.mem.lastIndexOfScalar(u8, receiver_name, '.') orelse return null;
+    const owner_name = receiver_name[0..field_separator];
+    const field_name = receiver_name[field_separator + 1 ..];
+    const operation = call.name[method_separator + 1 ..];
+    if (!isMutation(operation) and !std.mem.eql(u8, operation, "count") and !std.mem.eql(u8, operation, "is_empty")) return null;
+    const owner = StaticMembers.ownerIndex(self, owner_name) orelse return null;
+    const field = StaticMembers.find(self, owner, field_name) orelse return null;
+    const qualified_owner = self.program.structures[owner].name;
+
+    var owner_expression = Ast.Expression{ .position = call.name_position, .value = .{ .identifier = qualified_owner } };
+    var receiver_expression = Ast.Expression{ .position = call.name_position, .value = .{ .field_access = .{
+        .base = &owner_expression,
+        .name_position = call.name_position,
+        .name = field_name,
+    } } };
+    var rewritten = call;
+    rewritten.name = operation;
+    rewritten.receiver = &receiver_expression;
+    const receiver_type = field.declaration.type;
+    if (collectionForType(self.structures, receiver_type) == null) return null;
+    if (isMutation(rewritten.name)) return .{ .value = try analyzeMutation(self, builder, rewritten) };
+    const value = try analyzeCallForType(self, builder, rewritten, receiver_type);
+    if (value == null) {
+        const message = try std.fmt.allocPrint(self.allocator, "unknown collection operation '{s}'", .{rewritten.name});
+        return self.fail(call.name_position, message);
+    }
+    return .{ .value = value };
 }
 
 pub fn analyzeMutation(self: anytype, builder: anytype, call: Ast.Expression.Call) !?Model.TypedValue {
@@ -37,6 +84,21 @@ pub fn analyzeMutation(self: anytype, builder: anytype, call: Ast.Expression.Cal
             source = try self.analyzeExpression(builder, receiver_expression);
             if (collectionForType(self.structures, source.type) == null) return null;
             const access = receiver_expression.value.field_access;
+            if (try GenericSyntax.qualifiedName(self.allocator, access.base)) |owner_name| {
+                if (StaticMembers.ownerIndex(self, owner_name)) |owner| {
+                    const field = StaticMembers.find(self, owner, access.name) orelse
+                        return self.fail(access.name_position, "unknown static field");
+                    if (!field.declaration.mutable) {
+                        return self.fail(access.name_position, "collection mutation requires a var receiver");
+                    }
+                    break :binding .{
+                        .name = "<static field>",
+                        .type = source.type,
+                        .global = field.global,
+                        .mutable = true,
+                    };
+                }
+            }
             if (inferReceiverType(self.structures, builder, access.base)) |base_type| {
                 if (base_type.structureIndex()) |base_index| {
                     if (self.structures[base_index].is_class) ownership = .edge;
@@ -220,6 +282,7 @@ pub fn analyzeMutation(self: anytype, builder: anytype, call: Ast.Expression.Cal
 
 fn storeBinding(self: anytype, builder: anytype, binding: anytype, value: Ir.ValueId) !void {
     if (binding.local) |local| return self.emit(builder, .{ .local_store = .{ .local = local, .operand = value } });
+    if (binding.global) |global| return self.emit(builder, .{ .global_store = .{ .global = global, .operand = value } });
     return self.emit(builder, .{ .reference_store = .{ .reference = binding.reference.?, .operand = value } });
 }
 
@@ -421,7 +484,22 @@ fn analyzeElementReference(self: anytype, builder: anytype, unary: Ast.Expressio
 
 pub fn analyzeCall(self: anytype, builder: anytype, call: Ast.Expression.Call) !?Model.TypedValue {
     const receiver_expression = call.receiver orelse return null;
-    const receiver_type = inferReceiverType(self.structures, builder, receiver_expression) orelse return null;
+    const receiver_type = inferReceiverType(self.structures, builder, receiver_expression) orelse
+        (try staticReceiverType(self, receiver_expression)) orelse return null;
+    return analyzeCallForType(self, builder, call, receiver_type);
+}
+
+fn staticReceiverType(self: anytype, expression: *const Ast.Expression) !?Ast.Type {
+    if (expression.value != .field_access) return null;
+    const access = expression.value.field_access;
+    const owner_name = (try GenericSyntax.qualifiedName(self.allocator, access.base)) orelse return null;
+    const owner = StaticMembers.ownerIndex(self, owner_name) orelse return null;
+    const field = StaticMembers.find(self, owner, access.name) orelse return null;
+    return field.declaration.type;
+}
+
+fn analyzeCallForType(self: anytype, builder: anytype, call: Ast.Expression.Call, receiver_type: Ast.Type) !?Model.TypedValue {
+    const receiver_expression = call.receiver orelse return null;
     const collection = collectionForType(self.structures, receiver_type) orelse {
         if (std.mem.eql(u8, call.name, "indexed")) return self.fail(call.name_position, "indexed() expects an array or list");
         return null;

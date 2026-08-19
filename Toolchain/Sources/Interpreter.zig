@@ -75,7 +75,7 @@ pub fn runCaptureWithBoundaries(
         .allocator = allocator,
         .io = io,
         .boundaries = boundaries,
-        .globals = try Globals.initialize(allocator, program.globals),
+        .globals = try Globals.initialize(allocator, program),
     };
     const result = invokeDepth(allocator, program, function_id, &.{}, 0, &session) catch |err| switch (err) {
         error.RuntimeTerminated => return .{
@@ -124,7 +124,10 @@ pub fn invoke(
     function: Ir.FunctionId,
     arguments: []const Value,
 ) Error!Value {
-    var session: Session = .{ .allocator = allocator };
+    var session: Session = .{
+        .allocator = allocator,
+        .globals = try Globals.initialize(allocator, program),
+    };
     return invokeDepth(allocator, program, function, arguments, 0, &session);
 }
 
@@ -142,7 +145,7 @@ pub fn runFunctionCaptureWithBoundaries(
         .allocator = allocator,
         .io = io,
         .boundaries = boundaries,
-        .globals = try Globals.initialize(allocator, program.globals),
+        .globals = try Globals.initialize(allocator, program),
     };
     _ = invokeDepth(allocator, program, function_id, &.{}, 0, &session) catch |err| switch (err) {
         error.RuntimeTerminated => return .{

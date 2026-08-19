@@ -114,9 +114,57 @@ modifier remains accepted for source compatibility. Nested ordinary structures
 and classes remain constructible unless their own declaration also starts with
 `static`.
 
-A static field initializer is evaluated completely at compile time. It may use
-intrinsic literals, operators, numeric conversions, immutable static fields,
-and functions that the compiler proves compile-time evaluable:
+Silex chooses the initialization strategy from the value, independently of
+whether the field uses `let` or `var`. Statically representable initializers are
+evaluated completely at compile time. They may use intrinsic literals,
+operators, numeric conversions, immutable static fields, functions that the
+compiler proves compile-time evaluable, and similarly proven constructors of
+plain value structures whose fields are themselves compile-time values:
+
+```sx
+struct Vec2 {
+    var x:float
+    var y:float
+
+    init(x:float, y:float) {
+        self.x = x
+        self.y = y
+    }
+}
+
+static struct Waypoints {
+    let first:Vec2 = Vec2(-200.0, 200.0)
+    let second:Vec2 = Vec2(200.0, 200.0)
+}
+```
+
+The constructed value is stored directly in the program's static data. Reading
+`Waypoints.first` copies the value and does not call its constructor at runtime.
+
+An owning dynamic list needs runtime storage, so Silex generates an initializer
+and runs it before `main` or an isolated test entry:
+
+```sx
+static struct Paths {
+    let triangle:Vec2[] = [
+        Vec2(-200.0, 200.0),
+        Vec2(200.0, 200.0),
+        Vec2(0.0, -200.0),
+    ]
+
+    var editable:Vec2[] = [Vec2(0.0, 0.0)]
+}
+```
+
+`let` makes the initialized static field immutable; it does not require the
+value to exist in binary data. `Paths.triangle` can be read, indexed, and
+iterated, but it cannot be reassigned or resized. `var` permits both whole-field
+assignment and mutating list operations such as `Paths.editable.append(...)`.
+
+Runtime static fields initialize once, in declaration order. An initializer may
+read a runtime field declared earlier in that order; reading itself or a later
+runtime field is rejected. Their owned storage remains alive for the program or
+isolated test session.
 
 ```sx
 struct Layout {
@@ -132,9 +180,11 @@ struct Layout {
 ```
 
 Compile-time functions operate only on intrinsic scalar values, immutable
-locals, and other compile-time calls. Initializers cannot read `static var`,
-perform effects, allocate runtime resources, or form dependency cycles. This
-keeps static initialization deterministic and gives it no runtime cost.
+locals, and other compile-time calls. That compile-time path cannot read
+`static var`, perform effects, allocate runtime resources, or form dependency
+cycles. Values that require supported runtime storage, currently owning dynamic
+lists and value structures that contain them, use the ordered runtime path
+described above.
 
 ## Nest a type
 

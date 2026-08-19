@@ -353,7 +353,14 @@ fn encodeForPlatform(allocator: Allocator, program: Machine.Program, entry: Entr
         std.mem.writeInt(u64, code[offset + index * 8 ..][0..8], word, .little);
     };
     if (snapshot_lock_offset) |offset| std.mem.writeInt(u64, code[offset..][0..8], 0, .little);
-    for (program.globals, 0..) |global, index| std.mem.writeInt(u64, code[global_offsets[index]..][0..8], global.bits, .little);
+    for (program.globals, 0..) |global, index| {
+        std.mem.writeInt(u64, code[global_offsets[index]..][0..8], global.bits, .little);
+        if (global.extra_bits.len + 1 > global.width) return error.InvalidMachineProgram;
+        for (global.extra_bits, 1..) |bits, leaf| {
+            const offset = global_offsets[index] + leaf * Machine.slot_size;
+            std.mem.writeInt(u64, code[offset..][0..8], bits, .little);
+        }
+    }
     return .{
         .code = code,
         .function_offsets = offsets,

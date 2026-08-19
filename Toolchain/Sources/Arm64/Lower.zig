@@ -98,6 +98,7 @@ fn lowerInternal(
     const globals = try allocator.alloc(Machine.Global, program.globals.len + @intFromBool(has_mutex));
     for (program.globals, 0..) |global, index| globals[index] = .{
         .bits = global.bits,
+        .extra_bits = global.extra_bits,
         .width = @intCast(try leafCount(program, global.type)),
     };
     if (has_mutex) globals[program.globals.len] = .{ .bits = 0, .width = 8 };

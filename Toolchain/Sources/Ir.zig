@@ -574,7 +574,9 @@ pub const Global = struct {
     name: []const u8,
     type: Type,
     mutable: bool,
+    runtime_initialized: bool = false,
     bits: u64 = 0,
+    extra_bits: []const u64 = &.{},
 };
 
 pub fn writeText(allocator: Allocator, program: Program) Error![]u8 {

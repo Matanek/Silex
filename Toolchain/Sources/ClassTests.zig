@@ -1,6 +1,9 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const Frontend = @import("Frontend.zig");
 const Interpreter = @import("Interpreter.zig");
+const Lower = @import("Arm64/Lower.zig");
+const Runner = @import("Arm64/Runner.zig");
 
 fn run(source: []const u8) ![]const u8 {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
@@ -496,6 +499,10 @@ test "static initializers reject effects mutable dependencies and cycles" {
         "struct Values { static let first:int = Values.second; static let second:int = Values.first } func main() {}",
         "static initializer dependency forms a cycle",
     );
+    try expectCompileError(
+        "struct Value { var number:int; init() { print(1); self.number = 2 } } static struct Values { let current:Value = Value() } func main() {}",
+        "static initializer constructor is not compile-time evaluable",
+    );
 }
 
 test "static members reject instance selection and immutable assignment" {
@@ -547,6 +554,93 @@ test "static structures group constants state methods and ordinary nested types"
     );
     defer std.testing.allocator.free(output);
     try std.testing.expectEqualStrings("480 2 ok 1\n", output);
+}
+
+test "static structure fields preserve compile-time value structures in the interpreter and native backend" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\struct Vec2 {
+        \\    var x:float
+        \\    var y:float
+        \\    init(x:float, y:float) { self.x = x; self.y = y }
+        \\}
+        \\static struct Waypoints {
+        \\    let first:Vec2 = Vec2(-200.0, 200.0)
+        \\    let second:Vec2 = Vec2(200.0, 200.0)
+        \\    let third:Vec2 = Vec2(0.0, -200.0)
+        \\}
+        \\func answer() int {
+        \\    if Waypoints.first.x == -200.0 && Waypoints.second.y == 200.0 && Waypoints.third.y == -200.0 { return 42 }
+        \\    return 0
+        \\}
+        \\func main() { print(Waypoints.first.x, " ", Waypoints.second.x, " ", Waypoints.third.y) }
+    );
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("-200.0 200.0 -200.0\n", result.stdout);
+
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return;
+    var answer: ?usize = null;
+    for (compilation.ir.functions, 0..) |function, index| {
+        if (std.mem.eql(u8, function.name, "answer")) answer = index;
+    }
+    const function = answer orelse return error.TestUnexpectedResult;
+    const reference = try Interpreter.invoke(allocator, compilation.ir, function, &.{});
+    const machine = try Lower.lower(allocator, compilation.ir);
+    const native = try Runner.invoke(allocator, machine, function, &.{});
+    try std.testing.expectEqual(Interpreter.Value{ .integer = 42 }, reference);
+    try std.testing.expectEqual(@as(i64, 42), native.value);
+}
+
+test "static list fields initialize before entry and var lists remain mutable" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\struct Vec2 {
+        \\    var x:float
+        \\    var y:float
+        \\    init(x:float, y:float) { self.x = x; self.y = y }
+        \\}
+        \\static struct Paths {
+        \\    let path:Vec2[] = [Vec2(-200.0, 200.0), Vec2(200.0, 200.0), Vec2(0.0, -200.0)]
+        \\    let saved:Vec2[] = Paths.path
+        \\    var editable:Vec2[] = [Vec2(1.0, 2.0)]
+        \\}
+        \\func main() {
+        \\    assert(Paths.path.count() == 3)
+        \\    assert(Paths.saved.count() == 3)
+        \\    assert(Paths.path[0].x == -200.0)
+        \\    Paths.editable.append(Vec2(3.0, 4.0))
+        \\    assert(Paths.editable.count() == 2)
+        \\    Paths.editable = [Vec2(5.0, 6.0)]
+        \\    assert(Paths.path[2].y == -200.0)
+        \\    assert(Paths.editable[0].x == 5.0)
+        \\}
+    );
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("", result.stdout);
+
+    try expectCompileError(
+        "static struct Paths { let path:int[] = [1] } func main() { Paths.path.append(2) }",
+        "collection mutation requires a var receiver",
+    );
+    try expectCompileError(
+        "static struct Paths { let first:int[] = Paths.second; let second:int[] = [2] } func main() {}",
+        "runtime static initializer can only read runtime fields declared earlier",
+    );
+
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return;
+    var main: ?usize = null;
+    for (compilation.ir.functions, 0..) |function, index| {
+        if (std.mem.eql(u8, function.name, "main")) main = index;
+    }
+    const machine = try Lower.lower(allocator, compilation.ir);
+    const native = try Runner.invoke(allocator, machine, main orelse return error.TestUnexpectedResult, &.{});
+    try std.testing.expectEqual(@import("Arm64/Machine.zig").Status.success, native.status);
 }
 
 test "static containers reject instance features" {
