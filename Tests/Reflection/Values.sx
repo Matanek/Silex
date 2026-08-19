@@ -1,0 +1,63 @@
+enum Easing {
+    constant
+    linear
+    custom(float)
+}
+
+struct Transform {
+    var x:float
+    let visible:bool
+
+    func translate(value:float) {}
+    func reset() {}
+}
+
+class Actor {
+    let label:str
+    private var hidden:int = 0
+
+    func act() {}
+    private func secret() {}
+}
+
+func callback(value:int) bool { return value > 0 }
+
+test "reflect enums structures and functions" {
+    var easing = Easing.constant
+    let enumeration = reflect(easing)
+    assert(enumeration.type == "Easing")
+    assert(enumeration.name == "Easing.constant")
+    assert(enumeration.variants.count() == 3)
+    assert(enumeration.variants[0] == "constant")
+    assert(enumeration.variants[1] == "linear")
+    assert(enumeration.variants[2] == "custom")
+
+    easing = Easing.linear
+    assert(reflect(easing).name == "Easing.linear")
+
+    let transform = Transform(x:1.0, visible:true)
+    let structure = reflect(transform)
+    assert(structure.type == "Transform")
+    assert(structure.fields.count() == 2)
+    assert(structure.fields[0] == "x")
+    assert(structure.fields[1] == "visible")
+    assert(structure.methods.count() == 2)
+    assert(structure.methods[0] == "translate")
+    assert(structure.methods[1] == "reset")
+    assert(reflect(Transform(x:2.0, visible:false).visible).name == "Transform.visible")
+    assert(reflect(Transform(x:2.0, visible:false).visible).type == "bool")
+
+    var actor = Actor(label:"hero")
+    let class_info = reflect(actor)
+    assert(class_info.fields.count() == 1)
+    assert(class_info.fields[0] == "label")
+    assert(class_info.methods.count() == 1)
+    assert(class_info.methods[0] == "act")
+
+    let function = reflect(callback)
+    assert(function.type == "func(int)bool")
+    assert(function.name == "callback")
+    assert(function.parameters.count() == 1)
+    assert(function.parameters[0] == "int")
+    assert(function.return_type == "bool")
+}

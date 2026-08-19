@@ -1484,11 +1484,13 @@ pub const Compiler = struct {
             .call => |*call| {
                 call.owner = self.index.providers[module].owner;
                 call.module = self.index.providers[module].name;
+                call.entry_module = module == self.entry_module;
                 const type_arguments = try self.allocator.alloc(Ast.Type, call.type_arguments.len);
                 for (call.type_arguments, 0..) |type_argument, index| {
                     type_arguments[index] = self.remapType(module, type_map, type_argument);
                 }
                 call.type_arguments = type_arguments;
+                if (call.result_type) |result_type| call.result_type = self.remapType(module, type_map, result_type);
                 for (call.arguments) |argument| try self.rewriteExpression(module, argument, type_map);
                 for (call.named_arguments) |argument| try self.rewriteExpression(module, argument.value, type_map);
                 if (call.receiver == null and std.mem.eql(u8, call.name, "C.function_address") and call.arguments.len == 1 and
@@ -1606,6 +1608,7 @@ pub const Compiler = struct {
                 }
                 if (call.receiver == null and
                     (std.mem.eql(u8, call.name, "embed_text") or std.mem.eql(u8, call.name, "embed_bytes"))) return;
+                if (call.receiver == null and std.mem.eql(u8, call.name, "reflect")) return;
                 if (call.receiver == null and std.mem.eql(u8, call.name, "map_error")) {
                     if (call.arguments.len == 2 and call.arguments[1].value == .identifier) {
                         try self.qualifyFunctionReference(module, &call.arguments[1].value.identifier);

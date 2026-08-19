@@ -101,6 +101,7 @@ fn parseCondition(self: anytype) !Ast.Condition {
     const name = self.current.lexeme;
     const name_position = self.current.position;
     if (std.mem.eql(u8, name, "map_error")) return self.failAt(name_position, "'map_error' is a reserved intrinsic function name");
+    if (std.mem.eql(u8, name, "reflect")) return self.failAt(name_position, "'reflect' is a reserved intrinsic function name");
     if (std.mem.eql(u8, name, "embed_text")) return self.failAt(name_position, "'embed_text' is a reserved intrinsic function name");
     if (std.mem.eql(u8, name, "embed_bytes")) return self.failAt(name_position, "'embed_bytes' is a reserved intrinsic function name");
     try self.advance();

@@ -61,6 +61,22 @@ test "use the first payload-free enum variant as an intrinsic field value" {
     try std.testing.expectEqualStrings("true\n", result.stdout);
 }
 
+test "use 'in' contextually as an enum variant and member" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\enum Easing { in; out }
+        \\func describe(value:Easing) str {
+        \\    return match value { in => "in"; out => "out" }
+        \\}
+        \\func main() { print(describe(Easing.in)) }
+    );
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("in\n", result.stdout);
+}
+
 test "diagnose invalid associated enum construction" {
     try expectCompileError(
         "enum Choice { empty; value(int) } func main() { Choice.empty(1) }",

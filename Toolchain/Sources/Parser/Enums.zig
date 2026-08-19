@@ -30,7 +30,9 @@ pub fn parse(parser: anytype, is_public: bool, is_internal: bool, is_local: bool
     try parser.expect(.left_brace, "expected '{' after enum name");
     var variants: std.ArrayList(Ast.EnumVariant) = .empty;
     while (parser.current.tag != .right_brace and parser.current.tag != .end) {
-        if (parser.current.tag != .identifier) return parser.fail("expected enum variant name");
+        if (parser.current.tag != .identifier and parser.current.tag != .keyword_in) {
+            return parser.fail("expected enum variant name");
+        }
         const variant_name = parser.current.lexeme;
         const variant_position = parser.current.position;
         try parser.advance();

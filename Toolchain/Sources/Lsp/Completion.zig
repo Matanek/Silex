@@ -1252,6 +1252,10 @@ fn appendMembers(
 ) !void {
     const receiver = context.receiver orelse return;
     const trimmed_receiver = std.mem.trim(u8, receiver, " \t\r\n");
+    if (try appendReflectionMembers(allocator, candidates, source, program, cursor, context, trimmed_receiver)) return;
+    if (reflectionInitializer(allocator, source, cursor, trimmed_receiver)) |initializer| {
+        if (try appendReflectionMembers(allocator, candidates, source, program, cursor, context, initializer)) return;
+    }
     if (try appendIntrinsicResultMembers(allocator, candidates, context, trimmed_receiver)) return;
     if (findEnum(program, trimmed_receiver)) |enumeration| {
         for (enumeration.variants) |variant| try appendCandidate(allocator, candidates, context, .{
@@ -1370,6 +1374,111 @@ fn appendIntrinsicResultMembers(
     return true;
 }
 
+fn appendReflectionMembers(
+    allocator: Allocator,
+    candidates: *std.ArrayList(Candidate),
+    source: []const u8,
+    program: Ast.Program,
+    cursor: usize,
+    context: Context,
+    receiver: []const u8,
+) !bool {
+    if (!std.mem.startsWith(u8, receiver, "reflect(") or receiver.len <= "reflect()".len or receiver[receiver.len - 1] != ')') {
+        return false;
+    }
+    const operand = std.mem.trim(u8, receiver["reflect(".len .. receiver.len - 1], " \t\r\n");
+    if (operand.len == 0) return false;
+    try appendReflectionMember(allocator, candidates, context, "type", "type:str");
+    if (reflectionSelectsMember(operand)) {
+        try appendReflectionMember(allocator, candidates, context, "name", "name:str");
+    }
+    const type_name = resolveReceiverType(allocator, source, program, cursor, operand) orelse return true;
+    if (findEnum(program, nominalReceiverName(type_name)) != null) {
+        try appendReflectionMember(allocator, candidates, context, "name", "name:str");
+        try appendReflectionMember(allocator, candidates, context, "variants", "variants:str[]");
+        return true;
+    }
+    if (std.mem.startsWith(u8, type_name, "func(")) {
+        if (reflectionNamesFunction(program, operand)) {
+            try appendReflectionMember(allocator, candidates, context, "name", "name:str");
+        }
+        try appendReflectionMember(allocator, candidates, context, "parameters", "parameters:str[]");
+        try appendReflectionMember(allocator, candidates, context, "return_type", "return_type:str");
+        return true;
+    }
+    if (findStructure(program, nominalReceiverName(type_name))) |structure| {
+        if (!structure.is_tuple and !structure.is_protocol and structure.collection == null) {
+            try appendReflectionMember(allocator, candidates, context, "name", "name:str");
+            try appendReflectionMember(allocator, candidates, context, "fields", "fields:str[]");
+            try appendReflectionMember(allocator, candidates, context, "methods", "methods:str[]");
+        }
+    }
+    return true;
+}
+
+fn reflectionNamesFunction(program: Ast.Program, operand: []const u8) bool {
+    for (program.functions) |function| {
+        if (function.is_anonymous) continue;
+        if (std.mem.eql(u8, function.name, operand)) return true;
+        if (function.name.len > operand.len and std.mem.endsWith(u8, function.name, operand) and
+            function.name[function.name.len - operand.len - 1] == '.') return true;
+    }
+    return false;
+}
+
+fn reflectionSelectsMember(operand: []const u8) bool {
+    const dot = std.mem.lastIndexOfScalar(u8, operand, '.') orelse return false;
+    if (dot + 1 >= operand.len) return false;
+    const first = operand[dot + 1];
+    return std.ascii.isAlphabetic(first) or first == '_';
+}
+
+fn appendReflectionMember(
+    allocator: Allocator,
+    candidates: *std.ArrayList(Candidate),
+    context: Context,
+    label: []const u8,
+    detail: []const u8,
+) !void {
+    try appendCandidate(allocator, candidates, context, .{
+        .label = label,
+        .kind = CompletionKind.field,
+        .detail = detail,
+    }, memberFieldPriority, false);
+}
+
+fn reflectionInitializer(
+    allocator: Allocator,
+    source: []const u8,
+    cursor: usize,
+    name: []const u8,
+) ?[]const u8 {
+    if (name.len == 0 or std.mem.indexOfAny(u8, name, ".()[]") != null) return null;
+    const tokens = tokensUntil(allocator, source, cursor) catch return null;
+    var result: ?[]const u8 = null;
+    var index: usize = 0;
+    while (index + 4 < tokens.len) : (index += 1) {
+        if (tokens[index].tag != .keyword_let and tokens[index].tag != .keyword_var) continue;
+        if (tokens[index + 1].tag != .identifier or !std.mem.eql(u8, tokens[index + 1].lexeme, name)) continue;
+        var equal = index + 2;
+        while (equal < tokens.len and tokens[equal].tag != .equal) : (equal += 1) {
+            if (tokens[equal].tag == .semicolon or tokens[equal].tag == .right_brace) break;
+        }
+        if (equal + 2 >= tokens.len or tokens[equal].tag != .equal or
+            tokens[equal + 1].tag != .identifier or !std.mem.eql(u8, tokens[equal + 1].lexeme, "reflect") or
+            tokens[equal + 2].tag != .left_parenthesis) continue;
+        var depth: usize = 1;
+        var end = equal + 3;
+        while (end < tokens.len and depth != 0) : (end += 1) switch (tokens[end].tag) {
+            .left_parenthesis => depth += 1,
+            .right_parenthesis => depth -|= 1,
+            else => {},
+        };
+        if (depth == 0) result = source[tokens[equal + 1].start..tokens[end - 1].end];
+    }
+    return result;
+}
+
 fn resultArguments(receiver: []const u8) ?ResultArguments {
     if (!std.mem.startsWith(u8, receiver, "Result<") or receiver.len <= "Result<>".len or
         receiver[receiver.len - 1] != '>') return null;
@@ -1439,6 +1548,7 @@ fn appendExpressionSymbols(
     expected_type: ?ExpectedType,
 ) !void {
     try appendEmbeddedFileIntrinsics(allocator, candidates, context, expected_type);
+    try appendReflectionIntrinsic(allocator, candidates, context);
     if (matchesExpectedType(expected_type, "Result")) try appendCandidate(
         allocator,
         candidates,
@@ -1567,6 +1677,18 @@ fn appendEmbeddedFileIntrinsics(
         .kind = CompletionKind.function,
         .detail = "embed_bytes(file:str) uint8[]",
     }, typedPriority(18, expected_type, "uint8[]"), true);
+}
+
+fn appendReflectionIntrinsic(
+    allocator: Allocator,
+    candidates: *std.ArrayList(Candidate),
+    context: Context,
+) !void {
+    try appendCandidate(allocator, candidates, context, .{
+        .label = "reflect",
+        .kind = CompletionKind.function,
+        .detail = "reflect(value) reflection metadata",
+    }, 18, true);
 }
 
 fn appendStatementKeywords(allocator: Allocator, candidates: *std.ArrayList(Candidate), context: Context) !void {
@@ -1868,7 +1990,7 @@ fn visibleLocals(allocator: Allocator, source: []const u8, program: Ast.Program,
                 if (!completed and lineAtOffset(source, cursor) <= declaration_line) continue;
                 try locals.append(allocator, .{
                     .name = name,
-                    .type_name = inferDeclarationType(source, tokens[index..end]),
+                    .type_name = inferDeclarationType(source, program, tokens[index..end]),
                     .depth = depth,
                 });
             },
@@ -2204,7 +2326,7 @@ fn tryCallErrorType(program: Ast.Program, function_name: []const u8) ?[]const u8
     return result;
 }
 
-fn inferDeclarationType(source: []const u8, tokens: []const Token) ?[]const u8 {
+fn inferDeclarationType(source: []const u8, program: Ast.Program, tokens: []const Token) ?[]const u8 {
     for (tokens, 0..) |token, index| {
         if (token.tag == .colon and index + 1 < tokens.len) {
             var end = tokens.len;
@@ -2227,7 +2349,12 @@ fn inferDeclarationType(source: []const u8, tokens: []const Token) ?[]const u8 {
                 while (end + 2 < tokens.len and tokens[end + 1].tag == .dot and tokens[end + 2].tag == .identifier) {
                     end += 2;
                 }
-                if (end + 1 >= tokens.len or tokens[end + 1].tag != .left_parenthesis) break :qualified_initializer null;
+                if (end + 1 >= tokens.len or tokens[end + 1].tag != .left_parenthesis) {
+                    if (end < index + 3) break :qualified_initializer null;
+                    const owner = source[value.start..tokens[end - 2].end];
+                    if (findEnum(program, owner) != null) break :qualified_initializer owner;
+                    break :qualified_initializer null;
+                }
                 break :qualified_initializer source[value.start..tokens[end].end];
             },
             else => null,
@@ -3366,17 +3493,20 @@ test "complete local types in explicit cascade method arguments" {
     try std.testing.expect(!contains(items, "if"));
 }
 
-test "complete empty enum variants as values and payload variants as calls" {
+test "complete contextual and ordinary enum variants according to their payload" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const source =
-        \\enum State { ready; value(int) }
+        \\enum State { in; ready; value(int) }
         \\func main() { let state = State. }
     ;
     const cursor = std.mem.indexOf(u8, source, "State.").? + "State.".len;
     const items = try itemsAt(arena.allocator(), source, cursor, .trigger_character);
+    const easing_in = items[indexOf(items, "in").?];
     const ready = items[indexOf(items, "ready").?];
     const value = items[indexOf(items, "value").?];
+    try std.testing.expectEqualStrings("in", easing_in.insertText.?);
+    try std.testing.expect(easing_in.insertTextFormat == null);
     try std.testing.expectEqualStrings("ready", ready.insertText.?);
     try std.testing.expect(ready.insertTextFormat == null);
     try std.testing.expectEqualStrings("value($0)", value.insertText.?);
@@ -4316,6 +4446,76 @@ test "complete embedded file intrinsics in expressions" {
     const items = try itemsAt(arena.allocator(), source, cursor, .invoked);
     try std.testing.expect(contains(items, "embed_text"));
     try std.testing.expect(contains(items, "embed_bytes"));
+}
+
+test "complete reflect and category-specific reflection members" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const expression_source = "func main() { let value = ref }";
+    const expression_cursor = std.mem.indexOf(u8, expression_source, "ref").? + "ref".len;
+    const expressions = try itemsAt(allocator, expression_source, expression_cursor, .invoked);
+    try std.testing.expect(contains(expressions, "reflect"));
+
+    const enum_source =
+        \\enum Easing { constant; linear }
+        \\func main() {
+        \\    var easing = Easing.constant
+        \\    print(reflect(easing).)
+        \\}
+    ;
+    const enum_cursor = std.mem.indexOf(u8, enum_source, "reflect(easing).").? + "reflect(easing).".len;
+    const enum_items = try itemsAt(allocator, enum_source, enum_cursor, .trigger_character);
+    try std.testing.expectEqual(@as(usize, 3), enum_items.len);
+    try std.testing.expect(contains(enum_items, "type"));
+    try std.testing.expect(contains(enum_items, "name"));
+    try std.testing.expect(contains(enum_items, "variants"));
+
+    const bound_source =
+        \\enum Easing { constant; linear }
+        \\func main() {
+        \\    var easing = Easing.constant
+        \\    let metadata = reflect(easing)
+        \\    print(metadata.)
+        \\}
+    ;
+    const bound_cursor = std.mem.indexOf(u8, bound_source, "metadata.").? + "metadata.".len;
+    const bound_items = try itemsAt(allocator, bound_source, bound_cursor, .trigger_character);
+    try std.testing.expectEqual(@as(usize, 3), bound_items.len);
+    try std.testing.expect(contains(bound_items, "type"));
+    try std.testing.expect(contains(bound_items, "name"));
+    try std.testing.expect(contains(bound_items, "variants"));
+
+    const structure_source =
+        \\struct Point { let x:float; func reset() {} }
+        \\func main() {
+        \\    let point = Point(x:1.0)
+        \\    print(reflect(point).)
+        \\}
+    ;
+    const structure_cursor = std.mem.indexOf(u8, structure_source, "reflect(point).").? + "reflect(point).".len;
+    const structure_items = try itemsAt(allocator, structure_source, structure_cursor, .trigger_character);
+    try std.testing.expectEqual(@as(usize, 4), structure_items.len);
+    try std.testing.expect(contains(structure_items, "type"));
+    try std.testing.expect(contains(structure_items, "name"));
+    try std.testing.expect(contains(structure_items, "fields"));
+    try std.testing.expect(contains(structure_items, "methods"));
+
+    const selected_field_source =
+        \\struct Foo { let name:str = "Foo" }
+        \\func main() { print(reflect(Foo().name).) }
+    ;
+    const selected_field_cursor = std.mem.indexOf(u8, selected_field_source, "reflect(Foo().name).").? + "reflect(Foo().name).".len;
+    const selected_field_items = try itemsAt(allocator, selected_field_source, selected_field_cursor, .trigger_character);
+    try std.testing.expectEqual(@as(usize, 2), selected_field_items.len);
+    try std.testing.expect(contains(selected_field_items, "type"));
+    try std.testing.expect(contains(selected_field_items, "name"));
+
+    const computed_scalar_source = "func main() { print(reflect(1 + 2).) }";
+    const computed_scalar_cursor = std.mem.indexOf(u8, computed_scalar_source, "reflect(1 + 2).").? + "reflect(1 + 2).".len;
+    const computed_scalar_items = try itemsAt(allocator, computed_scalar_source, computed_scalar_cursor, .trigger_character);
+    try std.testing.expectEqual(@as(usize, 1), computed_scalar_items.len);
+    try std.testing.expect(contains(computed_scalar_items, "type"));
 }
 
 test "deduplicate overloads by labels while preserving distinct call shapes" {

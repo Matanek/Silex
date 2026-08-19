@@ -163,6 +163,26 @@ fn internPlaceholder(
     return type_value;
 }
 
+pub fn internReflectionPlaceholder(self: anytype, position: Source.Position) !Ast.Type {
+    const name = try std.fmt.allocPrint(
+        self.allocator,
+        "$reflection.literal.{d}.{d}",
+        .{ position.file, self.tuple_literal_count },
+    );
+    self.tuple_literal_count += 1;
+    const type_value = try self.internTypeName(name);
+    try self.nested_structures.append(self.allocator, .{
+        .position = position,
+        .name_position = position,
+        .name = name,
+        .fields = &.{},
+        .is_tuple = true,
+        .tuple_named = true,
+        .tuple_placeholder = true,
+    });
+    return type_value;
+}
+
 fn internType(self: anytype, position: Source.Position, named: bool, fields: []const Ast.StructureField) !Ast.Type {
     var name = try self.allocator.dupe(u8, "(");
     for (fields, 0..) |field, index| {

@@ -1735,6 +1735,7 @@ test {
     _ = @import("Numeric.zig");
     _ = @import("OptionalTests.zig");
     _ = @import("ResultTests.zig");
+    _ = @import("ReflectionTests.zig");
     _ = @import("TryTests.zig");
     _ = @import("TypedResourceTests.zig");
     _ = @import("TestBlockTests.zig");

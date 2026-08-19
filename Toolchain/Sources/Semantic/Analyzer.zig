@@ -36,6 +36,7 @@ const Declarations = @import("Declarations.zig");
 const Inheritance = @import("Inheritance.zig");
 const Interop = @import("Interop.zig");
 const EmbeddedFiles = @import("../EmbeddedFiles.zig");
+const Reflection = @import("Reflection.zig");
 const StaticMembers = @import("StaticMembers.zig");
 const StaticInitialization = @import("StaticInitialization.zig");
 const Protocols = @import("Protocols.zig");
@@ -1309,6 +1310,7 @@ pub const Analyzer = struct {
 
     pub fn analyzeCall(self: *Analyzer, builder: *FunctionBuilder, call: Ast.Expression.Call) AnalyzeError!?TypedValue {
         if (try Callbacks.call(self, builder, call)) |result| return result.value;
+        if (call.receiver == null and std.mem.eql(u8, call.name, "reflect")) return try Reflection.analyze(self, builder, call);
         if (call.receiver == null and std.mem.eql(u8, call.name, "map_error")) return try MapError.analyze(self, builder, call);
         if (try EmbeddedFiles.analyze(self, builder, call)) |value| return value;
         if (try Interop.analyzeIntrinsic(self, builder, call)) |value| return value;
@@ -1659,7 +1661,7 @@ pub const Analyzer = struct {
         return .{ .type = .bool, .value = result };
     }
 
-    fn emitString(self: *Analyzer, builder: *FunctionBuilder, value: []const u8) AnalyzeError!TypedValue {
+    pub fn emitString(self: *Analyzer, builder: *FunctionBuilder, value: []const u8) AnalyzeError!TypedValue {
         const result = try self.newValue(builder, .str);
         try self.emit(builder, .{ .constant_str = .{ .result = result, .value = value } });
         return .{ .type = .str, .value = result };

@@ -234,6 +234,7 @@ pub const Parser = struct {
         const name_position = self.current.position;
         if (std.mem.eql(u8, source_name, "Result")) return self.failAt(name_position, "'Result' is a reserved intrinsic type name");
         if (std.mem.eql(u8, source_name, "map_error")) return self.failAt(name_position, "'map_error' is a reserved intrinsic function name");
+        if (std.mem.eql(u8, source_name, "reflect")) return self.failAt(name_position, "'reflect' is a reserved intrinsic function name");
         if (std.mem.eql(u8, source_name, "embed_text")) return self.failAt(name_position, "'embed_text' is a reserved intrinsic function name");
         if (std.mem.eql(u8, source_name, "embed_bytes")) return self.failAt(name_position, "'embed_bytes' is a reserved intrinsic function name");
         try self.advance();
@@ -504,6 +505,7 @@ pub const Parser = struct {
         const name_position = self.current.position;
         if (std.mem.eql(u8, name, "_")) return self.failAt(name_position, "'_' is reserved for ignored match payloads");
         if (std.mem.eql(u8, name, "map_error")) return self.failAt(name_position, "'map_error' is a reserved intrinsic function name");
+        if (std.mem.eql(u8, name, "reflect")) return self.failAt(name_position, "'reflect' is a reserved intrinsic function name");
         if (std.mem.eql(u8, name, "embed_text")) return self.failAt(name_position, "'embed_text' is a reserved intrinsic function name");
         if (std.mem.eql(u8, name, "embed_bytes")) return self.failAt(name_position, "'embed_bytes' is a reserved intrinsic function name");
         try self.advance();
@@ -866,7 +868,7 @@ pub const Parser = struct {
             if (self.current.tag == .dot or self.current.tag == .question_dot) {
                 const safe = self.current.tag == .question_dot;
                 try self.advance();
-                if (self.current.tag != .identifier and self.current.tag != .keyword_copy and self.current.tag != .keyword_match) return self.fail(if (safe)
+                if (self.current.tag != .identifier and self.current.tag != .keyword_copy and self.current.tag != .keyword_in and self.current.tag != .keyword_match) return self.fail(if (safe)
                     "expected member name after '?.'"
                 else
                     "expected member name after '.'");
@@ -1026,6 +1028,10 @@ pub const Parser = struct {
             }
         }
         try self.expect(.right_parenthesis, "expected ')' after arguments");
+        const result_type = if (receiver == null and std.mem.eql(u8, name.lexeme, "reflect")) reflection: {
+            _ = try Collections.internDynamicType(self, name.position, .str);
+            break :reflection try Tuples.internReflectionPlaceholder(self, name.position);
+        } else null;
         return self.newExpression(.{
             .position = name.position,
             .value = .{ .call = .{
@@ -1036,6 +1042,7 @@ pub const Parser = struct {
                 .arguments = try arguments.toOwnedSlice(self.allocator),
                 .named_arguments = try named_arguments.toOwnedSlice(self.allocator),
                 .type_arguments = type_arguments,
+                .result_type = result_type,
             } },
         });
     }

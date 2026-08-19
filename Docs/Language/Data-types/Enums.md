@@ -13,6 +13,10 @@ let pending = Connection.waiting
 let active = Connection.connected("server")
 ```
 
+The iteration keyword `in` is contextual in enum declarations, variant access,
+and `match` branches, so intent-revealing values such as `Easing.in` remain
+available.
+
 A variant without associated values is a value and does not need parentheses.
 The historical `Connection.waiting()` form remains accepted. A variant with
 associated values remains a construction and requires parentheses.

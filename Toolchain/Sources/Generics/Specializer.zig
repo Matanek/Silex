@@ -648,6 +648,9 @@ pub const Specializer = struct {
                     copy.type_arguments = &.{};
                     break :value .{ .call = copy };
                 }
+                if (copy.receiver == null and std.mem.eql(u8, copy.name, "reflect")) {
+                    break :value .{ .call = copy };
+                }
                 if (copy.receiver != null) {
                     _ = try InjectedSystems.rewriteRegistration(self, &copy, locals.items);
                     if (try self.specializeMethodCall(copy, locals.items)) |name| {

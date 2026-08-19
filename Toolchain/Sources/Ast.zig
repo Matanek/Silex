@@ -79,6 +79,7 @@ pub const Expression = struct {
         result_type: ?Type = null,
         owner: usize = 0,
         module: []const u8 = "",
+        entry_module: bool = false,
     };
 
     pub const Cascade = struct {

@@ -50,11 +50,15 @@ constraints.
 | Critical section | `mutex { ... }` |
 | Cascade method | `value..update()` |
 | Bound instance method | `receiver.method` |
+| Value reflection | `reflect(value)` |
 | Cascade field assignment | `value..field = replacement` |
 
 `match` remains a control-flow keyword in expression position, but it is
 contextual after `func`, `.`, `?.`, or `..`. It can therefore name and select a
 method naturally: `func match(...)` and `pattern.match(text)`.
+
+`in` remains the iteration keyword, but it is contextual as an enum variant
+name, in a `match` branch, and after `.` or `?.`: `Easing.in`.
 
 The type suffixes `?`, `[]`, and `[N]` apply from left to right, so `Type?[]`
 and `Type[]?` are distinct types.

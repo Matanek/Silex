@@ -279,7 +279,7 @@ test "server preserves prefix ranking in the response consumed by Zed" {
         \\    l<|>
         \\}
     );
-    try Support.expectExactLabels(&.{ "let", "Result" }, items);
+    try Support.expectExactLabels(&.{ "let", "Result", "reflect" }, items);
     try Support.expectFirst("let", items);
     try Support.expectNoDuplicates(items);
 }

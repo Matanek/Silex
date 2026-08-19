@@ -14,7 +14,9 @@ pub fn parse(parser: anytype) !*Ast.Expression {
     var imperative: ?bool = null;
     while (parser.current.tag != .right_brace and parser.current.tag != .end) {
         const is_else = parser.current.tag == .keyword_else;
-        if (!is_else and parser.current.tag != .identifier) return parser.fail("expected enum variant or 'else' in match branch");
+        if (!is_else and parser.current.tag != .identifier and parser.current.tag != .keyword_in) {
+            return parser.fail("expected enum variant or 'else' in match branch");
+        }
         const branch_position = parser.current.position;
         const variant = if (is_else) "" else parser.current.lexeme;
         try parser.advance();
