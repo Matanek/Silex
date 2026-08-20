@@ -156,6 +156,11 @@ open Silex document
   derives canonical local, workspace-link, user-link, and installed locations
   from package identities, builds a single-version dependency graph, and
   enforces direct visibility.
+- An exact namespace extension may carry a `suite` installation permission.
+  The registry expands only the package explicitly requested by name and
+  selects independently released members whose parent dependency accepts that
+  exact release. Suite selection adds no package-composition dependency and is
+  never inferred from a wildcard.
 - Module interfaces preserve structured declaration identities (owner, module,
   name and complete parameter signature), the required parameter count that
   defines their effective call signatures, public nominal structures, fields,
@@ -164,9 +169,9 @@ open Silex document
   façade name to these identities without copying declarations or creating
   backend symbols. Transparent type aliases are normalized to the same portable
   type before signatures and IR are built; interfaces retain only their visible
-  source name and canonical target. `package` visibility is checked against package
-  identity and the declaring package's authenticated `friends` grants, while
-  `local` is checked against preserved source-file provenance;
+  source name and canonical target. `package` visibility is checked against
+  package identity and the declaring package's authenticated extension
+  `friend` permission, while `local` is checked against preserved source-file provenance;
   both are removed from public interfaces. Opaque non-public return types remain
   typed without exposing their declarations or members. `public` is checked
   during composition and semantic resolution; none of these visibilities is

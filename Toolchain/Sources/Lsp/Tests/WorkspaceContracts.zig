@@ -157,7 +157,7 @@ test "server completes and navigates package declarations for friend packages" {
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Package.json",
-        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":[\"GFX.Physics\"],\"friends\":[\"GFX.Physics\"]}",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":{\"GFX.Physics\":{\"friend\":true}}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Module/Core.sx",
@@ -215,7 +215,7 @@ test "server completes and navigates authorized umbrella contributions" {
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Package.json",
-        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":[\"GFX.Physics\"],\"catalogs\":[\"GFX.Plugins\"]}",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":{\"GFX.Physics\":{}},\"catalogs\":[\"GFX.Plugins\"]}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Module/Plugins.sx",

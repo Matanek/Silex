@@ -17,8 +17,8 @@ public func start() {
 
 Use `public` for declarations that package consumers may name, `package` for
 implementation shared by the modules of its package and child packages named
-by its manifest's `friends` policy, and `local` for a declaration restricted to
-its source file:
+by an extension entry carrying `friend: true` in its manifest, and `local` for
+a declaration restricted to its source file:
 
 ```sx
 public struct Position {
@@ -41,7 +41,7 @@ class Helper {}
 ```
 
 Packages sharing a namespace prefix do not share `package` visibility unless
-the package owning the declaration explicitly names the child in `friends`. A
+the package owning the declaration gives the child extension `friend: true`. A
 `local` declaration never crosses its exact source-file boundary. Files owned
 by a principal module share `module` declarations without merging lexical
 scopes or import paths. Platform and target declarations still use their

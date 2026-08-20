@@ -24,21 +24,19 @@ pub const PublicationProof = struct {
     repository: []const u8,
     commit: []const u8,
     archive_sha256: []const u8,
-    extensions: []const []const u8,
-    friends: []const []const u8 = &.{},
+    extensions: []const Packages.ExtensionPolicy,
     catalogs: []const []const u8 = &.{},
 };
 
 const Receipt = struct {
-    schema: u8 = 2,
+    schema: u8 = 3,
     name: []const u8,
     version: []const u8,
     repository: []const u8,
     commit: []const u8,
     archive_sha256: []const u8,
     manifest_sha256: []const u8,
-    extensions: []const []const u8,
-    friends: []const []const u8 = &.{},
+    extensions: []const Packages.ExtensionPolicy,
     catalogs: []const []const u8 = &.{},
 };
 
@@ -85,11 +83,8 @@ pub const Manager = struct {
         self.diagnostic = null;
         const package = try self.inspect(source);
         if (proof) |publication| {
-            if (!equalStrings(package.extensions, publication.extensions)) {
+            if (!equalExtensionPolicies(package.extensions, publication.extensions)) {
                 return self.failFmt("package '{s}' extensions do not match its source proof", .{package.name});
-            }
-            if (!equalStrings(package.friends, publication.friends)) {
-                return self.failFmt("package '{s}' friends do not match its source proof", .{package.name});
             }
             if (!equalStrings(package.catalogs, publication.catalogs)) {
                 return self.failFmt("package '{s}' catalogs do not match its source proof", .{package.name});
@@ -157,7 +152,6 @@ pub const Manager = struct {
             .archive_sha256 = proof.archive_sha256,
             .manifest_sha256 = manifest_sha256,
             .extensions = proof.extensions,
-            .friends = proof.friends,
             .catalogs = proof.catalogs,
         }, .{ .whitespace = .indent_2 });
         try Io.Dir.cwd().writeFile(self.io, .{ .sub_path = path, .data = source });
@@ -178,15 +172,14 @@ pub const Manager = struct {
         );
         const manifest_path = try std.fs.path.join(self.allocator, &.{ root, "Package.json" });
         const manifest_sha256 = try fileSha256(self.allocator, self.io, manifest_path);
-        if (receipt.schema != 2 or
+        if (receipt.schema != 3 or
             !std.mem.eql(u8, receipt.name, package.name) or
             !std.mem.eql(u8, receipt.version, version) or
             !std.mem.eql(u8, receipt.repository, proof.repository) or
             !std.mem.eql(u8, receipt.commit, proof.commit) or
             !std.mem.eql(u8, receipt.archive_sha256, proof.archive_sha256) or
             !std.mem.eql(u8, receipt.manifest_sha256, manifest_sha256) or
-            !equalStrings(receipt.extensions, proof.extensions) or
-            !equalStrings(receipt.friends, proof.friends) or
+            !equalExtensionPolicies(receipt.extensions, proof.extensions) or
             !equalStrings(receipt.catalogs, proof.catalogs))
         {
             return self.failFmt("installed package '{s}' does not match its source proof; remove it and reinstall", .{package.name});
@@ -363,6 +356,16 @@ fn equalStrings(left: []const []const u8, right: []const []const u8) bool {
     return true;
 }
 
+fn equalExtensionPolicies(left: []const Packages.ExtensionPolicy, right: []const Packages.ExtensionPolicy) bool {
+    if (left.len != right.len) return false;
+    for (left, right) |left_policy, right_policy| {
+        if (!std.mem.eql(u8, left_policy.name, right_policy.name) or
+            left_policy.friend != right_policy.friend or
+            left_policy.suite != right_policy.suite) return false;
+    }
+    return true;
+}
+
 test "install copies an immutable package without repository state" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -391,7 +394,7 @@ test "install copies an immutable package without repository state" {
     try std.testing.expect(!repeated.installed);
 }
 
-test "published package extension friend and catalog grants require an intact source proof" {
+test "published package extension permissions and catalogs require an intact source proof" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -402,7 +405,7 @@ test "published package extension friend and catalog grants require an intact so
     try temporary.dir.createDirPath(std.testing.io, "App");
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Package.json",
-        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"requires\":{\"silex\":\">=0.38.0 <0.39.0\"},\"extensions\":[\"GFX.UI\"],\"friends\":[\"GFX.UI\"],\"catalogs\":[\"GFX.Plugins\"]}",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"requires\":{\"silex\":\">=0.38.0 <0.39.0\"},\"extensions\":{\"GFX.UI\":{\"friend\":true,\"suite\":true}},\"catalogs\":[\"GFX.Plugins\"]}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX.UI/Package.json",
@@ -423,8 +426,7 @@ test "published package extension friend and catalog grants require an intact so
         .repository = "Matanek/Silex-Lib-GFX",
         .commit = "0123456789abcdef0123456789abcdef01234567",
         .archive_sha256 = digest,
-        .extensions = &.{"GFX.UI"},
-        .friends = &.{"GFX.UI"},
+        .extensions = &.{.{ .name = "GFX.UI", .friend = true, .suite = true }},
         .catalogs = &.{"GFX.Plugins"},
     });
     _ = try manager.installPublished(ui, .macos_arm64, .{
@@ -440,7 +442,7 @@ test "published package extension friend and catalog grants require an intact so
 
     try Io.Dir.cwd().writeFile(std.testing.io, .{
         .sub_path = try std.fs.path.join(allocator, &.{ gfx_result.destination, "Package.json" }),
-        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"requires\":{\"silex\":\">=0.38.0 <0.39.0\"},\"extensions\":[\"GFX.UI\"]}",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"requires\":{\"silex\":\">=0.38.0 <0.39.0\"},\"extensions\":{\"GFX.UI\":{}}}",
     });
     resolver = Packages.Resolver.init(allocator, std.testing.io, packages_root);
     try std.testing.expectError(error.InvalidPackageGraph, resolver.resolve(app));
@@ -452,8 +454,7 @@ test "published package extension friend and catalog grants require an intact so
         .repository = "Matanek/Silex-Lib-GFX",
         .commit = "0123456789abcdef0123456789abcdef01234567",
         .archive_sha256 = digest,
-        .extensions = &.{"GFX.UI"},
-        .friends = &.{"GFX.UI"},
+        .extensions = &.{.{ .name = "GFX.UI", .friend = true, .suite = true }},
         .catalogs = &.{"GFX.Plugins"},
     }));
 }

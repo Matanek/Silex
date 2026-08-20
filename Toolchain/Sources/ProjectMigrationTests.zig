@@ -397,7 +397,7 @@ test "share package declarations across modules without exporting them" {
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Library/Package.json",
-        .data = "{\"name\":\"Library\",\"version\":\"1.0.0\",\"extensions\":[\"Library.Tools\"]}",
+        .data = "{\"name\":\"Library\",\"version\":\"1.0.0\",\"extensions\":{\"Library.Tools\":{}}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Library/Module/Internals.sx",

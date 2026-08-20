@@ -983,7 +983,7 @@ test "qualified packages share namespaces without sharing ownership" {
         try temporary.dir.createDirPath(std.testing.io, module_path);
         const manifest_path = try std.fs.path.join(allocator, &.{ name, "Package.json" });
         const manifest = if (std.mem.eql(u8, name, "Silex"))
-            "{\"name\":\"Silex\",\"version\":\"1.0.0\",\"extensions\":[\"Silex.*\"]}"
+            "{\"name\":\"Silex\",\"version\":\"1.0.0\",\"extensions\":{\"Silex.*\":{}}}"
         else
             try std.fmt.allocPrint(
                 allocator,
@@ -1069,7 +1069,7 @@ test "packages authorize direct namespace extensions hierarchically" {
 
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Package.json",
-        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":[\"GFX.UI\"]}",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":{\"GFX.UI\":{}}}",
     });
     compiler = Compiler.init(allocator, std.testing.io);
     var compilation = try compiler.compile(input);
@@ -1083,7 +1083,7 @@ test "packages authorize direct namespace extensions hierarchically" {
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Package.json",
-        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":[\"GFX.*\"]}",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":{\"GFX.*\":{}}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX.UI.Controls/Package.json",
@@ -1106,7 +1106,7 @@ test "packages authorize direct namespace extensions hierarchically" {
 
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX.UI/Package.json",
-        .data = "{\"name\":\"GFX.UI\",\"version\":\"1.0.0\",\"extensions\":[\"GFX.UI.*\"]}",
+        .data = "{\"name\":\"GFX.UI\",\"version\":\"1.0.0\",\"extensions\":{\"GFX.UI.*\":{}}}",
     });
     compiler = Compiler.init(allocator, std.testing.io);
     compilation = try compiler.compile(input);
@@ -1199,7 +1199,7 @@ test "let exact and wildcard friend packages use package declarations" {
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Package.json",
-        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":[\"GFX.Physics\"]}",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":{\"GFX.Physics\":{}}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Module/Core.sx",
@@ -1244,7 +1244,7 @@ test "let exact and wildcard friend packages use package declarations" {
 
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Package.json",
-        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":[\"GFX.Physics\"],\"friends\":[\"GFX.Physics\"]}",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":{\"GFX.Physics\":{\"friend\":true}}}",
     });
     compiler = Compiler.init(allocator, std.testing.io);
     var compilation = try compiler.compile(input);
@@ -1253,12 +1253,23 @@ test "let exact and wildcard friend packages use package declarations" {
 
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Package.json",
-        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":[\"GFX.*\"],\"friends\":[\"GFX.*\"]}",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":{\"GFX.*\":{\"friend\":true}}}",
     });
     compiler = Compiler.init(allocator, std.testing.io);
     compilation = try compiler.compile(input);
     result = try @import("../Interpreter.zig").runCapture(allocator, compilation.ir);
     try std.testing.expectEqualStrings("84\n", result.stdout);
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Package.json",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":{\"GFX.*\":{\"friend\":true},\"GFX.Physics\":{}}}",
+    });
+    compiler = Compiler.init(allocator, std.testing.io);
+    try std.testing.expectError(error.InvalidSource, compiler.compile(input));
+    try std.testing.expectEqualStrings(
+        "enum 'Increment' is package-visible and unavailable outside package 'GFX'",
+        compiler.diagnostic.?.message,
+    );
 
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Main.sx",
@@ -1287,7 +1298,7 @@ test "compose child-owned reexports into authorized umbrella catalogs" {
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Package.json",
-        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":[\"GFX.Physics\"],\"catalogs\":[\"GFX.Plugins\"]}",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":{\"GFX.Physics\":{}},\"catalogs\":[\"GFX.Plugins\"]}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Module/Plugins.sx",
@@ -1322,7 +1333,7 @@ test "compose child-owned reexports into authorized umbrella catalogs" {
 
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Package.json",
-        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":[\"GFX.Physics\"]}",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":{\"GFX.Physics\":{}}}",
     });
     compiler = Compiler.init(allocator, std.testing.io);
     try std.testing.expectError(error.InvalidSource, compiler.compile(input));
@@ -1333,7 +1344,7 @@ test "compose child-owned reexports into authorized umbrella catalogs" {
 
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Package.json",
-        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":[\"GFX.Physics\"],\"catalogs\":[\"GFX.Plugins\"]}",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":{\"GFX.Physics\":{}},\"catalogs\":[\"GFX.Plugins\"]}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Module/Plugins.sx",

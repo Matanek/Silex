@@ -95,46 +95,58 @@ direct child package:
 {
   "name": "GFX",
   "version": "1.4.1",
-  "extensions": [
-    "GFX.UI"
-  ]
+  "extensions": {
+    "GFX.UI": {}
+  }
 }
 ```
 
 Use `"GFX.*"` to authorize any direct child of `GFX`. The wildcard covers one
 name segment only: it permits `GFX.UI`, but never `GFX.UI.Controls`. Once
 authorized, `GFX.UI` owns its namespace and must independently grant
-`"GFX.UI.Controls"` or `"GFX.UI.*"`. Every qualified package therefore requires
-its immediate parent package in the graph and the authorization of that parent.
-An extension entry cannot skip a level or name a package outside the declaring
-package's namespace. Omit `extensions` or use an empty array to keep the
-namespace closed.
+`"GFX.UI.Controls"` or `"GFX.UI.*"`. An extension entry cannot skip a level or
+name a package outside the declaring package's namespace. Omit `extensions` or
+use an empty object to keep the namespace closed.
 
-An authorized child package does not receive privileged source access merely
-because it extends the namespace. Use `friends` when selected children may also
-access declarations carrying `package` visibility:
+Each extension entry carries its own permissions. `friend` lets the selected
+child access declarations carrying `package` visibility, while `suite` includes
+that exact child when the parent is explicitly installed from the registry:
 
 ```json
 {
   "name": "GFX",
   "version": "1.4.1",
-  "extensions": ["GFX.Physics"],
-  "friends": ["GFX.Physics"]
+  "extensions": {
+    "GFX.Physics": {
+      "friend": true,
+      "suite": true
+    }
+  }
 }
 ```
 
-`"GFX.*"` is valid in `friends` and deliberately grants this access to every
-direct child package, including children published later by the community. It
-does not cover `GFX.Physics.Box2D`; `GFX.Physics` must authorize that next level
-itself. Every friend entry must already be covered by `extensions`, either
-exactly or through its wildcard.
+Permissions default to `false`. A wildcard may carry `friend: true`, deliberately
+granting privileged access to every matching direct child, including children
+published later by the community. `suite: true` is rejected on a wildcard
+because an open name pattern cannot determine a stable installation set. When
+both an exact entry and a wildcard match a child, the exact entry defines its
+permissions.
 
 Friendship grants access from the named child to the declaring parent. It does
 not install or activate the child, replace a dependency, expose `module`,
 `local`, `private`, or `protected` declarations, or make `package` declarations
-public to ordinary consumers. The owner of a wildcard accepts that future
-children can depend on package-visible implementation contracts; those
-children must still declare compatible parent versions.
+public to ordinary consumers. A suite permission does not create a dependency
+from the parent to the child and therefore cannot create a package-composition
+cycle.
+
+`silex install GFX` installs every exact extension carrying `suite: true`. For
+each member, the registry selects the newest tagged release compatible with the
+toolchain whose direct dependency on `GFX` accepts the selected GFX version.
+The extension keeps its own release cycle; publishing a newer compatible
+extension does not require a new GFX release. Suite expansion happens only for
+the package explicitly requested by name. Installing `GFX.Physics`, or meeting
+GFX as an ordinary dependency, does not expand GFX's suite. The member's normal
+dependencies are still installed transitively.
 
 This policy concerns separate package identities. Modules owned directly by
 `GFX`, including a module named `GFX.UI`, remain valid without authorization
@@ -149,8 +161,12 @@ catalogs:
 {
   "name": "GFX",
   "version": "1.4.1",
-  "extensions": ["GFX.*"],
-  "friends": ["GFX.Physics"],
+  "extensions": {
+    "GFX.Physics": {
+      "friend": true,
+      "suite": true
+    }
+  },
   "catalogs": [
     "GFX.Components",
     "GFX.Plugins",
@@ -166,14 +182,13 @@ reexport only declarations that it owns. Every contributed name is checked
 against the umbrella's declarations, child namespaces and other contributions;
 any collision rejects the composition.
 
-`catalogs`, `extensions` and `friends` express independent intentions.
-`extensions` authorizes the child package identity, `friends` grants that child
-access to the parent's `package` declarations, and `catalogs` opens named
-umbrellas to safe public reexports. None of them installs or activates an
-undeclared package.
+Extension authorization, `friend`, `suite`, and `catalogs` express independent
+intentions. The extension key authorizes the child identity, `friend` grants
+privileged source access, `suite` selects an exact child for explicit parent
+installation, and `catalogs` opens named umbrellas to safe public reexports.
 
-For registered packages, extension, friend, and catalog grants come directly from
-`Package.json` in
+For registered packages, extension permissions and catalog grants come directly
+from `Package.json` in
 the selected tagged commit. The installed package keeps a source proof binding
 that manifest to its repository, commit, and checksums. Editing a global
 package manifest does not grant another namespace or privileged package access:

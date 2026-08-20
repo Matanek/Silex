@@ -50,6 +50,7 @@ pub const Release = struct {
     requirement: Packages.SilexRequirement,
     repository: []const u8,
     commit: []const u8,
+    dependencies: []const Packages.ManifestDependency = &.{},
 };
 
 const PackageIndex = struct {
@@ -124,6 +125,35 @@ const PackageIndex = struct {
         );
         return error.InvalidRegistry;
     }
+
+    fn selectSuiteMember(
+        self: PackageIndex,
+        allocator: Allocator,
+        parent: Release,
+        toolchain: Packages.Version,
+        diagnostic: *?[]const u8,
+    ) error{ OutOfMemory, InvalidRegistry }!Release {
+        var selected: ?Release = null;
+        for (self.releases) |release| {
+            if (!release.requirement.accepts(toolchain)) continue;
+            var compatible = false;
+            for (release.dependencies) |dependency| {
+                if (std.mem.eql(u8, dependency.name, parent.name) and dependency.constraint.accepts(parent.version)) {
+                    compatible = true;
+                    break;
+                }
+            }
+            if (!compatible) continue;
+            if (selected == null or release.version.order(selected.?.version) == .gt) selected = release;
+        }
+        if (selected) |release| return release;
+        diagnostic.* = try std.fmt.allocPrint(
+            allocator,
+            "suite member '{s}' has no tagged version compatible with {s}@{d}.{d}.{d} and this Silex toolchain",
+            .{ self.name, parent.name, parent.version.major, parent.version.minor, parent.version.patch },
+        );
+        return error.InvalidRegistry;
+    }
 };
 
 const RawRegistry = struct {
@@ -140,6 +170,7 @@ const RawPackageManifest = struct {
     name: []const u8,
     version: []const u8,
     requires: struct { silex: []const u8 },
+    dependencies: ?std.json.Value = null,
 };
 
 const Acquired = struct {
@@ -200,7 +231,14 @@ pub const Client = struct {
         const package = try self.loadPackageIndex(registry, request.name);
         const release = try package.select(self.allocator, request, toolchain, &self.diagnostic);
         var stack: std.ArrayList([]const u8) = .empty;
-        return self.installRelease(registry, release, toolchain, target, store, &stack);
+        const result = try self.installRelease(registry, release, toolchain, target, store, &stack, null);
+        for (result.package.extensions) |extension| {
+            if (!extension.suite) continue;
+            const member = try self.loadPackageIndex(registry, extension.name);
+            const selected = try member.selectSuiteMember(self.allocator, release, toolchain, &self.diagnostic);
+            _ = try self.installRelease(registry, selected, toolchain, target, store, &stack, release);
+        }
+        return result;
     }
 
     fn installRelease(
@@ -211,6 +249,7 @@ pub const Client = struct {
         target: TargetModule.Target,
         store: *PackageStore.Manager,
         stack: *std.ArrayList([]const u8),
+        suite_parent: ?Release,
     ) anyerror!PackageStore.InstallResult {
         for (stack.items) |name| if (std.mem.eql(u8, name, release.name)) {
             return self.failFmt("package dependency cycle includes '{s}'", .{release.name});
@@ -233,16 +272,25 @@ pub const Client = struct {
         try stack.append(self.allocator, release.name);
         defer _ = stack.pop();
         for (manifest.dependencies) |dependency| {
-            const package = try self.loadPackageIndex(registry, dependency.name);
-            const selected = try package.selectDependency(self.allocator, dependency, toolchain, &self.diagnostic);
-            _ = try self.installRelease(registry, selected, toolchain, target, store, stack);
+            const selected = if (suite_parent) |parent| selected: {
+                if (!std.mem.eql(u8, dependency.name, parent.name)) break :selected null;
+                if (!dependency.constraint.accepts(parent.version)) return self.failFmt(
+                    "suite member '{s}' requires an incompatible version of '{s}'",
+                    .{ release.name, parent.name },
+                );
+                break :selected parent;
+            } else null;
+            const dependency_release = selected orelse dependency: {
+                const package = try self.loadPackageIndex(registry, dependency.name);
+                break :dependency try package.selectDependency(self.allocator, dependency, toolchain, &self.diagnostic);
+            };
+            _ = try self.installRelease(registry, dependency_release, toolchain, target, store, stack, suite_parent);
         }
         return store.installPublished(acquired.source, target, .{
             .repository = release.repository,
             .commit = release.commit,
             .archive_sha256 = acquired.sha256,
             .extensions = manifest.extensions,
-            .friends = manifest.friends,
             .catalogs = manifest.catalogs,
         }) catch |err| switch (err) {
             error.InvalidPackageStore => return self.failFmt(
@@ -284,12 +332,14 @@ pub const Client = struct {
             }
             const requirement = Packages.SilexRequirement.parse(raw.requires.silex) catch
                 return self.failFmt("tag '{s}' has an invalid requires.silex", .{tag});
+            const dependencies = try self.parseReleaseDependencies(tag, raw.dependencies);
             try releases.append(self.allocator, .{
                 .name = name,
                 .version = version,
                 .requirement = requirement,
                 .repository = registration.repository,
                 .commit = try self.allocator.dupe(u8, commit),
+                .dependencies = dependencies,
             });
         }
         return .{
@@ -298,6 +348,32 @@ pub const Client = struct {
             .git_root = git_root,
             .releases = try releases.toOwnedSlice(self.allocator),
         };
+    }
+
+    fn parseReleaseDependencies(
+        self: *Client,
+        tag: []const u8,
+        value: ?std.json.Value,
+    ) ![]const Packages.ManifestDependency {
+        const object = if (value) |dependencies| switch (dependencies) {
+            .object => |object| object,
+            else => return self.failFmt("tag '{s}' has invalid dependencies", .{tag}),
+        } else return &.{};
+        var result: std.ArrayList(Packages.ManifestDependency) = .empty;
+        var iterator = object.iterator();
+        while (iterator.next()) |entry| {
+            if (!Modules.validName(entry.key_ptr.*)) return self.failFmt("tag '{s}' has an invalid dependency identity", .{tag});
+            const text = switch (entry.value_ptr.*) {
+                .string => |text| text,
+                else => return self.failFmt("tag '{s}' has an invalid dependency constraint", .{tag}),
+            };
+            try result.append(self.allocator, .{
+                .name = entry.key_ptr.*,
+                .constraint = Packages.Constraint.parse(text) catch
+                    return self.failFmt("tag '{s}' has an invalid dependency constraint", .{tag}),
+            });
+        }
+        return result.toOwnedSlice(self.allocator);
     }
 
     fn synchronizeRepository(self: *Client, registration: Registration) ![]const u8 {
@@ -541,6 +617,7 @@ test "install tagged package dependencies from registered Git repositories" {
     defer temporary.cleanup();
     try temporary.dir.createDirPath(std.testing.io, "STD/Module");
     try temporary.dir.createDirPath(std.testing.io, "GFX/Module");
+    try temporary.dir.createDirPath(std.testing.io, "GFX.UI/Module");
     try temporary.dir.createDirPath(std.testing.io, "Registry");
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "STD/Package.json",
@@ -549,15 +626,22 @@ test "install tagged package dependencies from registered Git repositories" {
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "STD/Module/Text.sx", .data = "public func value() int { return 1 }" });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Package.json",
-        .data = "{\"name\":\"GFX\",\"version\":\"2.0.0\",\"requires\":{\"silex\":\">=0.38.0 <0.39.0\"},\"extensions\":[\"GFX.UI\"],\"friends\":[\"GFX.UI\"],\"catalogs\":[\"GFX.Plugins\"],\"dependencies\":{\"STD\":\"^1.0.0\"}}",
+        .data = "{\"name\":\"GFX\",\"version\":\"2.0.0\",\"requires\":{\"silex\":\">=0.38.0 <0.39.0\"},\"extensions\":{\"GFX.UI\":{\"friend\":true,\"suite\":true}},\"catalogs\":[\"GFX.Plugins\"],\"dependencies\":{\"STD\":\"^1.0.0\"}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "GFX/Module/Drawing.sx", .data = "public func value() int { return 2 }" });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX.UI/Package.json",
+        .data = "{\"name\":\"GFX.UI\",\"version\":\"1.0.0\",\"requires\":{\"silex\":\">=0.38.0 <0.39.0\"},\"dependencies\":{\"GFX\":\"^2.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "GFX.UI/Module/@Module.sx", .data = "public func value() int { return 3 }" });
     const relative_base = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
     const base = try Io.Dir.cwd().realPathFileAlloc(std.testing.io, relative_base, allocator);
     const std_root = try std.fs.path.join(allocator, &.{ base, "STD" });
     const gfx_root = try std.fs.path.join(allocator, &.{ base, "GFX" });
+    const ui_root = try std.fs.path.join(allocator, &.{ base, "GFX.UI" });
     const std_repository = try std.fs.path.join(allocator, &.{ base, "STD.git" });
     const gfx_repository = try std.fs.path.join(allocator, &.{ base, "GFX.git" });
+    const ui_repository = try std.fs.path.join(allocator, &.{ base, "GFX.UI.git" });
     try testGit(allocator, std_root, &.{ "init", "--quiet", "--initial-branch=main" });
     try testGit(allocator, std_root, &.{ "add", "." });
     try testGit(allocator, std_root, &.{ "-c", "user.name=Silex Test", "-c", "user.email=test@silex.local", "commit", "--quiet", "-m", "STD" });
@@ -568,12 +652,24 @@ test "install tagged package dependencies from registered Git repositories" {
     try testGit(allocator, gfx_root, &.{ "-c", "user.name=Silex Test", "-c", "user.email=test@silex.local", "commit", "--quiet", "-m", "GFX" });
     try testGit(allocator, gfx_root, &.{ "tag", "v2.0.0" });
     try testGit(allocator, base, &.{ "clone", "--quiet", "--bare", "GFX", "GFX.git" });
+    try testGit(allocator, ui_root, &.{ "init", "--quiet", "--initial-branch=main" });
+    try testGit(allocator, ui_root, &.{ "add", "." });
+    try testGit(allocator, ui_root, &.{ "-c", "user.name=Silex Test", "-c", "user.email=test@silex.local", "commit", "--quiet", "-m", "GFX.UI 1" });
+    try testGit(allocator, ui_root, &.{ "tag", "v1.0.0" });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX.UI/Package.json",
+        .data = "{\"name\":\"GFX.UI\",\"version\":\"2.0.0\",\"requires\":{\"silex\":\">=0.38.0 <0.39.0\"},\"dependencies\":{\"GFX\":\"^3.0.0\"}}",
+    });
+    try testGit(allocator, ui_root, &.{ "add", "Package.json" });
+    try testGit(allocator, ui_root, &.{ "-c", "user.name=Silex Test", "-c", "user.email=test@silex.local", "commit", "--quiet", "-m", "GFX.UI 2" });
+    try testGit(allocator, ui_root, &.{ "tag", "v2.0.0" });
+    try testGit(allocator, base, &.{ "clone", "--quiet", "--bare", "GFX.UI", "GFX.UI.git" });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Registry/index.json",
         .data = try std.fmt.allocPrint(
             allocator,
-            "{{\"schema\":2,\"packages\":[{{\"name\":\"GFX\",\"repository\":\"{s}\"}},{{\"name\":\"STD\",\"repository\":\"{s}\"}}]}}",
-            .{ gfx_repository, std_repository },
+            "{{\"schema\":2,\"packages\":[{{\"name\":\"GFX\",\"repository\":\"{s}\"}},{{\"name\":\"GFX.UI\",\"repository\":\"{s}\"}},{{\"name\":\"STD\",\"repository\":\"{s}\"}}]}}",
+            .{ gfx_repository, ui_repository, std_repository },
         ),
     });
 
@@ -594,9 +690,13 @@ test "install tagged package dependencies from registered Git repositories" {
         return err;
     };
     try std.testing.expectEqualStrings("GFX", result.package.name);
-    try std.testing.expectEqualStrings("GFX.UI", result.package.friends[0]);
+    try std.testing.expectEqualStrings("GFX.UI", result.package.extensions[0].name);
+    try std.testing.expect(result.package.extensions[0].friend);
+    try std.testing.expect(result.package.extensions[0].suite);
     try std.testing.expectEqualStrings("GFX.Plugins", result.package.catalogs[0]);
     try std.testing.expect(try pathExists(std.testing.io, try std.fs.path.join(allocator, &.{ store_root, "STD@1.0.0" })));
+    try std.testing.expect(try pathExists(std.testing.io, try std.fs.path.join(allocator, &.{ store_root, "GFX.UI@1.0.0" })));
+    try std.testing.expect(!try pathExists(std.testing.io, try std.fs.path.join(allocator, &.{ store_root, "GFX.UI@2.0.0" })));
     try std.testing.expect(try pathExists(std.testing.io, try std.fs.path.join(allocator, &.{ store_root, "GFX@2.0.0", ".silex", "source.json" })));
 }
 

@@ -108,14 +108,19 @@ pub const Package = struct {
     name: ?[]const u8,
     version: ?Version,
     origin: Origin,
-    extensions: []const []const u8 = &.{},
-    friends: []const []const u8 = &.{},
+    extensions: []const ExtensionPolicy = &.{},
     catalogs: []const []const u8 = &.{},
     root: []const u8,
     module_roots: []const ModuleRoot,
     inactive_modules: []const []const u8,
     dependencies: []const Dependency,
     boundary_providers: []const BoundaryProvider = &.{},
+};
+
+pub const ExtensionPolicy = struct {
+    name: []const u8,
+    friend: bool = false,
+    suite: bool = false,
 };
 
 pub const Origin = enum {
@@ -181,7 +186,8 @@ pub const Graph = struct {
         if (accessor == provider) return true;
         if (accessor >= self.packages.len or provider >= self.packages.len) return false;
         const accessor_name = self.packages[accessor].name orelse return false;
-        return allowsExtension(self.packages[provider].friends, accessor_name);
+        const policy = extensionPolicy(self.packages[provider].extensions, accessor_name) orelse return false;
+        return policy.friend;
     }
 
     pub fn canContributeToCatalog(self: Graph, contributor: usize, catalog_owner: usize, catalog: []const u8) bool {
@@ -257,8 +263,7 @@ pub const ManifestInfo = struct {
     name: []const u8,
     version: Version,
     silex_requirement: SilexRequirement,
-    extensions: []const []const u8,
-    friends: []const []const u8,
+    extensions: []const ExtensionPolicy,
     catalogs: []const []const u8,
     dependencies: []const ManifestDependency,
 };
@@ -288,8 +293,7 @@ const RawManifest = struct {
 const ParsedManifest = struct {
     name: ?[]const u8,
     version: ?Version,
-    extensions: []const []const u8,
-    friends: []const []const u8,
+    extensions: []const ExtensionPolicy,
     catalogs: []const []const u8,
     silex_requirement: ?SilexRequirement,
     dependencies: []const ManifestDependency,
@@ -340,7 +344,6 @@ pub const Resolver = struct {
                 .version = if (root_manifest) |manifest| manifest.version else null,
                 .origin = .project,
                 .extensions = if (root_manifest) |manifest| manifest.extensions else &.{},
-                .friends = if (root_manifest) |manifest| manifest.friends else &.{},
                 .catalogs = if (root_manifest) |manifest| manifest.catalogs else &.{},
                 .root = project_root,
                 .module_roots = roots.active,
@@ -390,7 +393,6 @@ pub const Resolver = struct {
             .version = version,
             .silex_requirement = requirement,
             .extensions = manifest.extensions,
-            .friends = manifest.friends,
             .catalogs = manifest.catalogs,
             .dependencies = manifest.dependencies,
         };
@@ -662,7 +664,6 @@ pub const Resolver = struct {
     ) !ParsedManifest {
         var trusted = manifest;
         trusted.extensions = &.{};
-        trusted.friends = &.{};
         trusted.catalogs = &.{};
         const receipt_path = try std.fs.path.join(self.allocator, &.{ root, ".silex", "source.json" });
         const source = Io.Dir.cwd().readFileAlloc(self.io, receipt_path, self.allocator, .limited(1024 * 1024)) catch |err| switch (err) {
@@ -677,8 +678,7 @@ pub const Resolver = struct {
             commit: []const u8,
             archive_sha256: []const u8,
             manifest_sha256: []const u8,
-            extensions: []const []const u8,
-            friends: []const []const u8 = &.{},
+            extensions: []const ExtensionPolicy,
             catalogs: []const []const u8 = &.{},
         };
         const receipt = std.json.parseFromSliceLeaky(Receipt, self.allocator, source, .{
@@ -692,21 +692,19 @@ pub const Resolver = struct {
         );
         const manifest_path = try std.fs.path.join(self.allocator, &.{ root, "Package.json" });
         const manifest_sha256 = try fileSha256(self.allocator, self.io, manifest_path);
-        if (receipt.schema != 2 or
+        if (receipt.schema != 3 or
             !std.mem.eql(u8, receipt.name, name) or
             !std.mem.eql(u8, receipt.version, version_text) or
             receipt.repository.len == 0 or
             !validObjectId(receipt.commit) or
             !validSha256(receipt.archive_sha256) or
             !std.mem.eql(u8, receipt.manifest_sha256, manifest_sha256) or
-            !equalStrings(receipt.extensions, manifest.extensions) or
-            !equalStrings(receipt.friends, manifest.friends) or
+            !equalExtensionPolicies(receipt.extensions, manifest.extensions) or
             !equalStrings(receipt.catalogs, manifest.catalogs))
         {
             return self.fail("installed package does not match its source proof; remove it and reinstall");
         }
         trusted.extensions = receipt.extensions;
-        trusted.friends = receipt.friends;
         trusted.catalogs = receipt.catalogs;
         return trusted;
     }
@@ -791,7 +789,6 @@ pub const Resolver = struct {
                 .version = version,
                 .origin = origin,
                 .extensions = manifest.extensions,
-                .friends = manifest.friends,
                 .catalogs = manifest.catalogs,
                 .root = root,
                 .module_roots = roots.active,
@@ -924,7 +921,7 @@ pub const Resolver = struct {
                 .{ child, parent_name },
             ));
             const parent = self.builders.items[parent_index].package;
-            if (allowsExtension(parent.extensions, child)) continue;
+            if (extensionPolicy(parent.extensions, child) != null) continue;
             return self.fail(try std.fmt.allocPrint(
                 self.allocator,
                 "package '{s}' does not authorize package '{s}' as a namespace extension",
@@ -1024,57 +1021,52 @@ pub const Resolver = struct {
             null;
         if (raw.name) |name| if (!Modules.validName(name)) return self.fail("invalid package identity");
 
-        var extensions: std.ArrayList([]const u8) = .empty;
-        if (raw.extensions) |value| {
-            const package_name = raw.name orelse return self.fail("an application manifest cannot declare extensions");
-            const array = switch (value) {
-                .array => |array| array,
-                else => return self.fail("extensions must be an array of direct child package names"),
-            };
-            for (array.items) |item| {
-                const extension = switch (item) {
-                    .string => |text| text,
-                    else => return self.fail("an extension grant must be a package name string"),
-                };
-                if (!validExtensionGrant(package_name, extension)) {
-                    return self.fail("an extension grant must name one direct child package or use Parent.*");
-                }
-                try extensions.append(self.allocator, extension);
-            }
-            std.mem.sort([]const u8, extensions.items, {}, stringLessThan);
-            if (extensions.items.len > 1) {
-                for (extensions.items[1..], extensions.items[0 .. extensions.items.len - 1]) |current, previous| {
-                    if (std.mem.eql(u8, current, previous)) return self.fail("extension grants must be unique");
-                }
-            }
+        if (raw.friends != null) {
+            return self.fail("friends moved into extension permissions; set friend inside the matching extensions entry");
         }
 
-        var friends: std.ArrayList([]const u8) = .empty;
-        if (raw.friends) |value| {
-            const package_name = raw.name orelse return self.fail("an application manifest cannot declare friends");
-            const array = switch (value) {
-                .array => |array| array,
-                else => return self.fail("friends must be an array of direct child package names"),
-            };
-            for (array.items) |item| {
-                const friend = switch (item) {
-                    .string => |text| text,
-                    else => return self.fail("a friend grant must be a package name string"),
-                };
-                if (!validExtensionGrant(package_name, friend)) {
-                    return self.fail("a friend grant must name one direct child package or use Parent.*");
-                }
-                if (!allowsExtension(extensions.items, friend)) {
-                    return self.fail("a friend grant must also be authorized by extensions");
-                }
-                try friends.append(self.allocator, friend);
+        var extensions: std.ArrayList(ExtensionPolicy) = .empty;
+        if (raw.extensions) |value| {
+            const package_name = raw.name orelse return self.fail("an application manifest cannot declare extensions");
+            switch (value) {
+                .object => |object| {
+                    var iterator = object.iterator();
+                    while (iterator.next()) |entry| {
+                        const extension = entry.key_ptr.*;
+                        if (!validExtensionGrant(package_name, extension)) {
+                            return self.fail("an extension grant must name one direct child package or use Parent.*");
+                        }
+                        const permissions = switch (entry.value_ptr.*) {
+                            .object => |permissions| permissions,
+                            else => return self.fail("extension permissions must be an object"),
+                        };
+                        var policy: ExtensionPolicy = .{ .name = extension };
+                        var permission_iterator = permissions.iterator();
+                        while (permission_iterator.next()) |permission| {
+                            const enabled = switch (permission.value_ptr.*) {
+                                .bool => |enabled| enabled,
+                                else => return self.fail("extension permissions must be boolean"),
+                            };
+                            if (std.mem.eql(u8, permission.key_ptr.*, "friend")) {
+                                policy.friend = enabled;
+                            } else if (std.mem.eql(u8, permission.key_ptr.*, "suite")) {
+                                policy.suite = enabled;
+                            } else {
+                                return self.fail("an extension accepts only friend and suite permissions");
+                            }
+                        }
+                        if (policy.suite and std.mem.endsWith(u8, extension, ".*")) {
+                            return self.fail("suite permission requires an exact package name; wildcard extensions cannot be installed deterministically");
+                        }
+                        try extensions.append(self.allocator, policy);
+                    }
+                },
+                .array => |array| if (array.items.len != 0) {
+                    return self.fail("extensions must be an object mapping direct child package names to permissions");
+                },
+                else => return self.fail("extensions must be an object mapping direct child package names to permissions"),
             }
-            std.mem.sort([]const u8, friends.items, {}, stringLessThan);
-            if (friends.items.len > 1) {
-                for (friends.items[1..], friends.items[0 .. friends.items.len - 1]) |current, previous| {
-                    if (std.mem.eql(u8, current, previous)) return self.fail("friend grants must be unique");
-                }
-            }
+            std.mem.sort(ExtensionPolicy, extensions.items, {}, extensionPolicyLessThan);
         }
 
         var catalogs: std.ArrayList([]const u8) = .empty;
@@ -1144,7 +1136,6 @@ pub const Resolver = struct {
             .name = raw.name,
             .version = version,
             .extensions = try extensions.toOwnedSlice(self.allocator),
-            .friends = try friends.toOwnedSlice(self.allocator),
             .catalogs = try catalogs.toOwnedSlice(self.allocator),
             .silex_requirement = silex_requirement,
             .dependencies = try dependencies.toOwnedSlice(self.allocator),
@@ -1360,16 +1351,30 @@ pub fn validExtensionGrant(package_name: []const u8, grant: []const u8) bool {
         (Modules.validName(child) and std.mem.indexOfScalar(u8, child, '.') == null);
 }
 
-fn allowsExtension(grants: []const []const u8, child: []const u8) bool {
-    for (grants) |grant| {
-        if (std.mem.eql(u8, grant, child) or std.mem.endsWith(u8, grant, ".*")) return true;
+fn extensionPolicy(policies: []const ExtensionPolicy, child: []const u8) ?ExtensionPolicy {
+    var wildcard: ?ExtensionPolicy = null;
+    for (policies) |policy| {
+        if (std.mem.eql(u8, policy.name, child)) return policy;
+        if (std.mem.endsWith(u8, policy.name, ".*") and
+            child.len > policy.name.len - 1 and
+            std.mem.startsWith(u8, child, policy.name[0 .. policy.name.len - 1])) wildcard = policy;
     }
-    return false;
+    return wildcard;
 }
 
 fn equalStrings(left: []const []const u8, right: []const []const u8) bool {
     if (left.len != right.len) return false;
     for (left, right) |left_value, right_value| if (!std.mem.eql(u8, left_value, right_value)) return false;
+    return true;
+}
+
+fn equalExtensionPolicies(left: []const ExtensionPolicy, right: []const ExtensionPolicy) bool {
+    if (left.len != right.len) return false;
+    for (left, right) |left_policy, right_policy| {
+        if (!std.mem.eql(u8, left_policy.name, right_policy.name) or
+            left_policy.friend != right_policy.friend or
+            left_policy.suite != right_policy.suite) return false;
+    }
     return true;
 }
 
@@ -1472,6 +1477,10 @@ fn stringLessThan(_: void, left: []const u8, right: []const u8) bool {
     return std.mem.lessThan(u8, left, right);
 }
 
+fn extensionPolicyLessThan(_: void, left: ExtensionPolicy, right: ExtensionPolicy) bool {
+    return std.mem.lessThan(u8, left.name, right.name);
+}
+
 fn dependencyLessThan(_: void, left: ManifestDependency, right: ManifestDependency) bool {
     return std.mem.lessThan(u8, left.name, right.name);
 }
@@ -1517,7 +1526,7 @@ test "parse exact and caret stable versions" {
     try std.testing.expectError(error.InvalidVersion, Version.parse("1.2.3-beta"));
 }
 
-test "diagnose invalid package extension grants" {
+test "validate extension permissions and reject wildcard suite members" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -1528,67 +1537,36 @@ test "diagnose invalid package extension grants" {
 
     const cases = [_]struct { source: []const u8, diagnostic: []const u8 }{
         .{
-            .source = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":{}}",
-            .diagnostic = "extensions must be an array of direct child package names",
+            .source = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":[\"GFX.UI\"]}",
+            .diagnostic = "extensions must be an object mapping direct child package names to permissions",
         },
         .{
-            .source = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":[false]}",
-            .diagnostic = "an extension grant must be a package name string",
+            .source = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":{\"GFX.UI\":false}}",
+            .diagnostic = "extension permissions must be an object",
         },
         .{
-            .source = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":[\"GFX.UI.Controls\"]}",
+            .source = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":{\"GFX.UI.Controls\":{}}}",
             .diagnostic = "an extension grant must name one direct child package or use Parent.*",
         },
         .{
-            .source = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":[\"GFX.UI\",\"GFX.UI\"]}",
-            .diagnostic = "extension grants must be unique",
+            .source = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":{\"GFX.UI\":{\"friend\":\"yes\"}}}",
+            .diagnostic = "extension permissions must be boolean",
         },
         .{
-            .source = "{\"extensions\":[]}",
+            .source = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":{\"GFX.UI\":{\"trusted\":true}}}",
+            .diagnostic = "an extension accepts only friend and suite permissions",
+        },
+        .{
+            .source = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":{\"GFX.*\":{\"friend\":true,\"suite\":true}}}",
+            .diagnostic = "suite permission requires an exact package name; wildcard extensions cannot be installed deterministically",
+        },
+        .{
+            .source = "{\"extensions\":{}}",
             .diagnostic = "an application manifest cannot declare extensions",
-        },
-    };
-    for (cases) |case| {
-        try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "GFX/Package.json", .data = case.source });
-        var resolver = Resolver.init(allocator, std.testing.io, null);
-        try std.testing.expectError(error.InvalidPackageGraph, resolver.resolve(root));
-        try std.testing.expectEqualStrings(case.diagnostic, resolver.diagnostic.?);
-    }
-}
-
-test "validate exact and wildcard friend grants" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-    var temporary = std.testing.tmpDir(.{});
-    defer temporary.cleanup();
-    try temporary.dir.createDirPath(std.testing.io, "GFX/Module");
-    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "GFX" });
-
-    const cases = [_]struct { source: []const u8, diagnostic: []const u8 }{
-        .{
-            .source = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":[\"GFX.*\"],\"friends\":{}}",
-            .diagnostic = "friends must be an array of direct child package names",
-        },
-        .{
-            .source = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":[\"GFX.*\"],\"friends\":[false]}",
-            .diagnostic = "a friend grant must be a package name string",
-        },
-        .{
-            .source = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":[\"GFX.*\"],\"friends\":[\"GFX.UI.Controls\"]}",
-            .diagnostic = "a friend grant must name one direct child package or use Parent.*",
-        },
-        .{
-            .source = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":[\"GFX.UI\"],\"friends\":[\"GFX.Physics\"]}",
-            .diagnostic = "a friend grant must also be authorized by extensions",
-        },
-        .{
-            .source = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":[\"GFX.*\"],\"friends\":[\"GFX.UI\",\"GFX.UI\"]}",
-            .diagnostic = "friend grants must be unique",
         },
         .{
             .source = "{\"friends\":[]}",
-            .diagnostic = "an application manifest cannot declare friends",
+            .diagnostic = "friends moved into extension permissions; set friend inside the matching extensions entry",
         },
     };
     for (cases) |case| {
@@ -1600,11 +1578,13 @@ test "validate exact and wildcard friend grants" {
 
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Package.json",
-        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":[\"GFX.*\"],\"friends\":[\"GFX.*\"]}",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":{\"GFX.*\":{\"friend\":true}}}",
     });
     var resolver = Resolver.init(allocator, std.testing.io, null);
     const graph = try resolver.resolve(root);
-    try std.testing.expectEqualStrings("GFX.*", graph.packages[0].friends[0]);
+    try std.testing.expectEqualStrings("GFX.*", graph.packages[0].extensions[0].name);
+    try std.testing.expect(graph.packages[0].extensions[0].friend);
+    try std.testing.expect(!graph.packages[0].extensions[0].suite);
 }
 
 test "validate package-owned umbrella catalogs" {
@@ -2073,7 +2053,7 @@ test "resolve qualified identities literally from an injected global root" {
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Global/Silex@0.1.0/Package.json",
-        .data = "{\"name\":\"Silex\",\"version\":\"0.1.0\",\"requires\":{\"silex\":\">=0.38.0 <0.39.0\"},\"extensions\":[\"Silex.Bootstrap\"]}",
+        .data = "{\"name\":\"Silex\",\"version\":\"0.1.0\",\"requires\":{\"silex\":\">=0.38.0 <0.39.0\"},\"extensions\":{\"Silex.Bootstrap\":{}}}",
     });
     try temporary.dir.createDirPath(std.testing.io, "Global/Silex@0.1.0/.silex");
     const silex_manifest = try std.fs.path.join(allocator, &.{ global, "Silex@0.1.0", "Package.json" });
@@ -2082,7 +2062,7 @@ test "resolve qualified identities literally from an injected global root" {
         .sub_path = "Global/Silex@0.1.0/.silex/source.json",
         .data = try std.fmt.allocPrint(
             allocator,
-            "{{\"schema\":2,\"name\":\"Silex\",\"version\":\"0.1.0\",\"repository\":\"https://github.com/Matanek/Silex.git\",\"commit\":\"0123456789abcdef0123456789abcdef01234567\",\"archive_sha256\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\",\"manifest_sha256\":\"{s}\",\"extensions\":[\"Silex.Bootstrap\"]}}",
+            "{{\"schema\":3,\"name\":\"Silex\",\"version\":\"0.1.0\",\"repository\":\"https://github.com/Matanek/Silex.git\",\"commit\":\"0123456789abcdef0123456789abcdef01234567\",\"archive_sha256\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\",\"manifest_sha256\":\"{s}\",\"extensions\":[{{\"name\":\"Silex.Bootstrap\",\"friend\":false,\"suite\":false}}]}}",
             .{manifest_sha256},
         ),
     });

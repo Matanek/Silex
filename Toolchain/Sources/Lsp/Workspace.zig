@@ -3372,7 +3372,7 @@ test "respect closed package namespaces during completion" {
 
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Package.json",
-        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":[\"GFX.UI\"]}",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":{\"GFX.UI\":{}}}",
     });
     const items = (try itemsAt(
         allocator,

@@ -3,7 +3,7 @@
 The public package registry is hosted at
 [`https://registry.silex-lang.org/v1/index.json`](https://registry.silex-lang.org/v1/index.json).
 It assigns each package name to one canonical Git repository. Versions,
-compatibility, dependencies, namespace extension grants, friend grants, and package contents
+compatibility, dependencies, namespace extension permissions, and package contents
 remain owned by tagged commits in that repository.
 
 The generated registry index has this shape:
@@ -29,13 +29,16 @@ that tag.
 Silex creates the package archive directly from the selected commit and stores
 a source proof beside the installed files. The proof binds the package name and
 version to its repository, commit, archive checksum, manifest checksum,
-extension grants, and friend grants. Editing an installed manifest therefore
+extension permissions, including suite membership, and catalog grants. Editing an installed manifest therefore
 cannot grant another namespace or privileged package access. The local Git
 cache also refuses to replace an already observed tag with another commit.
 
 Dependencies remain declared only in the tagged `Package.json`. The installer
 resolves them transitively through their own registered repositories before it
-installs the requested package.
+installs the requested package. When the explicitly requested package marks an
+exact extension with `suite: true`, the installer also selects the newest tagged
+extension whose direct parent dependency accepts the selected parent version.
+Wildcard extensions can never carry `suite`.
 
 ## Register a package once
 
@@ -62,7 +65,7 @@ SILEX_REGISTRY_SOURCE=/absolute/path/to/Silex-Registry silex register path/to/Pa
 ## Prepare and tag versions
 
 1. Update and validate `Package.json`, including `version`, `requires.silex`,
-   dependencies, `extensions`, `friends`, and `catalogs`.
+   dependencies, extension permissions, and `catalogs`.
 2. Commit the complete package contents.
 3. Optionally validate the Silex package contract and display the expected tag:
 
