@@ -579,7 +579,7 @@ pub fn scopeItemsAtForTargetExpected(
                 if (!std.mem.eql(u8, function.name, target.declaration)) continue;
                 if (function.is_local) continue;
                 if (function.is_internal) {
-                    if (provider.owner != project.current_owner) continue;
+                    if (!project.graph.canAccessPackage(project.current_owner, provider.owner)) continue;
                 } else if (!function.is_public and !providerInCurrentModule(project, provider)) continue;
                 if (!Completion.callAcceptsParameters(source, cursor, loaded.program, function.parameters)) continue;
                 try appendRanked(allocator, &ranked, .{
@@ -940,7 +940,7 @@ fn appendPathItems(
         for (loaded.program.structures) |structure| {
             if (structure.is_local) continue;
             if (structure.is_internal) {
-                if (provider.owner != project.current_owner) continue;
+                if (!project.graph.canAccessPackage(project.current_owner, provider.owner)) continue;
             } else if (!module_context and contextual_provider == null and !structure.is_public) continue;
             if (!matchesPrefix(structure.name, query.prefix)) continue;
             if (query.type_only or call_source == null) {
@@ -984,7 +984,7 @@ fn appendPathItems(
         for (loaded.program.enums) |enumeration| {
             if (enumeration.is_local or !matchesPrefix(enumeration.name, query.prefix)) continue;
             if (enumeration.is_internal) {
-                if (provider.owner != project.current_owner) continue;
+                if (!project.graph.canAccessPackage(project.current_owner, provider.owner)) continue;
             } else if (!module_context and contextual_provider == null and !enumeration.is_public) continue;
             try appendRanked(allocator, ranked, .{
                 .label = enumeration.name,
@@ -996,7 +996,7 @@ fn appendPathItems(
             for (loaded.program.functions) |function| {
                 if (function.is_local) continue;
                 if (function.is_internal) {
-                    if (provider.owner != project.current_owner) continue;
+                    if (!project.graph.canAccessPackage(project.current_owner, provider.owner)) continue;
                 } else if (!module_context and contextual_provider == null and !function.is_public) continue;
                 if (call_source) |text| if (!Completion.callAcceptsParameters(
                     text,
@@ -1082,14 +1082,15 @@ fn hasPublicDeclaration(program: Ast.Program, name: []const u8) bool {
     return false;
 }
 
-fn hasPublicApi(program: Ast.Program) bool {
-    for (program.structures) |structure| if (structure.is_public) return true;
-    for (program.enums) |enumeration| if (enumeration.is_public) return true;
-    for (program.functions) |function| if (function.is_public) return true;
+fn hasVisibleApi(graph: @import("../Packages.zig").Graph, current_owner: usize, provider_owner: usize, program: Ast.Program) bool {
+    const package_visible = graph.canAccessPackage(current_owner, provider_owner);
+    for (program.structures) |structure| if (structure.is_public or (package_visible and structure.is_internal)) return true;
+    for (program.enums) |enumeration| if (enumeration.is_public or (package_visible and enumeration.is_internal)) return true;
+    for (program.functions) |function| if (function.is_public or (package_visible and function.is_internal)) return true;
     for (program.uses) |use| if (use.is_public and use.alias != null) return true;
     for (program.extensions) |extension| {
         if (extension.conformances.len != 0) return true;
-        for (extension.methods) |method| if (method.is_public) return true;
+        for (extension.methods) |method| if (method.is_public or (package_visible and method.is_internal)) return true;
     }
     return false;
 }
@@ -1108,7 +1109,7 @@ fn modulePathVisible(
         if (!matches or !project.graph.canAccess(project.current_owner, provider.owner, provider.name)) continue;
         if (provider.owner == project.current_owner) return true;
         const loaded = try loadProgram(allocator, io, documents, provider) orelse continue;
-        if (hasPublicApi(loaded.program)) return true;
+        if (hasVisibleApi(project.graph, project.current_owner, provider.owner, loaded.program)) return true;
     }
     return false;
 }
@@ -1810,7 +1811,7 @@ fn importedQualifiedCallReturnTypePath(
         if (function.is_local or !std.mem.eql(u8, function.name, call.name) or
             !parametersAcceptArity(function.parameters, call.arity)) continue;
         if (function.is_internal) {
-            if (provider.owner != project.current_owner) continue;
+            if (!project.graph.canAccessPackage(project.current_owner, provider.owner)) continue;
         } else if (!function.is_public and !providerInCurrentModule(project, provider)) continue;
         const candidate = returnTypeName(loaded.program, function.return_type) orelse continue;
         if (return_name != null and !std.mem.eql(u8, return_name.?, candidate)) return null;
@@ -2091,7 +2092,7 @@ fn lastSegment(path: []const u8) []const u8 {
 fn importedMemberVisible(project: IndexedProject, provider: Modules.Provider, member: anytype) bool {
     if (member.is_public) return true;
     if (member.is_local or member.is_private or member.is_protected) return false;
-    if (member.is_internal) return provider.owner == project.current_owner;
+    if (member.is_internal) return project.graph.canAccessPackage(project.current_owner, provider.owner);
     return providerInCurrentModule(project, provider);
 }
 

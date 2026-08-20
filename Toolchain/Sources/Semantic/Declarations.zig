@@ -7,6 +7,7 @@ const Resources = @import("Resources.zig");
 const Constructors = @import("Constructors.zig");
 const Optionals = @import("Optionals.zig");
 const Numeric = @import("../Numeric.zig");
+const Visibility = @import("Visibility.zig");
 
 const StructureState = enum { unseen, visiting, complete };
 
@@ -139,7 +140,7 @@ fn validateInheritance(self: anytype, index: usize, states: []StructureState) !v
         if (base_declaration.is_local and base_declaration.position.file != declaration.position.file) {
             return self.fail(declaration.base_position, "local base class is unavailable outside its source file");
         }
-        if (base_declaration.is_internal and base_declaration.owner != declaration.owner) {
+        if (base_declaration.is_internal and !Visibility.packageAccessible(self, declaration.owner, base_declaration.owner)) {
             return self.fail(declaration.base_position, "package-visible base class is unavailable outside its package");
         }
         try validateInheritance(self, base_index, states);

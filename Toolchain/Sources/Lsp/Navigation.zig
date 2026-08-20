@@ -1,6 +1,7 @@
 const std = @import("std");
 const Ast = @import("../Ast.zig");
 const Modules = @import("../Modules.zig");
+const Packages = @import("../Packages.zig");
 const ParserModule = @import("../Parser.zig");
 const Source = @import("../Source.zig");
 const TargetModule = @import("../Target.zig");
@@ -107,6 +108,7 @@ fn definitionForPath(
         loaded.program,
         provider,
         target.declaration,
+        project.graph,
         project.current_owner,
         current_module,
         project.current_path,
@@ -131,6 +133,7 @@ fn declarationPosition(
     program: Ast.Program,
     provider: Modules.Provider,
     declaration: []const u8,
+    graph: Packages.Graph,
     current_owner: usize,
     current_module: ?[]const u8,
     current_path: []const u8,
@@ -144,23 +147,23 @@ fn declarationPosition(
             std.mem.eql(u8, structure.name, lastSegment(provider.name)) and
             !std.mem.eql(u8, structure.name, nominal_name);
         if (!std.mem.eql(u8, structure.name, nominal_name) and !principal_member) continue;
-        if (!visible(structure.is_public, structure.is_internal, structure.is_local, provider, current_owner, current_module, current_path)) return null;
+        if (!visible(graph, structure.is_public, structure.is_internal, structure.is_local, provider, current_owner, current_module, current_path)) return null;
         const requested_member = member_name orelse if (principal_member) nominal_name else return .{
             .position = structure.name_position,
             .name = structure.name,
         };
         for (structure.fields) |field| if (std.mem.eql(u8, field.name, requested_member) and
-            memberVisible(field.is_public, field.is_local, field.is_internal, field.is_private, field.is_protected, provider, current_owner, current_module, current_path)) return .{
+            memberVisible(graph, field.is_public, field.is_local, field.is_internal, field.is_private, field.is_protected, provider, current_owner, current_module, current_path)) return .{
             .position = field.name_position,
             .name = field.name,
         };
         for (structure.static_fields) |field| if (std.mem.eql(u8, field.name, requested_member) and
-            memberVisible(field.is_public, field.is_local, field.is_internal, field.is_private, field.is_protected, provider, current_owner, current_module, current_path)) return .{
+            memberVisible(graph, field.is_public, field.is_local, field.is_internal, field.is_private, field.is_protected, provider, current_owner, current_module, current_path)) return .{
             .position = field.name_position,
             .name = field.name,
         };
         for (structure.methods) |method| if (std.mem.eql(u8, method.name, requested_member) and
-            memberVisible(method.is_public, method.is_local, method.is_internal, method.is_private, method.is_protected, provider, current_owner, current_module, current_path)) return .{
+            memberVisible(graph, method.is_public, method.is_local, method.is_internal, method.is_private, method.is_protected, provider, current_owner, current_module, current_path)) return .{
             .position = method.name_position,
             .name = method.name,
         };
@@ -171,7 +174,7 @@ fn declarationPosition(
             std.mem.eql(u8, enumeration.name, lastSegment(provider.name)) and
             !std.mem.eql(u8, enumeration.name, nominal_name);
         if (!std.mem.eql(u8, enumeration.name, nominal_name) and !principal_member) continue;
-        if (!visible(enumeration.is_public, enumeration.is_internal, enumeration.is_local, provider, current_owner, current_module, current_path)) return null;
+        if (!visible(graph, enumeration.is_public, enumeration.is_internal, enumeration.is_local, provider, current_owner, current_module, current_path)) return null;
         const requested_member = member_name orelse if (principal_member) nominal_name else return .{
             .position = enumeration.name_position,
             .name = enumeration.name,
@@ -184,7 +187,7 @@ fn declarationPosition(
     }
     for (program.functions) |function| {
         if (!std.mem.eql(u8, function.name, declaration)) continue;
-        if (!visible(function.is_public, function.is_internal, function.is_local, provider, current_owner, current_module, current_path)) return null;
+        if (!visible(graph, function.is_public, function.is_internal, function.is_local, provider, current_owner, current_module, current_path)) return null;
         return .{ .position = function.name_position, .name = function.name };
     }
     const target_name = if (member_name != null)
@@ -200,6 +203,7 @@ fn declarationPosition(
             if (!std.mem.eql(u8, method.name, requested_member)) continue;
             const accessible = if (method.visibility_explicit)
                 memberVisible(
+                    graph,
                     method.is_public,
                     method.is_local,
                     method.is_internal,
@@ -211,7 +215,7 @@ fn declarationPosition(
                     current_path,
                 )
             else if (structureNamed(program, target_name)) |target|
-                visible(target.is_public, target.is_internal, target.is_local, provider, current_owner, current_module, current_path)
+                visible(graph, target.is_public, target.is_internal, target.is_local, provider, current_owner, current_module, current_path)
             else
                 current_module != null and std.mem.eql(u8, provider.name, current_module.?);
             if (!accessible) return null;
@@ -229,6 +233,7 @@ fn structureNamed(program: Ast.Program, name: []const u8) ?Ast.Structure {
 }
 
 fn visible(
+    graph: Packages.Graph,
     is_public: bool,
     is_internal: bool,
     is_local: bool,
@@ -238,11 +243,12 @@ fn visible(
     current_path: []const u8,
 ) bool {
     if (is_local) return samePath(provider.path, current_path);
-    if (is_internal) return provider.owner == current_owner;
+    if (is_internal) return graph.canAccessPackage(current_owner, provider.owner);
     return is_public or (current_module != null and std.mem.eql(u8, provider.name, current_module.?));
 }
 
 fn memberVisible(
+    graph: Packages.Graph,
     is_public: bool,
     is_local: bool,
     is_internal: bool,
@@ -256,7 +262,7 @@ fn memberVisible(
     if (is_public) return true;
     if (is_private or is_protected) return false;
     if (is_local) return samePath(provider.path, current_path);
-    if (is_internal) return provider.owner == current_owner;
+    if (is_internal) return graph.canAccessPackage(current_owner, provider.owner);
     return current_module != null and std.mem.eql(u8, provider.name, current_module.?);
 }
 

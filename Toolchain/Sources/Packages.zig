@@ -109,6 +109,7 @@ pub const Package = struct {
     version: ?Version,
     origin: Origin,
     extensions: []const []const u8 = &.{},
+    friends: []const []const u8 = &.{},
     root: []const u8,
     module_roots: []const ModuleRoot,
     inactive_modules: []const []const u8,
@@ -175,6 +176,13 @@ pub const Graph = struct {
         return direct.package == provider;
     }
 
+    pub fn canAccessPackage(self: Graph, accessor: usize, provider: usize) bool {
+        if (accessor == provider) return true;
+        if (accessor >= self.packages.len or provider >= self.packages.len) return false;
+        const accessor_name = self.packages[accessor].name orelse return false;
+        return allowsExtension(self.packages[provider].friends, accessor_name);
+    }
+
     pub fn label(self: Graph, package: usize) []const u8 {
         return self.packages[package].name orelse "application";
     }
@@ -237,6 +245,7 @@ pub const ManifestInfo = struct {
     version: Version,
     silex_requirement: SilexRequirement,
     extensions: []const []const u8,
+    friends: []const []const u8,
     dependencies: []const ManifestDependency,
 };
 
@@ -254,6 +263,7 @@ const RawManifest = struct {
     name: ?[]const u8 = null,
     version: ?[]const u8 = null,
     extensions: ?std.json.Value = null,
+    friends: ?std.json.Value = null,
     requires: ?std.json.Value = null,
     dependencies: ?std.json.Value = null,
     boundary: ?std.json.Value = null,
@@ -264,6 +274,7 @@ const ParsedManifest = struct {
     name: ?[]const u8,
     version: ?Version,
     extensions: []const []const u8,
+    friends: []const []const u8,
     silex_requirement: ?SilexRequirement,
     dependencies: []const ManifestDependency,
     boundary_providers: []const BoundaryProvider,
@@ -313,6 +324,7 @@ pub const Resolver = struct {
                 .version = if (root_manifest) |manifest| manifest.version else null,
                 .origin = .project,
                 .extensions = if (root_manifest) |manifest| manifest.extensions else &.{},
+                .friends = if (root_manifest) |manifest| manifest.friends else &.{},
                 .root = project_root,
                 .module_roots = roots.active,
                 .inactive_modules = roots.inactive,
@@ -361,6 +373,7 @@ pub const Resolver = struct {
             .version = version,
             .silex_requirement = requirement,
             .extensions = manifest.extensions,
+            .friends = manifest.friends,
             .dependencies = manifest.dependencies,
         };
     }
@@ -576,7 +589,7 @@ pub const Resolver = struct {
             const root = try std.fs.path.join(self.allocator, &.{ global_root, entry.name });
             var manifest = try self.loadRequired(root);
             const version = try self.validateSelected(manifest, request.name, root, true);
-            manifest = try self.trustGlobalExtensions(root, manifest, request.name, version);
+            manifest = try self.trustGlobalPolicy(root, manifest, request.name, version);
             if (!folder_version.eql(version)) return self.fail("global package folder and manifest version differ");
             available.* = newest(available.*, version);
             if (!request.constraint.accepts(version)) continue;
@@ -612,7 +625,7 @@ pub const Resolver = struct {
             const root = try std.fs.path.join(self.allocator, &.{ global_root, entry.name });
             var manifest = try self.loadRequired(root);
             const version = try self.validateSelected(manifest, name, root, true);
-            manifest = try self.trustGlobalExtensions(root, manifest, name, version);
+            manifest = try self.trustGlobalPolicy(root, manifest, name, version);
             if (!folder_version.eql(version)) return self.fail("global package folder and manifest version differ");
             if (!manifest.silex_requirement.?.accepts(self.toolchain_version)) continue;
             if (best == null or version.order(best.?.version) == .gt) {
@@ -622,7 +635,7 @@ pub const Resolver = struct {
         return best;
     }
 
-    fn trustGlobalExtensions(
+    fn trustGlobalPolicy(
         self: *Resolver,
         root: []const u8,
         manifest: ParsedManifest,
@@ -631,6 +644,7 @@ pub const Resolver = struct {
     ) !ParsedManifest {
         var trusted = manifest;
         trusted.extensions = &.{};
+        trusted.friends = &.{};
         const receipt_path = try std.fs.path.join(self.allocator, &.{ root, ".silex", "source.json" });
         const source = Io.Dir.cwd().readFileAlloc(self.io, receipt_path, self.allocator, .limited(1024 * 1024)) catch |err| switch (err) {
             error.FileNotFound, error.NotDir => return trusted,
@@ -645,6 +659,7 @@ pub const Resolver = struct {
             archive_sha256: []const u8,
             manifest_sha256: []const u8,
             extensions: []const []const u8,
+            friends: []const []const u8 = &.{},
         };
         const receipt = std.json.parseFromSliceLeaky(Receipt, self.allocator, source, .{
             .allocate = .alloc_always,
@@ -664,11 +679,13 @@ pub const Resolver = struct {
             !validObjectId(receipt.commit) or
             !validSha256(receipt.archive_sha256) or
             !std.mem.eql(u8, receipt.manifest_sha256, manifest_sha256) or
-            !equalStrings(receipt.extensions, manifest.extensions))
+            !equalStrings(receipt.extensions, manifest.extensions) or
+            !equalStrings(receipt.friends, manifest.friends))
         {
             return self.fail("installed package does not match its source proof; remove it and reinstall");
         }
         trusted.extensions = receipt.extensions;
+        trusted.friends = receipt.friends;
         return trusted;
     }
 
@@ -752,6 +769,7 @@ pub const Resolver = struct {
                 .version = version,
                 .origin = origin,
                 .extensions = manifest.extensions,
+                .friends = manifest.friends,
                 .root = root,
                 .module_roots = roots.active,
                 .inactive_modules = roots.inactive,
@@ -1008,6 +1026,34 @@ pub const Resolver = struct {
             }
         }
 
+        var friends: std.ArrayList([]const u8) = .empty;
+        if (raw.friends) |value| {
+            const package_name = raw.name orelse return self.fail("an application manifest cannot declare friends");
+            const array = switch (value) {
+                .array => |array| array,
+                else => return self.fail("friends must be an array of direct child package names"),
+            };
+            for (array.items) |item| {
+                const friend = switch (item) {
+                    .string => |text| text,
+                    else => return self.fail("a friend grant must be a package name string"),
+                };
+                if (!validExtensionGrant(package_name, friend)) {
+                    return self.fail("a friend grant must name one direct child package or use Parent.*");
+                }
+                if (!allowsExtension(extensions.items, friend)) {
+                    return self.fail("a friend grant must also be authorized by extensions");
+                }
+                try friends.append(self.allocator, friend);
+            }
+            std.mem.sort([]const u8, friends.items, {}, stringLessThan);
+            if (friends.items.len > 1) {
+                for (friends.items[1..], friends.items[0 .. friends.items.len - 1]) |current, previous| {
+                    if (std.mem.eql(u8, current, previous)) return self.fail("friend grants must be unique");
+                }
+            }
+        }
+
         var silex_requirement: ?SilexRequirement = null;
         if (raw.requires) |value| {
             const object = switch (value) {
@@ -1050,6 +1096,7 @@ pub const Resolver = struct {
             .name = raw.name,
             .version = version,
             .extensions = try extensions.toOwnedSlice(self.allocator),
+            .friends = try friends.toOwnedSlice(self.allocator),
             .silex_requirement = silex_requirement,
             .dependencies = try dependencies.toOwnedSlice(self.allocator),
             .boundary_providers = &.{},
@@ -1458,6 +1505,57 @@ test "diagnose invalid package extension grants" {
         try std.testing.expectError(error.InvalidPackageGraph, resolver.resolve(root));
         try std.testing.expectEqualStrings(case.diagnostic, resolver.diagnostic.?);
     }
+}
+
+test "validate exact and wildcard friend grants" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "GFX/Module");
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "GFX" });
+
+    const cases = [_]struct { source: []const u8, diagnostic: []const u8 }{
+        .{
+            .source = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":[\"GFX.*\"],\"friends\":{}}",
+            .diagnostic = "friends must be an array of direct child package names",
+        },
+        .{
+            .source = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":[\"GFX.*\"],\"friends\":[false]}",
+            .diagnostic = "a friend grant must be a package name string",
+        },
+        .{
+            .source = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":[\"GFX.*\"],\"friends\":[\"GFX.UI.Controls\"]}",
+            .diagnostic = "a friend grant must name one direct child package or use Parent.*",
+        },
+        .{
+            .source = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":[\"GFX.UI\"],\"friends\":[\"GFX.Physics\"]}",
+            .diagnostic = "a friend grant must also be authorized by extensions",
+        },
+        .{
+            .source = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":[\"GFX.*\"],\"friends\":[\"GFX.UI\",\"GFX.UI\"]}",
+            .diagnostic = "friend grants must be unique",
+        },
+        .{
+            .source = "{\"friends\":[]}",
+            .diagnostic = "an application manifest cannot declare friends",
+        },
+    };
+    for (cases) |case| {
+        try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "GFX/Package.json", .data = case.source });
+        var resolver = Resolver.init(allocator, std.testing.io, null);
+        try std.testing.expectError(error.InvalidPackageGraph, resolver.resolve(root));
+        try std.testing.expectEqualStrings(case.diagnostic, resolver.diagnostic.?);
+    }
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Package.json",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":[\"GFX.*\"],\"friends\":[\"GFX.*\"]}",
+    });
+    var resolver = Resolver.init(allocator, std.testing.io, null);
+    const graph = try resolver.resolve(root);
+    try std.testing.expectEqualStrings("GFX.*", graph.packages[0].friends[0]);
 }
 
 test "parse and apply Silex toolchain requirements before package sources" {

@@ -1184,6 +1184,94 @@ test "enforce public package interfaces and direct dependency visibility" {
     try std.testing.expectEqualStrings("unknown function 'B.Private.value'", compiler.diagnostic.?.message);
 }
 
+test "let exact and wildcard friend packages use package declarations" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.createDirPath(std.testing.io, "GFX/Module");
+    try temporary.dir.createDirPath(std.testing.io, "GFX.Physics/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Package.json",
+        .data = "{\"dependencies\":{\"GFX\":\"=1.0.0\",\"GFX.Physics\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Package.json",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":[\"GFX.Physics\"]}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/Core.sx",
+        .data =
+        \\package struct InternalValue {
+        \\    let amount:int
+        \\    func add(value:int) int { return self.amount + value }
+        \\}
+        \\package enum Increment { two }
+        \\package func internal_value() int { return 42 }
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX.Physics/Package.json",
+        .data = "{\"name\":\"GFX.Physics\",\"version\":\"1.0.0\",\"dependencies\":{\"GFX\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX.Physics/Module/Plugin.sx",
+        .data =
+        \\use GFX.Core
+        \\public func function_value() int { return Core.internal_value() }
+        \\public func structure_value() int {
+        \\    let increment = Core.Increment.two
+        \\    let value = Core.InternalValue(amount:40)
+        \\    return value.add(2)
+        \\}
+        \\public func value() int { return function_value() + structure_value() }
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "use GFX.Physics.Plugin\nfunc main() { print(Plugin.value()) }",
+    });
+
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Compiler.init(allocator, std.testing.io);
+    try std.testing.expectError(error.InvalidSource, compiler.compile(input));
+    try std.testing.expectEqualStrings(
+        "enum 'Increment' is package-visible and unavailable outside package 'GFX'",
+        compiler.diagnostic.?.message,
+    );
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Package.json",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":[\"GFX.Physics\"],\"friends\":[\"GFX.Physics\"]}",
+    });
+    compiler = Compiler.init(allocator, std.testing.io);
+    var compilation = try compiler.compile(input);
+    var result = try @import("../Interpreter.zig").runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("84\n", result.stdout);
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Package.json",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":[\"GFX.*\"],\"friends\":[\"GFX.*\"]}",
+    });
+    compiler = Compiler.init(allocator, std.testing.io);
+    compilation = try compiler.compile(input);
+    result = try @import("../Interpreter.zig").runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("84\n", result.stdout);
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "use GFX.Core\nfunc main() { print(Core.internal_value()) }",
+    });
+    compiler = Compiler.init(allocator, std.testing.io);
+    try std.testing.expectError(error.InvalidSource, compiler.compile(input));
+    try std.testing.expectEqualStrings(
+        "function 'GFX.Core.internal_value' is package-visible and unavailable outside its package",
+        compiler.diagnostic.?.message,
+    );
+}
+
 test "compose and execute structures inside their declaring module" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

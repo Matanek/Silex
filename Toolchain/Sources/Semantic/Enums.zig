@@ -5,6 +5,7 @@ const Model = @import("Model.zig");
 const Optionals = @import("Optionals.zig");
 const Borrowing = @import("Borrowing.zig");
 const Resources = @import("Resources.zig");
+const Visibility = @import("Visibility.zig");
 
 pub fn prepare(self: anytype) ![]const Ir.Enum {
     const result = try self.allocator.alloc(Ir.Enum, self.program.enums.len);
@@ -51,7 +52,7 @@ pub fn analyzeInitializer(self: anytype, builder: anytype, call: Ast.Expression.
         const message = try std.fmt.allocPrint(self.allocator, "enum '{s}' is local to its source file", .{enumeration.name});
         return self.fail(call.name_position, message);
     }
-    if (enumeration.is_internal and self.owner_context != enumeration.owner) {
+    if (enumeration.is_internal and !Visibility.packageVisible(self, enumeration.owner)) {
         const message = try std.fmt.allocPrint(self.allocator, "enum '{s}' is package-visible and unavailable outside its package", .{enumeration.name});
         return self.fail(call.name_position, message);
     }
@@ -124,7 +125,7 @@ pub fn analyzeValue(
         const message = try std.fmt.allocPrint(self.allocator, "enum '{s}' is local to its source file", .{enumeration.name});
         return self.fail(position, message);
     }
-    if (enumeration.is_internal and self.owner_context != enumeration.owner) {
+    if (enumeration.is_internal and !Visibility.packageVisible(self, enumeration.owner)) {
         const message = try std.fmt.allocPrint(self.allocator, "enum '{s}' is package-visible and unavailable outside its package", .{enumeration.name});
         return self.fail(position, message);
     }

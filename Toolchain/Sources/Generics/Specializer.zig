@@ -11,6 +11,7 @@ const InjectedSystems = @import("InjectedSystems.zig");
 const EcsComponents = @import("EcsComponents.zig");
 const WorkerSafety = @import("WorkerSafety.zig");
 const ModuleScopes = @import("../ModuleScopes.zig");
+const Packages = @import("../Packages.zig");
 
 const Allocator = std.mem.Allocator;
 const SpecializeError = Source.Error || Allocator.Error;
@@ -83,6 +84,7 @@ pub const Specializer = struct {
     specialization_file: ?usize = null,
     active_contracts: []const GenericContract = &.{},
     module_scope_roots: []const []const u8 = &.{},
+    packages: ?Packages.Graph = null,
     diagnostic: ?Source.Diagnostic = null,
 
     pub fn init(allocator: Allocator) Specializer {
@@ -593,7 +595,7 @@ pub const Specializer = struct {
                             (candidate.name.len > function_name.len and std.mem.endsWith(u8, candidate.name, function_name) and
                                 candidate.name[candidate.name.len - function_name.len - 1] == '.');
                         if (!name_matches or
-                            candidate.type_parameters.len != copy.type_arguments.len or !functionVisible(self.module_scope_roots, copy, candidate)) continue;
+                            candidate.type_parameters.len != copy.type_arguments.len or !functionVisible(self.packages, self.module_scope_roots, copy, candidate)) continue;
                         if (selected != null) {
                             const message = try std.fmt.allocPrint(
                                 self.allocator,
@@ -845,7 +847,7 @@ pub const Specializer = struct {
                 var contextual: ?Ast.Type = null;
                 for (self.source.functions) |function| {
                     if (!std.mem.eql(u8, function.name, call.name) or function.type_parameters.len != call.type_arguments.len or
-                        !parametersAcceptArity(function.parameters, call.arguments.len) or !functionVisible(self.module_scope_roots, call, function)) continue;
+                        !parametersAcceptArity(function.parameters, call.arguments.len) or !functionVisible(self.packages, self.module_scope_roots, call, function)) continue;
                     const candidate = try self.rewriteType(function.parameters[index].type, call.type_arguments, call.arguments[index].position);
                     if (contextual != null and contextual.? != candidate) {
                         contextual = null;
@@ -866,7 +868,7 @@ pub const Specializer = struct {
         var saw_generic = false;
         var saw_arity = false;
         for (self.source.functions) |*function| {
-            if (function.type_parameters.len == 0 or !std.mem.eql(u8, function.name, call.name) or !functionVisible(self.module_scope_roots, call, function.*)) continue;
+            if (function.type_parameters.len == 0 or !std.mem.eql(u8, function.name, call.name) or !functionVisible(self.packages, self.module_scope_roots, call, function.*)) continue;
             saw_generic = true;
             if (call.type_arguments.len != 0) {
                 if (call.type_arguments.len != function.type_parameters.len) continue;
@@ -1010,7 +1012,7 @@ pub const Specializer = struct {
         }
         if (call.type_arguments.len == 0) {
             for (structure.methods) |method| {
-                if (!std.mem.eql(u8, method.name, call.name) or !methodVisible(self.module_scope_roots, call, source_structure, method)) continue;
+                if (!std.mem.eql(u8, method.name, call.name) or !methodVisible(self.packages, self.module_scope_roots, call, source_structure, method)) continue;
                 const ordered = try self.orderNamedMethodArguments(method.parameters, call, actual_types) orelse continue;
                 if (self.argumentsMatch(method.parameters, ordered, &.{})) return null;
             }
@@ -1021,7 +1023,7 @@ pub const Specializer = struct {
         var saw_generic = false;
         var saw_type_arity = false;
         for (source_structure.methods) |method| {
-            if (method.type_parameters.len == 0 or !std.mem.eql(u8, method.name, call.name) or !methodVisible(self.module_scope_roots, call, source_structure, method)) continue;
+            if (method.type_parameters.len == 0 or !std.mem.eql(u8, method.name, call.name) or !methodVisible(self.packages, self.module_scope_roots, call, source_structure, method)) continue;
             saw_generic = true;
             const ordered = try self.orderNamedMethodArguments(method.parameters, call, actual_types) orelse continue;
             if (call.type_arguments.len != 0) {
@@ -1561,7 +1563,7 @@ pub const Specializer = struct {
 
     fn hasCompatibleConcrete(self: *Specializer, call: Ast.Expression.Call, actual: []const Ast.Type) bool {
         for (self.functions.items) |function| {
-            if (!std.mem.eql(u8, function.name, call.name) or !functionVisible(self.module_scope_roots, call, function)) continue;
+            if (!std.mem.eql(u8, function.name, call.name) or !functionVisible(self.packages, self.module_scope_roots, call, function)) continue;
             if (!parametersAcceptArity(function.parameters, actual.len)) continue;
             if (self.argumentsMatch(function.parameters, actual, &.{})) return true;
         }
@@ -1571,7 +1573,7 @@ pub const Specializer = struct {
         // available through `name<T>(...)`.
         for (self.source.functions) |function| {
             if (function.type_parameters.len != 0 or !std.mem.eql(u8, function.name, call.name) or
-                !functionVisible(self.module_scope_roots, call, function)) continue;
+                !functionVisible(self.packages, self.module_scope_roots, call, function)) continue;
             if (!parametersAcceptArity(function.parameters, actual.len)) continue;
             if (self.argumentsMatch(function.parameters, actual, &.{})) return true;
         }
@@ -2101,20 +2103,26 @@ fn parametersAcceptArity(parameters: []const Ast.Parameter, arity: usize) bool {
     return arity >= required and arity <= parameters.len;
 }
 
-fn functionVisible(module_scope_roots: []const []const u8, call: Ast.Expression.Call, function: Ast.Function) bool {
+fn functionVisible(packages: ?Packages.Graph, module_scope_roots: []const []const u8, call: Ast.Expression.Call, function: Ast.Function) bool {
     if (function.is_local) return call.name_position.file == function.position.file;
     if (function.is_public) return true;
-    if (function.is_internal) return call.owner == function.owner;
+    if (function.is_internal) return if (packages) |graph|
+        graph.canAccessPackage(call.owner, function.owner)
+    else
+        call.owner == function.owner;
     if (call.name_position.file == function.position.file) return true;
     const separator = std.mem.lastIndexOfScalar(u8, function.name, '.') orelse return false;
     return ModuleScopes.same(module_scope_roots, call.module, function.name[0..separator]);
 }
 
-fn methodVisible(module_scope_roots: []const []const u8, call: Ast.Expression.Call, structure: Ast.Structure, method: Ast.Function) bool {
+fn methodVisible(packages: ?Packages.Graph, module_scope_roots: []const []const u8, call: Ast.Expression.Call, structure: Ast.Structure, method: Ast.Function) bool {
     if (call.compiler_generated and method.is_internal) return true;
     if (method.is_local) return call.name_position.file == method.position.file;
     if (method.is_public) return true;
-    if (method.is_internal) return call.owner == method.owner;
+    if (method.is_internal) return if (packages) |graph|
+        graph.canAccessPackage(call.owner, method.owner)
+    else
+        call.owner == method.owner;
     if (method.is_private or method.is_protected) return call.owner == method.owner;
     if (call.name_position.file == method.position.file) return true;
     const separator = std.mem.lastIndexOfScalar(u8, structure.name, '.') orelse return false;

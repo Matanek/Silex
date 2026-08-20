@@ -110,16 +110,43 @@ An extension entry cannot skip a level or name a package outside the declaring
 package's namespace. Omit `extensions` or use an empty array to keep the
 namespace closed.
 
+An authorized child package does not receive privileged source access merely
+because it extends the namespace. Use `friends` when selected children may also
+access declarations carrying `package` visibility:
+
+```json
+{
+  "name": "GFX",
+  "version": "1.4.1",
+  "extensions": ["GFX.Physics"],
+  "friends": ["GFX.Physics"]
+}
+```
+
+`"GFX.*"` is valid in `friends` and deliberately grants this access to every
+direct child package, including children published later by the community. It
+does not cover `GFX.Physics.Box2D`; `GFX.Physics` must authorize that next level
+itself. Every friend entry must already be covered by `extensions`, either
+exactly or through its wildcard.
+
+Friendship grants access from the named child to the declaring parent. It does
+not install or activate the child, replace a dependency, expose `module`,
+`local`, `private`, or `protected` declarations, or make `package` declarations
+public to ordinary consumers. The owner of a wildcard accepts that future
+children can depend on package-visible implementation contracts; those
+children must still declare compatible parent versions.
+
 This policy concerns separate package identities. Modules owned directly by
 `GFX`, including a module named `GFX.UI`, remain valid without authorization
 because they belong to the same package.
 
-For registered packages, extension grants come directly from `Package.json` in
+For registered packages, extension and friend grants come directly from
+`Package.json` in
 the selected tagged commit. The installed package keeps a source proof binding
 that manifest to its repository, commit, and checksums. Editing a global
-package manifest does not grant another namespace: Silex rejects a manifest
-whose checksum or extension policy no longer matches its proof and asks for
-reinstallation.
+package manifest does not grant another namespace or privileged package access:
+Silex rejects a manifest whose checksum or grant policy no longer matches its
+proof and asks for reinstallation.
 Sibling workspace packages and packages selected with `silex link` remain live
 development sources and therefore use their current manifests directly.
 

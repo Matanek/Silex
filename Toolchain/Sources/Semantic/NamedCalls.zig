@@ -20,7 +20,7 @@ pub fn analyzeFunction(self: anytype, builder: anytype, call: Ast.Expression.Cal
     for (self.program.functions, 0..) |function, function_id| {
         if (!std.mem.eql(u8, function.name, call.name)) continue;
         total_named += 1;
-        if (!Support.functionVisible(self.module_scope_roots, call, function)) continue;
+        if (!Support.functionVisible(self.packages, self.module_scope_roots, call, function)) continue;
         visible += 1;
         switch (try Arguments.map(self.allocator, function.parameters, call.arguments, call.named_arguments)) {
             .arguments => |mapped| {

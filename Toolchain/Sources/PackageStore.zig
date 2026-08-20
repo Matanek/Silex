@@ -25,6 +25,7 @@ pub const PublicationProof = struct {
     commit: []const u8,
     archive_sha256: []const u8,
     extensions: []const []const u8,
+    friends: []const []const u8 = &.{},
 };
 
 const Receipt = struct {
@@ -36,6 +37,7 @@ const Receipt = struct {
     archive_sha256: []const u8,
     manifest_sha256: []const u8,
     extensions: []const []const u8,
+    friends: []const []const u8 = &.{},
 };
 
 pub const Manager = struct {
@@ -80,9 +82,14 @@ pub const Manager = struct {
     ) !InstallResult {
         self.diagnostic = null;
         const package = try self.inspect(source);
-        if (proof) |publication| if (!equalStrings(package.extensions, publication.extensions)) {
-            return self.failFmt("package '{s}' extensions do not match its source proof", .{package.name});
-        };
+        if (proof) |publication| {
+            if (!equalStrings(package.extensions, publication.extensions)) {
+                return self.failFmt("package '{s}' extensions do not match its source proof", .{package.name});
+            }
+            if (!equalStrings(package.friends, publication.friends)) {
+                return self.failFmt("package '{s}' friends do not match its source proof", .{package.name});
+            }
+        }
         const folder = try packageFolder(self.allocator, package);
         const destination = try std.fs.path.join(self.allocator, &.{ self.packages_root, folder });
         if (try exists(self.io, destination)) {
@@ -145,6 +152,7 @@ pub const Manager = struct {
             .archive_sha256 = proof.archive_sha256,
             .manifest_sha256 = manifest_sha256,
             .extensions = proof.extensions,
+            .friends = proof.friends,
         }, .{ .whitespace = .indent_2 });
         try Io.Dir.cwd().writeFile(self.io, .{ .sub_path = path, .data = source });
     }
@@ -171,7 +179,8 @@ pub const Manager = struct {
             !std.mem.eql(u8, receipt.commit, proof.commit) or
             !std.mem.eql(u8, receipt.archive_sha256, proof.archive_sha256) or
             !std.mem.eql(u8, receipt.manifest_sha256, manifest_sha256) or
-            !equalStrings(receipt.extensions, proof.extensions))
+            !equalStrings(receipt.extensions, proof.extensions) or
+            !equalStrings(receipt.friends, proof.friends))
         {
             return self.failFmt("installed package '{s}' does not match its source proof; remove it and reinstall", .{package.name});
         }
@@ -375,7 +384,7 @@ test "install copies an immutable package without repository state" {
     try std.testing.expect(!repeated.installed);
 }
 
-test "published package extensions require an intact source proof" {
+test "published package extension and friend grants require an intact source proof" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -386,7 +395,7 @@ test "published package extensions require an intact source proof" {
     try temporary.dir.createDirPath(std.testing.io, "App");
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Package.json",
-        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"requires\":{\"silex\":\">=0.38.0 <0.39.0\"},\"extensions\":[\"GFX.UI\"]}",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"requires\":{\"silex\":\">=0.38.0 <0.39.0\"},\"extensions\":[\"GFX.UI\"],\"friends\":[\"GFX.UI\"]}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX.UI/Package.json",
@@ -408,6 +417,7 @@ test "published package extensions require an intact source proof" {
         .commit = "0123456789abcdef0123456789abcdef01234567",
         .archive_sha256 = digest,
         .extensions = &.{"GFX.UI"},
+        .friends = &.{"GFX.UI"},
     });
     _ = try manager.installPublished(ui, .macos_arm64, .{
         .repository = "Matanek/Silex-Lib-GFX-UI",
@@ -418,10 +428,11 @@ test "published package extensions require an intact source proof" {
     var resolver = Packages.Resolver.init(allocator, std.testing.io, packages_root);
     const graph = try resolver.resolve(app);
     try std.testing.expectEqual(@as(usize, 3), graph.packages.len);
+    try std.testing.expect(graph.canAccessPackage(2, 1));
 
     try Io.Dir.cwd().writeFile(std.testing.io, .{
         .sub_path = try std.fs.path.join(allocator, &.{ gfx_result.destination, "Package.json" }),
-        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"requires\":{\"silex\":\">=0.38.0 <0.39.0\"},\"extensions\":[\"GFX.Evil\"]}",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"requires\":{\"silex\":\">=0.38.0 <0.39.0\"},\"extensions\":[\"GFX.UI\"]}",
     });
     resolver = Packages.Resolver.init(allocator, std.testing.io, packages_root);
     try std.testing.expectError(error.InvalidPackageGraph, resolver.resolve(app));
@@ -434,6 +445,7 @@ test "published package extensions require an intact source proof" {
         .commit = "0123456789abcdef0123456789abcdef01234567",
         .archive_sha256 = digest,
         .extensions = &.{"GFX.UI"},
+        .friends = &.{"GFX.UI"},
     }));
 }
 

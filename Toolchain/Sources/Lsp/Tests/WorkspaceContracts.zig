@@ -146,6 +146,64 @@ test "server navigates imported package declarations to their exact sources" {
     try std.testing.expectEqual(@as(usize, 15), method.range.end.character);
 }
 
+test "server completes and navigates package declarations for friend packages" {
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "GFX/Module");
+    try temporary.dir.createDirPath(std.testing.io, "GFX.Physics/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Package.json",
+        .data = "{\"dependencies\":{\"GFX\":\"=1.0.0\",\"GFX.Physics\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Package.json",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":[\"GFX.Physics\"],\"friends\":[\"GFX.Physics\"]}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/Core.sx",
+        .data = "package func internal_value() int { return 42 }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX.Physics/Package.json",
+        .data = "{\"name\":\"GFX.Physics\",\"version\":\"1.0.0\",\"dependencies\":{\"GFX\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX.Physics/Module/Plugin.sx",
+        .data = "use GFX.Core\npublic func value() int { return Core.internal_value() }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = "func main() {}" });
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
+    const plugin_uri = try std.fmt.allocPrint(allocator, "file://{s}/GFX.Physics/Module/Plugin.sx", .{root});
+    const core_uri = try std.fmt.allocPrint(allocator, "file://{s}/GFX/Module/Core.sx", .{root});
+
+    var server = ServerModule.Server.init(std.testing.allocator, std.testing.io);
+    defer server.deinit();
+    try Support.initializeServer(&server, allocator, root_uri);
+
+    const items = try Support.serverCompletion(&server, allocator, plugin_uri,
+        \\use GFX.Core
+        \\public func value() int { return Core.internal_<|> }
+    );
+    var completed = false;
+    for (items) |item| if (std.mem.eql(u8, item.label, "internal_value")) {
+        completed = true;
+        break;
+    };
+    try std.testing.expect(completed);
+
+    const definition = (try Support.serverDefinition(&server, allocator, plugin_uri,
+        \\use GFX.Core
+        \\public func value() int { return Core.internal_<|>value() }
+    )).?;
+    try std.testing.expectEqualStrings(core_uri, definition.uri);
+    try std.testing.expectEqual(@as(usize, 0), definition.range.start.line);
+}
+
 test "server navigates package extensions call chains fields and cascades" {
     var temporary = std.testing.tmpDir(.{});
     defer temporary.cleanup();

@@ -16,14 +16,14 @@ pub fn memberVisible(self: anytype, structure_index: usize, member: anytype, pos
             if (!active) return false;
             if (member.is_public) return true;
             if (member.is_local) return position.file == member.position.file;
-            if (member.is_internal) return self.owner_context != null and self.owner_context.? == member.owner;
+            if (member.is_internal) return packageVisible(self, member.owner);
             return position.file == member.position.file;
         }
     }
     if (member.is_public) return true;
     if (member.is_local) return position.file == member.position.file;
     if (member.is_internal) {
-        return self.owner_context != null and self.owner_context.? == self.program.structures[structure_index].owner;
+        return packageVisible(self, self.program.structures[structure_index].owner);
     }
     if (!member.is_private and !member.is_protected) {
         return position.file == member.position.file or sameModule(self, structure_index);
@@ -42,7 +42,7 @@ pub fn typeVisible(self: anytype, structure_index: usize, position: Source.Posit
         if (!typeVisible(self, owner, position)) return false;
         if (declaration.is_public) return true;
         if (declaration.is_local) return position.file == declaration.position.file;
-        if (declaration.is_internal) return self.owner_context != null and self.owner_context.? == declaration.owner;
+        if (declaration.is_internal) return packageVisible(self, declaration.owner);
         if (!declaration.is_private and !declaration.is_protected) {
             return position.file == declaration.position.file or sameModule(self, structure_index);
         }
@@ -54,7 +54,7 @@ pub fn typeVisible(self: anytype, structure_index: usize, position: Source.Posit
     if (position.file == declaration.position.file) return true;
     if (declaration.is_local) return false;
     if (active_file == declaration.position.file) return true;
-    if (declaration.is_internal) return self.owner_context != null and self.owner_context.? == declaration.owner;
+    if (declaration.is_internal) return packageVisible(self, declaration.owner);
     return sameModule(self, structure_index);
 }
 
@@ -94,6 +94,16 @@ fn logicalModule(module: []const u8) []const u8 {
 
 pub fn sameFamily(self: anytype, left: usize, right: usize) bool {
     return root(self, left) == root(self, right);
+}
+
+pub fn packageVisible(self: anytype, provider: usize) bool {
+    const accessor = self.owner_context orelse return false;
+    return packageAccessible(self, accessor, provider);
+}
+
+pub fn packageAccessible(self: anytype, accessor: usize, provider: usize) bool {
+    if (self.packages) |packages| return packages.canAccessPackage(accessor, provider);
+    return accessor == provider;
 }
 
 fn root(self: anytype, start: usize) usize {

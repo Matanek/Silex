@@ -705,7 +705,7 @@ fn evaluateCall(self: anytype, evaluation: *Evaluation, call: Ast.Expression.Cal
         }
     } else {
         for (self.program.functions) |function| {
-            if (function.is_anonymous or !std.mem.eql(u8, function.name, call.name) or !Support.functionVisible(self.module_scope_roots, call, function)) continue;
+            if (function.is_anonymous or !std.mem.eql(u8, function.name, call.name) or !Support.functionVisible(self.packages, self.module_scope_roots, call, function)) continue;
             if (call.named_arguments.len == 0 and !Support.acceptsArity(function.parameters, call.arguments.len)) continue;
             if (call.named_arguments.len != 0 and (try Arguments.map(self.allocator, function.parameters, call.arguments, call.named_arguments)) == .problem) continue;
             try candidates.append(self.allocator, .{ .function = function });

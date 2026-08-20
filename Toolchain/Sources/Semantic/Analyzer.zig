@@ -1095,7 +1095,7 @@ pub const Analyzer = struct {
             );
             return self.fail(access.name_position, message);
         }
-        if (declaration.is_internal and self.owner_context != declaration.owner) {
+        if (declaration.is_internal and !Visibility.packageVisible(self, declaration.owner)) {
             const message = try std.fmt.allocPrint(
                 self.allocator,
                 "members of package-visible structure '{s}' are unavailable outside its package",
@@ -1364,7 +1364,7 @@ pub const Analyzer = struct {
         for (self.program.functions) |function| {
             if (!std.mem.eql(u8, function.name, call.name)) continue;
             total_named += 1;
-            if (!Support.functionVisible(self.module_scope_roots, call, function)) continue;
+            if (!Support.functionVisible(self.packages, self.module_scope_roots, call, function)) continue;
             named_count += 1;
             if (Support.acceptsArity(function.parameters, call.arguments.len)) arity_count += 1;
         }
@@ -1390,7 +1390,7 @@ pub const Analyzer = struct {
         }
         if (arity_count == 0) {
             const message = if (named_count == 1) single: {
-                const function = Support.findVisibleFunctionByName(self.module_scope_roots, self.program, call).?;
+                const function = Support.findVisibleFunctionByName(self.packages, self.module_scope_roots, self.program, call).?;
                 const required = Support.requiredParameterCount(function.parameters);
                 break :single if (required == function.parameters.len)
                     try std.fmt.allocPrint(
@@ -1416,7 +1416,7 @@ pub const Analyzer = struct {
         if (arity_count == 1) {
             for (self.program.functions, 0..) |function, function_id| {
                 if (std.mem.eql(u8, function.name, call.name) and Support.acceptsArity(function.parameters, call.arguments.len) and
-                    Support.functionVisible(self.module_scope_roots, call, function))
+                    Support.functionVisible(self.packages, self.module_scope_roots, call, function))
                 {
                     sole_candidate = function_id;
                     break;
@@ -1439,7 +1439,7 @@ pub const Analyzer = struct {
             var viable: std.ArrayList(Ir.FunctionId) = .empty;
             for (self.program.functions, 0..) |function, function_id| {
                 if (!std.mem.eql(u8, function.name, call.name) or !Support.acceptsArity(function.parameters, arguments.items.len)) continue;
-                if (!Support.functionVisible(self.module_scope_roots, call, function)) continue;
+                if (!Support.functionVisible(self.packages, self.module_scope_roots, call, function)) continue;
                 var matches = true;
                 for (function.parameters[0..arguments.items.len], arguments.items) |parameter, argument| {
                     if (conversionCost(self, argument.type, parameter.type) == null) {
@@ -1482,7 +1482,7 @@ pub const Analyzer = struct {
             if (arity_count == 1) {
                 for (self.program.functions) |function| {
                     if (!std.mem.eql(u8, function.name, call.name) or !Support.acceptsArity(function.parameters, arguments.items.len)) continue;
-                    if (!Support.functionVisible(self.module_scope_roots, call, function)) continue;
+                    if (!Support.functionVisible(self.packages, self.module_scope_roots, call, function)) continue;
                     for (function.parameters[0..arguments.items.len], arguments.items, 0..) |parameter, argument, index| {
                         if (parameter.type == argument.type) continue;
                         const message = try std.fmt.allocPrint(

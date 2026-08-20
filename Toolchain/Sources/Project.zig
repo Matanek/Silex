@@ -187,6 +187,7 @@ pub const Compiler = struct {
         };
         var specializer = GenericSpecializer.init(self.allocator);
         specializer.module_scope_roots = self.module_scope_roots;
+        specializer.packages = self.packages;
         const ast = specializer.specialize(composition.program) catch |err| {
             self.diagnostic = specializer.diagnostic;
             return err;

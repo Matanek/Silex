@@ -343,7 +343,7 @@ fn matches(signature: Ast.FunctionType, function: Ast.Function) bool {
 fn visible(self: anytype, function: Ast.Function, file: usize) bool {
     if (function.is_local) return function.position.file == file;
     if (function.is_public or function.position.file == file) return true;
-    if (function.is_internal) return self.owner_context != null and self.owner_context.? == function.owner;
+    if (function.is_internal) return Visibility.packageVisible(self, function.owner);
     const context = self.module_context orelse return false;
     const separator = std.mem.lastIndexOfScalar(u8, function.name, '.') orelse return false;
     return ModuleScopes.same(self.module_scope_roots, function.name[0..separator], context);

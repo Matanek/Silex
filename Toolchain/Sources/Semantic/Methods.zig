@@ -379,7 +379,7 @@ fn analyzeCallWithReceiver(
         );
         return self.fail(call.name_position, message);
     }
-    if (receiver_structure.is_internal and self.owner_context != receiver_structure.owner) {
+    if (receiver_structure.is_internal and !Visibility.packageVisible(self, receiver_structure.owner)) {
         const message = try std.fmt.allocPrint(
             self.allocator,
             "members of package-visible structure '{s}' are unavailable outside its package",
