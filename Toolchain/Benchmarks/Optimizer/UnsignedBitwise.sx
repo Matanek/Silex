@@ -1,0 +1,9 @@
+func mix(value:uint32) uint32 {
+    let shifted_left = value << 5
+    let shifted_right = value >> 7
+    return (shifted_left ^ shifted_right) & 0x7fffffff
+}
+
+func main() {
+    print(mix(0x12345678))
+}

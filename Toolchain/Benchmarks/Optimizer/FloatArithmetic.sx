@@ -1,0 +1,14 @@
+func converge(seed:float, rounds:int) float {
+    var value = seed
+    var index = 0
+    while index < rounds {
+        value = value * 0.99999 + 0.00001
+        index++
+    }
+    return value
+}
+
+func main() {
+    let result = converge(0.25, 5000000)
+    print(result > 0.99)
+}

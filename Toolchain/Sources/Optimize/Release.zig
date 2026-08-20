@@ -135,13 +135,18 @@ fn replaceFunctionScalarAggregates(allocator: Allocator, program: Ir.Program, fu
     @memset(roots, null);
     const fields = try allocator.alloc(?[]const Ir.ValueId, function.value_types.len);
     @memset(fields, null);
-    for (function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
-        .structure_init => |value| if (scalarStructure(program, value.structure, 0)) {
-            roots[value.result] = value.result;
-            fields[value.result] = value.fields;
-        },
-        else => {},
-    };
+    const root_blocks = try allocator.alloc(?usize, function.value_types.len);
+    @memset(root_blocks, null);
+    for (function.blocks, 0..) |block, block_index| {
+        for (block.instructions) |instruction| switch (instruction) {
+            .structure_init => |value| if (scalarStructure(program, value.structure, 0)) {
+                roots[value.result] = value.result;
+                fields[value.result] = value.fields;
+                root_blocks[value.result] = block_index;
+            },
+            else => {},
+        };
+    }
     var changed = true;
     while (changed) {
         changed = false;
@@ -178,6 +183,17 @@ fn replaceFunctionScalarAggregates(allocator: Allocator, program: Ir.Program, fu
     for (roots, 0..) |root, value| if (root) |resolved| {
         if (uses[value] != allowed[value]) escaped[resolved] = true;
     };
+    const block_uses = try allocator.alloc(usize, function.value_types.len);
+    for (function.blocks, 0..) |block, block_index| {
+        @memset(block_uses, 0);
+        for (block.instructions) |instruction| countUses(instruction, block_uses);
+        countTerminatorUses(block.terminator, block_uses);
+        for (roots, 0..) |root, value| if (root) |resolved| {
+            if (block_uses[value] > 0 and root_blocks[resolved].? != block_index) {
+                escaped[resolved] = true;
+            }
+        };
+    }
 
     const blocks = try allocator.alloc(Ir.Block, function.blocks.len);
     const constants = try allocator.alloc(Constant, function.value_types.len);
@@ -1309,4 +1325,29 @@ test "release scalarizes non escaping value structures" {
     const body = tail[0..end];
     try std.testing.expect(!std.mem.containsAtLeast(u8, body, 1, "call @add"));
     try std.testing.expect(!std.mem.containsAtLeast(u8, body, 1, "struct.init @Pair"));
+}
+
+test "release keeps scalar aggregates materialized across control flow" {
+    const Frontend = @import("../Frontend.zig");
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\struct Pair { let x:float; let y:float }
+        \\func component(value:Pair, condition:bool) float {
+        \\    let scaled = Pair(x:value.x * 0.5, y:value.y * 0.5)
+        \\    var offset = 0.0
+        \\    if condition { offset = 1.0 }
+        \\    return scaled.x + offset
+        \\}
+        \\func main() { print(component(Pair(x:8.0, y:4.0), true)) }
+    );
+    const optimized = try optimize(allocator, compilation.ir);
+    const text = try Ir.writeText(allocator, optimized);
+    const start = std.mem.indexOf(u8, text, "func @component") orelse return error.TestUnexpectedResult;
+    const tail = text[start..];
+    const end = std.mem.indexOf(u8, tail, "\n}\n") orelse tail.len;
+    const body = tail[0..end];
+    try std.testing.expect(std.mem.containsAtLeast(u8, body, 1, "struct.init @Pair"));
 }

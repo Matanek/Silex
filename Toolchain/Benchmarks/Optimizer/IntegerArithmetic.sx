@@ -1,0 +1,13 @@
+func mix(seed:int, rounds:int) int {
+    var value = seed
+    var index = 0
+    while index < rounds {
+        value = (value * 17 + index) % 1000003
+        index++
+    }
+    return value
+}
+
+func main() {
+    print(mix(12345, 5000000))
+}

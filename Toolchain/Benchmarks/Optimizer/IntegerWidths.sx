@@ -1,0 +1,9 @@
+func combine(left:int8, right:uint8) int16 {
+    let wide_left = left as int16
+    let wide_right = right as int16
+    return wide_left * 3 + wide_right
+}
+
+func main() {
+    print(combine(-8, 42))
+}

@@ -1,0 +1,30 @@
+struct Vec3 {
+    let x:float
+    let y:float
+    let z:float
+}
+
+func transform(value:Vec3, scale:float) Vec3 {
+    return Vec3(
+        x:value.x * scale + 1.0,
+        y:value.y * scale + 2.0,
+        z:value.z * scale + 3.0
+    )
+}
+
+func main() {
+    var values:Vec3[] = [
+        Vec3(x:1.0, y:2.0, z:3.0),
+        Vec3(x:4.0, y:5.0, z:6.0),
+        Vec3(x:7.0, y:8.0, z:9.0)
+    ]
+    var checksum = 0.0
+    for index in 0...values.count() {
+        let changed = transform(values[index], 2.0)
+        values[index] = changed
+        checksum += changed.x + changed.y + changed.z
+    }
+    print(values[0].x, " ", values[0].y, " ", values[0].z)
+    print(values[-1].x, " ", values[-1].y, " ", values[-1].z)
+    print(checksum)
+}

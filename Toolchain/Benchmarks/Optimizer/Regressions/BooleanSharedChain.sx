@@ -1,0 +1,37 @@
+func classify(a:bool, b:bool, c:bool, base:int) int {
+    let accepted = a && b && c
+    var result = base
+    if accepted {
+        result += 100
+    } else {
+        result -= 100
+    }
+    if accepted {
+        result += 10
+    } else {
+        result -= 10
+    }
+    return result
+}
+
+func hot_chain(rounds:int) int {
+    var accepted = 0
+    var index = 0
+    while index < rounds {
+        let inside_x = index % 7 != 0
+        let inside_y = index % 11 != 0
+        let inside_z = index % 13 != 0
+        if inside_x && inside_y && inside_z {
+            accepted++
+        }
+        index++
+    }
+    return accepted
+}
+
+func main() {
+    print(classify(true, true, true, 1))
+    print(classify(true, true, false, 2))
+    print(classify(false, true, true, 3))
+    print(hot_chain(10000))
+}

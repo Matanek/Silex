@@ -1,0 +1,14 @@
+func choose(value:int, condition:bool) int {
+    var result = value * 2
+    if condition {
+        result += 7
+    } else {
+        result -= 3
+    }
+    return result
+}
+
+func main() {
+    print(choose(12, true))
+    print(choose(12, false))
+}

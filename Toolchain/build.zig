@@ -127,6 +127,47 @@ pub fn build(b: *std.Build) void {
     const benchmark_step = b.step("benchmark-native", "Compare Debug and Release native code with clang++ -O2");
     benchmark_step.dependOn(&benchmark_command.step);
 
+    const optimizer_oracle_module = b.createModule(.{
+        .root_source_file = b.path("Tools/OptimizerOracle/Main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    optimizer_oracle_module.addAnonymousImport("silex_optimizer_api", .{
+        .root_source_file = b.path("Sources/OptimizerOracleApi.zig"),
+    });
+    const optimizer_oracle = b.addExecutable(.{
+        .name = "silex-optimizer-oracle",
+        .root_module = optimizer_oracle_module,
+    });
+    const optimizer_oracle_command = b.addRunArtifact(optimizer_oracle);
+    optimizer_oracle_command.addArtifactArg(executable);
+    optimizer_oracle_command.addDirectoryArg(b.path("Benchmarks/Optimizer"));
+    if (b.args) |args| optimizer_oracle_command.addArgs(args);
+    const optimizer_oracle_step = b.step(
+        "optimizer-oracle",
+        "Verify, fuzz, or compare Silex optimization with LLVM",
+    );
+    optimizer_oracle_step.dependOn(&optimizer_oracle_command.step);
+
+    const optimizer_gate_command = b.addRunArtifact(optimizer_oracle);
+    optimizer_gate_command.addArtifactArg(executable);
+    optimizer_gate_command.addDirectoryArg(b.path("Benchmarks/Optimizer"));
+    optimizer_gate_command.addArg("gate");
+    const optimizer_gate_step = b.step(
+        "optimizer-gate",
+        "Run the complete semantic, native, LLVM, and benchmark optimizer gate",
+    );
+    optimizer_gate_step.dependOn(&optimizer_gate_command.step);
+
+    const optimizer_oracle_tests = b.addTest(.{ .root_module = optimizer_oracle_module });
+    const optimizer_oracle_test_command = b.addRunArtifact(optimizer_oracle_tests);
+    const optimizer_oracle_test_step = b.step(
+        "test-optimizer-oracle",
+        "Run optimizer-oracle unit and differential tests",
+    );
+    optimizer_oracle_test_step.dependOn(&optimizer_oracle_test_command.step);
+    optimizer_gate_step.dependOn(&optimizer_oracle_test_command.step);
+
     const tests = b.addTest(.{ .root_module = module });
     const test_command = b.addRunArtifact(tests);
     const deep_copy_tests = b.addTest(.{
@@ -167,6 +208,7 @@ pub fn build(b: *std.Build) void {
     check_step.dependOn(&deep_copy_test_command.step);
     check_step.dependOn(&language_test_command.step);
     check_step.dependOn(&lsp_test_command.step);
+    check_step.dependOn(&optimizer_oracle_test_command.step);
 }
 
 fn manifestVersion() []const u8 {

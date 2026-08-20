@@ -1,0 +1,22 @@
+func emit(labels:@str[..], enabled:bool) {
+    var index = 0
+    for label in labels {
+        let visible = enabled && index % 2 == 0 && label != ""
+        if visible {
+            print("visible[", index, "]=", label)
+        } else {
+            print("hidden[", index, "]=", label)
+        }
+        if visible {
+            print("draw:", label)
+        }
+        index++
+    }
+}
+
+func main() {
+    let labels = ["title", "fps", "boids", "debug", "footer"]
+    emit(@labels[0:labels.count()], true)
+    emit(@labels[1:4], false)
+    print("text-pass-complete")
+}

@@ -1,0 +1,65 @@
+struct Boid {
+    let position_x:float
+    let position_y:float
+    let position_z:float
+    let velocity_x:float
+    let velocity_y:float
+    let velocity_z:float
+}
+
+struct Steering {
+    let x:float
+    let y:float
+    let z:float
+    let neighbors:int
+}
+
+func make_boids(count:int) Boid[] {
+    var boids:Boid[] = []
+    for index in 0...count {
+        boids.append(Boid(
+            position_x:(index % 17) as float * 3.0,
+            position_y:(index % 13) as float * 5.0,
+            position_z:(index % 11) as float * 7.0,
+            velocity_x:(index % 5) as float + 1.0,
+            velocity_y:(index % 7) as float - 2.0,
+            velocity_z:(index % 3) as float + 0.5
+        ))
+    }
+    return boids
+}
+
+func steer(boid:Boid, others:@Boid[..]) Steering {
+    var x = 0.0
+    var y = 0.0
+    var z = 0.0
+    var neighbors = 0
+    for other in others {
+        let offset_x = boid.position_x - other.position_x
+        let offset_y = boid.position_y - other.position_y
+        let offset_z = boid.position_z - other.position_z
+        let distance_squared = offset_x * offset_x + offset_y * offset_y + offset_z * offset_z
+        if distance_squared > 0.0 && distance_squared < 5_184.0 && neighbors < 32 {
+            x += offset_x + other.velocity_x
+            y += offset_y + other.velocity_y
+            z += offset_z + other.velocity_z
+            neighbors++
+        }
+    }
+    return Steering(x:x, y:y, z:z, neighbors:neighbors)
+}
+
+func main() {
+    let boids = make_boids(48)
+    let view = @boids[0:boids.count()]
+    var checksum = 0.0
+    var neighbors = 0
+    for boid in view {
+        let steering = steer(boid, view)
+        checksum += steering.x + steering.y + steering.z
+        neighbors += steering.neighbors
+    }
+    print(neighbors)
+    print(checksum == checksum)
+    print(checksum > -1000000.0 && checksum < 1000000.0)
+}
