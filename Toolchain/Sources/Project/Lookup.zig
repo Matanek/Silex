@@ -78,6 +78,15 @@ test "compare Windows provider paths across separator and case spelling" {
     try std.testing.expect(!samePath("Examples\\Distribution\\Hello.sx", "Examples/Distribution/Hello.sx", false));
 }
 
+test "keep a relative entry path below the current package root" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    try std.testing.expectEqualStrings(
+        "Tests/Catalogs.sx",
+        try relativeInputPath(arena.allocator(), ".", "Tests/Catalogs.sx"),
+    );
+}
+
 pub fn discoverProviders(self: anytype, input_path: []const u8) !Modules.Index {
     var indexes: std.ArrayList(Modules.Index) = .empty;
     const excluded_roots = try self.allocator.alloc([]const u8, self.packages.packages.len - 1);
@@ -111,7 +120,7 @@ pub fn discoverProviders(self: anytype, input_path: []const u8) !Modules.Index {
     if (findProviderPath(.{ .index = discovered }, input_path) != null) return discovered;
 
     const package = self.packages.packages[0];
-    const relative_path = try std.fs.path.relative(self.allocator, ".", null, package.root, input_path);
+    const relative_path = try relativeInputPath(self.allocator, package.root, input_path);
     const relative_name = try Modules.moduleName(self.allocator, relative_path);
     const module_name = if (package.name) |name|
         try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{ name, relative_name })
@@ -127,6 +136,13 @@ pub fn discoverProviders(self: anytype, input_path: []const u8) !Modules.Index {
     }};
     const entry_index: Modules.Index = .{ .providers = &entry_provider };
     return Modules.combine(self.allocator, &.{ discovered, entry_index });
+}
+
+fn relativeInputPath(allocator: std.mem.Allocator, root: []const u8, input: []const u8) ![]const u8 {
+    if (std.mem.eql(u8, root, ".") and !std.fs.path.isAbsolute(input)) {
+        return allocator.dupe(u8, input);
+    }
+    return std.fs.path.relative(allocator, ".", null, root, input);
 }
 
 const NamespaceRelationship = struct {

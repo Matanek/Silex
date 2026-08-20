@@ -990,7 +990,7 @@ pub const Resolver = struct {
         }
         if (manifest.name) |name| {
             if (!Modules.validName(name)) return self.fail("invalid package identity");
-            if (!std.mem.eql(u8, std.fs.path.basename(root), name)) {
+            if (!std.mem.eql(u8, try localRootName(self.allocator, self.io, root), name)) {
                 return self.fail("local package folder and manifest name differ");
             }
         }
@@ -1339,6 +1339,23 @@ pub const Resolver = struct {
         return error.InvalidPackageGraph;
     }
 };
+
+fn localRootName(allocator: Allocator, io: Io, root: []const u8) ![]const u8 {
+    const basename = std.fs.path.basename(root);
+    if (!std.mem.eql(u8, basename, ".") and !std.mem.eql(u8, basename, "..")) return basename;
+    const canonical = try Io.Dir.cwd().realPathFileAlloc(io, root, allocator);
+    return std.fs.path.basename(canonical);
+}
+
+test "resolve the current directory name for local package identity" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const canonical = try Io.Dir.cwd().realPathFileAlloc(std.testing.io, ".", arena.allocator());
+    try std.testing.expectEqualStrings(
+        std.fs.path.basename(canonical),
+        try localRootName(arena.allocator(), std.testing.io, "."),
+    );
+}
 
 fn artifactSha256(artifacts: ?std.json.Value, target_name: []const u8, relative_path: []const u8) ?[]const u8 {
     const targets = switch (artifacts orelse return null) {

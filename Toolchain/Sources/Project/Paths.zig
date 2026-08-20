@@ -20,10 +20,16 @@ pub fn findRootWithin(
             if (samePath(directory, limit)) return fallback;
             if (!pathInside(directory, limit)) return fallback;
         }
-        const next = std.fs.path.dirname(directory) orelse return fallback;
+        const next = parentDirectory(directory) orelse return fallback;
         if (std.mem.eql(u8, next, directory)) return fallback;
         directory = next;
     }
+}
+
+fn parentDirectory(directory: []const u8) ?[]const u8 {
+    if (std.fs.path.dirname(directory)) |parent| return parent;
+    if (!std.fs.path.isAbsolute(directory) and !std.mem.eql(u8, directory, ".")) return ".";
+    return null;
 }
 
 fn looseRoot(input_path: []const u8) []const u8 {
@@ -69,4 +75,9 @@ test "use a principal module's parent as the loose project root" {
         sandbox,
         try findRootWithin(allocator, std.testing.io, input, workspace),
     );
+}
+
+test "continue a relative manifest search through the current directory" {
+    try std.testing.expectEqualStrings(".", parentDirectory("Tests").?);
+    try std.testing.expect(parentDirectory(".") == null);
 }
