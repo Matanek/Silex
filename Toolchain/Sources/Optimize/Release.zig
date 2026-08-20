@@ -52,6 +52,12 @@ pub fn optimizeWithoutInlining(allocator: Allocator, program: Ir.Program) !Ir.Pr
 fn simplifyBooleanDiamonds(allocator: Allocator, function: Ir.Function) !Ir.Function {
     if (function.blocks.len < 4) return function;
     const blocks = try allocator.dupe(Ir.Block, function.blocks);
+    const uses = try allocator.alloc(usize, function.value_types.len);
+    @memset(uses, 0);
+    for (blocks) |block| {
+        for (block.instructions) |instruction| countUses(instruction, uses);
+        countTerminatorUses(block.terminator, uses);
+    }
     var changed = false;
     for (blocks, 0..) |block, block_index| {
         const outer = switch (block.terminator) {
@@ -85,6 +91,7 @@ fn simplifyBooleanDiamonds(allocator: Allocator, function: Ir.Function) !Ir.Func
             else => continue,
         };
         if (copy.result != false_value.result) continue;
+        if (uses[false_value.result] != 1) continue;
 
         blocks[block_index].terminator = .{ .branch = .{
             .condition = outer.condition,
@@ -1033,6 +1040,87 @@ test "release folds constants and propagates copies in straight-line code" {
     const text = try Ir.writeText(allocator, optimized);
     try std.testing.expect(std.mem.containsAtLeast(u8, text, 1, "const 42"));
     try std.testing.expect(!std.mem.containsAtLeast(u8, text, 1, "copy"));
+}
+
+test "boolean diamond simplification preserves a merged result used after the branch" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const value_types = [_]Ir.Type{ .bool, .bool, .bool };
+    const evaluated = [_]Ir.Instruction{
+        .{ .copy = .{ .result = 2, .operand = 1 } },
+    };
+    const short_circuit = [_]Ir.Instruction{
+        .{ .constant_bool = .{ .result = 2, .value = false } },
+    };
+    const blocks = [_]Ir.Block{
+        .{ .instructions = &.{}, .terminator = .{ .branch = .{
+            .condition = 0,
+            .then_block = 1,
+            .else_block = 2,
+        } } },
+        .{ .instructions = &evaluated, .terminator = .{ .jump = 3 } },
+        .{ .instructions = &short_circuit, .terminator = .{ .jump = 3 } },
+        .{ .instructions = &.{}, .terminator = .{ .branch = .{
+            .condition = 2,
+            .then_block = 4,
+            .else_block = 5,
+        } } },
+        .{ .instructions = &.{}, .terminator = .{ .jump = 1 } },
+        .{ .instructions = &.{}, .terminator = .{ .return_value = 2 } },
+    };
+    const function: Ir.Function = .{
+        .name = "shared",
+        .parameter_types = &.{ .bool, .bool },
+        .return_type = .bool,
+        .value_types = &value_types,
+        .blocks = &blocks,
+    };
+
+    const optimized = try simplifyBooleanDiamonds(allocator, function);
+
+    try std.testing.expectEqual(@as(usize, blocks.len), optimized.blocks.len);
+    try std.testing.expectEqual(@as(Ir.BlockId, 2), optimized.blocks[0].terminator.branch.else_block);
+}
+
+test "boolean diamond simplification accepts shared control-only blocks" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const value_types = [_]Ir.Type{ .bool, .bool, .bool };
+    const evaluated = [_]Ir.Instruction{
+        .{ .copy = .{ .result = 2, .operand = 1 } },
+    };
+    const short_circuit = [_]Ir.Instruction{
+        .{ .constant_bool = .{ .result = 2, .value = false } },
+    };
+    const blocks = [_]Ir.Block{
+        .{ .instructions = &.{}, .terminator = .{ .branch = .{
+            .condition = 0,
+            .then_block = 1,
+            .else_block = 2,
+        } } },
+        .{ .instructions = &evaluated, .terminator = .{ .jump = 3 } },
+        .{ .instructions = &short_circuit, .terminator = .{ .jump = 3 } },
+        .{ .instructions = &.{}, .terminator = .{ .branch = .{
+            .condition = 2,
+            .then_block = 4,
+            .else_block = 5,
+        } } },
+        .{ .instructions = &.{}, .terminator = .{ .jump = 1 } },
+        .{ .instructions = &.{}, .terminator = .return_void },
+    };
+    const function: Ir.Function = .{
+        .name = "shared_control",
+        .parameter_types = &.{ .bool, .bool },
+        .return_type = .void,
+        .value_types = &value_types,
+        .blocks = &blocks,
+    };
+
+    const optimized = try simplifyBooleanDiamonds(allocator, function);
+
+    try std.testing.expectEqual(@as(usize, 4), optimized.blocks.len);
 }
 
 test "release preserves representation-changing copies" {
