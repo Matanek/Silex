@@ -91,7 +91,23 @@ pub fn discoverProviders(self: anytype, input_path: []const u8) !Modules.Index {
             try indexes.append(self.allocator, discovered);
         }
     }
-    const discovered = try Modules.combine(self.allocator, indexes.items);
+    const merges = try self.packages.moduleMerges(self.allocator);
+    const discovered = Modules.combineWithMerges(self.allocator, indexes.items, merges) catch |err| switch (err) {
+        error.DuplicateModule => {
+            if (Modules.firstCollision(indexes.items, merges)) |collision| {
+                if (namespaceParent(self.packages, collision)) |relationship| {
+                    const message = try std.fmt.allocPrint(
+                        self.allocator,
+                        "parent package '{s}' owns module '{s}'; extension package '{s}' cannot provide the same module unless its exact extension permission enables merge",
+                        .{ relationship.parent, collision.name, relationship.child },
+                    );
+                    return self.fail(.{ .offset = 0, .line = 1, .column = 1 }, message);
+                }
+            }
+            return error.DuplicateModule;
+        },
+        else => |other| return other,
+    };
     if (findProviderPath(.{ .index = discovered }, input_path) != null) return discovered;
 
     const package = self.packages.packages[0];
@@ -111,4 +127,24 @@ pub fn discoverProviders(self: anytype, input_path: []const u8) !Modules.Index {
     }};
     const entry_index: Modules.Index = .{ .providers = &entry_provider };
     return Modules.combine(self.allocator, &.{ discovered, entry_index });
+}
+
+const NamespaceRelationship = struct {
+    parent: []const u8,
+    child: []const u8,
+};
+
+fn namespaceParent(packages: anytype, collision: Modules.Collision) ?NamespaceRelationship {
+    return namespaceParentOrdered(packages, collision.left_owner, collision.right_owner, collision.name) orelse
+        namespaceParentOrdered(packages, collision.right_owner, collision.left_owner, collision.name);
+}
+
+fn namespaceParentOrdered(packages: anytype, parent_owner: usize, child_owner: usize, module_name: []const u8) ?NamespaceRelationship {
+    if (parent_owner >= packages.packages.len or child_owner >= packages.packages.len) return null;
+    const parent_name = packages.packages[parent_owner].name orelse return null;
+    const child_name = packages.packages[child_owner].name orelse return null;
+    if (!std.mem.eql(u8, child_name, module_name)) return null;
+    const separator = std.mem.lastIndexOfScalar(u8, child_name, '.') orelse return null;
+    if (!std.mem.eql(u8, parent_name, child_name[0..separator])) return null;
+    return .{ .parent = parent_name, .child = child_name };
 }

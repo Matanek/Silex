@@ -132,7 +132,11 @@ pub fn index(
             try indexes.append(allocator, discovered);
         }
     }
-    const module_index = try Modules.combine(allocator, indexes.items);
+    const module_index = try Modules.combineWithMerges(
+        allocator,
+        indexes.items,
+        try graph.moduleMerges(allocator),
+    );
     var current_owner: usize = 0;
     for (module_index.providers) |provider| if (samePath(provider.path, document_path)) {
         current_owner = provider.owner;

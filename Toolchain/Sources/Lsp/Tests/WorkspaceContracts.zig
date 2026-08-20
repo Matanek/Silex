@@ -204,6 +204,67 @@ test "server completes and navigates package declarations for friend packages" {
     try std.testing.expectEqual(@as(usize, 0), definition.range.start.line);
 }
 
+test "server completes additive parent and extension module declarations" {
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "GFX/Module");
+    try temporary.dir.createDirPath(std.testing.io, "GFX.Physics/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Package.json",
+        .data = "{\"dependencies\":{\"GFX\":\"=1.0.0\",\"GFX.Physics\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Package.json",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":{\"GFX.Physics\":{\"merge\":true}}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/Physics.sx",
+        .data = "public struct CorePhysics {}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX.Physics/Package.json",
+        .data = "{\"name\":\"GFX.Physics\",\"version\":\"1.0.0\",\"dependencies\":{\"GFX\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX.Physics/Module/@Module.sx",
+        .data = "public struct ExtensionPhysics {}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = "func main() {}" });
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
+    const main_uri = try std.fmt.allocPrint(allocator, "file://{s}/Main.sx", .{root});
+    const core_uri = try std.fmt.allocPrint(allocator, "file://{s}/GFX/Module/Physics.sx", .{root});
+    const extension_uri = try std.fmt.allocPrint(allocator, "file://{s}/GFX.Physics/Module/%40Module.sx", .{root});
+
+    var server = ServerModule.Server.init(std.testing.allocator, std.testing.io);
+    defer server.deinit();
+    try Support.initializeServer(&server, allocator, root_uri);
+
+    const items = try Support.serverCompletion(&server, allocator, main_uri,
+        \\use GFX.Physics
+        \\func main() { Physics.<|> }
+    );
+    try Support.expectPresent("CorePhysics", items);
+    try Support.expectPresent("ExtensionPhysics", items);
+    try Support.expectNoDuplicates(items);
+
+    const core = (try Support.serverDefinition(&server, allocator, main_uri,
+        \\use GFX.Physics
+        \\func main() { Physics.Core<|>Physics() }
+    )).?;
+    try std.testing.expectEqualStrings(core_uri, core.uri);
+
+    const extension = (try Support.serverDefinition(&server, allocator, main_uri,
+        \\use GFX.Physics
+        \\func main() { Physics.Extension<|>Physics() }
+    )).?;
+    try std.testing.expectEqualStrings(extension_uri, extension.uri);
+}
+
 test "server completes and navigates authorized umbrella contributions" {
     var temporary = std.testing.tmpDir(.{});
     defer temporary.cleanup();

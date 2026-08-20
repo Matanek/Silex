@@ -121,6 +121,7 @@ pub const ExtensionPolicy = struct {
     name: []const u8,
     friend: bool = false,
     suite: bool = false,
+    merge: bool = false,
 };
 
 pub const Origin = enum {
@@ -179,7 +180,12 @@ pub const Graph = struct {
     pub fn canAccess(self: Graph, owner: usize, provider: usize, module_name: []const u8) bool {
         if (owner == provider) return true;
         const direct = self.directDependencyForModule(owner, module_name) orelse return false;
-        return direct.package == provider;
+        if (direct.package == provider) return true;
+        if (!std.mem.eql(u8, direct.name, module_name) or provider >= self.packages.len) return false;
+        const child_name = self.packages[direct.package].name orelse return false;
+        if (!std.mem.eql(u8, child_name, direct.name)) return false;
+        const policy = extensionPolicy(self.packages[provider].extensions, child_name) orelse return false;
+        return policy.merge and std.mem.eql(u8, policy.name, child_name);
     }
 
     pub fn canAccessPackage(self: Graph, accessor: usize, provider: usize) bool {
@@ -200,6 +206,26 @@ pub const Graph = struct {
             if (std.mem.eql(u8, allowed, catalog)) return true;
         }
         return false;
+    }
+
+    pub fn moduleMerges(self: Graph, allocator: Allocator) Allocator.Error![]const Modules.Merge {
+        var result: std.ArrayList(Modules.Merge) = .empty;
+        for (self.packages, 0..) |parent, parent_owner| {
+            for (parent.extensions) |policy| {
+                if (!policy.merge) continue;
+                for (self.packages, 0..) |child, child_owner| {
+                    const child_name = child.name orelse continue;
+                    if (!std.mem.eql(u8, child_name, policy.name)) continue;
+                    try result.append(allocator, .{
+                        .name = policy.name,
+                        .parent_owner = parent_owner,
+                        .child_owner = child_owner,
+                    });
+                    break;
+                }
+            }
+        }
+        return result.toOwnedSlice(allocator);
     }
 
     pub fn label(self: Graph, package: usize) []const u8 {
@@ -1051,12 +1077,17 @@ pub const Resolver = struct {
                                 policy.friend = enabled;
                             } else if (std.mem.eql(u8, permission.key_ptr.*, "suite")) {
                                 policy.suite = enabled;
+                            } else if (std.mem.eql(u8, permission.key_ptr.*, "merge")) {
+                                policy.merge = enabled;
                             } else {
-                                return self.fail("an extension accepts only friend and suite permissions");
+                                return self.fail("an extension accepts only friend, suite, and merge permissions");
                             }
                         }
                         if (policy.suite and std.mem.endsWith(u8, extension, ".*")) {
                             return self.fail("suite permission requires an exact package name; wildcard extensions cannot be installed deterministically");
+                        }
+                        if (policy.merge and std.mem.endsWith(u8, extension, ".*")) {
+                            return self.fail("merge permission requires an exact package name; wildcard extensions cannot share a module deterministically");
                         }
                         try extensions.append(self.allocator, policy);
                     }
@@ -1373,7 +1404,8 @@ fn equalExtensionPolicies(left: []const ExtensionPolicy, right: []const Extensio
     for (left, right) |left_policy, right_policy| {
         if (!std.mem.eql(u8, left_policy.name, right_policy.name) or
             left_policy.friend != right_policy.friend or
-            left_policy.suite != right_policy.suite) return false;
+            left_policy.suite != right_policy.suite or
+            left_policy.merge != right_policy.merge) return false;
     }
     return true;
 }
@@ -1526,7 +1558,7 @@ test "parse exact and caret stable versions" {
     try std.testing.expectError(error.InvalidVersion, Version.parse("1.2.3-beta"));
 }
 
-test "validate extension permissions and reject wildcard suite members" {
+test "validate extension permissions and reject wildcard suite and merge members" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -1554,11 +1586,15 @@ test "validate extension permissions and reject wildcard suite members" {
         },
         .{
             .source = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":{\"GFX.UI\":{\"trusted\":true}}}",
-            .diagnostic = "an extension accepts only friend and suite permissions",
+            .diagnostic = "an extension accepts only friend, suite, and merge permissions",
         },
         .{
             .source = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":{\"GFX.*\":{\"friend\":true,\"suite\":true}}}",
             .diagnostic = "suite permission requires an exact package name; wildcard extensions cannot be installed deterministically",
+        },
+        .{
+            .source = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":{\"GFX.*\":{\"merge\":true}}}",
+            .diagnostic = "merge permission requires an exact package name; wildcard extensions cannot share a module deterministically",
         },
         .{
             .source = "{\"extensions\":{}}",
@@ -1584,6 +1620,26 @@ test "validate extension permissions and reject wildcard suite members" {
     const graph = try resolver.resolve(root);
     try std.testing.expectEqualStrings("GFX.*", graph.packages[0].extensions[0].name);
     try std.testing.expect(graph.packages[0].extensions[0].friend);
+    try std.testing.expect(!graph.packages[0].extensions[0].suite);
+    try std.testing.expect(!graph.packages[0].extensions[0].merge);
+}
+
+test "parse exact module merge permission" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "GFX/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Package.json",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":{\"GFX.Physics\":{\"merge\":true}}}",
+    });
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "GFX" });
+    var resolver = Resolver.init(allocator, std.testing.io, null);
+    const graph = try resolver.resolve(root);
+    try std.testing.expect(graph.packages[0].extensions[0].merge);
+    try std.testing.expect(!graph.packages[0].extensions[0].friend);
     try std.testing.expect(!graph.packages[0].extensions[0].suite);
 }
 
@@ -2062,7 +2118,7 @@ test "resolve qualified identities literally from an injected global root" {
         .sub_path = "Global/Silex@0.1.0/.silex/source.json",
         .data = try std.fmt.allocPrint(
             allocator,
-            "{{\"schema\":3,\"name\":\"Silex\",\"version\":\"0.1.0\",\"repository\":\"https://github.com/Matanek/Silex.git\",\"commit\":\"0123456789abcdef0123456789abcdef01234567\",\"archive_sha256\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\",\"manifest_sha256\":\"{s}\",\"extensions\":[{{\"name\":\"Silex.Bootstrap\",\"friend\":false,\"suite\":false}}]}}",
+            "{{\"schema\":3,\"name\":\"Silex\",\"version\":\"0.1.0\",\"repository\":\"https://github.com/Matanek/Silex.git\",\"commit\":\"0123456789abcdef0123456789abcdef01234567\",\"archive_sha256\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\",\"manifest_sha256\":\"{s}\",\"extensions\":[{{\"name\":\"Silex.Bootstrap\",\"friend\":false,\"suite\":false,\"merge\":false}}]}}",
             .{manifest_sha256},
         ),
     });

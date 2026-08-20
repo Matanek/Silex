@@ -109,8 +109,10 @@ name a package outside the declaring package's namespace. Omit `extensions` or
 use an empty object to keep the namespace closed.
 
 Each extension entry carries its own permissions. `friend` lets the selected
-child access declarations carrying `package` visibility, while `suite` includes
-that exact child when the parent is explicitly installed from the registry:
+child access declarations carrying `package` visibility, `suite` includes that
+exact child when the parent is explicitly installed from the registry, and
+`merge` lets the parent and that exact child contribute public declarations to
+the child's principal module:
 
 ```json
 {
@@ -119,7 +121,8 @@ that exact child when the parent is explicitly installed from the registry:
   "extensions": {
     "GFX.Physics": {
       "friend": true,
-      "suite": true
+      "suite": true,
+      "merge": true
     }
   }
 }
@@ -127,10 +130,29 @@ that exact child when the parent is explicitly installed from the registry:
 
 Permissions default to `false`. A wildcard may carry `friend: true`, deliberately
 granting privileged access to every matching direct child, including children
-published later by the community. `suite: true` is rejected on a wildcard
-because an open name pattern cannot determine a stable installation set. When
-both an exact entry and a wildcard match a child, the exact entry defines its
-permissions.
+published later by the community. `suite: true` and `merge: true` are rejected
+on a wildcard because an open name pattern can determine neither a stable
+installation set nor one authenticated module participant. When both an exact
+entry and a wildcard match a child, the exact entry defines its permissions.
+
+Extension authorization delegates a namespace; it never transfers the
+parent's authority over that namespace. A module supplied by `GFX` under the
+exact name `GFX.Physics` is therefore canonical. If the active child package
+also supplies its principal `GFX.Physics` module, composition rejects the two
+providers by default with a diagnostic naming the parent and extension. The
+child cannot replace the parent's module through installation order, version
+selection, a workspace link, or a wildcard grant.
+
+An exact `merge: true` permission makes this one collision intentionally
+additive. The parent remains the canonical module provider, while public
+declarations from both principal-module fragments enter the composed
+`GFX.Physics` interface. Each declaration retains its package owner. `module`
+and `package` visibility never merge across the package boundary; use the
+independent `friend` permission when the child deliberately needs the parent's
+`package` declarations. Two public declarations or reexports with the same
+name reject the composition rather than selecting a winner. Modules below the
+child namespace remain ordinary independently owned modules, and exact
+collisions below the principal module remain errors.
 
 Friendship grants access from the named child to the declaring parent. It does
 not install or activate the child, replace a dependency, expose `module`,
@@ -182,10 +204,12 @@ reexport only declarations that it owns. Every contributed name is checked
 against the umbrella's declarations, child namespaces and other contributions;
 any collision rejects the composition.
 
-Extension authorization, `friend`, `suite`, and `catalogs` express independent
-intentions. The extension key authorizes the child identity, `friend` grants
-privileged source access, `suite` selects an exact child for explicit parent
-installation, and `catalogs` opens named umbrellas to safe public reexports.
+Extension authorization, `friend`, `suite`, `merge`, and `catalogs` express
+independent intentions. The extension key authorizes the child identity,
+`friend` grants privileged source access, `suite` selects an exact child for
+explicit parent installation, `merge` opens only the exact child principal
+module to additive public composition, and `catalogs` opens named umbrellas to
+safe public reexports.
 
 For registered packages, extension permissions and catalog grants come directly
 from `Package.json` in

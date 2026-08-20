@@ -134,9 +134,14 @@ package. Private specialized declarations are accessible only through their
 contextual qualifier; public declarations still contribute to the composed
 module interface.
 
-This composition never crosses a package boundary. Packages with qualified
-names may share a namespace prefix, but they cannot contribute fragments to
-the same exact module.
+This composition normally never crosses a package boundary. Packages with
+qualified names may share a namespace prefix, but they cannot contribute
+fragments to the same exact module unless the parent package grants exact
+`merge: true` permission for the child package's principal module. That narrow
+merge composes only public declarations, retains declaration ownership and
+rejects every public name collision. Platform and target fragments, deeper
+modules and package-private scopes continue to belong to their original
+package.
 
 ## Combine a module with its child namespace
 

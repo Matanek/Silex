@@ -161,6 +161,13 @@ open Silex document
   selects independently released members whose parent dependency accepts that
   exact release. Suite selection adds no package-composition dependency and is
   never inferred from a wildcard.
+- A parent package remains authoritative over every module in its namespace.
+  When it and an authorized child package provide the child's exact principal
+  module, the parent is canonical and composition fails unless the parent's
+  exact extension policy carries `merge`. An enabled merge adds distinct public
+  declarations while retaining their package owners; duplicate public names
+  and every deeper exact-module collision remain deterministic errors, and
+  neither module nor package visibility crosses the boundary implicitly.
 - Module interfaces preserve structured declaration identities (owner, module,
   name and complete parameter signature), the required parameter count that
   defines their effective call signatures, public nominal structures, fields,

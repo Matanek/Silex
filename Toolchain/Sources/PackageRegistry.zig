@@ -626,7 +626,7 @@ test "install tagged package dependencies from registered Git repositories" {
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "STD/Module/Text.sx", .data = "public func value() int { return 1 }" });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Package.json",
-        .data = "{\"name\":\"GFX\",\"version\":\"2.0.0\",\"requires\":{\"silex\":\">=0.38.0 <0.39.0\"},\"extensions\":{\"GFX.UI\":{\"friend\":true,\"suite\":true}},\"catalogs\":[\"GFX.Plugins\"],\"dependencies\":{\"STD\":\"^1.0.0\"}}",
+        .data = "{\"name\":\"GFX\",\"version\":\"2.0.0\",\"requires\":{\"silex\":\">=0.38.0 <0.39.0\"},\"extensions\":{\"GFX.UI\":{\"friend\":true,\"suite\":true,\"merge\":true}},\"catalogs\":[\"GFX.Plugins\"],\"dependencies\":{\"STD\":\"^1.0.0\"}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "GFX/Module/Drawing.sx", .data = "public func value() int { return 2 }" });
     try temporary.dir.writeFile(std.testing.io, .{
@@ -693,6 +693,7 @@ test "install tagged package dependencies from registered Git repositories" {
     try std.testing.expectEqualStrings("GFX.UI", result.package.extensions[0].name);
     try std.testing.expect(result.package.extensions[0].friend);
     try std.testing.expect(result.package.extensions[0].suite);
+    try std.testing.expect(result.package.extensions[0].merge);
     try std.testing.expectEqualStrings("GFX.Plugins", result.package.catalogs[0]);
     try std.testing.expect(try pathExists(std.testing.io, try std.fs.path.join(allocator, &.{ store_root, "STD@1.0.0" })));
     try std.testing.expect(try pathExists(std.testing.io, try std.fs.path.join(allocator, &.{ store_root, "GFX.UI@1.0.0" })));

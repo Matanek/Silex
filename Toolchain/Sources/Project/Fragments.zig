@@ -22,7 +22,7 @@ pub fn install(
 pub fn same(index: Modules.Index, left: usize, right: usize) bool {
     const left_provider = index.providers[left];
     const right_provider = index.providers[right];
-    return left_provider.owner == right_provider.owner and
+    return Modules.compositionOwner(left_provider) == Modules.compositionOwner(right_provider) and
         std.mem.eql(u8, left_provider.name, right_provider.name);
 }
 

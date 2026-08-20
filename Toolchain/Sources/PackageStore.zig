@@ -361,7 +361,8 @@ fn equalExtensionPolicies(left: []const Packages.ExtensionPolicy, right: []const
     for (left, right) |left_policy, right_policy| {
         if (!std.mem.eql(u8, left_policy.name, right_policy.name) or
             left_policy.friend != right_policy.friend or
-            left_policy.suite != right_policy.suite) return false;
+            left_policy.suite != right_policy.suite or
+            left_policy.merge != right_policy.merge) return false;
     }
     return true;
 }
@@ -405,7 +406,7 @@ test "published package extension permissions and catalogs require an intact sou
     try temporary.dir.createDirPath(std.testing.io, "App");
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Package.json",
-        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"requires\":{\"silex\":\">=0.38.0 <0.39.0\"},\"extensions\":{\"GFX.UI\":{\"friend\":true,\"suite\":true}},\"catalogs\":[\"GFX.Plugins\"]}",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"requires\":{\"silex\":\">=0.38.0 <0.39.0\"},\"extensions\":{\"GFX.UI\":{\"friend\":true,\"suite\":true,\"merge\":true}},\"catalogs\":[\"GFX.Plugins\"]}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX.UI/Package.json",
@@ -426,7 +427,7 @@ test "published package extension permissions and catalogs require an intact sou
         .repository = "Matanek/Silex-Lib-GFX",
         .commit = "0123456789abcdef0123456789abcdef01234567",
         .archive_sha256 = digest,
-        .extensions = &.{.{ .name = "GFX.UI", .friend = true, .suite = true }},
+        .extensions = &.{.{ .name = "GFX.UI", .friend = true, .suite = true, .merge = true }},
         .catalogs = &.{"GFX.Plugins"},
     });
     _ = try manager.installPublished(ui, .macos_arm64, .{
@@ -454,7 +455,7 @@ test "published package extension permissions and catalogs require an intact sou
         .repository = "Matanek/Silex-Lib-GFX",
         .commit = "0123456789abcdef0123456789abcdef01234567",
         .archive_sha256 = digest,
-        .extensions = &.{.{ .name = "GFX.UI", .friend = true, .suite = true }},
+        .extensions = &.{.{ .name = "GFX.UI", .friend = true, .suite = true, .merge = true }},
         .catalogs = &.{"GFX.Plugins"},
     }));
 }

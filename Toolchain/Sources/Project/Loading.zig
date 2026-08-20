@@ -93,6 +93,7 @@ pub fn load(self: anytype, module: usize, from: ?usize) !void {
         unit.state = .loading;
         try parse(self, fragment);
     }
+    try validateMergedDeclarations(self, module);
     for (self.units, 0..) |unit, fragment| {
         if (!Fragments.same(self.index, module, fragment) or unit.state != .loading) continue;
         try bind(self, fragment);
@@ -102,6 +103,82 @@ pub fn load(self: anytype, module: usize, from: ?usize) !void {
         try self.activateQualifiedReferences(fragment);
         unit.state = .loaded;
     }
+}
+
+fn validateMergedDeclarations(self: anytype, module: usize) !void {
+    const fragments = self.units[module].fragments;
+    for (fragments, 0..) |left, left_index| {
+        const left_provider = self.index.providers[left];
+        const left_program = self.units[left].program orelse continue;
+        for (fragments[left_index + 1 ..]) |right| {
+            const right_provider = self.index.providers[right];
+            if (left_provider.owner == right_provider.owner) continue;
+            const right_program = self.units[right].program orelse continue;
+            for (right_program.functions) |function| {
+                if (function.is_public and hasPublicName(left_program, function.name)) {
+                    return mergedDeclarationCollision(self, right, function.name, function.name_position, left_provider.owner);
+                }
+            }
+            for (right_program.structures) |structure| {
+                if (Reexports.structureExported(right_program, structure) and hasPublicName(left_program, structure.name)) {
+                    return mergedDeclarationCollision(self, right, structure.name, structure.name_position, left_provider.owner);
+                }
+            }
+            for (right_program.enums) |enumeration| {
+                if (enumeration.is_public and hasPublicName(left_program, enumeration.name)) {
+                    return mergedDeclarationCollision(self, right, enumeration.name, enumeration.name_position, left_provider.owner);
+                }
+            }
+            for (right_program.uses) |use| {
+                if (!use.is_public) continue;
+                const alias = use.alias orelse Names.lastSegment(use.path);
+                if (hasPublicName(left_program, alias)) {
+                    return mergedDeclarationCollision(
+                        self,
+                        right,
+                        alias,
+                        use.alias_position orelse use.position,
+                        left_provider.owner,
+                    );
+                }
+            }
+        }
+    }
+}
+
+fn hasPublicName(program: @import("../Ast.zig").Program, name: []const u8) bool {
+    if (std.mem.eql(u8, name, Result.name)) return false;
+    for (program.functions) |function| if (function.is_public and std.mem.eql(u8, function.name, name)) return true;
+    for (program.structures) |structure| {
+        if (Reexports.structureExported(program, structure) and std.mem.eql(u8, structure.name, name)) return true;
+    }
+    for (program.enums) |enumeration| if (enumeration.is_public and std.mem.eql(u8, enumeration.name, name)) return true;
+    for (program.uses) |use| {
+        if (!use.is_public) continue;
+        const alias = use.alias orelse Names.lastSegment(use.path);
+        if (std.mem.eql(u8, alias, name)) return true;
+    }
+    return false;
+}
+
+fn mergedDeclarationCollision(
+    self: anytype,
+    provider: usize,
+    name: []const u8,
+    position: @import("../Source.zig").Position,
+    previous_owner: usize,
+) !void {
+    const message = try std.fmt.allocPrint(
+        self.allocator,
+        "public declaration '{s}' from extension package '{s}' collides with package '{s}' in merged module '{s}'",
+        .{
+            name,
+            self.packages.label(self.index.providers[provider].owner),
+            self.packages.label(previous_owner),
+            self.index.providers[provider].name,
+        },
+    );
+    return self.fail(position, message);
 }
 
 fn parse(self: anytype, fragment: usize) !void {

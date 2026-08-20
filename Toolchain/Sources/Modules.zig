@@ -20,7 +20,20 @@ pub const Provider = struct {
     path: []const u8,
     file: usize,
     owner: usize = 0,
+    merge_owner: ?usize = null,
     origin: Origin = .portable,
+};
+
+pub const Merge = struct {
+    name: []const u8,
+    parent_owner: usize,
+    child_owner: usize,
+};
+
+pub const Collision = struct {
+    name: []const u8,
+    left_owner: usize,
+    right_owner: usize,
 };
 
 pub const principal_file = "@module.sx";
@@ -37,8 +50,11 @@ pub const Index = struct {
             switch (std.mem.order(u8, self.providers[middle].name, name)) {
                 .lt => low = middle + 1,
                 .gt => high = middle,
-                .eq => return self.providers[middle],
+                .eq => high = middle,
             }
+        }
+        if (low < self.providers.len and std.mem.eql(u8, self.providers[low].name, name)) {
+            return self.providers[low];
         }
         return null;
     }
@@ -163,19 +179,66 @@ fn insideAny(path: []const u8, roots: []const []const u8) bool {
 }
 
 pub fn combine(allocator: Allocator, indexes: []const Index) (Allocator.Error || error{DuplicateModule})!Index {
+    return combineWithMerges(allocator, indexes, &.{});
+}
+
+pub fn combineWithMerges(
+    allocator: Allocator,
+    indexes: []const Index,
+    merges: []const Merge,
+) (Allocator.Error || error{DuplicateModule})!Index {
     var providers: std.ArrayList(Provider) = .empty;
-    for (indexes) |index| try providers.appendSlice(allocator, index.providers);
+    for (indexes) |index| for (index.providers) |provider| {
+        var merged = provider;
+        merged.merge_owner = mergeOwner(merges, provider);
+        try providers.append(allocator, merged);
+    };
     std.mem.sort(Provider, providers.items, {}, lessThan);
     for (providers.items, 0..) |*provider, index| {
         provider.file = index;
         if (index != 0 and
             std.mem.eql(u8, providers.items[index - 1].name, provider.name) and
-            providers.items[index - 1].owner != provider.owner)
+            compositionOwner(providers.items[index - 1]) != compositionOwner(provider.*))
         {
             return error.DuplicateModule;
         }
     }
     return .{ .providers = try providers.toOwnedSlice(allocator) };
+}
+
+pub fn firstCollision(indexes: []const Index, merges: []const Merge) ?Collision {
+    for (indexes, 0..) |left_index, index_number| {
+        for (left_index.providers) |left| {
+            for (indexes[index_number..]) |right_index| {
+                for (right_index.providers) |right| {
+                    if (left.owner == right.owner or !std.mem.eql(u8, left.name, right.name)) continue;
+                    const left_merge_owner = mergeOwner(merges, left);
+                    const right_merge_owner = mergeOwner(merges, right);
+                    if (left_merge_owner != null and left_merge_owner == right_merge_owner) continue;
+                    return .{
+                        .name = left.name,
+                        .left_owner = left.owner,
+                        .right_owner = right.owner,
+                    };
+                }
+            }
+        }
+    }
+    return null;
+}
+
+pub fn compositionOwner(provider: Provider) usize {
+    return provider.merge_owner orelse provider.owner;
+}
+
+fn mergeOwner(merges: []const Merge, provider: Provider) ?usize {
+    for (merges) |merge| {
+        if (!std.mem.eql(u8, merge.name, provider.name)) continue;
+        if (provider.owner == merge.parent_owner or provider.owner == merge.child_owner) {
+            return merge.parent_owner;
+        }
+    }
+    return null;
 }
 
 pub fn moduleName(allocator: Allocator, relative_path: []const u8) Error![]const u8 {
@@ -229,6 +292,12 @@ fn isInfrastructureDirectory(name: []const u8) bool {
 fn lessThan(_: void, left: Provider, right: Provider) bool {
     const names = std.mem.order(u8, left.name, right.name);
     if (names != .eq) return names == .lt;
+    const left_composition_owner = compositionOwner(left);
+    const right_composition_owner = compositionOwner(right);
+    if (left_composition_owner == right_composition_owner and left.owner != right.owner) {
+        if (left.owner == left_composition_owner) return true;
+        if (right.owner == right_composition_owner) return false;
+    }
     return std.mem.lessThan(u8, left.path, right.path);
 }
 

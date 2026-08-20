@@ -50,6 +50,7 @@ pub fn functionVisible(packages: ?Packages.Graph, module_scope_roots: []const []
     else
         call.owner == function.owner;
     if (call.name_position.file == function.position.file) return true;
+    if (call.owner != function.owner) return false;
     const separator = std.mem.lastIndexOfScalar(u8, function.name, '.') orelse return false;
     return ModuleScopes.same(module_scope_roots, call.module, function.name[0..separator]);
 }

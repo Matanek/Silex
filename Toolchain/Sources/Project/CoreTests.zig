@@ -1114,6 +1114,93 @@ test "packages authorize direct namespace extensions hierarchically" {
     try std.testing.expectEqualStrings("43\n", result.stdout);
 }
 
+test "parent packages own exact extension modules and may merge them additively" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.createDirPath(std.testing.io, "GFX/Module");
+    try temporary.dir.createDirPath(std.testing.io, "GFX.Physics/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Package.json",
+        .data = "{\"dependencies\":{\"GFX\":\"=1.0.0\",\"GFX.Physics\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Package.json",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":{\"GFX.Physics\":{}}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/Physics.sx",
+        .data = "public func core_value() int { return 20 }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX.Physics/Package.json",
+        .data = "{\"name\":\"GFX.Physics\",\"version\":\"1.0.0\",\"dependencies\":{\"GFX\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX.Physics/Module/@Module.sx",
+        .data = "public func extension_value() int { return 22 }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "use GFX.Physics\nfunc main() { print(Physics.core_value() + Physics.extension_value()) }",
+    });
+
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Compiler.init(allocator, std.testing.io);
+    try std.testing.expectError(error.InvalidSource, compiler.compile(input));
+    try std.testing.expectEqualStrings(
+        "parent package 'GFX' owns module 'GFX.Physics'; extension package 'GFX.Physics' cannot provide the same module unless its exact extension permission enables merge",
+        compiler.diagnostic.?.message,
+    );
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Package.json",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":{\"GFX.Physics\":{\"merge\":true}}}",
+    });
+    compiler = Compiler.init(allocator, std.testing.io);
+    const compilation = compiler.compile(input) catch |err| {
+        std.debug.print("merged extension compilation failed: {s}\n", .{compiler.diagnostic.?.message});
+        return err;
+    };
+    const result = try @import("../Interpreter.zig").runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("42\n", result.stdout);
+    const provider = compiler.index.find("GFX.Physics").?;
+    try std.testing.expectEqualStrings("GFX", compiler.packages.label(provider.owner));
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX.Physics/Module/@Module.sx",
+        .data = "public func core_value() int { return 22 }",
+    });
+    compiler = Compiler.init(allocator, std.testing.io);
+    try std.testing.expectError(error.InvalidSource, compiler.compile(input));
+    try std.testing.expectEqualStrings(
+        "public declaration 'core_value' from extension package 'GFX.Physics' collides with package 'GFX' in merged module 'GFX.Physics'",
+        compiler.diagnostic.?.message,
+    );
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/Physics.sx",
+        .data = "public func core_value() int { return GFX.Physics.extension_hidden() }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX.Physics/Module/@Module.sx",
+        .data = "func extension_hidden() int { return 42 }",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data = "use GFX.Physics\nfunc main() { print(Physics.core_value()) }",
+    });
+    compiler = Compiler.init(allocator, std.testing.io);
+    try std.testing.expectError(error.InvalidSource, compiler.compile(input));
+    try std.testing.expectEqualStrings(
+        "function 'GFX.Physics.extension_hidden' is module-visible and unavailable outside its module",
+        compiler.diagnostic.?.message,
+    );
+}
+
 test "enforce public package interfaces and direct dependency visibility" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

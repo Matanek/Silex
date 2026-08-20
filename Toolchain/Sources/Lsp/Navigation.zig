@@ -100,28 +100,31 @@ fn definitionForPath(
 ) !?Types.Location {
     if (depth > 16) return null;
     const target = declarationTarget(project.index, path) orelse return null;
-    const provider = project.index.providers[target.provider];
-    if (!project.graph.canAccess(project.current_owner, provider.owner, provider.name)) return null;
-    const loaded = try ProjectIndex.loadProgram(allocator, io, documents, provider) orelse return null;
+    const canonical_provider = project.index.providers[target.provider];
     const current_module = currentModule(project);
-    if (declarationPosition(
-        loaded.program,
-        provider,
-        target.declaration,
-        project.graph,
-        project.current_owner,
-        current_module,
-        project.current_path,
-    )) |definition| {
-        return location(allocator, provider.path, loaded.source, definition.position, definition.name.len, encoding);
+    for (project.index.providers) |provider| {
+        if (!std.mem.eql(u8, provider.name, canonical_provider.name)) continue;
+        if (!project.graph.canAccess(project.current_owner, provider.owner, provider.name)) continue;
+        const loaded = try ProjectIndex.loadProgram(allocator, io, documents, provider) orelse continue;
+        if (declarationPosition(
+            loaded.program,
+            provider,
+            target.declaration,
+            project.graph,
+            project.current_owner,
+            current_module,
+            project.current_path,
+        )) |definition| {
+            return location(allocator, provider.path, loaded.source, definition.position, definition.name.len, encoding);
+        }
+        for (loaded.program.uses) |use| {
+            const alias = use.alias orelse lastSegment(use.path);
+            if (!std.mem.eql(u8, alias, target.declaration)) continue;
+            if (!use.is_public and provider.owner != project.current_owner) return null;
+            return definitionForPath(allocator, io, documents, project, use.path, encoding, depth + 1);
+        }
     }
-    for (loaded.program.uses) |use| {
-        const alias = use.alias orelse lastSegment(use.path);
-        if (!std.mem.eql(u8, alias, target.declaration)) continue;
-        if (!use.is_public and provider.owner != project.current_owner) return null;
-        return definitionForPath(allocator, io, documents, project, use.path, encoding, depth + 1);
-    }
-    const catalog_uses = try ProjectIndex.catalogUses(allocator, io, documents, project, provider);
+    const catalog_uses = try ProjectIndex.catalogUses(allocator, io, documents, project, canonical_provider);
     for (catalog_uses) |catalog_use| {
         const alias = catalog_use.use.alias orelse continue;
         if (!std.mem.eql(u8, alias, target.declaration)) continue;
@@ -250,7 +253,8 @@ fn visible(
 ) bool {
     if (is_local) return samePath(provider.path, current_path);
     if (is_internal) return graph.canAccessPackage(current_owner, provider.owner);
-    return is_public or (current_module != null and std.mem.eql(u8, provider.name, current_module.?));
+    return is_public or (provider.owner == current_owner and current_module != null and
+        std.mem.eql(u8, provider.name, current_module.?));
 }
 
 fn memberVisible(
@@ -269,7 +273,7 @@ fn memberVisible(
     if (is_private or is_protected) return false;
     if (is_local) return samePath(provider.path, current_path);
     if (is_internal) return graph.canAccessPackage(current_owner, provider.owner);
-    return current_module != null and std.mem.eql(u8, provider.name, current_module.?);
+    return provider.owner == current_owner and current_module != null and std.mem.eql(u8, provider.name, current_module.?);
 }
 
 fn currentModule(project: ProjectIndex.IndexedProject) ?[]const u8 {
