@@ -4,6 +4,7 @@ const Modules = @import("../Modules.zig");
 const Packages = @import("../Packages.zig");
 const ParserModule = @import("../Parser.zig");
 const Paths = @import("../Project/Paths.zig");
+const Reexports = @import("../Project/Reexports.zig");
 const TargetModule = @import("../Target.zig");
 const Types = @import("Types.zig");
 
@@ -21,6 +22,78 @@ pub const LoadedProgram = struct {
     source: []const u8,
     program: Ast.Program,
 };
+
+pub const CatalogUse = struct {
+    provider: Modules.Provider,
+    use: Ast.Use,
+};
+
+pub fn catalogUses(
+    allocator: Allocator,
+    io: Io,
+    documents: []const Types.Document,
+    project: IndexedProject,
+    catalog_provider: Modules.Provider,
+) ![]const CatalogUse {
+    var result: std.ArrayList(CatalogUse) = .empty;
+    for (project.index.providers) |provider| {
+        if (provider.origin != .portable) continue;
+        const package_name = project.graph.packages[provider.owner].name orelse continue;
+        if (!std.mem.eql(u8, provider.name, package_name)) continue;
+        if (!project.graph.canContributeToCatalog(provider.owner, catalog_provider.owner, catalog_provider.name)) continue;
+        const loaded = try loadProgram(allocator, io, documents, provider) orelse continue;
+        for (loaded.program.catalog_contributions) |contribution| {
+            if (!std.mem.eql(u8, contribution.target, catalog_provider.name)) continue;
+            for (contribution.uses) |use| {
+                if (!try useDirectlyOwned(allocator, io, documents, project, provider.owner, use.path)) continue;
+                try result.append(allocator, .{ .provider = provider, .use = use });
+            }
+        }
+    }
+    return result.toOwnedSlice(allocator);
+}
+
+fn useDirectlyOwned(
+    allocator: Allocator,
+    io: Io,
+    documents: []const Types.Document,
+    project: IndexedProject,
+    owner: usize,
+    path: []const u8,
+) !bool {
+    var module_name: ?[]const u8 = null;
+    for (project.index.providers) |provider| {
+        const matches = std.mem.eql(u8, path, provider.name) or
+            (path.len > provider.name.len and std.mem.startsWith(u8, path, provider.name) and
+                path[provider.name.len] == '.');
+        if (!matches or provider.owner != owner or (module_name != null and provider.name.len <= module_name.?.len)) continue;
+        module_name = provider.name;
+    }
+    const module = module_name orelse return false;
+    const declaration = if (path.len == module.len)
+        lastSegment(module)
+    else
+        path[module.len + 1 ..];
+    for (project.index.providers) |provider| {
+        if (provider.owner != owner or !std.mem.eql(u8, provider.name, module)) continue;
+        const loaded = try loadProgram(allocator, io, documents, provider) orelse continue;
+        for (loaded.program.functions) |function| {
+            if (function.is_public and std.mem.eql(u8, function.name, declaration)) return true;
+        }
+        for (loaded.program.structures) |structure| {
+            if (Reexports.structureExported(loaded.program, structure) and std.mem.eql(u8, structure.name, declaration)) return true;
+        }
+        for (loaded.program.enums) |enumeration| {
+            if (enumeration.is_public and std.mem.eql(u8, enumeration.name, declaration)) return true;
+        }
+    }
+    return false;
+}
+
+fn lastSegment(path: []const u8) []const u8 {
+    const separator = std.mem.lastIndexOfScalar(u8, path, '.') orelse return path;
+    return path[separator + 1 ..];
+}
 
 pub fn index(
     allocator: Allocator,

@@ -121,6 +121,12 @@ fn definitionForPath(
         if (!use.is_public and provider.owner != project.current_owner) return null;
         return definitionForPath(allocator, io, documents, project, use.path, encoding, depth + 1);
     }
+    const catalog_uses = try ProjectIndex.catalogUses(allocator, io, documents, project, provider);
+    for (catalog_uses) |catalog_use| {
+        const alias = catalog_use.use.alias orelse continue;
+        if (!std.mem.eql(u8, alias, target.declaration)) continue;
+        return definitionForPath(allocator, io, documents, project, catalog_use.use.path, encoding, depth + 1);
+    }
     return null;
 }
 

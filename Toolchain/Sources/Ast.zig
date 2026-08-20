@@ -537,6 +537,13 @@ pub const Use = struct {
     is_public: bool = false,
 };
 
+pub const CatalogContribution = struct {
+    position: Source.Position,
+    target_position: Source.Position,
+    target: []const u8,
+    uses: []const Use,
+};
+
 pub const Function = struct {
     is_anonymous: bool = false,
     is_test: bool = false,
@@ -666,6 +673,7 @@ pub const Extension = struct {
 
 pub const Program = struct {
     uses: []const Use = &.{},
+    catalog_contributions: []const CatalogContribution = &.{},
     type_names: []const []const u8 = &.{},
     test_only_type_names: []const bool = &.{},
     generic_types: []const GenericType = &.{},

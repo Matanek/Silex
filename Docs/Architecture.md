@@ -171,6 +171,13 @@ open Silex document
   typed without exposing their declarations or members. `public` is checked
   during composition and semantic resolution; none of these visibilities is
   related to Mach-O symbol export or native layout.
+- Umbrella catalog contributions are discovered only in an active child
+  package's portable principal module. The parent manifest authenticates each
+  open catalog, and composition accepts only public reexports whose declaration
+  provider is owned by that child. Conflicting aliases or child namespaces are
+  rejected deterministically. Contributions become ordinary typed reexport
+  bindings before semantic lowering; they inject no declarations, executable
+  code, runtime registry or backend concept into the parent module.
 - The composer resolves all calls and assigns deterministic `FunctionId`
   values before native lowering. The backend receives one portable IR program
   and knows nothing about manifests, package paths, or source visibility.

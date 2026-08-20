@@ -41,7 +41,7 @@ When a public top-level type has the same name as its module's last segment,
 the module name is also the type name:
 
 ```sx
-// Math/Vec3.sx
+// STD/Math/Vec3.sx
 public struct Vec3 {
     public var x:float
     public var y:float
@@ -50,7 +50,7 @@ public struct Vec3 {
 ```
 
 ```sx
-use Math
+use STD.Math
 
 let position:Math.Vec3 = Math.Vec3(x:2, y:10, z:5)
 ```
@@ -187,3 +187,30 @@ public use Rendering.Renderer
 This is equivalent to `public use Rendering.Renderer.Renderer`. It reexports
 only the homonymous `Renderer` declaration, not the `Rendering.Renderer` module
 tree.
+
+## Contribute to a package umbrella
+
+A qualified child package can add its own public declarations to an umbrella
+catalog explicitly opened by its parent. Contributions belong in the portable
+principal module `Module/@Module.sx` of the child package:
+
+```sx
+contribute GFX.Components {
+    public use GFX.Physics.RigidBody2D.RigidBody2D
+}
+
+contribute GFX.Resources {
+    public use GFX.Physics.World2D.World2D
+}
+```
+
+The block accepts only `public use` declarations naming declarations owned by
+the contributing package. It cannot contain functions, types, fields,
+extensions, executable statements or type aliases. Composition therefore adds
+only façade names; it never injects implementation into the parent module.
+
+The parent must list the exact umbrella modules in its authenticated
+`Package.json`, and the child must already be authorized by `extensions`.
+Contributions are considered only for packages present in the resolved graph.
+An alias that collides with an umbrella declaration, another contribution or a
+child namespace is rejected rather than ordered or overridden.

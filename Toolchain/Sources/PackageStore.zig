@@ -26,6 +26,7 @@ pub const PublicationProof = struct {
     archive_sha256: []const u8,
     extensions: []const []const u8,
     friends: []const []const u8 = &.{},
+    catalogs: []const []const u8 = &.{},
 };
 
 const Receipt = struct {
@@ -38,6 +39,7 @@ const Receipt = struct {
     manifest_sha256: []const u8,
     extensions: []const []const u8,
     friends: []const []const u8 = &.{},
+    catalogs: []const []const u8 = &.{},
 };
 
 pub const Manager = struct {
@@ -88,6 +90,9 @@ pub const Manager = struct {
             }
             if (!equalStrings(package.friends, publication.friends)) {
                 return self.failFmt("package '{s}' friends do not match its source proof", .{package.name});
+            }
+            if (!equalStrings(package.catalogs, publication.catalogs)) {
+                return self.failFmt("package '{s}' catalogs do not match its source proof", .{package.name});
             }
         }
         const folder = try packageFolder(self.allocator, package);
@@ -153,6 +158,7 @@ pub const Manager = struct {
             .manifest_sha256 = manifest_sha256,
             .extensions = proof.extensions,
             .friends = proof.friends,
+            .catalogs = proof.catalogs,
         }, .{ .whitespace = .indent_2 });
         try Io.Dir.cwd().writeFile(self.io, .{ .sub_path = path, .data = source });
     }
@@ -180,7 +186,8 @@ pub const Manager = struct {
             !std.mem.eql(u8, receipt.archive_sha256, proof.archive_sha256) or
             !std.mem.eql(u8, receipt.manifest_sha256, manifest_sha256) or
             !equalStrings(receipt.extensions, proof.extensions) or
-            !equalStrings(receipt.friends, proof.friends))
+            !equalStrings(receipt.friends, proof.friends) or
+            !equalStrings(receipt.catalogs, proof.catalogs))
         {
             return self.failFmt("installed package '{s}' does not match its source proof; remove it and reinstall", .{package.name});
         }
@@ -384,7 +391,7 @@ test "install copies an immutable package without repository state" {
     try std.testing.expect(!repeated.installed);
 }
 
-test "published package extension and friend grants require an intact source proof" {
+test "published package extension friend and catalog grants require an intact source proof" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -395,7 +402,7 @@ test "published package extension and friend grants require an intact source pro
     try temporary.dir.createDirPath(std.testing.io, "App");
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Package.json",
-        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"requires\":{\"silex\":\">=0.38.0 <0.39.0\"},\"extensions\":[\"GFX.UI\"],\"friends\":[\"GFX.UI\"]}",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"requires\":{\"silex\":\">=0.38.0 <0.39.0\"},\"extensions\":[\"GFX.UI\"],\"friends\":[\"GFX.UI\"],\"catalogs\":[\"GFX.Plugins\"]}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX.UI/Package.json",
@@ -418,6 +425,7 @@ test "published package extension and friend grants require an intact source pro
         .archive_sha256 = digest,
         .extensions = &.{"GFX.UI"},
         .friends = &.{"GFX.UI"},
+        .catalogs = &.{"GFX.Plugins"},
     });
     _ = try manager.installPublished(ui, .macos_arm64, .{
         .repository = "Matanek/Silex-Lib-GFX-UI",
@@ -446,6 +454,7 @@ test "published package extension and friend grants require an intact source pro
         .archive_sha256 = digest,
         .extensions = &.{"GFX.UI"},
         .friends = &.{"GFX.UI"},
+        .catalogs = &.{"GFX.Plugins"},
     }));
 }
 

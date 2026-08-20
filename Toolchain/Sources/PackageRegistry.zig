@@ -243,6 +243,7 @@ pub const Client = struct {
             .archive_sha256 = acquired.sha256,
             .extensions = manifest.extensions,
             .friends = manifest.friends,
+            .catalogs = manifest.catalogs,
         }) catch |err| switch (err) {
             error.InvalidPackageStore => return self.failFmt(
                 "cannot install package '{s}': {s}",
@@ -548,7 +549,7 @@ test "install tagged package dependencies from registered Git repositories" {
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "STD/Module/Text.sx", .data = "public func value() int { return 1 }" });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Package.json",
-        .data = "{\"name\":\"GFX\",\"version\":\"2.0.0\",\"requires\":{\"silex\":\">=0.38.0 <0.39.0\"},\"extensions\":[\"GFX.UI\"],\"friends\":[\"GFX.UI\"],\"dependencies\":{\"STD\":\"^1.0.0\"}}",
+        .data = "{\"name\":\"GFX\",\"version\":\"2.0.0\",\"requires\":{\"silex\":\">=0.38.0 <0.39.0\"},\"extensions\":[\"GFX.UI\"],\"friends\":[\"GFX.UI\"],\"catalogs\":[\"GFX.Plugins\"],\"dependencies\":{\"STD\":\"^1.0.0\"}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "GFX/Module/Drawing.sx", .data = "public func value() int { return 2 }" });
     const relative_base = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
@@ -594,6 +595,7 @@ test "install tagged package dependencies from registered Git repositories" {
     };
     try std.testing.expectEqualStrings("GFX", result.package.name);
     try std.testing.expectEqualStrings("GFX.UI", result.package.friends[0]);
+    try std.testing.expectEqualStrings("GFX.Plugins", result.package.catalogs[0]);
     try std.testing.expect(try pathExists(std.testing.io, try std.fs.path.join(allocator, &.{ store_root, "STD@1.0.0" })));
     try std.testing.expect(try pathExists(std.testing.io, try std.fs.path.join(allocator, &.{ store_root, "GFX@2.0.0", ".silex", "source.json" })));
 }

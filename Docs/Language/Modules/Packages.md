@@ -140,7 +140,39 @@ This policy concerns separate package identities. Modules owned directly by
 `GFX`, including a module named `GFX.UI`, remain valid without authorization
 because they belong to the same package.
 
-For registered packages, extension and friend grants come directly from
+### Open umbrella catalogs to child packages
+
+A package can designate selected public façade modules as reexport-only
+catalogs:
+
+```json
+{
+  "name": "GFX",
+  "version": "1.4.1",
+  "extensions": ["GFX.*"],
+  "friends": ["GFX.Physics"],
+  "catalogs": [
+    "GFX.Components",
+    "GFX.Plugins",
+    "GFX.Resources"
+  ]
+}
+```
+
+An active immediate child such as `GFX.Physics` may then declare `contribute`
+blocks in its portable principal module. The target must be an existing module
+owned by its immediate parent and listed exactly in `catalogs`. The child can
+reexport only declarations that it owns. Every contributed name is checked
+against the umbrella's declarations, child namespaces and other contributions;
+any collision rejects the composition.
+
+`catalogs`, `extensions` and `friends` express independent intentions.
+`extensions` authorizes the child package identity, `friends` grants that child
+access to the parent's `package` declarations, and `catalogs` opens named
+umbrellas to safe public reexports. None of them installs or activates an
+undeclared package.
+
+For registered packages, extension, friend, and catalog grants come directly from
 `Package.json` in
 the selected tagged commit. The installed package keeps a source proof binding
 that manifest to its repository, commit, and checksums. Editing a global

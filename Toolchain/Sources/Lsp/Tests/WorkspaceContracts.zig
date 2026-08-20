@@ -204,6 +204,80 @@ test "server completes and navigates package declarations for friend packages" {
     try std.testing.expectEqual(@as(usize, 0), definition.range.start.line);
 }
 
+test "server completes and navigates authorized umbrella contributions" {
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "GFX/Module");
+    try temporary.dir.createDirPath(std.testing.io, "GFX.Physics/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Package.json",
+        .data = "{\"dependencies\":{\"GFX\":\"=1.0.0\",\"GFX.Physics\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Package.json",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"extensions\":[\"GFX.Physics\"],\"catalogs\":[\"GFX.Plugins\"]}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/Plugins.sx",
+        .data = "public struct Core {}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX.Physics/Package.json",
+        .data = "{\"name\":\"GFX.Physics\",\"version\":\"1.0.0\",\"dependencies\":{\"GFX\":\"=1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX.Physics/Module/@Module.sx",
+        .data =
+        \\contribute GFX.Plugins {
+        \\    public use GFX.Physics.Plugin as Physics
+        \\}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX.Physics/Module/Plugin.sx",
+        .data = "public struct Plugin {}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Main.sx", .data = "func main() {}" });
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const root_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{root});
+    const main_uri = try std.fmt.allocPrint(allocator, "file://{s}/Main.sx", .{root});
+    const plugin_uri = try std.fmt.allocPrint(allocator, "file://{s}/GFX.Physics/Module/Plugin.sx", .{root});
+
+    var server = ServerModule.Server.init(std.testing.allocator, std.testing.io);
+    defer server.deinit();
+    try Support.initializeServer(&server, allocator, root_uri);
+
+    const items = try Support.serverCompletion(&server, allocator, main_uri,
+        \\use GFX.Plugins
+        \\func main() { Plugins.<|> }
+    );
+    try Support.expectPresent("Core", items);
+    try Support.expectPresent("Physics", items);
+    try Support.expectNoDuplicates(items);
+
+    const definition = (try Support.serverDefinition(&server, allocator, main_uri,
+        \\use GFX.Plugins
+        \\func main() { Plugins.Phys<|>ics() }
+    )).?;
+    try std.testing.expectEqualStrings(plugin_uri, definition.uri);
+    try std.testing.expectEqual(@as(usize, 0), definition.range.start.line);
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Module/Plugins.sx",
+        .data = "public struct Physics {}",
+    });
+    const colliding = try Support.serverCompletion(&server, allocator, main_uri,
+        \\use GFX.Plugins
+        \\func main() { Plugins.<|> }
+    );
+    try Support.expectPresent("Physics", colliding);
+    try Support.expectNoDuplicates(colliding);
+}
+
 test "server navigates package extensions call chains fields and cascades" {
     var temporary = std.testing.tmpDir(.{});
     defer temporary.cleanup();

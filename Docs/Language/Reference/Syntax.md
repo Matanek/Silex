@@ -15,6 +15,7 @@ constraints.
 | Compiler-provided class contract | `intrinsic class Name { ... }` |
 | Protocol | `protocol Name { ... }` |
 | Extension | `extend Name { ... }` |
+| Umbrella contribution | `contribute Package.Catalog { public use Package.Child.Type }` |
 | Enum variant | `caseName(Type)` inside `enum` |
 | Empty enum value | `Enum.caseName` |
 | Enum value with payload | `Enum.caseName(value)` |

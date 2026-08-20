@@ -62,7 +62,7 @@ SILEX_REGISTRY_SOURCE=/absolute/path/to/Silex-Registry silex register path/to/Pa
 ## Prepare and tag versions
 
 1. Update and validate `Package.json`, including `version`, `requires.silex`,
-   dependencies, `extensions`, and `friends`.
+   dependencies, `extensions`, `friends`, and `catalogs`.
 2. Commit the complete package contents.
 3. Optionally validate the Silex package contract and display the expected tag:
 

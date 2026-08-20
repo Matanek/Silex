@@ -23,6 +23,7 @@ pub const TokenTag = enum {
     keyword_class,
     keyword_protocol,
     keyword_extend,
+    keyword_contribute,
     keyword_enum,
     keyword_match,
     keyword_init,
@@ -620,6 +621,7 @@ fn keywordTag(lexeme: []const u8) ?TokenTag {
         .{ "class", TokenTag.keyword_class },
         .{ "protocol", TokenTag.keyword_protocol },
         .{ "extend", TokenTag.keyword_extend },
+        .{ "contribute", TokenTag.keyword_contribute },
         .{ "enum", TokenTag.keyword_enum },
         .{ "match", TokenTag.keyword_match },
         .{ "init", TokenTag.keyword_init },
@@ -704,6 +706,12 @@ test "reserve class keyword" {
 test "reserve extend keyword" {
     var lexer = Lexer.init("extend Randomizer {}");
     try std.testing.expectEqual(TokenTag.keyword_extend, (try lexer.next()).tag);
+    try std.testing.expectEqual(TokenTag.identifier, (try lexer.next()).tag);
+}
+
+test "reserve contribute keyword" {
+    var lexer = Lexer.init("contribute GFX.Plugins {}");
+    try std.testing.expectEqual(TokenTag.keyword_contribute, (try lexer.next()).tag);
     try std.testing.expectEqual(TokenTag.identifier, (try lexer.next()).tag);
 }
 

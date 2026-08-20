@@ -1043,6 +1043,58 @@ fn appendPathItems(
             );
         }
     }
+    if (contextual_provider == null) if (exact_provider) |provider| {
+        var contributed_aliases: std.ArrayList([]const u8) = .empty;
+        const catalog_uses = try ProjectIndex.catalogUses(allocator, io, documents, project, provider);
+        for (catalog_uses) |catalog_use| {
+            const alias = catalog_use.use.alias orelse continue;
+            if (!matchesPrefix(alias, query.prefix)) continue;
+            if (!try catalogAliasAvailable(
+                allocator,
+                io,
+                documents,
+                project,
+                provider,
+                alias,
+                contributed_aliases.items,
+            )) continue;
+            try contributed_aliases.append(allocator, alias);
+            try appendReexportTarget(
+                allocator,
+                io,
+                documents,
+                project,
+                catalog_use.use.path,
+                alias,
+                query.prefix,
+                call_source,
+                call_cursor,
+                ranked,
+                0,
+                query.type_only,
+            );
+        }
+    };
+}
+
+fn catalogAliasAvailable(
+    allocator: Allocator,
+    io: Io,
+    documents: []const Types.Document,
+    project: IndexedProject,
+    catalog_provider: Modules.Provider,
+    alias: []const u8,
+    contributed_aliases: []const []const u8,
+) !bool {
+    for (contributed_aliases) |existing| if (std.mem.eql(u8, existing, alias)) return false;
+    const child = try std.fmt.allocPrint(allocator, "{s}.{s}", .{ catalog_provider.name, alias });
+    if (project.index.isNamespace(child)) return false;
+    for (project.index.providers) |provider| {
+        if (!std.mem.eql(u8, provider.name, catalog_provider.name) or provider.owner != catalog_provider.owner) continue;
+        const loaded = try loadProgram(allocator, io, documents, provider) orelse continue;
+        if (hasPublicDeclaration(loaded.program, alias)) return false;
+    }
+    return true;
 }
 
 fn contextualProvider(project: IndexedProject, qualifier: []const u8) ?usize {

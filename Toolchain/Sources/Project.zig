@@ -56,6 +56,7 @@ pub const TestCase = struct {
     position: Source.Position,
 };
 const Binding = Reexports.Binding;
+const CatalogContribution = Reexports.CatalogContribution;
 const Unit = Reexports.Unit;
 
 const GeographicScope = enum(u8) { local, module, package, public };
@@ -83,6 +84,7 @@ pub const Compiler = struct {
     index: Modules.Index = undefined,
     module_scope_roots: []const []const u8 = &.{},
     units: []Unit = &.{},
+    catalog_contributions: []const CatalogContribution = &.{},
     files: []const []const u8 = &.{},
     entry_module: usize = 0,
     diagnostic: ?Source.Diagnostic = null,
@@ -167,6 +169,7 @@ pub const Compiler = struct {
         self.units = try self.allocator.alloc(Unit, self.index.providers.len);
         @memset(self.units, .{});
         try Fragments.install(self.allocator, self.index, self.units);
+        try Loading.discoverCatalogContributions(self);
         const files = try self.allocator.alloc([]const u8, self.index.providers.len);
         for (self.index.providers, 0..) |provider, file| files[file] = provider.path;
         self.files = files;
@@ -219,6 +222,12 @@ pub const Compiler = struct {
         var dependency_files: std.ArrayList([]const u8) = .empty;
         for (self.units, 0..) |unit, module| {
             if (unit.state == .loaded) try dependency_files.append(self.allocator, self.index.providers[module].path);
+        }
+        for (self.catalog_contributions) |contribution| {
+            const path = self.index.providers[contribution.contributor].path;
+            var present = false;
+            for (dependency_files.items) |existing| present = present or std.mem.eql(u8, existing, path);
+            if (!present) try dependency_files.append(self.allocator, path);
         }
         try dependency_files.appendSlice(self.allocator, analyzer.shader_files.items);
         try dependency_files.appendSlice(self.allocator, analyzer.embedded_files.items);

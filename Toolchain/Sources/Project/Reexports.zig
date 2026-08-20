@@ -15,6 +15,12 @@ pub const Binding = struct {
     position: Source.Position,
 };
 
+pub const CatalogContribution = struct {
+    contributor: usize,
+    target: usize,
+    use: Ast.Use,
+};
+
 pub const Unit = struct {
     state: State = .fresh,
     program: ?Ast.Program = null,

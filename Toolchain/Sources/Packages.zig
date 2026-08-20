@@ -110,6 +110,7 @@ pub const Package = struct {
     origin: Origin,
     extensions: []const []const u8 = &.{},
     friends: []const []const u8 = &.{},
+    catalogs: []const []const u8 = &.{},
     root: []const u8,
     module_roots: []const ModuleRoot,
     inactive_modules: []const []const u8,
@@ -183,6 +184,18 @@ pub const Graph = struct {
         return allowsExtension(self.packages[provider].friends, accessor_name);
     }
 
+    pub fn canContributeToCatalog(self: Graph, contributor: usize, catalog_owner: usize, catalog: []const u8) bool {
+        if (contributor >= self.packages.len or catalog_owner >= self.packages.len or contributor == catalog_owner) return false;
+        const contributor_name = self.packages[contributor].name orelse return false;
+        const owner_name = self.packages[catalog_owner].name orelse return false;
+        const separator = std.mem.lastIndexOfScalar(u8, contributor_name, '.') orelse return false;
+        if (!std.mem.eql(u8, contributor_name[0..separator], owner_name)) return false;
+        for (self.packages[catalog_owner].catalogs) |allowed| {
+            if (std.mem.eql(u8, allowed, catalog)) return true;
+        }
+        return false;
+    }
+
     pub fn label(self: Graph, package: usize) []const u8 {
         return self.packages[package].name orelse "application";
     }
@@ -246,6 +259,7 @@ pub const ManifestInfo = struct {
     silex_requirement: SilexRequirement,
     extensions: []const []const u8,
     friends: []const []const u8,
+    catalogs: []const []const u8,
     dependencies: []const ManifestDependency,
 };
 
@@ -264,6 +278,7 @@ const RawManifest = struct {
     version: ?[]const u8 = null,
     extensions: ?std.json.Value = null,
     friends: ?std.json.Value = null,
+    catalogs: ?std.json.Value = null,
     requires: ?std.json.Value = null,
     dependencies: ?std.json.Value = null,
     boundary: ?std.json.Value = null,
@@ -275,6 +290,7 @@ const ParsedManifest = struct {
     version: ?Version,
     extensions: []const []const u8,
     friends: []const []const u8,
+    catalogs: []const []const u8,
     silex_requirement: ?SilexRequirement,
     dependencies: []const ManifestDependency,
     boundary_providers: []const BoundaryProvider,
@@ -325,6 +341,7 @@ pub const Resolver = struct {
                 .origin = .project,
                 .extensions = if (root_manifest) |manifest| manifest.extensions else &.{},
                 .friends = if (root_manifest) |manifest| manifest.friends else &.{},
+                .catalogs = if (root_manifest) |manifest| manifest.catalogs else &.{},
                 .root = project_root,
                 .module_roots = roots.active,
                 .inactive_modules = roots.inactive,
@@ -374,6 +391,7 @@ pub const Resolver = struct {
             .silex_requirement = requirement,
             .extensions = manifest.extensions,
             .friends = manifest.friends,
+            .catalogs = manifest.catalogs,
             .dependencies = manifest.dependencies,
         };
     }
@@ -645,6 +663,7 @@ pub const Resolver = struct {
         var trusted = manifest;
         trusted.extensions = &.{};
         trusted.friends = &.{};
+        trusted.catalogs = &.{};
         const receipt_path = try std.fs.path.join(self.allocator, &.{ root, ".silex", "source.json" });
         const source = Io.Dir.cwd().readFileAlloc(self.io, receipt_path, self.allocator, .limited(1024 * 1024)) catch |err| switch (err) {
             error.FileNotFound, error.NotDir => return trusted,
@@ -660,6 +679,7 @@ pub const Resolver = struct {
             manifest_sha256: []const u8,
             extensions: []const []const u8,
             friends: []const []const u8 = &.{},
+            catalogs: []const []const u8 = &.{},
         };
         const receipt = std.json.parseFromSliceLeaky(Receipt, self.allocator, source, .{
             .allocate = .alloc_always,
@@ -680,12 +700,14 @@ pub const Resolver = struct {
             !validSha256(receipt.archive_sha256) or
             !std.mem.eql(u8, receipt.manifest_sha256, manifest_sha256) or
             !equalStrings(receipt.extensions, manifest.extensions) or
-            !equalStrings(receipt.friends, manifest.friends))
+            !equalStrings(receipt.friends, manifest.friends) or
+            !equalStrings(receipt.catalogs, manifest.catalogs))
         {
             return self.fail("installed package does not match its source proof; remove it and reinstall");
         }
         trusted.extensions = receipt.extensions;
         trusted.friends = receipt.friends;
+        trusted.catalogs = receipt.catalogs;
         return trusted;
     }
 
@@ -770,6 +792,7 @@ pub const Resolver = struct {
                 .origin = origin,
                 .extensions = manifest.extensions,
                 .friends = manifest.friends,
+                .catalogs = manifest.catalogs,
                 .root = root,
                 .module_roots = roots.active,
                 .inactive_modules = roots.inactive,
@@ -1054,6 +1077,31 @@ pub const Resolver = struct {
             }
         }
 
+        var catalogs: std.ArrayList([]const u8) = .empty;
+        if (raw.catalogs) |value| {
+            const package_name = raw.name orelse return self.fail("an application manifest cannot declare catalogs");
+            const array = switch (value) {
+                .array => |array| array,
+                else => return self.fail("catalogs must be an array of umbrella module names"),
+            };
+            for (array.items) |item| {
+                const catalog = switch (item) {
+                    .string => |text| text,
+                    else => return self.fail("a catalog must be a module name string"),
+                };
+                if (!Modules.validName(catalog) or !belongsTo(catalog, package_name)) {
+                    return self.fail("a catalog must name an umbrella module owned by the package");
+                }
+                try catalogs.append(self.allocator, catalog);
+            }
+            std.mem.sort([]const u8, catalogs.items, {}, stringLessThan);
+            if (catalogs.items.len > 1) {
+                for (catalogs.items[1..], catalogs.items[0 .. catalogs.items.len - 1]) |current, previous| {
+                    if (std.mem.eql(u8, current, previous)) return self.fail("catalogs must be unique");
+                }
+            }
+        }
+
         var silex_requirement: ?SilexRequirement = null;
         if (raw.requires) |value| {
             const object = switch (value) {
@@ -1097,6 +1145,7 @@ pub const Resolver = struct {
             .version = version,
             .extensions = try extensions.toOwnedSlice(self.allocator),
             .friends = try friends.toOwnedSlice(self.allocator),
+            .catalogs = try catalogs.toOwnedSlice(self.allocator),
             .silex_requirement = silex_requirement,
             .dependencies = try dependencies.toOwnedSlice(self.allocator),
             .boundary_providers = &.{},
@@ -1556,6 +1605,54 @@ test "validate exact and wildcard friend grants" {
     var resolver = Resolver.init(allocator, std.testing.io, null);
     const graph = try resolver.resolve(root);
     try std.testing.expectEqualStrings("GFX.*", graph.packages[0].friends[0]);
+}
+
+test "validate package-owned umbrella catalogs" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "GFX/Module");
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "GFX" });
+
+    const cases = [_]struct { source: []const u8, diagnostic: []const u8 }{
+        .{
+            .source = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"catalogs\":{}}",
+            .diagnostic = "catalogs must be an array of umbrella module names",
+        },
+        .{
+            .source = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"catalogs\":[false]}",
+            .diagnostic = "a catalog must be a module name string",
+        },
+        .{
+            .source = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"catalogs\":[\"Physics.Plugins\"]}",
+            .diagnostic = "a catalog must name an umbrella module owned by the package",
+        },
+        .{
+            .source = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"catalogs\":[\"GFX.Plugins\",\"GFX.Plugins\"]}",
+            .diagnostic = "catalogs must be unique",
+        },
+        .{
+            .source = "{\"catalogs\":[]}",
+            .diagnostic = "an application manifest cannot declare catalogs",
+        },
+    };
+    for (cases) |case| {
+        try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "GFX/Package.json", .data = case.source });
+        var resolver = Resolver.init(allocator, std.testing.io, null);
+        try std.testing.expectError(error.InvalidPackageGraph, resolver.resolve(root));
+        try std.testing.expectEqualStrings(case.diagnostic, resolver.diagnostic.?);
+    }
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Package.json",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"catalogs\":[\"GFX.Components\",\"GFX.Plugins\"]}",
+    });
+    var resolver = Resolver.init(allocator, std.testing.io, null);
+    const graph = try resolver.resolve(root);
+    try std.testing.expectEqualStrings("GFX.Components", graph.packages[0].catalogs[0]);
+    try std.testing.expectEqualStrings("GFX.Plugins", graph.packages[0].catalogs[1]);
 }
 
 test "parse and apply Silex toolchain requirements before package sources" {

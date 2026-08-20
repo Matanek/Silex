@@ -13,6 +13,7 @@ const TypeSyntax = @import("Parser/TypeSyntax.zig");
 const Nominals = @import("Parser/Nominals.zig");
 const Protocols = @import("Parser/Protocols.zig");
 const Extensions = @import("Parser/Extensions.zig");
+const Catalogs = @import("Parser/Catalogs.zig");
 const Interop = @import("Parser/Interop.zig");
 const TestBlocks = @import("Parser/TestBlocks.zig");
 const ControlFlow = @import("Parser/ControlFlow.zig");
@@ -60,6 +61,7 @@ pub const Parser = struct {
     pub fn parse(self: *Parser) ParseError!Ast.Program {
         try self.advance();
         var uses: std.ArrayList(Ast.Use) = .empty;
+        var catalog_contributions: std.ArrayList(Ast.CatalogContribution) = .empty;
         var structures: std.ArrayList(Ast.Structure) = .empty;
         var enums: std.ArrayList(Ast.Enum) = .empty;
         var functions: std.ArrayList(Ast.Function) = .empty;
@@ -82,6 +84,7 @@ pub const Parser = struct {
                     return self.fail("expected use, enum, struct, class, intrinsic class, protocol, function, or test declaration"),
                 .keyword_let => try external_functions.append(self.allocator, try Interop.parseFunction(self)),
                 .keyword_extend => try extensions.append(self.allocator, try Extensions.parse(self)),
+                .keyword_contribute => try catalog_contributions.append(self.allocator, try Catalogs.parse(self)),
                 .keyword_public => {
                     try self.advance();
                     switch (self.current.tag) {
@@ -181,6 +184,7 @@ pub const Parser = struct {
         };
         return .{
             .uses = try uses.toOwnedSlice(self.allocator),
+            .catalog_contributions = try catalog_contributions.toOwnedSlice(self.allocator),
             .type_names = try self.type_names.toOwnedSlice(self.allocator),
             .test_only_type_names = try self.test_only_type_names.toOwnedSlice(self.allocator),
             .generic_types = try self.generic_types.toOwnedSlice(self.allocator),
@@ -1404,6 +1408,53 @@ test "parse module uses aliases and qualified calls" {
     try std.testing.expectEqualStrings("Operations", call.receiver.?.value.identifier);
     try std.testing.expectEqualStrings("value", call.arguments[0].value.call.name);
     try std.testing.expectEqualStrings("Checked", call.arguments[0].value.call.receiver.?.value.identifier);
+}
+
+test "parse reexport-only umbrella contributions" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(),
+        \\contribute GFX.Components {
+        \\    public use GFX.Physics.RigidBody2D.RigidBody2D
+        \\}
+        \\contribute GFX.Plugins {
+        \\    public use GFX.Physics.Plugin as Physics
+        \\}
+    );
+    const program = try parser.parse();
+    try std.testing.expectEqual(@as(usize, 2), program.catalog_contributions.len);
+    try std.testing.expectEqualStrings("GFX.Components", program.catalog_contributions[0].target);
+    try std.testing.expectEqualStrings("RigidBody2D", program.catalog_contributions[0].uses[0].alias.?);
+    try std.testing.expectEqualStrings("GFX.Plugins", program.catalog_contributions[1].target);
+    try std.testing.expectEqualStrings("Physics", program.catalog_contributions[1].uses[0].alias.?);
+}
+
+test "reject declarations and type aliases inside umbrella contributions" {
+    const cases = [_]struct { source: []const u8, diagnostic: []const u8 }{
+        .{
+            .source = "contribute GFX.Plugins { func injected() {} }",
+            .diagnostic = "an umbrella contribution can only contain public use declarations",
+        },
+        .{
+            .source = "contribute GFX.Plugins { public func injected() {} }",
+            .diagnostic = "an umbrella contribution can only contain public use declarations",
+        },
+        .{
+            .source = "contribute GFX.Plugins { public use int as Physics }",
+            .diagnostic = "an umbrella contribution can only reexport named declarations",
+        },
+        .{
+            .source = "contribute GFX.Plugins {}",
+            .diagnostic = "an umbrella contribution cannot be empty",
+        },
+    };
+    for (cases) |case| {
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+        var parser = Parser.init(arena.allocator(), case.source);
+        try std.testing.expectError(error.InvalidSource, parser.parse());
+        try std.testing.expectEqualStrings(case.diagnostic, parser.diagnostic.?.message);
+    }
 }
 
 test "parse structure declarations named aggregates and field paths" {
