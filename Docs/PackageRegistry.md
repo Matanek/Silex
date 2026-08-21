@@ -40,6 +40,11 @@ exact extension with `suite: true`, the installer also selects the newest tagged
 extension whose direct parent dependency accepts the selected parent version.
 Wildcard extensions can never carry `suite`.
 
+Tagged manifests may also declare `devDependencies`. They are excluded from
+ordinary installation and from every consumer graph. `silex install Name --dev`
+installs the explicitly requested release's development dependencies plus each
+one's normal transitive dependencies; development dependencies never recurse.
+
 ## Register a package once
 
 Once the package name and canonical repository are established, register that

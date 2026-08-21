@@ -51,6 +51,7 @@ pub const Release = struct {
     repository: []const u8,
     commit: []const u8,
     dependencies: []const Packages.ManifestDependency = &.{},
+    dev_dependencies: []const Packages.ManifestDependency = &.{},
 };
 
 const PackageIndex = struct {
@@ -171,6 +172,7 @@ const RawPackageManifest = struct {
     version: []const u8,
     requires: struct { silex: []const u8 },
     dependencies: ?std.json.Value = null,
+    devDependencies: ?std.json.Value = null,
 };
 
 const Acquired = struct {
@@ -227,6 +229,7 @@ pub const Client = struct {
         toolchain: Packages.Version,
         target: TargetModule.Target,
         store: *PackageStore.Manager,
+        development: bool,
     ) !PackageStore.InstallResult {
         const package = try self.loadPackageIndex(registry, request.name);
         const release = try package.select(self.allocator, request, toolchain, &self.diagnostic);
@@ -238,7 +241,32 @@ pub const Client = struct {
             const selected = try member.selectSuiteMember(self.allocator, release, toolchain, &self.diagnostic);
             _ = try self.installRelease(registry, selected, toolchain, target, store, &stack, release);
         }
+        if (development) {
+            try self.installDevelopmentDependencies(
+                registry,
+                release.dev_dependencies,
+                toolchain,
+                target,
+                store,
+            );
+        }
         return result;
+    }
+
+    pub fn installDevelopmentDependencies(
+        self: *Client,
+        registry: Registry,
+        dependencies: []const Packages.ManifestDependency,
+        toolchain: Packages.Version,
+        target: TargetModule.Target,
+        store: *PackageStore.Manager,
+    ) !void {
+        var stack: std.ArrayList([]const u8) = .empty;
+        for (dependencies) |dependency| {
+            const package = try self.loadPackageIndex(registry, dependency.name);
+            const release = try package.selectDependency(self.allocator, dependency, toolchain, &self.diagnostic);
+            _ = try self.installRelease(registry, release, toolchain, target, store, &stack, null);
+        }
     }
 
     fn installRelease(
@@ -333,6 +361,7 @@ pub const Client = struct {
             const requirement = Packages.SilexRequirement.parse(raw.requires.silex) catch
                 return self.failFmt("tag '{s}' has an invalid requires.silex", .{tag});
             const dependencies = try self.parseReleaseDependencies(tag, raw.dependencies);
+            const dev_dependencies = try self.parseReleaseDependencies(tag, raw.devDependencies);
             try releases.append(self.allocator, .{
                 .name = name,
                 .version = version,
@@ -340,6 +369,7 @@ pub const Client = struct {
                 .repository = registration.repository,
                 .commit = try self.allocator.dupe(u8, commit),
                 .dependencies = dependencies,
+                .dev_dependencies = dev_dependencies,
             });
         }
         return .{
@@ -618,6 +648,7 @@ test "install tagged package dependencies from registered Git repositories" {
     try temporary.dir.createDirPath(std.testing.io, "STD/Module");
     try temporary.dir.createDirPath(std.testing.io, "GFX/Module");
     try temporary.dir.createDirPath(std.testing.io, "GFX.UI/Module");
+    try temporary.dir.createDirPath(std.testing.io, "GFX.Dev/Module");
     try temporary.dir.createDirPath(std.testing.io, "Registry");
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "STD/Package.json",
@@ -626,7 +657,7 @@ test "install tagged package dependencies from registered Git repositories" {
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "STD/Module/Text.sx", .data = "public func value() int { return 1 }" });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Package.json",
-        .data = "{\"name\":\"GFX\",\"version\":\"2.0.0\",\"requires\":{\"silex\":\">=0.38.0 <0.39.0\"},\"extensions\":{\"GFX.UI\":{\"friend\":true,\"suite\":true,\"merge\":true}},\"catalogs\":[\"GFX.Plugins\"],\"dependencies\":{\"STD\":\"^1.0.0\"}}",
+        .data = "{\"name\":\"GFX\",\"version\":\"2.0.0\",\"requires\":{\"silex\":\">=0.38.0 <0.39.0\"},\"extensions\":{\"GFX.UI\":{\"friend\":true,\"suite\":true,\"merge\":true}},\"catalogs\":[\"GFX.Plugins\"],\"dependencies\":{\"STD\":\"^1.0.0\"},\"devDependencies\":{\"GFX.Dev\":\"^1.0.0\"}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "GFX/Module/Drawing.sx", .data = "public func value() int { return 2 }" });
     try temporary.dir.writeFile(std.testing.io, .{
@@ -634,14 +665,21 @@ test "install tagged package dependencies from registered Git repositories" {
         .data = "{\"name\":\"GFX.UI\",\"version\":\"1.0.0\",\"requires\":{\"silex\":\">=0.38.0 <0.39.0\"},\"dependencies\":{\"GFX\":\"^2.0.0\"}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "GFX.UI/Module/@Module.sx", .data = "public func value() int { return 3 }" });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX.Dev/Package.json",
+        .data = "{\"name\":\"GFX.Dev\",\"version\":\"1.0.0\",\"requires\":{\"silex\":\">=0.38.0 <0.39.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "GFX.Dev/Module/@Module.sx", .data = "public func value() int { return 4 }" });
     const relative_base = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
     const base = try Io.Dir.cwd().realPathFileAlloc(std.testing.io, relative_base, allocator);
     const std_root = try std.fs.path.join(allocator, &.{ base, "STD" });
     const gfx_root = try std.fs.path.join(allocator, &.{ base, "GFX" });
     const ui_root = try std.fs.path.join(allocator, &.{ base, "GFX.UI" });
+    const dev_root = try std.fs.path.join(allocator, &.{ base, "GFX.Dev" });
     const std_repository = try std.fs.path.join(allocator, &.{ base, "STD.git" });
     const gfx_repository = try std.fs.path.join(allocator, &.{ base, "GFX.git" });
     const ui_repository = try std.fs.path.join(allocator, &.{ base, "GFX.UI.git" });
+    const dev_repository = try std.fs.path.join(allocator, &.{ base, "GFX.Dev.git" });
     try testGit(allocator, std_root, &.{ "init", "--quiet", "--initial-branch=main" });
     try testGit(allocator, std_root, &.{ "add", "." });
     try testGit(allocator, std_root, &.{ "-c", "user.name=Silex Test", "-c", "user.email=test@silex.local", "commit", "--quiet", "-m", "STD" });
@@ -664,12 +702,17 @@ test "install tagged package dependencies from registered Git repositories" {
     try testGit(allocator, ui_root, &.{ "-c", "user.name=Silex Test", "-c", "user.email=test@silex.local", "commit", "--quiet", "-m", "GFX.UI 2" });
     try testGit(allocator, ui_root, &.{ "tag", "v2.0.0" });
     try testGit(allocator, base, &.{ "clone", "--quiet", "--bare", "GFX.UI", "GFX.UI.git" });
+    try testGit(allocator, dev_root, &.{ "init", "--quiet", "--initial-branch=main" });
+    try testGit(allocator, dev_root, &.{ "add", "." });
+    try testGit(allocator, dev_root, &.{ "-c", "user.name=Silex Test", "-c", "user.email=test@silex.local", "commit", "--quiet", "-m", "GFX.Dev" });
+    try testGit(allocator, dev_root, &.{ "tag", "v1.0.0" });
+    try testGit(allocator, base, &.{ "clone", "--quiet", "--bare", "GFX.Dev", "GFX.Dev.git" });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Registry/index.json",
         .data = try std.fmt.allocPrint(
             allocator,
-            "{{\"schema\":2,\"packages\":[{{\"name\":\"GFX\",\"repository\":\"{s}\"}},{{\"name\":\"GFX.UI\",\"repository\":\"{s}\"}},{{\"name\":\"STD\",\"repository\":\"{s}\"}}]}}",
-            .{ gfx_repository, ui_repository, std_repository },
+            "{{\"schema\":2,\"packages\":[{{\"name\":\"GFX\",\"repository\":\"{s}\"}},{{\"name\":\"GFX.Dev\",\"repository\":\"{s}\"}},{{\"name\":\"GFX.UI\",\"repository\":\"{s}\"}},{{\"name\":\"STD\",\"repository\":\"{s}\"}}]}}",
+            .{ gfx_repository, dev_repository, ui_repository, std_repository },
         ),
     });
 
@@ -685,6 +728,7 @@ test "install tagged package dependencies from registered Git repositories" {
         try Packages.Version.parse("0.38.0"),
         .macos_arm64,
         &store,
+        false,
     ) catch |err| {
         std.debug.print("package registry integration failed: {s}\n", .{client.diagnostic orelse store.diagnostic orelse @errorName(err)});
         return err;
@@ -698,7 +742,23 @@ test "install tagged package dependencies from registered Git repositories" {
     try std.testing.expect(try pathExists(std.testing.io, try std.fs.path.join(allocator, &.{ store_root, "STD@1.0.0" })));
     try std.testing.expect(try pathExists(std.testing.io, try std.fs.path.join(allocator, &.{ store_root, "GFX.UI@1.0.0" })));
     try std.testing.expect(!try pathExists(std.testing.io, try std.fs.path.join(allocator, &.{ store_root, "GFX.UI@2.0.0" })));
+    try std.testing.expect(!try pathExists(std.testing.io, try std.fs.path.join(allocator, &.{ store_root, "GFX.Dev@1.0.0" })));
     try std.testing.expect(try pathExists(std.testing.io, try std.fs.path.join(allocator, &.{ store_root, "GFX@2.0.0", ".silex", "source.json" })));
+
+    const development_store_root = try std.fs.path.join(allocator, &.{ base, "DevelopmentStore", "packages" });
+    var development_store = PackageStore.Manager.init(allocator, std.testing.allocator, std.testing.io, development_store_root);
+    _ = try client.install(
+        registry,
+        try Request.parse("GFX"),
+        try Packages.Version.parse("0.38.0"),
+        .macos_arm64,
+        &development_store,
+        true,
+    );
+    try std.testing.expect(try pathExists(
+        std.testing.io,
+        try std.fs.path.join(allocator, &.{ development_store_root, "GFX.Dev@1.0.0" }),
+    ));
 }
 
 fn testGit(allocator: Allocator, root: []const u8, arguments: []const []const u8) !void {

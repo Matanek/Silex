@@ -81,15 +81,31 @@ pub fn requireContextualTarget(
 }
 
 pub fn structureTarget(self: anytype, module: usize, name: []const u8) !?Target {
-    const target = try structureCandidate(self, module, name) orelse return null;
-    if (self.units[target.module].state != .loaded) return null;
-    if (Names.findStructure(self.units[target.module].program.?, target.declaration) != null) return target;
-    return self.resolveReexport(
-        target.module,
-        target.declaration,
-        .structure,
-        try self.allocator.alloc(bool, self.units.len),
+    if (try structureCandidate(self, module, name)) |target| {
+        if (self.units[target.module].state == .loaded) {
+            if (Names.findStructure(self.units[target.module].program.?, target.declaration) != null) return target;
+            if (try self.resolveReexport(
+                target.module,
+                target.declaration,
+                .structure,
+                try self.allocator.alloc(bool, self.units.len),
+            )) |reexport| return reexport;
+        }
+    }
+    return nestedStructureTarget(self, module, name);
+}
+
+fn nestedStructureTarget(self: anytype, module: usize, name: []const u8) !?Target {
+    const separator = std.mem.lastIndexOfScalar(u8, name, '.') orelse return null;
+    const enclosing = try structureTarget(self, module, name[0..separator]) orelse return null;
+    if (self.units[enclosing.module].state != .loaded) return null;
+    const declaration = try std.fmt.allocPrint(
+        self.allocator,
+        "{s}.{s}",
+        .{ enclosing.declaration, name[separator + 1 ..] },
     );
+    if (Names.findStructure(self.units[enclosing.module].program.?, declaration) == null) return null;
+    return .{ .module = enclosing.module, .declaration = declaration };
 }
 
 pub fn enumTarget(self: anytype, module: usize, name: []const u8) !?Target {

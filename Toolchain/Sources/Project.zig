@@ -147,6 +147,7 @@ pub const Compiler = struct {
         const root_path = try Paths.findRoot(self.allocator, self.io, input_path);
         if (builtin.is_test) try PackageTestFixtures.prepareWorkspaceLinks(self.allocator, self.io, root_path);
         var package_resolver = Packages.Resolver.initForTarget(self.allocator, self.io, self.global_packages_root, self.target);
+        package_resolver.enableDevelopmentDependencies();
         self.packages = package_resolver.resolve(root_path) catch |err| switch (err) {
             error.InvalidPackageGraph => return self.fail(
                 .{ .offset = 0, .line = 1, .column = 1 },

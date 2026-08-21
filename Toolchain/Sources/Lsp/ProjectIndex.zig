@@ -104,6 +104,7 @@ pub fn index(
     document_path: []const u8,
 ) !IndexedProject {
     var resolver = Packages.Resolver.initForTarget(allocator, io, global_packages_root, target);
+    resolver.enableDevelopmentDependencies();
     const graph = try resolver.resolve(root);
     var indexes: std.ArrayList(Modules.Index) = .empty;
     const excluded_roots = try allocator.alloc([]const u8, graph.packages.len - 1);

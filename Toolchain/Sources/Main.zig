@@ -43,7 +43,7 @@ const usage =
     \\       silex interpret <source.sx> [-n|--nocache] [--emit-ir]
     \\       silex test <source.sx|directory> [-n|--nocache] [--emit-ir]
     \\       silex compile <source.sx> [--target <target>] [-d|--debug|-r|--release] [-n|--nocache] -o|--output <executable>
-    \\       silex install <package|package-directory> [--target <target>]
+    \\       silex install <package|package-directory> [--dev] [--target <target>]
     \\       silex check <package-directory>
     \\       silex register <package-directory>
     \\       silex link <package-directory> [--workspace <directory>] [--target <target>]
@@ -274,6 +274,7 @@ fn installPackage(init: std.process.Init, allocator: std.mem.Allocator, args: []
         packages_root,
         options.package_path,
         target,
+        options.development,
     ) orelse return 1;
     std.debug.print("silex: {s} {s}@{d}.{d}.{d} in {s}\n", .{
         if (result.installed) "installed" else "already installed",
@@ -293,6 +294,7 @@ fn installPackageOperand(
     packages_root: []const u8,
     operand: []const u8,
     target: TargetModule.Target,
+    development: bool,
 ) !?PackageStore.InstallResult {
     const status = Io.Dir.cwd().statFile(init.io, operand, .{}) catch |err| switch (err) {
         error.FileNotFound, error.NotDir => null,
@@ -303,13 +305,36 @@ fn installPackageOperand(
             std.debug.print("silex: package source '{s}' is not a directory\n", .{operand});
             return null;
         }
-        return store.install(operand, target) catch |err| switch (err) {
+        const result = store.install(operand, target) catch |err| switch (err) {
             error.InvalidPackageStore => {
                 std.debug.print("silex: cannot install package: {s}\n", .{store.diagnostic orelse "invalid package"});
                 return null;
             },
             else => return err,
         };
+        if (development and result.package.dev_dependencies.len != 0) {
+            const registry_index = try loadPackageRegistry(init, allocator, packages_root) orelse return null;
+            var registry = PackageRegistry.Client.init(
+                allocator,
+                init.gpa,
+                init.io,
+                try packageRegistryCacheRoot(allocator, packages_root),
+            );
+            registry.installDevelopmentDependencies(
+                registry_index,
+                result.package.dev_dependencies,
+                Packages.Version.parse(build_options.version) catch unreachable,
+                target,
+                store,
+            ) catch |err| switch (err) {
+                error.InvalidRegistry => {
+                    std.debug.print("silex: cannot install development dependencies: {s}\n", .{registry.diagnostic orelse "invalid registry package"});
+                    return null;
+                },
+                else => return err,
+            };
+        }
+        return result;
     }
     if (looksLikePath(operand)) {
         std.debug.print("silex: cannot locate package directory '{s}'\n", .{operand});
@@ -320,11 +345,7 @@ fn installPackageOperand(
         std.debug.print("silex: invalid package request '{s}'; expected Name or Name@MAJOR.MINOR.PATCH\n", .{operand});
         return null;
     };
-    const silex_root = std.fs.path.dirname(packages_root) orelse {
-        std.debug.print("silex: invalid user package store\n", .{});
-        return null;
-    };
-    const cache_root = try std.fs.path.join(allocator, &.{ silex_root, "cache", "registry" });
+    const cache_root = try packageRegistryCacheRoot(allocator, packages_root);
     var registry = PackageRegistry.Client.init(allocator, init.gpa, init.io, cache_root);
     const location = init.environ_map.get("SILEX_REGISTRY") orelse PackageRegistry.default_location;
     const registry_index = registry.load(location) catch |err| switch (err) {
@@ -340,9 +361,35 @@ fn installPackageOperand(
         Packages.Version.parse(build_options.version) catch unreachable,
         target,
         store,
+        development,
     ) catch |err| switch (err) {
         error.InvalidRegistry => {
             std.debug.print("silex: cannot install package: {s}\n", .{registry.diagnostic orelse "cannot install registry package"});
+            return null;
+        },
+        else => return err,
+    };
+}
+
+fn packageRegistryCacheRoot(allocator: std.mem.Allocator, packages_root: []const u8) ![]const u8 {
+    const silex_root = std.fs.path.dirname(packages_root) orelse return error.InvalidPackageStore;
+    return std.fs.path.join(allocator, &.{ silex_root, "cache", "registry" });
+}
+
+fn loadPackageRegistry(
+    init: std.process.Init,
+    allocator: std.mem.Allocator,
+    packages_root: []const u8,
+) !?PackageRegistry.Registry {
+    const cache_root = packageRegistryCacheRoot(allocator, packages_root) catch {
+        std.debug.print("silex: invalid user package store\n", .{});
+        return null;
+    };
+    var registry = PackageRegistry.Client.init(allocator, init.gpa, init.io, cache_root);
+    const location = init.environ_map.get("SILEX_REGISTRY") orelse PackageRegistry.default_location;
+    return registry.load(location) catch |err| switch (err) {
+        error.InvalidRegistry => {
+            std.debug.print("silex: cannot use package registry: {s}\n", .{registry.diagnostic orelse "invalid registry"});
             return null;
         },
         else => return err,
@@ -575,6 +622,7 @@ fn listResolvedPackages(
         try globalPackagesRoot(allocator, init.environ_map),
         TargetModule.Target.host() orelse .macos_arm64,
     );
+    resolver.enableDevelopmentDependencies();
     const graph = resolver.resolve(project_root) catch |err| switch (err) {
         error.InvalidPackageGraph => {
             std.debug.print("silex: cannot resolve packages: {s}\n", .{resolver.diagnostic orelse "invalid package graph"});
@@ -1575,6 +1623,7 @@ fn printCliDiagnostic(command: []const u8, diagnostic: Cli.Diagnostic) void {
         .unknown_target => std.debug.print("silex: unknown target '{s}'; expected macos-arm64, linux-x64, windows-x64 or windows-arm64\n", .{diagnostic.argument.?}),
         .missing_workspace => std.debug.print("silex: option '--workspace' expects a directory\n", .{}),
         .duplicate_workspace => std.debug.print("silex: workspace is specified more than once\n", .{}),
+        .duplicate_dev => std.debug.print("silex: development dependencies are requested more than once\n", .{}),
         .unknown_action => std.debug.print("silex: unknown '{s}' action '{s}'; expected 'resolve' or no action\n", .{ command, diagnostic.argument.? }),
         .conflicting_modes => std.debug.print("silex: Debug and Release modes are mutually exclusive near '{s}'\n", .{diagnostic.argument.?}),
         .option_unavailable => std.debug.print("silex: option '{s}' is unavailable for '{s}'\n", .{ diagnostic.argument.?, command }),

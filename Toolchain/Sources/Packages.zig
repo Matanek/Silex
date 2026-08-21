@@ -292,6 +292,7 @@ pub const ManifestInfo = struct {
     extensions: []const ExtensionPolicy,
     catalogs: []const []const u8,
     dependencies: []const ManifestDependency,
+    dev_dependencies: []const ManifestDependency,
 };
 
 pub const ManifestDependency = struct {
@@ -312,6 +313,7 @@ const RawManifest = struct {
     catalogs: ?std.json.Value = null,
     requires: ?std.json.Value = null,
     dependencies: ?std.json.Value = null,
+    devDependencies: ?std.json.Value = null,
     boundary: ?std.json.Value = null,
     artifacts: ?std.json.Value = null,
 };
@@ -323,6 +325,7 @@ const ParsedManifest = struct {
     catalogs: []const []const u8,
     silex_requirement: ?SilexRequirement,
     dependencies: []const ManifestDependency,
+    dev_dependencies: []const ManifestDependency,
     boundary_providers: []const BoundaryProvider,
 };
 
@@ -343,6 +346,8 @@ pub const Resolver = struct {
     workspace_links_root: ?[]const u8 = null,
     builders: std.ArrayList(Builder) = .empty,
     diagnostic: ?[]const u8 = null,
+    include_dev_dependencies: bool = false,
+    resolving_root_dev_dependency: bool = false,
 
     pub fn init(allocator: Allocator, io: Io, global_root: ?[]const u8) Resolver {
         return initForTarget(allocator, io, global_root, TargetModule.Target.host() orelse .macos_arm64);
@@ -350,6 +355,10 @@ pub const Resolver = struct {
 
     pub fn initForTarget(allocator: Allocator, io: Io, global_root: ?[]const u8, target: TargetModule.Target) Resolver {
         return .{ .allocator = allocator, .io = io, .global_root = global_root, .target = target };
+    }
+
+    pub fn enableDevelopmentDependencies(self: *Resolver) void {
+        self.include_dev_dependencies = true;
     }
 
     pub fn resolve(self: *Resolver, project_root: []const u8) !Graph {
@@ -381,7 +390,10 @@ pub const Resolver = struct {
         });
 
         if (root_manifest) |manifest| {
-            try self.resolveDependencies(0, manifest.dependencies);
+            try self.resolveDependencies(0, manifest.dependencies, false);
+            if (self.include_dev_dependencies) {
+                try self.resolveDependencies(0, manifest.dev_dependencies, true);
+            }
         } else {
             if (self.workspace_links_root) |root| try self.resolveImplicitLinksAt(root, .workspace_link);
             if (try self.userLinksRoot()) |root| try self.resolveImplicitLinksAt(root, .user_link);
@@ -421,6 +433,7 @@ pub const Resolver = struct {
             .extensions = manifest.extensions,
             .catalogs = manifest.catalogs,
             .dependencies = manifest.dependencies,
+            .dev_dependencies = manifest.dev_dependencies,
         };
     }
 
@@ -526,9 +539,17 @@ pub const Resolver = struct {
         });
     }
 
-    fn resolveDependencies(self: *Resolver, owner: usize, dependencies: []const ManifestDependency) anyerror!void {
+    fn resolveDependencies(
+        self: *Resolver,
+        owner: usize,
+        dependencies: []const ManifestDependency,
+        development: bool,
+    ) anyerror!void {
         for (dependencies) |request| {
-            const package = try self.resolveRequest(owner, request);
+            const package = if (development and owner == 0)
+                try self.resolveRootDevelopmentRequest(request)
+            else
+                try self.resolveRequest(owner, request);
             try self.builders.items[owner].dependencies.append(self.allocator, .{
                 .name = request.name,
                 .package = package,
@@ -537,13 +558,32 @@ pub const Resolver = struct {
         }
     }
 
+    fn resolveRootDevelopmentRequest(self: *Resolver, request: ManifestDependency) anyerror!usize {
+        self.resolving_root_dev_dependency = true;
+        defer self.resolving_root_dev_dependency = false;
+        return self.resolveRequest(0, request) catch |err| switch (err) {
+            error.InvalidPackageGraph => if (self.find(request.name) == null)
+                return self.fail(try std.fmt.allocPrint(
+                    self.allocator,
+                    "'{s}' is a development dependency of '{s}'. Run: silex install {s} --dev",
+                    .{ request.name, try self.ownerLabel(0), self.builders.items[0].package.name orelse "." },
+                ))
+            else
+                return err,
+            else => |other| return other,
+        };
+    }
+
     fn resolveRequest(self: *Resolver, owner: usize, request: ManifestDependency) anyerror!usize {
         if (self.find(request.name)) |existing| {
             const builder = &self.builders.items[existing];
             if (!request.constraint.accepts(builder.package.version.?)) {
                 return self.fail(try self.selectedVersionDiagnostic(owner, request, builder.package.version.?));
             }
-            if (builder.state == .visiting) return self.fail("package dependency cycle");
+            if (builder.state == .visiting) {
+                if (existing == 0 and owner != 0 and self.resolving_root_dev_dependency) return existing;
+                return self.fail("package dependency cycle");
+            }
             return existing;
         }
 
@@ -824,7 +864,7 @@ pub const Resolver = struct {
             },
             .state = .visiting,
         });
-        try self.resolveDependencies(index, manifest.dependencies);
+        try self.resolveDependencies(index, manifest.dependencies, false);
         self.builders.items[index].state = .done;
         return index;
     }
@@ -1142,11 +1182,41 @@ pub const Resolver = struct {
                 return self.fail("invalid requires.silex version range; expected '>=MAJOR.MINOR.PATCH' with optional '<MAJOR.MINOR.PATCH'");
         }
 
+        const dependencies = try self.parseDependencies(raw.dependencies, "dependencies");
+        const dev_dependencies = try self.parseDependencies(raw.devDependencies, "devDependencies");
+        for (dev_dependencies) |development| {
+            for (dependencies) |dependency| {
+                if (std.mem.eql(u8, development.name, dependency.name)) {
+                    return self.fail("a package cannot appear in both dependencies and devDependencies");
+                }
+            }
+        }
+        return .{
+            .name = raw.name,
+            .version = version,
+            .extensions = try extensions.toOwnedSlice(self.allocator),
+            .catalogs = try catalogs.toOwnedSlice(self.allocator),
+            .silex_requirement = silex_requirement,
+            .dependencies = dependencies,
+            .dev_dependencies = dev_dependencies,
+            .boundary_providers = &.{},
+        };
+    }
+
+    fn parseDependencies(
+        self: *Resolver,
+        value: ?std.json.Value,
+        field: []const u8,
+    ) ![]const ManifestDependency {
         var dependencies: std.ArrayList(ManifestDependency) = .empty;
-        if (raw.dependencies) |value| {
-            const object = switch (value) {
+        if (value) |present| {
+            const object = switch (present) {
                 .object => |object| object,
-                else => return self.fail("dependencies must be an object of version constraints"),
+                else => return self.fail(try std.fmt.allocPrint(
+                    self.allocator,
+                    "{s} must be an object of version constraints",
+                    .{field},
+                )),
             };
             var iterator = object.iterator();
             while (iterator.next()) |entry| {
@@ -1163,15 +1233,7 @@ pub const Resolver = struct {
             }
             std.mem.sort(ManifestDependency, dependencies.items, {}, dependencyLessThan);
         }
-        return .{
-            .name = raw.name,
-            .version = version,
-            .extensions = try extensions.toOwnedSlice(self.allocator),
-            .catalogs = try catalogs.toOwnedSlice(self.allocator),
-            .silex_requirement = silex_requirement,
-            .dependencies = try dependencies.toOwnedSlice(self.allocator),
-            .boundary_providers = &.{},
-        };
+        return dependencies.toOwnedSlice(self.allocator);
     }
 
     fn parseBoundary(
@@ -1573,6 +1635,67 @@ test "parse exact and caret stable versions" {
     try std.testing.expect((try Constraint.parse("^0.2.1")).accepts(try Version.parse("0.3.0")));
     try std.testing.expect(!(try Constraint.parse("^0.2.1")).accepts(try Version.parse("1.0.0")));
     try std.testing.expectError(error.InvalidVersion, Version.parse("1.2.3-beta"));
+}
+
+test "development dependencies belong only to the root development graph" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "Canvas/Module");
+    try temporary.dir.createDirPath(std.testing.io, "Store/Viewer@1.0.0/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Canvas/Package.json",
+        .data = "{\"name\":\"Canvas\",\"version\":\"1.0.0\",\"devDependencies\":{\"Viewer\":\"^1.0.0\"}}",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Store/Viewer@1.0.0/Package.json",
+        .data = "{\"name\":\"Viewer\",\"version\":\"1.0.0\",\"requires\":{\"silex\":\">=0.0.0\"},\"dependencies\":{\"Canvas\":\"^1.0.0\"}}",
+    });
+    const base = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
+    const canvas = try std.fs.path.join(allocator, &.{ base, "Canvas" });
+    const store = try std.fs.path.join(allocator, &.{ base, "Store" });
+
+    var consumer_resolver = Resolver.init(allocator, std.testing.io, store);
+    const consumer_graph = try consumer_resolver.resolve(canvas);
+    try std.testing.expectEqual(@as(usize, 1), consumer_graph.packages.len);
+
+    var development_resolver = Resolver.init(allocator, std.testing.io, store);
+    development_resolver.enableDevelopmentDependencies();
+    const development_graph = try development_resolver.resolve(canvas);
+    try std.testing.expectEqual(@as(usize, 2), development_graph.packages.len);
+    try std.testing.expectEqualStrings("Viewer", development_graph.packages[1].name.?);
+    try std.testing.expectEqual(@as(usize, 1), development_graph.packages[1].dependencies.len);
+    try std.testing.expectEqual(@as(usize, 0), development_graph.packages[1].dependencies[0].package);
+
+    var missing_resolver = Resolver.init(allocator, std.testing.io, null);
+    missing_resolver.enableDevelopmentDependencies();
+    try std.testing.expectError(error.InvalidPackageGraph, missing_resolver.resolve(canvas));
+    try std.testing.expectEqualStrings(
+        "'Viewer' is a development dependency of 'Canvas@1.0.0'. Run: silex install Canvas --dev",
+        missing_resolver.diagnostic.?,
+    );
+}
+
+test "reject a dependency duplicated across runtime and development scopes" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "Canvas/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Canvas/Package.json",
+        .data = "{\"name\":\"Canvas\",\"version\":\"1.0.0\",\"dependencies\":{\"Viewer\":\"^1.0.0\"},\"devDependencies\":{\"Viewer\":\"^1.0.0\"}}",
+    });
+    const root = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Canvas" });
+    var resolver = Resolver.init(allocator, std.testing.io, null);
+    try std.testing.expectError(error.InvalidPackageGraph, resolver.resolve(root));
+    try std.testing.expectEqualStrings(
+        "a package cannot appear in both dependencies and devDependencies",
+        resolver.diagnostic.?,
+    );
 }
 
 test "validate extension permissions and reject wildcard suite and merge members" {

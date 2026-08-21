@@ -9,7 +9,14 @@ pub fn canonical(allocator: std.mem.Allocator, module: []const u8, declaration: 
 
 pub fn nominal(allocator: std.mem.Allocator, module: []const u8, declaration: []const u8) std.mem.Allocator.Error![]const u8 {
     if (std.mem.eql(u8, declaration, Result.name)) return Result.name;
-    if (std.mem.eql(u8, lastSegment(module), declaration)) return allocator.dupe(u8, module);
+    const principal = lastSegment(module);
+    if (std.mem.eql(u8, principal, declaration)) return allocator.dupe(u8, module);
+    if (declaration.len > principal.len and
+        std.mem.startsWith(u8, declaration, principal) and
+        declaration[principal.len] == '.')
+    {
+        return std.fmt.allocPrint(allocator, "{s}{s}", .{ module, declaration[principal.len..] });
+    }
     return canonical(allocator, module, declaration);
 }
 
@@ -61,4 +68,11 @@ pub fn expressionPosition(module: usize) Source.Position {
 pub fn pathInside(path: []const u8, directory: []const u8) bool {
     if (!std.mem.startsWith(u8, path, directory) or path.len <= directory.len) return false;
     return path[directory.len] == std.fs.path.sep;
+}
+
+test "collapse the principal declaration prefix for nested nominal types" {
+    const allocator = std.testing.allocator;
+    const name = try nominal(allocator, "GFX.GPU.Plugin", "Plugin.Settings");
+    defer allocator.free(name);
+    try std.testing.expectEqualStrings("GFX.GPU.Plugin.Settings", name);
 }

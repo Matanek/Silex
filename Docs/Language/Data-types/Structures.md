@@ -199,6 +199,8 @@ let entry = Catalog.Entry(value:42)
 ```
 
 A nested type does not capture an owner instance.
+An alias or public reexport of the enclosing type preserves its nested types,
+so an alias such as `Window` also exposes `Window.Settings`.
 
 ## Create a generic structure
 

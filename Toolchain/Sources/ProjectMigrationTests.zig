@@ -182,6 +182,50 @@ test "prefer a facade reexport over a homonymous principal type static call" {
     try std.testing.expectEqualStrings("Silex\n", result.stdout);
 }
 
+test "retain nested types through an alias of a homonymous principal declaration" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+
+    try temporary.dir.createDirPath(std.testing.io, "GFX/GPU");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data =
+        \\use GFX.Plugins
+        \\func main() {
+        \\    let settings:Plugins.GPU.Settings = Plugins.GPU.Settings(value:42)
+        \\    print(settings.value, " ", Plugins.GPU().value())
+        \\}
+        ,
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/Plugins.sx",
+        .data = "public use GFX.GPU.Plugin.Plugin as GPU",
+    });
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "GFX/GPU/Plugin.sx",
+        .data =
+        \\public struct Plugin {
+        \\    struct Settings {
+        \\        let value:int
+        \\        init(value:int = 7) { self.value = value }
+        \\    }
+        \\    private let settings:Settings
+        \\    init(settings:Settings = Settings()) { self.settings = settings }
+        \\    func value() int { return self.settings.value }
+        \\}
+        ,
+    });
+
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(input);
+    const result = try @import("Interpreter.zig").runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("42 7\n", result.stdout);
+}
+
 test "diagnose invalid public reexports and cycles" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

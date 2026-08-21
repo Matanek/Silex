@@ -269,6 +269,40 @@ checkout explicitly with `silex link` when its sources must remain live.
 Dependencies are direct. Declare every package used by the application; a
 transitive dependency is not automatically visible.
 
+### Declare development dependencies
+
+Packages may keep tools used only by their examples, tests, benchmarks, smokes,
+or other development programs outside their public dependency graph:
+
+```json
+{
+  "dependencies": {
+    "GFX": "^0.37.0"
+  },
+  "devDependencies": {
+    "GFX.Viewer": "^0.1.0"
+  }
+}
+```
+
+`devDependencies` follows the same identity and version-constraint rules as
+`dependencies`. One package cannot appear in both objects. The distinction is
+semantic and does not depend on directory names: development sources in the
+root checkout can import these packages, while the package's consumers never
+inherit or see them through the package graph.
+
+Install the explicitly requested package with its development environment:
+
+~~~sh
+silex install GFX.Canvas --dev
+~~~
+
+Only that root package's development dependencies are added. Their normal
+dependencies remain transitive, but their own `devDependencies` are not
+installed recursively. Without `--dev`, installation and consumption use only
+`dependencies`. A missing development dependency is diagnosed with the exact
+`silex install <package> --dev` command needed to prepare the checkout.
+
 A loose program without `Package.json` needs no manifest merely to try Silex
 or run a short script. Its implicit development environment exposes compatible
 packages through workspace links, user links, then installed versions. Its
