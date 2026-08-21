@@ -40,6 +40,18 @@ exact extension with `suite: true`, the installer also selects the newest tagged
 extension whose direct parent dependency accepts the selected parent version.
 Wildcard extensions can never carry `suite`.
 
+In an interactive terminal, installation reports the registry lookup, package
+resolution, release download, and installation of every dependency and suite
+member. The active operation updates in place; each completed package becomes
+a durable `ready` line stating whether it was installed or already present.
+The installer visits one selected version of a package only once across the
+dependency and suite graph. A failed suite member becomes a durable `failed`
+line, then installation continues with every independent member. After the
+complete suite has been visited, an interactive command returns a nonzero
+status without repeating those durable diagnostics. Redirected and CI
+executions remain quiet on success and receive one combined failure diagnostic
+listing every failed member.
+
 Tagged manifests may also declare `devDependencies`. They are excluded from
 ordinary installation and from every consumer graph. `silex install Name --dev`
 installs the explicitly requested release's development dependencies plus each

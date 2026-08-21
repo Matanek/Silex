@@ -267,6 +267,7 @@ fn installPackage(init: std.process.Init, allocator: std.mem.Allocator, args: []
         return 1;
     };
     var store = PackageStore.Manager.init(allocator, init.gpa, init.io, packages_root);
+    var progress = CliProgress.Install.init(init.io);
     const result = try installPackageOperand(
         init,
         allocator,
@@ -275,7 +276,9 @@ fn installPackage(init: std.process.Init, allocator: std.mem.Allocator, args: []
         options.package_path,
         target,
         options.development,
+        &progress,
     ) orelse return 1;
+    progress.finish();
     std.debug.print("silex: {s} {s}@{d}.{d}.{d} in {s}\n", .{
         if (result.installed) "installed" else "already installed",
         result.package.name,
@@ -295,6 +298,7 @@ fn installPackageOperand(
     operand: []const u8,
     target: TargetModule.Target,
     development: bool,
+    progress: *CliProgress.Install,
 ) !?PackageStore.InstallResult {
     const status = Io.Dir.cwd().statFile(init.io, operand, .{}) catch |err| switch (err) {
         error.FileNotFound, error.NotDir => null,
@@ -305,6 +309,7 @@ fn installPackageOperand(
             std.debug.print("silex: package source '{s}' is not a directory\n", .{operand});
             return null;
         }
+        progress.source(.install, operand);
         const result = store.install(operand, target) catch |err| switch (err) {
             error.InvalidPackageStore => {
                 std.debug.print("silex: cannot install package: {s}\n", .{store.diagnostic orelse "invalid package"});
@@ -313,13 +318,14 @@ fn installPackageOperand(
             else => return err,
         };
         if (development and result.package.dev_dependencies.len != 0) {
-            const registry_index = try loadPackageRegistry(init, allocator, packages_root) orelse return null;
+            const registry_index = try loadPackageRegistry(init, allocator, packages_root, progress) orelse return null;
             var registry = PackageRegistry.Client.init(
                 allocator,
                 init.gpa,
                 init.io,
                 try packageRegistryCacheRoot(allocator, packages_root),
             );
+            registry.setProgress(packageProgressReporter(progress));
             registry.installDevelopmentDependencies(
                 registry_index,
                 result.package.dev_dependencies,
@@ -347,7 +353,9 @@ fn installPackageOperand(
     };
     const cache_root = try packageRegistryCacheRoot(allocator, packages_root);
     var registry = PackageRegistry.Client.init(allocator, init.gpa, init.io, cache_root);
+    registry.setProgress(packageProgressReporter(progress));
     const location = init.environ_map.get("SILEX_REGISTRY") orelse PackageRegistry.default_location;
+    progress.source(.registry, location);
     const registry_index = registry.load(location) catch |err| switch (err) {
         error.InvalidRegistry => {
             std.debug.print("silex: cannot use package registry: {s}\n", .{registry.diagnostic orelse "invalid registry"});
@@ -363,6 +371,12 @@ fn installPackageOperand(
         store,
         development,
     ) catch |err| switch (err) {
+        error.IncompleteSuite => {
+            if (!progress.enabled) {
+                std.debug.print("silex: cannot install package: {s}\n", .{registry.diagnostic orelse "incomplete package suite"});
+            }
+            return null;
+        },
         error.InvalidRegistry => {
             std.debug.print("silex: cannot install package: {s}\n", .{registry.diagnostic orelse "cannot install registry package"});
             return null;
@@ -380,6 +394,7 @@ fn loadPackageRegistry(
     init: std.process.Init,
     allocator: std.mem.Allocator,
     packages_root: []const u8,
+    progress: *CliProgress.Install,
 ) !?PackageRegistry.Registry {
     const cache_root = packageRegistryCacheRoot(allocator, packages_root) catch {
         std.debug.print("silex: invalid user package store\n", .{});
@@ -387,6 +402,7 @@ fn loadPackageRegistry(
     };
     var registry = PackageRegistry.Client.init(allocator, init.gpa, init.io, cache_root);
     const location = init.environ_map.get("SILEX_REGISTRY") orelse PackageRegistry.default_location;
+    progress.source(.registry, location);
     return registry.load(location) catch |err| switch (err) {
         error.InvalidRegistry => {
             std.debug.print("silex: cannot use package registry: {s}\n", .{registry.diagnostic orelse "invalid registry"});
@@ -394,6 +410,44 @@ fn loadPackageRegistry(
         },
         else => return err,
     };
+}
+
+fn packageProgressReporter(progress: *CliProgress.Install) PackageRegistry.ProgressReporter {
+    return .{
+        .context = progress,
+        .callback = reportPackageProgress,
+    };
+}
+
+fn reportPackageProgress(context: *anyopaque, event: PackageRegistry.ProgressEvent) void {
+    const progress: *CliProgress.Install = @ptrCast(@alignCast(context));
+    switch (event) {
+        .resolve => |name| progress.package(.resolve, name, null),
+        .download => |package| progress.package(.download, package.name, .{
+            .major = package.version.major,
+            .minor = package.version.minor,
+            .patch = package.version.patch,
+        }),
+        .install => |package| progress.package(.install, package.name, .{
+            .major = package.version.major,
+            .minor = package.version.minor,
+            .patch = package.version.patch,
+        }),
+        .complete => |package| progress.complete(package.name, .{
+            .major = package.version.major,
+            .minor = package.version.minor,
+            .patch = package.version.patch,
+        }, package.installed),
+        .failed => |package| progress.failed(
+            package.name,
+            if (package.version) |version| .{
+                .major = version.major,
+                .minor = version.minor,
+                .patch = version.patch,
+            } else null,
+            package.diagnostic,
+        ),
+    }
 }
 
 fn looksLikePath(text: []const u8) bool {
