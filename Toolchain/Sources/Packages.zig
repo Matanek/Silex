@@ -2268,6 +2268,7 @@ test "ignore a colocated package and select the newest compatible installed vers
     const app = try std.fs.path.join(allocator, &.{ base, "App" });
     const global = try std.fs.path.join(allocator, &.{ base, "Global" });
     var resolver = Resolver.init(allocator, std.testing.io, global);
+    resolver.toolchain_version = try Version.parse("0.38.0");
     var graph = try resolver.resolve(app);
     try std.testing.expectEqualStrings("Math", graph.packages[1].name.?);
     try std.testing.expect(graph.packages[1].version.?.eql(try Version.parse("1.5.0")));
@@ -2281,6 +2282,7 @@ test "ignore a colocated package and select the newest compatible installed vers
         .data = "{\"name\":\"Math\",\"version\":\"1.4.1\"}",
     });
     resolver = Resolver.init(allocator, std.testing.io, global);
+    resolver.toolchain_version = try Version.parse("0.38.0");
     graph = try resolver.resolve(app);
     try std.testing.expect(graph.packages[1].version.?.eql(try Version.parse("1.5.0")));
 }
@@ -2377,6 +2379,7 @@ test "resolve qualified identities literally from an injected global root" {
     const app = try std.fs.path.join(allocator, &.{ base, "App" });
     const global = try std.fs.path.join(allocator, &.{ base, "Global" });
     var resolver = Resolver.init(allocator, std.testing.io, global);
+    resolver.toolchain_version = try Version.parse("0.38.0");
     try std.testing.expectError(error.InvalidPackageGraph, resolver.resolve(app));
     try std.testing.expectEqualStrings(
         "package 'Silex.Bootstrap' requires parent package 'Silex' to authorize its namespace",
@@ -2404,6 +2407,7 @@ test "resolve qualified identities literally from an injected global root" {
         ),
     });
     resolver = Resolver.init(allocator, std.testing.io, global);
+    resolver.toolchain_version = try Version.parse("0.38.0");
     const graph = try resolver.resolve(app);
     try std.testing.expectEqualStrings("Silex.Bootstrap", graph.packages[2].name.?);
     try std.testing.expect(std.mem.endsWith(u8, graph.packages[2].root, "Silex.Bootstrap@0.1.7"));
