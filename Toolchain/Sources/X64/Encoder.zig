@@ -242,13 +242,24 @@ fn encodeFunction(
     program: Machine.Program,
     function: Machine.Function,
 ) Error!void {
-    if (function.register_slots.len != 0 or function.float_register_slots.len != 0) return unsupported("release register allocation");
+    if (function.float_register_slots.len != 0 or function.float_lane_slots.len != 0) return unsupported("X64 floating register allocation");
+    for (function.register_slots) |residence| if (residence) |register| {
+        if (register >= 16 or register == @intFromEnum(Register.rsp) or register == @intFromEnum(Register.rbp)) {
+            return error.InvalidMachineProgram;
+        }
+    };
     try bytes.appendSlice(allocator, &.{ 0x55, 0x48, 0x89, 0xe5 });
     try emitFrameAllocation(allocator, bytes, platform, function.frame_size);
     const argument_registers = [_]Register{ .rdi, .rsi, .rdx, .rcx, .r8, .r9, .r10, .r11 };
     if (function.parameters.len != function.parameter_count) return error.InvalidMachineProgram;
     if (function.hidden_return_slot) |slot| try emitStoreStack(allocator, bytes, .r15, slot);
-    for (function.parameters, 0..) |parameter, index| {
+    // Copy arguments backwards so a scalar residence in r8-r11 cannot replace
+    // a later incoming argument before that argument reaches its own slot.
+    var remaining_parameters = function.parameters.len;
+    while (remaining_parameters != 0) {
+        remaining_parameters -= 1;
+        const index = remaining_parameters;
+        const parameter = function.parameters[index];
         if (index >= argument_registers.len) {
             const incoming_displacement: i32 = @intCast(16 + (index - argument_registers.len) * Machine.slot_size);
             if (parameter.aggregate) {
@@ -260,7 +271,7 @@ fn encodeFunction(
             } else {
                 if (parameter.width != 1) return error.InvalidMachineProgram;
                 try emitLoadMemory(allocator, bytes, .rax, .rbp, incoming_displacement);
-                try emitStoreStack(allocator, bytes, .rax, parameter.start);
+                try emitStoreValue(allocator, bytes, function.register_slots, .rax, parameter.start);
             }
         } else if (parameter.aggregate) {
             for (0..parameter.width) |leaf| {
@@ -269,7 +280,7 @@ fn encodeFunction(
             }
         } else {
             if (parameter.width != 1) return error.InvalidMachineProgram;
-            try emitStoreStack(allocator, bytes, argument_registers[index], parameter.start);
+            try emitStoreValue(allocator, bytes, function.register_slots, argument_registers[index], parameter.start);
         }
     }
     for (function.capture_parameters, 0..) |capture, index| {
@@ -290,11 +301,11 @@ fn encodeFunction(
         switch (instruction) {
             .constant_int => |value| {
                 try emitImmediate(allocator, bytes, .rax, value.bits);
-                try emitStoreStack(allocator, bytes, .rax, value.result);
+                try emitStoreValue(allocator, bytes, function.register_slots, .rax, value.result);
             },
             .constant_bool => |value| {
                 try emitImmediate(allocator, bytes, .rax, @intFromBool(value.value));
-                try emitStoreStack(allocator, bytes, .rax, value.result);
+                try emitStoreValue(allocator, bytes, function.register_slots, .rax, value.result);
             },
             .constant_float32 => |value| {
                 try emitImmediate(allocator, bytes, .rax, value.bits);
@@ -343,8 +354,8 @@ fn encodeFunction(
                 value,
             ),
             .copy => |copy| {
-                try emitLoadStack(allocator, bytes, .rax, copy.operand);
-                try emitStoreStack(allocator, bytes, .rax, copy.result);
+                try emitLoadValue(allocator, bytes, function.register_slots, .rax, copy.operand);
+                try emitStoreValue(allocator, bytes, function.register_slots, .rax, copy.result);
             },
             .copy_range => |copy| try emitCopyRange(allocator, bytes, copy.result, copy.operand),
             .deep_copy => |copy| {
@@ -563,7 +574,7 @@ fn encodeFunction(
                 format,
             ),
             .unary => |unary| {
-                try emitLoadStack(allocator, bytes, .rax, unary.operand);
+                try emitLoadValue(allocator, bytes, function.register_slots, .rax, unary.operand);
                 if (unary.type == .float32) {
                     try bytes.append(allocator, 0x35);
                     try appendInt(allocator, bytes, u32, 0x8000_0000);
@@ -573,9 +584,9 @@ fn encodeFunction(
                 } else {
                     try bytes.appendSlice(allocator, &.{ 0x48, 0xf7, 0xd8 });
                 }
-                try emitStoreStack(allocator, bytes, .rax, unary.result);
+                try emitStoreValue(allocator, bytes, function.register_slots, .rax, unary.result);
             },
-            .binary => |binary| try emitBinary(allocator, bytes, binary),
+            .binary => |binary| try emitBinary(allocator, bytes, function.register_slots, binary),
             .string_byte_at => |access| {
                 try emitLoadStack(allocator, bytes, .rax, access.operand);
                 try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xc0, 8 });
@@ -675,7 +686,7 @@ fn encodeFunction(
                     try emitImmediate(allocator, bytes, .rax, 0);
                 } else {
                     if (value.width != 1) return error.InvalidMachineProgram;
-                    try emitLoadStack(allocator, bytes, .rax, value.start);
+                    try emitLoadValue(allocator, bytes, function.register_slots, .rax, value.start);
                 }
                 try bytes.appendSlice(allocator, &.{ 0x31, 0xd2 });
                 try appendEpilogueJump(allocator, bytes, &epilogue_fixups);
@@ -786,11 +797,16 @@ fn emitDynamicCall(
     if (call.result) |result| if (!result.aggregate) try emitStoreStack(allocator, bytes, .rax, result.start);
 }
 
-fn emitBinary(allocator: Allocator, bytes: *std.ArrayList(u8), binary: Machine.Instruction.Binary) Error!void {
+fn emitBinary(
+    allocator: Allocator,
+    bytes: *std.ArrayList(u8),
+    residences: []const ?u5,
+    binary: Machine.Instruction.Binary,
+) Error!void {
     if (binary.type.isFloat()) return emitFloatBinary(allocator, bytes, binary);
     if (binary.type == .str) return emitStringBinary(allocator, bytes, binary);
-    try emitLoadStack(allocator, bytes, .rax, binary.left);
-    try emitLoadStack(allocator, bytes, .rcx, binary.right);
+    try emitLoadValue(allocator, bytes, residences, .rax, binary.left);
+    try emitLoadValue(allocator, bytes, residences, .rcx, binary.right);
     switch (binary.operator) {
         .add => try bytes.appendSlice(allocator, &.{ 0x48, 0x01, 0xc8 }),
         .subtract => try bytes.appendSlice(allocator, &.{ 0x48, 0x29, 0xc8 }),
@@ -822,7 +838,7 @@ fn emitBinary(allocator: Allocator, bytes: *std.ArrayList(u8), binary: Machine.I
             try bytes.appendSlice(allocator, &.{ condition, 0xc0, 0x48, 0x0f, 0xb6, 0xc0 });
         },
     }
-    try emitStoreStack(allocator, bytes, .rax, binary.result);
+    try emitStoreValue(allocator, bytes, residences, .rax, binary.result);
 }
 
 fn emitStringBinary(allocator: Allocator, bytes: *std.ArrayList(u8), binary: Machine.Instruction.Binary) Error!void {
@@ -884,7 +900,7 @@ fn emitAggregateEqual(
             try guard_skips.append(allocator, bytes.items.len);
             try bytes.appendNTimes(allocator, 0, 4);
         }
-        try emitBinary(allocator, bytes, .{
+        try emitBinary(allocator, bytes, &.{}, .{
             .result = value.result,
             .operator = .equal,
             .left = value.left.start + leaf.offset,
@@ -2413,6 +2429,21 @@ fn emitLoadStack(allocator: Allocator, bytes: *std.ArrayList(u8), register: Regi
     try appendInt(allocator, bytes, i32, slotDisplacement(slot));
 }
 
+fn emitLoadValue(
+    allocator: Allocator,
+    bytes: *std.ArrayList(u8),
+    residences: []const ?u5,
+    register: Register,
+    slot: Machine.Slot,
+) Allocator.Error!void {
+    if (residences.len != 0) if (residences[slot]) |residence| {
+        const source: Register = @enumFromInt(residence);
+        if (source != register) try emitMoveRegister(allocator, bytes, register, source);
+        return;
+    };
+    try emitLoadStack(allocator, bytes, register, slot);
+}
+
 fn emitLoadFloatStack(allocator: Allocator, bytes: *std.ArrayList(u8), xmm: u3, slot: Machine.Slot, double: bool) Allocator.Error!void {
     try bytes.append(allocator, if (double) 0xf2 else 0xf3);
     try bytes.appendSlice(allocator, &.{ 0x0f, 0x10, 0x85 | (@as(u8, xmm) << 3) });
@@ -2518,6 +2549,21 @@ fn emitStoreStack(allocator: Allocator, bytes: *std.ArrayList(u8), register: Reg
     try bytes.append(allocator, 0x89);
     try bytes.append(allocator, 0x85 | (@as(u8, @intFromEnum(register) & 7) << 3));
     try appendInt(allocator, bytes, i32, slotDisplacement(slot));
+}
+
+fn emitStoreValue(
+    allocator: Allocator,
+    bytes: *std.ArrayList(u8),
+    residences: []const ?u5,
+    register: Register,
+    slot: Machine.Slot,
+) Allocator.Error!void {
+    if (residences.len != 0) if (residences[slot]) |residence| {
+        const destination: Register = @enumFromInt(residence);
+        if (destination != register) try emitMoveRegister(allocator, bytes, destination, register);
+        return;
+    };
+    try emitStoreStack(allocator, bytes, register, slot);
 }
 
 fn emitFrameAllocation(
@@ -2776,6 +2822,28 @@ test "encode X64 ownership and deep-copy runtime callbacks" {
     try std.testing.expect(linux.code.len > 4096);
     try std.testing.expect(windows.code.len > 4096);
     try std.testing.expect(windows.windows_import_sites.len >= 2);
+}
+
+test "X64 scalar allocation reduces leaf arithmetic code" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = @import("../Frontend.zig").Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\func total(a:int, b:int, c:int, d:int) int {
+        \\    let first = a + b
+        \\    let second = c + d
+        \\    return first * second
+        \\}
+        \\func main() { assert(total(1, 2, 3, 4) == 21) }
+    );
+    const stack_program = try @import("../Arm64/Lower.zig").lower(allocator, compilation.ir);
+    const register_program = try @import("RegisterAllocation.zig").allocateProgram(allocator, stack_program);
+    const stack_image = try encodeLinux(allocator, stack_program);
+    defer stack_image.deinit(allocator);
+    const register_image = try encodeLinux(allocator, register_program);
+    defer register_image.deinit(allocator);
+    try std.testing.expect(register_image.code.len < stack_image.code.len);
 }
 
 test "X64 keeps the scalar fallback when portable SLP groups are present" {

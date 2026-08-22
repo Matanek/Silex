@@ -17,6 +17,7 @@ const MacOSLink = @import("MacOS/Link.zig");
 const Elf = @import("Linux/Elf.zig");
 const X64Encoder = @import("X64/Encoder.zig");
 const X64Object = @import("X64/Object.zig");
+const X64RegisterAllocation = @import("X64/RegisterAllocation.zig");
 const PE = @import("Windows/PE.zig");
 const WindowsImports = @import("Windows/Imports.zig");
 const NativeLink = @import("NativeLink.zig");
@@ -1177,13 +1178,19 @@ fn compileNativeOptions(
         },
     };
     const lower_mode = lowerModeForTarget(options.mode, target);
-    const machine = (if (options.cache)
+    var machine = (if (options.cache)
         Lower.lowerCachedWithBoundaries(allocator, init.io, native_ir, boundaries, lower_mode)
     else
         Lower.lowerWithModeAndBoundaries(allocator, native_ir, boundaries, lower_mode)) catch |err| {
         std.debug.print("silex: native backend cannot lower this program: {t}\n", .{err});
         return 1;
     };
+    if (options.mode == .release and (target.eql(.linux_x64) or target.eql(.windows_x64))) {
+        machine = X64RegisterAllocation.allocateProgram(allocator, machine) catch |err| {
+            std.debug.print("silex: X64 register allocation failed: {t}\n", .{err});
+            return 1;
+        };
+    }
     progress.stage(.emit);
     if (target.eql(.macos_arm64) and
         (boundary_providers.len != 0 or MacOSLink.requiresSystemLink(machine.external_functions)))
@@ -1758,8 +1765,8 @@ fn configureShaderCompiler(
 
 fn lowerModeForTarget(mode: Cli.Mode, target: TargetModule.Target) Lower.Mode {
     if (mode == .release and target.eql(.macos_arm64)) return .release;
-    // X64 keeps the optimized portable IR but uses stack slots until its
-    // native register allocator can consume release machine functions.
+    // X64 starts from the stack-compatible machine form, then applies its own
+    // target-specific scalar allocation after lowering.
     return .debug;
 }
 
