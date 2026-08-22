@@ -1,6 +1,5 @@
 const std = @import("std");
 const Ast = @import("../Ast.zig");
-const Strings = @import("../Strings.zig");
 const Generics = @import("Generics.zig");
 
 pub fn parse(parser: anytype, is_public: bool, is_internal: bool, is_local: bool) !Ast.Enum {
@@ -94,7 +93,7 @@ pub fn parse(parser: anytype, is_public: bool, is_internal: bool, is_local: bool
 fn parseRawValue(parser: anytype, expected: Ast.Type) !Ast.EnumRawValue {
     if (expected == .str) {
         if (parser.current.tag != .string) return parser.fail("raw enum value must be a 'str' literal");
-        const value = try Strings.decode(parser.allocator, parser.current.lexeme);
+        const value = try parser.decodeStringToken(parser.current);
         try parser.advance();
         return .{ .string = value };
     }

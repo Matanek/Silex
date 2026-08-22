@@ -7,6 +7,9 @@ constraints.
 | --- | --- |
 | Immutable variable | `let name:type = value` |
 | Mutable variable | `var name:type = value` |
+| String | `"text"` |
+| Block string | `"` followed by indented lines and a closing `"` on its own line |
+| String interpolation | `"value: $(expression)"` |
 | Function | `func name(value:type) ReturnType { ... }` |
 | Named call | `name(value:expression)` |
 | Mixed call | `name(expression, other:expression)` |

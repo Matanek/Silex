@@ -1,5 +1,6 @@
 const std = @import("std");
 const Source = @import("Source.zig");
+const Strings = @import("Strings.zig");
 
 pub const TokenTag = enum {
     keyword_void,
@@ -124,11 +125,17 @@ pub const Token = struct {
     position: Source.Position,
     start: usize,
     end: usize,
+    block_string: bool = false,
 };
 
 pub const Lexer = struct {
+    const StringMode = struct {
+        block: bool,
+        contents_start: usize,
+    };
+
     const Mode = union(enum) {
-        string,
+        string: StringMode,
         interpolation: usize,
     };
 
@@ -150,8 +157,11 @@ pub const Lexer = struct {
     }
 
     pub fn next(self: *Lexer) Source.Error!Token {
-        if (self.mode_count != 0 and self.modes[self.mode_count - 1] == .string) {
-            return self.stringPartToken();
+        if (self.mode_count != 0) {
+            switch (self.modes[self.mode_count - 1]) {
+                .string => return self.stringPartToken(),
+                .interpolation => {},
+            }
         }
         self.skipIgnored();
 
@@ -234,18 +244,32 @@ pub const Lexer = struct {
     }
 
     fn stringTokenOrStart(self: *Lexer, position: Source.Position) Source.Error!Token {
-        if (!self.containsInterpolation()) return self.stringToken(position);
+        const block = self.index + 1 < self.source.len and
+            (self.source[self.index + 1] == '\n' or self.source[self.index + 1] == '\r');
+        if (!self.containsInterpolation(block)) return self.stringToken(position, block);
         const start = self.index;
         self.advance();
-        try self.pushMode(.string, position);
-        return self.token(.string_start, start, position);
+        if (block) self.stringNewline();
+        try self.pushMode(.{ .string = .{ .block = block, .contents_start = self.index } }, position);
+        var result = self.token(.string_start, start, position);
+        result.block_string = block;
+        return result;
     }
 
-    fn containsInterpolation(self: *const Lexer) bool {
+    fn containsInterpolation(self: *const Lexer, block: bool) bool {
         var index = self.index + 1;
+        if (block) {
+            if (self.source[index] == '\r' and index + 1 < self.source.len and self.source[index + 1] == '\n') index += 1;
+            index += 1;
+        }
         while (index < self.source.len) {
             switch (self.source[index]) {
-                '"', '\n', '\r' => return false,
+                '"' => return false,
+                '\n', '\r' => {
+                    if (!block) return false;
+                    if (self.source[index] == '\r' and index + 1 < self.source.len and self.source[index + 1] == '\n') index += 1;
+                    index += 1;
+                },
                 '\\' => index += 2,
                 '$' => {
                     if (index + 1 >= self.source.len) return false;
@@ -264,10 +288,20 @@ pub const Lexer = struct {
     }
 
     fn stringPartToken(self: *Lexer) Source.Error!Token {
+        const mode = switch (self.modes[self.mode_count - 1]) {
+            .string => |value| value,
+            .interpolation => unreachable,
+        };
         const start = self.index;
         const position = self.currentPosition();
         if (self.index == self.source.len) return self.fail(position, "unterminated string literal");
         if (self.source[self.index] == '"') {
+            if (mode.block and !self.blockQuoteBeginsLine(mode.contents_start)) {
+                return self.fail(position, "block string closing quote must begin its line");
+            }
+            if (mode.block and !Strings.hasValidBlockIndentation(self.source[mode.contents_start..self.index])) {
+                return self.fail(position, "block string line must match the closing quote indentation");
+            }
             self.advance();
             self.mode_count -= 1;
             return self.token(.string_end, start, position);
@@ -282,7 +316,10 @@ pub const Lexer = struct {
         while (self.index < self.source.len) {
             switch (self.source[self.index]) {
                 '"' => break,
-                '\n', '\r' => return self.fail(position, "unterminated string literal"),
+                '\n', '\r' => if (mode.block)
+                    self.stringNewline()
+                else
+                    return self.fail(position, "unterminated string literal"),
                 '\\' => {
                     self.advance();
                     if (self.index == self.source.len) return self.fail(position, "unterminated string literal");
@@ -320,20 +357,31 @@ pub const Lexer = struct {
         };
     }
 
-    fn stringToken(self: *Lexer, position: Source.Position) Source.Error!Token {
+    fn stringToken(self: *Lexer, position: Source.Position, block: bool) Source.Error!Token {
+        const token_start = self.index;
         self.advance();
+        if (block) self.stringNewline();
         const contents_start = self.index;
         while (self.index < self.source.len) {
             switch (self.source[self.index]) {
                 '"' => {
+                    if (block and !self.blockQuoteBeginsLine(contents_start)) {
+                        return self.fail(self.currentPosition(), "block string closing quote must begin its line");
+                    }
                     const lexeme = self.source[contents_start..self.index];
                     if (!std.unicode.utf8ValidateSlice(lexeme)) {
                         return self.fail(position, "string literal is not valid UTF-8");
                     }
+                    if (block and !Strings.hasValidBlockIndentation(lexeme)) {
+                        return self.fail(position, "block string line must match the closing quote indentation");
+                    }
                     self.advance();
-                    return .{ .tag = .string, .lexeme = lexeme, .position = position, .start = contents_start - 1, .end = self.index };
+                    return .{ .tag = .string, .lexeme = lexeme, .position = position, .start = token_start, .end = self.index, .block_string = block };
                 },
-                '\n', '\r' => return self.fail(position, "unterminated string literal"),
+                '\n', '\r' => if (block)
+                    self.stringNewline()
+                else
+                    return self.fail(position, "unterminated string literal"),
                 '\\' => {
                     self.advance();
                     if (self.index == self.source.len) {
@@ -345,6 +393,19 @@ pub const Lexer = struct {
             }
         }
         return self.fail(position, "unterminated string literal");
+    }
+
+    fn blockQuoteBeginsLine(self: *const Lexer, contents_start: usize) bool {
+        var index = self.index;
+        while (index > contents_start) {
+            index -= 1;
+            switch (self.source[index]) {
+                '\n', '\r' => return true,
+                ' ', '\t' => {},
+                else => return false,
+            }
+        }
+        return true;
     }
 
     fn equalToken(self: *Lexer, start: usize, position: Source.Position) Token {
@@ -582,6 +643,20 @@ pub const Lexer = struct {
         self.index += 1;
         self.line += 1;
         self.column = 1;
+    }
+
+    fn stringNewline(self: *Lexer) void {
+        if (self.source[self.index] == '\r') {
+            self.advance();
+            if (self.index < self.source.len and self.source[self.index] == '\n') {
+                self.newline();
+            } else {
+                self.line += 1;
+                self.column = 1;
+            }
+            return;
+        }
+        self.newline();
     }
 
     fn currentPosition(self: *const Lexer) Source.Position {
@@ -918,6 +993,50 @@ test "recognize string escapes" {
     const token = try lexer.next();
     try std.testing.expectEqual(TokenTag.string, token.tag);
     try std.testing.expectEqualStrings("line\\n\\u{00E9}", token.lexeme);
+}
+
+test "recognize an indented block string" {
+    var lexer = Lexer.init("\"\n    first line\n      second line\n    \"");
+    const token = try lexer.next();
+    try std.testing.expectEqual(TokenTag.string, token.tag);
+    try std.testing.expect(token.block_string);
+    try std.testing.expectEqualStrings("    first line\n      second line\n    ", token.lexeme);
+    try std.testing.expectEqual(@as(usize, 4), lexer.line);
+}
+
+test "recognize interpolation inside a block string" {
+    var lexer = Lexer.init("\"\n    Hello, $(name).\n    \"");
+    const start = try lexer.next();
+    try std.testing.expectEqual(TokenTag.string_start, start.tag);
+    try std.testing.expect(start.block_string);
+    const expected = [_]TokenTag{
+        .string_text,
+        .interpolation_start,
+        .identifier,
+        .interpolation_end,
+        .string_text,
+        .string_end,
+        .end,
+    };
+    for (expected) |tag| try std.testing.expectEqual(tag, (try lexer.next()).tag);
+}
+
+test "keep an ordinary unterminated string confined to its line" {
+    var lexer = Lexer.init("\"text\nnext");
+    try std.testing.expectError(error.InvalidSource, lexer.next());
+    try std.testing.expectEqualStrings("unterminated string literal", lexer.diagnostic.?.message);
+}
+
+test "require a block string closing quote to begin its line" {
+    var lexer = Lexer.init("\"\n    text \"\n    \"");
+    try std.testing.expectError(error.InvalidSource, lexer.next());
+    try std.testing.expectEqualStrings("block string closing quote must begin its line", lexer.diagnostic.?.message);
+}
+
+test "require block string content to match the closing indentation" {
+    var lexer = Lexer.init("\"\n  shallow\n    \"");
+    try std.testing.expectError(error.InvalidSource, lexer.next());
+    try std.testing.expectEqualStrings("block string line must match the closing quote indentation", lexer.diagnostic.?.message);
 }
 
 test "recognize string interpolation and nested parentheses" {

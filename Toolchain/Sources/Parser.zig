@@ -951,7 +951,7 @@ pub const Parser = struct {
                 try self.advance();
                 return self.newExpression(.{
                     .position = token.position,
-                    .value = .{ .string = try Strings.decode(self.allocator, token.lexeme) },
+                    .value = .{ .string = try self.decodeStringToken(token) },
                 });
             },
             .string_start => return self.parseInterpolatedString(token),
@@ -976,12 +976,22 @@ pub const Parser = struct {
     }
 
     fn parseInterpolatedString(self: *Parser, token: Token) ParseError!*Ast.Expression {
+        const RawPart = union(enum) {
+            text: Token,
+            expression: *Ast.Expression,
+        };
+
         try self.advance();
         var parts: std.ArrayList(Ast.Expression.StringPart) = .empty;
+        var raw_parts: std.ArrayList(RawPart) = .empty;
         while (self.current.tag != .string_end) {
             switch (self.current.tag) {
                 .string_text => {
-                    try parts.append(self.allocator, .{ .text = try Strings.decode(self.allocator, self.current.lexeme) });
+                    if (token.block_string) {
+                        try raw_parts.append(self.allocator, .{ .text = self.current });
+                    } else {
+                        try parts.append(self.allocator, .{ .text = try Strings.decode(self.allocator, self.current.lexeme) });
+                    }
                     try self.advance();
                 },
                 .interpolation_start => {
@@ -989,17 +999,47 @@ pub const Parser = struct {
                     if (self.current.tag == .interpolation_end) return self.fail("expected expression inside string interpolation");
                     const expression = try self.parseExpression(true);
                     try self.expect(.interpolation_end, "expected ')' after string interpolation");
-                    try parts.append(self.allocator, .{ .expression = expression });
+                    if (token.block_string) {
+                        try raw_parts.append(self.allocator, .{ .expression = expression });
+                    } else {
+                        try parts.append(self.allocator, .{ .expression = expression });
+                    }
                 },
                 .end => return self.fail("unterminated string literal"),
                 else => return self.fail("expected text or interpolation in string literal"),
             }
+        }
+        if (token.block_string) {
+            const source = self.lexer.source[token.end..self.current.start];
+            const layout = Strings.blockLayout(source);
+            const content_end = token.end + layout.content.len;
+            var decoder = Strings.BlockDecoder.init(layout.indentation);
+            for (raw_parts.items) |raw_part| switch (raw_part) {
+                .text => |text| {
+                    const start = @max(text.start, token.end);
+                    const end = @min(text.end, content_end);
+                    if (start >= end) continue;
+                    const decoded = try decoder.decodeChunk(self.allocator, self.lexer.source[start..end]);
+                    if (decoded.len != 0) try parts.append(self.allocator, .{ .text = decoded });
+                },
+                .expression => |expression| {
+                    decoder.expression();
+                    try parts.append(self.allocator, .{ .expression = expression });
+                },
+            };
         }
         try self.advance();
         return self.newExpression(.{
             .position = token.position,
             .value = .{ .interpolated_string = .{ .parts = try parts.toOwnedSlice(self.allocator) } },
         });
+    }
+
+    pub fn decodeStringToken(self: *Parser, token: Token) Allocator.Error![]const u8 {
+        return if (token.block_string)
+            Strings.decodeBlock(self.allocator, token.lexeme)
+        else
+            Strings.decode(self.allocator, token.lexeme);
     }
 
     fn parseCallAfterName(self: *Parser, name: Token, receiver: ?*Ast.Expression, safe: bool, type_arguments: []const Ast.Type) ParseError!*Ast.Expression {
@@ -1269,6 +1309,31 @@ test "parse interpolated strings and variadic print" {
     try std.testing.expectEqualSlices(u8, "Value: ", interpolated.parts[0].text);
     try std.testing.expectEqual(@as(usize, 3), statements[2].print_statement.values.len);
     try std.testing.expectEqualSlices(u8, "$(value)", statements[2].print_statement.values[2].value.string);
+}
+
+test "parse dedented block strings with interpolation" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var parser = Parser.init(arena.allocator(),
+        \\func main() {
+        \\    let name = "Ada"
+        \\    let plain = "
+        \\    first
+        \\      second
+        \\    "
+        \\    let message = "
+        \\    Hello, $(name).
+        \\        indented
+        \\    "
+        \\}
+    );
+    const program = try parser.parse();
+    const statements = program.functions[0].statements;
+    try std.testing.expectEqualSlices(u8, "first\n  second", statements[1].variable_declaration.initializer.?.value.string);
+    const interpolated = statements[2].variable_declaration.initializer.?.value.interpolated_string;
+    try std.testing.expectEqual(@as(usize, 3), interpolated.parts.len);
+    try std.testing.expectEqualSlices(u8, "Hello, ", interpolated.parts[0].text);
+    try std.testing.expectEqualSlices(u8, ".\n    indented", interpolated.parts[2].text);
 }
 
 test "parse conditional alternatives and logical precedence" {

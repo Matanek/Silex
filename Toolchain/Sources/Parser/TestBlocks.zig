@@ -1,13 +1,12 @@
 const std = @import("std");
 const Ast = @import("../Ast.zig");
-const Strings = @import("../Strings.zig");
 
 pub fn parse(self: anytype) ![]const Ast.Function {
     const position = self.current.position;
     if (self.current.tag != .identifier or !std.mem.eql(u8, self.current.lexeme, "test")) return self.fail("expected 'test'");
     try self.advance();
     const test_name = if (self.current.tag == .string) name: {
-        const decoded = try Strings.decode(self.allocator, self.current.lexeme);
+        const decoded = try self.decodeStringToken(self.current);
         try self.advance();
         break :name decoded;
     } else null;

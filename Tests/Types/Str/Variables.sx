@@ -22,3 +22,14 @@ test "str assignments preserve independent values" {
     assert(first == "first")
     assert(second == "second")
 }
+
+test "block strings remove structural indentation and interpolate values" {
+    let language = "Silex"
+    let text = "
+    first line
+      $(language)
+    \"quoted\"
+    "
+
+    assert(text == "first line\n  Silex\n\"quoted\"")
+}

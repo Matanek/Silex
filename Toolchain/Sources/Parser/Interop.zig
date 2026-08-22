@@ -1,6 +1,5 @@
 const std = @import("std");
 const Ast = @import("../Ast.zig");
-const Strings = @import("../Strings.zig");
 
 pub fn parseFunction(self: anytype) !Ast.ExternalFunction {
     const position = self.current.position;
@@ -46,7 +45,7 @@ pub fn parseFunction(self: anytype) !Ast.ExternalFunction {
     try expectIdentifier(self, "name", "expected 'name' argument in C.function");
     try self.expect(.colon, "expected ':' after 'name'");
     if (self.current.tag != .string) return self.fail("C.function name must be a string literal");
-    const source_name = try Strings.decode(self.allocator, self.current.lexeme);
+    const source_name = try self.decodeStringToken(self.current);
     try self.advance();
     try self.expect(.right_parenthesis, "expected ')' after C.function arguments");
     try self.expectStatementTerminator();
