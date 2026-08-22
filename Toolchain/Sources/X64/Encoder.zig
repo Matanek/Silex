@@ -380,6 +380,9 @@ fn encodeFunction(
                     destination_offset += field.width;
                 }
             },
+            .protocol_init => |value| try emitProtocolInit(allocator, bytes, value),
+            .protocol_test => |value| try emitProtocolTest(allocator, bytes, value),
+            .protocol_extract => |value| try emitProtocolExtract(allocator, bytes, value),
             .list_init => |value| try emitListInit(allocator, bytes, windows_import_sites, platform, &epilogue_fixups, value),
             .collection_load => |value| {
                 if (value.dynamic or value.view) {
@@ -418,6 +421,7 @@ fn encodeFunction(
                 try emitFixedReplace(allocator, bytes, &epilogue_fixups, value),
             .collection_count => |value| try emitCollectionCount(allocator, bytes, value),
             .list_edit => |value| try emitListEdit(allocator, bytes, windows_import_sites, platform, &epilogue_fixups, value),
+            .collection_slice => |value| try emitCollectionSlice(allocator, bytes, windows_import_sites, platform, &epilogue_fixups, value),
             .collection_view => |value| try emitCollectionView(allocator, bytes, &epilogue_fixups, value),
             .aggregate_equal => |value| try emitAggregateEqual(allocator, bytes, value),
             .class_init => |value| try emitClassInit(allocator, bytes, windows_import_sites, platform, &epilogue_fixups, value),
@@ -559,6 +563,14 @@ fn encodeFunction(
             .external_call => |call| try ExternalCalls.emit(allocator, bytes, windows_import_sites, external_call_sites, platform, program, function, call),
             .mutex_lock => try emitMutexOperation(allocator, bytes, global_fixups, windows_import_sites, platform, program, true),
             .mutex_unlock => try emitMutexOperation(allocator, bytes, global_fixups, windows_import_sites, platform, program, false),
+            .dynamic_call => |call| try emitDynamicCall(
+                allocator,
+                bytes,
+                calls,
+                &epilogue_fixups,
+                call,
+                &argument_registers,
+            ),
             .print => |value| switch (value.kind) {
                 .signed_integer, .unsigned_integer => try emitPrintInteger(allocator, bytes, windows_import_sites, platform, value.value, value.newline, value.kind == .signed_integer),
                 .boolean => try emitPrintBoolean(allocator, bytes, data_fixups, windows_import_sites, platform, value.value, value.newline),
@@ -623,6 +635,87 @@ fn encodeFunction(
         try patchRelative(bytes.items, branch.displacement_at, instruction_offsets[branch.instruction]);
     }
     for (epilogue_fixups.items) |fixup| try patchRelative(bytes.items, fixup.displacement_at, epilogue);
+}
+
+fn emitProtocolInit(
+    allocator: Allocator,
+    bytes: *std.ArrayList(u8),
+    value: Machine.Instruction.ProtocolInit,
+) Error!void {
+    if (value.class_operand) {
+        try emitLoadStack(allocator, bytes, .rax, value.operand.start);
+        try emitLoadMemory(allocator, bytes, .rax, .rax, 0);
+    } else try emitImmediate(allocator, bytes, .rax, value.structure);
+    try emitStoreStack(allocator, bytes, .rax, value.result.start);
+    for (0..value.operand.width) |leaf| {
+        try emitLoadStack(allocator, bytes, .rax, @intCast(@as(usize, value.operand.start) + leaf));
+        try emitStoreStack(allocator, bytes, .rax, @intCast(@as(usize, value.result.start) + 1 + leaf));
+    }
+    if (value.operand.width + 1 < value.result.width) {
+        try emitImmediate(allocator, bytes, .rax, 0);
+        for (value.operand.width + 1..value.result.width) |leaf| {
+            try emitStoreStack(allocator, bytes, .rax, @intCast(@as(usize, value.result.start) + leaf));
+        }
+    }
+}
+
+fn emitProtocolTest(
+    allocator: Allocator,
+    bytes: *std.ArrayList(u8),
+    value: Machine.Instruction.ProtocolTest,
+) Error!void {
+    try emitLoadStack(allocator, bytes, .rax, value.operand);
+    try emitImmediate(allocator, bytes, .rcx, value.structure);
+    try bytes.appendSlice(allocator, &.{ 0x48, 0x39, 0xc8, 0x0f, 0x94, 0xc0, 0x48, 0x0f, 0xb6, 0xc0 });
+    try emitStoreStack(allocator, bytes, .rax, value.result);
+}
+
+fn emitProtocolExtract(
+    allocator: Allocator,
+    bytes: *std.ArrayList(u8),
+    value: Machine.Instruction.ProtocolExtract,
+) Error!void {
+    for (0..value.result.width) |leaf| {
+        try emitLoadStack(allocator, bytes, .rax, @intCast(@as(usize, value.operand.start) + 1 + leaf));
+        try emitStoreStack(allocator, bytes, .rax, @intCast(@as(usize, value.result.start) + leaf));
+    }
+}
+
+fn emitDynamicCall(
+    allocator: Allocator,
+    bytes: *std.ArrayList(u8),
+    calls: *std.ArrayList(CallFixup),
+    epilogue_fixups: *std.ArrayList(EpilogueFixup),
+    call: Machine.Instruction.DynamicCall,
+    argument_registers: []const Register,
+) Error!void {
+    try emitLoadStack(allocator, bytes, .r13, call.receiver);
+    try emitLoadMemory(allocator, bytes, .r13, .r13, 0);
+    if (call.result) |result| if (result.aggregate) try emitAddressStack(allocator, bytes, .r15, result.start);
+    const outgoing_stack_size = try emitInternalCallArguments(allocator, bytes, call.arguments, argument_registers);
+
+    var done: std.ArrayList(usize) = .empty;
+    defer done.deinit(allocator);
+    for (call.implementations) |implementation| {
+        try emitImmediate(allocator, bytes, .rax, implementation.structure);
+        try bytes.appendSlice(allocator, &.{ 0x49, 0x39, 0xc5, 0x0f, 0x85 });
+        const skip = bytes.items.len;
+        try bytes.appendNTimes(allocator, 0, 4);
+        try appendCall(allocator, bytes, calls, implementation.function);
+        try emitStackAddition(allocator, bytes, outgoing_stack_size);
+        try bytes.appendSlice(allocator, &.{ 0x48, 0x85, 0xd2 });
+        try appendConditionalEpilogue(allocator, bytes, epilogue_fixups, 0x85);
+        try bytes.append(allocator, 0xe9);
+        try done.append(allocator, bytes.items.len);
+        try bytes.appendNTimes(allocator, 0, 4);
+        try patchRelative(bytes.items, skip, bytes.items.len);
+    }
+    try appendCall(allocator, bytes, calls, call.function);
+    try emitStackAddition(allocator, bytes, outgoing_stack_size);
+    try bytes.appendSlice(allocator, &.{ 0x48, 0x85, 0xd2 });
+    try appendConditionalEpilogue(allocator, bytes, epilogue_fixups, 0x85);
+    for (done.items) |site| try patchRelative(bytes.items, site, bytes.items.len);
+    if (call.result) |result| if (!result.aggregate) try emitStoreStack(allocator, bytes, .rax, result.start);
 }
 
 fn emitBinary(allocator: Allocator, bytes: *std.ArrayList(u8), binary: Machine.Instruction.Binary) Error!void {
@@ -1615,22 +1708,130 @@ fn emitCollectionView(
         try emitImmediate(allocator, bytes, .rcx, value.count);
     }
     try emitLoadStack(allocator, bytes, .rax, value.start);
+    try emitNormalizeBound(allocator, bytes, .rax, .rcx);
     try emitLoadStack(allocator, bytes, .rdx, value.end);
-    try bytes.appendSlice(allocator, &.{ 0x48, 0x39, 0xd0, 0x0f, 0x86 });
-    const ordered = bytes.items.len;
+    try emitNormalizeBound(allocator, bytes, .rdx, .rcx);
+    try emitImmediate(allocator, bytes, .r11, 0);
+    try emitRegisterBinary(allocator, bytes, 0x39, .rax, .rdx);
+    try bytes.appendSlice(allocator, &.{ 0x0f, 0x8d });
+    const empty = bytes.items.len;
     try bytes.appendNTimes(allocator, 0, 4);
-    try emitRuntimeFailure(allocator, bytes, epilogue);
-    try patchRelative(bytes.items, ordered, bytes.items.len);
-    try bytes.appendSlice(allocator, &.{ 0x48, 0x39, 0xca, 0x0f, 0x86 });
-    const bounded = bytes.items.len;
-    try bytes.appendNTimes(allocator, 0, 4);
-    try emitRuntimeFailure(allocator, bytes, epilogue);
-    try patchRelative(bytes.items, bounded, bytes.items.len);
-    try bytes.appendSlice(allocator, &.{ 0x48, 0x29, 0xc2, 0x48, 0x69, 0xc0 });
+    try emitMoveRegister(allocator, bytes, .r11, .rdx);
+    try emitRegisterBinary(allocator, bytes, 0x29, .r11, .rax);
+    try patchRelative(bytes.items, empty, bytes.items.len);
+    try bytes.appendSlice(allocator, &.{ 0x48, 0x69, 0xc0 });
     try appendInt(allocator, bytes, u32, @as(u32, value.element_width) * Machine.slot_size);
-    try bytes.appendSlice(allocator, &.{ 0x48, 0x01, 0xc3 });
+    if (value.dynamic or value.source_view) {
+        try emitRegisterBinary(allocator, bytes, 0x01, .rbx, .rax);
+    } else try emitRegisterBinary(allocator, bytes, 0x29, .rbx, .rax);
     try emitStoreStack(allocator, bytes, .rbx, value.result.start);
-    try emitStoreStack(allocator, bytes, .rdx, @intCast(@as(usize, value.result.start) + 1));
+    try emitStoreStack(allocator, bytes, .r11, @intCast(@as(usize, value.result.start) + 1));
+    _ = epilogue;
+}
+
+fn emitCollectionSlice(
+    allocator: Allocator,
+    bytes: *std.ArrayList(u8),
+    import_sites: *std.ArrayList(WindowsImports.X64Site),
+    platform: Platform,
+    epilogue: *std.ArrayList(EpilogueFixup),
+    value: Machine.Instruction.CollectionSlice,
+) Error!void {
+    if (value.view) {
+        try emitLoadStack(allocator, bytes, .r12, value.collection.start);
+        try emitLoadStack(allocator, bytes, .rcx, @intCast(@as(usize, value.collection.start) + 1));
+    } else if (value.dynamic) {
+        try emitLoadStack(allocator, bytes, .r12, value.collection.start);
+        try emitLoadMemory(allocator, bytes, .rcx, .r12, 0);
+        try emitAddImmediateRegister(allocator, bytes, .r12, 8);
+    } else {
+        try emitAddressStack(allocator, bytes, .r12, value.collection.start);
+        try emitImmediate(allocator, bytes, .rcx, value.count);
+    }
+    try emitLoadStack(allocator, bytes, .rax, value.start);
+    try emitNormalizeBound(allocator, bytes, .rax, .rcx);
+    try emitLoadStack(allocator, bytes, .rdx, value.end);
+    try emitNormalizeBound(allocator, bytes, .rdx, .rcx);
+
+    try emitImmediate(allocator, bytes, .r14, 0);
+    try emitRegisterBinary(allocator, bytes, 0x39, .rax, .rdx);
+    try bytes.appendSlice(allocator, &.{ 0x0f, 0x8d });
+    const empty = bytes.items.len;
+    try bytes.appendNTimes(allocator, 0, 4);
+    try emitMoveRegister(allocator, bytes, .r14, .rdx);
+    try emitRegisterBinary(allocator, bytes, 0x29, .r14, .rax);
+    try patchRelative(bytes.items, empty, bytes.items.len);
+    try emitMoveRegister(allocator, bytes, .r13, .rax);
+
+    const stride = @as(u32, value.element_width) * Machine.slot_size;
+    try emitMoveRegister(allocator, bytes, .rsi, .r14);
+    try bytes.appendSlice(allocator, &.{ 0x48, 0x69, 0xf6 });
+    try appendInt(allocator, bytes, u32, stride);
+    try emitAddImmediateRegister(allocator, bytes, .rsi, 8);
+    try emitAllocation(allocator, bytes, import_sites, platform, epilogue);
+    try emitMoveRegister(allocator, bytes, .r15, .rax);
+    try emitStoreMemory(allocator, bytes, .r15, 0, .r14);
+
+    try emitMoveRegister(allocator, bytes, .rax, .r13);
+    try bytes.appendSlice(allocator, &.{ 0x48, 0x69, 0xc0 });
+    try appendInt(allocator, bytes, u32, stride);
+    if (value.dynamic or value.view) {
+        try emitRegisterBinary(allocator, bytes, 0x01, .r12, .rax);
+    } else try emitRegisterBinary(allocator, bytes, 0x29, .r12, .rax);
+    try emitMoveRegister(allocator, bytes, .r10, .r15);
+    try emitAddImmediateRegister(allocator, bytes, .r10, 8);
+    try emitMoveRegister(allocator, bytes, .rsi, .r14);
+    try emitRegisterBinary(allocator, bytes, 0x85, .rsi, .rsi);
+    try bytes.appendSlice(allocator, &.{ 0x0f, 0x84 });
+    const copied = bytes.items.len;
+    try bytes.appendNTimes(allocator, 0, 4);
+    const loop = bytes.items.len;
+    for (0..value.element_width) |leaf| {
+        const source_offset: i32 = if (value.dynamic or value.view)
+            @intCast(leaf * Machine.slot_size)
+        else
+            -@as(i32, @intCast(leaf * Machine.slot_size));
+        try emitLoadMemory(allocator, bytes, .rax, .r12, source_offset);
+        try emitStoreMemory(allocator, bytes, .r10, @intCast(leaf * Machine.slot_size), .rax);
+    }
+    if (value.dynamic or value.view) {
+        try emitAddImmediateRegister(allocator, bytes, .r12, stride);
+    } else try emitSubtractImmediateRegister(allocator, bytes, .r12, stride);
+    try emitAddImmediateRegister(allocator, bytes, .r10, stride);
+    try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xee, 1, 0x0f, 0x85 });
+    const repeat = bytes.items.len;
+    try bytes.appendNTimes(allocator, 0, 4);
+    try patchRelative(bytes.items, repeat, loop);
+    try patchRelative(bytes.items, copied, bytes.items.len);
+    try emitStoreStack(allocator, bytes, .r15, value.result);
+}
+
+fn emitNormalizeBound(
+    allocator: Allocator,
+    bytes: *std.ArrayList(u8),
+    bound: Register,
+    count: Register,
+) Error!void {
+    try emitRegisterBinary(allocator, bytes, 0x85, bound, bound);
+    try bytes.appendSlice(allocator, &.{ 0x0f, 0x89 });
+    const nonnegative = bytes.items.len;
+    try bytes.appendNTimes(allocator, 0, 4);
+    try emitRegisterBinary(allocator, bytes, 0x01, bound, count);
+    try patchRelative(bytes.items, nonnegative, bytes.items.len);
+
+    try emitRegisterBinary(allocator, bytes, 0x85, bound, bound);
+    try bytes.appendSlice(allocator, &.{ 0x0f, 0x89 });
+    const not_below = bytes.items.len;
+    try bytes.appendNTimes(allocator, 0, 4);
+    try emitImmediate(allocator, bytes, bound, 0);
+    try patchRelative(bytes.items, not_below, bytes.items.len);
+
+    try emitRegisterBinary(allocator, bytes, 0x39, bound, count);
+    try bytes.appendSlice(allocator, &.{ 0x0f, 0x8e });
+    const not_above = bytes.items.len;
+    try bytes.appendNTimes(allocator, 0, 4);
+    try emitMoveRegister(allocator, bytes, bound, count);
+    try patchRelative(bytes.items, not_above, bytes.items.len);
 }
 
 fn emitStringFromBytes(
@@ -2150,6 +2351,45 @@ test "encode internal X64 arguments beyond the register window" {
         \\    return a+b+c+d+e+f+g+h+i+j
         \\}
         \\func main() { total(1,2,3,4,5,6,7,8,9,10) }
+    );
+    const machine = try @import("../Arm64/Lower.zig").lower(allocator, compilation.ir);
+
+    const linux = try encodeLinux(allocator, machine);
+    defer linux.deinit(allocator);
+    const windows = try encodeWindows(allocator, machine);
+    defer windows.deinit(allocator);
+    try std.testing.expect(linux.code.len > 0);
+    try std.testing.expect(windows.code.len > 0);
+}
+
+test "encode X64 dynamic protocol calls beyond the register window" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = @import("../Frontend.zig").Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\protocol Total {
+        \\    func total(a:int,b:int,c:int,d:int,e:int,f:int,g:int,h:int) int
+        \\}
+        \\struct Offset : Total {
+        \\    let value:int
+        \\    func total(a:int,b:int,c:int,d:int,e:int,f:int,g:int,h:int) int {
+        \\        return self.value+a+b+c+d+e+f+g+h
+        \\    }
+        \\}
+        \\class ClassOffset : Total {
+        \\    let value:int
+        \\    init(value:int) { self.value = value }
+        \\    func total(a:int,b:int,c:int,d:int,e:int,f:int,g:int,h:int) int {
+        \\        return self.value+a+b+c+d+e+f+g+h
+        \\    }
+        \\}
+        \\func main() {
+        \\    var value:Total = Offset(value:6)
+        \\    assert(value.total(1,2,3,4,5,6,7,8) == 42)
+        \\    value = ClassOffset(6)
+        \\    assert(value.total(1,2,3,4,5,6,7,8) == 42)
+        \\}
     );
     const machine = try @import("../Arm64/Lower.zig").lower(allocator, compilation.ir);
 
