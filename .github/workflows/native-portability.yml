@@ -5,12 +5,14 @@ on:
   pull_request:
     paths:
       - "Toolchain/**"
+      - "Tests/Native/**"
       - "Examples/Distribution/**"
       - ".github/workflows/native-portability.yml"
   push:
     branches: [main]
     paths:
       - "Toolchain/**"
+      - "Tests/Native/**"
       - "Examples/Distribution/**"
       - ".github/workflows/native-portability.yml"
 

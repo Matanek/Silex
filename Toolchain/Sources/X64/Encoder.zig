@@ -281,7 +281,9 @@ fn encodeFunction(
     };
     try bytes.appendSlice(allocator, &.{ 0x55, 0x48, 0x89, 0xe5 });
     const runtime_frame_size: u16 = if (enable_cycle_collector) 16 else 0;
-    const encoded_frame_size = std.math.add(u16, function.frame_size, runtime_frame_size) catch return error.InvalidMachineProgram;
+    const required_frame_size = std.math.add(u16, function.frame_size, runtime_frame_size) catch return error.InvalidMachineProgram;
+    const padded_frame_size = std.math.add(u16, required_frame_size, 15) catch return error.InvalidMachineProgram;
+    const encoded_frame_size = padded_frame_size & ~@as(u16, 15);
     try emitFrameAllocation(allocator, bytes, platform, encoded_frame_size);
     const cycle_context_slot: Machine.Slot = @intCast(function.frame_size / Machine.slot_size);
     const argument_registers = [_]Register{ .rdi, .rsi, .rdx, .rcx, .r8, .r9, .r10, .r11 };
@@ -393,8 +395,17 @@ fn encodeFunction(
             },
             .copy_range => |copy| try emitCopyRange(allocator, bytes, copy.result, copy.operand),
             .deep_copy => |copy| {
-                try emitAddressStack(allocator, bytes, .rdi, copy.operand.start);
-                try emitAddressStack(allocator, bytes, .rsi, copy.result.start);
+                if (copy.operand.width != copy.result.width) return error.InvalidMachineProgram;
+                const value_byte_count = @as(u32, copy.operand.width) * Machine.slot_size;
+                const scratch_byte_count = std.mem.alignForward(u32, value_byte_count * 2, 16);
+                try emitStackSubtraction(allocator, bytes, scratch_byte_count);
+                for (0..copy.operand.width) |leaf| {
+                    try emitLoadStack(allocator, bytes, .rax, @intCast(@as(usize, copy.operand.start) + leaf));
+                    try emitStoreMemory(allocator, bytes, .rsp, @intCast(leaf * Machine.slot_size), .rax);
+                }
+                try emitMoveRegister(allocator, bytes, .rdi, .rsp);
+                try emitMoveRegister(allocator, bytes, .rsi, .rsp);
+                try emitAddImmediateRegister(allocator, bytes, .rsi, value_byte_count);
                 const model_at = try emitRipAddress(allocator, bytes, .rdx);
                 try emitImmediate(allocator, bytes, .rcx, @intFromEnum(copy.type));
                 const allocate_at = try emitRipAddress(allocator, bytes, .r8);
@@ -409,6 +420,11 @@ fn encodeFunction(
                     .release_at = release_at,
                 });
                 try emitMoveRegister(allocator, bytes, .rdx, .rax);
+                for (0..copy.result.width) |leaf| {
+                    try emitLoadMemory(allocator, bytes, .rax, .rsp, @intCast(value_byte_count + leaf * Machine.slot_size));
+                    try emitStoreStack(allocator, bytes, .rax, @intCast(@as(usize, copy.result.start) + leaf));
+                }
+                try emitStackAddition(allocator, bytes, scratch_byte_count);
                 try emitRegisterBinary(allocator, bytes, 0x85, .rdx, .rdx);
                 try appendConditionalEpilogue(allocator, bytes, &epilogue_fixups, 0x85);
             },
@@ -501,6 +517,8 @@ fn encodeFunction(
                     return error.InvalidMachineProgram;
                 }
                 try emitLoadStack(allocator, bytes, .rax, value.index);
+                try emitImmediate(allocator, bytes, .rcx, value.count);
+                try emitNormalizeCollectionIndex(allocator, bytes, .rax, .rcx);
                 try bytes.appendSlice(allocator, &.{ 0x48, 0x3d });
                 try appendInt(allocator, bytes, u32, value.count);
                 try bytes.appendSlice(allocator, &.{ 0x0f, 0x82 });
@@ -1727,6 +1745,7 @@ fn emitDynamicCollectionLoad(
         try emitAddImmediateRegister(allocator, bytes, .rbx, list_header_size);
     }
     try emitLoadStack(allocator, bytes, .rax, value.index);
+    try emitNormalizeCollectionIndex(allocator, bytes, .rax, .rcx);
     if (value.checked) {
         try bytes.appendSlice(allocator, &.{ 0x48, 0x39, 0xc8, 0x0f, 0x82 });
         const in_bounds = bytes.items.len;
@@ -1762,6 +1781,7 @@ fn emitCollectionReference(
         try emitImmediate(allocator, bytes, .rcx, value.count);
     }
     try emitLoadStack(allocator, bytes, .rax, value.index);
+    try emitNormalizeCollectionIndex(allocator, bytes, .rax, .rcx);
     try bytes.appendSlice(allocator, &.{ 0x48, 0x39, 0xc8, 0x0f, 0x82 });
     const in_bounds = bytes.items.len;
     try bytes.appendNTimes(allocator, 0, 4);
@@ -1787,6 +1807,7 @@ fn emitViewReplace(
     try emitLoadStack(allocator, bytes, .rbx, value.collection.start);
     try emitLoadStack(allocator, bytes, .rcx, @intCast(@as(usize, value.collection.start) + 1));
     try emitLoadStack(allocator, bytes, .rax, value.index);
+    try emitNormalizeCollectionIndex(allocator, bytes, .rax, .rcx);
     try bytes.appendSlice(allocator, &.{ 0x48, 0x39, 0xc8, 0x0f, 0x82 });
     const in_bounds = bytes.items.len;
     try bytes.appendNTimes(allocator, 0, 4);
@@ -1813,6 +1834,7 @@ fn emitDynamicReplace(
     try emitLoadStack(allocator, bytes, .rbx, value.collection.start);
     try emitLoadMemory(allocator, bytes, .r12, .rbx, 0);
     try emitLoadStack(allocator, bytes, .r13, value.index);
+    try emitNormalizeCollectionIndex(allocator, bytes, .r13, .r12);
     try bytes.appendSlice(allocator, &.{ 0x4d, 0x39, 0xe5, 0x0f, 0x82 });
     const in_bounds = bytes.items.len;
     try bytes.appendNTimes(allocator, 0, 4);
@@ -1865,6 +1887,7 @@ fn emitFixedReplace(
 ) Error!void {
     try emitLoadStack(allocator, bytes, .r13, value.index);
     try emitImmediate(allocator, bytes, .r12, value.count);
+    try emitNormalizeCollectionIndex(allocator, bytes, .r13, .r12);
     try bytes.appendSlice(allocator, &.{ 0x4d, 0x39, 0xe5, 0x0f, 0x82 });
     const in_bounds = bytes.items.len;
     try bytes.appendNTimes(allocator, 0, 4);
@@ -1957,6 +1980,7 @@ fn emitGeneralListEdit(
         .take, .insert => {
             const index = value.index orelse return error.InvalidMachineProgram;
             try emitLoadStack(allocator, bytes, .r13, index);
+            try emitNormalizeCollectionIndex(allocator, bytes, .r13, .r12);
             try bytes.appendSlice(allocator, &.{ 0x4d, 0x39, 0xe5, 0x0f, if (value.kind == .insert) 0x86 else 0x82 });
             const valid = bytes.items.len;
             try bytes.appendNTimes(allocator, 0, 4);
@@ -2339,6 +2363,20 @@ fn emitNormalizeBound(
     try bytes.appendNTimes(allocator, 0, 4);
     try emitMoveRegister(allocator, bytes, bound, count);
     try patchRelative(bytes.items, not_above, bytes.items.len);
+}
+
+fn emitNormalizeCollectionIndex(
+    allocator: Allocator,
+    bytes: *std.ArrayList(u8),
+    index: Register,
+    count: Register,
+) Error!void {
+    try emitRegisterBinary(allocator, bytes, 0x85, index, index);
+    try bytes.appendSlice(allocator, &.{ 0x0f, 0x89 });
+    const nonnegative = bytes.items.len;
+    try bytes.appendNTimes(allocator, 0, 4);
+    try emitRegisterBinary(allocator, bytes, 0x01, index, count);
+    try patchRelative(bytes.items, nonnegative, bytes.items.len);
 }
 
 fn emitStringFromBytes(
