@@ -56,6 +56,7 @@ pub fn build(b: *std.Build) void {
         .optimize = .ReleaseSmall,
         .strip = true,
         .unwind_tables = .none,
+        .red_zone = false,
     });
     const float_runtime_x64 = b.addExecutable(.{
         .name = "silex-float-runtime-x64",
@@ -88,6 +89,26 @@ pub fn build(b: *std.Build) void {
         "pub const object_bytes = @embedFile(\"silex-deep-copy-runtime.macho\");\n",
     );
     module.addAnonymousImport("deep_copy_runtime_object", .{ .root_source_file = deep_copy_runtime_import });
+    const deep_copy_runtime_x64_module = b.createModule(.{
+        .root_source_file = b.path("Runtime/DeepCopy.zig"),
+        .target = float_runtime_x64_target,
+        .optimize = .ReleaseSmall,
+        .strip = true,
+        .unwind_tables = .none,
+        .red_zone = false,
+    });
+    const deep_copy_runtime_x64 = b.addExecutable(.{
+        .name = "silex-deep-copy-runtime-x64",
+        .root_module = deep_copy_runtime_x64_module,
+    });
+    deep_copy_runtime_x64.entry = .{ .symbol_name = "silex_deep_copy_x64" };
+    const deep_copy_runtime_x64_files = b.addWriteFiles();
+    _ = deep_copy_runtime_x64_files.addCopyFile(deep_copy_runtime_x64.getEmittedBin(), "silex-deep-copy-runtime-x64.elf");
+    const deep_copy_runtime_x64_import = deep_copy_runtime_x64_files.add(
+        "DeepCopyRuntimeX64Object.zig",
+        "pub const object_bytes = @embedFile(\"silex-deep-copy-runtime-x64.elf\");\n",
+    );
+    module.addAnonymousImport("deep_copy_runtime_x64_object", .{ .root_source_file = deep_copy_runtime_x64_import });
     const cycle_runtime_module = b.createModule(.{
         .root_source_file = b.path("Runtime/CycleCollector.zig"),
         .target = runtime_target,

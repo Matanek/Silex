@@ -19,6 +19,9 @@ const entry_words: usize = 4;
 const class_header_words: usize = 4;
 const list_header_words: usize = 5;
 
+const AllocateFunction = *const fn (usize) callconv(.c) ?[*]u64;
+const ReleaseFunction = *const fn ([*]u8, usize) callconv(.c) void;
+
 fn optionalChild(type_value: u64) ?u64 {
     const depth = type_value >> optional_depth_shift;
     return if (depth == 0) null else ((depth - 1) << optional_depth_shift) | (type_value & type_base_mask);
@@ -35,6 +38,8 @@ const Kind = enum(u64) {
 
 const Context = struct {
     model: [*]const u64,
+    allocate_function: AllocateFunction,
+    release_function: ReleaseFunction,
 
     fn entry(self: Context, type_value: u64) [*]const u64 {
         return self.model + 1 + @as(usize, @intCast(type_value - structure_base)) * entry_words;
@@ -50,12 +55,42 @@ const Context = struct {
     fn data(self: Context, entry_value: [*]const u64) [*]const u64 {
         return self.model + @as(usize, @intCast(entry_value[2]));
     }
+
+    fn allocate(self: Context, byte_count: usize) ?[*]u64 {
+        return self.allocate_function(byte_count);
+    }
+
+    fn release(self: Context, address: [*]u8, byte_count: usize) void {
+        self.release_function(address, byte_count);
+    }
 };
 
 pub fn main() void {}
 
 export fn silex_deep_copy(source: [*]const u64, destination: [*]u64, model: [*]const u64, type_value: u64) callconv(.c) u64 {
-    const context: Context = .{ .model = model };
+    return deepCopy(.{
+        .model = model,
+        .allocate_function = systemAllocate,
+        .release_function = systemRelease,
+    }, source, destination, type_value);
+}
+
+export fn silex_deep_copy_x64(
+    source: [*]const u64,
+    destination: [*]u64,
+    model: [*]const u64,
+    type_value: u64,
+    allocate_function: AllocateFunction,
+    release_function: ReleaseFunction,
+) callconv(.c) u64 {
+    return deepCopy(.{
+        .model = model,
+        .allocate_function = allocate_function,
+        .release_function = release_function,
+    }, source, destination, type_value);
+}
+
+fn deepCopy(context: Context, source: [*]const u64, destination: [*]u64, type_value: u64) u64 {
     clear(destination, context.width(type_value));
     if (!cloneValue(context, source, destination, type_value, false)) {
         rollbackValue(context, source, destination, type_value);
@@ -139,7 +174,7 @@ fn cloneClass(context: Context, source: [*]const u64, destination: [*]u64, data:
             cursor += field_count;
             continue;
         }
-        const clone = allocate((object_width + class_header_words) * @sizeOf(u64)) orelse return false;
+        const clone = context.allocate((object_width + class_header_words) * @sizeOf(u64)) orelse return false;
         clear(clone, object_width + class_header_words);
         clone[0] = dynamic_type;
         clone[3] = @intFromPtr(original);
@@ -169,7 +204,7 @@ fn cloneList(context: Context, source: [*]const u64, destination: [*]u64, elemen
     const count: usize = @intCast(original[0]);
     const element_width = context.width(element_type);
     const byte_count = (list_header_words + count * element_width) * @sizeOf(u64);
-    const clone = allocate(byte_count) orelse return false;
+    const clone = context.allocate(byte_count) orelse return false;
     clear(clone, list_header_words + count * element_width);
     clone[0] = count;
     clone[if (edge) 2 else 1] = 1;
@@ -298,7 +333,7 @@ fn rollbackValue(context: Context, source: [*]const u64, destination: [*]u64, ty
         return;
     }
     if (type_value <= scalar_limit) {
-        if (type_value == string_type and destination[0] != 0) releaseString(destination[0]);
+        if (type_value == string_type and destination[0] != 0) releaseString(context, destination[0]);
         return;
     }
     if (type_value >= function_base and type_value < function_end) return;
@@ -339,7 +374,7 @@ fn rollbackClass(context: Context, source: [*]const u64, data: [*]const u64) voi
         cursor += 3;
         if (structure == original[0]) {
             rollbackFields(context, original + class_header_words, clone + class_header_words, data + cursor, field_count);
-            release(@ptrCast(clone), (object_width + class_header_words) * @sizeOf(u64));
+            context.release(@ptrCast(clone), (object_width + class_header_words) * @sizeOf(u64));
             return;
         }
         cursor += field_count;
@@ -369,7 +404,7 @@ fn rollbackList(context: Context, source: [*]const u64, destination: [*]u64, ele
         const offset = list_header_words + index * width;
         rollbackValue(context, original + offset, clone + offset, element_type);
     }
-    release(@ptrCast(clone), @intCast(clone[3]));
+    context.release(@ptrCast(clone), @intCast(clone[3]));
 }
 
 fn rollbackArray(context: Context, source: [*]const u64, destination: [*]u64, element_type: u64, count: usize) void {
@@ -390,7 +425,7 @@ fn rollbackEnumeration(context: Context, source: [*]const u64, destination: [*]u
     }
 }
 
-fn releaseString(value: u64) void {
+fn releaseString(context: Context, value: u64) void {
     const descriptor: [*]const u64 = @ptrFromInt(value);
     if (descriptor[0] & dynamic_string_flag == 0) return;
     const allocation: [*]u64 = @ptrFromInt(value - dynamic_string_prefix_words * @sizeOf(u64));
@@ -400,7 +435,7 @@ fn releaseString(value: u64) void {
         if (@cmpxchgWeak(u64, reference_count, current, current - 1, .acq_rel, .acquire)) |observed| {
             current = observed;
         } else {
-            if (current == 1) release(@ptrCast(allocation), @intCast(allocation[1]));
+            if (current == 1) context.release(@ptrCast(allocation), @intCast(allocation[1]));
             return;
         }
     }
@@ -410,7 +445,10 @@ fn clear(destination: [*]u64, count: usize) void {
     for (0..count) |index| destination[index] = 0;
 }
 
-fn allocate(byte_count: usize) ?[*]u64 {
+fn systemAllocate(byte_count: usize) callconv(.c) ?[*]u64 {
+    if (comptime builtin.cpu.arch != .aarch64 or builtin.os.tag != .macos) {
+        return null;
+    }
     if (builtin.is_test) {
         if (TestState.allocation_budget) |remaining| {
             if (remaining == 0) return null;
@@ -433,7 +471,10 @@ fn allocate(byte_count: usize) ?[*]u64 {
     return @ptrFromInt(result);
 }
 
-fn release(address: [*]u8, byte_count: usize) void {
+fn systemRelease(address: [*]u8, byte_count: usize) callconv(.c) void {
+    if (comptime builtin.cpu.arch != .aarch64 or builtin.os.tag != .macos) {
+        return;
+    }
     _ = asm volatile ("svc #0x80"
         : [result] "={x0}" (-> usize),
         : [address] "{x0}" (@intFromPtr(address)),
@@ -493,7 +534,7 @@ test "successful root clones own exactly one releasable root" {
     const list_clone: [*]u64 = @ptrFromInt(list_destination[0]);
     try std.testing.expectEqual(@as(u64, 1), list_clone[1]);
     try std.testing.expectEqual(@as(u64, 0), list_clone[2]);
-    release(@ptrCast(list_clone), @intCast(list_clone[3]));
+    systemRelease(@ptrCast(list_clone), @intCast(list_clone[3]));
 
     const class_type = structure_base;
     const class_model = [_]u64{
@@ -514,6 +555,6 @@ test "successful root clones own exactly one releasable root" {
     const class_clone: [*]u64 = @ptrFromInt(class_destination[0]);
     try std.testing.expectEqual(@as(u64, 1), class_clone[1]);
     try std.testing.expectEqual(@as(u64, 0), class_clone[2]);
-    release(@ptrCast(class_clone), 4 * @sizeOf(u64));
+    systemRelease(@ptrCast(class_clone), 4 * @sizeOf(u64));
     try std.testing.expectEqual(@as(usize, 0), TestState.live_allocations);
 }

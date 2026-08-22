@@ -29,6 +29,17 @@ class ClassOffset : Total {
     }
 }
 
+class CopyState {
+    var value:int
+    drop { print("copy state drop") }
+}
+
+struct CopyGraph {
+    var first:CopyState
+    var again:CopyState
+    var values:CopyState[]
+}
+
 func dynamic_total() int {
     var value:Total = Offset(value:6)
     return value.total(1, 2, 3, 4, 5, 6, 7, 8)
@@ -37,6 +48,19 @@ func dynamic_total() int {
 func dynamic_class_total() int {
     var value:Total = ClassOffset(6)
     return value.total(1, 2, 3, 4, 5, 6, 7, 8)
+}
+
+func verify_deep_copy() {
+    var state = CopyState(value:5)
+    var source = CopyGraph(first:state, again:state, values:[state, state])
+    var detached = copy source
+    assert(detached.first == detached.again)
+    assert(detached.first == detached.values[0])
+    assert(detached.values[0] == detached.values[1])
+    assert(detached.first != source.first)
+    detached.first.value = 9
+    assert(source.first.value == 5)
+    assert(detached.again.value == 9)
 }
 
 func sum_view(values:@int[..]) int {
@@ -125,10 +149,15 @@ test "execute the complete x64 collection mutation slice" {
     verify_collections()
 }
 
+test "execute x64 ownership and deep-copy runtime" {
+    verify_deep_copy()
+}
+
 func main() {
     assert(total(1, 2, 3, 4, 5, 6, 7, 8, 9, 10) == 55)
     assert(callback_total() == 55)
     assert(dynamic_total() == 42)
     assert(dynamic_class_total() == 42)
     verify_collections()
+    verify_deep_copy()
 }
