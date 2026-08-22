@@ -2072,7 +2072,9 @@ fn emitGeneralListEdit(
         .append, .take_last, .clear => unreachable,
     }
     try emitStoreStack(allocator, bytes, .r15, value.result);
-    try emitListDropSlot(allocator, bytes, import_sites, platform, value.collection, value.ownership);
+    if (value.argument_dynamic and value.argument_transferred) {
+        try emitListDropSlot(allocator, bytes, import_sites, platform, value.argument.?.start, .root);
+    }
 }
 
 fn emitListArgument(allocator: Allocator, bytes: *std.ArrayList(u8), argument: Machine.Span) Error!void {
@@ -2193,7 +2195,6 @@ fn emitListTakeLast(
     try patchRelative(bytes.items, repeat, loop);
     try patchRelative(bytes.items, copied, bytes.items.len);
     try emitStoreStack(allocator, bytes, .r15, value.result);
-    try emitListDropSlot(allocator, bytes, import_sites, platform, value.collection, value.ownership);
 }
 
 fn emitCollectionView(
