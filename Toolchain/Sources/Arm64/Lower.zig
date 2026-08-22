@@ -1371,7 +1371,7 @@ test "lower answer and nested calls to deterministic machine slots" {
         \\func main() { answer() }
     );
     try std.testing.expectEqual(@as(usize, 3), program.functions.len);
-    try std.testing.expectEqual(@as(u4, 2), program.functions[0].parameter_count);
+    try std.testing.expectEqual(@as(u12, 2), program.functions[0].parameter_count);
     try std.testing.expectEqual(@as(u12, 3), program.functions[0].slot_count);
     try std.testing.expectEqual(@as(u16, 32), program.functions[0].frame_size);
     try std.testing.expectEqual(Machine.BinaryOperator.add, program.functions[0].instructions[0].binary.operator);
@@ -1381,15 +1381,17 @@ test "lower answer and nested calls to deterministic machine slots" {
     try std.testing.expectEqual(@as(Machine.FunctionId, 1), program.functions[2].instructions[0].call.function);
 }
 
-test "reject target limits before encoding" {
+test "lower internal stack arguments before encoding" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
     var frontend = @import("../Frontend.zig").Frontend.init(allocator);
     const compilation = try frontend.compile(
-        "func many(a:int,b:int,c:int,d:int,e:int,f:int,g:int,h:int,i:int) int { return a } func main() {}",
+        "func many(a:int,b:int,c:int,d:int,e:int,f:int,g:int,h:int,i:int) int { return i } func main() { many(1,2,3,4,5,6,7,8,9) }",
     );
-    try std.testing.expectError(error.TooManyArguments, lower(allocator, compilation.ir));
+    const lowered = try lower(allocator, compilation.ir);
+    try std.testing.expectEqual(@as(u12, 9), lowered.functions[0].parameter_count);
+    try std.testing.expectEqual(@as(usize, 9), lowered.functions[1].instructions[9].call.arguments.len);
 
     const functions = [_]Ir.Function{.{
         .name = "floating",

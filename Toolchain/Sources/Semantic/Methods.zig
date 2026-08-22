@@ -1138,6 +1138,14 @@ fn analyzeMutatingStatements(
             },
             .if_statement => |conditional| try analyzeMutatingIf(self, builder, method, structure_index, flat, self_local, conditional),
             .while_statement => |loop| try analyzeMutatingWhile(self, builder, method, structure_index, flat, self_local, loop),
+            .for_statement => |loop| try Control.analyzeForUsing(
+                self,
+                builder,
+                method,
+                loop,
+                MutatingMatchContext{ .structure_index = structure_index, .flat = flat, .self_local = self_local },
+                analyzeMutatingMatchBranch,
+            ),
             .mutex_statement => |mutex| protected: {
                 if (mutex.synchronized) {
                     try self.emit(builder, .mutex_lock);

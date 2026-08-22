@@ -2,6 +2,8 @@ const std = @import("std");
 const Frontend = @import("Frontend.zig");
 const Interpreter = @import("Interpreter.zig");
 const Ir = @import("Ir.zig");
+const Lower = @import("Arm64/Lower.zig");
+const X64Encoder = @import("X64/Encoder.zig");
 
 test "mutate fixed arrays and dynamic lists with value semantics" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
@@ -35,6 +37,14 @@ test "mutate fixed arrays and dynamic lists with value semantics" {
     );
     const result = try Interpreter.runCapture(allocator, compilation.ir);
     try std.testing.expectEqualStrings("2183\n2806 5 51 2\n0true\n", result.stdout);
+    const machine = try Lower.lower(allocator, compilation.ir);
+    var linux_x64 = try X64Encoder.encodeLinux(allocator, machine);
+    defer linux_x64.deinit(allocator);
+    var windows_x64 = try X64Encoder.encodeWindows(allocator, machine);
+    defer windows_x64.deinit(allocator);
+    try std.testing.expect(linux_x64.code.len != 0);
+    try std.testing.expect(windows_x64.code.len != 0);
+    try std.testing.expect(windows_x64.windows_import_sites.len != 0);
 }
 
 test "reject collection mutation through let" {

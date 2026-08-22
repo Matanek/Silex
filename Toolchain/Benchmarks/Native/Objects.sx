@@ -5,19 +5,19 @@ protocol Value {
 struct Snapshot:Value {
     let value:int
 
-    public func get() int {
+    func get() int {
         return self.value
     }
 }
 
 class Counter {
-    public var value:int
+    var value:int
 
-    public func add(amount:int) {
+    func add(amount:int) {
         self.value += amount
     }
 
-    public func get() int {
+    func get() int {
         return self.value
     }
 }

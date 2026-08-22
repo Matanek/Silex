@@ -623,7 +623,12 @@ fn encodeFunction(
     };
     if (function.hidden_return_slot) |slot| try words.append(allocator, storeStack(.x15, slot));
     for (function.parameters, 0..) |parameter, index| {
-        const incoming: Register = @enumFromInt(index);
+        const incoming: Register = if (index < Machine.max_register_arguments) @enumFromInt(index) else .x10;
+        if (index >= Machine.max_register_arguments) {
+            const incoming_offset = 2 * Machine.slot_size +
+                (index - Machine.max_register_arguments) * Machine.slot_size;
+            try emitLoadAtOffset(allocator, words, incoming, .x29, incoming_offset);
+        }
         if (!parameter.aggregate) {
             if (floatResidence(function, parameter.start) != null or
                 floatLaneResidence(function, parameter.start) != null)
@@ -1297,24 +1302,20 @@ fn encodeFunction(
                 try words.append(allocator, storeStack(.x9, address.result.start + 1));
             },
             .call => |call| {
-                for (call.arguments, 0..) |argument, index| {
-                    const outgoing: Register = @enumFromInt(index);
-                    if (argument.aggregate) {
-                        if (argument.width == 0) {
-                            try words.append(allocator, moveWideZero64(outgoing, 0, 0));
-                        } else try emitStackAddress(allocator, words, outgoing, argument.start);
-                    } else if (floatResidence(function, argument.start) != null) {
-                        try loadFloatValue(allocator, words, function, .x9, argument.start, false);
-                        try words.append(allocator, moveFloatToGeneral(outgoing, .x9, false));
-                    } else try loadValue(allocator, words, function, outgoing, argument.start);
-                }
-                if (call.result) |result| if (result.aggregate) {
+                if (call.arguments.len > Machine.max_register_arguments) if (call.result) |result| if (result.aggregate) {
+                    if (result.width == 0) {
+                        try words.append(allocator, moveWideZero64(.x15, 0, 0));
+                    } else try emitStackAddress(allocator, words, .x15, result.start);
+                };
+                const outgoing_stack_size = try emitCallArguments(allocator, words, function, call.arguments, true);
+                if (call.arguments.len <= Machine.max_register_arguments) if (call.result) |result| if (result.aggregate) {
                     if (result.width == 0) {
                         try words.append(allocator, moveWideZero64(.x15, 0, 0));
                     } else try emitStackAddress(allocator, words, .x15, result.start);
                 };
                 try calls.append(allocator, .{ .at = words.items.len, .function = call.function });
                 try words.append(allocator, branchLink());
+                try emitStackAdjustment(allocator, words, outgoing_stack_size, true);
                 try appendFixup(allocator, words, &fixups.epilogue, compareBranchNonZero(.x8), .imm19);
                 if (call.result) |result| if (!result.aggregate) {
                     if (floatResidence(function, result.start) != null) {
@@ -1324,25 +1325,41 @@ fn encodeFunction(
                 };
             },
             .indirect_call => |call| {
-                for (call.arguments, 0..) |argument, index| {
-                    const outgoing: Register = @enumFromInt(index);
-                    if (argument.aggregate) {
-                        if (argument.width == 0) try words.append(allocator, moveWideZero64(outgoing, 0, 0)) else try emitStackAddress(allocator, words, outgoing, argument.start);
-                    } else try words.append(allocator, loadStack(outgoing, argument.start));
-                }
-                if (call.result) |result| if (result.aggregate) {
+                if (call.arguments.len > Machine.max_register_arguments) if (call.result) |result| if (result.aggregate) {
                     if (result.width == 0) try words.append(allocator, moveWideZero64(.x15, 0, 0)) else try emitStackAddress(allocator, words, .x15, result.start);
                 };
-                try words.append(allocator, loadStack(.x14, call.callee + 1));
-                try words.append(allocator, loadStack(.x16, call.callee));
+                const outgoing_stack_size = try emitCallArguments(allocator, words, function, call.arguments, false);
+                if (call.arguments.len <= Machine.max_register_arguments) if (call.result) |result| if (result.aggregate) {
+                    if (result.width == 0) try words.append(allocator, moveWideZero64(.x15, 0, 0)) else try emitStackAddress(allocator, words, .x15, result.start);
+                };
+                if (outgoing_stack_size == 0) {
+                    try words.append(allocator, loadStack(.x14, call.callee + 1));
+                    try words.append(allocator, loadStack(.x16, call.callee));
+                } else {
+                    try emitLoadAtOffset(
+                        allocator,
+                        words,
+                        .x16,
+                        .x13,
+                        Machine.slotOffset(call.callee),
+                    );
+                    try emitLoadAtOffset(
+                        allocator,
+                        words,
+                        .x14,
+                        .x13,
+                        Machine.slotOffset(call.callee + 1),
+                    );
+                }
                 try words.append(allocator, A64.branchLinkRegister(.x16));
+                try emitStackAdjustment(allocator, words, outgoing_stack_size, true);
                 try appendFixup(allocator, words, &fixups.epilogue, compareBranchNonZero(.x8), .imm19);
                 if (call.result) |result| if (!result.aggregate) try words.append(allocator, storeStack(.x0, result.start));
             },
             .external_call => |call| try ExternalCalls.emit(allocator, words, external_call_sites, program, function, call),
             .mutex_lock => try emitMutexOperation(allocator, words, data_fixups, external_call_sites, platform, program, true),
             .mutex_unlock => try emitMutexOperation(allocator, words, data_fixups, external_call_sites, platform, program, false),
-            .dynamic_call => |call| try encodeDynamicCall(allocator, words, calls, &fixups, call),
+            .dynamic_call => |call| try encodeDynamicCall(allocator, words, calls, &fixups, function, call),
             .print => |value| switch (value.kind) {
                 .signed_integer => try emitPrintInteger(allocator, words, value.value, 1, value.newline),
                 .unsigned_integer => try emitPrintUnsigned(allocator, words, value.value, value.newline),
@@ -1741,27 +1758,28 @@ fn encodeDynamicCall(
     words: *std.ArrayList(u32),
     calls: *std.ArrayList(CallFixup),
     fixups: *FunctionFixups,
+    function: Machine.Function,
     call: Machine.Instruction.DynamicCall,
 ) Error!void {
-    try words.append(allocator, loadStack(.x9, call.receiver));
-    try words.append(allocator, load64(.x9, .x9, 0));
-    for (call.arguments, 0..) |argument, index| {
-        const outgoing: Register = @enumFromInt(index);
-        if (argument.aggregate) {
-            if (argument.width == 0) try words.append(allocator, moveWideZero64(outgoing, 0, 0)) else try emitStackAddress(allocator, words, outgoing, argument.start);
-        } else try words.append(allocator, loadStack(outgoing, argument.start));
-    }
-    if (call.result) |result| if (result.aggregate) {
+    const discriminator: Register = if (call.arguments.len <= Machine.max_register_arguments) .x9 else .x12;
+    try words.append(allocator, loadStack(discriminator, call.receiver));
+    try words.append(allocator, load64(discriminator, discriminator, 0));
+    if (call.arguments.len > Machine.max_register_arguments) if (call.result) |result| if (result.aggregate) {
+        if (result.width == 0) try words.append(allocator, moveWideZero64(.x15, 0, 0)) else try emitStackAddress(allocator, words, .x15, result.start);
+    };
+    const outgoing_stack_size = try emitCallArguments(allocator, words, function, call.arguments, false);
+    if (call.arguments.len <= Machine.max_register_arguments) if (call.result) |result| if (result.aggregate) {
         if (result.width == 0) try words.append(allocator, moveWideZero64(.x15, 0, 0)) else try emitStackAddress(allocator, words, .x15, result.start);
     };
     var done: std.ArrayList(usize) = .empty;
     for (call.implementations) |implementation| {
         try emitImmediate64(allocator, words, .x10, implementation.structure);
-        try words.append(allocator, compareRegisters(.x9, .x10));
+        try words.append(allocator, compareRegisters(discriminator, .x10));
         const skip = words.items.len;
         try words.append(allocator, conditionalBranch(.not_equal));
         try calls.append(allocator, .{ .at = words.items.len, .function = implementation.function });
         try words.append(allocator, branchLink());
+        try emitStackAdjustment(allocator, words, outgoing_stack_size, true);
         try appendFixup(allocator, words, &fixups.epilogue, compareBranchNonZero(.x8), .imm19);
         try done.append(allocator, words.items.len);
         try words.append(allocator, branch());
@@ -1769,9 +1787,69 @@ fn encodeDynamicCall(
     }
     try calls.append(allocator, .{ .at = words.items.len, .function = call.function });
     try words.append(allocator, branchLink());
+    try emitStackAdjustment(allocator, words, outgoing_stack_size, true);
     try appendFixup(allocator, words, &fixups.epilogue, compareBranchNonZero(.x8), .imm19);
     for (done.items) |at| try patch26(words.items, at, words.items.len);
     if (call.result) |result| if (!result.aggregate) try words.append(allocator, storeStack(.x0, result.start));
+}
+
+fn emitCallArguments(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    function: Machine.Function,
+    arguments: []const Machine.Span,
+    use_residences: bool,
+) Error!u16 {
+    const register_count = @min(arguments.len, Machine.max_register_arguments);
+    for (arguments[0..register_count], 0..) |argument, index| {
+        const outgoing: Register = @enumFromInt(index);
+        if (argument.aggregate) {
+            if (argument.width == 0) {
+                try words.append(allocator, moveWideZero64(outgoing, 0, 0));
+            } else try emitStackAddress(allocator, words, outgoing, argument.start);
+        } else if (use_residences and floatResidence(function, argument.start) != null) {
+            try loadFloatValue(allocator, words, function, .x9, argument.start, false);
+            try words.append(allocator, moveFloatToGeneral(outgoing, .x9, false));
+        } else if (use_residences) {
+            try loadValue(allocator, words, function, outgoing, argument.start);
+        } else try words.append(allocator, loadStack(outgoing, argument.start));
+    }
+    if (arguments.len <= Machine.max_register_arguments) return 0;
+
+    const raw_size = (arguments.len - Machine.max_register_arguments) * Machine.slot_size;
+    const stack_size: u16 = @intCast(std.mem.alignForward(usize, raw_size, 16));
+    try emitStackAdjustment(allocator, words, stack_size, false);
+    // ORR's register 31 denotes XZR, not SP. Materialize the caller frame base
+    // with ADD so stack arguments keep addressing the original local frame.
+    try words.append(allocator, addSubtractImmediate(.x13, .zero_or_sp, 0, true));
+    try emitRegisterAdjustment(allocator, words, .x13, stack_size, true);
+    for (arguments[Machine.max_register_arguments..], 0..) |argument, index| {
+        if (argument.aggregate) {
+            if (argument.width == 0) {
+                try words.append(allocator, moveWideZero64(.x9, 0, 0));
+            } else try emitBaseAddress(allocator, words, .x9, .x13, Machine.slotOffset(argument.start));
+        } else if (floatLaneResidence(function, argument.start)) |residence| {
+            const source: Register = @enumFromInt(residence.register);
+            if (residence.lane == 0) {
+                try words.append(allocator, moveFloatToGeneral(.x9, source, false));
+            } else {
+                try words.append(allocator, A64.duplicateFloat32Lane(.x9, source, 1));
+                try words.append(allocator, moveFloatToGeneral(.x9, .x9, false));
+            }
+        } else if (floatResidence(function, argument.start)) |number| {
+            try words.append(allocator, moveFloatToGeneral(.x9, @enumFromInt(number), false));
+        } else if (valueResultRegister(function, argument.start)) |source| {
+            if (source != .x9) try words.append(allocator, moveRegister(.x9, source));
+        } else try emitLoadAtOffset(
+            allocator,
+            words,
+            .x9,
+            .x13,
+            Machine.slotOffset(argument.start),
+        );
+        try emitStoreAtOffset(allocator, words, .x9, .zero_or_sp, index * Machine.slot_size);
+    }
+    return stack_size;
 }
 
 fn emitSpanCopy(
@@ -3712,6 +3790,32 @@ fn emitStackAdjustment(
         try words.append(allocator, addSubtractImmediate(.zero_or_sp, .zero_or_sp, @intCast(amount), add));
         remaining -= amount;
     }
+}
+
+fn emitRegisterAdjustment(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    register: Register,
+    byte_count: u16,
+    add: bool,
+) Allocator.Error!void {
+    var remaining = byte_count;
+    while (remaining != 0) {
+        const amount: u16 = @min(remaining, 4080);
+        try words.append(allocator, addSubtractImmediate(register, register, @intCast(amount), add));
+        remaining -= amount;
+    }
+}
+
+fn emitBaseAddress(
+    allocator: Allocator,
+    words: *std.ArrayList(u32),
+    destination: Register,
+    base: Register,
+    byte_offset: u16,
+) Allocator.Error!void {
+    if (destination != base) try words.append(allocator, moveRegister(destination, base));
+    try emitRegisterAdjustment(allocator, words, destination, byte_offset, true);
 }
 
 fn appendFixup(

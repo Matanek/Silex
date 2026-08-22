@@ -36,8 +36,9 @@ const Platform = ExternalCalls.Platform;
 
 /// Encodes the reachable scalar/class slice of the portable machine program
 /// directly as X64. The internal convention is deliberately Silex-owned:
-/// scalar arguments use RDI, RSI, RDX, RCX, R8, R9, R10, R11; scalar results
-/// use RAX; the execution status uses RDX.
+/// the first eight scalar arguments use RDI, RSI, RDX, RCX, R8, R9, R10, R11
+/// and remaining arguments use aligned stack slots; scalar results use RAX;
+/// the execution status uses RDX.
 pub fn encodeLinux(allocator: Allocator, program: Machine.Program) Error!Image {
     return encode(allocator, program, .linux, false, null);
 }
@@ -207,7 +208,20 @@ fn encodeFunction(
     if (function.parameters.len != function.parameter_count) return error.InvalidMachineProgram;
     if (function.hidden_return_slot) |slot| try emitStoreStack(allocator, bytes, .r15, slot);
     for (function.parameters, 0..) |parameter, index| {
-        if (parameter.aggregate) {
+        if (index >= argument_registers.len) {
+            const incoming_displacement: i32 = @intCast(16 + (index - argument_registers.len) * Machine.slot_size);
+            if (parameter.aggregate) {
+                try emitLoadMemory(allocator, bytes, .r14, .rbp, incoming_displacement);
+                for (0..parameter.width) |leaf| {
+                    try emitLoadMemory(allocator, bytes, .rax, .r14, -@as(i32, @intCast(leaf * Machine.slot_size)));
+                    try emitStoreStack(allocator, bytes, .rax, @intCast(@as(usize, parameter.start) + leaf));
+                }
+            } else {
+                if (parameter.width != 1) return error.InvalidMachineProgram;
+                try emitLoadMemory(allocator, bytes, .rax, .rbp, incoming_displacement);
+                try emitStoreStack(allocator, bytes, .rax, parameter.start);
+            }
+        } else if (parameter.aggregate) {
             for (0..parameter.width) |leaf| {
                 try emitLoadMemory(allocator, bytes, .rax, argument_registers[index], -@as(i32, @intCast(leaf * Machine.slot_size)));
                 try emitStoreStack(allocator, bytes, .rax, @intCast(@as(usize, parameter.start) + leaf));
@@ -518,16 +532,10 @@ fn encodeFunction(
                 try emitStoreStack(allocator, bytes, .rax, address.result.start + 1);
             },
             .call => |call| {
-                for (call.arguments, 0..) |argument, index| {
-                    if (argument.aggregate) {
-                        try emitAddressStack(allocator, bytes, argument_registers[index], argument.start);
-                    } else {
-                        if (argument.width != 1) return error.InvalidMachineProgram;
-                        try emitLoadStack(allocator, bytes, argument_registers[index], argument.start);
-                    }
-                }
                 if (call.result) |result| if (result.aggregate) try emitAddressStack(allocator, bytes, .r15, result.start);
+                const outgoing_stack_size = try emitInternalCallArguments(allocator, bytes, call.arguments, &argument_registers);
                 try appendCall(allocator, bytes, calls, call.function);
+                try emitStackAddition(allocator, bytes, outgoing_stack_size);
                 try bytes.appendSlice(allocator, &.{ 0x48, 0x85, 0xd2 });
                 try appendConditionalEpilogue(allocator, bytes, &epilogue_fixups, 0x85);
                 if (call.result) |result| {
@@ -538,16 +546,12 @@ fn encodeFunction(
                 }
             },
             .indirect_call => |call| {
-                for (call.arguments, 0..) |argument, index| {
-                    if (argument.aggregate) try emitAddressStack(allocator, bytes, argument_registers[index], argument.start) else {
-                        if (argument.width != 1) return error.InvalidMachineProgram;
-                        try emitLoadStack(allocator, bytes, argument_registers[index], argument.start);
-                    }
-                }
                 if (call.result) |result| if (result.aggregate) try emitAddressStack(allocator, bytes, .r15, result.start);
+                const outgoing_stack_size = try emitInternalCallArguments(allocator, bytes, call.arguments, &argument_registers);
                 try emitLoadStack(allocator, bytes, .r12, call.callee + 1);
                 try emitLoadStack(allocator, bytes, .rax, call.callee);
                 try bytes.appendSlice(allocator, &.{ 0xff, 0xd0 });
+                try emitStackAddition(allocator, bytes, outgoing_stack_size);
                 try bytes.appendSlice(allocator, &.{ 0x48, 0x85, 0xd2 });
                 try appendConditionalEpilogue(allocator, bytes, &epilogue_fixups, 0x85);
                 if (call.result) |result| if (!result.aggregate) try emitStoreStack(allocator, bytes, .rax, result.start);
@@ -556,8 +560,10 @@ fn encodeFunction(
             .mutex_lock => try emitMutexOperation(allocator, bytes, global_fixups, windows_import_sites, platform, program, true),
             .mutex_unlock => try emitMutexOperation(allocator, bytes, global_fixups, windows_import_sites, platform, program, false),
             .print => |value| switch (value.kind) {
-                .signed_integer, .unsigned_integer => try emitPrintPositiveInteger(allocator, bytes, value.value, value.newline),
-                else => return unsupported("non-integer print"),
+                .signed_integer, .unsigned_integer => try emitPrintInteger(allocator, bytes, windows_import_sites, platform, value.value, value.newline, value.kind == .signed_integer),
+                .boolean => try emitPrintBoolean(allocator, bytes, data_fixups, windows_import_sites, platform, value.value, value.newline),
+                .string => try emitPrintString(allocator, bytes, data_fixups, windows_import_sites, platform, value.value, value.newline),
+                .float32, .float64 => return unsupported("floating-point print"),
             },
             .assert => |assertion| {
                 try emitLoadStack(allocator, bytes, .rax, assertion.condition);
@@ -840,7 +846,15 @@ fn emitRuntimeFailure(allocator: Allocator, bytes: *std.ArrayList(u8), epilogue:
     try appendEpilogueJump(allocator, bytes, epilogue);
 }
 
-fn emitPrintPositiveInteger(allocator: Allocator, bytes: *std.ArrayList(u8), slot: Machine.Slot, newline: bool) Error!void {
+fn emitPrintInteger(
+    allocator: Allocator,
+    bytes: *std.ArrayList(u8),
+    import_sites: *std.ArrayList(WindowsImports.X64Site),
+    platform: Platform,
+    slot: Machine.Slot,
+    newline: bool,
+    signed: bool,
+) Error!void {
     try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xec, 40 });
     try bytes.appendSlice(allocator, &.{ 0x48, 0x8d, 0x74, 0x24, 39 });
     if (newline) {
@@ -848,6 +862,15 @@ fn emitPrintPositiveInteger(allocator: Allocator, bytes: *std.ArrayList(u8), slo
         try emitImmediate(allocator, bytes, .r8, 1);
     } else try emitImmediate(allocator, bytes, .r8, 0);
     try emitLoadStack(allocator, bytes, .rax, slot);
+    try emitImmediate(allocator, bytes, .r9, 0);
+    if (signed) {
+        try bytes.appendSlice(allocator, &.{ 0x48, 0x85, 0xc0, 0x0f, 0x89 });
+        const nonnegative = bytes.items.len;
+        try bytes.appendNTimes(allocator, 0, 4);
+        try emitImmediate(allocator, bytes, .r9, 1);
+        try bytes.appendSlice(allocator, &.{ 0x48, 0xf7, 0xd8 });
+        try patchRelative(bytes.items, nonnegative, bytes.items.len);
+    }
     try bytes.appendSlice(allocator, &.{ 0x48, 0x85, 0xc0, 0x0f, 0x85 });
     const nonzero = bytes.items.len;
     try bytes.appendNTimes(allocator, 0, 4);
@@ -862,10 +885,98 @@ fn emitPrintPositiveInteger(allocator: Allocator, bytes: *std.ArrayList(u8), slo
     try patchRelative(bytes.items, nonzero, loop);
     try patchRelative(bytes.items, repeat, loop);
     try patchRelative(bytes.items, finished, bytes.items.len);
-    try emitMoveRegister(allocator, bytes, .rdx, .r8);
-    try emitImmediate(allocator, bytes, .rax, 1);
-    try emitImmediate(allocator, bytes, .rdi, 1);
-    try bytes.appendSlice(allocator, &.{ 0x0f, 0x05, 0x48, 0x83, 0xc4, 40 });
+    if (signed) {
+        try bytes.appendSlice(allocator, &.{ 0x4d, 0x85, 0xc9, 0x0f, 0x84 });
+        const unsigned = bytes.items.len;
+        try bytes.appendNTimes(allocator, 0, 4);
+        try bytes.appendSlice(allocator, &.{ 0x48, 0xff, 0xce, 0xc6, 0x06, '-', 0x49, 0xff, 0xc0 });
+        try patchRelative(bytes.items, unsigned, bytes.items.len);
+    }
+    try emitWriteBuffer(allocator, bytes, import_sites, platform, 1, .rsi, .r8);
+    try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xc4, 40 });
+}
+
+fn emitPrintBoolean(
+    allocator: Allocator,
+    bytes: *std.ArrayList(u8),
+    data_fixups: *std.ArrayList(DataFixup),
+    import_sites: *std.ArrayList(WindowsImports.X64Site),
+    platform: Platform,
+    slot: Machine.Slot,
+    newline: bool,
+) Error!void {
+    try emitLoadStack(allocator, bytes, .rax, slot);
+    try bytes.appendSlice(allocator, &.{ 0x48, 0x85, 0xc0, 0x0f, 0x84 });
+    const use_false = bytes.items.len;
+    try bytes.appendNTimes(allocator, 0, 4);
+    try emitPrintStatic(allocator, bytes, data_fixups, import_sites, platform, 1);
+    try bytes.append(allocator, 0xe9);
+    const finished = bytes.items.len;
+    try bytes.appendNTimes(allocator, 0, 4);
+    try patchRelative(bytes.items, use_false, bytes.items.len);
+    try emitPrintStatic(allocator, bytes, data_fixups, import_sites, platform, 2);
+    try patchRelative(bytes.items, finished, bytes.items.len);
+    if (newline) try emitPrintStatic(allocator, bytes, data_fixups, import_sites, platform, 0);
+}
+
+fn emitPrintString(
+    allocator: Allocator,
+    bytes: *std.ArrayList(u8),
+    data_fixups: *std.ArrayList(DataFixup),
+    import_sites: *std.ArrayList(WindowsImports.X64Site),
+    platform: Platform,
+    slot: Machine.Slot,
+    newline: bool,
+) Error!void {
+    try emitLoadStack(allocator, bytes, .rsi, slot);
+    try emitLoadMemory(allocator, bytes, .r8, .rsi, 0);
+    try emitMaskDynamicStringLength(allocator, bytes, .r8);
+    try emitAddImmediateRegister(allocator, bytes, .rsi, 8);
+    try emitWriteBuffer(allocator, bytes, import_sites, platform, 1, .rsi, .r8);
+    if (newline) try emitPrintStatic(allocator, bytes, data_fixups, import_sites, platform, 0);
+}
+
+fn emitPrintStatic(
+    allocator: Allocator,
+    bytes: *std.ArrayList(u8),
+    data_fixups: *std.ArrayList(DataFixup),
+    import_sites: *std.ArrayList(WindowsImports.X64Site),
+    platform: Platform,
+    string: usize,
+) Error!void {
+    try bytes.appendSlice(allocator, &.{ 0x48, 0x8d, 0x35 });
+    const displacement_at = bytes.items.len;
+    try bytes.appendNTimes(allocator, 0, 4);
+    try data_fixups.append(allocator, .{ .displacement_at = displacement_at, .string = string });
+    try emitLoadMemory(allocator, bytes, .r8, .rsi, 0);
+    try emitAddImmediateRegister(allocator, bytes, .rsi, 8);
+    try emitWriteBuffer(allocator, bytes, import_sites, platform, 1, .rsi, .r8);
+}
+
+fn emitWriteBuffer(
+    allocator: Allocator,
+    bytes: *std.ArrayList(u8),
+    import_sites: *std.ArrayList(WindowsImports.X64Site),
+    platform: Platform,
+    descriptor: u64,
+    address: Register,
+    count: Register,
+) Error!void {
+    switch (platform) {
+        .linux => {
+            if (address != .rsi) try emitMoveRegister(allocator, bytes, .rsi, address);
+            if (count != .rdx) try emitMoveRegister(allocator, bytes, .rdx, count);
+            try emitImmediate(allocator, bytes, .rax, 1);
+            try emitImmediate(allocator, bytes, .rdi, descriptor);
+            try bytes.appendSlice(allocator, &.{ 0x0f, 0x05 });
+        },
+        .windows => {
+            if (address != .rdx) try emitMoveRegister(allocator, bytes, .rdx, address);
+            if (count != .r8) try emitMoveRegister(allocator, bytes, .r8, count);
+            try emitImmediate(allocator, bytes, .rcx, descriptor);
+            try ExternalCalls.emitWindowsImportCall(allocator, bytes, import_sites, .crt_write);
+        },
+    }
 }
 
 fn emitWriteStatic(allocator: Allocator, bytes: *std.ArrayList(u8), fixups: *std.ArrayList(DataFixup), string: usize) Allocator.Error!void {
@@ -1198,7 +1309,10 @@ fn emitListEdit(
         try emitStoreStack(allocator, bytes, .r10, value.result);
         return;
     }
-    if (value.kind != .append or value.argument == null) return unsupported("x64 list edit other than append");
+    if (value.kind != .append) {
+        return emitGeneralListEdit(allocator, bytes, import_sites, platform, epilogue, value);
+    }
+    if (value.argument == null) return error.InvalidMachineProgram;
     try emitLoadStack(allocator, bytes, .rbx, value.collection);
     try emitLoadMemory(allocator, bytes, .r12, .rbx, 0);
     try emitMoveRegister(allocator, bytes, .r13, .r12);
@@ -1230,6 +1344,201 @@ fn emitListEdit(
         try emitStoreMemory(allocator, bytes, .r14, @intCast(leaf * Machine.slot_size), .rax);
     }
     try emitStoreStack(allocator, bytes, .r15, value.result);
+}
+
+fn emitGeneralListEdit(
+    allocator: Allocator,
+    bytes: *std.ArrayList(u8),
+    import_sites: *std.ArrayList(WindowsImports.X64Site),
+    platform: Platform,
+    epilogue: *std.ArrayList(EpilogueFixup),
+    value: Machine.Instruction.ListEdit,
+) Error!void {
+    try emitLoadStack(allocator, bytes, .rbx, value.collection);
+    try emitLoadMemory(allocator, bytes, .r12, .rbx, 0);
+
+    switch (value.kind) {
+        .take, .insert => {
+            const index = value.index orelse return error.InvalidMachineProgram;
+            try emitLoadStack(allocator, bytes, .r13, index);
+            try bytes.appendSlice(allocator, &.{ 0x4d, 0x39, 0xe5, 0x0f, if (value.kind == .insert) 0x86 else 0x82 });
+            const valid = bytes.items.len;
+            try bytes.appendNTimes(allocator, 0, 4);
+            try emitRuntimeFailure(allocator, bytes, epilogue);
+            try patchRelative(bytes.items, valid, bytes.items.len);
+        },
+        .take_first => {
+            try emitImmediate(allocator, bytes, .r13, 0);
+            try bytes.appendSlice(allocator, &.{ 0x4d, 0x85, 0xe4, 0x0f, 0x85 });
+            const nonempty = bytes.items.len;
+            try bytes.appendNTimes(allocator, 0, 4);
+            try emitRuntimeFailure(allocator, bytes, epilogue);
+            try patchRelative(bytes.items, nonempty, bytes.items.len);
+        },
+        .prepend, .append_sequence, .reverse => try emitImmediate(allocator, bytes, .r13, 0),
+        .append, .take_last, .clear => return error.InvalidMachineProgram,
+    }
+
+    try emitMoveRegister(allocator, bytes, .rsi, .r12);
+    switch (value.kind) {
+        .prepend, .insert => try emitAddImmediateRegister(allocator, bytes, .rsi, 1),
+        .take, .take_first => try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xee, 1 }),
+        .append_sequence => {
+            const argument = value.argument orelse return error.InvalidMachineProgram;
+            if (value.argument_dynamic) {
+                try emitLoadStack(allocator, bytes, .rcx, argument.start);
+                try emitLoadMemory(allocator, bytes, .rcx, .rcx, 0);
+                try emitRegisterBinary(allocator, bytes, 0x01, .rsi, .rcx);
+            } else try emitAddImmediateRegister(allocator, bytes, .rsi, value.argument_count);
+        },
+        .reverse => {},
+        .append, .take_last, .clear => unreachable,
+    }
+    try emitImmediate(allocator, bytes, .rcx, @as(u64, value.element_width) * Machine.slot_size);
+    try bytes.appendSlice(allocator, &.{ 0x48, 0x0f, 0xaf, 0xf1 });
+    try emitAddImmediateRegister(allocator, bytes, .rsi, 8);
+    try emitAllocation(allocator, bytes, import_sites, platform, epilogue);
+    try emitMoveRegister(allocator, bytes, .r15, .rax);
+
+    try emitMoveRegister(allocator, bytes, .rax, .r12);
+    switch (value.kind) {
+        .prepend, .insert => try emitAddImmediateRegister(allocator, bytes, .rax, 1),
+        .take, .take_first => try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xe8, 1 }),
+        .append_sequence => {
+            if (value.argument_dynamic) {
+                try emitLoadStack(allocator, bytes, .rcx, value.argument.?.start);
+                try emitLoadMemory(allocator, bytes, .rcx, .rcx, 0);
+                try emitRegisterBinary(allocator, bytes, 0x01, .rax, .rcx);
+            } else try emitAddImmediateRegister(allocator, bytes, .rax, value.argument_count);
+        },
+        .reverse => {},
+        .append, .take_last, .clear => unreachable,
+    }
+    try emitStoreMemory(allocator, bytes, .r15, 0, .rax);
+
+    if (value.removed) |removed| {
+        try emitLoadStack(allocator, bytes, .r10, value.collection);
+        try emitAddImmediateRegister(allocator, bytes, .r10, 8);
+        try emitMoveRegister(allocator, bytes, .rax, .r13);
+        try bytes.appendSlice(allocator, &.{ 0x48, 0x69, 0xc0 });
+        try appendInt(allocator, bytes, u32, @as(u32, value.element_width) * Machine.slot_size);
+        try emitRegisterBinary(allocator, bytes, 0x01, .r10, .rax);
+        for (0..removed.width) |leaf| {
+            try emitLoadMemory(allocator, bytes, .rax, .r10, @intCast(leaf * Machine.slot_size));
+            try emitStoreStack(allocator, bytes, .rax, @intCast(@as(usize, removed.start) + leaf));
+        }
+    }
+
+    try emitLoadStack(allocator, bytes, .rbx, value.collection);
+    try emitAddImmediateRegister(allocator, bytes, .rbx, 8);
+    try emitMoveRegister(allocator, bytes, .r14, .r15);
+    try emitAddImmediateRegister(allocator, bytes, .r14, 8);
+    switch (value.kind) {
+        .prepend => {
+            try emitListArgument(allocator, bytes, value.argument orelse return error.InvalidMachineProgram);
+            try emitMoveRegister(allocator, bytes, .rsi, .r12);
+            try emitListCopyElements(allocator, bytes, value.element_width);
+        },
+        .insert => {
+            try emitMoveRegister(allocator, bytes, .rsi, .r13);
+            try emitListCopyElements(allocator, bytes, value.element_width);
+            try emitListArgument(allocator, bytes, value.argument orelse return error.InvalidMachineProgram);
+            try emitMoveRegister(allocator, bytes, .rsi, .r12);
+            try bytes.appendSlice(allocator, &.{ 0x4c, 0x29, 0xee });
+            try emitListCopyElements(allocator, bytes, value.element_width);
+        },
+        .take, .take_first => {
+            try emitMoveRegister(allocator, bytes, .rsi, .r13);
+            try emitListCopyElements(allocator, bytes, value.element_width);
+            try emitAddImmediateRegister(allocator, bytes, .rbx, @as(u32, value.element_width) * Machine.slot_size);
+            try emitMoveRegister(allocator, bytes, .rsi, .r12);
+            try bytes.appendSlice(allocator, &.{ 0x4c, 0x29, 0xee, 0x48, 0x83, 0xee, 1 });
+            try emitListCopyElements(allocator, bytes, value.element_width);
+        },
+        .append_sequence => {
+            try emitMoveRegister(allocator, bytes, .rsi, .r12);
+            try emitListCopyElements(allocator, bytes, value.element_width);
+            if (value.argument_dynamic) {
+                try emitLoadStack(allocator, bytes, .rbx, value.argument.?.start);
+                try emitLoadMemory(allocator, bytes, .rsi, .rbx, 0);
+                try emitAddImmediateRegister(allocator, bytes, .rbx, 8);
+                try emitListCopyElements(allocator, bytes, value.element_width);
+            } else {
+                const argument = value.argument orelse return error.InvalidMachineProgram;
+                for (0..argument.width) |leaf| {
+                    try emitLoadStack(allocator, bytes, .rax, @intCast(@as(usize, argument.start) + leaf));
+                    try emitStoreMemory(allocator, bytes, .r14, 0, .rax);
+                    try emitAddImmediateRegister(allocator, bytes, .r14, Machine.slot_size);
+                }
+            }
+        },
+        .reverse => try emitListCopyElementsReversed(allocator, bytes, value.element_width),
+        .append, .take_last, .clear => unreachable,
+    }
+    try emitStoreStack(allocator, bytes, .r15, value.result);
+}
+
+fn emitListArgument(allocator: Allocator, bytes: *std.ArrayList(u8), argument: Machine.Span) Error!void {
+    for (0..argument.width) |leaf| {
+        try emitLoadStack(allocator, bytes, .rax, @intCast(@as(usize, argument.start) + leaf));
+        try emitStoreMemory(allocator, bytes, .r14, @intCast(leaf * Machine.slot_size), .rax);
+    }
+    try emitAddImmediateRegister(allocator, bytes, .r14, @as(u32, argument.width) * Machine.slot_size);
+}
+
+fn emitListCopyElements(allocator: Allocator, bytes: *std.ArrayList(u8), element_width: u12) Error!void {
+    try bytes.appendSlice(allocator, &.{ 0x48, 0x85, 0xf6, 0x0f, 0x84 });
+    const copied = bytes.items.len;
+    try bytes.appendNTimes(allocator, 0, 4);
+    const loop = bytes.items.len;
+    for (0..element_width) |leaf| {
+        try emitLoadMemory(allocator, bytes, .rax, .rbx, @intCast(leaf * Machine.slot_size));
+        try emitStoreMemory(allocator, bytes, .r14, @intCast(leaf * Machine.slot_size), .rax);
+    }
+    const stride = @as(u32, element_width) * Machine.slot_size;
+    try emitAddImmediateRegister(allocator, bytes, .rbx, stride);
+    try emitAddImmediateRegister(allocator, bytes, .r14, stride);
+    try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xee, 1, 0x0f, 0x85 });
+    const repeat = bytes.items.len;
+    try bytes.appendNTimes(allocator, 0, 4);
+    try patchRelative(bytes.items, repeat, loop);
+    try patchRelative(bytes.items, copied, bytes.items.len);
+}
+
+fn emitListCopyElementsReversed(allocator: Allocator, bytes: *std.ArrayList(u8), element_width: u12) Error!void {
+    try emitMoveRegister(allocator, bytes, .rsi, .r12);
+    try bytes.appendSlice(allocator, &.{ 0x48, 0x85, 0xf6, 0x0f, 0x84 });
+    const copied = bytes.items.len;
+    try bytes.appendNTimes(allocator, 0, 4);
+    try emitMoveRegister(allocator, bytes, .rax, .r12);
+    try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xe8, 1, 0x48, 0x69, 0xc0 });
+    const stride = @as(u32, element_width) * Machine.slot_size;
+    try appendInt(allocator, bytes, u32, stride);
+    try emitRegisterBinary(allocator, bytes, 0x01, .rbx, .rax);
+    const loop = bytes.items.len;
+    for (0..element_width) |leaf| {
+        try emitLoadMemory(allocator, bytes, .rax, .rbx, @intCast(leaf * Machine.slot_size));
+        try emitStoreMemory(allocator, bytes, .r14, @intCast(leaf * Machine.slot_size), .rax);
+    }
+    try emitSubtractImmediateRegister(allocator, bytes, .rbx, stride);
+    try emitAddImmediateRegister(allocator, bytes, .r14, stride);
+    try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xee, 1, 0x0f, 0x85 });
+    const repeat = bytes.items.len;
+    try bytes.appendNTimes(allocator, 0, 4);
+    try patchRelative(bytes.items, repeat, loop);
+    try patchRelative(bytes.items, copied, bytes.items.len);
+}
+
+fn emitAddImmediateRegister(allocator: Allocator, bytes: *std.ArrayList(u8), register: Register, value: u32) Allocator.Error!void {
+    const rex: u8 = 0x48 | @as(u8, @intFromBool(@intFromEnum(register) >= 8));
+    try bytes.appendSlice(allocator, &.{ rex, 0x81, 0xc0 | (@as(u8, @intFromEnum(register)) & 7) });
+    try appendInt(allocator, bytes, u32, value);
+}
+
+fn emitSubtractImmediateRegister(allocator: Allocator, bytes: *std.ArrayList(u8), register: Register, value: u32) Allocator.Error!void {
+    const rex: u8 = 0x48 | @as(u8, @intFromBool(@intFromEnum(register) >= 8));
+    try bytes.appendSlice(allocator, &.{ rex, 0x81, 0xe8 | (@as(u8, @intFromEnum(register)) & 7) });
+    try appendInt(allocator, bytes, u32, value);
 }
 
 fn emitListTakeLast(
@@ -1526,6 +1835,38 @@ fn appendCall(allocator: Allocator, bytes: *std.ArrayList(u8), calls: *std.Array
     try bytes.appendNTimes(allocator, 0, 4);
 }
 
+fn emitInternalCallArguments(
+    allocator: Allocator,
+    bytes: *std.ArrayList(u8),
+    arguments: []const Machine.Span,
+    argument_registers: []const Register,
+) Error!u32 {
+    const register_count = @min(arguments.len, argument_registers.len);
+    for (arguments[0..register_count], argument_registers[0..register_count]) |argument, register| {
+        if (argument.aggregate) {
+            try emitAddressStack(allocator, bytes, register, argument.start);
+        } else {
+            if (argument.width != 1) return error.InvalidMachineProgram;
+            try emitLoadStack(allocator, bytes, register, argument.start);
+        }
+    }
+    if (arguments.len <= argument_registers.len) return 0;
+
+    const raw_size = (arguments.len - argument_registers.len) * Machine.slot_size;
+    const stack_size: u32 = @intCast(std.mem.alignForward(usize, raw_size, 16));
+    try emitStackSubtraction(allocator, bytes, stack_size);
+    for (arguments[argument_registers.len..], 0..) |argument, index| {
+        if (argument.aggregate) {
+            try emitAddressStack(allocator, bytes, .rax, argument.start);
+        } else {
+            if (argument.width != 1) return error.InvalidMachineProgram;
+            try emitLoadStack(allocator, bytes, .rax, argument.start);
+        }
+        try emitStoreMemory(allocator, bytes, .rsp, @intCast(index * Machine.slot_size), .rax);
+    }
+    return stack_size;
+}
+
 fn emitLoadStack(allocator: Allocator, bytes: *std.ArrayList(u8), register: Register, slot: Machine.Slot) Allocator.Error!void {
     try emitRex(allocator, bytes, true, register);
     try bytes.append(allocator, 0x8b);
@@ -1649,6 +1990,12 @@ fn emitFrameAllocation(
 
 fn emitStackSubtraction(allocator: Allocator, bytes: *std.ArrayList(u8), amount: u32) Allocator.Error!void {
     try bytes.appendSlice(allocator, &.{ 0x48, 0x81, 0xec });
+    try appendInt(allocator, bytes, u32, amount);
+}
+
+fn emitStackAddition(allocator: Allocator, bytes: *std.ArrayList(u8), amount: u32) Allocator.Error!void {
+    if (amount == 0) return;
+    try bytes.appendSlice(allocator, &.{ 0x48, 0x81, 0xc4 });
     try appendInt(allocator, bytes, u32, amount);
 }
 
@@ -1791,6 +2138,27 @@ test "encode a no-op Silex main for the Linux X64 process contract" {
     defer windows.deinit(std.testing.allocator);
     try std.testing.expectEqual(@as(usize, 0), windows.windows_import_sites.len);
     try std.testing.expectEqual(@as(u8, 0xc3), windows.code[windows.code.len - 1]);
+}
+
+test "encode internal X64 arguments beyond the register window" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = @import("../Frontend.zig").Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\func total(a:int,b:int,c:int,d:int,e:int,f:int,g:int,h:int,i:int,j:int) int {
+        \\    return a+b+c+d+e+f+g+h+i+j
+        \\}
+        \\func main() { total(1,2,3,4,5,6,7,8,9,10) }
+    );
+    const machine = try @import("../Arm64/Lower.zig").lower(allocator, compilation.ir);
+
+    const linux = try encodeLinux(allocator, machine);
+    defer linux.deinit(allocator);
+    const windows = try encodeWindows(allocator, machine);
+    defer windows.deinit(allocator);
+    try std.testing.expect(linux.code.len > 0);
+    try std.testing.expect(windows.code.len > 0);
 }
 
 test "X64 keeps the scalar fallback when portable SLP groups are present" {

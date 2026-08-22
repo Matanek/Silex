@@ -13,6 +13,23 @@ pub fn analyze(
     source_expression: *Ast.Expression,
     source: Model.TypedValue,
 ) !bool {
+    return analyzeUsing(self, builder, function, loop, source_expression, source, {}, analyzeOrdinaryBody);
+}
+
+fn analyzeOrdinaryBody(_: void, self: anytype, builder: anytype, function: Ast.Function, statements: []const Ast.Statement) !bool {
+    return self.analyzeStatements(builder, function, statements);
+}
+
+pub fn analyzeUsing(
+    self: anytype,
+    builder: anytype,
+    function: Ast.Function,
+    loop: Ast.ForStatement,
+    source_expression: *Ast.Expression,
+    source: Model.TypedValue,
+    context: anytype,
+    comptime analyze_body: anytype,
+) !bool {
     if (loop.bindings.len != 0) return self.fail(loop.name_position, "string traversal requires one binding");
     if (loop.mode == .mutable) return self.fail(loop.name_position, "for var is unavailable for immutable string scalars");
 
@@ -71,7 +88,7 @@ pub fn analyze(
         .mutex_depth = builder.mutex_depth,
     });
     const loop_index = builder.loops.items.len - 1;
-    const terminated = try self.analyzeStatements(builder, function, loop.statements);
+    const terminated = try analyze_body(context, self, builder, function, loop.statements);
     const loop_context = builder.loops.items[loop_index];
     builder.loops.items.len -= 1;
     if (!terminated) try Resources.emitActiveDrops(self, builder, binding_count);

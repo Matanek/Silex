@@ -242,6 +242,9 @@ open Silex document
 - The complete initial backend targets `macos-arm64`. It uses an internal
   register-and-stack ABI, places every IR value in a deterministic stack slot,
   and reports checked arithmetic failures through an internal status register.
+  The first eight scalar arguments use target registers and additional scalar
+  or aggregate arguments use aligned outgoing stack slots; source arity is not
+  capped by the register count.
 - Native structure lowering flattens fundamental leaves into private stack-slot
   spans. Aggregate arguments use internal addresses and aggregate returns use
   an internal hidden destination; neither convention, nor the flattened layout,
@@ -259,16 +262,21 @@ open Silex document
   instructions directly and writes an ELF64 container without section headers
   or an external linker when no package boundary is referenced. Boundary calls
   instead use a relocatable ELF object and the bootstrap linker. Its integer,
-  control-flow, class, aggregate and
-  `getrandom` vertical slice executes under Alpine; other machine operations
-  remain explicit encoder errors until the differential corpus covers them.
+  control-flow, class, aggregate, dynamic-list mutation,
+  string/boolean/integer output and `getrandom` vertical slice executes under
+  Alpine. Calls use the same eight-register-plus-stack policy for direct,
+  indirect and dynamic dispatch. Other machine operations remain explicit
+  encoder errors until the differential corpus covers them.
   Mutable globals are currently appended to the bootstrap image, so its single
   load segment is temporarily executable and writable. A dedicated writable
   data segment is required before the X64 container is hardened.
 - The Windows emitters write PE32+ for X64 and ARM64, including deterministic
   import descriptors, lookup tables and IAT entries for `VirtualAlloc` and
   `ProcessPrng`. X64 uses the Win64 boundary registers and ARM64 shares the
-  instruction encoder while substituting the Windows allocation boundary.
+  instruction encoder while substituting the Windows allocation boundary. The
+  Windows X64 path shares the Linux X64 list, output and stack-argument
+  instruction coverage while adapting system calls to imported Win32/UCRT
+  functions.
   Package-boundary builds use COFF objects, Win64 or Windows ARM64 C ABI calls,
   and the bootstrap linker with the selected archives and system libraries.
   The X64 bootstrap image likewise keeps its combined code/global section

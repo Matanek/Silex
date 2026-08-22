@@ -84,6 +84,33 @@ test "class parameter modes separate instance mutation observation and reference
     try std.testing.expectEqualStrings("12 12 20 30 false\n", output);
 }
 
+test "mutating methods preserve their receiver when returning from for loops" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\class Search {
+        \\    var values:int[]
+        \\    init() { self.values = [] }
+        \\    func remember_or_find(target:int) int {
+        \\        for value in self.values {
+        \\            if value == target { return value }
+        \\        }
+        \\        self.values.append(target)
+        \\        return -1
+        \\    }
+        \\}
+        \\func main() {
+        \\    var search = Search()
+        \\    print(search.remember_or_find(3), " ", search.remember_or_find(3))
+        \\}
+    );
+    const result = try Interpreter.runCapture(allocator, compilation.ir);
+    try std.testing.expectEqualStrings("-1 3\n", result.stdout);
+    _ = try Lower.lower(allocator, compilation.ir);
+}
+
 test "read-reference class parameters reject direct transitive and dynamic mutation" {
     try expectCompileError(
         "class Counter { var value:int } func change(counter:@Counter) { counter.value = 1 } func main() {}",

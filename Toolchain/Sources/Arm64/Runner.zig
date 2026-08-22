@@ -44,6 +44,7 @@ pub fn invoke(
     if (function >= program.functions.len or arguments.len != program.functions[function].parameter_count) {
         return error.InvalidMachineProgram;
     }
+    if (arguments.len > Machine.max_register_arguments) return error.TooManyArguments;
     const image = try Encoder.encode(allocator, program, .{ .test_function = function });
     defer image.deinit(allocator);
     const entry_offset = image.entry_offset orelse return error.InvalidMachineProgram;

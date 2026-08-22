@@ -8,6 +8,7 @@ const Allocator = std.mem.Allocator;
 pub const max_register_arguments = 8;
 pub const max_external_arguments = 10;
 pub const max_slots = 4095;
+pub const max_arguments = max_slots;
 pub const slot_size = 8;
 
 pub const FunctionId = usize;
@@ -546,7 +547,7 @@ pub const Instruction = union(enum) {
 
 pub const Function = struct {
     name: []const u8,
-    parameter_count: u4,
+    parameter_count: u12,
     parameters: []const Span = &.{},
     capture_parameters: []const Span = &.{},
     return_type: Types.Type,
@@ -606,8 +607,8 @@ pub fn checkedSlot(value: usize) Error!Slot {
     return @intCast(value);
 }
 
-pub fn checkedArgumentCount(value: usize) Error!u4 {
-    if (value > max_register_arguments) return error.TooManyArguments;
+pub fn checkedArgumentCount(value: usize) Error!u12 {
+    if (value > max_arguments) return error.TooManyArguments;
     return @intCast(value);
 }
 
@@ -626,7 +627,6 @@ pub fn validate(program: Program) Error!void {
         if (global.width == 0 or global.extra_bits.len + 1 > global.width) return error.InvalidMachineProgram;
     }
     for (program.functions) |function| {
-        if (function.parameter_count > max_register_arguments) return error.TooManyArguments;
         if (function.register_slots.len == 0 and function.float_register_slots.len == 0) {
             if (function.frame_size != try frameSize(function.slot_count)) return error.InvalidMachineProgram;
         } else if (function.frame_size > try frameSize(function.slot_count) or function.frame_size % 16 != 0) {
@@ -915,7 +915,6 @@ pub fn validate(program: Program) Error!void {
                 },
                 .call => |call| {
                     if (call.function >= program.functions.len) return error.InvalidMachineProgram;
-                    if (call.arguments.len > max_register_arguments) return error.TooManyArguments;
                     if (call.arguments.len != program.functions[call.function].parameter_count) return error.InvalidMachineProgram;
                     if (call.result) |result| try requireSpan(function, result);
                     for (call.arguments, program.functions[call.function].parameters) |argument, parameter| {
@@ -933,7 +932,6 @@ pub fn validate(program: Program) Error!void {
                 },
                 .indirect_call => |call| {
                     try requireSlot(function, call.callee);
-                    if (call.arguments.len > max_register_arguments) return error.TooManyArguments;
                     for (call.arguments) |argument| try requireSpan(function, argument);
                     if (call.result) |result| try requireSpan(function, result) else if (call.return_type != .void) return error.InvalidMachineProgram;
                 },
@@ -953,7 +951,7 @@ pub fn validate(program: Program) Error!void {
                     }
                 },
                 .dynamic_call => |call| {
-                    if (call.function >= program.functions.len or call.arguments.len > max_register_arguments) return error.InvalidMachineProgram;
+                    if (call.function >= program.functions.len) return error.InvalidMachineProgram;
                     try requireSlot(function, call.receiver);
                     const fallback = program.functions[call.function];
                     if (call.arguments.len != fallback.parameter_count) return error.InvalidMachineProgram;
@@ -1762,7 +1760,8 @@ test "validate function identities calls and slots" {
     try validate(.{ .functions = &functions });
 }
 
-test "reject unsupported frame and argument counts" {
-    try std.testing.expectError(error.TooManyArguments, checkedArgumentCount(9));
+test "accept stack arguments and reject unsupported frame counts" {
+    try std.testing.expectEqual(@as(u12, 9), try checkedArgumentCount(9));
+    try std.testing.expectError(error.TooManyArguments, checkedArgumentCount(max_arguments + 1));
     try std.testing.expectError(error.FrameTooLarge, checkedSlot(max_slots + 1));
 }

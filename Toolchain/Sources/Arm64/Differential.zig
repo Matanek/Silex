@@ -121,6 +121,45 @@ test "native ARM64 agrees with the reference interpreter on fundamental values" 
     try compare(allocator, compilation.ir, machine, "exactRemainder", &.{});
 }
 
+test "native ARM64 passes internal arguments beyond the register window" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var frontend = Frontend.Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\struct Pair { let left:int; let right:int }
+        \\func total(a:int,b:int,c:int,d:int,e:int,f:int,g:int,h:int,i:int,j:int) int {
+        \\    return a+b+c+d+e+f+g+h+i+j
+        \\}
+        \\func float_total(a:float,b:float,c:float,d:float,e:float,f:float,g:float,h:float,i:float,j:float) float {
+        \\    return a+b+c+d+e+f+g+h+i+j
+        \\}
+        \\func pair_total(a:int,b:int,c:int,d:int,e:int,f:int,g:int,h:int,pair:Pair) int {
+        \\    return a+b+c+d+e+f+g+h+pair.left+pair.right
+        \\}
+        \\func stack_arguments() int { return total(1,2,3,4,5,6,7,8,9,10) }
+        \\func callback_arguments() int {
+        \\    let callback = total
+        \\    return callback(1,2,3,4,5,6,7,8,9,10)
+        \\}
+        \\func aggregate_stack_argument() int { return pair_total(1,2,3,4,5,6,7,8,Pair(left:9,right:10)) }
+        \\func float_stack_arguments() float { return float_total(1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.0) }
+        \\func main() {}
+    );
+    const debug_machine = try Lower.lowerWithMode(allocator, compilation.ir, .debug);
+    try compare(allocator, compilation.ir, debug_machine, "stack_arguments", &.{});
+    try compare(allocator, compilation.ir, debug_machine, "callback_arguments", &.{});
+    try compare(allocator, compilation.ir, debug_machine, "aggregate_stack_argument", &.{});
+    try compare(allocator, compilation.ir, debug_machine, "float_stack_arguments", &.{});
+    const release_machine = try Lower.lowerWithMode(allocator, compilation.ir, .release);
+    try compare(allocator, compilation.ir, release_machine, "stack_arguments", &.{});
+    try compare(allocator, compilation.ir, release_machine, "callback_arguments", &.{});
+    try compare(allocator, compilation.ir, release_machine, "aggregate_stack_argument", &.{});
+    try compare(allocator, compilation.ir, release_machine, "float_stack_arguments", &.{});
+}
+
 test "native ARM64 release preserves floats returned from list-contained aggregates" {
     if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);

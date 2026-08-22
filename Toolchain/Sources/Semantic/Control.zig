@@ -163,6 +163,21 @@ pub fn analyzeWhile(self: anytype, builder: anytype, function: Ast.Function, loo
 }
 
 pub fn analyzeFor(self: anytype, builder: anytype, function: Ast.Function, loop: Ast.ForStatement) !bool {
+    return analyzeForUsing(self, builder, function, loop, {}, analyzeOrdinaryBody);
+}
+
+fn analyzeOrdinaryBody(_: void, self: anytype, builder: anytype, function: Ast.Function, statements: []const Ast.Statement) !bool {
+    return self.analyzeStatements(builder, function, statements);
+}
+
+pub fn analyzeForUsing(
+    self: anytype,
+    builder: anytype,
+    function: Ast.Function,
+    loop: Ast.ForStatement,
+    context: anytype,
+    comptime analyze_body: anytype,
+) !bool {
     if (loop.index_name) |name| {
         if (Support.findBinding(builder.bindings.items, name) != null) {
             const message = try std.fmt.allocPrint(self.allocator, "variable '{s}' is already declared in this scope", .{name});
@@ -178,15 +193,23 @@ pub fn analyzeFor(self: anytype, builder: anytype, function: Ast.Function, loop:
         return self.fail(binding.position, message);
     };
     return switch (loop.source) {
-        .collection => |source| analyzeCollectionFor(self, builder, function, loop, source),
+        .collection => |source| analyzeCollectionFor(self, builder, function, loop, source, context, analyze_body),
         .range => |range| if (loop.index_name != null)
             self.fail(loop.index_position.?, "double for binding requires an indexed() array or list source")
         else
-            analyzeRangeFor(self, builder, function, loop, range),
+            analyzeRangeFor(self, builder, function, loop, range, context, analyze_body),
     };
 }
 
-fn analyzeCollectionFor(self: anytype, builder: anytype, function: Ast.Function, loop: Ast.ForStatement, source_expression: *Ast.Expression) !bool {
+fn analyzeCollectionFor(
+    self: anytype,
+    builder: anytype,
+    function: Ast.Function,
+    loop: Ast.ForStatement,
+    source_expression: *Ast.Expression,
+    context: anytype,
+    comptime analyze_body: anytype,
+) !bool {
     const indexed_call: ?Ast.Expression.Call = if (source_expression.value == .call and
         std.mem.eql(u8, source_expression.value.call.name, "indexed"))
         source_expression.value.call
@@ -204,12 +227,12 @@ fn analyzeCollectionFor(self: anytype, builder: anytype, function: Ast.Function,
     };
     const source = try self.analyzeExpression(builder, collection_expression);
     if (source.type == .str and loop.index_name == null) {
-        return StringIteration.analyze(self, builder, function, loop, collection_expression, source);
+        return StringIteration.analyzeUsing(self, builder, function, loop, collection_expression, source, context, analyze_body);
     }
     if (loop.index_name == null) {
         if (source.type.structureIndex()) |structure_index| if (structure_index < self.program.structures.len) {
             const structure = self.program.structures[structure_index];
-            if (structure.query_pattern != null) return analyzeQueryFor(self, builder, function, loop, source_expression, source, structure) catch |err| {
+            if (structure.query_pattern != null) return analyzeQueryFor(self, builder, function, loop, source_expression, source, structure, context, analyze_body) catch |err| {
                 if (self.diagnostic == null) return self.fail(loop.position, "internal ECS query lowering failed");
                 return err;
             };
@@ -217,7 +240,7 @@ fn analyzeCollectionFor(self: anytype, builder: anytype, function: Ast.Function,
     }
     const collection = Collections.collectionForType(self.structures, source.type) orelse {
         if (loop.index_name != null) return self.fail(collection_expression.position, "indexed() expects an array or list");
-        return analyzeIteratorFor(self, builder, function, loop, collection_expression, source);
+        return analyzeIteratorFor(self, builder, function, loop, collection_expression, source, context, analyze_body);
     };
     if (loop.index_name != null and collection.view) return self.fail(collection_expression.position, "indexed() expects an array or list");
     const source_root: ?[]const u8 = switch (collection_expression.value) {
@@ -317,7 +340,7 @@ fn analyzeCollectionFor(self: anytype, builder: anytype, function: Ast.Function,
         .mutex_depth = builder.mutex_depth,
     });
     const loop_index = builder.loops.items.len - 1;
-    const terminated = try self.analyzeStatements(builder, function, loop.statements);
+    const terminated = try analyze_body(context, self, builder, function, loop.statements);
     const loop_context = builder.loops.items[loop_index];
     builder.loops.items.len -= 1;
     if (!terminated) try Resources.emitActiveDrops(self, builder, if (loop.mode == .mutable) binding_count + 1 else binding_count);
@@ -363,6 +386,8 @@ fn analyzeIteratorFor(
     loop: Ast.ForStatement,
     source_expression: *Ast.Expression,
     source: Model.TypedValue,
+    context: anytype,
+    comptime analyze_body: anytype,
 ) !bool {
     if (loop.bindings.len != 0) return self.fail(loop.name_position, "custom iterator traversal requires one binding");
     if (loop.mode == .mutable) return self.fail(loop.name_position, "for var is unavailable for values produced by a custom iterator");
@@ -458,7 +483,7 @@ fn analyzeIteratorFor(
         .mutex_depth = builder.mutex_depth,
     });
     const loop_index = builder.loops.items.len - 1;
-    const terminated = try self.analyzeStatements(builder, function, loop.statements);
+    const terminated = try analyze_body(context, self, builder, function, loop.statements);
     const loop_context = builder.loops.items[loop_index];
     builder.loops.items.len -= 1;
     if (!terminated) try Resources.emitActiveDrops(self, builder, current_binding_index);
@@ -495,6 +520,8 @@ fn analyzeQueryFor(
     source_expression: *Ast.Expression,
     source: Model.TypedValue,
     query: Ast.Structure,
+    context: anytype,
+    comptime analyze_body: anytype,
 ) !bool {
     if (loop.bindings.len == 0) return self.fail(loop.name_position, "ECS.Query iteration requires tuple destructuring");
     const pattern_type = query.query_pattern.?;
@@ -729,7 +756,7 @@ fn analyzeQueryFor(
         .mutex_depth = builder.mutex_depth,
     });
     const loop_index = builder.loops.items.len - 1;
-    const terminated = try self.analyzeStatements(builder, function, loop.statements);
+    const terminated = try analyze_body(context, self, builder, function, loop.statements);
     const loop_context = builder.loops.items[loop_index];
     builder.loops.items.len -= 1;
     if (!terminated) try Resources.emitActiveDrops(self, builder, binding_count);
@@ -796,7 +823,15 @@ fn methodFunctionId(program: Ast.Program, structure_index: usize, method_index: 
     return result + method_index;
 }
 
-fn analyzeRangeFor(self: anytype, builder: anytype, function: Ast.Function, loop: Ast.ForStatement, range: Ast.ForStatement.Range) !bool {
+fn analyzeRangeFor(
+    self: anytype,
+    builder: anytype,
+    function: Ast.Function,
+    loop: Ast.ForStatement,
+    range: Ast.ForStatement.Range,
+    context: anytype,
+    comptime analyze_body: anytype,
+) !bool {
     const start = try self.analyzeExpression(builder, range.start);
     const end = try self.analyzeExpression(builder, range.end);
     if (start.type != .int or end.type != .int) return self.fail(loop.position, "range bounds expect 'int'");
@@ -844,7 +879,7 @@ fn analyzeRangeFor(self: anytype, builder: anytype, function: Ast.Function, loop
         .mutex_depth = builder.mutex_depth,
     });
     const loop_index = builder.loops.items.len - 1;
-    const terminated = try self.analyzeStatements(builder, function, loop.statements);
+    const terminated = try analyze_body(context, self, builder, function, loop.statements);
     const loop_context = builder.loops.items[loop_index];
     builder.loops.items.len -= 1;
     if (!terminated) try Resources.emitActiveDrops(self, builder, binding_count);
