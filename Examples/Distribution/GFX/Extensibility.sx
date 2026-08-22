@@ -1,5 +1,5 @@
-use GFX.FrameGraph
 use GFX.GPU
+use GFX.Rendering.FrameGraph
 use GFX.Scene3D.Rotator as Rotator3D
 
 func main() {
