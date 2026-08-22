@@ -44,20 +44,26 @@ jobs:
           "$SILEX_INSTALL_DIR/silex" install STD
           "$SILEX_INSTALL_DIR/silex" install GFX
           mkdir -p "$RUNNER_TEMP/packages"
-          gfx_install=$(find "$HOME/.silex/packages" -maxdepth 1 -type d -name 'GFX@*' -print -quit)
-          test -n "$gfx_install"
+          find_package() {
+            find "$HOME/.silex/packages" -maxdepth 1 -type d -name "$1@*" -print -quit
+          }
+          gfx_install=$(find_package GFX)
+          gfx_audio=$(find_package GFX.Audio)
+          gfx_canvas=$(find_package GFX.Canvas)
+          gfx_scene2d=$(find_package GFX.Scene2D)
+          test -n "$gfx_install" && test -n "$gfx_audio" && test -n "$gfx_canvas" && test -n "$gfx_scene2d"
           cp -R "$gfx_install" "$RUNNER_TEMP/packages/GFX"
           package="$RUNNER_TEMP/packages/GFX"
           repository="$GITHUB_WORKSPACE"
           cd "$RUNNER_TEMP/packages"
 
           if [ "${{ matrix.execution }}" = "run" ]; then
-            "$SILEX_INSTALL_DIR/silex" compile "$package/Smokes/Audio.sx" -o "$RUNNER_TEMP/gfx-audio"
+            "$SILEX_INSTALL_DIR/silex" compile "$gfx_audio/Smokes/Audio.sx" -o "$RUNNER_TEMP/gfx-audio"
             timeout 30s env SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=dummy "$RUNNER_TEMP/gfx-audio"
-            "$SILEX_INSTALL_DIR/silex" compile "$package/Smokes/Text.sx" -o "$RUNNER_TEMP/gfx-text"
+            "$SILEX_INSTALL_DIR/silex" compile "$gfx_canvas/Smokes/Text.sx" -o "$RUNNER_TEMP/gfx-text"
             timeout 30s env SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=dummy "$RUNNER_TEMP/gfx-text"
             "$SILEX_INSTALL_DIR/silex" test "$package/Tests/Color.sx"
-            "$SILEX_INSTALL_DIR/silex" test "$package/Tests/Scene2D/ViewportCamera.sx"
+            "$SILEX_INSTALL_DIR/silex" test "$gfx_scene2d/Tests/ViewportCamera.sx"
             "$SILEX_INSTALL_DIR/silex" test "$package/Tests/Application/CollectionFieldMutation.sx"
             "$SILEX_INSTALL_DIR/silex" compile "$repository/Examples/Distribution/GFX/Runtime.sx" -o "$RUNNER_TEMP/gfx-runtime-smoke"
             timeout 30s env SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=dummy "$RUNNER_TEMP/gfx-runtime-smoke"
@@ -65,8 +71,8 @@ jobs:
             "$SILEX_INSTALL_DIR/silex" compile "$repository/Examples/Distribution/GFX/Canvas.sx" -o "$RUNNER_TEMP/gfx-canvas-smoke"
             "$SILEX_INSTALL_DIR/silex" compile "$repository/Examples/Distribution/GFX/Extensibility.sx" -o "$RUNNER_TEMP/gfx-extensibility-smoke"
           else
-            "$SILEX_INSTALL_DIR/silex" compile "$package/Smokes/Audio.sx" -o "$RUNNER_TEMP/gfx-audio"
-            "$SILEX_INSTALL_DIR/silex" compile "$package/Smokes/Text.sx" -o "$RUNNER_TEMP/gfx-text"
+            "$SILEX_INSTALL_DIR/silex" compile "$gfx_audio/Smokes/Audio.sx" -o "$RUNNER_TEMP/gfx-audio"
+            "$SILEX_INSTALL_DIR/silex" compile "$gfx_canvas/Smokes/Text.sx" -o "$RUNNER_TEMP/gfx-text"
             "$SILEX_INSTALL_DIR/silex" compile "$repository/Examples/Distribution/GFX/Runtime.sx" -o "$RUNNER_TEMP/gfx-runtime-smoke"
             "$SILEX_INSTALL_DIR/silex" compile "$repository/Examples/Distribution/GFX/Window.sx" -o "$RUNNER_TEMP/gfx-window-smoke"
             "$SILEX_INSTALL_DIR/silex" compile "$repository/Examples/Distribution/GFX/Canvas.sx" -o "$RUNNER_TEMP/gfx-canvas-smoke"
@@ -103,21 +109,28 @@ jobs:
           & $silex install GFX
           $packages = Join-Path $env:RUNNER_TEMP "packages"
           New-Item -ItemType Directory -Force $packages | Out-Null
-          $gfxInstall = Get-ChildItem (Join-Path $env:USERPROFILE ".silex/packages") -Directory -Filter "GFX@*" | Select-Object -First 1
-          if (-not $gfxInstall) {
-            throw "GFX was not installed"
+          function Find-Package([string] $name) {
+            $package = Get-ChildItem (Join-Path $env:USERPROFILE ".silex/packages") -Directory -Filter "$name@*" | Select-Object -First 1
+            if (-not $package) {
+              throw "$name was not installed"
+            }
+            return $package.FullName
           }
-          Copy-Item -Recurse $gfxInstall.FullName (Join-Path $packages "GFX")
+          $gfxInstall = Find-Package "GFX"
+          $gfxAudio = Find-Package "GFX.Audio"
+          $gfxCanvas = Find-Package "GFX.Canvas"
+          $gfxScene2D = Find-Package "GFX.Scene2D"
+          Copy-Item -Recurse $gfxInstall (Join-Path $packages "GFX")
           $package = Join-Path $packages "GFX"
           Set-Location $packages
           & $silex test (Join-Path $package "Tests/Color.sx")
-          & $silex test (Join-Path $package "Tests/Scene2D/ViewportCamera.sx")
+          & $silex test (Join-Path $gfxScene2D "Tests/ViewportCamera.sx")
           & $silex test (Join-Path $package "Tests/Application/CollectionFieldMutation.sx")
           $audio = Join-Path $env:RUNNER_TEMP "gfx-audio.exe"
-          & $silex compile (Join-Path $package "Smokes/Audio.sx") -o $audio
+          & $silex compile (Join-Path $gfxAudio "Smokes/Audio.sx") -o $audio
           & $audio
           $text = Join-Path $env:RUNNER_TEMP "gfx-text.exe"
-          & $silex compile (Join-Path $package "Smokes/Text.sx") -o $text
+          & $silex compile (Join-Path $gfxCanvas "Smokes/Text.sx") -o $text
           & $text
           $runtime = Join-Path $env:RUNNER_TEMP "gfx-runtime-smoke.exe"
           & $silex compile (Join-Path $env:GITHUB_WORKSPACE "Examples/Distribution/GFX/Runtime.sx") -o $runtime
