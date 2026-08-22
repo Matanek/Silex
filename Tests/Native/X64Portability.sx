@@ -40,6 +40,29 @@ struct CopyGraph {
     var values:CopyState[]
 }
 
+class DirectCycleNode {
+    var next:DirectCycleNode? = null
+    drop { print("x64 cycle drop") }
+}
+
+class CollectionCycleNode {
+    var links:CollectionCycleNode[]
+
+    init() { self.links = [] }
+    drop { print("x64 cycle drop") }
+}
+
+protocol CycleLink {
+    func linked() bool
+}
+
+class ProtocolCycleNode : CycleLink {
+    var next:CycleLink? = null
+
+    func linked() bool { return true }
+    drop { print("x64 cycle drop") }
+}
+
 func dynamic_total() int {
     var value:Total = Offset(value:6)
     return value.total(1, 2, 3, 4, 5, 6, 7, 8)
@@ -61,6 +84,27 @@ func verify_deep_copy() {
     detached.first.value = 9
     assert(source.first.value == 5)
     assert(detached.again.value == 9)
+}
+
+func verify_cycles() {
+    {
+        var first = DirectCycleNode()
+        var second = DirectCycleNode()
+        first.next = second
+        second.next = first
+    }
+    {
+        var first = CollectionCycleNode()
+        var second = CollectionCycleNode()
+        first.links.append(second)
+        second.links.append(first)
+    }
+    {
+        var first = ProtocolCycleNode()
+        var second = ProtocolCycleNode()
+        first.next = second
+        second.next = first
+    }
 }
 
 func sum_view(values:@int[..]) int {
@@ -153,6 +197,10 @@ test "execute x64 ownership and deep-copy runtime" {
     verify_deep_copy()
 }
 
+test "finalize x64 cycles across direct collection and protocol edges" {
+    verify_cycles()
+}
+
 func main() {
     assert(total(1, 2, 3, 4, 5, 6, 7, 8, 9, 10) == 55)
     assert(callback_total() == 55)
@@ -160,4 +208,5 @@ func main() {
     assert(dynamic_class_total() == 42)
     verify_collections()
     verify_deep_copy()
+    verify_cycles()
 }

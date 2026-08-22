@@ -88,7 +88,10 @@ jobs:
           "$silex" compile "$gfx_canvas/Smokes/Text.sx" -o "$RUNNER_TEMP/gfx-text"
           timeout 30s env SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=dummy "$RUNNER_TEMP/gfx-text"
           "$silex" compile "$GITHUB_WORKSPACE/Tests/Native/X64Portability.sx" --release -o "$RUNNER_TEMP/x64-portability"
-          "$RUNNER_TEMP/x64-portability"
+          portability_output=$("$RUNNER_TEMP/x64-portability")
+          printf '%s\n' "$portability_output"
+          cycle_drops=$(printf '%s\n' "$portability_output" | grep -c '^x64 cycle drop$')
+          test "$cycle_drops" -eq 6
           "$silex" compile "$GITHUB_WORKSPACE/Examples/Distribution/GFX/Runtime.sx" -o "$RUNNER_TEMP/gfx-runtime"
           timeout 30s env SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=dummy "$RUNNER_TEMP/gfx-runtime"
           "$silex" compile "$GITHUB_WORKSPACE/Examples/Distribution/GFX/Window.sx" -o "$RUNNER_TEMP/gfx-window"
@@ -136,7 +139,12 @@ jobs:
           & $text
           $portability = Join-Path $env:RUNNER_TEMP "x64-portability.exe"
           & $silex compile (Join-Path $env:GITHUB_WORKSPACE "Tests/Native/X64Portability.sx") --release -o $portability
-          & $portability
+          $portabilityOutput = & $portability
+          $portabilityOutput | ForEach-Object { Write-Output $_ }
+          $cycleDrops = @($portabilityOutput | Where-Object { $_ -eq "x64 cycle drop" }).Count
+          if ($cycleDrops -ne 6) {
+            throw "expected 6 X64 cycle finalizers, got $cycleDrops"
+          }
           & $silex compile (Join-Path $env:GITHUB_WORKSPACE "Examples/Distribution/GFX/Runtime.sx") -o "$env:RUNNER_TEMP/gfx-runtime.exe"
           & "$env:RUNNER_TEMP/gfx-runtime.exe"
           & $silex compile (Join-Path $env:GITHUB_WORKSPACE "Examples/Distribution/GFX/Window.sx") -o "$env:RUNNER_TEMP/gfx-window.exe"

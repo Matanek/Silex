@@ -3,6 +3,7 @@ const Machine = @import("../Arm64/Machine.zig");
 const WindowsImports = @import("../Windows/Imports.zig");
 const FloatRuntime = @import("FloatRuntime.zig");
 const DeepCopyRuntime = @import("DeepCopyRuntime.zig");
+const CycleRuntime = @import("CycleRuntime.zig");
 const ExternalCalls = @import("ExternalCalls.zig");
 const Reachability = @import("Reachability.zig");
 const TextRuntime = @import("TextRuntime.zig");
@@ -17,8 +18,9 @@ const edge_count_offset: i32 = 2 * Machine.slot_size;
 const byte_count_offset: i32 = 3 * Machine.slot_size;
 const state_offset: i32 = 4 * Machine.slot_size;
 const class_state_offset: i32 = 3 * Machine.slot_size;
+const enable_cycle_collector = true;
 
-pub const Error = Machine.Error || Allocator.Error || FloatRuntime.Error || DeepCopyRuntime.Error || error{UnsupportedInstruction};
+pub const Error = Machine.Error || Allocator.Error || FloatRuntime.Error || DeepCopyRuntime.Error || CycleRuntime.Error || error{UnsupportedInstruction};
 
 pub const Image = struct {
     code: []u8,
@@ -45,6 +47,12 @@ const DeepCopyFixup = struct {
     model_at: usize,
     allocate_at: usize,
     release_at: usize,
+};
+const CycleFixup = struct {
+    call_at: usize,
+    model_at: ?usize = null,
+    allocate_at: ?usize = null,
+    release_at: ?usize = null,
 };
 const Platform = ExternalCalls.Platform;
 
@@ -103,6 +111,8 @@ fn encode(
     defer float_calls.deinit(allocator);
     var deep_copy_calls: std.ArrayList(DeepCopyFixup) = .empty;
     defer deep_copy_calls.deinit(allocator);
+    var cycle_calls: std.ArrayList(CycleFixup) = .empty;
+    defer cycle_calls.deinit(allocator);
     var data_fixups: std.ArrayList(DataFixup) = .empty;
     defer data_fixups.deinit(allocator);
     var global_fixups: std.ArrayList(GlobalFixup) = .empty;
@@ -115,7 +125,7 @@ fn encode(
     for (program.functions, 0..) |function, function_id| {
         if (!reachable[function_id]) continue;
         offsets[function_id] = @intCast(bytes.items.len);
-        try encodeFunction(allocator, &bytes, &calls, &function_addresses, &float_calls, &deep_copy_calls, &data_fixups, &global_fixups, &windows_import_sites, &external_call_sites, platform, program, function);
+        try encodeFunction(allocator, &bytes, &calls, &function_addresses, &float_calls, &deep_copy_calls, &cycle_calls, &data_fixups, &global_fixups, &windows_import_sites, &external_call_sites, platform, program, function);
     }
 
     const entry_offset: u32 = @intCast(bytes.items.len);
@@ -166,11 +176,16 @@ fn encode(
         try bytes.appendSlice(allocator, runtime.bytes);
     }
 
-    if (deep_copy_calls.items.len != 0) {
-        const allocate_callback = bytes.items.len;
+    var allocate_callback: ?usize = null;
+    var release_callback: ?usize = null;
+    if (deep_copy_calls.items.len != 0 or cycle_calls.items.len != 0) {
+        allocate_callback = bytes.items.len;
         try emitRuntimeAllocateCallback(allocator, &bytes, &windows_import_sites, platform);
-        const release_callback = bytes.items.len;
+        release_callback = bytes.items.len;
         try emitRuntimeReleaseCallback(allocator, &bytes, &windows_import_sites, platform);
+    }
+
+    if (deep_copy_calls.items.len != 0) {
         var runtime = try DeepCopyRuntime.payload(allocator);
         defer runtime.deinit(allocator);
         while (bytes.items.len % 4096 != runtime.page_offset) try bytes.append(allocator, 0);
@@ -178,8 +193,22 @@ fn encode(
         const target = runtime_start + runtime.entry_offset;
         for (deep_copy_calls.items) |fixup| {
             try patchRelative(bytes.items, fixup.call_at, target);
-            try patchRelative(bytes.items, fixup.allocate_at, allocate_callback);
-            try patchRelative(bytes.items, fixup.release_at, release_callback);
+            try patchRelative(bytes.items, fixup.allocate_at, allocate_callback.?);
+            try patchRelative(bytes.items, fixup.release_at, release_callback.?);
+        }
+        try bytes.appendSlice(allocator, runtime.bytes);
+    }
+
+    if (cycle_calls.items.len != 0) {
+        var runtime = try CycleRuntime.payload(allocator);
+        defer runtime.deinit(allocator);
+        while (bytes.items.len % 4096 != runtime.page_offset) try bytes.append(allocator, 0);
+        const runtime_start = bytes.items.len;
+        const target = runtime_start + runtime.entry_offset;
+        for (cycle_calls.items) |fixup| {
+            try patchRelative(bytes.items, fixup.call_at, target);
+            if (fixup.allocate_at) |at| try patchRelative(bytes.items, at, allocate_callback.?);
+            if (fixup.release_at) |at| try patchRelative(bytes.items, at, release_callback.?);
         }
         try bytes.appendSlice(allocator, runtime.bytes);
     }
@@ -197,11 +226,12 @@ fn encode(
         if (fixup.string >= string_offsets.len) return error.InvalidMachineProgram;
         try patchRelative(bytes.items, fixup.displacement_at, string_offsets[fixup.string]);
     }
-    if (deep_copy_calls.items.len != 0) {
+    if (deep_copy_calls.items.len != 0 or cycle_calls.items.len != 0) {
         while (bytes.items.len % Machine.slot_size != 0) try bytes.append(allocator, 0);
         const copy_model_offset = bytes.items.len;
         for (program.copy_model) |word| try appendInt(allocator, &bytes, u64, word);
         for (deep_copy_calls.items) |fixup| try patchRelative(bytes.items, fixup.model_at, copy_model_offset);
+        for (cycle_calls.items) |fixup| if (fixup.model_at) |at| try patchRelative(bytes.items, at, copy_model_offset);
     }
     const global_offsets = try allocator.alloc(usize, program.globals.len);
     defer allocator.free(global_offsets);
@@ -234,6 +264,7 @@ fn encodeFunction(
     function_addresses: *std.ArrayList(FunctionAddressFixup),
     float_calls: *std.ArrayList(usize),
     deep_copy_calls: *std.ArrayList(DeepCopyFixup),
+    cycle_calls: *std.ArrayList(CycleFixup),
     data_fixups: *std.ArrayList(DataFixup),
     global_fixups: *std.ArrayList(GlobalFixup),
     windows_import_sites: *std.ArrayList(WindowsImports.X64Site),
@@ -249,7 +280,10 @@ fn encodeFunction(
         }
     };
     try bytes.appendSlice(allocator, &.{ 0x55, 0x48, 0x89, 0xe5 });
-    try emitFrameAllocation(allocator, bytes, platform, function.frame_size);
+    const runtime_frame_size: u16 = if (enable_cycle_collector) 16 else 0;
+    const encoded_frame_size = std.math.add(u16, function.frame_size, runtime_frame_size) catch return error.InvalidMachineProgram;
+    try emitFrameAllocation(allocator, bytes, platform, encoded_frame_size);
+    const cycle_context_slot: Machine.Slot = @intCast(function.frame_size / Machine.slot_size);
     const argument_registers = [_]Register{ .rdi, .rsi, .rdx, .rcx, .r8, .r9, .r10, .r11 };
     if (function.parameters.len != function.parameter_count) return error.InvalidMachineProgram;
     if (function.hidden_return_slot) |slot| try emitStoreStack(allocator, bytes, .r15, slot);
@@ -506,9 +540,11 @@ fn encodeFunction(
                 allocator,
                 bytes,
                 calls,
+                cycle_calls,
                 &epilogue_fixups,
                 windows_import_sites,
                 platform,
+                cycle_context_slot,
                 value,
             ),
             .list_retain => |value| try emitListRetain(allocator, bytes, value),
@@ -1010,26 +1046,51 @@ fn emitClassRetain(
     value: Machine.Instruction.ClassRetain,
 ) Error!void {
     try emitLoadStack(allocator, bytes, .r10, value.operand);
+    if (value.ownership == .edge) try emitMarkCycleDirty(allocator, bytes);
     try emitAtomicIncrement(allocator, bytes, .r10, switch (value.ownership) {
         .root => root_count_offset,
         .edge => edge_count_offset,
     });
 }
 
+/// State 4 caches a negative cycle proof. Changing an incoming class edge
+/// invalidates that proof before its reference count changes.
+fn emitMarkCycleDirty(allocator: Allocator, bytes: *std.ArrayList(u8)) Error!void {
+    const retry = bytes.items.len;
+    try emitLoadMemory(allocator, bytes, .rax, .r10, class_state_offset);
+    try emitImmediate(allocator, bytes, .rcx, 4);
+    try emitRegisterBinary(allocator, bytes, 0x39, .rax, .rcx);
+    try bytes.appendSlice(allocator, &.{ 0x0f, 0x85 });
+    const clean = bytes.items.len;
+    try bytes.appendNTimes(allocator, 0, 4);
+    try emitImmediate(allocator, bytes, .r11, 0);
+    try bytes.appendSlice(allocator, &.{ 0xf0, 0x4d, 0x0f, 0xb1, 0x5a, @intCast(class_state_offset) });
+    try bytes.appendSlice(allocator, &.{ 0x0f, 0x85 });
+    const conflicted = bytes.items.len;
+    try bytes.appendNTimes(allocator, 0, 4);
+    try patchRelative(bytes.items, conflicted, retry);
+    try patchRelative(bytes.items, clean, bytes.items.len);
+}
+
 fn emitClassDrop(
     allocator: Allocator,
     bytes: *std.ArrayList(u8),
     calls: *std.ArrayList(CallFixup),
+    cycle_calls: *std.ArrayList(CycleFixup),
     epilogue_fixups: *std.ArrayList(EpilogueFixup),
     import_sites: *std.ArrayList(WindowsImports.X64Site),
     platform: Platform,
+    cycle_context_slot: Machine.Slot,
     value: Machine.Instruction.ClassDrop,
 ) Error!void {
+    try emitImmediate(allocator, bytes, .rax, 0);
+    try emitStoreStack(allocator, bytes, .rax, cycle_context_slot);
     const count_offset: i32 = switch (value.ownership) {
         .root => root_count_offset,
         .edge => edge_count_offset,
     };
     try emitLoadStack(allocator, bytes, .r10, value.operand);
+    if (value.ownership == .edge) try emitMarkCycleDirty(allocator, bytes);
     const retry = bytes.items.len;
     try emitLoadMemory(allocator, bytes, .rax, .r10, count_offset);
     try emitRegisterBinary(allocator, bytes, 0x85, .rax, .rax);
@@ -1044,21 +1105,80 @@ fn emitClassDrop(
     try bytes.appendNTimes(allocator, 0, 4);
     try patchRelative(bytes.items, conflicted, retry);
 
+    // A live root proves reachability. With no roots but remaining edges, the
+    // object is a cycle candidate; with no references it finalizes directly.
     try emitLoadMemory(allocator, bytes, .rax, .r10, root_count_offset);
-    try emitLoadMemory(allocator, bytes, .r11, .r10, edge_count_offset);
-    try emitRegisterBinary(allocator, bytes, 0x01, .rax, .r11);
     try emitRegisterBinary(allocator, bytes, 0x85, .rax, .rax);
     try bytes.appendSlice(allocator, &.{ 0x0f, 0x85 });
-    const still_referenced = bytes.items.len;
+    const rooted = bytes.items.len;
+    try bytes.appendNTimes(allocator, 0, 4);
+    try emitLoadMemory(allocator, bytes, .r11, .r10, edge_count_offset);
+    try emitRegisterBinary(allocator, bytes, 0x85, .r11, .r11);
+    try bytes.appendSlice(allocator, &.{ 0x0f, 0x85 });
+    const cycle_candidate = bytes.items.len;
     try bytes.appendNTimes(allocator, 0, 4);
 
-    try emitImmediate(allocator, bytes, .rax, 1);
-    try bytes.appendSlice(allocator, &.{ 0x49, 0x87, 0x42, @intCast(class_state_offset) });
-    try emitRegisterBinary(allocator, bytes, 0x85, .rax, .rax);
-    try bytes.appendSlice(allocator, &.{ 0x0f, 0x85 });
+    const claim_retry = bytes.items.len;
+    try emitLoadMemory(allocator, bytes, .rax, .r10, class_state_offset);
+    try emitImmediate(allocator, bytes, .rcx, 2);
+    try emitRegisterBinary(allocator, bytes, 0x39, .rax, .rcx);
+    try bytes.appendSlice(allocator, &.{ 0x0f, 0x84 });
+    const tracing = bytes.items.len;
+    try bytes.appendNTimes(allocator, 0, 4);
+    try emitImmediate(allocator, bytes, .rcx, 1);
+    try emitRegisterBinary(allocator, bytes, 0x39, .rax, .rcx);
+    try bytes.appendSlice(allocator, &.{ 0x0f, 0x84 });
     const already_claimed = bytes.items.len;
     try bytes.appendNTimes(allocator, 0, 4);
+    try emitImmediate(allocator, bytes, .r11, 1);
+    try bytes.appendSlice(allocator, &.{ 0xf0, 0x4d, 0x0f, 0xb1, 0x5a, @intCast(class_state_offset) });
+    try bytes.appendSlice(allocator, &.{ 0x0f, 0x85 });
+    const claim_conflicted = bytes.items.len;
+    try bytes.appendNTimes(allocator, 0, 4);
+    try patchRelative(bytes.items, tracing, claim_retry);
+    try patchRelative(bytes.items, claim_conflicted, claim_retry);
+    try bytes.append(allocator, 0xe9);
+    const finalize_without_cycle = bytes.items.len;
+    try bytes.appendNTimes(allocator, 0, 4);
 
+    const cycle_prepare = bytes.items.len;
+    try patchRelative(bytes.items, cycle_candidate, cycle_prepare);
+    try emitLoadStack(allocator, bytes, .r10, value.operand);
+    try emitLoadMemory(allocator, bytes, .rax, .r10, class_state_offset);
+    try emitRegisterBinary(allocator, bytes, 0x85, .rax, .rax);
+    try bytes.appendSlice(allocator, &.{ 0x0f, 0x85 });
+    const cycle_claimed = bytes.items.len;
+    try bytes.appendNTimes(allocator, 0, 4);
+    try emitImmediate(allocator, bytes, .rdi, 0);
+    try emitLoadStack(allocator, bytes, .rsi, value.operand);
+    const model_at = try emitRipAddress(allocator, bytes, .rdx);
+    try emitImmediate(allocator, bytes, .rcx, 0x100 + value.static_type);
+    const allocate_at = try emitRipAddress(allocator, bytes, .r8);
+    const release_at = try emitRipAddress(allocator, bytes, .r9);
+    try bytes.append(allocator, 0xe8);
+    const prepare_call = bytes.items.len;
+    try bytes.appendNTimes(allocator, 0, 4);
+    try cycle_calls.append(allocator, .{
+        .call_at = prepare_call,
+        .model_at = model_at,
+        .allocate_at = allocate_at,
+        .release_at = release_at,
+    });
+    try emitRegisterBinary(allocator, bytes, 0x85, .rax, .rax);
+    try emitImmediate(allocator, bytes, .rdx, 0);
+    try bytes.appendSlice(allocator, &.{ 0x0f, 0x84 });
+    const cycle_unavailable = bytes.items.len;
+    try bytes.appendNTimes(allocator, 0, 4);
+    try emitStoreStack(allocator, bytes, .rax, cycle_context_slot);
+    try bytes.append(allocator, 0xe9);
+    const finalize_cycle = bytes.items.len;
+    try bytes.appendNTimes(allocator, 0, 4);
+
+    const finalize = bytes.items.len;
+    try patchRelative(bytes.items, finalize_without_cycle, finalize);
+    try patchRelative(bytes.items, finalize_cycle, finalize);
+
+    try emitLoadStack(allocator, bytes, .r10, value.operand);
     try emitLoadMemory(allocator, bytes, .r12, .r10, 0);
     var finalized: std.ArrayList(usize) = .empty;
     defer finalized.deinit(allocator);
@@ -1082,11 +1202,30 @@ fn emitClassDrop(
         try bytes.appendNTimes(allocator, 0, 4);
         try patchRelative(bytes.items, next_plan, bytes.items.len);
     }
+    const finalization_complete = bytes.items.len;
+    try emitLoadStack(allocator, bytes, .rsi, cycle_context_slot);
+    try emitRegisterBinary(allocator, bytes, 0x85, .rsi, .rsi);
+    try bytes.appendSlice(allocator, &.{ 0x0f, 0x84 });
+    const no_context = bytes.items.len;
+    try bytes.appendNTimes(allocator, 0, 4);
+    try emitImmediate(allocator, bytes, .rdi, 1);
+    try emitImmediate(allocator, bytes, .rdx, 0);
+    try emitImmediate(allocator, bytes, .rcx, 0);
+    try emitImmediate(allocator, bytes, .r8, 0);
+    try emitImmediate(allocator, bytes, .r9, 0);
+    try bytes.append(allocator, 0xe8);
+    const finish_call = bytes.items.len;
+    try bytes.appendNTimes(allocator, 0, 4);
+    try cycle_calls.append(allocator, .{ .call_at = finish_call });
+    try emitImmediate(allocator, bytes, .rdx, 0);
     const done = bytes.items.len;
-    for (finalized.items) |site| try patchRelative(bytes.items, site, done);
+    for (finalized.items) |site| try patchRelative(bytes.items, site, finalization_complete);
     try patchRelative(bytes.items, already_released, done);
-    try patchRelative(bytes.items, still_referenced, done);
+    try patchRelative(bytes.items, rooted, done);
     try patchRelative(bytes.items, already_claimed, done);
+    try patchRelative(bytes.items, cycle_claimed, done);
+    try patchRelative(bytes.items, cycle_unavailable, done);
+    try patchRelative(bytes.items, no_context, done);
 }
 
 fn emitRuntimeFailure(allocator: Allocator, bytes: *std.ArrayList(u8), epilogue: *std.ArrayList(EpilogueFixup)) Allocator.Error!void {
@@ -1377,12 +1516,25 @@ fn emitResourceDropPointer(
     const still_referenced = bytes.items.len;
     try bytes.appendNTimes(allocator, 0, 4);
 
-    try emitImmediate(allocator, bytes, .rax, 1);
-    try bytes.appendSlice(allocator, &.{ 0x49, 0x87, 0x42, @intCast(state_offset) });
-    try emitRegisterBinary(allocator, bytes, 0x85, .rax, .rax);
-    try bytes.appendSlice(allocator, &.{ 0x0f, 0x85 });
+    const claim_retry = bytes.items.len;
+    try emitLoadMemory(allocator, bytes, .rax, .r10, state_offset);
+    try emitImmediate(allocator, bytes, .rcx, 2);
+    try emitRegisterBinary(allocator, bytes, 0x39, .rax, .rcx);
+    try bytes.appendSlice(allocator, &.{ 0x0f, 0x84 });
+    const tracing = bytes.items.len;
+    try bytes.appendNTimes(allocator, 0, 4);
+    try emitImmediate(allocator, bytes, .rcx, 1);
+    try emitRegisterBinary(allocator, bytes, 0x39, .rax, .rcx);
+    try bytes.appendSlice(allocator, &.{ 0x0f, 0x84 });
     const already_claimed = bytes.items.len;
     try bytes.appendNTimes(allocator, 0, 4);
+    try emitImmediate(allocator, bytes, .r11, 1);
+    try bytes.appendSlice(allocator, &.{ 0xf0, 0x4d, 0x0f, 0xb1, 0x5a, @intCast(state_offset) });
+    try bytes.appendSlice(allocator, &.{ 0x0f, 0x85 });
+    const claim_conflicted = bytes.items.len;
+    try bytes.appendNTimes(allocator, 0, 4);
+    try patchRelative(bytes.items, tracing, claim_retry);
+    try patchRelative(bytes.items, claim_conflicted, claim_retry);
     try emitLoadMemory(allocator, bytes, .rsi, .r10, byte_count_offset);
     try emitDeallocation(allocator, bytes, import_sites, platform, .r10, .rsi);
 

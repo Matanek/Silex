@@ -128,6 +128,26 @@ pub fn build(b: *std.Build) void {
         "pub const object_bytes = @embedFile(\"silex-cycle-runtime.macho\");\n",
     );
     module.addAnonymousImport("cycle_runtime_object", .{ .root_source_file = cycle_runtime_import });
+    const cycle_runtime_x64_module = b.createModule(.{
+        .root_source_file = b.path("Runtime/CycleCollector.zig"),
+        .target = float_runtime_x64_target,
+        .optimize = .ReleaseSmall,
+        .strip = true,
+        .unwind_tables = .none,
+        .red_zone = false,
+    });
+    const cycle_runtime_x64 = b.addExecutable(.{
+        .name = "silex-cycle-runtime-x64",
+        .root_module = cycle_runtime_x64_module,
+    });
+    cycle_runtime_x64.entry = .{ .symbol_name = "silex_cycle_x64" };
+    const cycle_runtime_x64_files = b.addWriteFiles();
+    _ = cycle_runtime_x64_files.addCopyFile(cycle_runtime_x64.getEmittedBin(), "silex-cycle-runtime-x64.elf");
+    const cycle_runtime_x64_import = cycle_runtime_x64_files.add(
+        "CycleRuntimeX64Object.zig",
+        "pub const object_bytes = @embedFile(\"silex-cycle-runtime-x64.elf\");\n",
+    );
+    module.addAnonymousImport("cycle_runtime_x64_object", .{ .root_source_file = cycle_runtime_x64_import });
     const executable = b.addExecutable(.{
         .name = "silex",
         .root_module = module,
@@ -199,6 +219,14 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const deep_copy_test_command = b.addRunArtifact(deep_copy_tests);
+    const cycle_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("Runtime/CycleCollector.zig"),
+            .target = runtime_target,
+            .optimize = .Debug,
+        }),
+    });
+    const cycle_test_command = b.addRunArtifact(cycle_tests);
     const language_test_command = b.addRunArtifact(executable);
     language_test_command.addArg("test");
     language_test_command.addDirectoryArg(b.path("../Tests"));
@@ -208,6 +236,7 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run compiler and Silex language tests");
     test_step.dependOn(&test_command.step);
     test_step.dependOn(&deep_copy_test_command.step);
+    test_step.dependOn(&cycle_test_command.step);
     test_step.dependOn(&language_test_command.step);
 
     const lsp_test_module = b.createModule(.{
@@ -227,6 +256,7 @@ pub fn build(b: *std.Build) void {
     // requested mode without installing it into zig-out/bin.
     check_step.dependOn(&test_command.step);
     check_step.dependOn(&deep_copy_test_command.step);
+    check_step.dependOn(&cycle_test_command.step);
     check_step.dependOn(&language_test_command.step);
     check_step.dependOn(&lsp_test_command.step);
     check_step.dependOn(&optimizer_oracle_test_command.step);

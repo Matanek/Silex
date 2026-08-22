@@ -1,3 +1,6 @@
+const std = @import("std");
+const builtin = @import("builtin");
+
 const type_base_mask: u64 = 0x00ffffff;
 const optional_depth_shift: u6 = 24;
 const structure_base: u64 = 0x100;
@@ -8,6 +11,9 @@ const entry_words: usize = 4;
 const class_header_words: usize = 4;
 const list_header_words: usize = 5;
 const page_bytes: usize = 0x4000;
+
+const AllocateFunction = *const fn (usize) callconv(.c) ?[*]u64;
+const ReleaseFunction = *const fn ([*]u8, usize) callconv(.c) void;
 
 fn optionalChild(type_value: u64) ?u64 {
     const depth = type_value >> optional_depth_shift;
@@ -31,6 +37,9 @@ const Context = struct {
     nodes: [*]Node,
     count: usize,
     capacity: usize,
+    node_byte_count: usize,
+    allocate_function: AllocateFunction,
+    release_function: ReleaseFunction,
 
     fn entry(self: *const Context, type_value: u64) [*]const u64 {
         return self.model + 1 + @as(usize, @intCast(type_value - structure_base)) * entry_words;
@@ -46,6 +55,14 @@ const Context = struct {
     fn data(self: *const Context, entry_value: [*]const u64) [*]const u64 {
         return self.model + @as(usize, @intCast(entry_value[2]));
     }
+
+    fn allocate(self: *const Context, byte_count: usize) ?[*]u8 {
+        return @ptrCast(self.allocate_function(byte_count) orelse return null);
+    }
+
+    fn release(self: *const Context, address: [*]u8, byte_count: usize) void {
+        self.release_function(address, byte_count);
+    }
 };
 
 const AddResult = enum { added, existing, failed };
@@ -57,14 +74,42 @@ pub fn main() void {}
 /// Operation 1 releases the temporary tracing context after ordinary generated
 /// finalizers have cascaded through the component.
 export fn silex_cycle(operation: u64, value: u64, model: [*]const u64, type_value: u64) callconv(.c) u64 {
+    return cycle(operation, value, model, type_value, systemAllocate, systemRelease);
+}
+
+export fn silex_cycle_x64(
+    operation: u64,
+    value: u64,
+    model: [*]const u64,
+    type_value: u64,
+    allocate_function: AllocateFunction,
+    release_function: ReleaseFunction,
+) callconv(.c) u64 {
+    return cycle(operation, value, model, type_value, allocate_function, release_function);
+}
+
+fn cycle(
+    operation: u64,
+    value: u64,
+    model: [*]const u64,
+    type_value: u64,
+    allocate_function: AllocateFunction,
+    release_function: ReleaseFunction,
+) u64 {
     if (operation != 0) {
         finish(@ptrFromInt(value));
         return 0;
     }
-    return @intFromPtr(prepare(@ptrFromInt(value), model, type_value) orelse return 0);
+    return @intFromPtr(prepare(@ptrFromInt(value), model, type_value, allocate_function, release_function) orelse return 0);
 }
 
-fn prepare(candidate: [*]u64, model: [*]const u64, type_value: u64) ?*Context {
+fn prepare(
+    candidate: [*]u64,
+    model: [*]const u64,
+    type_value: u64,
+    allocate_function: AllocateFunction,
+    release_function: ReleaseFunction,
+) ?*Context {
     const state: *u64 = @ptrCast(candidate + 3);
     if (@cmpxchgStrong(u64, state, 0, 2, .acq_rel, .acquire) != null) return null;
     var probe: Context = undefined;
@@ -72,18 +117,24 @@ fn prepare(candidate: [*]u64, model: [*]const u64, type_value: u64) ?*Context {
     probe.nodes = undefined;
     probe.count = 0;
     probe.capacity = 0;
+    probe.node_byte_count = 0;
+    probe.allocate_function = allocate_function;
+    probe.release_function = release_function;
     const graph_kind = classGraphKind(&probe, candidate, type_value, 0);
     if (graph_kind != .class_graph) return reject(candidate, null, if (graph_kind == .none) 4 else 0);
-    const context_mapping = allocate(page_bytes) orelse return reject(candidate, null, 0);
+    const context_mapping: [*]u8 = @ptrCast(allocate_function(page_bytes) orelse return reject(candidate, null, 0));
     const context: *Context = @ptrCast(@alignCast(context_mapping));
-    const node_mapping = allocate(page_bytes) orelse {
-        release(context_mapping, page_bytes);
+    const node_mapping: [*]u8 = @ptrCast(allocate_function(page_bytes) orelse {
+        release_function(context_mapping, page_bytes);
         return reject(candidate, null, 0);
-    };
+    });
     context.model = model;
     context.nodes = @ptrCast(@alignCast(node_mapping));
     context.count = 0;
     context.capacity = page_bytes / @sizeOf(Node);
+    context.node_byte_count = page_bytes;
+    context.allocate_function = allocate_function;
+    context.release_function = release_function;
     if (addNode(context, candidate, type_value, false) != .added or !traceClass(context, candidate, type_value)) {
         releaseClaims(context);
         discard(context);
@@ -243,8 +294,8 @@ fn mergeGraphKind(left: GraphKind, right: GraphKind) GraphKind {
 }
 
 fn discard(context: *Context) void {
-    release(@ptrCast(context.nodes), context.capacity * @sizeOf(Node));
-    release(@ptrCast(context), page_bytes);
+    context.release(@ptrCast(context.nodes), context.node_byte_count);
+    context.release(@ptrCast(context), page_bytes);
 }
 
 fn addNode(context: *Context, address: [*]u64, type_value: u64, incoming: bool) AddResult {
@@ -308,13 +359,15 @@ fn releaseClaims(context: *Context) void {
 }
 
 fn grow(context: *Context) bool {
-    const new_capacity = context.capacity * 2;
-    const mapping = allocate(new_capacity * @sizeOf(Node)) orelse return false;
+    const new_byte_count = context.node_byte_count * 2;
+    const new_capacity = new_byte_count / @sizeOf(Node);
+    const mapping = context.allocate(new_byte_count) orelse return false;
     const nodes: [*]Node = @ptrCast(@alignCast(mapping));
     for (context.nodes[0..context.count], 0..) |node, index| nodes[index] = node;
-    release(@ptrCast(context.nodes), context.capacity * @sizeOf(Node));
+    context.release(@ptrCast(context.nodes), context.node_byte_count);
     context.nodes = nodes;
     context.capacity = new_capacity;
+    context.node_byte_count = new_byte_count;
     return true;
 }
 
@@ -439,7 +492,8 @@ fn classBytes(object: [*]u64, data: [*]const u64) ?usize {
     return null;
 }
 
-fn allocate(byte_count: usize) ?[*]u8 {
+fn systemAllocate(byte_count: usize) callconv(.c) ?[*]u64 {
+    if (comptime builtin.cpu.arch != .aarch64 or builtin.os.tag != .macos) return null;
     var result: usize = 0;
     asm volatile ("svc #0x80"
         : [result] "={x0}" (result),
@@ -455,11 +509,94 @@ fn allocate(byte_count: usize) ?[*]u8 {
     return @ptrFromInt(result);
 }
 
-fn release(address: [*]u8, byte_count: usize) void {
+fn systemRelease(address: [*]u8, byte_count: usize) callconv(.c) void {
+    if (comptime builtin.cpu.arch != .aarch64 or builtin.os.tag != .macos) return;
     _ = asm volatile ("svc #0x80"
         : [result] "={x0}" (-> usize),
         : [address] "{x0}" (@intFromPtr(address)),
           [size] "{x1}" (byte_count),
           [number] "{x16}" (@as(usize, 73)),
         : .{ .memory = true });
+}
+
+fn testAllocate(byte_count: usize) callconv(.c) ?[*]u64 {
+    if (!builtin.is_test) return null;
+    const words = std.testing.allocator.alloc(u64, byte_count / @sizeOf(u64)) catch return null;
+    return words.ptr;
+}
+
+fn testRelease(address: [*]u8, byte_count: usize) callconv(.c) void {
+    if (!builtin.is_test) return;
+    const words: [*]u64 = @ptrCast(@alignCast(address));
+    std.testing.allocator.free(words[0 .. byte_count / @sizeOf(u64)]);
+}
+
+test "X64 callbacks prove and commit a direct class cycle" {
+    const class_type = structure_base;
+    const optional_class_type = (@as(u64, 1) << optional_depth_shift) | class_type;
+    const structure: u64 = 42;
+    const model = [_]u64{
+        1,
+        @intFromEnum(Kind.class),
+        1,
+        5,
+        0,
+        1,
+        structure,
+        2,
+        1,
+        optional_class_type,
+    };
+    var first = [_]u64{ structure, 0, 1, 0, 1, 0 };
+    var second = [_]u64{ structure, 0, 1, 0, 1, 0 };
+    first[5] = @intFromPtr(&second);
+    second[5] = @intFromPtr(&first);
+
+    const context = silex_cycle_x64(
+        0,
+        @intFromPtr(&first),
+        &model,
+        class_type,
+        testAllocate,
+        testRelease,
+    );
+    try std.testing.expect(context != 0);
+    try std.testing.expectEqual(@as(u64, 1), first[3]);
+    try std.testing.expectEqual(@as(u64, 3), second[3]);
+    try std.testing.expectEqual(@as(u64, 0), first[2]);
+    try std.testing.expectEqual(@as(u64, 1), second[2]);
+    _ = silex_cycle_x64(1, context, &model, class_type, testAllocate, testRelease);
+}
+
+test "X64 callbacks cache a negative proof for an externally reached cycle" {
+    const class_type = structure_base;
+    const optional_class_type = (@as(u64, 1) << optional_depth_shift) | class_type;
+    const structure: u64 = 42;
+    const model = [_]u64{
+        1,
+        @intFromEnum(Kind.class),
+        1,
+        5,
+        0,
+        1,
+        structure,
+        2,
+        1,
+        optional_class_type,
+    };
+    var first = [_]u64{ structure, 0, 1, 0, 1, 0 };
+    var second = [_]u64{ structure, 1, 1, 0, 1, 0 };
+    first[5] = @intFromPtr(&second);
+    second[5] = @intFromPtr(&first);
+
+    try std.testing.expectEqual(@as(u64, 0), silex_cycle_x64(
+        0,
+        @intFromPtr(&first),
+        &model,
+        class_type,
+        testAllocate,
+        testRelease,
+    ));
+    try std.testing.expectEqual(@as(u64, 4), first[3]);
+    try std.testing.expectEqual(@as(u64, 0), second[3]);
 }
