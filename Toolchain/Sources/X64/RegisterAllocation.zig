@@ -58,7 +58,7 @@ pub fn allocate(allocator: Allocator, function: Machine.Function) Allocator.Erro
         var used = [_]bool{false} ** registers.len;
         var active_index: usize = 0;
         while (active_index < active.items.len) {
-            if (active.items[active_index].last <= interval.first) {
+            if (active.items[active_index].last < interval.first) {
                 _ = active.swapRemove(active_index);
                 continue;
             }
@@ -162,4 +162,27 @@ test "allocate X64 volatile scalar residences and spill incompatible functions" 
         .frame_size = 16,
         .instructions = &incompatible,
     })).len);
+}
+
+test "keep operands used by the same X64 instruction in distinct residences" {
+    const instructions = [_]Machine.Instruction{
+        .{ .binary = .{ .result = 2, .operator = .add, .left = 0, .right = 1 } },
+        .{ .return_value = .{ .start = 2, .width = 1 } },
+    };
+    const residences = try allocate(std.testing.allocator, .{
+        .name = "sum",
+        .parameter_count = 2,
+        .parameters = &.{
+            .{ .start = 0, .width = 1 },
+            .{ .start = 1, .width = 1 },
+        },
+        .return_type = .int,
+        .slot_count = 3,
+        .frame_size = 32,
+        .instructions = &instructions,
+    });
+    defer std.testing.allocator.free(residences);
+    try std.testing.expect(residences[0] != null);
+    try std.testing.expect(residences[1] != null);
+    try std.testing.expect(residences[0] != residences[1]);
 }
