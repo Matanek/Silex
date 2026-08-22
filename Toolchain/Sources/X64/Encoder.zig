@@ -1701,7 +1701,7 @@ fn emitBytesLiteral(
     if (count != 0) {
         try emitStringAddress(allocator, bytes, data_fixups, value.string, value.result);
         try emitLoadStack(allocator, bytes, .rbx, value.result);
-        try emitAddImmediateRegister(allocator, bytes, .rbx, list_header_size);
+        try emitAddImmediateRegister(allocator, bytes, .rbx, Machine.slot_size);
         try emitMoveRegister(allocator, bytes, .r14, .r15);
         try emitAddImmediateRegister(allocator, bytes, .r14, list_header_size);
         try emitImmediate(allocator, bytes, .rsi, count);

@@ -78,6 +78,15 @@ func dynamic_class_total() int {
     return value.total(1, 2, 3, 4, 5, 6, 7, 8)
 }
 
+func verify_embedded_bytes() {
+    let source = embed_bytes("X64Portability.sx")
+    assert(source.count() > 300)
+    assert(source[0] == 102 as uint8)
+    assert(source[1] == 117 as uint8)
+    assert(source[2] == 110 as uint8)
+    assert(source[3] == 99 as uint8)
+}
+
 func verify_deep_copy() {
     var state = CopyState(value:5)
     var source = CopyGraph(first:state, again:state, values:[state, state])
@@ -192,6 +201,10 @@ test "execute direct indirect and dynamic calls beyond x64 registers" {
     assert(callback_total() == 55)
     assert(dynamic_total() == 42)
     assert(dynamic_class_total() == 42)
+}
+
+test "preserve embedded byte contents on x64" {
+    verify_embedded_bytes()
 }
 
 test "replace and preserve an aliased x64 list" {
