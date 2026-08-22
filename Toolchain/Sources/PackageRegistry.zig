@@ -891,27 +891,27 @@ test "install tagged package dependencies from registered Git repositories" {
     try temporary.dir.createDirPath(std.testing.io, "Registry");
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "STD/Package.json",
-        .data = "{\"name\":\"STD\",\"version\":\"1.0.0\",\"requires\":{\"silex\":\">=0.38.0 <0.39.0\"}}",
+        .data = "{\"name\":\"STD\",\"version\":\"1.0.0\",\"requires\":{\"silex\":\">=0.38.0\"}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "STD/Module/Text.sx", .data = "public func value() int { return 1 }" });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Package.json",
-        .data = "{\"name\":\"GFX\",\"version\":\"2.0.0\",\"requires\":{\"silex\":\">=0.38.0 <0.39.0\"},\"extensions\":{\"GFX.UI\":{\"friend\":true,\"suite\":true,\"merge\":true}},\"catalogs\":[\"GFX.Plugins\"],\"dependencies\":{\"STD\":\"^1.0.0\"},\"devDependencies\":{\"GFX.Dev\":\"^1.0.0\"}}",
+        .data = "{\"name\":\"GFX\",\"version\":\"2.0.0\",\"requires\":{\"silex\":\">=0.38.0\"},\"extensions\":{\"GFX.UI\":{\"friend\":true,\"suite\":true,\"merge\":true}},\"catalogs\":[\"GFX.Plugins\"],\"dependencies\":{\"STD\":\"^1.0.0\"},\"devDependencies\":{\"GFX.Dev\":\"^1.0.0\"}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "GFX/Module/Drawing.sx", .data = "public func value() int { return 2 }" });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX.Audio/Package.json",
-        .data = "{\"name\":\"GFX.Audio\",\"version\":\"1.0.0\",\"requires\":{\"silex\":\">=0.38.0 <0.39.0\"},\"dependencies\":{\"GFX\":\"^3.0.0\"}}",
+        .data = "{\"name\":\"GFX.Audio\",\"version\":\"1.0.0\",\"requires\":{\"silex\":\">=0.38.0\"},\"dependencies\":{\"GFX\":\"^3.0.0\"}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "GFX.Audio/Module/@Module.sx", .data = "public func value() int { return 5 }" });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX.UI/Package.json",
-        .data = "{\"name\":\"GFX.UI\",\"version\":\"1.0.0\",\"requires\":{\"silex\":\">=0.38.0 <0.39.0\"},\"dependencies\":{\"GFX\":\"^2.0.0\"}}",
+        .data = "{\"name\":\"GFX.UI\",\"version\":\"1.0.0\",\"requires\":{\"silex\":\">=0.38.0\"},\"dependencies\":{\"GFX\":\"^2.0.0\"}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "GFX.UI/Module/@Module.sx", .data = "public func value() int { return 3 }" });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX.Dev/Package.json",
-        .data = "{\"name\":\"GFX.Dev\",\"version\":\"1.0.0\",\"requires\":{\"silex\":\">=0.38.0 <0.39.0\"}}",
+        .data = "{\"name\":\"GFX.Dev\",\"version\":\"1.0.0\",\"requires\":{\"silex\":\">=0.38.0\"}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "GFX.Dev/Module/@Module.sx", .data = "public func value() int { return 4 }" });
     const relative_base = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
@@ -937,7 +937,7 @@ test "install tagged package dependencies from registered Git repositories" {
     try testGit(allocator, gfx_root, &.{ "tag", "v2.0.0" });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Package.json",
-        .data = "{\"name\":\"GFX\",\"version\":\"2.1.0\",\"requires\":{\"silex\":\">=0.38.0 <0.39.0\"},\"extensions\":{\"GFX.Audio\":{\"suite\":true},\"GFX.UI\":{\"friend\":true,\"suite\":true,\"merge\":true}},\"catalogs\":[\"GFX.Plugins\"],\"dependencies\":{\"STD\":\"^1.0.0\"},\"devDependencies\":{\"GFX.Dev\":\"^1.0.0\"}}",
+        .data = "{\"name\":\"GFX\",\"version\":\"2.1.0\",\"requires\":{\"silex\":\">=0.38.0\"},\"extensions\":{\"GFX.Audio\":{\"suite\":true},\"GFX.UI\":{\"friend\":true,\"suite\":true,\"merge\":true}},\"catalogs\":[\"GFX.Plugins\"],\"dependencies\":{\"STD\":\"^1.0.0\"},\"devDependencies\":{\"GFX.Dev\":\"^1.0.0\"}}",
     });
     try testGit(allocator, gfx_root, &.{ "add", "Package.json" });
     try testGit(allocator, gfx_root, &.{ "-c", "user.name=Silex Test", "-c", "user.email=test@silex.local", "commit", "--quiet", "-m", "GFX 2.1" });
@@ -954,7 +954,7 @@ test "install tagged package dependencies from registered Git repositories" {
     try testGit(allocator, ui_root, &.{ "tag", "v1.0.0" });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX.UI/Package.json",
-        .data = "{\"name\":\"GFX.UI\",\"version\":\"2.0.0\",\"requires\":{\"silex\":\">=0.38.0 <0.39.0\"},\"dependencies\":{\"GFX\":\"^3.0.0\"}}",
+        .data = "{\"name\":\"GFX.UI\",\"version\":\"2.0.0\",\"requires\":{\"silex\":\">=0.38.0\"},\"dependencies\":{\"GFX\":\"^3.0.0\"}}",
     });
     try testGit(allocator, ui_root, &.{ "add", "Package.json" });
     try testGit(allocator, ui_root, &.{ "-c", "user.name=Silex Test", "-c", "user.email=test@silex.local", "commit", "--quiet", "-m", "GFX.UI 2" });

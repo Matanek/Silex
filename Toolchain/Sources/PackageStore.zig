@@ -378,7 +378,7 @@ test "install copies an immutable package without repository state" {
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Checkout/Package.json",
         .data =
-        \\{"name":"STD","version":"1.2.0","requires":{"silex":">=0.38.0 <0.39.0"}}
+        \\{"name":"STD","version":"1.2.0","requires":{"silex":">=0.38.0"}}
         ,
     });
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Checkout/Module/Text.sx", .data = "public module Text {}" });
@@ -406,11 +406,11 @@ test "published package extension permissions and catalogs require an intact sou
     try temporary.dir.createDirPath(std.testing.io, "App");
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Package.json",
-        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"requires\":{\"silex\":\">=0.38.0 <0.39.0\"},\"extensions\":{\"GFX.UI\":{\"friend\":true,\"suite\":true,\"merge\":true}},\"catalogs\":[\"GFX.Plugins\"]}",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"requires\":{\"silex\":\">=0.38.0\"},\"extensions\":{\"GFX.UI\":{\"friend\":true,\"suite\":true,\"merge\":true}},\"catalogs\":[\"GFX.Plugins\"]}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX.UI/Package.json",
-        .data = "{\"name\":\"GFX.UI\",\"version\":\"1.0.0\",\"requires\":{\"silex\":\">=0.38.0 <0.39.0\"},\"dependencies\":{\"GFX\":\"=1.0.0\"}}",
+        .data = "{\"name\":\"GFX.UI\",\"version\":\"1.0.0\",\"requires\":{\"silex\":\">=0.38.0\"},\"dependencies\":{\"GFX\":\"=1.0.0\"}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "App/Package.json",
@@ -443,7 +443,7 @@ test "published package extension permissions and catalogs require an intact sou
 
     try Io.Dir.cwd().writeFile(std.testing.io, .{
         .sub_path = try std.fs.path.join(allocator, &.{ gfx_result.destination, "Package.json" }),
-        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"requires\":{\"silex\":\">=0.38.0 <0.39.0\"},\"extensions\":{\"GFX.UI\":{}}}",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.0.0\",\"requires\":{\"silex\":\">=0.38.0\"},\"extensions\":{\"GFX.UI\":{}}}",
     });
     resolver = Packages.Resolver.init(allocator, std.testing.io, packages_root);
     try std.testing.expectError(error.InvalidPackageGraph, resolver.resolve(app));
@@ -477,7 +477,7 @@ test "link exposes live package sources and unlink removes the override" {
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Checkout/Package.json",
         .data =
-        \\{"name":"STD","version":"1.2.0","requires":{"silex":">=0.38.0 <0.39.0"}}
+        \\{"name":"STD","version":"1.2.0","requires":{"silex":">=0.38.0"}}
         ,
     });
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Checkout/Module/Live.sx", .data = "public module Live {}" });
@@ -494,7 +494,7 @@ test "link exposes live package sources and unlink removes the override" {
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Checkout/Package.json",
         .data =
-        \\{"name":"STD","version":"2.0.0","requires":{"silex":">=0.38.0 <0.39.0"}}
+        \\{"name":"STD","version":"2.0.0","requires":{"silex":">=0.38.0"}}
         ,
     });
     resolver = Packages.Resolver.init(allocator, std.testing.io, packages_root);
@@ -510,7 +510,7 @@ test "link exposes live package sources and unlink removes the override" {
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Checkout/Package.json",
         .data =
-        \\{"name":"STD","version":"1.2.0","requires":{"silex":">=0.38.0 <0.39.0"}}
+        \\{"name":"STD","version":"1.2.0","requires":{"silex":">=0.38.0"}}
         ,
     });
     _ = try manager.linkWorkspace(source, base, .macos_arm64);

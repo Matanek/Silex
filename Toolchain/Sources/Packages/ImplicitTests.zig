@@ -14,7 +14,7 @@ test "expose the newest compatible global package to a loose project" {
     try temporary.dir.createDirPath(std.testing.io, "Global/STD@0.17.0/Module");
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Global/STD@0.16.0/Package.json",
-        .data = "{\"name\":\"STD\",\"version\":\"0.16.0\",\"requires\":{\"silex\":\">=0.38.0 <0.39.0\"}}",
+        .data = "{\"name\":\"STD\",\"version\":\"0.16.0\",\"requires\":{\"silex\":\">=0.38.0\"}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Global/STD@0.16.2/Package.json",

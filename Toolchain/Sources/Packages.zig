@@ -1481,19 +1481,17 @@ test "resolve a versioned installed package as the project root" {
     try temporary.dir.createDirPath(std.testing.io, "Global/GFX@0.37.0/Module");
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Global/GFX@0.37.0/Package.json",
-        .data = "{\"name\":\"GFX\",\"version\":\"0.37.0\",\"requires\":{\"silex\":\">=0.38.0 <0.39.0\"}}",
+        .data = "{\"name\":\"GFX\",\"version\":\"0.37.0\",\"requires\":{\"silex\":\">=0.38.0\"}}",
     });
     const global = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Global" });
     const root = try std.fs.path.join(allocator, &.{ global, "GFX@0.37.0" });
     var resolver = Resolver.init(allocator, std.testing.io, global);
-    resolver.toolchain_version = try Version.parse("0.38.0");
     const graph = try resolver.resolve(root);
     try std.testing.expectEqualStrings("GFX", graph.packages[0].name.?);
 
     try temporary.dir.rename("Global/GFX@0.37.0", temporary.dir, "Global/GFX@0.37.1", std.testing.io);
     const mismatched = try std.fs.path.join(allocator, &.{ global, "GFX@0.37.1" });
     resolver = Resolver.init(allocator, std.testing.io, global);
-    resolver.toolchain_version = try Version.parse("0.38.0");
     try std.testing.expectError(error.InvalidPackageGraph, resolver.resolve(mismatched));
     try std.testing.expectEqualStrings("local package folder and manifest name differ", resolver.diagnostic.?);
 }
@@ -2373,13 +2371,12 @@ test "resolve qualified identities literally from an injected global root" {
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Global/Silex.Bootstrap@0.1.7/Package.json",
-        .data = "{\"name\":\"Silex.Bootstrap\",\"version\":\"0.1.7\",\"requires\":{\"silex\":\">=0.38.0 <0.39.0\"}}",
+        .data = "{\"name\":\"Silex.Bootstrap\",\"version\":\"0.1.7\",\"requires\":{\"silex\":\">=0.38.0\"}}",
     });
     const base = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path });
     const app = try std.fs.path.join(allocator, &.{ base, "App" });
     const global = try std.fs.path.join(allocator, &.{ base, "Global" });
     var resolver = Resolver.init(allocator, std.testing.io, global);
-    resolver.toolchain_version = try Version.parse("0.38.0");
     try std.testing.expectError(error.InvalidPackageGraph, resolver.resolve(app));
     try std.testing.expectEqualStrings(
         "package 'Silex.Bootstrap' requires parent package 'Silex' to authorize its namespace",
@@ -2393,7 +2390,7 @@ test "resolve qualified identities literally from an injected global root" {
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Global/Silex@0.1.0/Package.json",
-        .data = "{\"name\":\"Silex\",\"version\":\"0.1.0\",\"requires\":{\"silex\":\">=0.38.0 <0.39.0\"},\"extensions\":{\"Silex.Bootstrap\":{}}}",
+        .data = "{\"name\":\"Silex\",\"version\":\"0.1.0\",\"requires\":{\"silex\":\">=0.38.0\"},\"extensions\":{\"Silex.Bootstrap\":{}}}",
     });
     try temporary.dir.createDirPath(std.testing.io, "Global/Silex@0.1.0/.silex");
     const silex_manifest = try std.fs.path.join(allocator, &.{ global, "Silex@0.1.0", "Package.json" });
@@ -2407,7 +2404,6 @@ test "resolve qualified identities literally from an injected global root" {
         ),
     });
     resolver = Resolver.init(allocator, std.testing.io, global);
-    resolver.toolchain_version = try Version.parse("0.38.0");
     const graph = try resolver.resolve(app);
     try std.testing.expectEqualStrings("Silex.Bootstrap", graph.packages[2].name.?);
     try std.testing.expect(std.mem.endsWith(u8, graph.packages[2].root, "Silex.Bootstrap@0.1.7"));

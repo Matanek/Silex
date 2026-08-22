@@ -325,7 +325,7 @@ test "check validates a package without requiring or mutating Git" {
     try temporary.dir.createDirPath(std.testing.io, "GFX/Module");
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Package.json",
-        .data = "{\"name\":\"GFX\",\"version\":\"1.2.3\",\"requires\":{\"silex\":\">=0.38.0 <0.39.0\"}}",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.2.3\",\"requires\":{\"silex\":\">=0.38.0\"}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "GFX/Module/Drawing.sx", .data = "public func draw() {}\n" });
 
@@ -349,7 +349,7 @@ test "register prepares one identity without requiring a version tag" {
     try temporary.dir.createDirPath(std.testing.io, "Registry/scripts");
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "GFX/Package.json",
-        .data = "{\"name\":\"GFX\",\"version\":\"1.2.3\",\"requires\":{\"silex\":\">=0.38.0 <0.39.0\"}}",
+        .data = "{\"name\":\"GFX\",\"version\":\"1.2.3\",\"requires\":{\"silex\":\">=0.38.0\"}}",
     });
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "GFX/Module/Drawing.sx", .data = "public func draw() {}\n" });
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Registry/scripts/build-registry.mjs", .data = "// validator\n" });
