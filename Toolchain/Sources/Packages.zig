@@ -1030,10 +1030,24 @@ pub const Resolver = struct {
         }
         if (manifest.name) |name| {
             if (!Modules.validName(name)) return self.fail("invalid package identity");
-            if (!std.mem.eql(u8, try localRootName(self.allocator, self.io, root), name)) {
-                return self.fail("local package folder and manifest name differ");
-            }
+            if (std.mem.eql(u8, try localRootName(self.allocator, self.io, root), name)) return;
+            if (try self.matchesInstalledRoot(root, name, manifest.version.?)) return;
+            return self.fail("local package folder and manifest name differ");
         }
+    }
+
+    fn matchesInstalledRoot(self: *Resolver, root: []const u8, name: []const u8, version: Version) !bool {
+        const global_root = self.global_root orelse return false;
+        const canonical_root = try Io.Dir.cwd().realPathFileAlloc(self.io, root, self.allocator);
+        const canonical_global = try Io.Dir.cwd().realPathFileAlloc(self.io, global_root, self.allocator);
+        const parent = std.fs.path.dirname(canonical_root) orelse return false;
+        if (!std.mem.eql(u8, parent, canonical_global)) return false;
+        const expected = try std.fmt.allocPrint(
+            self.allocator,
+            "{s}@{d}.{d}.{d}",
+            .{ name, version.major, version.minor, version.patch },
+        );
+        return std.mem.eql(u8, std.fs.path.basename(canonical_root), expected);
     }
 
     fn loadOptional(self: *Resolver, path: []const u8) !?ParsedManifest {
@@ -1417,6 +1431,32 @@ test "resolve the current directory name for local package identity" {
         std.fs.path.basename(canonical),
         try localRootName(arena.allocator(), std.testing.io, "."),
     );
+}
+
+test "resolve a versioned installed package as the project root" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "Global/GFX@0.37.0/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Global/GFX@0.37.0/Package.json",
+        .data = "{\"name\":\"GFX\",\"version\":\"0.37.0\",\"requires\":{\"silex\":\">=0.38.0 <0.39.0\"}}",
+    });
+    const global = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Global" });
+    const root = try std.fs.path.join(allocator, &.{ global, "GFX@0.37.0" });
+    var resolver = Resolver.init(allocator, std.testing.io, global);
+    resolver.toolchain_version = try Version.parse("0.38.0");
+    const graph = try resolver.resolve(root);
+    try std.testing.expectEqualStrings("GFX", graph.packages[0].name.?);
+
+    try temporary.dir.rename("Global/GFX@0.37.0", temporary.dir, "Global/GFX@0.37.1", std.testing.io);
+    const mismatched = try std.fs.path.join(allocator, &.{ global, "GFX@0.37.1" });
+    resolver = Resolver.init(allocator, std.testing.io, global);
+    resolver.toolchain_version = try Version.parse("0.38.0");
+    try std.testing.expectError(error.InvalidPackageGraph, resolver.resolve(mismatched));
+    try std.testing.expectEqualStrings("local package folder and manifest name differ", resolver.diagnostic.?);
 }
 
 fn artifactSha256(artifacts: ?std.json.Value, target_name: []const u8, relative_path: []const u8) ?[]const u8 {
