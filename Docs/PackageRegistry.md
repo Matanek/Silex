@@ -3,8 +3,9 @@
 The public package registry is hosted at
 [`https://registry.silex-lang.org/v1/index.json`](https://registry.silex-lang.org/v1/index.json).
 It assigns each package name to one canonical Git repository. Versions,
-compatibility, dependencies, namespace extension permissions, and package contents
-remain owned by tagged commits in that repository.
+descriptions, authors, compatibility, dependencies, namespace extension
+permissions, and package contents remain owned by tagged commits in that
+repository.
 
 The generated registry index has this shape:
 
@@ -81,8 +82,9 @@ SILEX_REGISTRY_SOURCE=/absolute/path/to/Silex-Registry silex register path/to/Pa
 
 ## Prepare and tag versions
 
-1. Update and validate `Package.json`, including `version`, `requires.silex`,
-   dependencies, extension permissions, and `catalogs`.
+1. Update and validate `Package.json`, including `version`, `description`,
+   `authors`, `requires.silex`, dependencies, extension permissions, and
+   `catalogs`.
 2. Commit the complete package contents.
 3. Optionally validate the Silex package contract and display the expected tag:
 

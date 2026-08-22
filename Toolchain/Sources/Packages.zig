@@ -288,6 +288,8 @@ pub const Graph = struct {
 pub const ManifestInfo = struct {
     name: []const u8,
     version: Version,
+    description: ?[]const u8,
+    authors: []const []const u8,
     silex_requirement: SilexRequirement,
     extensions: []const ExtensionPolicy,
     catalogs: []const []const u8,
@@ -308,6 +310,8 @@ pub const Result = struct {
 const RawManifest = struct {
     name: ?[]const u8 = null,
     version: ?[]const u8 = null,
+    description: ?[]const u8 = null,
+    authors: ?std.json.Value = null,
     extensions: ?std.json.Value = null,
     friends: ?std.json.Value = null,
     catalogs: ?std.json.Value = null,
@@ -321,6 +325,8 @@ const RawManifest = struct {
 const ParsedManifest = struct {
     name: ?[]const u8,
     version: ?Version,
+    description: ?[]const u8,
+    authors: []const []const u8,
     extensions: []const ExtensionPolicy,
     catalogs: []const []const u8,
     silex_requirement: ?SilexRequirement,
@@ -429,6 +435,8 @@ pub const Resolver = struct {
         return .{
             .name = name,
             .version = version,
+            .description = manifest.description,
+            .authors = manifest.authors,
             .silex_requirement = requirement,
             .extensions = manifest.extensions,
             .catalogs = manifest.catalogs,
@@ -1101,6 +1109,35 @@ pub const Resolver = struct {
             null;
         if (raw.name) |name| if (!Modules.validName(name)) return self.fail("invalid package identity");
 
+        const description = if (raw.description) |description| description: {
+            if (!validMetadataLine(description)) {
+                return self.fail("description must be a non-empty single-line string without surrounding whitespace");
+            }
+            break :description description;
+        } else null;
+
+        var authors: std.ArrayList([]const u8) = .empty;
+        if (raw.authors) |value| {
+            const array = switch (value) {
+                .array => |array| array,
+                else => return self.fail("authors must be a non-empty array of names"),
+            };
+            if (array.items.len == 0) return self.fail("authors must be a non-empty array of names");
+            for (array.items) |item| {
+                const author = switch (item) {
+                    .string => |text| text,
+                    else => return self.fail("each author must be a name string"),
+                };
+                if (!validMetadataLine(author)) {
+                    return self.fail("each author must be a non-empty single-line string without surrounding whitespace");
+                }
+                for (authors.items) |existing| {
+                    if (std.mem.eql(u8, existing, author)) return self.fail("authors must be unique");
+                }
+                try authors.append(self.allocator, author);
+            }
+        }
+
         if (raw.friends != null) {
             return self.fail("friends moved into extension permissions; set friend inside the matching extensions entry");
         }
@@ -1208,6 +1245,8 @@ pub const Resolver = struct {
         return .{
             .name = raw.name,
             .version = version,
+            .description = description,
+            .authors = try authors.toOwnedSlice(self.allocator),
             .extensions = try extensions.toOwnedSlice(self.allocator),
             .catalogs = try catalogs.toOwnedSlice(self.allocator),
             .silex_requirement = silex_requirement,
@@ -1493,6 +1532,12 @@ fn belongsTo(module_name: []const u8, package_name: []const u8) bool {
             module_name[package_name.len] == '.');
 }
 
+fn validMetadataLine(text: []const u8) bool {
+    return text.len != 0 and
+        std.mem.trim(u8, text, " \t\r\n").len == text.len and
+        std.mem.indexOfAny(u8, text, "\r\n") == null;
+}
+
 pub fn validExtensionGrant(package_name: []const u8, grant: []const u8) bool {
     if (grant.len <= package_name.len + 1 or !std.mem.startsWith(u8, grant, package_name) or
         grant[package_name.len] != '.') return false;
@@ -1664,6 +1709,62 @@ fn writeTestArchive(directory: Io.Dir, io: Io, path: []const u8, target: TargetM
         std.mem.writeInt(u16, archive[70..72], 1, .little);
     }
     try directory.writeFile(io, .{ .sub_path = path, .data = &archive });
+}
+
+test "inspect optional package description and authors" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "Metadata/Module");
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Metadata/Package.json",
+        .data =
+        \\{
+        \\  "name": "Metadata",
+        \\  "version": "1.0.0",
+        \\  "description": "Package metadata fixture.",
+        \\  "authors": ["Matanek", "Silex contributors"],
+        \\  "requires": { "silex": ">=0.0.0" }
+        \\}
+        ,
+    });
+    const base = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Metadata" });
+    var resolver = Resolver.init(allocator, std.testing.io, null);
+    const manifest = try resolver.inspectPackage(base);
+    try std.testing.expectEqualStrings("Package metadata fixture.", manifest.description.?);
+    try std.testing.expectEqual(@as(usize, 2), manifest.authors.len);
+    try std.testing.expectEqualStrings("Matanek", manifest.authors[0]);
+    try std.testing.expectEqualStrings("Silex contributors", manifest.authors[1]);
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Metadata/Package.json",
+        .data = "{\"name\":\"Metadata\",\"version\":\"1.0.0\",\"description\":\" padded\",\"requires\":{\"silex\":\">=0.0.0\"}}",
+    });
+    resolver = Resolver.init(allocator, std.testing.io, null);
+    try std.testing.expectError(error.InvalidPackageGraph, resolver.inspectPackage(base));
+    try std.testing.expectEqualStrings(
+        "description must be a non-empty single-line string without surrounding whitespace",
+        resolver.diagnostic.?,
+    );
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Metadata/Package.json",
+        .data = "{\"name\":\"Metadata\",\"version\":\"1.0.0\",\"authors\":[\"Matanek\",\"Matanek\"],\"requires\":{\"silex\":\">=0.0.0\"}}",
+    });
+    resolver = Resolver.init(allocator, std.testing.io, null);
+    try std.testing.expectError(error.InvalidPackageGraph, resolver.inspectPackage(base));
+    try std.testing.expectEqualStrings("authors must be unique", resolver.diagnostic.?);
+
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Metadata/Package.json",
+        .data = "{\"name\":\"Metadata\",\"version\":\"1.0.0\",\"requires\":{\"silex\":\">=0.0.0\"}}",
+    });
+    resolver = Resolver.init(allocator, std.testing.io, null);
+    const legacy = try resolver.inspectPackage(base);
+    try std.testing.expectEqual(@as(?[]const u8, null), legacy.description);
+    try std.testing.expectEqual(@as(usize, 0), legacy.authors.len);
 }
 
 test "parse exact and caret stable versions" {

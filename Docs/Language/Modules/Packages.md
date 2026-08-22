@@ -80,11 +80,22 @@ Its directory name and manifest identity match:
 {
   "name": "Math",
   "version": "1.4.1",
+  "description": "Vectors, matrices, and numeric helpers for Silex programs.",
+  "authors": ["Ada", "Grace"],
   "requires": {
     "silex": ">=0.38.0 <0.39.0"
   }
 }
 ```
+
+`description` is an optional non-empty single line without surrounding
+whitespace. Keep it short enough to identify the package in search results and
+catalogs without replacing the README.
+
+`authors` is an optional non-empty array of unique, non-empty names. Its order
+is preserved. The field records attribution only: it grants no namespace,
+publication, registry, or source-access permission. Both metadata fields remain
+optional so historical tagged manifests stay valid.
 
 Qualified package names extend the namespace of each shorter package prefix.
 Packages reject independently distributed extensions by default, so `GFX` and
