@@ -87,11 +87,25 @@ pub fn addSubtractImmediateSetFlags(destination: Register, source: Register, imm
 }
 
 pub fn storeStack(source: Register, slot: Machine.Slot) u32 {
-    return 0xf9000000 | (@as(u32, slot) << 10) | (registerBits(.zero_or_sp) << 5) | registerBits(source);
+    const extended = slot >= Machine.direct_stack_slots;
+    const direct_slot: u12 = @intCast(if (extended)
+        slot - Machine.direct_stack_slots
+    else
+        slot);
+    const base: Register = if (extended) .x28 else .zero_or_sp;
+    return 0xf9000000 | (@as(u32, direct_slot) << 10) |
+        (registerBits(base) << 5) | registerBits(source);
 }
 
 pub fn loadStack(destination: Register, slot: Machine.Slot) u32 {
-    return 0xf9400000 | (@as(u32, slot) << 10) | (registerBits(.zero_or_sp) << 5) | registerBits(destination);
+    const extended = slot >= Machine.direct_stack_slots;
+    const direct_slot: u12 = @intCast(if (extended)
+        slot - Machine.direct_stack_slots
+    else
+        slot);
+    const base: Register = if (extended) .x28 else .zero_or_sp;
+    return 0xf9400000 | (@as(u32, direct_slot) << 10) |
+        (registerBits(base) << 5) | registerBits(destination);
 }
 
 pub fn storeByte(source: Register, base: Register) u32 {

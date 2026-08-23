@@ -14,10 +14,12 @@ pub const Result = struct {
     residences: []const ?u5,
     float_residences: []const ?u5,
     float_lane_residences: []const ?Machine.FloatLaneResidence,
-    frame_size: u16,
+    frame_size: u32,
 };
 
-/// Keeps scalar values in the callee-saved ARM64 registers x19...x28. The
+/// Keeps scalar values in the callee-saved ARM64 registers x19...x28. Large
+/// frames reserve x28 as the base of their second directly addressed window.
+/// The
 /// accepted instruction subset is deliberately explicit: every operation
 /// outside it keeps the entire function stack-resident until its encoder can
 /// consume and produce registered values safely.
@@ -83,11 +85,15 @@ pub fn allocate(allocator: Allocator, function: Machine.Function) (Allocator.Err
             try float_intervals.append(allocator, interval);
         } else try integer_intervals.append(allocator, interval);
     }
+    const integer_registers = if (function.slot_count >= Machine.direct_stack_slots)
+        &[_]u5{ 19, 20, 21, 22, 23, 24, 25, 26, 27, 16, 17, 0, 1, 2, 3, 4, 5, 6, 7, 8 }
+    else
+        &[_]u5{ 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 16, 17, 0, 1, 2, 3, 4, 5, 6, 7, 8 };
     try allocateGraph(
         allocator,
         residences,
         integer_intervals.items,
-        &.{ 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 16, 17, 0, 1, 2, 3, 4, 5, 6, 7, 8 },
+        integer_registers,
         function.instructions,
         function.slot_count,
     );

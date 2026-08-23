@@ -280,10 +280,10 @@ fn encodeFunction(
         }
     };
     try bytes.appendSlice(allocator, &.{ 0x55, 0x48, 0x89, 0xe5 });
-    const runtime_frame_size: u16 = if (enable_cycle_collector) 16 else 0;
-    const required_frame_size = std.math.add(u16, function.frame_size, runtime_frame_size) catch return error.InvalidMachineProgram;
-    const padded_frame_size = std.math.add(u16, required_frame_size, 15) catch return error.InvalidMachineProgram;
-    const encoded_frame_size = padded_frame_size & ~@as(u16, 15);
+    const runtime_frame_size: u32 = if (enable_cycle_collector) 16 else 0;
+    const required_frame_size = std.math.add(u32, function.frame_size, runtime_frame_size) catch return error.InvalidMachineProgram;
+    const padded_frame_size = std.math.add(u32, required_frame_size, 15) catch return error.InvalidMachineProgram;
+    const encoded_frame_size = padded_frame_size & ~@as(u32, 15);
     try emitFrameAllocation(allocator, bytes, platform, encoded_frame_size);
     const cycle_context_slot: Machine.Slot = @intCast(function.frame_size / Machine.slot_size);
     const argument_registers = [_]Register{ .rdi, .rsi, .rdx, .rcx, .r8, .r9, .r10, .r11 };
@@ -2761,9 +2761,9 @@ fn emitFrameAllocation(
     allocator: Allocator,
     bytes: *std.ArrayList(u8),
     platform: Platform,
-    frame_size: u16,
+    frame_size: u32,
 ) Allocator.Error!void {
-    var remaining: u32 = frame_size;
+    var remaining = frame_size;
     if (platform == .windows) {
         while (remaining > 4096) {
             try emitStackSubtraction(allocator, bytes, 4096);

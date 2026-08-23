@@ -108,3 +108,28 @@ test "execute answer directly on the ARM64 host" {
     try std.testing.expectEqual(@as(i64, 42), result.value);
     try std.testing.expectEqual(Machine.Status.success, result.status);
 }
+
+test "execute a function whose stack crosses the direct ARM64 slot window" {
+    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var source: std.ArrayList(u8) = .empty;
+    try source.appendSlice(allocator, "func answer() int {\n");
+    for (0..Machine.direct_stack_slots + 8) |index| {
+        try source.appendSlice(
+            allocator,
+            try std.fmt.allocPrint(allocator, "let value_{d}:int = {d}\n", .{ index, index }),
+        );
+    }
+    try source.appendSlice(
+        allocator,
+        "return value_4103\n}\nfunc main() {}\n",
+    );
+
+    const program = try compile(allocator, source.items);
+    try std.testing.expect(program.functions[0].slot_count > Machine.direct_stack_slots);
+    const result = try invoke(allocator, program, 0, &.{});
+    try std.testing.expectEqual(@as(i64, 4103), result.value);
+    try std.testing.expectEqual(Machine.Status.success, result.status);
+}

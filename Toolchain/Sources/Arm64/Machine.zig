@@ -7,12 +7,13 @@ const Allocator = std.mem.Allocator;
 
 pub const max_register_arguments = 8;
 pub const max_external_arguments = 10;
-pub const max_slots = 4095;
-pub const max_arguments = max_slots;
+pub const direct_stack_slots = 4096;
+pub const max_slots = direct_stack_slots * 2 - 2;
+pub const max_arguments = std.math.maxInt(u12);
 pub const slot_size = 8;
 
 pub const FunctionId = usize;
-pub const Slot = u12;
+pub const Slot = u13;
 pub const FloatLaneResidence = struct { register: u5, lane: u1, partner: Slot };
 /// Target-independent lane affinity produced from portable IR. A backend may
 /// select any profitable subset and may keep every lane scalar.
@@ -555,8 +556,8 @@ pub const Function = struct {
     return_aggregate: bool = false,
     recoverable_entry_result: bool = false,
     hidden_return_slot: ?Slot = null,
-    slot_count: u12,
-    frame_size: u16,
+    slot_count: Slot,
+    frame_size: u32,
     /// Release-only residence map indexed by virtual slot. Null keeps the
     /// value in its deterministic stack slot.
     register_slots: []const ?u5 = &.{},
@@ -612,14 +613,14 @@ pub fn checkedArgumentCount(value: usize) Error!u12 {
     return @intCast(value);
 }
 
-pub fn frameSize(slots: usize) Error!u16 {
+pub fn frameSize(slots: usize) Error!u32 {
     if (slots > max_slots) return error.FrameTooLarge;
     const bytes = slots * slot_size;
     return @intCast(std.mem.alignForward(usize, bytes, 16));
 }
 
-pub fn slotOffset(slot: Slot) u16 {
-    return @as(u16, slot) * slot_size;
+pub fn slotOffset(slot: Slot) u32 {
+    return @as(u32, slot) * slot_size;
 }
 
 pub fn validate(program: Program) Error!void {
@@ -1716,12 +1717,13 @@ fn requireSpan(function: Function, span: Span) Error!void {
 }
 
 test "allocate deterministic aligned stack homes" {
-    try std.testing.expectEqual(@as(u16, 0), slotOffset(0));
-    try std.testing.expectEqual(@as(u16, 16), slotOffset(2));
-    try std.testing.expectEqual(@as(u16, 0), try frameSize(0));
-    try std.testing.expectEqual(@as(u16, 16), try frameSize(1));
-    try std.testing.expectEqual(@as(u16, 16), try frameSize(2));
-    try std.testing.expectEqual(@as(u16, 32), try frameSize(3));
+    try std.testing.expectEqual(@as(u32, 0), slotOffset(0));
+    try std.testing.expectEqual(@as(u32, 16), slotOffset(2));
+    try std.testing.expectEqual(@as(u32, 0), try frameSize(0));
+    try std.testing.expectEqual(@as(u32, 16), try frameSize(1));
+    try std.testing.expectEqual(@as(u32, 16), try frameSize(2));
+    try std.testing.expectEqual(@as(u32, 32), try frameSize(3));
+    try std.testing.expectEqual(@as(u32, 65_520), try frameSize(max_slots));
 }
 
 test "validate function identities calls and slots" {

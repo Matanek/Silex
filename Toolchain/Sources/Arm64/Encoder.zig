@@ -590,17 +590,18 @@ fn encodeFunction(
         const load = function.instructions[cursor.load_index].collection_load;
         if (eagerCollectionWidth(function, cursor.load_index, load) != 2) collection_cursor = null;
     }
-    const runtime_frame_size: u16 = if (enable_cycle_collector) 16 else 0;
-    const saved_register_count = calleeSavedRegisterCount(function);
-    const saved_register_size: u16 = @intCast(std.mem.alignForward(usize, saved_register_count * Machine.slot_size, 16));
-    const local_frame_size = std.math.add(u16, function.frame_size, runtime_frame_size) catch return error.InvalidMachineProgram;
-    const encoded_frame_size = std.math.add(u16, local_frame_size, saved_register_size) catch return error.InvalidMachineProgram;
+    const runtime_frame_size: u32 = if (enable_cycle_collector) 16 else 0;
+    const extended_frame = function.slot_count >= Machine.direct_stack_slots;
+    const saved_register_count = calleeSavedRegisterCount(function, extended_frame);
+    const saved_register_size: u32 = @intCast(std.mem.alignForward(usize, saved_register_count * Machine.slot_size, 16));
+    const local_frame_size = std.math.add(u32, function.frame_size, runtime_frame_size) catch return error.InvalidMachineProgram;
+    const encoded_frame_size = std.math.add(u32, local_frame_size, saved_register_size) catch return error.InvalidMachineProgram;
     const cycle_context_slot: Machine.Slot = @intCast(function.frame_size / Machine.slot_size);
     try words.append(allocator, saveFrame());
     try words.append(allocator, moveFramePointer());
     try emitStackAdjustment(allocator, words, encoded_frame_size, false);
     var saved_register_index: usize = 0;
-    for (callee_saved_registers) |register| if (functionUsesRegister(function, register)) {
+    for (callee_saved_registers) |register| if (shouldSaveRegister(function, register, extended_frame)) {
         try emitStoreAtOffset(
             allocator,
             words,
@@ -621,6 +622,13 @@ fn encodeFunction(
         );
         saved_register_index += 1;
     };
+    if (extended_frame) try emitBaseAddress(
+        allocator,
+        words,
+        .x28,
+        .zero_or_sp,
+        Machine.direct_stack_slots * Machine.slot_size,
+    );
     if (function.hidden_return_slot) |slot| try words.append(allocator, storeStack(.x15, slot));
     for (function.parameters, 0..) |parameter, index| {
         const incoming: Register = if (index < Machine.max_register_arguments) @enumFromInt(index) else .x10;
@@ -1626,7 +1634,7 @@ fn encodeFunction(
 
     const epilogue_label = words.items.len;
     saved_register_index = 0;
-    for (callee_saved_registers) |register| if (functionUsesRegister(function, register)) {
+    for (callee_saved_registers) |register| if (shouldSaveRegister(function, register, extended_frame)) {
         try emitLoadAtOffset(
             allocator,
             words,
@@ -1676,11 +1684,18 @@ const callee_saved_registers = [_]Register{
 };
 const callee_saved_float_registers = [_]Register{ .x8, .x13, .x14, .x15 };
 
-fn calleeSavedRegisterCount(function: Machine.Function) usize {
+fn calleeSavedRegisterCount(function: Machine.Function, extended_frame: bool) usize {
     var count: usize = 0;
-    for (callee_saved_registers) |register| count += @intFromBool(functionUsesRegister(function, register));
+    for (callee_saved_registers) |register| {
+        count += @intFromBool(shouldSaveRegister(function, register, extended_frame));
+    }
     for (callee_saved_float_registers) |register| count += @intFromBool(functionUsesFloatRegister(function, register));
     return count;
+}
+
+fn shouldSaveRegister(function: Machine.Function, register: Register, extended_frame: bool) bool {
+    return functionUsesRegister(function, register) or
+        (extended_frame and register == .x28);
 }
 
 fn functionUsesFloatRegister(function: Machine.Function, register: Register) bool {
@@ -1907,9 +1922,15 @@ fn emitLoadAtOffset(
     byte_offset: usize,
 ) Allocator.Error!void {
     if (byte_offset <= std.math.maxInt(u12)) return words.append(allocator, load64(destination, base, @intCast(byte_offset)));
-    try emitImmediate64(allocator, words, .x14, byte_offset);
-    try words.append(allocator, addRegisters(.x14, base, .x14));
-    try words.append(allocator, load64(destination, .x14, 0));
+    const scratch: Register = if (base == .x14) .x13 else .x14;
+    if (base == .zero_or_sp) {
+        try words.append(allocator, addSubtractImmediate(scratch, base, 0, true));
+        try emitRegisterAdjustment(allocator, words, scratch, byte_offset, true);
+    } else {
+        try emitImmediate64(allocator, words, scratch, byte_offset);
+        try words.append(allocator, addRegisters(scratch, base, scratch));
+    }
+    try words.append(allocator, load64(destination, scratch, 0));
 }
 
 fn emitStoreAtOffset(
@@ -1920,9 +1941,21 @@ fn emitStoreAtOffset(
     byte_offset: usize,
 ) Allocator.Error!void {
     if (byte_offset <= std.math.maxInt(u12)) return words.append(allocator, store64(source, base, @intCast(byte_offset)));
-    try emitImmediate64(allocator, words, .x13, byte_offset);
-    try words.append(allocator, addRegisters(.x13, base, .x13));
-    try words.append(allocator, store64(source, .x13, 0));
+    var scratch: Register = .x13;
+    if (source == scratch or base == scratch) {
+        scratch = .x14;
+    }
+    if (source == scratch or base == scratch) {
+        scratch = .x12;
+    }
+    if (base == .zero_or_sp) {
+        try words.append(allocator, addSubtractImmediate(scratch, base, 0, true));
+        try emitRegisterAdjustment(allocator, words, scratch, byte_offset, true);
+    } else {
+        try emitImmediate64(allocator, words, scratch, byte_offset);
+        try words.append(allocator, addRegisters(scratch, base, scratch));
+    }
+    try words.append(allocator, store64(source, scratch, 0));
 }
 
 fn encodeAggregateEqual(
@@ -3781,12 +3814,12 @@ fn storeOptionalValue(
 fn emitStackAdjustment(
     allocator: Allocator,
     words: *std.ArrayList(u32),
-    frame_size: u16,
+    frame_size: u32,
     add: bool,
 ) Allocator.Error!void {
-    var remaining: u16 = frame_size;
+    var remaining = frame_size;
     while (remaining != 0) {
-        const amount: u16 = @min(remaining, 4080);
+        const amount: u32 = @min(remaining, 4080);
         try words.append(allocator, addSubtractImmediate(.zero_or_sp, .zero_or_sp, @intCast(amount), add));
         remaining -= amount;
     }
@@ -3796,7 +3829,7 @@ fn emitRegisterAdjustment(
     allocator: Allocator,
     words: *std.ArrayList(u32),
     register: Register,
-    byte_count: u16,
+    byte_count: usize,
     add: bool,
 ) Allocator.Error!void {
     var remaining = byte_count;
@@ -3812,9 +3845,13 @@ fn emitBaseAddress(
     words: *std.ArrayList(u32),
     destination: Register,
     base: Register,
-    byte_offset: u16,
+    byte_offset: usize,
 ) Allocator.Error!void {
-    if (destination != base) try words.append(allocator, moveRegister(destination, base));
+    if (destination != base) {
+        if (base == .zero_or_sp) {
+            try words.append(allocator, addSubtractImmediate(destination, base, 0, true));
+        } else try words.append(allocator, moveRegister(destination, base));
+    }
     try emitRegisterAdjustment(allocator, words, destination, byte_offset, true);
 }
 
@@ -3893,6 +3930,14 @@ test "encode known AArch64 instruction words" {
     try std.testing.expectEqual(@as(u32, 0xd2800540), moveWideZero64(.x0, 42, 0));
     try std.testing.expectEqual(@as(u32, 0xf90003e9), storeStack(.x9, 0));
     try std.testing.expectEqual(@as(u32, 0xf94003e9), loadStack(.x9, 0));
+    try std.testing.expectEqual(
+        A64.store64(.x9, .x28, 0),
+        storeStack(.x9, Machine.direct_stack_slots),
+    );
+    try std.testing.expectEqual(
+        A64.load64(.x9, .x28, 0),
+        loadStack(.x9, Machine.direct_stack_slots),
+    );
     try std.testing.expectEqual(@as(u32, 0xc85ffdc9), A64.loadAcquireExclusive64(.x9, .x14));
     try std.testing.expectEqual(@as(u32, 0xc80afdc9), A64.storeReleaseExclusive64(.x10, .x9, .x14));
     try std.testing.expectEqual(@as(u32, 0xc89ffddf), A64.storeRelease64(.zero_or_sp, .x14));

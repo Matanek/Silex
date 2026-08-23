@@ -1066,6 +1066,10 @@ fn equalityLeaves(
     return result.toOwnedSlice(allocator);
 }
 
+fn checkedEqualityOffset(value: usize) Machine.Error!u12 {
+    return std.math.cast(u12, value) orelse error.FrameTooLarge;
+}
+
 fn appendEqualityLeaves(
     allocator: Allocator,
     program: Ir.Program,
@@ -1077,7 +1081,7 @@ fn appendEqualityLeaves(
     if (type_value.functionIndex() != null) {
         for (0..2) |_| {
             try result.append(allocator, .{
-                .offset = try Machine.checkedSlot(offset.*),
+                .offset = try checkedEqualityOffset(offset.*),
                 .type = .uint,
                 .guards = guards,
             });
@@ -1086,7 +1090,7 @@ fn appendEqualityLeaves(
         return;
     }
     if (type_value.optionalChild()) |child| {
-        const tag_offset = try Machine.checkedSlot(offset.*);
+        const tag_offset = try checkedEqualityOffset(offset.*);
         try result.append(allocator, .{ .offset = tag_offset, .type = .bool, .guards = guards });
         offset.* += 1;
         const present = try appendEqualityGuard(allocator, guards, .{ .offset = tag_offset, .expected = 1 });
@@ -1094,7 +1098,7 @@ fn appendEqualityLeaves(
     }
     if (enumByType(program, type_value)) |enumeration| {
         const start = offset.*;
-        const tag_offset = try Machine.checkedSlot(start);
+        const tag_offset = try checkedEqualityOffset(start);
         try result.append(allocator, .{ .offset = tag_offset, .type = .uint, .guards = guards });
         if (enumeration.raw_type == null) {
             for (enumeration.variants, 0..) |variant, variant_index| {
@@ -1113,7 +1117,7 @@ fn appendEqualityLeaves(
     }
     const structure_index = type_value.structureIndex() orelse {
         try result.append(allocator, .{
-            .offset = try Machine.checkedSlot(offset.*),
+            .offset = try checkedEqualityOffset(offset.*),
             .type = type_value,
             .guards = guards,
         });
@@ -1124,7 +1128,7 @@ fn appendEqualityLeaves(
     const structure = program.structures[structure_index];
     if (structure.is_protocol) {
         const start = offset.*;
-        const tag_offset = try Machine.checkedSlot(start);
+        const tag_offset = try checkedEqualityOffset(start);
         try result.append(allocator, .{ .offset = tag_offset, .type = .uint, .guards = guards });
         for (program.structures, 0..) |candidate, candidate_index| {
             if (candidate.is_protocol or !irConforms(program, candidate_index, structure_index)) continue;
@@ -1147,7 +1151,7 @@ fn appendEqualityLeaves(
     }
     if (structure.is_class) {
         try result.append(allocator, .{
-            .offset = try Machine.checkedSlot(offset.*),
+            .offset = try checkedEqualityOffset(offset.*),
             .type = .uint,
             .guards = guards,
         });
@@ -1159,14 +1163,14 @@ fn appendEqualityLeaves(
             for (0..length) |_| try appendEqualityLeaves(allocator, program, collection.element, guards, offset, result);
         } else {
             try result.append(allocator, .{
-                .offset = try Machine.checkedSlot(offset.*),
+                .offset = try checkedEqualityOffset(offset.*),
                 .type = .uint,
                 .guards = guards,
             });
             offset.* += 1;
             if (collection.view) {
                 try result.append(allocator, .{
-                    .offset = try Machine.checkedSlot(offset.*),
+                    .offset = try checkedEqualityOffset(offset.*),
                     .type = .uint,
                     .guards = guards,
                 });
@@ -1373,7 +1377,7 @@ test "lower answer and nested calls to deterministic machine slots" {
     try std.testing.expectEqual(@as(usize, 3), program.functions.len);
     try std.testing.expectEqual(@as(u12, 2), program.functions[0].parameter_count);
     try std.testing.expectEqual(@as(u12, 3), program.functions[0].slot_count);
-    try std.testing.expectEqual(@as(u16, 32), program.functions[0].frame_size);
+    try std.testing.expectEqual(@as(u32, 32), program.functions[0].frame_size);
     try std.testing.expectEqual(Machine.BinaryOperator.add, program.functions[0].instructions[0].binary.operator);
     try std.testing.expectEqual(@as(Machine.Slot, 0), program.functions[0].instructions[0].binary.left);
     try std.testing.expectEqual(@as(Machine.FunctionId, 0), program.functions[1].instructions[2].call.function);
