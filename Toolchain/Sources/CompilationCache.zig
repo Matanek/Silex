@@ -409,7 +409,7 @@ pub fn materializeExecutable(
     output_path: []const u8,
 ) !void {
     const source = try executablePath(allocator, digest, kind);
-    if (std.fs.path.dirname(output_path)) |directory| try Io.Dir.cwd().createDirPath(io, directory);
+    try ensureOutputParent(io, output_path);
     Io.Dir.cwd().deleteFile(io, output_path) catch |err| switch (err) {
         error.FileNotFound => {},
         else => return err,
@@ -417,6 +417,19 @@ pub fn materializeExecutable(
     Io.Dir.hardLink(Io.Dir.cwd(), source, Io.Dir.cwd(), output_path, io, .{}) catch {
         try Io.Dir.cwd().copyFile(source, Io.Dir.cwd(), output_path, io, .{});
     };
+}
+
+pub fn ensureOutputParent(io: Io, output_path: []const u8) !void {
+    const directory = std.fs.path.dirname(output_path) orelse return;
+    try ensureDirectory(Io.Dir.cwd(), io, directory);
+}
+
+fn ensureDirectory(base: Io.Dir, io: Io, path: []const u8) !void {
+    var existing = base.openDir(io, path, .{}) catch {
+        try base.createDirPath(io, path);
+        return;
+    };
+    existing.close(io);
 }
 
 fn entryKey(
@@ -632,4 +645,17 @@ test "compact native state retains linked boundary providers" {
     try std.testing.expectEqual(@as(usize, 1), loaded.providers.len);
     try std.testing.expectEqualStrings("SDL3", loaded.providers[0].name);
     try std.testing.expectEqualStrings("Metal", loaded.providers[0].frameworks[0]);
+}
+
+test "output parent accepts an existing symbolic link to a directory" {
+    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.createDirPath(std.testing.io, "target");
+    try temporary.dir.symLink(std.testing.io, "target", "alias", .{ .is_directory = true });
+
+    try ensureDirectory(temporary.dir, std.testing.io, "alias");
+
+    var opened = try temporary.dir.openDir(std.testing.io, "alias", .{});
+    opened.close(std.testing.io);
 }

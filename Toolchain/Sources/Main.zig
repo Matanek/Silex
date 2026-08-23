@@ -1207,7 +1207,7 @@ fn compileNativeOptions(
             defer file.close(init.io);
             try file.writeStreamingAll(init.io, object);
         }
-        if (std.fs.path.dirname(options.output_path)) |directory| try Io.Dir.cwd().createDirPath(init.io, directory);
+        try CompilationCache.ensureOutputParent(init.io, options.output_path);
         progress.stage(.link);
         MacOSLink.executable(
             allocator,
@@ -1250,7 +1250,7 @@ fn compileNativeOptions(
             defer file.close(init.io);
             try file.writeStreamingAll(init.io, object);
         }
-        if (std.fs.path.dirname(options.output_path)) |directory| try Io.Dir.cwd().createDirPath(init.io, directory);
+        try CompilationCache.ensureOutputParent(init.io, options.output_path);
         progress.stage(.link);
         NativeLink.executable(allocator, init.io, linker_path, target, object_path, options.output_path, boundary_providers) catch |err| {
             std.debug.print("silex: cannot link native package artifacts for {s}: {t}\n", .{ target.name(), err });
@@ -1274,7 +1274,7 @@ fn compileNativeOptions(
             defer file.close(init.io);
             try file.writeStreamingAll(init.io, object);
         }
-        if (std.fs.path.dirname(options.output_path)) |directory| try Io.Dir.cwd().createDirPath(init.io, directory);
+        try CompilationCache.ensureOutputParent(init.io, options.output_path);
         progress.stage(.link);
         NativeLink.executable(allocator, init.io, linker_path, target, object_path, options.output_path, boundary_providers) catch |err| {
             std.debug.print("silex: cannot link native package artifacts for windows-arm64: {t}\n", .{err});
@@ -1588,8 +1588,8 @@ fn printSourceDiagnostic(compiler: Project.Compiler, source_path: []const u8) vo
 }
 
 fn writeExecutable(init: std.process.Init, output_path: []const u8, executable: []const u8) u8 {
-    if (std.fs.path.dirname(output_path)) |directory| Io.Dir.cwd().createDirPath(init.io, directory) catch |err| {
-        std.debug.print("silex: unable to create directory '{s}': {t}\n", .{ directory, err });
+    CompilationCache.ensureOutputParent(init.io, output_path) catch |err| {
+        std.debug.print("silex: unable to create output directory for '{s}': {t}\n", .{ output_path, err });
         return 1;
     };
     const file = Io.Dir.cwd().createFile(init.io, output_path, .{
