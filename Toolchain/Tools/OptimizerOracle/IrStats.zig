@@ -81,7 +81,11 @@ fn profileInstruction(result: *Profile, instruction: Silex.Ir.Instruction) void 
         .copy, .deep_copy, .class_cast => result.copies += 1,
         .local_load => result.local_loads += 1,
         .local_store => result.local_stores += 1,
-        .global_load, .field_load, .collection_load, .reference_load, .address_load => result.other_loads += 1,
+        .global_load, .field_load, .reference_load, .address_load => result.other_loads += 1,
+        .collection_load => |load| {
+            result.other_loads += 1;
+            if (load.checked) result.checked_operations += 1;
+        },
         .global_store, .field_store, .collection_replace, .reference_store, .address_store => result.other_stores += 1,
         .binary => |binary| {
             if (binary.checked) result.checked_operations += 1;

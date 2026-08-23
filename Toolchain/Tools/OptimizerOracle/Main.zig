@@ -190,6 +190,12 @@ fn reportEvidence(io: std.Io, allocator: std.mem.Allocator, evidence: Qualificat
             "    contract: {s} blocks {d} -> {d}",
             .{ blocks.function, blocks.raw, blocks.optimized },
         ),
+        .bounds => |bounds| try Report.line(
+            io,
+            allocator,
+            "    contract: {s} checked collection loads {d} -> {d}",
+            .{ bounds.function, bounds.raw, bounds.optimized },
+        ),
         .slp => |slp| try Report.line(
             io,
             allocator,

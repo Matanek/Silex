@@ -1,0 +1,31 @@
+func sum(values:@int[..]) int {
+    var total = 0
+    var index = 0
+    while index < values.count() {
+        total += values[index]
+        index++
+    }
+    return total
+}
+
+func checked(values:@int[..], index:int) int {
+    return values[index]
+}
+
+func main() {
+    let values = [
+        1, 2, 3, 4, 5, 6, 7, 8,
+        9, 10, 11, 12, 13, 14, 15, 16,
+        17, 18, 19, 20, 21, 22, 23, 24,
+        25, 26, 27, 28, 29, 30, 31, 32
+    ]
+    let view = @values[0:values.count()]
+    var checksum = 0
+    var repetition = 0
+    while repetition < 2_000_000 {
+        checksum += sum(view)
+        repetition++
+    }
+    print(checksum)
+    print(checked(view, 1))
+}

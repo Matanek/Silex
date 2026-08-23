@@ -308,11 +308,14 @@ open Silex document
   progress when the operation completes but retains it when compilation fails.
 - Release propagates constants and copies through straight-line functions,
   folds checked scalar operations, removes dead constants, and inlines small
-  pure calculations over scalar and structure values. ARM64 lowering then performs deterministic
-  linear-scan allocation for safe scalar leaves; addressable values, aggregates
-  and values constrained by calls remain explicit spills. Fully resident leaf
-  functions allocate no value frame. Debug retains the direct stack-resident
-  lowering.
+  pure calculations over scalar and structure values. It also marks a
+  collection load as bounded when a zero-origin induction variable is dominated
+  by the exact collection-count comparison and cannot advance before that load;
+  every unproved access retains its runtime bounds diagnostic. ARM64 lowering
+  then performs deterministic linear-scan allocation for safe scalar leaves;
+  addressable values, aggregates and values constrained by calls remain
+  explicit spills. Fully resident leaf functions allocate no value frame.
+  Debug retains the direct stack-resident lowering.
 - Source-compiling commands root their private cache at
   `<invocation-cwd>/.silex/cache`. Content-addressed, versioned entries persist
   module ASTs, portable typed IR, complete native inputs with their boundary

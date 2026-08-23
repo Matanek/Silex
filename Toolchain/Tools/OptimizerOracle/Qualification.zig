@@ -11,6 +11,11 @@ pub const Evidence = union(enum) {
         raw: usize,
         optimized: usize,
     },
+    bounds: struct {
+        function: []const u8,
+        raw: usize,
+        optimized: usize,
+    },
     slp: struct {
         function: []const u8,
         required: u3,
@@ -28,6 +33,7 @@ pub fn verifyContract(
     return switch (contract) {
         .none => .none,
         .reduces_blocks => |function_name| verifyBlockReduction(function_name, differential),
+        .removes_collection_bounds => |function_name| verifyCollectionBounds(function_name, differential),
         .slp_width => |requirement| try verifySlp(
             allocator,
             requirement.function,
@@ -36,6 +42,32 @@ pub fn verifyContract(
             differential.optimized_ir,
         ),
     };
+}
+
+fn verifyCollectionBounds(function_name: []const u8, differential: Differential.Result) !Evidence {
+    const raw_function = findFunction(differential.raw_ir, function_name) orelse
+        return error.ContractFunctionMissing;
+    const optimized_function = findFunction(differential.optimized_ir, function_name) orelse
+        return error.ContractFunctionMissing;
+    const raw = checkedCollectionLoads(raw_function);
+    const optimized = checkedCollectionLoads(optimized_function);
+    if (raw == 0 or optimized >= raw) return error.ExpectedCollectionBoundsRemovalMissing;
+    return .{ .bounds = .{
+        .function = function_name,
+        .raw = raw,
+        .optimized = optimized,
+    } };
+}
+
+fn checkedCollectionLoads(function: Silex.Ir.Function) usize {
+    var count: usize = 0;
+    for (function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
+        .collection_load => |load| if (load.checked) {
+            count += 1;
+        },
+        else => {},
+    };
+    return count;
 }
 
 fn verifyBlockReduction(function_name: []const u8, differential: Differential.Result) !Evidence {

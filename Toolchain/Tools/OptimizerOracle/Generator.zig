@@ -8,6 +8,7 @@ pub const CorpusEntry = struct {
 pub const StructuralContract = union(enum) {
     none,
     reduces_blocks: []const u8,
+    removes_collection_bounds: []const u8,
     slp_width: struct {
         function: []const u8,
         minimum: u3,
@@ -39,6 +40,11 @@ pub const regressions = [_]RegressionEntry{
     .{
         .name = "Regressions/ArrayStorageAccess.sx",
         .concern = "fixed, dynamic, nested, and aggregate collection storage",
+    },
+    .{
+        .name = "Regressions/BoundedCollectionLoop.sx",
+        .concern = "proven zero-origin collection traversal without weakening other bounds checks",
+        .contract = .{ .removes_collection_bounds = "sum" },
     },
     .{
         .name = "Regressions/FloatLaneXYZ.sx",
