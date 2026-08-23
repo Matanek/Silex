@@ -16,6 +16,13 @@ pub const Evidence = union(enum) {
         raw: usize,
         optimized: usize,
     },
+    scalar_loop: struct {
+        function: []const u8,
+        raw_collection_loads: usize,
+        optimized_collection_loads: usize,
+        raw_calls: usize,
+        optimized_calls: usize,
+    },
     slp: struct {
         function: []const u8,
         required: u3,
@@ -34,6 +41,7 @@ pub fn verifyContract(
         .none => .none,
         .reduces_blocks => |function_name| verifyBlockReduction(function_name, differential),
         .removes_collection_bounds => |function_name| verifyCollectionBounds(function_name, differential),
+        .scalarizes_dense_loop => |function_name| verifyDenseScalarLoop(function_name, differential),
         .slp_width => |requirement| try verifySlp(
             allocator,
             requirement.function,
@@ -42,6 +50,41 @@ pub fn verifyContract(
             differential.optimized_ir,
         ),
     };
+}
+
+const ScalarLoopProfile = struct {
+    collection_loads: usize = 0,
+    calls: usize = 0,
+};
+
+fn verifyDenseScalarLoop(function_name: []const u8, differential: Differential.Result) !Evidence {
+    const raw_function = findFunction(differential.raw_ir, function_name) orelse
+        return error.ContractFunctionMissing;
+    const optimized_function = findFunction(differential.optimized_ir, function_name) orelse
+        return error.ContractFunctionMissing;
+    const raw = scalarLoopProfile(raw_function);
+    const optimized = scalarLoopProfile(optimized_function);
+    if (raw.collection_loads == 0 or optimized.collection_loads >= raw.collection_loads)
+        return error.ExpectedCollectionLoadReductionMissing;
+    if (raw.calls == 0 or optimized.calls >= raw.calls)
+        return error.ExpectedDenseLoopInliningMissing;
+    return .{ .scalar_loop = .{
+        .function = function_name,
+        .raw_collection_loads = raw.collection_loads,
+        .optimized_collection_loads = optimized.collection_loads,
+        .raw_calls = raw.calls,
+        .optimized_calls = optimized.calls,
+    } };
+}
+
+fn scalarLoopProfile(function: Silex.Ir.Function) ScalarLoopProfile {
+    var result: ScalarLoopProfile = .{};
+    for (function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
+        .collection_load => result.collection_loads += 1,
+        .call, .indirect_call, .boundary_call, .dynamic_call => result.calls += 1,
+        else => {},
+    };
+    return result;
 }
 
 fn verifyCollectionBounds(function_name: []const u8, differential: Differential.Result) !Evidence {

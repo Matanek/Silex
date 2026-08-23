@@ -306,9 +306,12 @@ open Silex document
   disabled when standard error is not a terminal, preserving quiet successful
   execution for scripts and CI. An ANSI-capable terminal clears successful
   progress when the operation completes but retains it when compilation fails.
-- Release propagates constants and copies through straight-line functions,
-  folds checked scalar operations, removes dead constants, and inlines small
-  pure calculations over scalar and structure values. It also marks a
+- Release propagates constants and copies through straight-line functions. In
+  call-free functions containing a proven repeated scalar collection read, it
+  reuses the corresponding local, field and collection loads within each basic
+  block until an aliasing write. It folds checked scalar operations, removes
+  dead constants, and inlines small pure calculations plus read-only class
+  collection-count accessors. It also marks a
   collection load as bounded when a zero-origin induction variable is dominated
   by the exact collection-count comparison and cannot advance before that load;
   every unproved access retains its runtime bounds diagnostic. ARM64 lowering

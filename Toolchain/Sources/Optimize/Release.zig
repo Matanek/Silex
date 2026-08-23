@@ -1,6 +1,7 @@
 const std = @import("std");
 const Ir = @import("../Ir.zig");
 const Bounds = @import("Bounds.zig");
+const DenseBlocks = @import("DenseBlocks.zig");
 const InlineValues = @import("InlineValues.zig");
 
 const Allocator = std.mem.Allocator;
@@ -40,7 +41,8 @@ pub fn optimizeWithoutInlining(allocator: Allocator, program: Ir.Program) !Ir.Pr
     for (program.functions, 0..) |function, index| summaries[index] = summarize(function);
     const functions = try allocator.alloc(Ir.Function, program.functions.len);
     for (program.functions, 0..) |function, index| {
-        const optimized = try optimizeFunction(allocator, function, summaries);
+        const localized = try optimizeDenseBlocks(allocator, function);
+        const optimized = try optimizeFunction(allocator, localized, summaries);
         const simplified = try simplifyBooleanDiamonds(allocator, optimized);
         functions[index] = try Bounds.optimize(allocator, simplified);
     }
@@ -251,8 +253,8 @@ fn scalarStructure(program: Ir.Program, structure_index: usize, depth: usize) bo
 }
 
 fn optimizeFunction(allocator: Allocator, function: Ir.Function, summaries: []const GlobalSummary) !Ir.Function {
-    // Alias and constant propagation is intentionally local to straight-line
-    // functions until the optimizer models dominance and control-flow joins.
+    // Global alias and constant propagation stays restricted to a single
+    // block until the optimizer models dominance and control-flow joins.
     if (function.blocks.len != 1) return function;
 
     const aliases = try allocator.alloc(Ir.ValueId, function.value_types.len);
@@ -297,6 +299,116 @@ fn optimizeFunction(allocator: Allocator, function: Ir.Function, summaries: []co
     result.blocks = try removeUnreachableBlocks(allocator, blocks);
     result.blocks = try removeDeadConstants(allocator, result);
     return result;
+}
+
+fn optimizeDenseBlocks(allocator: Allocator, function: Ir.Function) !Ir.Function {
+    if (!DenseBlocks.isEligible(function)) return function;
+    const blocks = try allocator.alloc(Ir.Block, function.blocks.len);
+    const constants = try allocator.alloc(Constant, function.value_types.len);
+    @memset(constants, .unknown);
+    for (function.blocks, 0..) |block, block_index| {
+        const aliases = try allocator.alloc(Ir.ValueId, function.value_types.len);
+        for (aliases, 0..) |*alias, value| alias.* = value;
+        const local_values = try allocator.alloc(?Ir.ValueId, function.local_types.len);
+        @memset(local_values, null);
+        var field_loads: std.ArrayList(Ir.Instruction.FieldLoad) = .empty;
+        var collection_loads: std.ArrayList(Ir.Instruction.CollectionLoad) = .empty;
+        var instructions: std.ArrayList(Ir.Instruction) = .empty;
+        for (block.instructions) |original| {
+            const instruction = try rewriteInstruction(allocator, original, aliases);
+            switch (instruction) {
+                .local_load => |load| {
+                    const local_type = function.local_types[load.local];
+                    if (local_type.isNumeric() or local_type == .bool) {
+                        if (local_values[load.local]) |previous| {
+                            aliases[load.result] = canonical(aliases, previous);
+                            continue;
+                        }
+                        local_values[load.local] = load.result;
+                    }
+                },
+                .local_store => |store| {
+                    const local_type = function.local_types[store.local];
+                    local_values[store.local] = if (local_type.isNumeric() or local_type == .bool)
+                        canonical(aliases, store.operand)
+                    else
+                        null;
+                },
+                .field_load => |load| {
+                    if (matchingFieldLoad(field_loads.items, load)) |previous| {
+                        aliases[load.result] = canonical(aliases, previous);
+                        continue;
+                    }
+                    try field_loads.append(allocator, load);
+                },
+                .collection_load => |load| {
+                    const result_type = function.value_types[load.result];
+                    if (result_type.isNumeric() or result_type == .bool) {
+                        if (matchingCollectionLoad(collection_loads.items, load)) |previous| {
+                            aliases[load.result] = canonical(aliases, previous);
+                            continue;
+                        }
+                        try collection_loads.append(allocator, load);
+                    }
+                },
+                .global_store,
+                .field_store,
+                .collection_replace,
+                .list_edit,
+                .reference_store,
+                .address_store,
+                .call,
+                .indirect_call,
+                .boundary_call,
+                .dynamic_call,
+                .mutex_lock,
+                .mutex_unlock,
+                => {
+                    field_loads.clearRetainingCapacity();
+                    collection_loads.clearRetainingCapacity();
+                    switch (instruction) {
+                        .reference_store,
+                        .address_store,
+                        .call,
+                        .indirect_call,
+                        .boundary_call,
+                        .dynamic_call,
+                        .mutex_lock,
+                        .mutex_unlock,
+                        => @memset(local_values, null),
+                        else => {},
+                    }
+                },
+                else => {},
+            }
+            try instructions.append(allocator, instruction);
+        }
+        blocks[block_index] = .{
+            .instructions = try instructions.toOwnedSlice(allocator),
+            .terminator = rewriteTerminator(block.terminator, aliases, constants),
+        };
+    }
+    var result = function;
+    result.blocks = blocks;
+    return result;
+}
+
+fn matchingFieldLoad(loads: []const Ir.Instruction.FieldLoad, candidate: Ir.Instruction.FieldLoad) ?Ir.ValueId {
+    for (loads) |load| {
+        if (load.base == candidate.base and load.field == candidate.field) return load.result;
+    }
+    return null;
+}
+
+fn matchingCollectionLoad(
+    loads: []const Ir.Instruction.CollectionLoad,
+    candidate: Ir.Instruction.CollectionLoad,
+) ?Ir.ValueId {
+    for (loads) |load| {
+        if (load.collection == candidate.collection and load.index == candidate.index and
+            load.checked == candidate.checked) return load.result;
+    }
+    return null;
 }
 
 fn summarize(function: Ir.Function) GlobalSummary {
@@ -1355,65 +1467,5 @@ test "release keeps scalar aggregates materialized across control flow" {
 }
 
 test "release removes only collection bounds proven by zero-origin loops" {
-    const Frontend = @import("../Frontend.zig");
-    const Interpreter = @import("../Interpreter.zig");
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-    var frontend = Frontend.Frontend.init(allocator);
-    const compilation = try frontend.compile(
-        \\func sum(values:@int[..]) int {
-        \\    var total = 0
-        \\    var index = 0
-        \\    while index < values.count() {
-        \\        total += values[index]
-        \\        index++
-        \\    }
-        \\    return total
-        \\}
-        \\func unproven(values:@int[..]) int {
-        \\    var index = -4
-        \\    while index < values.count() { return values[index] }
-        \\    return 0
-        \\}
-        \\func advanced_before_access(values:@int[..]) int {
-        \\    var index = 0
-        \\    while index < values.count() {
-        \\        index++
-        \\        return values[index]
-        \\    }
-        \\    return 0
-        \\}
-        \\func nested(values:@int[..]) int {
-        \\    var total = 0
-        \\    var repetition = 0
-        \\    while repetition < 2 {
-        \\        var index = 0
-        \\        while index < values.count() {
-        \\            total += values[index]
-        \\            index++
-        \\        }
-        \\        repetition++
-        \\    }
-        \\    return total
-        \\}
-        \\func main() {
-        \\    let values = [3, 5, 8]
-        \\    print(sum(@values[0:values.count()]))
-        \\}
-    );
-    const optimized = try optimize(allocator, compilation.ir);
-    const text = try Ir.writeText(allocator, optimized);
-    const sum_start = std.mem.indexOf(u8, text, "func @sum") orelse return error.TestUnexpectedResult;
-    const unproven_start = std.mem.indexOf(u8, text, "func @unproven") orelse return error.TestUnexpectedResult;
-    const advanced_start = std.mem.indexOf(u8, text, "func @advanced_before_access") orelse return error.TestUnexpectedResult;
-    const nested_start = std.mem.indexOf(u8, text, "func @nested") orelse return error.TestUnexpectedResult;
-    const main_start = std.mem.indexOf(u8, text, "func @main") orelse return error.TestUnexpectedResult;
-    try std.testing.expect(std.mem.indexOf(u8, text[sum_start..unproven_start], "collection.load %0, %7 bounded") != null);
-    try std.testing.expect(std.mem.indexOf(u8, text[unproven_start..advanced_start], " bounded") == null);
-    try std.testing.expect(std.mem.indexOf(u8, text[advanced_start..nested_start], " bounded") == null);
-    try std.testing.expect(std.mem.indexOf(u8, text[nested_start..main_start], " bounded") != null);
-    const result = try Interpreter.runCapture(allocator, optimized);
-    try std.testing.expectEqualStrings("16\n", result.stdout);
-    try std.testing.expectEqual(@as(u8, 0), result.exit_code);
+    try @import("ReleaseTests.zig").boundedCollectionLoops(optimize);
 }

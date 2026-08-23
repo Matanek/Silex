@@ -1,0 +1,46 @@
+class Store {
+    var positions:float[]
+    var velocities:float[]
+
+    init() {
+        self.positions = []
+        self.velocities = []
+    }
+
+    func fill(count:int) {
+        var index = 0
+        while index < count {
+            self.positions.append(index as float)
+            self.velocities.append((index + 1) as float)
+            index++
+        }
+    }
+
+    func count() int { return self.positions.count() }
+}
+
+func integrate(store:Store, delta:float) float {
+    var checksum = 0.0
+    var index = 0
+    while index < store.count() {
+        let velocity = store.velocities[index]
+        let position = store.positions[index]
+        checksum += position + store.positions[index] +
+            velocity * delta + store.positions[index]
+        index++
+    }
+    return checksum
+}
+
+func main() {
+    var store = Store()
+    store.fill(64)
+    var checksum = 0.0
+    var repetition = 0
+    while repetition < 10_000 {
+        checksum += integrate(store, 0.0001)
+        repetition++
+    }
+    print(checksum == checksum)
+    print(store.positions[0] == 0.0)
+}

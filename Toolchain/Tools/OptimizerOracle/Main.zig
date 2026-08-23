@@ -196,6 +196,18 @@ fn reportEvidence(io: std.Io, allocator: std.mem.Allocator, evidence: Qualificat
             "    contract: {s} checked collection loads {d} -> {d}",
             .{ bounds.function, bounds.raw, bounds.optimized },
         ),
+        .scalar_loop => |scalar| try Report.line(
+            io,
+            allocator,
+            "    contract: {s} collection loads {d} -> {d}, calls {d} -> {d}",
+            .{
+                scalar.function,
+                scalar.raw_collection_loads,
+                scalar.optimized_collection_loads,
+                scalar.raw_calls,
+                scalar.optimized_calls,
+            },
+        ),
         .slp => |slp| try Report.line(
             io,
             allocator,

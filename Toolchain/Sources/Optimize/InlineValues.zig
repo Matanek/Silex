@@ -42,7 +42,7 @@ fn resolve(program: Ir.Program, information: []Info, function_index: usize) void
         info.state = .rejected;
         return;
     }
-    for (function.value_types[function.parameter_types.len..]) |value_type| if (!isValueType(program, value_type, 0)) {
+    for (function.value_types[function.parameter_types.len..]) |value_type| if (!isInlineValueType(program, value_type)) {
         info.state = .rejected;
         return;
     };
@@ -64,7 +64,7 @@ fn resolve(program: Ir.Program, information: []Info, function_index: usize) void
     var cost: usize = 0;
     for (function.blocks[0].instructions) |instruction| {
         switch (instruction) {
-            .constant_int, .constant_bool, .constant_float32, .constant_float64, .field_load, .structure_init, .unary, .binary, .convert, .address_load, .address_store => cost += 1,
+            .constant_int, .constant_bool, .constant_float32, .constant_float64, .field_load, .collection_count, .structure_init, .unary, .binary, .convert, .address_load, .address_store => cost += 1,
             .boundary_call => |call| {
                 if (call.result == null) {
                     info.state = .rejected;
@@ -109,7 +109,13 @@ fn isParameterType(program: Ir.Program, value_type: Ir.Type) bool {
     const structure_index = value_type.structureIndex() orelse return false;
     if (structure_index >= program.structures.len) return false;
     const structure = program.structures[structure_index];
-    return !structure.is_class and !structure.is_static and structure.collection == null;
+    return !structure.is_static and (structure.is_class or structure.collection == null);
+}
+
+fn isInlineValueType(program: Ir.Program, value_type: Ir.Type) bool {
+    if (isValueType(program, value_type, 0)) return true;
+    const structure_index = value_type.structureIndex() orelse return false;
+    return structure_index < program.structures.len and !program.structures[structure_index].is_static;
 }
 
 fn isValueType(program: Ir.Program, value_type: Ir.Type, depth: usize) bool {
@@ -209,6 +215,14 @@ fn emitCall(
                 .result = result,
                 .base = mapped(mapping, value.base),
                 .field = value.field,
+            } });
+        },
+        .collection_count => |value| {
+            const result = try appendType(allocator, function, caller_types, value.result);
+            mapping[value.result] = result;
+            try output.append(allocator, .{ .collection_count = .{
+                .result = result,
+                .collection = mapped(mapping, value.collection),
             } });
         },
         .address_load => |value| {
