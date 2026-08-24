@@ -33,6 +33,20 @@ pub fn executable(
         "-L/lib64",
         "-L/usr/local/lib",
     });
+    var archive_directories: std.ArrayList([]const u8) = .empty;
+    for (providers) |provider| if (provider.archive) |archive| {
+        const directory = std.fs.path.dirname(archive) orelse continue;
+        var duplicate = false;
+        for (archive_directories.items) |existing| if (std.mem.eql(u8, existing, directory)) {
+            duplicate = true;
+            break;
+        };
+        if (!duplicate) try archive_directories.append(allocator, directory);
+    };
+    std.mem.sort([]const u8, archive_directories.items, {}, stringLessThan);
+    for (archive_directories.items) |directory| {
+        try arguments.append(allocator, try std.fmt.allocPrint(allocator, "-L{s}", .{directory}));
+    }
     for (providers) |provider| if (provider.archive) |archive| try arguments.append(allocator, archive);
     var libraries: std.ArrayList([]const u8) = .empty;
     for (providers) |provider| for (provider.libraries) |library| {

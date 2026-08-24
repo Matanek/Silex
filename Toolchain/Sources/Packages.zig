@@ -1604,7 +1604,7 @@ fn validRelativePath(path: []const u8) bool {
 
 fn validLibraryName(name: []const u8) bool {
     if (name.len == 0) return false;
-    for (name) |character| if (!std.ascii.isAlphanumeric(character) and character != '_' and character != '-' and character != '.') return false;
+    for (name) |character| if (!std.ascii.isAlphanumeric(character) and character != '_' and character != '-' and character != '.' and character != '+') return false;
     return true;
 }
 
@@ -2140,12 +2140,13 @@ test "resolve ELF and COFF boundary archives with system libraries" {
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Bridge/Package.json",
         .data =
-        \\{"name":"Bridge","version":"1.0.0","boundary":{"windows-x64":{"providers":{"Native":{"archive":"Boundary/windows-x64/Bridge.lib","libraries":["user32"]}}}}}
+        \\{"name":"Bridge","version":"1.0.0","boundary":{"windows-x64":{"providers":{"Native":{"archive":"Boundary/windows-x64/Bridge.lib","libraries":["user32","stdc++"]}}}}}
         ,
     });
     resolver = Resolver.initForTarget(allocator, std.testing.io, null, .windows_x64);
     graph = try resolver.resolve(base);
-    try std.testing.expectEqualStrings("user32", graph.packages[0].boundary_providers[0].libraries[0]);
+    try std.testing.expectEqualStrings("stdc++", graph.packages[0].boundary_providers[0].libraries[0]);
+    try std.testing.expectEqualStrings("user32", graph.packages[0].boundary_providers[0].libraries[1]);
 
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Bridge/Package.json",
