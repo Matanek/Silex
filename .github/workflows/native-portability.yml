@@ -23,7 +23,7 @@ env:
   STD_CHECKPOINT: 94adcd6747a3edd01a3b8552b46f12b087c7cdae
   GFX_CHECKPOINT: f7019091e808a87059400b1c07b45be8dcf315a2
   PHYSICS_CHECKPOINT: 392b41868d0d936dae38041d3a4ca77da5f01faf
-  WEBVIEW_CHECKPOINT: 1366741fe571b6c8c79e057101529729b5100ff6
+  WEBVIEW_CHECKPOINT: 7919f42149f843e8d43a58aeb86f192719a6ea83
 
 jobs:
   native:
@@ -123,8 +123,10 @@ jobs:
           silex="$RUNNER_TEMP/silex-prefix/bin/silex"
           "$silex" setup
           "$silex" install STD
-          "$silex" install GFX
-          "$silex" install "$GITHUB_WORKSPACE/.checkpoint/GFX"
+          "$silex" install GFX.Canvas
+          "$silex" install GFX.Scene2D
+          "$silex" install GFX.Audio
+          "$silex" link "$GITHUB_WORKSPACE/.checkpoint/GFX"
           "$silex" link "$GITHUB_WORKSPACE/.checkpoint/STD"
           "$silex" link "$GITHUB_WORKSPACE/.checkpoint/GFX.Physics"
           "$silex" link "$GITHUB_WORKSPACE/.checkpoint/GFX.WebView"
@@ -192,8 +194,10 @@ jobs:
           $silex = Join-Path $env:RUNNER_TEMP "silex-prefix/bin/silex.exe"
           & $silex setup
           & $silex install STD
-          & $silex install GFX
-          & $silex install (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/GFX")
+          & $silex install GFX.Canvas
+          & $silex install GFX.Scene2D
+          & $silex install GFX.Audio
+          & $silex link (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/GFX")
           & $silex link (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/STD")
           & $silex link (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/GFX.Physics")
           & $silex link (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/GFX.WebView")
@@ -260,8 +264,10 @@ jobs:
           silex="$RUNNER_TEMP/silex-prefix/bin/silex"
           "$silex" setup
           "$silex" install STD
-          "$silex" install GFX
-          "$silex" install "$GITHUB_WORKSPACE/.checkpoint/GFX"
+          "$silex" install GFX.Canvas
+          "$silex" install GFX.Scene2D
+          "$silex" install GFX.Audio
+          "$silex" link "$GITHUB_WORKSPACE/.checkpoint/GFX"
           "$silex" link "$GITHUB_WORKSPACE/.checkpoint/STD"
           "$silex" link "$GITHUB_WORKSPACE/.checkpoint/GFX.Physics"
           "$silex" link "$GITHUB_WORKSPACE/.checkpoint/GFX.WebView"
