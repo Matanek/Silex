@@ -22,6 +22,7 @@ permissions:
 env:
   STD_CHECKPOINT: baea236a62e9b99382b5d38365b77f06d339867a
   PHYSICS_CHECKPOINT: 781f88c5ea47e2b85614eb31a463173b92c0abc9
+  WEBVIEW_CHECKPOINT: b129d3e1a06afb955ffa2edc22a854bdfa29421f
 
 jobs:
   native:
@@ -55,6 +56,13 @@ jobs:
           ref: ${{ env.PHYSICS_CHECKPOINT }}
           path: .checkpoint/GFX.Physics
 
+      - name: Check out the exact GFX.WebView checkpoint
+        uses: actions/checkout@v6
+        with:
+          repository: Matanek/Silex-Lib-GFX.WebView
+          ref: ${{ env.WEBVIEW_CHECKPOINT }}
+          path: .checkpoint/GFX.WebView
+
       - name: Install bootstrap Zig on macOS
         if: runner.os == 'macOS'
         shell: bash
@@ -70,6 +78,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev xvfb
           curl -fL https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz -o "$RUNNER_TEMP/zig.tar.xz"
           echo "70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00  $RUNNER_TEMP/zig.tar.xz" | sha256sum -c -
           tar -xJf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP"
@@ -97,6 +107,7 @@ jobs:
           test "$(uname -m)" = "x86_64"
           test "$(git -C "$GITHUB_WORKSPACE/.checkpoint/STD" rev-parse HEAD)" = "$STD_CHECKPOINT"
           test "$(git -C "$GITHUB_WORKSPACE/.checkpoint/GFX.Physics" rev-parse HEAD)" = "$PHYSICS_CHECKPOINT"
+          test "$(git -C "$GITHUB_WORKSPACE/.checkpoint/GFX.WebView" rev-parse HEAD)" = "$WEBVIEW_CHECKPOINT"
           export HOME="$RUNNER_TEMP/home"
           mkdir -p "$HOME"
           zig build -Doptimize=ReleaseFast -Dcpu=baseline --prefix "$RUNNER_TEMP/silex-prefix" --build-file Toolchain/build.zig
@@ -106,6 +117,7 @@ jobs:
           "$silex" install GFX
           "$silex" link "$GITHUB_WORKSPACE/.checkpoint/STD"
           "$silex" link "$GITHUB_WORKSPACE/.checkpoint/GFX.Physics"
+          "$silex" link "$GITHUB_WORKSPACE/.checkpoint/GFX.WebView"
           "$silex" test "$GITHUB_WORKSPACE/Tests/Types/Str/Operators.sx"
           "$silex" test "$GITHUB_WORKSPACE/Tests/Types/Str/Returns.sx"
           "$silex" test "$GITHUB_WORKSPACE/Tests/Native/X64Portability.sx"
@@ -117,6 +129,8 @@ jobs:
             "$RUNNER_TEMP/physics-corpus" --sparse-10000 --workers-2
             "$RUNNER_TEMP/physics-corpus" --sparse-10000 --workers-4
           } | python3 "$GITHUB_WORKSPACE/.checkpoint/GFX.Physics/Benchmarks/Oracle2D/CheckCorpus.py" --enforce
+          xvfb-run -a env GDK_BACKEND=x11 SDL_VIDEODRIVER=x11 \
+            "$silex" test "$GITHUB_WORKSPACE/.checkpoint/GFX.WebView/Tests"
           find_package() {
             find "$HOME/.silex/packages" -maxdepth 1 -type d -name "$1@*" -print -quit
           }
@@ -154,7 +168,8 @@ jobs:
           }
           $stdHead = git -C (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/STD") rev-parse HEAD
           $physicsHead = git -C (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/GFX.Physics") rev-parse HEAD
-          if ($stdHead -ne $env:STD_CHECKPOINT -or $physicsHead -ne $env:PHYSICS_CHECKPOINT) {
+          $webViewHead = git -C (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/GFX.WebView") rev-parse HEAD
+          if ($stdHead -ne $env:STD_CHECKPOINT -or $physicsHead -ne $env:PHYSICS_CHECKPOINT -or $webViewHead -ne $env:WEBVIEW_CHECKPOINT) {
             throw "external checkpoint does not match the pinned commits"
           }
           $env:USERPROFILE = Join-Path $env:RUNNER_TEMP "home"
@@ -169,6 +184,7 @@ jobs:
           & $silex install GFX
           & $silex link (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/STD")
           & $silex link (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/GFX.Physics")
+          & $silex link (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/GFX.WebView")
           & $silex test (Join-Path $env:GITHUB_WORKSPACE "Tests/Types/Str/Operators.sx")
           & $silex test (Join-Path $env:GITHUB_WORKSPACE "Tests/Types/Str/Returns.sx")
           & $silex test (Join-Path $env:GITHUB_WORKSPACE "Tests/Native/X64Portability.sx")
@@ -182,6 +198,7 @@ jobs:
             & $physicsCorpus --sparse-10000 --workers-4
           )
           $physicsRecords | python (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/GFX.Physics/Benchmarks/Oracle2D/CheckCorpus.py") --enforce
+          & $silex test (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/GFX.WebView/Tests")
           function Find-Package([string] $name) {
             $package = Get-ChildItem (Join-Path $env:USERPROFILE ".silex/packages") -Directory -Filter "$name@*" | Select-Object -First 1
             if (-not $package) {
@@ -224,6 +241,7 @@ jobs:
           test "$(uname -m)" = "arm64"
           test "$(git -C "$GITHUB_WORKSPACE/.checkpoint/STD" rev-parse HEAD)" = "$STD_CHECKPOINT"
           test "$(git -C "$GITHUB_WORKSPACE/.checkpoint/GFX.Physics" rev-parse HEAD)" = "$PHYSICS_CHECKPOINT"
+          test "$(git -C "$GITHUB_WORKSPACE/.checkpoint/GFX.WebView" rev-parse HEAD)" = "$WEBVIEW_CHECKPOINT"
           export HOME="$RUNNER_TEMP/home"
           mkdir -p "$HOME"
           zig build -Doptimize=ReleaseFast -Dcpu=baseline --prefix "$RUNNER_TEMP/silex-prefix" --build-file Toolchain/build.zig
@@ -233,6 +251,7 @@ jobs:
           "$silex" install GFX
           "$silex" link "$GITHUB_WORKSPACE/.checkpoint/STD"
           "$silex" link "$GITHUB_WORKSPACE/.checkpoint/GFX.Physics"
+          "$silex" link "$GITHUB_WORKSPACE/.checkpoint/GFX.WebView"
           "$silex" test "$GITHUB_WORKSPACE/Tests/Types/Str/Operators.sx"
           "$silex" test "$GITHUB_WORKSPACE/Tests/Types/Str/Returns.sx"
           "$silex" test "$GITHUB_WORKSPACE/.checkpoint/STD/Tests/Threading.sx"
@@ -243,3 +262,4 @@ jobs:
             "$RUNNER_TEMP/physics-corpus" --sparse-10000 --workers-2
             "$RUNNER_TEMP/physics-corpus" --sparse-10000 --workers-4
           } | python3 "$GITHUB_WORKSPACE/.checkpoint/GFX.Physics/Benchmarks/Oracle2D/CheckCorpus.py" --enforce
+          "$silex" compile "$GITHUB_WORKSPACE/.checkpoint/GFX.WebView/Examples/Availability.sx" --release -o "$RUNNER_TEMP/webview-availability"
