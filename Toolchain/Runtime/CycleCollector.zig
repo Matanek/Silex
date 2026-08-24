@@ -112,6 +112,10 @@ fn prepare(
 ) ?*Context {
     const state: *u64 = @ptrCast(candidate + 3);
     if (@cmpxchgStrong(u64, state, 0, 2, .acq_rel, .acquire) != null) return null;
+    const candidate_roots: *u64 = @ptrCast(candidate + 1);
+    // A retain may race the drop that selected this candidate. Reject it
+    // before tracing so pooled objects can safely mutate after retaining a root.
+    if (@atomicLoad(u64, candidate_roots, .acquire) != 0) return reject(candidate, null, 4);
     var probe: Context = undefined;
     probe.model = model;
     probe.nodes = undefined;
@@ -566,6 +570,37 @@ test "X64 callbacks prove and commit a direct class cycle" {
     try std.testing.expectEqual(@as(u64, 0), first[2]);
     try std.testing.expectEqual(@as(u64, 1), second[2]);
     _ = silex_cycle_x64(1, context, &model, class_type, testAllocate, testRelease);
+}
+
+test "X64 callbacks reject a candidate retained before tracing" {
+    const class_type = structure_base;
+    const optional_class_type = (@as(u64, 1) << optional_depth_shift) | class_type;
+    const structure: u64 = 42;
+    const model = [_]u64{
+        1,
+        @intFromEnum(Kind.class),
+        1,
+        5,
+        0,
+        1,
+        structure,
+        2,
+        1,
+        optional_class_type,
+    };
+    var candidate = [_]u64{ structure, 1, 1, 0, 1, 0 };
+    candidate[5] = @intFromPtr(&candidate);
+
+    try std.testing.expectEqual(@as(u64, 0), silex_cycle_x64(
+        0,
+        @intFromPtr(&candidate),
+        &model,
+        class_type,
+        testAllocate,
+        testRelease,
+    ));
+    try std.testing.expectEqual(@as(u64, 4), candidate[3]);
+    try std.testing.expectEqual(@as(u64, 1), candidate[2]);
 }
 
 test "X64 callbacks cache a negative proof for an externally reached cycle" {
