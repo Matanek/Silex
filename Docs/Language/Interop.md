@@ -101,6 +101,12 @@ identity through an opaque system callback context. These operations are for
 private platform adapters: the object must remain alive until the system has
 finished using the context.
 
+On Windows X64, function addresses use a generated Win64 adapter. It translates
+the platform callback registers to Silex's portable internal convention and
+preserves Win64 nonvolatile registers. Calls through ordinary Silex function
+values use the same adapter in the opposite direction, so a callback remains
+usable both by a system API and by Silex code.
+
 Some C APIs publish functions through a table of addresses rather than named
 linker symbols. A package platform adapter can call one of those entries with
 an explicit C signature:

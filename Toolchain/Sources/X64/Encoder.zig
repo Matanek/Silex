@@ -158,13 +158,27 @@ fn encode(
         },
     }
 
+    if (platform == .windows) {
+        var thunk_offsets = std.AutoHashMap(usize, usize).init(allocator);
+        defer thunk_offsets.deinit();
+        for (function_addresses.items) |fixup| {
+            const thunk = try thunk_offsets.getOrPut(fixup.function);
+            if (!thunk.found_existing) {
+                thunk.value_ptr.* = bytes.items.len;
+                try emitWindowsFunctionThunk(allocator, &bytes, &calls, program.functions[fixup.function], fixup.function);
+            }
+            try patchRelative(bytes.items, fixup.displacement_at, thunk.value_ptr.*);
+        }
+    } else {
+        for (function_addresses.items) |fixup| {
+            if (fixup.function >= offsets.len or offsets[fixup.function] == std.math.maxInt(u32)) return error.InvalidMachineProgram;
+            try patchRelative(bytes.items, fixup.displacement_at, offsets[fixup.function]);
+        }
+    }
+
     for (calls.items) |call| {
         if (call.function >= offsets.len or offsets[call.function] == std.math.maxInt(u32)) return error.InvalidMachineProgram;
         try patchRelative(bytes.items, call.displacement_at, offsets[call.function]);
-    }
-    for (function_addresses.items) |fixup| {
-        if (fixup.function >= offsets.len or offsets[fixup.function] == std.math.maxInt(u32)) return error.InvalidMachineProgram;
-        try patchRelative(bytes.items, fixup.displacement_at, offsets[fixup.function]);
     }
 
     if (float_calls.items.len != 0) {
@@ -693,7 +707,10 @@ fn encodeFunction(
             },
             .indirect_call => |call| {
                 if (call.result) |result| if (result.aggregate) try emitAddressStack(allocator, bytes, .r15, result.start);
-                const outgoing_stack_size = try emitInternalCallArguments(allocator, bytes, call.arguments, &argument_registers);
+                const outgoing_stack_size = if (platform == .windows)
+                    try emitWindowsCallbackArguments(allocator, bytes, call.arguments)
+                else
+                    try emitInternalCallArguments(allocator, bytes, call.arguments, &argument_registers);
                 try emitLoadStack(allocator, bytes, .r12, call.callee + 1);
                 try emitLoadStack(allocator, bytes, .rax, call.callee);
                 try bytes.appendSlice(allocator, &.{ 0xff, 0xd0 });
@@ -2587,6 +2604,69 @@ fn appendCall(allocator: Allocator, bytes: *std.ArrayList(u8), calls: *std.Array
     try bytes.appendNTimes(allocator, 0, 4);
 }
 
+fn emitWindowsFunctionThunk(
+    allocator: Allocator,
+    bytes: *std.ArrayList(u8),
+    calls: *std.ArrayList(CallFixup),
+    function: Machine.Function,
+    function_id: usize,
+) Error!void {
+    if (function.parameters.len > 8) return unsupported("Windows callback with more than eight parameters");
+
+    // Silex uses its portable internal register convention while Win64 enters
+    // callbacks through RCX, RDX, R8 and R9. Preserve every Win64 nonvolatile
+    // register that a Silex function may use, then bridge the scalar arguments.
+    try bytes.appendSlice(allocator, &.{
+        0x53, 0x56, 0x57,
+        0x41, 0x54, 0x41,
+        0x55, 0x41, 0x56,
+        0x41, 0x57,
+    });
+    const incoming = [_]Register{ .rcx, .rdx, .r8, .r9 };
+    const internal = [_]Register{ .rdi, .rsi, .rdx, .rcx };
+    for (incoming[0..@min(function.parameters.len, 4)], internal[0..@min(function.parameters.len, 4)]) |source, destination| {
+        try emitMoveRegister(allocator, bytes, destination, source);
+    }
+    const stacked = [_]Register{ .r8, .r9, .r10, .r11 };
+    for (stacked[0..function.parameters.len -| 4], 0..) |destination, index| {
+        try emitLoadMemory(allocator, bytes, destination, .rsp, @intCast(96 + index * Machine.slot_size));
+    }
+    try appendCall(allocator, bytes, calls, function_id);
+    try bytes.appendSlice(allocator, &.{
+        0x41, 0x5f, 0x41, 0x5e, 0x41, 0x5d, 0x41, 0x5c,
+        0x5f, 0x5e, 0x5b, 0xc3,
+    });
+}
+
+fn emitWindowsCallbackArguments(
+    allocator: Allocator,
+    bytes: *std.ArrayList(u8),
+    arguments: []const Machine.Span,
+) Error!u32 {
+    if (arguments.len > 8) return unsupported("Windows callback call with more than eight parameters");
+    const stack_size: u32 = @intCast(std.mem.alignForward(usize, 32 + (arguments.len -| 4) * Machine.slot_size, 16));
+    try emitStackSubtraction(allocator, bytes, stack_size);
+    const registers = [_]Register{ .rcx, .rdx, .r8, .r9 };
+    for (arguments[0..@min(arguments.len, 4)], registers[0..@min(arguments.len, 4)]) |argument, register| {
+        if (argument.aggregate) {
+            try emitAddressStack(allocator, bytes, register, argument.start);
+        } else {
+            if (argument.width != 1) return error.InvalidMachineProgram;
+            try emitLoadStack(allocator, bytes, register, argument.start);
+        }
+    }
+    for (arguments[@min(arguments.len, 4)..], 0..) |argument, index| {
+        if (argument.aggregate) {
+            try emitAddressStack(allocator, bytes, .rax, argument.start);
+        } else {
+            if (argument.width != 1) return error.InvalidMachineProgram;
+            try emitLoadStack(allocator, bytes, .rax, argument.start);
+        }
+        try emitStoreMemory(allocator, bytes, .rsp, @intCast(32 + index * Machine.slot_size), .rax);
+    }
+    return stack_size;
+}
+
 fn emitInternalCallArguments(
     allocator: Allocator,
     bytes: *std.ArrayList(u8),
@@ -2932,6 +3012,35 @@ test "encode a no-op Silex main for the Linux X64 process contract" {
     defer windows.deinit(std.testing.allocator);
     try std.testing.expectEqual(@as(usize, 0), windows.windows_import_sites.len);
     try std.testing.expectEqual(@as(u8, 0xc3), windows.code[windows.code.len - 1]);
+}
+
+test "encode Win64 callback thunks for Silex function addresses" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = @import("../Frontend.zig").Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\func worker(value:int) int { return value + 1 }
+        \\func main() {
+        \\    let callback:func(int) int = worker
+        \\    assert(callback(41) == 42)
+        \\}
+    );
+    const machine = try @import("../Arm64/Lower.zig").lower(allocator, compilation.ir);
+    const image = try encodeWindows(allocator, machine);
+    defer image.deinit(allocator);
+    const address_instruction = std.mem.indexOf(u8, image.code, &.{ 0x48, 0x8d, 0x05 }) orelse return error.InvalidMachineProgram;
+    const displacement_at = address_instruction + 3;
+    const displacement = std.mem.readInt(i32, image.code[displacement_at..][0..4], .little);
+    const thunk_start: usize = @intCast(@as(i64, @intCast(displacement_at + 4)) + displacement);
+    const expected = [_]u8{
+        0x53, 0x56, 0x57,
+        0x41, 0x54, 0x41,
+        0x55, 0x41, 0x56,
+        0x41, 0x57, 0x48,
+        0x89, 0xcf,
+    };
+    try std.testing.expectEqualSlices(u8, &expected, image.code[thunk_start..][0..expected.len]);
 }
 
 test "encode internal X64 arguments beyond the register window" {
