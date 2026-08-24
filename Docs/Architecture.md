@@ -157,20 +157,20 @@ open Silex document
   from package identities, builds a single-version dependency graph, and
   enforces direct visibility.
 - An exact namespace extension may carry a `suite` installation permission.
-  The registry expands only the package explicitly requested by name and
-  selects independently released members whose parent dependency accepts that
-  exact release. Suite selection adds no package-composition dependency and is
-  never inferred from a wildcard.
+  The registry expands only a package explicitly requested by registered name
+  with `--suite`, and selects independently released members whose parent
+  dependency accepts that exact release. Suite selection adds no
+  package-composition dependency and is never inferred from a wildcard.
 - In an interactive terminal, registry installation reports lookup, package
   resolution, release acquisition, and installation for transitive
-  dependencies and exact suite members. One active line updates in place while
-  completed packages remain as durable results. A selected package release is
-  processed once across the complete dependency and suite graph. A failed suite
-  member becomes a durable result and does not prevent independent members from
-  being installed. After visiting the complete suite, the command returns a
-  nonzero status without repeating the durable interactive diagnostics.
-  Redirected executions do not gain progress output and instead receive one
-  combined failure diagnostic.
+  dependencies and, only when requested, exact suite members. One active line
+  updates in place while completed packages remain as durable results. A
+  selected package release is processed once across the complete dependency
+  and requested suite graph. A failed suite member becomes a durable result and
+  does not prevent independent members from being installed. After visiting
+  the complete requested suite, the command returns a nonzero status without
+  repeating the durable interactive diagnostics. Redirected executions do not
+  gain progress output and instead receive one combined failure diagnostic.
 - A parent package remains authoritative over every module in its namespace.
   When it and an authorized child package provide the child's exact principal
   module, the parent is canonical and composition fails unless the parent's

@@ -44,6 +44,11 @@ pub const Registry = struct {
     }
 };
 
+pub const InstallOptions = struct {
+    development: bool = false,
+    suite: bool = false,
+};
+
 pub const Release = struct {
     name: []const u8,
     version: Packages.Version,
@@ -273,7 +278,7 @@ pub const Client = struct {
         toolchain: Packages.Version,
         target: TargetModule.Target,
         store: *PackageStore.Manager,
-        development: bool,
+        options: InstallOptions,
     ) !PackageStore.InstallResult {
         self.diagnostic = null;
         const package = try self.loadPackageIndex(registry, request.name);
@@ -284,64 +289,66 @@ pub const Client = struct {
         const result = try self.installRelease(registry, release, toolchain, target, store, &stack, &installed, null);
         var suite_failures: std.ArrayList(SuiteFailure) = .empty;
         defer suite_failures.deinit(self.allocator);
-        for (result.package.extensions) |extension| {
-            if (!extension.suite) continue;
-            if (installed.get(extension.name)) |existing| {
-                var compatible = false;
-                for (existing.package.dependencies) |dependency| {
-                    if (std.mem.eql(u8, dependency.name, release.name) and dependency.constraint.accepts(release.version)) {
-                        compatible = true;
-                        break;
+        if (options.suite) {
+            for (result.package.extensions) |extension| {
+                if (!extension.suite) continue;
+                if (installed.get(extension.name)) |existing| {
+                    var compatible = false;
+                    for (existing.package.dependencies) |dependency| {
+                        if (std.mem.eql(u8, dependency.name, release.name) and dependency.constraint.accepts(release.version)) {
+                            compatible = true;
+                            break;
+                        }
                     }
+                    if (!compatible) {
+                        const diagnostic = try std.fmt.allocPrint(
+                            self.allocator,
+                            "suite member '{s}' requires an incompatible version of '{s}'",
+                            .{ extension.name, release.name },
+                        );
+                        try self.recordSuiteFailure(&suite_failures, extension.name, existing.package.version, diagnostic);
+                    }
+                    continue;
                 }
-                if (!compatible) {
-                    const diagnostic = try std.fmt.allocPrint(
-                        self.allocator,
-                        "suite member '{s}' requires an incompatible version of '{s}'",
-                        .{ extension.name, release.name },
-                    );
-                    try self.recordSuiteFailure(&suite_failures, extension.name, existing.package.version, diagnostic);
-                }
-                continue;
+                const member = self.loadPackageIndex(registry, extension.name) catch |err| switch (err) {
+                    error.InvalidRegistry => {
+                        try self.recordSuiteFailure(
+                            &suite_failures,
+                            extension.name,
+                            null,
+                            self.diagnostic orelse "cannot resolve suite member",
+                        );
+                        continue;
+                    },
+                    else => |other| return other,
+                };
+                const selected = member.selectSuiteMember(self.allocator, release, toolchain, &self.diagnostic) catch |err| switch (err) {
+                    error.InvalidRegistry => {
+                        try self.recordSuiteFailure(
+                            &suite_failures,
+                            extension.name,
+                            null,
+                            self.diagnostic orelse "cannot select suite member",
+                        );
+                        continue;
+                    },
+                    else => |other| return other,
+                };
+                _ = self.installRelease(registry, selected, toolchain, target, store, &stack, &installed, release) catch |err| switch (err) {
+                    error.InvalidRegistry => {
+                        try self.recordSuiteFailure(
+                            &suite_failures,
+                            extension.name,
+                            selected.version,
+                            self.diagnostic orelse "cannot install suite member",
+                        );
+                        continue;
+                    },
+                    else => |other| return other,
+                };
             }
-            const member = self.loadPackageIndex(registry, extension.name) catch |err| switch (err) {
-                error.InvalidRegistry => {
-                    try self.recordSuiteFailure(
-                        &suite_failures,
-                        extension.name,
-                        null,
-                        self.diagnostic orelse "cannot resolve suite member",
-                    );
-                    continue;
-                },
-                else => |other| return other,
-            };
-            const selected = member.selectSuiteMember(self.allocator, release, toolchain, &self.diagnostic) catch |err| switch (err) {
-                error.InvalidRegistry => {
-                    try self.recordSuiteFailure(
-                        &suite_failures,
-                        extension.name,
-                        null,
-                        self.diagnostic orelse "cannot select suite member",
-                    );
-                    continue;
-                },
-                else => |other| return other,
-            };
-            _ = self.installRelease(registry, selected, toolchain, target, store, &stack, &installed, release) catch |err| switch (err) {
-                error.InvalidRegistry => {
-                    try self.recordSuiteFailure(
-                        &suite_failures,
-                        extension.name,
-                        selected.version,
-                        self.diagnostic orelse "cannot install suite member",
-                    );
-                    continue;
-                },
-                else => |other| return other,
-            };
         }
-        if (development) {
+        if (options.development) {
             try self.installDependencies(
                 registry,
                 release.dev_dependencies,
@@ -877,7 +884,7 @@ const TestProgressRecorder = struct {
     }
 };
 
-test "install tagged package dependencies from registered Git repositories" {
+test "install tagged package dependencies and opt-in suites from registered Git repositories" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -975,20 +982,43 @@ test "install tagged package dependencies from registered Git repositories" {
     });
 
     const cache = try std.fs.path.join(allocator, &.{ base, "Cache" });
-    const store_root = try std.fs.path.join(allocator, &.{ base, "Store", "packages" });
     const registry_path = try std.fs.path.join(allocator, &.{ base, "Registry", "index.json" });
     var client = Client.init(allocator, std.testing.allocator, std.testing.io, cache);
+    const registry = try client.load(registry_path);
+
+    const minimal_store_root = try std.fs.path.join(allocator, &.{ base, "MinimalStore", "packages" });
+    var minimal_store = PackageStore.Manager.init(allocator, std.testing.allocator, std.testing.io, minimal_store_root);
+    var minimal_progress: TestProgressRecorder = .{};
+    client.setProgress(.{ .context = &minimal_progress, .callback = TestProgressRecorder.report });
+    const minimal_result = try client.install(
+        registry,
+        try Request.parse("GFX@2.1.0"),
+        try Packages.Version.parse("0.38.0"),
+        .macos_arm64,
+        &minimal_store,
+        .{},
+    );
+    try std.testing.expectEqualStrings("GFX", minimal_result.package.name);
+    try std.testing.expectEqual(@as(usize, 1), minimal_progress.std_resolutions);
+    try std.testing.expectEqual(@as(usize, 1), minimal_progress.std_completions);
+    try std.testing.expectEqual(@as(usize, 0), minimal_progress.ui_completions);
+    try std.testing.expect(!minimal_progress.resolved_suite);
+    try std.testing.expect(!minimal_progress.failed_audio);
+    try std.testing.expect(try pathExists(std.testing.io, try std.fs.path.join(allocator, &.{ minimal_store_root, "STD@1.0.0" })));
+    try std.testing.expect(!try pathExists(std.testing.io, try std.fs.path.join(allocator, &.{ minimal_store_root, "GFX.Audio@1.0.0" })));
+    try std.testing.expect(!try pathExists(std.testing.io, try std.fs.path.join(allocator, &.{ minimal_store_root, "GFX.UI@1.0.0" })));
+
+    const store_root = try std.fs.path.join(allocator, &.{ base, "SuiteStore", "packages" });
+    var store = PackageStore.Manager.init(allocator, std.testing.allocator, std.testing.io, store_root);
     var progress: TestProgressRecorder = .{};
     client.setProgress(.{ .context = &progress, .callback = TestProgressRecorder.report });
-    const registry = try client.load(registry_path);
-    var store = PackageStore.Manager.init(allocator, std.testing.allocator, std.testing.io, store_root);
     const result = client.install(
         registry,
         try Request.parse("GFX@2.0.0"),
         try Packages.Version.parse("0.38.0"),
         .macos_arm64,
         &store,
-        false,
+        .{ .suite = true },
     ) catch |err| {
         std.debug.print("package registry integration failed: {s}\n", .{client.diagnostic orelse store.diagnostic orelse @errorName(err)});
         return err;
@@ -1020,7 +1050,7 @@ test "install tagged package dependencies from registered Git repositories" {
         try Packages.Version.parse("0.38.0"),
         .macos_arm64,
         &incomplete_store,
-        false,
+        .{ .suite = true },
     ));
     try std.testing.expect(progress.failed_audio);
     try std.testing.expectEqual(@as(usize, 2), progress.ui_completions);
@@ -1035,11 +1065,34 @@ test "install tagged package dependencies from registered Git repositories" {
         try Packages.Version.parse("0.38.0"),
         .macos_arm64,
         &development_store,
-        true,
+        .{ .development = true },
     );
     try std.testing.expect(try pathExists(
         std.testing.io,
         try std.fs.path.join(allocator, &.{ development_store_root, "GFX.Dev@1.0.0" }),
+    ));
+    try std.testing.expect(!try pathExists(
+        std.testing.io,
+        try std.fs.path.join(allocator, &.{ development_store_root, "GFX.UI@1.0.0" }),
+    ));
+
+    const complete_store_root = try std.fs.path.join(allocator, &.{ base, "CompleteStore", "packages" });
+    var complete_store = PackageStore.Manager.init(allocator, std.testing.allocator, std.testing.io, complete_store_root);
+    _ = try client.install(
+        registry,
+        try Request.parse("GFX@2.0.0"),
+        try Packages.Version.parse("0.38.0"),
+        .macos_arm64,
+        &complete_store,
+        .{ .development = true, .suite = true },
+    );
+    try std.testing.expect(try pathExists(
+        std.testing.io,
+        try std.fs.path.join(allocator, &.{ complete_store_root, "GFX.Dev@1.0.0" }),
+    ));
+    try std.testing.expect(try pathExists(
+        std.testing.io,
+        try std.fs.path.join(allocator, &.{ complete_store_root, "GFX.UI@1.0.0" }),
     ));
 }
 

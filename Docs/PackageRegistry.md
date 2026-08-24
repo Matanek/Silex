@@ -30,33 +30,48 @@ that tag.
 Silex creates the package archive directly from the selected commit and stores
 a source proof beside the installed files. The proof binds the package name and
 version to its repository, commit, archive checksum, manifest checksum,
-extension permissions, including suite membership, and catalog grants. Editing an installed manifest therefore
-cannot grant another namespace or privileged package access. The local Git
-cache also refuses to replace an already observed tag with another commit.
+extension permissions, including suite membership, and catalog grants.
+Editing an installed manifest therefore cannot grant another namespace or
+privileged package access. The local Git cache also refuses to replace an
+already observed tag with another commit.
 
 Dependencies remain declared only in the tagged `Package.json`. The installer
 resolves them transitively through their own registered repositories before it
-installs the requested package. When the explicitly requested package marks an
-exact extension with `suite: true`, the installer also selects the newest tagged
-extension whose direct parent dependency accepts the selected parent version.
-Wildcard extensions can never carry `suite`.
+installs the requested package. This required graph is the complete default
+behavior: `silex install Name` never expands an optional suite.
+
+Add `--suite` to a registered package request when its exact extensions should
+also be installed:
+
+```sh
+silex install GFX --suite
+silex install GFX@0.38.2 --suite
+```
+
+For each exact extension marked `suite: true`, the installer selects the newest
+tagged release whose direct parent dependency accepts the selected parent
+version. Wildcard extensions can never carry `suite`. Suite installation is
+unavailable for a local package-directory operand because mixing an unpublished
+parent with independently tagged children would not form a reproducible set.
 
 In an interactive terminal, installation reports the registry lookup, package
-resolution, release download, and installation of every dependency and suite
-member. The active operation updates in place; each completed package becomes
-a durable `ready` line stating whether it was installed or already present.
-The installer visits one selected version of a package only once across the
-dependency and suite graph. A failed suite member becomes a durable `failed`
-line, then installation continues with every independent member. After the
-complete suite has been visited, an interactive command returns a nonzero
-status without repeating those durable diagnostics. Redirected and CI
-executions remain quiet on success and receive one combined failure diagnostic
-listing every failed member.
+resolution, release download, and installation of every selected dependency
+and, with `--suite`, suite member. The active operation updates in place; each
+completed package becomes a durable `ready` line stating whether it was
+installed or already present. The installer visits one selected version of a
+package only once across the dependency and requested suite graph. A failed
+suite member becomes a durable `failed` line, then installation continues with
+every independent member. After the complete requested suite has been visited,
+an interactive command returns a nonzero status without repeating those
+durable diagnostics. Redirected and CI executions remain quiet on success and
+receive one combined failure diagnostic listing every failed member.
 
 Tagged manifests may also declare `devDependencies`. They are excluded from
 ordinary installation and from every consumer graph. `silex install Name --dev`
 installs the explicitly requested release's development dependencies plus each
 one's normal transitive dependencies; development dependencies never recurse.
+`--dev` and `--suite` are independent and may be combined when both optional
+sets are wanted.
 
 ## Register a package once
 

@@ -20,6 +20,7 @@ pub const Diagnostic = struct {
         missing_workspace,
         duplicate_workspace,
         duplicate_dev,
+        duplicate_suite,
         unknown_action,
         conflicting_modes,
         option_unavailable,
@@ -52,6 +53,7 @@ pub const InstallOptions = struct {
     package_path: []const u8,
     target: ?TargetModule.Target,
     development: bool,
+    suite: bool,
 };
 
 pub const LinkOptions = struct {
@@ -237,6 +239,7 @@ pub fn parseInstall(args: []const []const u8) InstallResult {
     var package_path: ?[]const u8 = null;
     var target: ?TargetModule.Target = null;
     var development = false;
+    var suite = false;
     var index: usize = 0;
 
     while (index < args.len) : (index += 1) {
@@ -244,6 +247,9 @@ pub fn parseInstall(args: []const []const u8) InstallResult {
         if (std.mem.eql(u8, argument, "--dev")) {
             if (development) return failure(InstallResult, .duplicate_dev, argument);
             development = true;
+        } else if (std.mem.eql(u8, argument, "--suite")) {
+            if (suite) return failure(InstallResult, .duplicate_suite, argument);
+            suite = true;
         } else if (std.mem.eql(u8, argument, "--target")) {
             if (target != null) return failure(InstallResult, .duplicate_target, argument);
             index += 1;
@@ -265,6 +271,7 @@ pub fn parseInstall(args: []const []const u8) InstallResult {
         .package_path = package_path orelse return failure(InstallResult, .missing_package, null),
         .target = target,
         .development = development,
+        .suite = suite,
     } };
 }
 
@@ -398,15 +405,18 @@ test "install accepts one package and an optional target" {
     try std.testing.expectEqualStrings("Sandbox/GFX", local.package_path);
     try std.testing.expect(local.target == null);
     try std.testing.expect(!local.development);
+    try std.testing.expect(!local.suite);
 
-    const cross = parseInstall(&.{ "--dev", "--target", "windows-arm64", "Sandbox/GFX" }).options;
+    const cross = parseInstall(&.{ "--dev", "--suite", "--target", "windows-arm64", "Sandbox/GFX" }).options;
     try std.testing.expect(cross.target.?.eql(.windows_arm64));
     try std.testing.expect(cross.development);
+    try std.testing.expect(cross.suite);
     try expectInstallDiagnostic(parseInstall(&.{}), .missing_package, null);
     try expectInstallDiagnostic(parseInstall(&.{ "A", "B" }), .multiple_packages, "B");
     try expectInstallDiagnostic(parseInstall(&.{ "A", "--target" }), .missing_target, "--target");
     try expectInstallDiagnostic(parseInstall(&.{ "A", "--target", "other" }), .unknown_target, "other");
     try expectInstallDiagnostic(parseInstall(&.{ "A", "--dev", "--dev" }), .duplicate_dev, "--dev");
+    try expectInstallDiagnostic(parseInstall(&.{ "A", "--suite", "--suite" }), .duplicate_suite, "--suite");
 }
 
 test "package commands accept exactly one path or name" {

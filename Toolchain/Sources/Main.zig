@@ -44,7 +44,7 @@ const usage =
     \\       silex interpret <source.sx> [-n|--nocache] [--emit-ir]
     \\       silex test <source.sx|directory> [-n|--nocache] [--emit-ir]
     \\       silex compile <source.sx> [--target <target>] [-d|--debug|-r|--release] [-n|--nocache] -o|--output <executable>
-    \\       silex install <package|package-directory> [--dev] [--target <target>]
+    \\       silex install <package|package-directory> [--suite] [--dev] [--target <target>]
     \\       silex check <package-directory>
     \\       silex register <package-directory>
     \\       silex link <package-directory> [--workspace <directory>] [--target <target>]
@@ -277,6 +277,7 @@ fn installPackage(init: std.process.Init, allocator: std.mem.Allocator, args: []
         options.package_path,
         target,
         options.development,
+        options.suite,
         &progress,
     ) orelse return 1;
     progress.finish();
@@ -299,6 +300,7 @@ fn installPackageOperand(
     operand: []const u8,
     target: TargetModule.Target,
     development: bool,
+    suite: bool,
     progress: *CliProgress.Install,
 ) !?PackageStore.InstallResult {
     const status = Io.Dir.cwd().statFile(init.io, operand, .{}) catch |err| switch (err) {
@@ -308,6 +310,10 @@ fn installPackageOperand(
     if (status) |found| {
         if (found.kind != .directory) {
             std.debug.print("silex: package source '{s}' is not a directory\n", .{operand});
+            return null;
+        }
+        if (suite) {
+            std.debug.print("silex: '--suite' is available only for registered package names\n", .{});
             return null;
         }
         progress.source(.install, operand);
@@ -370,7 +376,7 @@ fn installPackageOperand(
         Packages.Version.parse(build_options.version) catch unreachable,
         target,
         store,
-        development,
+        .{ .development = development, .suite = suite },
     ) catch |err| switch (err) {
         error.IncompleteSuite => {
             if (!progress.enabled) {
@@ -1690,6 +1696,7 @@ fn printCliDiagnostic(command: []const u8, diagnostic: Cli.Diagnostic) void {
         .missing_workspace => std.debug.print("silex: option '--workspace' expects a directory\n", .{}),
         .duplicate_workspace => std.debug.print("silex: workspace is specified more than once\n", .{}),
         .duplicate_dev => std.debug.print("silex: development dependencies are requested more than once\n", .{}),
+        .duplicate_suite => std.debug.print("silex: package suite is requested more than once\n", .{}),
         .unknown_action => std.debug.print("silex: unknown '{s}' action '{s}'; expected 'resolve' or no action\n", .{ command, diagnostic.argument.? }),
         .conflicting_modes => std.debug.print("silex: Debug and Release modes are mutually exclusive near '{s}'\n", .{diagnostic.argument.?}),
         .option_unavailable => std.debug.print("silex: option '{s}' is unavailable for '{s}'\n", .{ diagnostic.argument.?, command }),

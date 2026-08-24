@@ -120,8 +120,8 @@ name a package outside the declaring package's namespace. Omit `extensions` or
 use an empty object to keep the namespace closed.
 
 Each extension entry carries its own permissions. `friend` lets the selected
-child access declarations carrying `package` visibility, `suite` includes that
-exact child when the parent is explicitly installed from the registry, and
+child access declarations carrying `package` visibility, `suite` makes that
+exact child available to the parent's explicit `--suite` installation, and
 `merge` lets the parent and that exact child contribute public declarations to
 the child's principal module:
 
@@ -172,14 +172,21 @@ public to ordinary consumers. A suite permission does not create a dependency
 from the parent to the child and therefore cannot create a package-composition
 cycle.
 
-`silex install GFX` installs every exact extension carrying `suite: true`. For
-each member, the registry selects the newest tagged release compatible with the
-toolchain whose direct dependency on `GFX` accepts the selected GFX version.
-The extension keeps its own release cycle; publishing a newer compatible
-extension does not require a new GFX release. Suite expansion happens only for
-the package explicitly requested by name. Installing `GFX.Physics`, or meeting
-GFX as an ordinary dependency, does not expand GFX's suite. The member's normal
-dependencies are still installed transitively.
+`silex install GFX` installs GFX and its required dependency graph only. Add
+`--suite` to install every exact extension carrying `suite: true`:
+
+```sh
+silex install GFX --suite
+```
+
+For each member, the registry selects the newest tagged release compatible
+with the toolchain whose direct dependency on `GFX` accepts the selected GFX
+version. The extension keeps its own release cycle; publishing a newer
+compatible extension does not require a new GFX release. Suite expansion
+happens only when `--suite` accompanies the package explicitly requested by
+registered name. Installing `GFX.Physics`, meeting GFX as an ordinary
+dependency, or installing GFX from a local directory does not expand GFX's
+suite. The member's normal dependencies are still installed transitively.
 
 This policy concerns separate package identities. Modules owned directly by
 `GFX`, including a module named `GFX.UI`, remain valid without authorization
@@ -217,10 +224,10 @@ any collision rejects the composition.
 
 Extension authorization, `friend`, `suite`, `merge`, and `catalogs` express
 independent intentions. The extension key authorizes the child identity,
-`friend` grants privileged source access, `suite` selects an exact child for
-explicit parent installation, `merge` opens only the exact child principal
-module to additive public composition, and `catalogs` opens named umbrellas to
-safe public reexports.
+`friend` grants privileged source access, `suite` selects an exact child when
+the user requests the parent's `--suite` installation, `merge` opens only the
+exact child principal module to additive public composition, and `catalogs`
+opens named umbrellas to safe public reexports.
 
 For registered packages, extension permissions and catalog grants come directly
 from `Package.json` in
