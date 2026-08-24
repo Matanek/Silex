@@ -2635,9 +2635,11 @@ fn emitWindowsFunctionThunk(
     for (stacked[0..@min(function.parameters.len -| 4, stacked.len)], 0..) |destination, index| {
         try emitLoadMemory(allocator, bytes, destination, .rsp, @intCast(outgoing_stack_size + 96 + index * Machine.slot_size));
     }
-    for (8..function.parameters.len) |index| {
-        try emitLoadMemory(allocator, bytes, .rax, .rsp, @intCast(outgoing_stack_size + 96 + (index - 4) * Machine.slot_size));
-        try emitStoreMemory(allocator, bytes, .rsp, @intCast((index - 8) * Machine.slot_size), .rax);
+    if (function.parameters.len > 8) {
+        for (8..function.parameters.len) |index| {
+            try emitLoadMemory(allocator, bytes, .rax, .rsp, @intCast(outgoing_stack_size + 96 + (index - 4) * Machine.slot_size));
+            try emitStoreMemory(allocator, bytes, .rsp, @intCast((index - 8) * Machine.slot_size), .rax);
+        }
     }
     try appendCall(allocator, bytes, calls, function_id);
     try emitStackAddition(allocator, bytes, outgoing_stack_size);
@@ -3032,9 +3034,12 @@ test "encode Win64 callback thunks for Silex function addresses" {
         \\func worker(a:int,b:int,c:int,d:int,e:int,f:int,g:int,h:int,i:int,j:int) int {
         \\    return a+b+c+d+e+f+g+h+i+j
         \\}
+        \\func increment(value:int) int { return value + 1 }
         \\func main() {
         \\    let callback:func(int,int,int,int,int,int,int,int,int,int) int = worker
         \\    assert(callback(1,2,3,4,5,6,7,8,9,10) == 55)
+        \\    let incrementer:func(int) int = increment
+        \\    assert(incrementer(41) == 42)
         \\}
     );
     const machine = try @import("../Arm64/Lower.zig").lower(allocator, compilation.ir);
