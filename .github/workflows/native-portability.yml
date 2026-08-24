@@ -23,7 +23,7 @@ env:
   STD_CHECKPOINT: 94adcd6747a3edd01a3b8552b46f12b087c7cdae
   GFX_CHECKPOINT: 247323c7082a2e2250ced2e4dd120ee5bede9e93
   PHYSICS_CHECKPOINT: 392b41868d0d936dae38041d3a4ca77da5f01faf
-  WEBVIEW_CHECKPOINT: ac680fb7b30d9a94e8e45ecfbf689fbd9682045b
+  WEBVIEW_CHECKPOINT: 101778a95f6de5138dd1046e20e0401c887b6575
 
 jobs:
   native:
@@ -123,6 +123,7 @@ jobs:
           silex="$RUNNER_TEMP/silex-prefix/bin/silex"
           "$silex" setup
           "$silex" install STD
+          "$silex" install GFX
           "$silex" install "$GITHUB_WORKSPACE/.checkpoint/GFX"
           "$silex" link "$GITHUB_WORKSPACE/.checkpoint/STD"
           "$silex" link "$GITHUB_WORKSPACE/.checkpoint/GFX.Physics"
@@ -191,6 +192,7 @@ jobs:
           $silex = Join-Path $env:RUNNER_TEMP "silex-prefix/bin/silex.exe"
           & $silex setup
           & $silex install STD
+          & $silex install GFX
           & $silex install (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/GFX")
           & $silex link (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/STD")
           & $silex link (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/GFX.Physics")
@@ -258,6 +260,7 @@ jobs:
           silex="$RUNNER_TEMP/silex-prefix/bin/silex"
           "$silex" setup
           "$silex" install STD
+          "$silex" install GFX
           "$silex" install "$GITHUB_WORKSPACE/.checkpoint/GFX"
           "$silex" link "$GITHUB_WORKSPACE/.checkpoint/STD"
           "$silex" link "$GITHUB_WORKSPACE/.checkpoint/GFX.Physics"
