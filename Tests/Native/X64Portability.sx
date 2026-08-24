@@ -86,13 +86,34 @@ struct X64Asset {
 }
 
 struct X64Site {
+    let entry_path:str
     var assets:X64Asset[]
 
-    init(entry:X64Asset) { self.assets = [entry] }
+    init(entry:X64Asset) {
+        self.entry_path = entry.path()
+        self.assets = [entry]
+    }
 
-    func add(asset:X64Asset) { self.assets.append(asset) }
+    func add(asset:X64Asset) {
+        for let existing in self.assets {
+            if existing.path() == asset.path() { panic("duplicate x64 asset") }
+        }
+        self.assets.append(asset)
+    }
 
-    func entry() X64Asset { return self.assets[0] }
+    func find(path:str) X64Asset? {
+        for let asset in self.assets {
+            if asset.path() == path { return asset }
+        }
+        return null
+    }
+
+    func require(path:str) X64Asset {
+        if let asset = self.find(path) { return asset }
+        panic("missing x64 asset")
+    }
+
+    func entry() X64Asset { return self.require(self.entry_path) }
 }
 
 func paired_float_checksum(left:X64FloatPair, right:X64FloatPair) float {
