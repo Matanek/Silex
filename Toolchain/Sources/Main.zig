@@ -826,7 +826,12 @@ fn testSource(init: std.process.Init, allocator: std.mem.Allocator, args: []cons
                 try Io.File.stdout().writeStreamingAll(init.io, result.stdout);
                 try Io.File.stderr().writeStreamingAll(init.io, result.stderr);
                 break :succeeded switch (result.term) {
-                    .exited => |code| code == 0,
+                    .exited => |code| exited: {
+                        if (code != 0) {
+                            std.debug.print("silex: native test '{s}' exited with code {d}\n", .{ label, code });
+                        }
+                        break :exited code == 0;
+                    },
                     .signal => |signal| signaled: {
                         std.debug.print("silex: native test '{s}' terminated by signal {d}\n", .{ label, @intFromEnum(signal) });
                         break :signaled false;

@@ -20,8 +20,8 @@ permissions:
   contents: read
 
 env:
-  STD_CHECKPOINT: baea236a62e9b99382b5d38365b77f06d339867a
-  PHYSICS_CHECKPOINT: 781f88c5ea47e2b85614eb31a463173b92c0abc9
+  STD_CHECKPOINT: 67e1168c767f05fd88eb583e6cdc2a0d9d1e574a
+  PHYSICS_CHECKPOINT: 392b41868d0d936dae38041d3a4ca77da5f01faf
   WEBVIEW_CHECKPOINT: b129d3e1a06afb955ffa2edc22a854bdfa29421f
 
 jobs:
@@ -121,14 +121,12 @@ jobs:
           "$silex" test "$GITHUB_WORKSPACE/Tests/Types/Str/Operators.sx"
           "$silex" test "$GITHUB_WORKSPACE/Tests/Types/Str/Returns.sx"
           "$silex" test "$GITHUB_WORKSPACE/Tests/Native/X64Portability.sx"
+          "$silex" compile "$GITHUB_WORKSPACE/.checkpoint/STD/Examples/Threading/NativeCheckpoint.sx" --release -o "$RUNNER_TEMP/threading-checkpoint"
+          "$RUNNER_TEMP/threading-checkpoint"
           "$silex" test "$GITHUB_WORKSPACE/.checkpoint/STD/Tests/Threading.sx"
           "$silex" test "$GITHUB_WORKSPACE/.checkpoint/STD/Tests/ThreadingParallelOnly.sx"
           "$silex" compile "$GITHUB_WORKSPACE/.checkpoint/GFX.Physics/Benchmarks/Corpus2D.sx" --release -o "$RUNNER_TEMP/physics-corpus"
-          {
-            "$RUNNER_TEMP/physics-corpus" --sparse-10000
-            "$RUNNER_TEMP/physics-corpus" --sparse-10000 --workers-2
-            "$RUNNER_TEMP/physics-corpus" --sparse-10000 --workers-4
-          } | python3 "$GITHUB_WORKSPACE/.checkpoint/GFX.Physics/Benchmarks/Oracle2D/CheckCorpus.py" --enforce
+          "$RUNNER_TEMP/physics-corpus" | python3 "$GITHUB_WORKSPACE/.checkpoint/GFX.Physics/Benchmarks/Oracle2D/CheckCorpus.py" --enforce
           xvfb-run -a env GDK_BACKEND=x11 SDL_VIDEODRIVER=x11 \
             "$silex" test "$GITHUB_WORKSPACE/.checkpoint/GFX.WebView/Tests"
           find_package() {
@@ -188,15 +186,14 @@ jobs:
           & $silex test (Join-Path $env:GITHUB_WORKSPACE "Tests/Types/Str/Operators.sx")
           & $silex test (Join-Path $env:GITHUB_WORKSPACE "Tests/Types/Str/Returns.sx")
           & $silex test (Join-Path $env:GITHUB_WORKSPACE "Tests/Native/X64Portability.sx")
+          $threadingCheckpoint = Join-Path $env:RUNNER_TEMP "threading-checkpoint.exe"
+          & $silex compile (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/STD/Examples/Threading/NativeCheckpoint.sx") --release -o $threadingCheckpoint
+          & $threadingCheckpoint
           & $silex test (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/STD/Tests/Threading.sx")
           & $silex test (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/STD/Tests/ThreadingParallelOnly.sx")
           $physicsCorpus = Join-Path $env:RUNNER_TEMP "physics-corpus.exe"
           & $silex compile (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/GFX.Physics/Benchmarks/Corpus2D.sx") --release -o $physicsCorpus
-          $physicsRecords = @(
-            & $physicsCorpus --sparse-10000
-            & $physicsCorpus --sparse-10000 --workers-2
-            & $physicsCorpus --sparse-10000 --workers-4
-          )
+          $physicsRecords = @(& $physicsCorpus)
           $physicsRecords | python (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/GFX.Physics/Benchmarks/Oracle2D/CheckCorpus.py") --enforce
           & $silex test (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/GFX.WebView/Tests")
           function Find-Package([string] $name) {
@@ -244,7 +241,7 @@ jobs:
           test "$(git -C "$GITHUB_WORKSPACE/.checkpoint/GFX.WebView" rev-parse HEAD)" = "$WEBVIEW_CHECKPOINT"
           export HOME="$RUNNER_TEMP/home"
           mkdir -p "$HOME"
-          zig build -Doptimize=ReleaseFast -Dcpu=baseline --prefix "$RUNNER_TEMP/silex-prefix" --build-file Toolchain/build.zig
+          (cd Toolchain && zig build -Doptimize=ReleaseFast --prefix "$RUNNER_TEMP/silex-prefix")
           silex="$RUNNER_TEMP/silex-prefix/bin/silex"
           "$silex" setup
           "$silex" install STD
@@ -254,12 +251,10 @@ jobs:
           "$silex" link "$GITHUB_WORKSPACE/.checkpoint/GFX.WebView"
           "$silex" test "$GITHUB_WORKSPACE/Tests/Types/Str/Operators.sx"
           "$silex" test "$GITHUB_WORKSPACE/Tests/Types/Str/Returns.sx"
+          "$silex" compile "$GITHUB_WORKSPACE/.checkpoint/STD/Examples/Threading/NativeCheckpoint.sx" --release -o "$RUNNER_TEMP/threading-checkpoint"
+          "$RUNNER_TEMP/threading-checkpoint"
           "$silex" test "$GITHUB_WORKSPACE/.checkpoint/STD/Tests/Threading.sx"
           "$silex" test "$GITHUB_WORKSPACE/.checkpoint/STD/Tests/ThreadingParallelOnly.sx"
           "$silex" compile "$GITHUB_WORKSPACE/.checkpoint/GFX.Physics/Benchmarks/Corpus2D.sx" --release -o "$RUNNER_TEMP/physics-corpus"
-          {
-            "$RUNNER_TEMP/physics-corpus" --sparse-10000
-            "$RUNNER_TEMP/physics-corpus" --sparse-10000 --workers-2
-            "$RUNNER_TEMP/physics-corpus" --sparse-10000 --workers-4
-          } | python3 "$GITHUB_WORKSPACE/.checkpoint/GFX.Physics/Benchmarks/Oracle2D/CheckCorpus.py" --enforce
+          "$RUNNER_TEMP/physics-corpus" | python3 "$GITHUB_WORKSPACE/.checkpoint/GFX.Physics/Benchmarks/Oracle2D/CheckCorpus.py" --enforce
           "$silex" compile "$GITHUB_WORKSPACE/.checkpoint/GFX.WebView/Examples/Availability.sx" --release -o "$RUNNER_TEMP/webview-availability"
