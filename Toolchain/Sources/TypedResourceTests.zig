@@ -403,7 +403,7 @@ test "structure methods register system callbacks declared later in their module
     try std.testing.expectEqualStrings("flushed\n", result.stdout);
 }
 
-test "query iteration releases its compiler-owned component list on every exit" {
+test "query iteration does not allocate a component filter list" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -429,10 +429,10 @@ test "query iteration releases its compiler-owned component list on every exit" 
         \\use GFX.ECS.Entity.Entity
         \\public class World {
         \\    package func query_archetype_count() int { return 0 }
-        \\    package func query_matches(archetype:int, required:@int[]) bool { return false }
+        \\    package func query_entity_count(archetype:int) int { return 0 }
         \\    package func query_entity(archetype:int, row:int) Entity { return Entity(value:0) }
-        \\    package func query_row_start(archetype:int, required:@int[], range_start:int) int { return 0 }
-        \\    package func query_row_end(archetype:int, required:@int[], range_end:int) int { return 0 }
+        \\    package func query_range_start(base:int, count:int, range_start:int) int { return 0 }
+        \\    package func query_range_end(base:int, count:int, range_end:int) int { return 0 }
         \\}
         ,
     });
@@ -470,7 +470,8 @@ test "query iteration releases its compiler-owned component list on every exit" 
     const tail = text[start..];
     const finish = std.mem.indexOf(u8, tail, "\n}\n") orelse return error.TestUnexpectedResult;
     const function_text = tail[0 .. finish + 3];
-    try std.testing.expectEqual(@as(usize, 2), std.mem.count(u8, function_text, "list.drop"));
+    try std.testing.expectEqual(@as(usize, 0), std.mem.count(u8, function_text, "list.init"));
+    try std.testing.expectEqual(@as(usize, 0), std.mem.count(u8, function_text, "list.drop"));
 }
 
 test "system callbacks keep their declaring module identity" {

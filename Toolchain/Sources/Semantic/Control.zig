@@ -552,44 +552,43 @@ fn analyzeQueryFor(
 
     const archetype_count_method = methodNamed(world, "query_archetype_count") orelse
         return missingQueryRegistration(self, loop.name_position);
-    const matches_method = methodNamed(world, "query_matches") orelse
+    const entity_count_method = methodNamed(world, "query_entity_count") orelse
         return missingQueryRegistration(self, loop.name_position);
     const entity_method = methodNamed(world, "query_entity") orelse
         return missingQueryRegistration(self, loop.name_position);
-    const row_start_method = methodNamed(world, "query_row_start") orelse
+    const row_start_method = methodNamed(world, "query_range_start") orelse
         return missingQueryRegistration(self, loop.name_position);
-    const row_end_method = methodNamed(world, "query_row_end") orelse
+    const row_end_method = methodNamed(world, "query_range_end") orelse
         return missingQueryRegistration(self, loop.name_position);
-    const required_type = world.methods[matches_method].parameters[1].type;
-    var required_ids: std.ArrayList(Ir.ValueId) = .empty;
+    const ReadPool = struct {
+        component: Ast.Type,
+        structure: usize,
+        local: Ir.LocalId,
+        world_method: usize,
+    };
+    var read_pools: std.ArrayList(ReadPool) = .empty;
     for (pattern.fields) |field| {
-        if (isEntityType(self, field.type)) continue;
-        const method_name = try std.fmt.allocPrint(self.allocator, "query_component_id<{s}>", .{self.typeName(field.type)});
+        if (isEntityType(self, field.type) or field.access_mode != .read) continue;
+        var already_cached = false;
+        for (read_pools.items) |pool| if (pool.component == field.type) {
+            already_cached = true;
+        };
+        if (already_cached) continue;
+        const method_name = try std.fmt.allocPrint(self.allocator, "query_pool<{s}>", .{self.typeName(field.type)});
         const method_index = methodNamed(world, method_name) orelse
             return missingQueryRegistration(self, loop.name_position);
-        const current_world = try loadLocalValue(self, builder, world_local, world_type);
-        const component_id = try self.newValue(builder, .int);
-        try self.emit(builder, .{ .call = .{
-            .result = component_id,
-            .function = methodFunctionId(self.program, world_index, method_index),
-            .arguments = try self.allocator.dupe(Ir.ValueId, &.{current_world}),
-        } });
-        try required_ids.append(self.allocator, component_id);
+        const pool_type = world.methods[method_index].return_type;
+        const pool_structure = pool_type.structureIndex() orelse return error.InvalidSource;
+        const pool_local = builder.local_types.items.len;
+        try builder.local_types.append(self.allocator, pool_type);
+        try read_pools.append(self.allocator, .{
+            .component = field.type,
+            .structure = pool_structure,
+            .local = pool_local,
+            .world_method = method_index,
+        });
     }
-    const required = try self.newValue(builder, required_type);
-    try self.emit(builder, .{ .list_init = .{
-        .result = required,
-        .values = try required_ids.toOwnedSlice(self.allocator),
-    } });
-    const required_local = builder.local_types.items.len;
-    try builder.local_types.append(self.allocator, required_type);
-    try self.emit(builder, .{ .local_store = .{ .local = required_local, .operand = required } });
     const query_binding_count = builder.bindings.items.len;
-    try builder.bindings.append(self.allocator, .{
-        .name = "$query-required",
-        .type = required_type,
-        .local = required_local,
-    });
 
     const archetype_local = builder.local_types.items.len;
     try builder.local_types.append(self.allocator, .int);
@@ -600,6 +599,12 @@ fn analyzeQueryFor(
     const row_end_local = builder.local_types.items.len;
     try builder.local_types.append(self.allocator, .int);
     try self.emit(builder, .{ .local_store = .{ .local = row_end_local, .operand = try emitInt(self, builder, 0) } });
+    const matched_base_local = builder.local_types.items.len;
+    try builder.local_types.append(self.allocator, .int);
+    try self.emit(builder, .{ .local_store = .{ .local = matched_base_local, .operand = try emitInt(self, builder, 0) } });
+    const matched_count_local = builder.local_types.items.len;
+    try builder.local_types.append(self.allocator, .int);
+    try self.emit(builder, .{ .local_store = .{ .local = matched_count_local, .operand = try emitInt(self, builder, 0) } });
 
     const availability_count = builder.bindings.items.len;
     const header_availability = try Availability.snapshot(self.allocator, builder.bindings.items, availability_count);
@@ -609,6 +614,7 @@ fn analyzeQueryFor(
     const row_condition = try self.newBlock(builder);
     const matched_block = try self.newBlock(builder);
     const row_update = try self.newBlock(builder);
+    const matched_archetype_update = try self.newBlock(builder);
     const archetype_update = try self.newBlock(builder);
     const exit_block = try self.newBlock(builder);
     self.terminate(builder, .{ .jump = archetype_condition });
@@ -632,28 +638,57 @@ fn analyzeQueryFor(
     self.terminate(builder, .{ .branch = .{ .condition = has_archetype, .then_block = archetype_candidate, .else_block = exit_block } });
 
     builder.current_block = archetype_candidate;
-    const candidate_world = try loadLocalValue(self, builder, world_local, world_type);
-    const candidate_archetype = try loadLocalValue(self, builder, archetype_local, .int);
-    const current_required = try loadLocalValue(self, builder, required_local, required_type);
-    const matches = try self.newValue(builder, .bool);
-    try self.emit(builder, .{ .call = .{
-        .result = matches,
-        .function = methodFunctionId(self.program, world_index, matches_method),
-        .arguments = try self.allocator.dupe(Ir.ValueId, &.{ candidate_world, candidate_archetype, current_required }),
-    } });
-    self.terminate(builder, .{ .branch = .{ .condition = matches, .then_block = row_initialize, .else_block = archetype_update } });
+    for (pattern.fields) |field| {
+        if (isEntityType(self, field.type)) continue;
+        const method_name = try std.fmt.allocPrint(self.allocator, "query_archetype_has<{s}>", .{self.typeName(field.type)});
+        const method_index = methodNamed(world, method_name) orelse
+            return missingQueryRegistration(self, loop.name_position);
+        const matches = try self.newValue(builder, .bool);
+        try self.emit(builder, .{ .call = .{
+            .result = matches,
+            .function = methodFunctionId(self.program, world_index, method_index),
+            .arguments = try self.allocator.dupe(Ir.ValueId, &.{
+                try loadLocalValue(self, builder, world_local, world_type),
+                try loadLocalValue(self, builder, archetype_local, .int),
+            }),
+        } });
+        const next_component = try self.newBlock(builder);
+        self.terminate(builder, .{ .branch = .{
+            .condition = matches,
+            .then_block = next_component,
+            .else_block = archetype_update,
+        } });
+        builder.current_block = next_component;
+    }
+    self.terminate(builder, .{ .jump = row_initialize });
 
     builder.current_block = row_initialize;
+    for (read_pools.items) |pool| {
+        const pool_value = try self.newValue(builder, .structure(pool.structure));
+        try self.emit(builder, .{ .call = .{
+            .result = pool_value,
+            .function = methodFunctionId(self.program, world_index, pool.world_method),
+            .arguments = try self.allocator.dupe(Ir.ValueId, &.{try loadLocalValue(self, builder, world_local, world_type)}),
+        } });
+        try self.emit(builder, .{ .local_store = .{ .local = pool.local, .operand = pool_value } });
+    }
     const interval_world = try loadLocalValue(self, builder, world_local, world_type);
     const interval_archetype = try loadLocalValue(self, builder, archetype_local, .int);
+    const entity_count = try self.newValue(builder, .int);
+    try self.emit(builder, .{ .call = .{
+        .result = entity_count,
+        .function = methodFunctionId(self.program, world_index, entity_count_method),
+        .arguments = try self.allocator.dupe(Ir.ValueId, &.{ interval_world, interval_archetype }),
+    } });
+    try self.emit(builder, .{ .local_store = .{ .local = matched_count_local, .operand = entity_count } });
     const first_row = try self.newValue(builder, .int);
     try self.emit(builder, .{ .call = .{
         .result = first_row,
         .function = methodFunctionId(self.program, world_index, row_start_method),
         .arguments = try self.allocator.dupe(Ir.ValueId, &.{
-            interval_world,
-            interval_archetype,
-            try loadLocalValue(self, builder, required_local, required_type),
+            try loadLocalValue(self, builder, world_local, world_type),
+            try loadLocalValue(self, builder, matched_base_local, .int),
+            entity_count,
             try loadLocalValue(self, builder, range_start_local, .int),
         }),
     } });
@@ -664,8 +699,8 @@ fn analyzeQueryFor(
         .function = methodFunctionId(self.program, world_index, row_end_method),
         .arguments = try self.allocator.dupe(Ir.ValueId, &.{
             try loadLocalValue(self, builder, world_local, world_type),
-            try loadLocalValue(self, builder, archetype_local, .int),
-            try loadLocalValue(self, builder, required_local, required_type),
+            try loadLocalValue(self, builder, matched_base_local, .int),
+            entity_count,
             try loadLocalValue(self, builder, range_end_local, .int),
         }),
     } });
@@ -681,7 +716,7 @@ fn analyzeQueryFor(
         try loadLocalValue(self, builder, row_end_local, .int),
         .bool,
     );
-    self.terminate(builder, .{ .branch = .{ .condition = has_entity, .then_block = matched_block, .else_block = archetype_update } });
+    self.terminate(builder, .{ .branch = .{ .condition = has_entity, .then_block = matched_block, .else_block = matched_archetype_update } });
 
     builder.current_block = matched_block;
     const entity_type = world.methods[entity_method].return_type;
@@ -705,13 +740,9 @@ fn analyzeQueryFor(
             try builder.bindings.append(self.allocator, .{ .name = binding.name, .type = field.type, .value = entity });
             continue;
         }
-        const getter_name = try std.fmt.allocPrint(
-            self.allocator,
-            "query_{s}<{s}>",
-            .{ if (field.access_mode == .mutable) "get_mut" else "get", self.typeName(field.type) },
-        );
-        const getter_index = methodNamed(world, getter_name) orelse return error.InvalidSource;
         if (field.access_mode == .mutable) {
+            const getter_name = try std.fmt.allocPrint(self.allocator, "query_get_mut<{s}>", .{self.typeName(field.type)});
+            const getter_index = methodNamed(world, getter_name) orelse return error.InvalidSource;
             const world_reference = try self.newValue(builder, .address);
             try self.emit(builder, .{ .local_address = .{ .result = world_reference, .local = world_local } });
             const reference = try self.newValue(builder, .address);
@@ -729,12 +760,19 @@ fn analyzeQueryFor(
                 .borrowed_mode = .mutable,
             });
         } else {
+            var cached_pool: ?ReadPool = null;
+            for (read_pools.items) |pool| if (pool.component == field.type) {
+                cached_pool = pool;
+            };
+            const pool = cached_pool orelse return error.InvalidSource;
+            const pool_structure = self.program.structures[pool.structure];
+            const getter_index = methodNamed(pool_structure, "get_known") orelse return error.InvalidSource;
             const value = try self.newValue(builder, field.type);
             try self.emit(builder, .{ .call = .{
                 .result = value,
-                .function = methodFunctionId(self.program, world_index, getter_index),
+                .function = methodFunctionId(self.program, pool.structure, getter_index),
                 .arguments = try self.allocator.dupe(Ir.ValueId, &.{
-                    try loadLocalValue(self, builder, world_local, world_type),
+                    try loadLocalValue(self, builder, pool.local, .structure(pool.structure)),
                     entity,
                 }),
             } });
@@ -774,6 +812,18 @@ fn analyzeQueryFor(
     );
     try self.emit(builder, .{ .local_store = .{ .local = row_local, .operand = next_row } });
     self.terminate(builder, .{ .jump = row_condition });
+
+    builder.current_block = matched_archetype_update;
+    const next_matched_base = try emitBinary(
+        self,
+        builder,
+        .add,
+        try loadLocalValue(self, builder, matched_base_local, .int),
+        try loadLocalValue(self, builder, matched_count_local, .int),
+        .int,
+    );
+    try self.emit(builder, .{ .local_store = .{ .local = matched_base_local, .operand = next_matched_base } });
+    self.terminate(builder, .{ .jump = archetype_update });
 
     builder.current_block = archetype_update;
     const next_archetype = try emitBinary(

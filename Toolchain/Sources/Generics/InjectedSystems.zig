@@ -145,11 +145,10 @@ pub fn rewriteRegistration(self: anytype, call: *Ast.Expression.Call, locals: an
                     callback.position,
                 );
                 const type_id_template = findGenericMethod(world_source.?, "query_component_id") orelse return error.InvalidSource;
-                const query_get_template = findGenericMethod(
-                    world_source.?,
-                    if (field.access_mode == .mutable) "query_get_mut" else "query_get",
-                ) orelse return error.InvalidSource;
+                const archetype_has_template = findGenericMethod(world_source.?, "query_archetype_has") orelse return error.InvalidSource;
+                const query_get_template = findGenericMethod(world_source.?, if (field.access_mode == .mutable) "query_get_mut" else "query_pool") orelse return error.InvalidSource;
                 _ = try self.instantiateMethod(world_type.?, type_id_template, &.{field.type}, callback.position);
+                _ = try self.instantiateMethod(world_type.?, archetype_has_template, &.{field.type}, callback.position);
                 _ = try self.instantiateMethod(world_type.?, query_get_template, &.{field.type}, callback.position);
             }
         }
