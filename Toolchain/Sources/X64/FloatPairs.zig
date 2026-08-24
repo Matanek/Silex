@@ -143,7 +143,7 @@ fn unpackLow(allocator: Allocator, bytes: *std.ArrayList(u8), destination: u3, s
 }
 
 fn slotDisplacement(slot: Machine.Slot) i32 {
-    return -@as(i32, (@as(i32, slot) + 1) * Machine.slot_size);
+    return @as(i32, slot) * Machine.slot_size;
 }
 
 fn appendInt(allocator: Allocator, bytes: *std.ArrayList(u8), comptime T: type, value: T) Allocator.Error!void {

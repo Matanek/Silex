@@ -770,7 +770,7 @@ fn emitRex(allocator: Allocator, bytes: *std.ArrayList(u8), wide: bool, register
 }
 
 fn slotDisplacement(slot: Machine.Slot) i32 {
-    return -@as(i32, @intCast((@as(usize, slot) + 1) * Machine.slot_size));
+    return @intCast(@as(usize, slot) * Machine.slot_size);
 }
 
 fn patchRelative(bytes: []u8, displacement_at: usize, target: anytype) error{InvalidMachineProgram}!void {
