@@ -2611,8 +2611,6 @@ fn emitWindowsFunctionThunk(
     function: Machine.Function,
     function_id: usize,
 ) Error!void {
-    if (function.parameters.len > 8) return unsupported("Windows callback with more than eight parameters");
-
     // Silex uses its portable internal register convention while Win64 enters
     // callbacks through RCX, RDX, R8 and R9. Preserve every Win64 nonvolatile
     // register that a Silex function may use, then bridge the scalar arguments.
@@ -2622,16 +2620,27 @@ fn emitWindowsFunctionThunk(
         0x55, 0x41, 0x56,
         0x41, 0x57,
     });
+    const outgoing_stack_size: u32 = @intCast(std.mem.alignForward(
+        usize,
+        (function.parameters.len -| 8) * Machine.slot_size,
+        16,
+    ));
+    try emitStackSubtraction(allocator, bytes, outgoing_stack_size);
     const incoming = [_]Register{ .rcx, .rdx, .r8, .r9 };
     const internal = [_]Register{ .rdi, .rsi, .rdx, .rcx };
     for (incoming[0..@min(function.parameters.len, 4)], internal[0..@min(function.parameters.len, 4)]) |source, destination| {
         try emitMoveRegister(allocator, bytes, destination, source);
     }
     const stacked = [_]Register{ .r8, .r9, .r10, .r11 };
-    for (stacked[0..function.parameters.len -| 4], 0..) |destination, index| {
-        try emitLoadMemory(allocator, bytes, destination, .rsp, @intCast(96 + index * Machine.slot_size));
+    for (stacked[0..@min(function.parameters.len -| 4, stacked.len)], 0..) |destination, index| {
+        try emitLoadMemory(allocator, bytes, destination, .rsp, @intCast(outgoing_stack_size + 96 + index * Machine.slot_size));
+    }
+    for (8..function.parameters.len) |index| {
+        try emitLoadMemory(allocator, bytes, .rax, .rsp, @intCast(outgoing_stack_size + 96 + (index - 4) * Machine.slot_size));
+        try emitStoreMemory(allocator, bytes, .rsp, @intCast((index - 8) * Machine.slot_size), .rax);
     }
     try appendCall(allocator, bytes, calls, function_id);
+    try emitStackAddition(allocator, bytes, outgoing_stack_size);
     try bytes.appendSlice(allocator, &.{
         0x41, 0x5f, 0x41, 0x5e, 0x41, 0x5d, 0x41, 0x5c,
         0x5f, 0x5e, 0x5b, 0xc3,
@@ -2643,7 +2652,6 @@ fn emitWindowsCallbackArguments(
     bytes: *std.ArrayList(u8),
     arguments: []const Machine.Span,
 ) Error!u32 {
-    if (arguments.len > 8) return unsupported("Windows callback call with more than eight parameters");
     const stack_size: u32 = @intCast(std.mem.alignForward(usize, 32 + (arguments.len -| 4) * Machine.slot_size, 16));
     try emitStackSubtraction(allocator, bytes, stack_size);
     const registers = [_]Register{ .rcx, .rdx, .r8, .r9 };
@@ -2863,6 +2871,7 @@ fn emitFrameAllocation(
 }
 
 fn emitStackSubtraction(allocator: Allocator, bytes: *std.ArrayList(u8), amount: u32) Allocator.Error!void {
+    if (amount == 0) return;
     try bytes.appendSlice(allocator, &.{ 0x48, 0x81, 0xec });
     try appendInt(allocator, bytes, u32, amount);
 }
@@ -3020,10 +3029,12 @@ test "encode Win64 callback thunks for Silex function addresses" {
     const allocator = arena.allocator();
     var frontend = @import("../Frontend.zig").Frontend.init(allocator);
     const compilation = try frontend.compile(
-        \\func worker(value:int) int { return value + 1 }
+        \\func worker(a:int,b:int,c:int,d:int,e:int,f:int,g:int,h:int,i:int,j:int) int {
+        \\    return a+b+c+d+e+f+g+h+i+j
+        \\}
         \\func main() {
-        \\    let callback:func(int) int = worker
-        \\    assert(callback(41) == 42)
+        \\    let callback:func(int,int,int,int,int,int,int,int,int,int) int = worker
+        \\    assert(callback(1,2,3,4,5,6,7,8,9,10) == 55)
         \\}
     );
     const machine = try @import("../Arm64/Lower.zig").lower(allocator, compilation.ir);
@@ -3038,7 +3049,9 @@ test "encode Win64 callback thunks for Silex function addresses" {
         0x41, 0x54, 0x41,
         0x55, 0x41, 0x56,
         0x41, 0x57, 0x48,
-        0x89, 0xcf,
+        0x81, 0xec, 0x10,
+        0x00, 0x00, 0x00,
+        0x48, 0x89, 0xcf,
     };
     try std.testing.expectEqualSlices(u8, &expected, image.code[thunk_start..][0..expected.len]);
 }

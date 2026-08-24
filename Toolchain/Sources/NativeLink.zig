@@ -26,6 +26,13 @@ pub fn executable(
         return error.LinkFailed;
     var arguments: std.ArrayList([]const u8) = .empty;
     try arguments.appendSlice(allocator, &.{ linker_path, "cc", "-target", triple, object_path, "-o", output_path });
+    if (target.eql(.linux_x64)) try arguments.appendSlice(allocator, &.{
+        "-L/usr/lib/x86_64-linux-gnu",
+        "-L/lib/x86_64-linux-gnu",
+        "-L/usr/lib64",
+        "-L/lib64",
+        "-L/usr/local/lib",
+    });
     for (providers) |provider| if (provider.archive) |archive| try arguments.append(allocator, archive);
     var libraries: std.ArrayList([]const u8) = .empty;
     for (providers) |provider| for (provider.libraries) |library| {
