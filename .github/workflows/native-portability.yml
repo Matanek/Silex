@@ -22,9 +22,10 @@ permissions:
 env:
   STD_CHECKPOINT: 94adcd6747a3edd01a3b8552b46f12b087c7cdae
   GFX_CHECKPOINT: f7019091e808a87059400b1c07b45be8dcf315a2
+  ECS_CHECKPOINT: bd198b84a0cadd30764e6ee9d286661c045a5057
   SCENE2D_CHECKPOINT: 5fdb51f68e326ef3519d5943dbbcc5e0d8c0eab5
   PHYSICS_CHECKPOINT: dcefe1570fc2f7efac0740649349c4e91997a660
-  WEBVIEW_CHECKPOINT: 06c3c3ab4ee9017975f752e3611fd7941dc579b4
+  WEBVIEW_CHECKPOINT: d4cce871aae58f7aed2b7da76518c2100bf14d8a
 
 jobs:
   native:
@@ -57,6 +58,13 @@ jobs:
           repository: Matanek/Silex-Lib-GFX
           ref: ${{ env.GFX_CHECKPOINT }}
           path: .checkpoint/GFX
+
+      - name: Check out the exact GFX.ECS checkpoint
+        uses: actions/checkout@v6
+        with:
+          repository: Matanek/Silex-Lib-GFX.ECS
+          ref: ${{ env.ECS_CHECKPOINT }}
+          path: .checkpoint/GFX.ECS
 
       - name: Check out the exact GFX.Scene2D checkpoint
         uses: actions/checkout@v6
@@ -123,6 +131,7 @@ jobs:
           test "$(uname -m)" = "x86_64"
           test "$(git -C "$GITHUB_WORKSPACE/.checkpoint/STD" rev-parse HEAD)" = "$STD_CHECKPOINT"
           test "$(git -C "$GITHUB_WORKSPACE/.checkpoint/GFX" rev-parse HEAD)" = "$GFX_CHECKPOINT"
+          test "$(git -C "$GITHUB_WORKSPACE/.checkpoint/GFX.ECS" rev-parse HEAD)" = "$ECS_CHECKPOINT"
           test "$(git -C "$GITHUB_WORKSPACE/.checkpoint/GFX.Scene2D" rev-parse HEAD)" = "$SCENE2D_CHECKPOINT"
           test "$(git -C "$GITHUB_WORKSPACE/.checkpoint/GFX.Physics" rev-parse HEAD)" = "$PHYSICS_CHECKPOINT"
           test "$(git -C "$GITHUB_WORKSPACE/.checkpoint/GFX.WebView" rev-parse HEAD)" = "$WEBVIEW_CHECKPOINT"
@@ -133,10 +142,11 @@ jobs:
           "$silex" setup
           "$silex" install STD
           "$silex" install GFX.Canvas
-          "$silex" install GFX.Scene2D
+          "$silex" install GFX.Scene2D --dev
           "$silex" install GFX.Audio
           "$silex" install GFX.Stats
           "$silex" link "$GITHUB_WORKSPACE/.checkpoint/GFX"
+          "$silex" link "$GITHUB_WORKSPACE/.checkpoint/GFX.ECS"
           "$silex" link "$GITHUB_WORKSPACE/.checkpoint/STD"
           "$silex" link "$GITHUB_WORKSPACE/.checkpoint/GFX.Scene2D"
           "$silex" link "$GITHUB_WORKSPACE/.checkpoint/GFX.Physics"
@@ -194,10 +204,11 @@ jobs:
           }
           $stdHead = git -C (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/STD") rev-parse HEAD
           $gfxHead = git -C (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/GFX") rev-parse HEAD
+          $ecsHead = git -C (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/GFX.ECS") rev-parse HEAD
           $scene2DHead = git -C (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/GFX.Scene2D") rev-parse HEAD
           $physicsHead = git -C (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/GFX.Physics") rev-parse HEAD
           $webViewHead = git -C (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/GFX.WebView") rev-parse HEAD
-          if ($stdHead -ne $env:STD_CHECKPOINT -or $gfxHead -ne $env:GFX_CHECKPOINT -or $scene2DHead -ne $env:SCENE2D_CHECKPOINT -or $physicsHead -ne $env:PHYSICS_CHECKPOINT -or $webViewHead -ne $env:WEBVIEW_CHECKPOINT) {
+          if ($stdHead -ne $env:STD_CHECKPOINT -or $gfxHead -ne $env:GFX_CHECKPOINT -or $ecsHead -ne $env:ECS_CHECKPOINT -or $scene2DHead -ne $env:SCENE2D_CHECKPOINT -or $physicsHead -ne $env:PHYSICS_CHECKPOINT -or $webViewHead -ne $env:WEBVIEW_CHECKPOINT) {
             throw "external checkpoint does not match the pinned commits"
           }
           $env:USERPROFILE = Join-Path $env:RUNNER_TEMP "home"
@@ -210,10 +221,11 @@ jobs:
           & $silex setup
           & $silex install STD
           & $silex install GFX.Canvas
-          & $silex install GFX.Scene2D
+          & $silex install GFX.Scene2D --dev
           & $silex install GFX.Audio
           & $silex install GFX.Stats
           & $silex link (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/GFX")
+          & $silex link (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/GFX.ECS")
           & $silex link (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/STD")
           & $silex link (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/GFX.Scene2D")
           & $silex link (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/GFX.Physics")
@@ -276,6 +288,7 @@ jobs:
           test "$(uname -m)" = "arm64"
           test "$(git -C "$GITHUB_WORKSPACE/.checkpoint/STD" rev-parse HEAD)" = "$STD_CHECKPOINT"
           test "$(git -C "$GITHUB_WORKSPACE/.checkpoint/GFX" rev-parse HEAD)" = "$GFX_CHECKPOINT"
+          test "$(git -C "$GITHUB_WORKSPACE/.checkpoint/GFX.ECS" rev-parse HEAD)" = "$ECS_CHECKPOINT"
           test "$(git -C "$GITHUB_WORKSPACE/.checkpoint/GFX.Scene2D" rev-parse HEAD)" = "$SCENE2D_CHECKPOINT"
           test "$(git -C "$GITHUB_WORKSPACE/.checkpoint/GFX.Physics" rev-parse HEAD)" = "$PHYSICS_CHECKPOINT"
           test "$(git -C "$GITHUB_WORKSPACE/.checkpoint/GFX.WebView" rev-parse HEAD)" = "$WEBVIEW_CHECKPOINT"
@@ -286,10 +299,11 @@ jobs:
           "$silex" setup
           "$silex" install STD
           "$silex" install GFX.Canvas
-          "$silex" install GFX.Scene2D
+          "$silex" install GFX.Scene2D --dev
           "$silex" install GFX.Audio
           "$silex" install GFX.Stats
           "$silex" link "$GITHUB_WORKSPACE/.checkpoint/GFX"
+          "$silex" link "$GITHUB_WORKSPACE/.checkpoint/GFX.ECS"
           "$silex" link "$GITHUB_WORKSPACE/.checkpoint/STD"
           "$silex" link "$GITHUB_WORKSPACE/.checkpoint/GFX.Scene2D"
           "$silex" link "$GITHUB_WORKSPACE/.checkpoint/GFX.Physics"
