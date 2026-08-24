@@ -21,8 +21,9 @@ permissions:
 
 env:
   STD_CHECKPOINT: 94adcd6747a3edd01a3b8552b46f12b087c7cdae
+  GFX_CHECKPOINT: 0d92e1cb1ec321517440566dd989602264a96470
   PHYSICS_CHECKPOINT: 392b41868d0d936dae38041d3a4ca77da5f01faf
-  WEBVIEW_CHECKPOINT: 78cadb73d48add337b6d27133e1db9ee72395c1f
+  WEBVIEW_CHECKPOINT: dee8e2b880e87a9a5c4458cd29794f69335905d9
 
 jobs:
   native:
@@ -48,6 +49,13 @@ jobs:
           repository: Matanek/Silex-Lib-STD
           ref: ${{ env.STD_CHECKPOINT }}
           path: .checkpoint/STD
+
+      - name: Check out the exact GFX checkpoint
+        uses: actions/checkout@v6
+        with:
+          repository: Matanek/Silex-Lib-GFX
+          ref: ${{ env.GFX_CHECKPOINT }}
+          path: .checkpoint/GFX
 
       - name: Check out the exact GFX.Physics checkpoint
         uses: actions/checkout@v6
@@ -106,6 +114,7 @@ jobs:
           set -euo pipefail
           test "$(uname -m)" = "x86_64"
           test "$(git -C "$GITHUB_WORKSPACE/.checkpoint/STD" rev-parse HEAD)" = "$STD_CHECKPOINT"
+          test "$(git -C "$GITHUB_WORKSPACE/.checkpoint/GFX" rev-parse HEAD)" = "$GFX_CHECKPOINT"
           test "$(git -C "$GITHUB_WORKSPACE/.checkpoint/GFX.Physics" rev-parse HEAD)" = "$PHYSICS_CHECKPOINT"
           test "$(git -C "$GITHUB_WORKSPACE/.checkpoint/GFX.WebView" rev-parse HEAD)" = "$WEBVIEW_CHECKPOINT"
           export HOME="$RUNNER_TEMP/home"
@@ -114,7 +123,7 @@ jobs:
           silex="$RUNNER_TEMP/silex-prefix/bin/silex"
           "$silex" setup
           "$silex" install STD
-          "$silex" install GFX
+          "$silex" install "$GITHUB_WORKSPACE/.checkpoint/GFX"
           "$silex" link "$GITHUB_WORKSPACE/.checkpoint/STD"
           "$silex" link "$GITHUB_WORKSPACE/.checkpoint/GFX.Physics"
           "$silex" link "$GITHUB_WORKSPACE/.checkpoint/GFX.WebView"
@@ -127,7 +136,7 @@ jobs:
           "$silex" test "$GITHUB_WORKSPACE/.checkpoint/STD/Tests/ThreadingParallelOnly.sx"
           "$silex" compile "$GITHUB_WORKSPACE/.checkpoint/GFX.Physics/Benchmarks/Corpus2D.sx" --release -o "$RUNNER_TEMP/physics-corpus"
           "$RUNNER_TEMP/physics-corpus" | python3 "$GITHUB_WORKSPACE/.checkpoint/GFX.Physics/Benchmarks/Oracle2D/CheckCorpus.py" --enforce
-          xvfb-run -a env GDK_BACKEND=x11 SDL_VIDEODRIVER=x11 \
+          xvfb-run -a env GDK_BACKEND=x11 SDL_VIDEO_DRIVER=x11 \
             NO_AT_BRIDGE=1 LIBGL_ALWAYS_SOFTWARE=1 \
             WEBKIT_DISABLE_COMPOSITING_MODE=1 WEBKIT_DISABLE_DMABUF_RENDERER=1 \
             "$silex" test "$GITHUB_WORKSPACE/.checkpoint/GFX.WebView/Tests"
@@ -167,9 +176,10 @@ jobs:
             throw "expected Windows X64 runner, got $env:PROCESSOR_ARCHITECTURE"
           }
           $stdHead = git -C (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/STD") rev-parse HEAD
+          $gfxHead = git -C (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/GFX") rev-parse HEAD
           $physicsHead = git -C (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/GFX.Physics") rev-parse HEAD
           $webViewHead = git -C (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/GFX.WebView") rev-parse HEAD
-          if ($stdHead -ne $env:STD_CHECKPOINT -or $physicsHead -ne $env:PHYSICS_CHECKPOINT -or $webViewHead -ne $env:WEBVIEW_CHECKPOINT) {
+          if ($stdHead -ne $env:STD_CHECKPOINT -or $gfxHead -ne $env:GFX_CHECKPOINT -or $physicsHead -ne $env:PHYSICS_CHECKPOINT -or $webViewHead -ne $env:WEBVIEW_CHECKPOINT) {
             throw "external checkpoint does not match the pinned commits"
           }
           $env:USERPROFILE = Join-Path $env:RUNNER_TEMP "home"
@@ -181,7 +191,7 @@ jobs:
           $silex = Join-Path $env:RUNNER_TEMP "silex-prefix/bin/silex.exe"
           & $silex setup
           & $silex install STD
-          & $silex install GFX
+          & $silex install (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/GFX")
           & $silex link (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/STD")
           & $silex link (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/GFX.Physics")
           & $silex link (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/GFX.WebView")
@@ -239,6 +249,7 @@ jobs:
           set -euo pipefail
           test "$(uname -m)" = "arm64"
           test "$(git -C "$GITHUB_WORKSPACE/.checkpoint/STD" rev-parse HEAD)" = "$STD_CHECKPOINT"
+          test "$(git -C "$GITHUB_WORKSPACE/.checkpoint/GFX" rev-parse HEAD)" = "$GFX_CHECKPOINT"
           test "$(git -C "$GITHUB_WORKSPACE/.checkpoint/GFX.Physics" rev-parse HEAD)" = "$PHYSICS_CHECKPOINT"
           test "$(git -C "$GITHUB_WORKSPACE/.checkpoint/GFX.WebView" rev-parse HEAD)" = "$WEBVIEW_CHECKPOINT"
           export HOME="$RUNNER_TEMP/home"
@@ -247,7 +258,7 @@ jobs:
           silex="$RUNNER_TEMP/silex-prefix/bin/silex"
           "$silex" setup
           "$silex" install STD
-          "$silex" install GFX
+          "$silex" install "$GITHUB_WORKSPACE/.checkpoint/GFX"
           "$silex" link "$GITHUB_WORKSPACE/.checkpoint/STD"
           "$silex" link "$GITHUB_WORKSPACE/.checkpoint/GFX.Physics"
           "$silex" link "$GITHUB_WORKSPACE/.checkpoint/GFX.WebView"
