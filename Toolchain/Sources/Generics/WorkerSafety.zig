@@ -575,10 +575,21 @@ fn workerSafeExternal(name: []const u8) bool {
         "sqrt",                    "cbrt",                      "hypot",
         "floor",                   "ceil",                      "round",
         "trunc",                   "fmod",                      "remainder",
-        "copysign",                "pthread_self",
+        "copysign",                "pthread_self",               "sem_wait",
+        "sem_trywait",             "sem_post",                    "WaitForSingleObject",
+        "ReleaseSemaphore",        "GetCurrentThreadId",          "__errno_location",
     };
     for (approved) |candidate| if (std.mem.eql(u8, candidate, name)) return true;
     return false;
+}
+
+test "portable scheduler synchronization boundaries are worker-safe" {
+    const approved = [_][]const u8{
+        "sem_wait", "sem_trywait", "sem_post", "__errno_location",
+        "WaitForSingleObject", "ReleaseSemaphore", "GetCurrentThreadId",
+    };
+    for (approved) |name| try std.testing.expect(workerSafeExternal(name));
+    try std.testing.expect(!workerSafeExternal("getpid"));
 }
 
 fn nameMatches(candidate: []const u8, requested: []const u8) bool {
