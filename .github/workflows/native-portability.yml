@@ -215,7 +215,6 @@ jobs:
           $env:USERPROFILE = Join-Path $env:RUNNER_TEMP "home"
           $env:HOME = $env:USERPROFILE
           $env:SDL_AUDIODRIVER = "dummy"
-          $env:SDL_VIDEODRIVER = "dummy"
           New-Item -ItemType Directory -Force $env:USERPROFILE | Out-Null
           zig build -Doptimize=ReleaseFast -Dcpu=baseline --prefix "$env:RUNNER_TEMP/silex-prefix" --build-file Toolchain/build.zig
           $silex = Join-Path $env:RUNNER_TEMP "silex-prefix/bin/silex.exe"
@@ -249,6 +248,7 @@ jobs:
           )
           $physicsRecords | python (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/GFX.Physics/Benchmarks/Oracle2D/CheckCorpus.py") --enforce
           & $silex test (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/GFX.WebView/Tests")
+          $env:SDL_VIDEODRIVER = "dummy"
           function Find-Package([string] $name) {
             $package = Get-ChildItem (Join-Path $env:USERPROFILE ".silex/packages") -Directory -Filter "$name@*" | Select-Object -First 1
             if (-not $package) {
