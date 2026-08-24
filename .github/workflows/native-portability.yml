@@ -22,8 +22,9 @@ permissions:
 env:
   STD_CHECKPOINT: 94adcd6747a3edd01a3b8552b46f12b087c7cdae
   GFX_CHECKPOINT: f7019091e808a87059400b1c07b45be8dcf315a2
-  PHYSICS_CHECKPOINT: 392b41868d0d936dae38041d3a4ca77da5f01faf
-  WEBVIEW_CHECKPOINT: 5e4b7d3e34487fea920676e1a35e1aa7efc20573
+  SCENE2D_CHECKPOINT: 5fdb51f68e326ef3519d5943dbbcc5e0d8c0eab5
+  PHYSICS_CHECKPOINT: dcefe1570fc2f7efac0740649349c4e91997a660
+  WEBVIEW_CHECKPOINT: 06c3c3ab4ee9017975f752e3611fd7941dc579b4
 
 jobs:
   native:
@@ -56,6 +57,13 @@ jobs:
           repository: Matanek/Silex-Lib-GFX
           ref: ${{ env.GFX_CHECKPOINT }}
           path: .checkpoint/GFX
+
+      - name: Check out the exact GFX.Scene2D checkpoint
+        uses: actions/checkout@v6
+        with:
+          repository: Matanek/Silex-Lib-GFX.Scene2D
+          ref: ${{ env.SCENE2D_CHECKPOINT }}
+          path: .checkpoint/GFX.Scene2D
 
       - name: Check out the exact GFX.Physics checkpoint
         uses: actions/checkout@v6
@@ -115,6 +123,7 @@ jobs:
           test "$(uname -m)" = "x86_64"
           test "$(git -C "$GITHUB_WORKSPACE/.checkpoint/STD" rev-parse HEAD)" = "$STD_CHECKPOINT"
           test "$(git -C "$GITHUB_WORKSPACE/.checkpoint/GFX" rev-parse HEAD)" = "$GFX_CHECKPOINT"
+          test "$(git -C "$GITHUB_WORKSPACE/.checkpoint/GFX.Scene2D" rev-parse HEAD)" = "$SCENE2D_CHECKPOINT"
           test "$(git -C "$GITHUB_WORKSPACE/.checkpoint/GFX.Physics" rev-parse HEAD)" = "$PHYSICS_CHECKPOINT"
           test "$(git -C "$GITHUB_WORKSPACE/.checkpoint/GFX.WebView" rev-parse HEAD)" = "$WEBVIEW_CHECKPOINT"
           export HOME="$RUNNER_TEMP/home"
@@ -129,6 +138,7 @@ jobs:
           "$silex" install GFX.Stats
           "$silex" link "$GITHUB_WORKSPACE/.checkpoint/GFX"
           "$silex" link "$GITHUB_WORKSPACE/.checkpoint/STD"
+          "$silex" link "$GITHUB_WORKSPACE/.checkpoint/GFX.Scene2D"
           "$silex" link "$GITHUB_WORKSPACE/.checkpoint/GFX.Physics"
           "$silex" link "$GITHUB_WORKSPACE/.checkpoint/GFX.WebView"
           "$silex" test "$GITHUB_WORKSPACE/Tests/Types/Str/Operators.sx"
@@ -139,7 +149,11 @@ jobs:
           "$silex" test "$GITHUB_WORKSPACE/.checkpoint/STD/Tests/Threading.sx"
           "$silex" test "$GITHUB_WORKSPACE/.checkpoint/STD/Tests/ThreadingParallelOnly.sx"
           "$silex" compile "$GITHUB_WORKSPACE/.checkpoint/GFX.Physics/Benchmarks/Corpus2D.sx" --release -o "$RUNNER_TEMP/physics-corpus"
-          "$RUNNER_TEMP/physics-corpus" | python3 "$GITHUB_WORKSPACE/.checkpoint/GFX.Physics/Benchmarks/Oracle2D/CheckCorpus.py" --enforce
+          {
+            "$RUNNER_TEMP/physics-corpus" --sparse-10000
+            "$RUNNER_TEMP/physics-corpus" --sparse-10000 --workers-2
+            "$RUNNER_TEMP/physics-corpus" --sparse-10000 --workers-4
+          } | python3 "$GITHUB_WORKSPACE/.checkpoint/GFX.Physics/Benchmarks/Oracle2D/CheckCorpus.py" --enforce
           xvfb-run -a env GDK_BACKEND=x11 SDL_VIDEO_DRIVER=x11 \
             NO_AT_BRIDGE=1 LIBGL_ALWAYS_SOFTWARE=1 \
             WEBKIT_DISABLE_COMPOSITING_MODE=1 WEBKIT_DISABLE_DMABUF_RENDERER=1 \
@@ -148,12 +162,11 @@ jobs:
             find "$HOME/.silex/packages" -maxdepth 1 -type d -name "$1@*" -print -quit
           }
           gfx=$(find_package GFX)
-          gfx_scene2d=$(find_package GFX.Scene2D)
           gfx_audio=$(find_package GFX.Audio)
           gfx_canvas=$(find_package GFX.Canvas)
-          test -n "$gfx" && test -n "$gfx_scene2d" && test -n "$gfx_audio" && test -n "$gfx_canvas"
+          test -n "$gfx" && test -n "$gfx_audio" && test -n "$gfx_canvas"
           "$silex" test "$gfx/Tests/Color.sx"
-          "$silex" test "$gfx_scene2d/Tests/ViewportCamera.sx"
+          "$silex" test "$GITHUB_WORKSPACE/.checkpoint/GFX.Scene2D/Tests/ViewportCamera.sx"
           "$silex" test "$gfx/Tests/Application/CollectionFieldMutation.sx"
           "$silex" compile "$gfx_audio/Smokes/Audio.sx" -o "$RUNNER_TEMP/gfx-audio"
           timeout 30s env SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=dummy "$RUNNER_TEMP/gfx-audio"
@@ -181,9 +194,10 @@ jobs:
           }
           $stdHead = git -C (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/STD") rev-parse HEAD
           $gfxHead = git -C (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/GFX") rev-parse HEAD
+          $scene2DHead = git -C (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/GFX.Scene2D") rev-parse HEAD
           $physicsHead = git -C (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/GFX.Physics") rev-parse HEAD
           $webViewHead = git -C (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/GFX.WebView") rev-parse HEAD
-          if ($stdHead -ne $env:STD_CHECKPOINT -or $gfxHead -ne $env:GFX_CHECKPOINT -or $physicsHead -ne $env:PHYSICS_CHECKPOINT -or $webViewHead -ne $env:WEBVIEW_CHECKPOINT) {
+          if ($stdHead -ne $env:STD_CHECKPOINT -or $gfxHead -ne $env:GFX_CHECKPOINT -or $scene2DHead -ne $env:SCENE2D_CHECKPOINT -or $physicsHead -ne $env:PHYSICS_CHECKPOINT -or $webViewHead -ne $env:WEBVIEW_CHECKPOINT) {
             throw "external checkpoint does not match the pinned commits"
           }
           $env:USERPROFILE = Join-Path $env:RUNNER_TEMP "home"
@@ -201,6 +215,7 @@ jobs:
           & $silex install GFX.Stats
           & $silex link (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/GFX")
           & $silex link (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/STD")
+          & $silex link (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/GFX.Scene2D")
           & $silex link (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/GFX.Physics")
           & $silex link (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/GFX.WebView")
           & $silex test (Join-Path $env:GITHUB_WORKSPACE "Tests/Types/Str/Operators.sx")
@@ -213,7 +228,11 @@ jobs:
           & $silex test (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/STD/Tests/ThreadingParallelOnly.sx")
           $physicsCorpus = Join-Path $env:RUNNER_TEMP "physics-corpus.exe"
           & $silex compile (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/GFX.Physics/Benchmarks/Corpus2D.sx") --release -o $physicsCorpus
-          $physicsRecords = @(& $physicsCorpus)
+          $physicsRecords = @(
+            & $physicsCorpus --sparse-10000
+            & $physicsCorpus --sparse-10000 --workers-2
+            & $physicsCorpus --sparse-10000 --workers-4
+          )
           $physicsRecords | python (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/GFX.Physics/Benchmarks/Oracle2D/CheckCorpus.py") --enforce
           & $silex test (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/GFX.WebView/Tests")
           function Find-Package([string] $name) {
@@ -224,11 +243,10 @@ jobs:
             return $package.FullName
           }
           $gfx = Find-Package "GFX"
-          $gfxScene2D = Find-Package "GFX.Scene2D"
           $gfxAudio = Find-Package "GFX.Audio"
           $gfxCanvas = Find-Package "GFX.Canvas"
           & $silex test (Join-Path $gfx "Tests/Color.sx")
-          & $silex test (Join-Path $gfxScene2D "Tests/ViewportCamera.sx")
+          & $silex test (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/GFX.Scene2D/Tests/ViewportCamera.sx")
           & $silex test (Join-Path $gfx "Tests/Application/CollectionFieldMutation.sx")
           $audio = Join-Path $env:RUNNER_TEMP "gfx-audio.exe"
           & $silex compile (Join-Path $gfxAudio "Smokes/Audio.sx") -o $audio
@@ -258,6 +276,7 @@ jobs:
           test "$(uname -m)" = "arm64"
           test "$(git -C "$GITHUB_WORKSPACE/.checkpoint/STD" rev-parse HEAD)" = "$STD_CHECKPOINT"
           test "$(git -C "$GITHUB_WORKSPACE/.checkpoint/GFX" rev-parse HEAD)" = "$GFX_CHECKPOINT"
+          test "$(git -C "$GITHUB_WORKSPACE/.checkpoint/GFX.Scene2D" rev-parse HEAD)" = "$SCENE2D_CHECKPOINT"
           test "$(git -C "$GITHUB_WORKSPACE/.checkpoint/GFX.Physics" rev-parse HEAD)" = "$PHYSICS_CHECKPOINT"
           test "$(git -C "$GITHUB_WORKSPACE/.checkpoint/GFX.WebView" rev-parse HEAD)" = "$WEBVIEW_CHECKPOINT"
           export HOME="$RUNNER_TEMP/home"
@@ -272,10 +291,15 @@ jobs:
           "$silex" install GFX.Stats
           "$silex" link "$GITHUB_WORKSPACE/.checkpoint/GFX"
           "$silex" link "$GITHUB_WORKSPACE/.checkpoint/STD"
+          "$silex" link "$GITHUB_WORKSPACE/.checkpoint/GFX.Scene2D"
           "$silex" link "$GITHUB_WORKSPACE/.checkpoint/GFX.Physics"
           "$silex" link "$GITHUB_WORKSPACE/.checkpoint/GFX.WebView"
           "$silex" compile "$GITHUB_WORKSPACE/.checkpoint/STD/Examples/Threading/NativeCheckpoint.sx" --release -o "$RUNNER_TEMP/threading-checkpoint"
           "$RUNNER_TEMP/threading-checkpoint"
           "$silex" compile "$GITHUB_WORKSPACE/.checkpoint/GFX.Physics/Benchmarks/Corpus2D.sx" --release -o "$RUNNER_TEMP/physics-corpus"
-          "$RUNNER_TEMP/physics-corpus" | python3 "$GITHUB_WORKSPACE/.checkpoint/GFX.Physics/Benchmarks/Oracle2D/CheckCorpus.py" --enforce
+          {
+            "$RUNNER_TEMP/physics-corpus" --sparse-10000
+            "$RUNNER_TEMP/physics-corpus" --sparse-10000 --workers-2
+            "$RUNNER_TEMP/physics-corpus" --sparse-10000 --workers-4
+          } | python3 "$GITHUB_WORKSPACE/.checkpoint/GFX.Physics/Benchmarks/Oracle2D/CheckCorpus.py" --enforce
           "$silex" compile "$GITHUB_WORKSPACE/.checkpoint/GFX.WebView/Examples/Availability.sx" --release -o "$RUNNER_TEMP/webview-availability"
