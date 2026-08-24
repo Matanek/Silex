@@ -5,3 +5,4 @@ pub const Interpreter = @import("Interpreter.zig");
 pub const Ir = @import("Ir.zig");
 pub const ReleaseOptimizer = @import("Optimize/Release.zig");
 pub const Slp = @import("Optimize/Slp.zig");
+pub const X64RegisterAllocation = @import("X64/RegisterAllocation.zig");

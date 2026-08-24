@@ -647,6 +647,9 @@ pub fn validate(program: Program) Error!void {
         if (function.float_register_slots.len != 0 and function.float_register_slots.len != function.slot_count) {
             return error.InvalidMachineProgram;
         }
+        if (function.float_lane_slots.len != 0 and function.float_lane_slots.len != function.slot_count) {
+            return error.InvalidMachineProgram;
+        }
         for (function.instructions) |instruction| {
             switch (instruction) {
                 .constant_int => |value| try requireSlot(function, value.result),

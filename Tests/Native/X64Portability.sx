@@ -45,6 +45,19 @@ struct CopyPair {
     var again:CopyState
 }
 
+struct X64FloatPair {
+    let x:float
+    let y:float
+}
+
+func paired_float_checksum(left:X64FloatPair, right:X64FloatPair) float {
+    let sum_x = left.x + right.x
+    let sum_y = left.y + right.y
+    let scaled_x = sum_x * 2.0
+    let scaled_y = sum_y * 2.0
+    return scaled_x + scaled_y
+}
+
 class DirectCycleNode {
     var next:DirectCycleNode? = null
     drop { print("x64 cycle drop") }
@@ -203,6 +216,13 @@ test "execute direct indirect and dynamic calls beyond x64 registers" {
     assert(dynamic_class_total() == 42)
 }
 
+test "preserve paired float32 arithmetic on x64" {
+    assert(paired_float_checksum(
+        X64FloatPair(x:1.0, y:2.0),
+        X64FloatPair(x:3.0, y:4.0)
+    ) == 20.0)
+}
+
 test "preserve embedded byte contents on x64" {
     verify_embedded_bytes()
 }
@@ -346,6 +366,10 @@ func main() {
     assert(callback_total() == 55)
     assert(dynamic_total() == 42)
     assert(dynamic_class_total() == 42)
+    assert(paired_float_checksum(
+        X64FloatPair(x:1.0, y:2.0),
+        X64FloatPair(x:3.0, y:4.0)
+    ) == 20.0)
     verify_collections()
     verify_deep_copy()
     verify_cycles()

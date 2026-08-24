@@ -5,6 +5,7 @@ const FloatRuntime = @import("FloatRuntime.zig");
 const DeepCopyRuntime = @import("DeepCopyRuntime.zig");
 const CycleRuntime = @import("CycleRuntime.zig");
 const ExternalCalls = @import("ExternalCalls.zig");
+const FloatPairs = @import("FloatPairs.zig");
 const Reachability = @import("Reachability.zig");
 const TextRuntime = @import("TextRuntime.zig");
 
@@ -273,7 +274,8 @@ fn encodeFunction(
     program: Machine.Program,
     function: Machine.Function,
 ) Error!void {
-    if (function.float_register_slots.len != 0 or function.float_lane_slots.len != 0) return unsupported("X64 floating register allocation");
+    if (function.float_register_slots.len != 0) return unsupported("X64 scalar floating register allocation");
+    try FloatPairs.validate(function);
     for (function.register_slots) |residence| if (residence) |register| {
         if (register >= 16 or register == @intFromEnum(Register.rsp) or register == @intFromEnum(Register.rbp)) {
             return error.InvalidMachineProgram;
@@ -640,7 +642,10 @@ fn encodeFunction(
                 }
                 try emitStoreValue(allocator, bytes, function.register_slots, .rax, unary.result);
             },
-            .binary => |binary| try emitBinary(allocator, bytes, function.register_slots, binary),
+            .binary => |binary| {
+                if (try FloatPairs.emit(allocator, bytes, function, binary)) continue;
+                try emitBinary(allocator, bytes, function.register_slots, binary);
+            },
             .string_byte_at => |access| {
                 try emitLoadStack(allocator, bytes, .rax, access.operand);
                 try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xc0, 8 });

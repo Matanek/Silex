@@ -1,10 +1,14 @@
 const std = @import("std");
 const Machine = @import("../Arm64/Machine.zig");
+const FloatLaneAllocation = @import("../Arm64/RegisterAllocation.zig");
 
 const Allocator = std.mem.Allocator;
 // These registers are volatile in both the System V and Windows X64 ABIs.
 // Compatible functions are leaves, so no call can invalidate their contents.
 const registers = [_]u5{ 8, 9, 10, 11 };
+// XMM0...XMM5 are volatile in both System V and Win64. Keep XMM3...XMM5
+// reserved for pair packing and packed arithmetic scratch values.
+const float_lane_registers = [_]u5{ 0, 1, 2 };
 
 const Interval = struct {
     slot: Machine.Slot,
@@ -19,6 +23,11 @@ pub fn allocateProgram(allocator: Allocator, program: Machine.Program) (Allocato
     for (program.functions, 0..) |function, index| {
         functions[index] = function;
         functions[index].register_slots = try allocate(allocator, function);
+        functions[index].float_lane_slots = try FloatLaneAllocation.allocateFloatLanePairsFor(
+            allocator,
+            function,
+            &float_lane_registers,
+        );
     }
     result.functions = functions;
     try Machine.validate(result);
@@ -331,4 +340,43 @@ test "allocate X64 scalar values globally across a loop" {
     try std.testing.expect(residences[0] != null);
     try std.testing.expectEqual(residences[0], residences[4]);
     try std.testing.expect(residences[3] != null);
+}
+
+test "allocate portable float32 pairs in baseline X64 SIMD registers" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const instructions = [_]Machine.Instruction{
+        .{ .constant_float32 = .{ .result = 0, .bits = @bitCast(@as(f32, 2.0)) } },
+        .{ .constant_float32 = .{ .result = 1, .bits = @bitCast(@as(f32, 2.0)) } },
+        .{ .constant_float32 = .{ .result = 2, .bits = @bitCast(@as(f32, 3.0)) } },
+        .{ .constant_float32 = .{ .result = 3, .bits = @bitCast(@as(f32, 3.0)) } },
+        .{ .binary = .{ .result = 4, .operator = .multiply, .left = 0, .right = 2, .type = .float32 } },
+        .{ .binary = .{ .result = 5, .operator = .multiply, .left = 1, .right = 3, .type = .float32 } },
+        .return_void,
+    };
+    const groups = [_]Machine.FloatLaneGroup{.{
+        .slots = .{ 4, 5, 0, 0 },
+        .width = 2,
+        .priority = 8,
+        .recurrence = false,
+        .in_loop = false,
+    }};
+    const functions = [_]Machine.Function{.{
+        .name = "main",
+        .parameter_count = 0,
+        .return_type = .void,
+        .slot_count = 6,
+        .frame_size = 48,
+        .float_lane_groups = &groups,
+        .instructions = &instructions,
+    }};
+    const allocated = try allocateProgram(allocator, .{ .functions = &functions });
+    const lanes = allocated.functions[0].float_lane_slots;
+    try std.testing.expectEqual(@as(usize, 6), lanes.len);
+    const first = lanes[4] orelse return error.TestUnexpectedResult;
+    const second = lanes[5] orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(first.register, second.register);
+    try std.testing.expectEqual(@as(u1, 0), first.lane);
+    try std.testing.expectEqual(@as(u1, 1), second.lane);
 }

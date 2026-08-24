@@ -211,12 +211,13 @@ fn reportEvidence(io: std.Io, allocator: std.mem.Allocator, evidence: Qualificat
         .slp => |slp| try Report.line(
             io,
             allocator,
-            "    contract: {s} SLP width {d} (required >= {d}), {d} native XY pairs{s}",
+            "    contract: {s} SLP width {d} (required >= {d}), {d} ARM64 and {d} X64 native XY pairs{s}",
             .{
                 slp.function,
                 slp.observed,
                 slp.required,
-                slp.native_pairs,
+                slp.arm64_pairs,
+                slp.x64_pairs,
                 if (slp.native_required) " (required)" else "",
             },
         ),

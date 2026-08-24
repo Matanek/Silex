@@ -267,10 +267,11 @@ open Silex document
   or an external linker when no package boundary is referenced. Boundary calls
   instead use a relocatable ELF object and the bootstrap linker. Its integer,
   control-flow, class, aggregate, dynamic-list mutation,
-  string/boolean/integer output and `getrandom` vertical slice executes under
-  Alpine. Calls use the same eight-register-plus-stack policy for direct,
-  indirect and dynamic dispatch. Other machine operations remain explicit
-  encoder errors until the differential corpus covers them.
+  string/boolean/integer output, scalar floating-point arithmetic, baseline SSE
+  `float32` pairs, and `getrandom` vertical slice executes under Alpine. Calls
+  use the same eight-register-plus-stack policy for direct, indirect and
+  dynamic dispatch. Other machine operations remain explicit encoder errors
+  until the differential corpus covers them.
   Mutable globals are currently appended to the bootstrap image, so its single
   load segment is temporarily executable and writable. A dedicated writable
   data segment is required before the X64 container is hardened.
@@ -278,9 +279,9 @@ open Silex document
   import descriptors, lookup tables and IAT entries for `VirtualAlloc` and
   `ProcessPrng`. X64 uses the Win64 boundary registers and ARM64 shares the
   instruction encoder while substituting the Windows allocation boundary. The
-  Windows X64 path shares the Linux X64 list, output and stack-argument
-  instruction coverage while adapting system calls to imported Win32/UCRT
-  functions.
+  Windows X64 path shares the Linux X64 list, output, stack-argument and
+  baseline SSE pair instruction coverage while adapting system calls to
+  imported Win32/UCRT functions.
   Package-boundary builds use COFF objects, Win64 or Windows ARM64 C ABI calls,
   and the bootstrap linker with the selected archives and system libraries.
   The X64 bootstrap image likewise keeps its combined code/global section
@@ -330,9 +331,14 @@ open Silex document
   every unproved access retains its runtime bounds diagnostic.
 - Native Release lowering performs deterministic CFG-wide liveness and graph
   coloring for compatible scalar functions on ARM64 and X64. Copy-affinity
-  components and destructive arithmetic are coalesced globally; ARM64 also
-  colors scalar floating-point values and proven SLP lanes in the shared SIMD
-  register class. Addressable values, unsupported aggregates, and values that
+  components and destructive arithmetic are coalesced globally. ARM64 colors
+  scalar floating-point values and proven SLP lanes in the shared SIMD register
+  class, then realizes profitable `float32` pairs with baseline NEON. X64
+  independently selects the same portable pairs for baseline SSE on both
+  System V and Win64, reserves only volatile XMM registers, and keeps their
+  scalar stack slots synchronized as a correct fallback for unselected or
+  unsupported operations. AVX is not selected until target features can prove
+  it is legal. Addressable values, unsupported aggregates, and values that
   cross unsupported machine operations remain explicit spills. Empty SSA edge
   transfers are bypassed after allocation, and the ARM64 collection cursor
   recognizes induction updates separated by independent SSA copies. Fully

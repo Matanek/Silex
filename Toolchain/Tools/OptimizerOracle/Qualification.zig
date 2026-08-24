@@ -28,7 +28,8 @@ pub const Evidence = union(enum) {
         required: u3,
         observed: u3,
         native_required: bool,
-        native_pairs: usize,
+        arm64_pairs: usize,
+        x64_pairs: usize,
     },
 };
 
@@ -138,22 +139,33 @@ fn verifySlp(
     var observed: u3 = 0;
     for (plan.groups) |group| observed = @max(observed, group.width);
     if (observed < minimum) return error.ExpectedSlpWidthMissing;
-    const machine_program = try Silex.Arm64Lower.lowerWithMode(allocator, program, .release);
-    const machine_function = findMachineFunction(machine_program, function_name) orelse
+    const arm64_program = try Silex.Arm64Lower.lowerWithMode(allocator, program, .release);
+    const arm64_function = findMachineFunction(arm64_program, function_name) orelse
         return error.ContractFunctionMissing;
-    var native_pairs: usize = 0;
-    for (machine_function.float_lane_slots) |residence| {
+    var arm64_pairs: usize = 0;
+    for (arm64_function.float_lane_slots) |residence| {
         if (residence) |lane| if (lane.lane == 0) {
-            native_pairs += 1;
+            arm64_pairs += 1;
         };
     }
-    if (native_pair and native_pairs == 0) return error.ExpectedNativeLanePairMissing;
+    const stack_program = try Silex.Arm64Lower.lowerWithMode(allocator, program, .debug);
+    const x64_program = try Silex.X64RegisterAllocation.allocateProgram(allocator, stack_program);
+    const x64_function = findMachineFunction(x64_program, function_name) orelse
+        return error.ContractFunctionMissing;
+    var x64_pairs: usize = 0;
+    for (x64_function.float_lane_slots) |residence| {
+        if (residence) |lane| if (lane.lane == 0) {
+            x64_pairs += 1;
+        };
+    }
+    if (native_pair and (arm64_pairs == 0 or x64_pairs == 0)) return error.ExpectedNativeLanePairMissing;
     return .{ .slp = .{
         .function = function_name,
         .required = minimum,
         .observed = observed,
         .native_required = native_pair,
-        .native_pairs = native_pairs,
+        .arm64_pairs = arm64_pairs,
+        .x64_pairs = x64_pairs,
     } };
 }
 

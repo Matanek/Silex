@@ -17,6 +17,25 @@ pub const Result = struct {
     frame_size: u32,
 };
 
+/// Places target-independent SLP pairs in a caller-selected SIMD register
+/// set. Backends remain free to pass an empty or baseline-only register set;
+/// unsupported functions keep the scalar machine form.
+pub fn allocateFloatLanePairsFor(
+    allocator: Allocator,
+    function: Machine.Function,
+    registers: []const u5,
+) Allocator.Error![]const ?Machine.FloatLaneResidence {
+    if (!isCompatibleFunction(function) or registers.len == 0) return try allocator.alloc(?Machine.FloatLaneResidence, 0);
+    const residences = try allocator.alloc(?Machine.FloatLaneResidence, function.slot_count);
+    @memset(residences, null);
+    const float_slots = try allocator.alloc(bool, function.slot_count);
+    defer allocator.free(float_slots);
+    @memset(float_slots, false);
+    inferFloatSlots(function, float_slots);
+    try allocateFloatPairs(allocator, function, float_slots, residences, registers);
+    return residences;
+}
+
 /// Keeps scalar values in the callee-saved ARM64 registers x19...x28. Large
 /// frames reserve x28 as the base of their second directly addressed window.
 /// The
@@ -36,7 +55,13 @@ pub fn allocate(allocator: Allocator, function: Machine.Function) (Allocator.Err
     defer allocator.free(float_slots);
     @memset(float_slots, false);
     inferFloatSlots(function, float_slots);
-    try allocateFloatPairs(allocator, function, float_slots, float_lane_residences);
+    const pair_registers = [_]u5{
+        16, 17, 18, 19, 20, 21, 22, 23,
+        24, 25, 26, 27, 28, 29, 30, 31,
+        8,  13, 14, 15, 0,  1,  2,  3,
+        4,  5,  6,  7,
+    };
+    try allocateFloatPairs(allocator, function, float_slots, float_lane_residences, &pair_registers);
     const forced = try allocator.alloc(bool, function.slot_count);
     defer allocator.free(forced);
     @memset(forced, false);
@@ -692,6 +717,7 @@ fn allocateFloatPairs(
     function: Machine.Function,
     float_slots: []const bool,
     residences: []?Machine.FloatLaneResidence,
+    registers: []const u5,
 ) Allocator.Error!void {
     const partners = try allocator.alloc(?Machine.Slot, function.slot_count);
     defer allocator.free(partners);
@@ -834,12 +860,6 @@ fn allocateFloatPairs(
             .weight = weight,
         });
     }
-    const pair_registers = [_]u5{
-        16, 17, 18, 19, 20, 21, 22, 23,
-        24, 25, 26, 27, 28, 29, 30, 31,
-        8,  13, 14, 15, 0,  1,  2,  3,
-        4,  5,  6,  7,
-    };
     const leaders = try allocator.alloc(?u5, function.slot_count);
     defer allocator.free(leaders);
     @memset(leaders, null);
@@ -847,7 +867,7 @@ fn allocateFloatPairs(
         allocator,
         leaders,
         intervals.items,
-        &pair_registers,
+        registers,
         partners,
         function.instructions,
         function.slot_count,
