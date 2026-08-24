@@ -20,9 +20,9 @@ permissions:
   contents: read
 
 env:
-  STD_CHECKPOINT: 68c59a7b7f3a7fec0354a8aa623dd7bd95a03e70
+  STD_CHECKPOINT: ef4af38d6fdd998269230bae1de4ee9db8892ab6
   PHYSICS_CHECKPOINT: 392b41868d0d936dae38041d3a4ca77da5f01faf
-  WEBVIEW_CHECKPOINT: b129d3e1a06afb955ffa2edc22a854bdfa29421f
+  WEBVIEW_CHECKPOINT: 5b9e599c8a8106098ebe8d73572a83378fbdc858
 
 jobs:
   native:
@@ -128,6 +128,8 @@ jobs:
           "$silex" compile "$GITHUB_WORKSPACE/.checkpoint/GFX.Physics/Benchmarks/Corpus2D.sx" --release -o "$RUNNER_TEMP/physics-corpus"
           "$RUNNER_TEMP/physics-corpus" | python3 "$GITHUB_WORKSPACE/.checkpoint/GFX.Physics/Benchmarks/Oracle2D/CheckCorpus.py" --enforce
           xvfb-run -a env GDK_BACKEND=x11 SDL_VIDEODRIVER=x11 \
+            NO_AT_BRIDGE=1 LIBGL_ALWAYS_SOFTWARE=1 \
+            WEBKIT_DISABLE_COMPOSITING_MODE=1 WEBKIT_DISABLE_DMABUF_RENDERER=1 \
             "$silex" test "$GITHUB_WORKSPACE/.checkpoint/GFX.WebView/Tests"
           find_package() {
             find "$HOME/.silex/packages" -maxdepth 1 -type d -name "$1@*" -print -quit
