@@ -497,8 +497,7 @@ fn encodeFunction(
             },
             .reference_offset => |offset| {
                 try emitLoadStack(allocator, bytes, .rax, offset.reference);
-                try bytes.appendSlice(allocator, &.{ 0x48, 0x05 });
-                try appendInt(allocator, bytes, u32, offset.byte_offset);
+                try emitSubtractImmediateRegister(allocator, bytes, .rax, offset.byte_offset);
                 try emitStoreStack(allocator, bytes, .rax, offset.result);
             },
             .reference_indirect_offset => |offset| {
