@@ -1,61 +1,91 @@
-name: Release Silex
+name: Publish Silex release candidate
+
+run-name: Publish Silex v${{ inputs.version }} from ${{ github.ref_name }}
 
 on:
-  push:
-    tags:
-      - "v*"
   workflow_dispatch:
+    inputs:
+      version:
+        description: Semantic version without the v prefix
+        required: true
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.version }}
+  cancel-in-progress: false
 
 jobs:
-  macos-arm64:
-    runs-on: macos-15
+  preflight:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
 
     steps:
-      - name: Check out the source
+      - name: Check out the exact candidate
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
-      - name: Verify the release version
+      - name: Verify the unpublished release candidate
         shell: bash
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          manifest_version=$(sed -n 's/^[[:space:]]*\.version = "\([^"]*\)",/\1/p' Toolchain/build.zig.zon)
-          test -n "$manifest_version"
-          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
-            test "$manifest_version" = "${GITHUB_REF_NAME#v}"
+          if [[ ! "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "release version must use MAJOR.MINOR.PATCH" >&2
+            exit 1
           fi
+          manifest_version=$(sed -n 's/^[[:space:]]*\.version = "\([^"]*\)",/\1/p' Toolchain/build.zig.zon)
+          test "$manifest_version" = "$RELEASE_VERSION"
+          test "$GITHUB_REF_NAME" = "main"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          if git show-ref --verify --quiet "refs/tags/v$RELEASE_VERSION"; then
+            echo "tag v$RELEASE_VERSION already exists" >&2
+            exit 1
+          fi
+
+  macos-arm64:
+    needs: preflight
+    runs-on: macos-15
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out the exact candidate
+        uses: actions/checkout@v6
 
       - name: Install Zig 0.16.0
         shell: bash
         run: |
           set -euo pipefail
-          curl -fL https://ziglang.org/download/0.16.0/zig-aarch64-macos-0.16.0.tar.xz -o zig.tar.xz
-          echo "b23d70deaa879b5c2d486ed3316f7eaa53e84acf6fc9cc747de152450d401489  zig.tar.xz" | shasum -a 256 -c -
-          tar -xf zig.tar.xz
-          echo "$PWD/zig-aarch64-macos-0.16.0" >> "$GITHUB_PATH"
+          archive="$RUNNER_TEMP/zig.tar.xz"
+          curl -fL https://ziglang.org/download/0.16.0/zig-aarch64-macos-0.16.0.tar.xz -o "$archive"
+          echo "b23d70deaa879b5c2d486ed3316f7eaa53e84acf6fc9cc747de152450d401489  $archive" | shasum -a 256 -c -
+          tar -xJf "$archive" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/zig-aarch64-macos-0.16.0" >> "$GITHUB_PATH"
 
-      - name: Build the standalone compiler
-        working-directory: Toolchain
-        run: zig build -Doptimize=ReleaseFast --prefix "$RUNNER_TEMP/silex-prefix"
-
-      - name: Assemble and smoke-test the artifact
+      - name: Build, assemble and smoke-test macOS ARM64
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/silex-macos-arm64/bin"
-          cp "$RUNNER_TEMP/silex-prefix/bin/silex" "$RUNNER_TEMP/silex-macos-arm64/bin/silex"
-          cp LICENSE NOTICE README.md "$RUNNER_TEMP/silex-macos-arm64/"
-          "$RUNNER_TEMP/silex-macos-arm64/bin/silex" --version
-          "$RUNNER_TEMP/silex-macos-arm64/bin/silex" targets
-          "$RUNNER_TEMP/silex-macos-arm64/bin/silex" setup
-          "$RUNNER_TEMP/silex-macos-arm64/bin/silex" install STD
-          "$RUNNER_TEMP/silex-macos-arm64/bin/silex" compile Examples/Distribution/Hello.sx -o "$RUNNER_TEMP/silex-package-smoke"
+          export HOME="$RUNNER_TEMP/home"
+          mkdir -p "$HOME"
+          (cd Toolchain && zig build -Doptimize=ReleaseFast --prefix "$RUNNER_TEMP/silex-prefix")
+          root="$RUNNER_TEMP/silex-macos-arm64"
+          mkdir -p "$root/bin"
+          cp "$RUNNER_TEMP/silex-prefix/bin/silex" "$root/bin/silex"
+          cp LICENSE NOTICE README.md "$root/"
+          "$root/bin/silex" --version
+          "$root/bin/silex" targets
+          "$root/bin/silex" setup
+          "$root/bin/silex" compile Tests/Native/DistributionSmoke.sx \
+            --release -o "$RUNNER_TEMP/distribution-smoke"
+          test "$("$RUNNER_TEMP/distribution-smoke")" = "silex distribution ready"
           tar -C "$RUNNER_TEMP" -czf silex-macos-arm64.tar.gz silex-macos-arm64
           shasum -a 256 silex-macos-arm64.tar.gz > silex-macos-arm64.tar.gz.sha256
 
-      - name: Retain the release files
+      - name: Retain the verified release files
         uses: actions/upload-artifact@v7
         with:
           name: silex-macos-arm64
@@ -63,53 +93,50 @@ jobs:
             silex-macos-arm64.tar.gz
             silex-macos-arm64.tar.gz.sha256
           if-no-files-found: error
+          retention-days: 1
 
   linux-x64:
+    needs: preflight
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
 
     steps:
-      - name: Check out the source
+      - name: Check out the exact candidate
         uses: actions/checkout@v6
-
-      - name: Verify the release version
-        shell: bash
-        run: |
-          set -euo pipefail
-          manifest_version=$(sed -n 's/^[[:space:]]*\.version = "\([^"]*\)",/\1/p' Toolchain/build.zig.zon)
-          test -n "$manifest_version"
-          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
-            test "$manifest_version" = "${GITHUB_REF_NAME#v}"
-          fi
 
       - name: Install Zig 0.16.0
         shell: bash
         run: |
           set -euo pipefail
-          curl -fL https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz -o zig.tar.xz
-          echo "70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00  zig.tar.xz" | sha256sum -c -
-          tar -xf zig.tar.xz
-          echo "$PWD/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
+          archive="$RUNNER_TEMP/zig.tar.xz"
+          curl -fL https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz -o "$archive"
+          echo "70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00  $archive" | sha256sum -c -
+          tar -xJf "$archive" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
 
-      - name: Build the standalone compiler
-        working-directory: Toolchain
-        run: zig build -Doptimize=ReleaseFast -Dcpu=baseline --prefix "$RUNNER_TEMP/silex-prefix"
-
-      - name: Assemble and smoke-test the artifact
+      - name: Build, assemble and smoke-test Linux X64
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/silex-linux-x64/bin"
-          cp "$RUNNER_TEMP/silex-prefix/bin/silex" "$RUNNER_TEMP/silex-linux-x64/bin/silex"
-          cp LICENSE NOTICE README.md "$RUNNER_TEMP/silex-linux-x64/"
-          "$RUNNER_TEMP/silex-linux-x64/bin/silex" --version
-          "$RUNNER_TEMP/silex-linux-x64/bin/silex" targets
-          "$RUNNER_TEMP/silex-linux-x64/bin/silex" setup
-          "$RUNNER_TEMP/silex-linux-x64/bin/silex" install STD
-          "$RUNNER_TEMP/silex-linux-x64/bin/silex" run Examples/Distribution/Hello.sx
+          export HOME="$RUNNER_TEMP/home"
+          mkdir -p "$HOME"
+          zig build -Doptimize=ReleaseFast -Dcpu=baseline \
+            --prefix "$RUNNER_TEMP/silex-prefix" \
+            --build-file Toolchain/build.zig
+          root="$RUNNER_TEMP/silex-linux-x64"
+          mkdir -p "$root/bin"
+          cp "$RUNNER_TEMP/silex-prefix/bin/silex" "$root/bin/silex"
+          cp LICENSE NOTICE README.md "$root/"
+          "$root/bin/silex" --version
+          "$root/bin/silex" targets
+          "$root/bin/silex" setup
+          "$root/bin/silex" compile Tests/Native/DistributionSmoke.sx \
+            --release -o "$RUNNER_TEMP/distribution-smoke"
+          test "$("$RUNNER_TEMP/distribution-smoke")" = "silex distribution ready"
           tar -C "$RUNNER_TEMP" -czf silex-linux-x64.tar.gz silex-linux-x64
           sha256sum silex-linux-x64.tar.gz > silex-linux-x64.tar.gz.sha256
 
-      - name: Retain the release files
+      - name: Retain the verified release files
         uses: actions/upload-artifact@v7
         with:
           name: silex-linux-x64
@@ -117,32 +144,21 @@ jobs:
             silex-linux-x64.tar.gz
             silex-linux-x64.tar.gz.sha256
           if-no-files-found: error
+          retention-days: 1
 
   windows-x64:
+    needs: preflight
     runs-on: windows-2025
+    timeout-minutes: 20
 
     steps:
-      - name: Check out the source
+      - name: Check out the exact candidate
         uses: actions/checkout@v6
-
-      - name: Verify the release version
-        shell: pwsh
-        run: |
-          $manifest = Get-Content Toolchain/build.zig.zon -Raw
-          if ($manifest -notmatch '\.version\s*=\s*"([^"]+)"') {
-            throw "Toolchain manifest does not declare a version"
-          }
-          $manifestVersion = $Matches[1]
-          if ("${{ github.event_name }}" -eq "push") {
-            $tagVersion = "${{ github.ref_name }}" -replace '^v', ''
-            if ($manifestVersion -ne $tagVersion) {
-              throw "Tag and toolchain versions differ"
-            }
-          }
 
       - name: Install Zig 0.16.0
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
           $archive = Join-Path $env:RUNNER_TEMP "zig.zip"
           Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile $archive
           $actual = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -152,14 +168,17 @@ jobs:
           Expand-Archive $archive -DestinationPath $env:RUNNER_TEMP
           Add-Content $env:GITHUB_PATH (Join-Path $env:RUNNER_TEMP "zig-x86_64-windows-0.16.0")
 
-      - name: Build the standalone compiler
-        working-directory: Toolchain
-        shell: pwsh
-        run: zig build -Doptimize=ReleaseFast -Dcpu=baseline --prefix "$env:RUNNER_TEMP/silex-prefix"
-
-      - name: Assemble and smoke-test the artifact
+      - name: Build, assemble and smoke-test Windows X64
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
+          $env:USERPROFILE = Join-Path $env:RUNNER_TEMP "home"
+          $env:HOME = $env:USERPROFILE
+          New-Item -ItemType Directory -Force $env:USERPROFILE | Out-Null
+          zig build -Doptimize=ReleaseFast -Dcpu=baseline `
+            --prefix "$env:RUNNER_TEMP/silex-prefix" `
+            --build-file Toolchain/build.zig
           $root = Join-Path $env:RUNNER_TEMP "silex-windows-x64"
           $bin = Join-Path $root "bin"
           New-Item -ItemType Directory -Force $bin | Out-Null
@@ -169,13 +188,17 @@ jobs:
           & $silex --version
           & $silex targets
           & $silex setup
-          & $silex install STD
-          & $silex run Examples/Distribution/Hello.sx
+          $smoke = Join-Path $env:RUNNER_TEMP "distribution-smoke.exe"
+          & $silex compile Tests/Native/DistributionSmoke.sx --release -o $smoke
+          $smokeOutput = @(& $smoke)
+          if ($LASTEXITCODE -ne 0 -or $smokeOutput.Count -ne 1 -or $smokeOutput[0] -ne "silex distribution ready") {
+            throw "standalone distribution smoke failed"
+          }
           Compress-Archive $root silex-windows-x64.zip
           $hash = (Get-FileHash silex-windows-x64.zip -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  silex-windows-x64.zip" | Set-Content -NoNewline silex-windows-x64.zip.sha256
 
-      - name: Retain the release files
+      - name: Retain the verified release files
         uses: actions/upload-artifact@v7
         with:
           name: silex-windows-x64
@@ -183,34 +206,56 @@ jobs:
             silex-windows-x64.zip
             silex-windows-x64.zip.sha256
           if-no-files-found: error
+          retention-days: 1
 
   publish:
-    if: github.event_name == 'push'
     needs: [macos-arm64, linux-x64, windows-x64]
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: release
+    permissions:
+      contents: write
 
     steps:
+      - name: Check out the exact candidate
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
       - name: Collect the verified release files
         uses: actions/download-artifact@v8
         with:
           path: release
           merge-multiple: true
 
-      - name: Publish the GitHub release
+      - name: Create the annotated tag and GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.version }}
         shell: bash
         run: |
-          gh release create "$GITHUB_REF_NAME" \
+          set -euo pipefail
+          tag="v$RELEASE_VERSION"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
+            echo "tag $tag already exists on origin" >&2
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$tag" "$GITHUB_SHA" -m "Silex $tag"
+          git push origin "$tag"
+          gh release create "$tag" \
             release/* \
             --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
-            --title "Silex $GITHUB_REF_NAME" \
+            --title "Silex $tag" \
             --generate-notes
 
       - name: Refresh the Silex website
         env:
           GH_TOKEN: ${{ secrets.WEBSITE_DISPATCH_TOKEN }}
+          RELEASE_VERSION: ${{ inputs.version }}
         shell: bash
         run: |
           set -euo pipefail
@@ -220,4 +265,4 @@ jobs:
           fi
           gh api --method POST repos/Matanek/Silex-Website/dispatches \
             -f event_type=silex-released \
-            -f "client_payload[version]=${GITHUB_REF_NAME#v}"
+            -f "client_payload[version]=$RELEASE_VERSION"

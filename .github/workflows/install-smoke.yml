@@ -1,4 +1,6 @@
-name: Smoke public installers
+name: Smoke public Silex installers
+
+run-name: Smoke Silex ${{ inputs.version }} installer (${{ inputs.target }})
 
 on:
   workflow_dispatch:
@@ -7,27 +9,34 @@ on:
         description: Published Silex version, or latest
         required: true
         default: latest
+      target:
+        description: Published target to execute
+        required: true
+        type: choice
+        default: all
+        options:
+          - all
+          - linux-x64
+          - windows-x64
 
 permissions:
   contents: read
 
+concurrency:
+  group: install-smoke-${{ inputs.version }}-${{ inputs.target }}
+  cancel-in-progress: true
+
 jobs:
-  unix:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: macos-15
-            execution: compile
-          - runner: ubuntu-24.04
-            execution: run
-    runs-on: ${{ matrix.runner }}
+  linux-x64:
+    if: inputs.target == 'all' || inputs.target == 'linux-x64'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
 
     steps:
-      - name: Check out the consumer smoke
+      - name: Check out the owned consumer smoke
         uses: actions/checkout@v6
 
-      - name: Install the published compiler
+      - name: Install and execute the published compiler
         shell: bash
         env:
           REQUESTED_VERSION: ${{ inputs.version }}
@@ -40,21 +49,19 @@ jobs:
           curl -fsSL https://raw.githubusercontent.com/Matanek/Silex/main/install.sh | sh
           "$SILEX_INSTALL_DIR/silex" --version
           "$SILEX_INSTALL_DIR/silex" setup
-          "$SILEX_INSTALL_DIR/silex" install STD
-          if [ "${{ matrix.execution }}" = "run" ]; then
-            "$SILEX_INSTALL_DIR/silex" run Examples/Distribution/Hello.sx
-          else
-            "$SILEX_INSTALL_DIR/silex" compile Examples/Distribution/Hello.sx -o "$RUNNER_TEMP/silex-package-smoke"
-          fi
+          output=$("$SILEX_INSTALL_DIR/silex" run Tests/Native/DistributionSmoke.sx --release)
+          test "$output" = "silex distribution ready"
 
   windows-x64:
+    if: inputs.target == 'all' || inputs.target == 'windows-x64'
     runs-on: windows-2025
+    timeout-minutes: 15
 
     steps:
-      - name: Check out the consumer smoke
+      - name: Check out the owned consumer smoke
         uses: actions/checkout@v6
 
-      - name: Install the published compiler
+      - name: Install and execute the published compiler
         shell: pwsh
         env:
           REQUESTED_VERSION: ${{ inputs.version }}
@@ -70,5 +77,7 @@ jobs:
           $silex = Join-Path $env:SILEX_INSTALL_DIR "silex.exe"
           & $silex --version
           & $silex setup
-          & $silex install STD
-          & $silex run Examples/Distribution/Hello.sx
+          $output = @(& $silex run Tests/Native/DistributionSmoke.sx --release)
+          if ($LASTEXITCODE -ne 0 -or $output.Count -ne 1 -or $output[0] -ne "silex distribution ready") {
+            throw "published installer smoke failed"
+          }

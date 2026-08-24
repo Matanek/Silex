@@ -1,0 +1,9 @@
+func answer() int {
+    let values = [40, 2]
+    return values[0] + values[1]
+}
+
+func main() {
+    if answer() != 42 { panic("standalone compiler returned an invalid result") }
+    print("silex distribution ready")
+}

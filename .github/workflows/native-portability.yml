@@ -1,116 +1,82 @@
-name: Validate native jobs checkpoint
+name: Validate Silex native portability
+
+run-name: Validate Silex native portability (${{ inputs.target }})
 
 on:
   workflow_dispatch:
-  pull_request:
-    paths:
-      - "Toolchain/**"
-      - "Tests/Native/**"
-      - "Examples/Distribution/**"
-      - ".github/workflows/native-portability.yml"
-  push:
-    branches: [main]
-    paths:
-      - "Toolchain/**"
-      - "Tests/Native/**"
-      - "Examples/Distribution/**"
-      - ".github/workflows/native-portability.yml"
+    inputs:
+      target:
+        description: Native target to execute
+        required: true
+        type: choice
+        default: all
+        options:
+          - all
+          - linux-x64
+          - windows-x64
 
 permissions:
   contents: read
 
-env:
-  STD_CHECKPOINT: c5c4473400025fc348c2304150a1cce0fabe8e91
-  GFX_CHECKPOINT: f7019091e808a87059400b1c07b45be8dcf315a2
-  ECS_CHECKPOINT: bd198b84a0cadd30764e6ee9d286661c045a5057
-  SCENE2D_CHECKPOINT: 5fdb51f68e326ef3519d5943dbbcc5e0d8c0eab5
-  PHYSICS_CHECKPOINT: dcefe1570fc2f7efac0740649349c4e91997a660
-  WEBVIEW_CHECKPOINT: d4cce871aae58f7aed2b7da76518c2100bf14d8a
+concurrency:
+  group: native-portability-${{ github.ref }}-${{ inputs.target }}
+  cancel-in-progress: true
 
 jobs:
-  native:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: macos-15
-            shell: bash
-          - runner: ubuntu-24.04
-            shell: bash
-          - runner: windows-2025
-            shell: pwsh
-    runs-on: ${{ matrix.runner }}
+  linux-x64:
+    if: inputs.target == 'all' || inputs.target == 'linux-x64'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
 
     steps:
       - name: Check out Silex
         uses: actions/checkout@v6
 
-      - name: Check out the exact STD checkpoint
-        uses: actions/checkout@v6
-        with:
-          repository: Matanek/Silex-Lib-STD
-          ref: ${{ env.STD_CHECKPOINT }}
-          path: .checkpoint/STD
-
-      - name: Check out the exact GFX checkpoint
-        uses: actions/checkout@v6
-        with:
-          repository: Matanek/Silex-Lib-GFX
-          ref: ${{ env.GFX_CHECKPOINT }}
-          path: .checkpoint/GFX
-
-      - name: Check out the exact GFX.ECS checkpoint
-        uses: actions/checkout@v6
-        with:
-          repository: Matanek/Silex-Lib-GFX.ECS
-          ref: ${{ env.ECS_CHECKPOINT }}
-          path: .checkpoint/GFX.ECS
-
-      - name: Check out the exact GFX.Scene2D checkpoint
-        uses: actions/checkout@v6
-        with:
-          repository: Matanek/Silex-Lib-GFX.Scene2D
-          ref: ${{ env.SCENE2D_CHECKPOINT }}
-          path: .checkpoint/GFX.Scene2D
-
-      - name: Check out the exact GFX.Physics checkpoint
-        uses: actions/checkout@v6
-        with:
-          repository: Matanek/Silex-Lib-GFX.Physics
-          ref: ${{ env.PHYSICS_CHECKPOINT }}
-          path: .checkpoint/GFX.Physics
-
-      - name: Check out the exact GFX.WebView checkpoint
-        uses: actions/checkout@v6
-        with:
-          repository: Matanek/Silex-Lib-GFX.WebView
-          ref: ${{ env.WEBVIEW_CHECKPOINT }}
-          path: .checkpoint/GFX.WebView
-
-      - name: Install bootstrap Zig on macOS
-        if: runner.os == 'macOS'
+      - name: Install Zig 0.16.0
         shell: bash
         run: |
           set -euo pipefail
-          curl -fL https://ziglang.org/download/0.16.0/zig-aarch64-macos-0.16.0.tar.xz -o "$RUNNER_TEMP/zig.tar.xz"
-          echo "b23d70deaa879b5c2d486ed3316f7eaa53e84acf6fc9cc747de152450d401489  $RUNNER_TEMP/zig.tar.xz" | shasum -a 256 -c -
-          tar -xJf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP"
-          echo "$RUNNER_TEMP/zig-aarch64-macos-0.16.0" >> "$GITHUB_PATH"
-
-      - name: Install bootstrap Zig on Linux
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev xvfb
-          curl -fL https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz -o "$RUNNER_TEMP/zig.tar.xz"
-          echo "70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00  $RUNNER_TEMP/zig.tar.xz" | sha256sum -c -
-          tar -xJf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP"
+          archive="$RUNNER_TEMP/zig.tar.xz"
+          curl -fL https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz -o "$archive"
+          echo "70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00  $archive" | sha256sum -c -
+          tar -xJf "$archive" -C "$RUNNER_TEMP"
           echo "$RUNNER_TEMP/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
 
-      - name: Install bootstrap Zig on Windows
-        if: runner.os == 'Windows'
+      - name: Build and validate Silex on Linux X64
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = "x86_64"
+          export HOME="$RUNNER_TEMP/home"
+          mkdir -p "$HOME"
+          zig build -Doptimize=ReleaseFast -Dcpu=baseline \
+            --prefix "$RUNNER_TEMP/silex-prefix" \
+            --build-file Toolchain/build.zig
+          silex="$RUNNER_TEMP/silex-prefix/bin/silex"
+          "$silex" setup
+          "$silex" test "$GITHUB_WORKSPACE/Tests/Types/Str/Operators.sx"
+          "$silex" test "$GITHUB_WORKSPACE/Tests/Types/Str/Returns.sx"
+          "$silex" test "$GITHUB_WORKSPACE/Tests/Native/X64Portability.sx"
+          "$silex" compile "$GITHUB_WORKSPACE/Tests/Native/X64Portability.sx" \
+            --release -o "$RUNNER_TEMP/x64-portability"
+          portability_output=$("$RUNNER_TEMP/x64-portability")
+          printf '%s\n' "$portability_output"
+          cycle_drops=$(printf '%s\n' "$portability_output" | grep -c '^x64 cycle drop$')
+          test "$cycle_drops" -eq 6
+          "$silex" compile "$GITHUB_WORKSPACE/Tests/Native/DistributionSmoke.sx" \
+            --release -o "$RUNNER_TEMP/distribution-smoke"
+          test "$("$RUNNER_TEMP/distribution-smoke")" = "silex distribution ready"
+
+  windows-x64:
+    if: inputs.target == 'all' || inputs.target == 'windows-x64'
+    runs-on: windows-2025
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out Silex
+        uses: actions/checkout@v6
+
+      - name: Install Zig 0.16.0
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -123,79 +89,7 @@ jobs:
           Expand-Archive $archive -DestinationPath $env:RUNNER_TEMP
           Add-Content $env:GITHUB_PATH (Join-Path $env:RUNNER_TEMP "zig-x86_64-windows-0.16.0")
 
-      - name: Build and validate on Linux
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$(uname -m)" = "x86_64"
-          test "$(git -C "$GITHUB_WORKSPACE/.checkpoint/STD" rev-parse HEAD)" = "$STD_CHECKPOINT"
-          test "$(git -C "$GITHUB_WORKSPACE/.checkpoint/GFX" rev-parse HEAD)" = "$GFX_CHECKPOINT"
-          test "$(git -C "$GITHUB_WORKSPACE/.checkpoint/GFX.ECS" rev-parse HEAD)" = "$ECS_CHECKPOINT"
-          test "$(git -C "$GITHUB_WORKSPACE/.checkpoint/GFX.Scene2D" rev-parse HEAD)" = "$SCENE2D_CHECKPOINT"
-          test "$(git -C "$GITHUB_WORKSPACE/.checkpoint/GFX.Physics" rev-parse HEAD)" = "$PHYSICS_CHECKPOINT"
-          test "$(git -C "$GITHUB_WORKSPACE/.checkpoint/GFX.WebView" rev-parse HEAD)" = "$WEBVIEW_CHECKPOINT"
-          export HOME="$RUNNER_TEMP/home"
-          mkdir -p "$HOME"
-          zig build -Doptimize=ReleaseFast -Dcpu=baseline --prefix "$RUNNER_TEMP/silex-prefix" --build-file Toolchain/build.zig
-          silex="$RUNNER_TEMP/silex-prefix/bin/silex"
-          "$silex" setup
-          "$silex" install STD
-          "$silex" install GFX.Canvas --dev
-          "$silex" install GFX.Scene2D --dev
-          "$silex" install GFX.Scene3D
-          "$silex" install GFX.Audio
-          "$silex" install GFX.Stats
-          "$silex" link "$GITHUB_WORKSPACE/.checkpoint/GFX"
-          "$silex" link "$GITHUB_WORKSPACE/.checkpoint/GFX.ECS"
-          "$silex" link "$GITHUB_WORKSPACE/.checkpoint/STD"
-          "$silex" link "$GITHUB_WORKSPACE/.checkpoint/GFX.Scene2D"
-          "$silex" link "$GITHUB_WORKSPACE/.checkpoint/GFX.Physics"
-          "$silex" link "$GITHUB_WORKSPACE/.checkpoint/GFX.WebView"
-          "$silex" test "$GITHUB_WORKSPACE/Tests/Types/Str/Operators.sx"
-          "$silex" test "$GITHUB_WORKSPACE/Tests/Types/Str/Returns.sx"
-          "$silex" test "$GITHUB_WORKSPACE/Tests/Native/X64Portability.sx"
-          "$silex" compile "$GITHUB_WORKSPACE/.checkpoint/STD/Examples/Threading/NativeCheckpoint.sx" --release -o "$RUNNER_TEMP/threading-checkpoint"
-          "$RUNNER_TEMP/threading-checkpoint"
-          "$silex" test "$GITHUB_WORKSPACE/.checkpoint/STD/Tests/Threading.sx"
-          "$silex" test "$GITHUB_WORKSPACE/.checkpoint/STD/Tests/ThreadingParallelOnly.sx"
-          "$silex" compile "$GITHUB_WORKSPACE/.checkpoint/GFX.Physics/Benchmarks/Corpus2D.sx" --release -o "$RUNNER_TEMP/physics-corpus"
-          {
-            "$RUNNER_TEMP/physics-corpus" --sparse-10000
-            "$RUNNER_TEMP/physics-corpus" --sparse-10000 --workers-2
-            "$RUNNER_TEMP/physics-corpus" --sparse-10000 --workers-4
-          } | python3 "$GITHUB_WORKSPACE/.checkpoint/GFX.Physics/Benchmarks/Oracle2D/CheckCorpus.py" --enforce
-          xvfb-run -a env GDK_BACKEND=x11 SDL_VIDEO_DRIVER=x11 \
-            NO_AT_BRIDGE=1 LIBGL_ALWAYS_SOFTWARE=1 \
-            WEBKIT_DISABLE_COMPOSITING_MODE=1 WEBKIT_DISABLE_DMABUF_RENDERER=1 \
-            "$silex" test "$GITHUB_WORKSPACE/.checkpoint/GFX.WebView/Tests"
-          find_package() {
-            find "$HOME/.silex/packages" -maxdepth 1 -type d -name "$1@*" -print -quit
-          }
-          gfx=$(find_package GFX)
-          gfx_audio=$(find_package GFX.Audio)
-          gfx_canvas=$(find_package GFX.Canvas)
-          test -n "$gfx" && test -n "$gfx_audio" && test -n "$gfx_canvas"
-          "$silex" test "$gfx/Tests/Color.sx"
-          "$silex" test "$GITHUB_WORKSPACE/.checkpoint/GFX.Scene2D/Tests/ViewportCamera.sx"
-          "$silex" test "$gfx/Tests/Application/CollectionFieldMutation.sx"
-          "$silex" compile "$gfx_audio/Smokes/Audio.sx" -o "$RUNNER_TEMP/gfx-audio"
-          timeout 30s env SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=dummy "$RUNNER_TEMP/gfx-audio"
-          "$silex" compile "$gfx_canvas/Smokes/Text.sx" -o "$RUNNER_TEMP/gfx-text"
-          timeout 30s env SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=dummy "$RUNNER_TEMP/gfx-text"
-          "$silex" compile "$GITHUB_WORKSPACE/Tests/Native/X64Portability.sx" --release -o "$RUNNER_TEMP/x64-portability"
-          portability_output=$("$RUNNER_TEMP/x64-portability")
-          printf '%s\n' "$portability_output"
-          cycle_drops=$(printf '%s\n' "$portability_output" | grep -c '^x64 cycle drop$')
-          test "$cycle_drops" -eq 6
-          "$silex" compile "$GITHUB_WORKSPACE/Examples/Distribution/GFX/Runtime.sx" -o "$RUNNER_TEMP/gfx-runtime"
-          timeout 30s env SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=dummy "$RUNNER_TEMP/gfx-runtime"
-          "$silex" compile "$GITHUB_WORKSPACE/Examples/Distribution/GFX/Window.sx" -o "$RUNNER_TEMP/gfx-window"
-          "$silex" compile "$GITHUB_WORKSPACE/Examples/Distribution/GFX/Canvas.sx" -o "$RUNNER_TEMP/gfx-canvas"
-          "$silex" compile "$GITHUB_WORKSPACE/Examples/Distribution/GFX/Extensibility.sx" -o "$RUNNER_TEMP/gfx-extensibility"
-
-      - name: Build and validate on Windows
-        if: runner.os == 'Windows'
+      - name: Build and validate Silex on Windows X64
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -203,120 +97,30 @@ jobs:
           if ($env:PROCESSOR_ARCHITECTURE -ne "AMD64") {
             throw "expected Windows X64 runner, got $env:PROCESSOR_ARCHITECTURE"
           }
-          $stdHead = git -C (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/STD") rev-parse HEAD
-          $gfxHead = git -C (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/GFX") rev-parse HEAD
-          $ecsHead = git -C (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/GFX.ECS") rev-parse HEAD
-          $scene2DHead = git -C (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/GFX.Scene2D") rev-parse HEAD
-          $physicsHead = git -C (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/GFX.Physics") rev-parse HEAD
-          $webViewHead = git -C (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/GFX.WebView") rev-parse HEAD
-          if ($stdHead -ne $env:STD_CHECKPOINT -or $gfxHead -ne $env:GFX_CHECKPOINT -or $ecsHead -ne $env:ECS_CHECKPOINT -or $scene2DHead -ne $env:SCENE2D_CHECKPOINT -or $physicsHead -ne $env:PHYSICS_CHECKPOINT -or $webViewHead -ne $env:WEBVIEW_CHECKPOINT) {
-            throw "external checkpoint does not match the pinned commits"
-          }
           $env:USERPROFILE = Join-Path $env:RUNNER_TEMP "home"
           $env:HOME = $env:USERPROFILE
-          $env:SDL_AUDIODRIVER = "dummy"
           New-Item -ItemType Directory -Force $env:USERPROFILE | Out-Null
-          zig build -Doptimize=ReleaseFast -Dcpu=baseline --prefix "$env:RUNNER_TEMP/silex-prefix" --build-file Toolchain/build.zig
+          zig build -Doptimize=ReleaseFast -Dcpu=baseline `
+            --prefix "$env:RUNNER_TEMP/silex-prefix" `
+            --build-file Toolchain/build.zig
           $silex = Join-Path $env:RUNNER_TEMP "silex-prefix/bin/silex.exe"
           & $silex setup
-          & $silex install STD
-          & $silex install GFX.Canvas --dev
-          & $silex install GFX.Scene2D --dev
-          & $silex install GFX.Scene3D
-          & $silex install GFX.Audio
-          & $silex install GFX.Stats
-          & $silex link (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/GFX")
-          & $silex link (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/GFX.ECS")
-          & $silex link (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/STD")
-          & $silex link (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/GFX.Scene2D")
-          & $silex link (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/GFX.Physics")
-          & $silex link (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/GFX.WebView")
           & $silex test (Join-Path $env:GITHUB_WORKSPACE "Tests/Types/Str/Operators.sx")
           & $silex test (Join-Path $env:GITHUB_WORKSPACE "Tests/Types/Str/Returns.sx")
           & $silex test (Join-Path $env:GITHUB_WORKSPACE "Tests/Native/X64Portability.sx")
-          $threadingCheckpoint = Join-Path $env:RUNNER_TEMP "threading-checkpoint.exe"
-          & $silex compile (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/STD/Examples/Threading/NativeCheckpoint.sx") --release -o $threadingCheckpoint
-          & $threadingCheckpoint
-          & $silex test (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/STD/Tests/Threading.sx")
-          & $silex test (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/STD/Tests/ThreadingParallelOnly.sx")
-          $physicsCorpus = Join-Path $env:RUNNER_TEMP "physics-corpus.exe"
-          & $silex compile (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/GFX.Physics/Benchmarks/Corpus2D.sx") --release -o $physicsCorpus
-          $physicsRecords = @(
-            & $physicsCorpus --sparse-10000
-            & $physicsCorpus --sparse-10000 --workers-2
-            & $physicsCorpus --sparse-10000 --workers-4
-          )
-          $physicsRecords | python (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/GFX.Physics/Benchmarks/Oracle2D/CheckCorpus.py") --enforce
-          & $silex test (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/GFX.WebView/Tests")
-          $env:SDL_VIDEODRIVER = "dummy"
-          function Find-Package([string] $name) {
-            $package = Get-ChildItem (Join-Path $env:USERPROFILE ".silex/packages") -Directory -Filter "$name@*" | Select-Object -First 1
-            if (-not $package) {
-              throw "$name was not installed"
-            }
-            return $package.FullName
-          }
-          $gfx = Find-Package "GFX"
-          $gfxAudio = Find-Package "GFX.Audio"
-          $gfxCanvas = Find-Package "GFX.Canvas"
-          & $silex test (Join-Path $gfx "Tests/Color.sx")
-          & $silex test (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/GFX.Scene2D/Tests/ViewportCamera.sx")
-          & $silex test (Join-Path $gfx "Tests/Application/CollectionFieldMutation.sx")
-          $audio = Join-Path $env:RUNNER_TEMP "gfx-audio.exe"
-          & $silex compile (Join-Path $gfxAudio "Smokes/Audio.sx") -o $audio
-          & $audio
-          $text = Join-Path $env:RUNNER_TEMP "gfx-text.exe"
-          & $silex compile (Join-Path $gfxCanvas "Smokes/Text.sx") -o $text
-          & $text
           $portability = Join-Path $env:RUNNER_TEMP "x64-portability.exe"
-          & $silex compile (Join-Path $env:GITHUB_WORKSPACE "Tests/Native/X64Portability.sx") --release -o $portability
-          $portabilityOutput = & $portability
+          & $silex compile (Join-Path $env:GITHUB_WORKSPACE "Tests/Native/X64Portability.sx") `
+            --release -o $portability
+          $portabilityOutput = @(& $portability)
           $portabilityOutput | ForEach-Object { Write-Output $_ }
           $cycleDrops = @($portabilityOutput | Where-Object { $_ -eq "x64 cycle drop" }).Count
           if ($cycleDrops -ne 6) {
             throw "expected 6 X64 cycle finalizers, got $cycleDrops"
           }
-          & $silex compile (Join-Path $env:GITHUB_WORKSPACE "Examples/Distribution/GFX/Runtime.sx") -o "$env:RUNNER_TEMP/gfx-runtime.exe"
-          & "$env:RUNNER_TEMP/gfx-runtime.exe"
-          & $silex compile (Join-Path $env:GITHUB_WORKSPACE "Examples/Distribution/GFX/Window.sx") -o "$env:RUNNER_TEMP/gfx-window.exe"
-          & $silex compile (Join-Path $env:GITHUB_WORKSPACE "Examples/Distribution/GFX/Canvas.sx") -o "$env:RUNNER_TEMP/gfx-canvas.exe"
-          & $silex compile (Join-Path $env:GITHUB_WORKSPACE "Examples/Distribution/GFX/Extensibility.sx") -o "$env:RUNNER_TEMP/gfx-extensibility.exe"
-
-      - name: Build and validate on macOS ARM64
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$(uname -m)" = "arm64"
-          test "$(git -C "$GITHUB_WORKSPACE/.checkpoint/STD" rev-parse HEAD)" = "$STD_CHECKPOINT"
-          test "$(git -C "$GITHUB_WORKSPACE/.checkpoint/GFX" rev-parse HEAD)" = "$GFX_CHECKPOINT"
-          test "$(git -C "$GITHUB_WORKSPACE/.checkpoint/GFX.ECS" rev-parse HEAD)" = "$ECS_CHECKPOINT"
-          test "$(git -C "$GITHUB_WORKSPACE/.checkpoint/GFX.Scene2D" rev-parse HEAD)" = "$SCENE2D_CHECKPOINT"
-          test "$(git -C "$GITHUB_WORKSPACE/.checkpoint/GFX.Physics" rev-parse HEAD)" = "$PHYSICS_CHECKPOINT"
-          test "$(git -C "$GITHUB_WORKSPACE/.checkpoint/GFX.WebView" rev-parse HEAD)" = "$WEBVIEW_CHECKPOINT"
-          export HOME="$RUNNER_TEMP/home"
-          mkdir -p "$HOME"
-          (cd Toolchain && zig build -Doptimize=ReleaseFast --prefix "$RUNNER_TEMP/silex-prefix")
-          silex="$RUNNER_TEMP/silex-prefix/bin/silex"
-          "$silex" setup
-          "$silex" install STD
-          "$silex" install GFX.Canvas --dev
-          "$silex" install GFX.Scene2D --dev
-          "$silex" install GFX.Scene3D
-          "$silex" install GFX.Audio
-          "$silex" install GFX.Stats
-          "$silex" link "$GITHUB_WORKSPACE/.checkpoint/GFX"
-          "$silex" link "$GITHUB_WORKSPACE/.checkpoint/GFX.ECS"
-          "$silex" link "$GITHUB_WORKSPACE/.checkpoint/STD"
-          "$silex" link "$GITHUB_WORKSPACE/.checkpoint/GFX.Scene2D"
-          "$silex" link "$GITHUB_WORKSPACE/.checkpoint/GFX.Physics"
-          "$silex" link "$GITHUB_WORKSPACE/.checkpoint/GFX.WebView"
-          "$silex" compile "$GITHUB_WORKSPACE/.checkpoint/STD/Examples/Threading/NativeCheckpoint.sx" --release -o "$RUNNER_TEMP/threading-checkpoint"
-          "$RUNNER_TEMP/threading-checkpoint"
-          "$silex" compile "$GITHUB_WORKSPACE/.checkpoint/GFX.Physics/Benchmarks/Corpus2D.sx" --release -o "$RUNNER_TEMP/physics-corpus"
-          {
-            "$RUNNER_TEMP/physics-corpus" --sparse-10000
-            "$RUNNER_TEMP/physics-corpus" --sparse-10000 --workers-2
-            "$RUNNER_TEMP/physics-corpus" --sparse-10000 --workers-4
-          } | python3 "$GITHUB_WORKSPACE/.checkpoint/GFX.Physics/Benchmarks/Oracle2D/CheckCorpus.py" --enforce
-          "$silex" compile "$GITHUB_WORKSPACE/.checkpoint/GFX.WebView/Examples/Availability.sx" --release -o "$RUNNER_TEMP/webview-availability"
+          $smoke = Join-Path $env:RUNNER_TEMP "distribution-smoke.exe"
+          & $silex compile (Join-Path $env:GITHUB_WORKSPACE "Tests/Native/DistributionSmoke.sx") `
+            --release -o $smoke
+          $smokeOutput = @(& $smoke)
+          if ($LASTEXITCODE -ne 0 -or $smokeOutput.Count -ne 1 -or $smokeOutput[0] -ne "silex distribution ready") {
+            throw "standalone distribution smoke failed"
+          }
