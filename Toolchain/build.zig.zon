@@ -1,6 +1,6 @@
 .{
     .name = .silex_native_toolchain,
-    .version = "0.40.0",
+    .version = "0.41.0",
     .fingerprint = 0xb3cadc1c8c9ee523,
     .minimum_zig_version = "0.16.0",
     .paths = .{
