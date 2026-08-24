@@ -387,9 +387,19 @@ fn traceValue(context: *Context, value: [*]u64, type_value: u64) bool {
     const data = context.data(entry_value);
     const kind: Kind = @enumFromInt(entry_value[0]);
     if (kind == .value) return traceFields(context, value, data, @intCast(entry_value[3]));
-    if (kind == .class) return traceClassEdge(context, @ptrFromInt(value[0]), type_value);
+    if (kind == .class) {
+        // Concurrent publication may expose the aggregate tag before its payload.
+        const address = value[0];
+        if (address == 0) return false;
+        return traceClassEdge(context, @ptrFromInt(address), type_value);
+    }
     if (kind == .protocol) return traceProtocol(context, value, data);
-    if (kind == .list) return traceListEdge(context, @ptrFromInt(value[0]), type_value, data[0]);
+    if (kind == .list) {
+        // Read once so a concurrent clear cannot invalidate a checked address.
+        const address = value[0];
+        if (address == 0) return false;
+        return traceListEdge(context, @ptrFromInt(address), type_value, data[0]);
+    }
     if (kind == .array) return traceArray(context, value, data[0], @intCast(data[1]));
     return traceEnumeration(context, value, data);
 }
@@ -600,6 +610,37 @@ test "X64 callbacks reject a candidate retained before tracing" {
         testRelease,
     ));
     try std.testing.expectEqual(@as(u64, 4), candidate[3]);
+    try std.testing.expectEqual(@as(u64, 1), candidate[2]);
+}
+
+test "X64 callbacks reject a transient null class edge" {
+    const class_type = structure_base;
+    const optional_class_type = (@as(u64, 1) << optional_depth_shift) | class_type;
+    const structure: u64 = 42;
+    const model = [_]u64{
+        1,
+        @intFromEnum(Kind.class),
+        1,
+        5,
+        0,
+        1,
+        structure,
+        2,
+        1,
+        optional_class_type,
+    };
+    // The optional tag is visible while its class payload is still null.
+    var candidate = [_]u64{ structure, 0, 1, 0, 1, 0 };
+
+    try std.testing.expectEqual(@as(u64, 0), silex_cycle_x64(
+        0,
+        @intFromPtr(&candidate),
+        &model,
+        class_type,
+        testAllocate,
+        testRelease,
+    ));
+    try std.testing.expectEqual(@as(u64, 0), candidate[3]);
     try std.testing.expectEqual(@as(u64, 1), candidate[2]);
 }
 
