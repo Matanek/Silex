@@ -141,7 +141,7 @@ jobs:
           silex="$RUNNER_TEMP/silex-prefix/bin/silex"
           "$silex" setup
           "$silex" install STD
-          "$silex" install GFX.Canvas
+          "$silex" install GFX.Canvas --dev
           "$silex" install GFX.Scene2D --dev
           "$silex" install GFX.Audio
           "$silex" install GFX.Stats
@@ -220,7 +220,7 @@ jobs:
           $silex = Join-Path $env:RUNNER_TEMP "silex-prefix/bin/silex.exe"
           & $silex setup
           & $silex install STD
-          & $silex install GFX.Canvas
+          & $silex install GFX.Canvas --dev
           & $silex install GFX.Scene2D --dev
           & $silex install GFX.Audio
           & $silex install GFX.Stats
@@ -298,7 +298,7 @@ jobs:
           silex="$RUNNER_TEMP/silex-prefix/bin/silex"
           "$silex" setup
           "$silex" install STD
-          "$silex" install GFX.Canvas
+          "$silex" install GFX.Canvas --dev
           "$silex" install GFX.Scene2D --dev
           "$silex" install GFX.Audio
           "$silex" install GFX.Stats
