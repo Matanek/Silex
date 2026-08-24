@@ -751,7 +751,7 @@ fn encodeFunction(
             },
             .jump => |target| try appendBranch(allocator, bytes, &branches, target),
             .branch => |branch| {
-                try emitLoadStack(allocator, bytes, .rax, branch.condition);
+                try emitLoadValue(allocator, bytes, function.register_slots, .rax, branch.condition);
                 try bytes.appendSlice(allocator, &.{ 0x48, 0x85, 0xc0, 0x0f, 0x85 });
                 const then_at = bytes.items.len;
                 try bytes.appendNTimes(allocator, 0, 4);

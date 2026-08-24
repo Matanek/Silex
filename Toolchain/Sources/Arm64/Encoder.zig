@@ -668,8 +668,7 @@ fn encodeFunction(
         try emitDeferredCollectionLoads(allocator, words, function, instruction_index, collection_cursor);
         if (!scalarCacheInstruction(instruction)) scalar_cache.clear();
         if (collection_cursor) |cursor| if (cursor.termination) |termination| {
-            if (instruction_index >= termination.increment_start and
-                instruction_index < termination.backedge) continue;
+            if (termination.elides(instruction_index)) continue;
         };
         switch (instruction) {
             .constant_int => |constant| {
@@ -796,10 +795,9 @@ fn encodeFunction(
             },
             .optional_unwrap => |optional| try emitSpanCopy(allocator, words, optional.result, optional.operand),
             .copy => |copy| {
-                if (floatPairLeader(function, copy.result) != null) continue;
                 if (floatLaneResidence(function, copy.result)) |pair| {
-                    if (pair.lane != 1) return error.InvalidMachineProgram;
-                    const first_operand = definingTransferOperandBefore(
+                    if (definingTransferOperandAfter(function.instructions, instruction_index, pair.partner) != null) continue;
+                    const partner_operand = definingTransferOperandBefore(
                         function.instructions,
                         instruction_index,
                         pair.partner,
@@ -808,8 +806,8 @@ fn encodeFunction(
                         allocator,
                         words,
                         function,
-                        first_operand,
-                        copy.operand,
+                        if (pair.lane == 0) copy.operand else partner_operand,
+                        if (pair.lane == 0) partner_operand else copy.operand,
                         .x9,
                         .x10,
                     );
@@ -1615,7 +1613,7 @@ fn encodeFunction(
 
     for (control_fixups.items) |fixup| {
         if (fixup.target >= instruction_offsets.len) return error.InvalidMachineProgram;
-        const target = resolveJumpTarget(function.instructions, fixup.target);
+        const target = resolveEncodedTarget(function, fixup.target);
         switch (fixup.width) {
             .imm19 => try patch19(words.items, fixup.at, instruction_offsets[target]),
             .imm26 => try patch26(words.items, fixup.at, instruction_offsets[target]),
@@ -1664,6 +1662,31 @@ fn encodeFunction(
     for (fixups.epilogue.items) |fixup| try patchLocal(words.items, fixup, epilogue_label);
     try patch26(words.items, overflow_to_epilogue, epilogue_label);
     try patch26(words.items, division_to_epilogue, epilogue_label);
+}
+
+fn resolveEncodedTarget(function: Machine.Function, initial: usize) usize {
+    var target = initial;
+    var remaining = function.instructions.len;
+    while (remaining != 0 and target < function.instructions.len) : (remaining -= 1) {
+        target = switch (function.instructions[target]) {
+            .jump => |next| next,
+            .copy => |copy| if (copyEmitsNoCode(function, copy)) target + 1 else return target,
+            else => return target,
+        };
+    }
+    return initial;
+}
+
+fn copyEmitsNoCode(function: Machine.Function, copy: Machine.Instruction.Copy) bool {
+    if (floatLaneResidence(function, copy.result) != null or floatLaneResidence(function, copy.operand) != null) return false;
+    const float_source = floatResultRegister(function, copy.operand);
+    const float_destination = floatResultRegister(function, copy.result);
+    if (float_source != null or float_destination != null) {
+        return float_source != null and float_destination != null and float_source.? == float_destination.?;
+    }
+    const source = valueResultRegister(function, copy.operand);
+    const destination = valueResultRegister(function, copy.result);
+    return source != null and destination != null and source.? == destination.?;
 }
 
 fn resolveJumpTarget(instructions: []const Machine.Instruction, initial: usize) usize {

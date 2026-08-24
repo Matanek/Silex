@@ -178,30 +178,101 @@ fn allocateGraph(
     const alias_roots = try allocator.alloc(Machine.Slot, slot_count);
     defer allocator.free(alias_roots);
     try buildPureAliasRoots(allocator, alias_roots, instructions, live, slot_count);
+    coalesceCopyAffinityRoots(alias_roots, instructions, live, slot_count);
 
     std.mem.sort(Interval, intervals, {}, heavierThan);
     for (intervals) |interval| {
-        if (preferredAliasResidence(interval.slot, residences, alias_roots)) |preferred| {
-            if (!colorConflicts(interval.slot, preferred, residences, alias_roots, live, instructions, slot_count)) {
-                residences[interval.slot] = preferred;
+        if (residences[interval.slot] != null) continue;
+        const root = alias_roots[interval.slot];
+        if (preferredComponentResidence(root, residences, alias_roots, instructions)) |preferred| {
+            if (!componentColorConflicts(root, preferred, residences, alias_roots, live, instructions, slot_count, intervals)) {
+                assignComponentResidence(root, preferred, residences, alias_roots, intervals);
                 continue;
             }
         }
-        if (copyPartner(interval.slot, instructions)) |partner| {
-            if (residences[partner]) |preferred| {
-                if (!colorConflicts(interval.slot, preferred, residences, alias_roots, live, instructions, slot_count)) {
-                    residences[interval.slot] = preferred;
-                    continue;
-                }
-            }
-        }
         for (registers) |register| {
-            if (!colorConflicts(interval.slot, register, residences, alias_roots, live, instructions, slot_count)) {
-                residences[interval.slot] = register;
+            if (!componentColorConflicts(root, register, residences, alias_roots, live, instructions, slot_count, intervals)) {
+                assignComponentResidence(root, register, residences, alias_roots, intervals);
                 break;
             }
         }
     }
+}
+
+fn preferredComponentResidence(
+    root: Machine.Slot,
+    residences: []const ?u5,
+    roots: []const Machine.Slot,
+    instructions: []const Machine.Instruction,
+) ?u5 {
+    for (roots, 0..) |candidate_root, slot| {
+        if (candidate_root != root) continue;
+        if (preferredCopyResidence(@intCast(slot), residences, instructions)) |residence| return residence;
+        if (copyPartner(@intCast(slot), instructions)) |partner| {
+            if (residences[partner]) |residence| return residence;
+        }
+    }
+    return null;
+}
+
+fn componentColorConflicts(
+    root: Machine.Slot,
+    register: u5,
+    residences: []const ?u5,
+    roots: []const Machine.Slot,
+    live: []const bool,
+    instructions: []const Machine.Instruction,
+    slot_count: usize,
+    intervals: []const Interval,
+) bool {
+    for (intervals) |interval| {
+        if (roots[interval.slot] != root) continue;
+        if (colorConflicts(interval.slot, register, residences, roots, live, instructions, slot_count)) return true;
+    }
+    return false;
+}
+
+fn assignComponentResidence(
+    root: Machine.Slot,
+    register: u5,
+    residences: []?u5,
+    roots: []const Machine.Slot,
+    intervals: []const Interval,
+) void {
+    for (intervals) |interval| if (roots[interval.slot] == root) {
+        residences[interval.slot] = register;
+    };
+}
+
+fn preferredCopyResidence(
+    slot: Machine.Slot,
+    residences: []const ?u5,
+    instructions: []const Machine.Instruction,
+) ?u5 {
+    for (instructions) |instruction| switch (instruction) {
+        .copy => |copy| {
+            const partner = if (copy.result == slot)
+                copy.operand
+            else if (copy.operand == slot)
+                copy.result
+            else
+                continue;
+            if (residences[partner]) |residence| return residence;
+        },
+        .copy_range => |copy| for (0..copy.result.width) |leaf| {
+            const result: Machine.Slot = @intCast(@as(usize, copy.result.start) + leaf);
+            const operand: Machine.Slot = @intCast(@as(usize, copy.operand.start) + leaf);
+            const partner = if (result == slot)
+                operand
+            else if (operand == slot)
+                result
+            else
+                continue;
+            if (residences[partner]) |residence| return residence;
+        },
+        else => {},
+    };
+    return null;
 }
 
 fn successorLive(
@@ -370,6 +441,74 @@ fn buildPureAliasRoots(
             if (steps == slot_count) break;
         }
     }
+}
+
+fn coalesceCopyAffinityRoots(
+    roots: []Machine.Slot,
+    instructions: []const Machine.Instruction,
+    live: []const bool,
+    slot_count: usize,
+) void {
+    for (instructions) |instruction| switch (instruction) {
+        .copy => |copy| mergeNonInterferingRoots(roots, copy.result, copy.operand, instructions, live, slot_count),
+        .copy_range => |copy| for (0..copy.result.width) |leaf| {
+            mergeNonInterferingRoots(
+                roots,
+                @intCast(@as(usize, copy.result.start) + leaf),
+                @intCast(@as(usize, copy.operand.start) + leaf),
+                instructions,
+                live,
+                slot_count,
+            );
+        },
+        else => {},
+    };
+}
+
+fn mergeNonInterferingRoots(
+    roots: []Machine.Slot,
+    left: Machine.Slot,
+    right: Machine.Slot,
+    instructions: []const Machine.Instruction,
+    live: []const bool,
+    slot_count: usize,
+) void {
+    const left_root = roots[left];
+    const right_root = roots[right];
+    if (left_root == right_root or componentsInterfere(
+        roots,
+        left_root,
+        right_root,
+        instructions,
+        live,
+        slot_count,
+    )) return;
+    for (roots) |*root| if (root.* == right_root) {
+        root.* = left_root;
+    };
+}
+
+fn componentsInterfere(
+    roots: []const Machine.Slot,
+    left_root: Machine.Slot,
+    right_root: Machine.Slot,
+    instructions: []const Machine.Instruction,
+    live: []const bool,
+    slot_count: usize,
+) bool {
+    for (roots, 0..) |root, left| {
+        if (root != left_root) continue;
+        for (roots, 0..) |other_root, right| {
+            if (other_root != right_root) continue;
+            for (instructions, 0..) |_, instruction| {
+                if (instructionCanShareResidence(instructions, live, slot_count, instruction, left, right)) continue;
+                if (live[instruction * slot_count + left] and live[instruction * slot_count + right]) return true;
+                if (instructionDefines(instructions[instruction], left) and live[instruction * slot_count + right]) return true;
+                if (instructionDefines(instructions[instruction], right) and live[instruction * slot_count + left]) return true;
+            }
+        }
+    }
+    return false;
 }
 
 fn safePureAliasOperand(
@@ -593,23 +732,21 @@ fn allocateFloatPairs(
             if (float_slots[first] and float_slots[second] and
                 partners[first] == null and partners[second] == null)
             {
+                const first_instruction = definingInstruction(function.instructions, first) orelse continue;
+                const second_instruction = definingInstruction(function.instructions, second) orelse continue;
                 pairSlots(partners, first, second);
                 if (group.in_loop and group.priority >= 8) {
                     planned[first] = true;
                     planned[second] = true;
                 }
-                const first_instruction = definingInstruction(function.instructions, first);
-                const second_instruction = definingInstruction(function.instructions, second);
-                if (first_instruction != null and second_instruction != null) {
-                    pairDefinitionOperands(
-                        function.instructions,
-                        partners,
-                        first,
-                        second,
-                        first_instruction.?,
-                        second_instruction.?,
-                    );
-                }
+                pairDefinitionOperands(
+                    function.instructions,
+                    partners,
+                    first,
+                    second,
+                    first_instruction,
+                    second_instruction,
+                );
             }
         }
     }

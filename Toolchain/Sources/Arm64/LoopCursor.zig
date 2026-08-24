@@ -15,8 +15,21 @@ pub const Cursor = struct {
 pub const Termination = struct {
     register: u5,
     increment_start: usize,
+    increment_indices: [4]usize,
     backedge: usize,
     body: usize,
+
+    pub fn elides(self: Termination, instruction: usize) bool {
+        for (self.increment_indices) |candidate| if (candidate == instruction) return true;
+        return false;
+    }
+};
+
+const UnitIncrement = struct {
+    source: usize,
+    one: usize,
+    addition: usize,
+    update: usize,
 };
 
 /// Recognizes one simple ascending collection loop whose element address can
@@ -76,7 +89,7 @@ fn recognize(
         else => return null,
     };
     if (induction.result != load.index or backedge_index < 4) return null;
-    if (!hasUnitIncrement(function.instructions, backedge_index, induction.operand)) return null;
+    const increment = unitIncrement(function.instructions, backedge_index, induction.operand) orelse return null;
     if (!hasOnlySelectedBackedge(function.instructions, backedge_index, header, load_index)) return null;
     if (try reachesInstructionAvoiding(allocator, function.instructions, load_index, header - 1)) return null;
     if (try reachesInstructionAvoiding(allocator, function.instructions, backedge_index, load_index)) return null;
@@ -96,6 +109,7 @@ fn recognize(
             backedge_index,
             collection,
             induction,
+            increment,
             end_register,
         )
     else
@@ -118,6 +132,7 @@ fn pointerTermination(
     backedge: usize,
     collection: Machine.Span,
     induction: Machine.Instruction.Copy,
+    increment: UnitIncrement,
     register: u5,
 ) ?Termination {
     if (collection.width != 2 or header + 3 >= load_index or backedge < 4 or
@@ -156,21 +171,22 @@ fn pointerTermination(
         resolveJumpTarget(function.instructions, branch_value.else_instruction) != backedge + 1)
         return null;
 
-    const increment_source = function.instructions[backedge - 4].copy;
-    const one = function.instructions[backedge - 3].constant_int;
-    const addition = function.instructions[backedge - 2].binary;
-    if (!slotUsedOnlyAtTwo(function.instructions, induction.operand, header, backedge - 4) or
+    const increment_source = function.instructions[increment.source].copy;
+    const one = function.instructions[increment.one].constant_int;
+    const addition = function.instructions[increment.addition].binary;
+    if (!slotUsedOnlyAtTwo(function.instructions, induction.operand, header, increment.source) or
         !slotUsedOnlyAtTwo(function.instructions, induction.result, comparison_index, load_index) or
         !slotUsedOnlyAt(function.instructions, count.result, comparison_index) or
         !slotUsedOnlyAt(function.instructions, comparison.result, branch_index) or
-        !slotUsedOnlyAt(function.instructions, increment_source.result, backedge - 2) or
-        !slotUsedOnlyAt(function.instructions, one.result, backedge - 2) or
-        !slotUsedOnlyAt(function.instructions, addition.result, backedge - 1))
+        !slotUsedOnlyAt(function.instructions, increment_source.result, increment.addition) or
+        !slotUsedOnlyAt(function.instructions, one.result, increment.addition) or
+        !slotUsedOnlyAt(function.instructions, addition.result, increment.update))
         return null;
 
     return .{
         .register = register,
-        .increment_start = backedge - 4,
+        .increment_start = increment.source,
+        .increment_indices = .{ increment.source, increment.one, increment.addition, increment.update },
         .backedge = backedge,
         .body = load_index - 1,
     };
@@ -239,33 +255,53 @@ fn slotUsedOnlyAtTwo(
     return true;
 }
 
-fn hasUnitIncrement(
+fn unitIncrement(
     instructions: []const Machine.Instruction,
     backedge: usize,
     state: Machine.Slot,
-) bool {
-    const source = switch (instructions[backedge - 4]) {
+) ?UnitIncrement {
+    if (backedge < 4) return null;
+    const update_index = backedge - 1;
+    const update = switch (instructions[update_index]) {
         .copy => |copy| copy,
-        else => return false,
+        else => return null,
     };
-    if (source.operand != state) return false;
-    const one = switch (instructions[backedge - 3]) {
-        .constant_int => |constant| constant,
-        else => return false,
-    };
-    if (one.bits != 1) return false;
-    const addition = switch (instructions[backedge - 2]) {
+    if (update.result != state) return null;
+
+    var addition_index = update_index;
+    while (addition_index != 0) {
+        addition_index -= 1;
+        switch (instructions[addition_index]) {
+            .copy => |copy| {
+                if (copy.result == state or copy.operand == state or
+                    copy.result == update.operand or copy.operand == update.operand) return null;
+                continue;
+            },
+            else => {},
+        }
+        break;
+    }
+    if (addition_index < 2) return null;
+    const addition = switch (instructions[addition_index]) {
         .binary => |binary| binary,
-        else => return false,
+        else => return null,
     };
-    if (addition.operator != .add or addition.type != .int or
-        !((addition.left == source.result and addition.right == one.result) or
-            (addition.right == source.result and addition.left == one.result))) return false;
-    const update = switch (instructions[backedge - 1]) {
+    if (addition.result != update.operand or addition.operator != .add or addition.type != .int) return null;
+    const one_index = addition_index - 1;
+    const one = switch (instructions[one_index]) {
+        .constant_int => |constant| constant,
+        else => return null,
+    };
+    if (one.bits != 1) return null;
+    const source_index = addition_index - 2;
+    const source = switch (instructions[source_index]) {
         .copy => |copy| copy,
-        else => return false,
+        else => return null,
     };
-    return update.result == state and update.operand == addition.result;
+    if (source.operand != state or
+        !((addition.left == source.result and addition.right == one.result) or
+            (addition.right == source.result and addition.left == one.result))) return null;
+    return .{ .source = source_index, .one = one_index, .addition = addition_index, .update = update_index };
 }
 
 fn cursorCompatibleFunction(function: Machine.Function) bool {
@@ -538,6 +574,37 @@ test "recognize pointer termination through a copied count view" {
     try std.testing.expectEqual(@as(usize, 10), termination.increment_start);
     try std.testing.expectEqual(@as(usize, 14), termination.backedge);
     try std.testing.expectEqual(@as(usize, 8), termination.body);
+}
+
+test "recognize pointer termination across an independent SSA edge copy" {
+    const source = cursorInstructions(1);
+    const instructions = [_]Machine.Instruction{
+        source[0],
+        source[1],
+        source[2],
+        source[3],
+        source[4],
+        source[5],
+        .{ .branch = .{ .condition = 5, .then_instruction = 7, .else_instruction = 15 } },
+        source[7],
+        source[8],
+        source[9],
+        source[10],
+        source[11],
+        .{ .copy = .{ .result = 10, .operand = 11 } },
+        source[12],
+        source[13],
+        source[14],
+    };
+    const function = cursorFunction(&instructions);
+    const cursor = (try find(std.testing.allocator, function)) orelse return error.TestUnexpectedResult;
+    const termination = cursor.termination orelse return error.TestUnexpectedResult;
+    try std.testing.expect(termination.elides(9));
+    try std.testing.expect(termination.elides(10));
+    try std.testing.expect(termination.elides(11));
+    try std.testing.expect(!termination.elides(12));
+    try std.testing.expect(termination.elides(13));
+    try std.testing.expectEqual(@as(usize, 14), termination.backedge);
 }
 
 fn cursorInstructionsWithCountCopy() [16]Machine.Instruction {

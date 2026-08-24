@@ -161,7 +161,15 @@ fn compatiblePair(
         .copy => |left| switch (second) {
             .copy => |right| if (pairedOrEqual(pairs, left.operand, right.operand) and
                 isFloatValue(function, left.result) and isFloatValue(function, right.result))
-                .{ .first = .{ .value = left.result }, .second = .{ .value = right.result }, .priority = pairPriority(pairs, .{ .value = left.operand }, .{ .value = right.operand }), .recurrence = false, .in_loop = in_loop }
+                .{
+                    .first = .{ .value = left.result },
+                    .second = .{ .value = right.result },
+                    .priority = pairPriority(pairs, .{ .value = left.operand }, .{ .value = right.operand }),
+                    .recurrence = (hasMultipleCopyDefinitions(function, left.result) and
+                        hasMultipleCopyDefinitions(function, right.result)) or
+                        pairRecurrence(pairs, .{ .value = left.operand }, .{ .value = right.operand }),
+                    .in_loop = in_loop,
+                }
             else
                 null,
             else => null,
@@ -213,10 +221,25 @@ fn valueOrigin(function: Ir.Function, value: Ir.ValueId, depth: u3) ?Origin {
     if (depth == 7) return .{ .value = value };
     for (function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
         .local_load => |load| if (load.result == value) return .{ .local = load.local },
-        .copy => |copy| if (copy.result == value) return valueOrigin(function, copy.operand, depth + 1),
+        .copy => |copy| if (copy.result == value) return if (hasMultipleCopyDefinitions(function, value))
+            .{ .value = value }
+        else
+            valueOrigin(function, copy.operand, depth + 1),
         else => {},
     };
     return .{ .value = value };
+}
+
+fn hasMultipleCopyDefinitions(function: Ir.Function, value: Ir.ValueId) bool {
+    var definitions: usize = 0;
+    for (function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
+        .copy => |copy| if (copy.result == value) {
+            definitions += 1;
+            if (definitions == 2) return true;
+        },
+        else => {},
+    };
+    return false;
 }
 
 fn pairedOrEqual(pairs: []const Pair, first: Ir.ValueId, second: Ir.ValueId) bool {

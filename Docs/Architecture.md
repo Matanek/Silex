@@ -306,19 +306,34 @@ open Silex document
   disabled when standard error is not a terminal, preserving quiet successful
   execution for scripts and CI. An ANSI-capable terminal clears successful
   progress when the operation completes but retains it when compilation fails.
-- Release propagates constants and copies through straight-line functions. In
-  call-free functions containing a proven repeated scalar collection read, it
-  reuses the corresponding local, field and collection loads within each basic
-  block until an aliasing write. It folds checked scalar operations, removes
-  dead constants, and inlines small pure calculations plus read-only class
-  collection-count accessors. It also marks a
+- Release propagates constants and copies across the control-flow graph. It
+  promotes profitable, non-addressed integer and boolean locals to SSA values,
+  constructs join values, removes trivial joins, lowers the remaining parallel
+  edge transfers, and prunes unreachable blocks. Promotion is deliberately
+  skipped when several live joins would add control-flow work; those locals
+  remain candidates for the native global allocator instead. Floating-point
+  recurrences retain their local identity for scalar and SLP lane allocation.
+  These decisions are automatic and require no source annotation.
+- Release inlines direct callees under a bounded cost across branches, loops,
+  and multiple returns, in addition to constant-result and small straight-line
+  specialization. It then re-runs scalar aggregate replacement, propagation,
+  dead-code elimination, dense-block reuse, and bounds analysis on the combined
+  graph. In call-free functions containing a proven repeated scalar collection
+  read, it reuses the corresponding local, field and collection loads within
+  each basic block until an aliasing write. It also marks a
   collection load as bounded when a zero-origin induction variable is dominated
   by the exact collection-count comparison and cannot advance before that load;
-  every unproved access retains its runtime bounds diagnostic. ARM64 lowering
-  then performs deterministic linear-scan allocation for safe scalar leaves;
-  addressable values, aggregates and values constrained by calls remain
-  explicit spills. Fully resident leaf functions allocate no value frame.
-  Debug retains the direct stack-resident lowering.
+  every unproved access retains its runtime bounds diagnostic.
+- Native Release lowering performs deterministic CFG-wide liveness and graph
+  coloring for compatible scalar functions on ARM64 and X64. Copy-affinity
+  components and destructive arithmetic are coalesced globally; ARM64 also
+  colors scalar floating-point values and proven SLP lanes in the shared SIMD
+  register class. Addressable values, unsupported aggregates, and values that
+  cross unsupported machine operations remain explicit spills. Empty SSA edge
+  transfers are bypassed after allocation, and the ARM64 collection cursor
+  recognizes induction updates separated by independent SSA copies. Fully
+  resident leaf functions allocate no value frame. Debug retains the direct
+  stack-resident lowering.
 - Source-compiling commands root their private cache at
   `<invocation-cwd>/.silex/cache`. Content-addressed, versioned entries persist
   module ASTs, portable typed IR, complete native inputs with their boundary

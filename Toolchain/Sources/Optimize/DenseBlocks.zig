@@ -36,17 +36,38 @@ fn hasRepeatedCollectionRead(function: Ir.Function) bool {
 }
 
 fn sameCollectionSource(instructions: []const Ir.Instruction, left: Ir.ValueId, right: Ir.ValueId) bool {
-    if (left == right) return true;
-    const left_load = fieldLoadProducing(instructions, left) orelse return false;
-    const right_load = fieldLoadProducing(instructions, right) orelse return false;
+    const left_origin = copyOrigin(instructions, left);
+    const right_origin = copyOrigin(instructions, right);
+    if (left_origin == right_origin) return true;
+    const left_load = fieldLoadProducing(instructions, left_origin) orelse return false;
+    const right_load = fieldLoadProducing(instructions, right_origin) orelse return false;
     return left_load.base == right_load.base and left_load.field == right_load.field;
 }
 
 fn sameCollectionIndex(instructions: []const Ir.Instruction, left: Ir.ValueId, right: Ir.ValueId) bool {
-    if (left == right) return true;
-    const left_load = localLoadProducing(instructions, left) orelse return false;
-    const right_load = localLoadProducing(instructions, right) orelse return false;
+    const left_origin = copyOrigin(instructions, left);
+    const right_origin = copyOrigin(instructions, right);
+    if (left_origin == right_origin) return true;
+    const left_load = localLoadProducing(instructions, left_origin) orelse return false;
+    const right_load = localLoadProducing(instructions, right_origin) orelse return false;
     return left_load.local == right_load.local;
+}
+
+fn copyOrigin(instructions: []const Ir.Instruction, value: Ir.ValueId) Ir.ValueId {
+    var current = value;
+    var remaining = instructions.len;
+    while (remaining != 0) : (remaining -= 1) {
+        var found: ?Ir.ValueId = null;
+        for (instructions) |instruction| switch (instruction) {
+            .copy => |copy| if (copy.result == current) {
+                if (found != null) return current;
+                found = copy.operand;
+            },
+            else => {},
+        };
+        current = found orelse return current;
+    }
+    return current;
 }
 
 fn fieldLoadProducing(instructions: []const Ir.Instruction, value: Ir.ValueId) ?Ir.Instruction.FieldLoad {

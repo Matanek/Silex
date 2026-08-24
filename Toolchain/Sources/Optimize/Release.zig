@@ -2,7 +2,9 @@ const std = @import("std");
 const Ir = @import("../Ir.zig");
 const Bounds = @import("Bounds.zig");
 const DenseBlocks = @import("DenseBlocks.zig");
+const InlineControlFlow = @import("InlineControlFlow.zig");
 const InlineValues = @import("InlineValues.zig");
+const SsaPromotion = @import("SsaPromotion.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -32,7 +34,8 @@ const BinarySummary = struct {
 pub fn optimize(allocator: Allocator, program: Ir.Program) !Ir.Program {
     const prepared = try optimizeWithoutInlining(allocator, program);
     const inlined = try InlineValues.optimize(allocator, prepared);
-    const scalarized = try replaceScalarAggregates(allocator, inlined);
+    const control_flow_inlined = try InlineControlFlow.optimize(allocator, inlined);
+    const scalarized = try replaceScalarAggregates(allocator, control_flow_inlined);
     return optimizeWithoutInlining(allocator, scalarized);
 }
 
@@ -48,6 +51,7 @@ pub fn optimizeWithoutInlining(allocator: Allocator, program: Ir.Program) !Ir.Pr
     }
     var result = program;
     result.functions = functions;
+    result = try SsaPromotion.optimize(allocator, result);
     const validated = try Ir.writeText(allocator, result);
     allocator.free(validated);
     return result;
@@ -303,6 +307,12 @@ fn optimizeFunction(allocator: Allocator, function: Ir.Function, summaries: []co
 
 fn optimizeDenseBlocks(allocator: Allocator, function: Ir.Function) !Ir.Function {
     if (!DenseBlocks.isEligible(function)) return function;
+    const copy_definitions = try allocator.alloc(usize, function.value_types.len);
+    @memset(copy_definitions, 0);
+    for (function.blocks) |block| for (block.instructions) |instruction| switch (instruction) {
+        .copy => |copy| copy_definitions[copy.result] += 1,
+        else => {},
+    };
     const blocks = try allocator.alloc(Ir.Block, function.blocks.len);
     const constants = try allocator.alloc(Constant, function.value_types.len);
     @memset(constants, .unknown);
@@ -317,6 +327,14 @@ fn optimizeDenseBlocks(allocator: Allocator, function: Ir.Function) !Ir.Function
         for (block.instructions) |original| {
             const instruction = try rewriteInstruction(allocator, original, aliases);
             switch (instruction) {
+                .copy => |copy| {
+                    if (copy_definitions[copy.result] == 1 and
+                        function.value_types[copy.result] == function.value_types[copy.operand])
+                    {
+                        aliases[copy.result] = canonical(aliases, copy.operand);
+                        continue;
+                    }
+                },
                 .local_load => |load| {
                     const local_type = function.local_types[load.local];
                     if (local_type.isNumeric() or local_type == .bool) {
