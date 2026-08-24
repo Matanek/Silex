@@ -143,6 +143,7 @@ jobs:
           "$silex" install STD
           "$silex" install GFX.Canvas --dev
           "$silex" install GFX.Scene2D --dev
+          "$silex" install GFX.Scene3D
           "$silex" install GFX.Audio
           "$silex" install GFX.Stats
           "$silex" link "$GITHUB_WORKSPACE/.checkpoint/GFX"
@@ -222,6 +223,7 @@ jobs:
           & $silex install STD
           & $silex install GFX.Canvas --dev
           & $silex install GFX.Scene2D --dev
+          & $silex install GFX.Scene3D
           & $silex install GFX.Audio
           & $silex install GFX.Stats
           & $silex link (Join-Path $env:GITHUB_WORKSPACE ".checkpoint/GFX")
@@ -300,6 +302,7 @@ jobs:
           "$silex" install STD
           "$silex" install GFX.Canvas --dev
           "$silex" install GFX.Scene2D --dev
+          "$silex" install GFX.Scene3D
           "$silex" install GFX.Audio
           "$silex" install GFX.Stats
           "$silex" link "$GITHUB_WORKSPACE/.checkpoint/GFX"
