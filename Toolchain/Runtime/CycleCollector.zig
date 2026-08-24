@@ -145,13 +145,15 @@ fn prepare(
         return reject(candidate, null, 0);
     }
     for (context.nodes[0..context.count]) |node| {
-        const roots: usize = @intCast(node.address[1]);
-        const edges: usize = @intCast(node.address[2]);
-        if (roots != 0 or edges > node.internal) {
+        const roots: *u64 = @ptrCast(node.address + 1);
+        const edges: *u64 = @ptrCast(node.address + 2);
+        const root_count: usize = @intCast(@atomicLoad(u64, roots, .acquire));
+        const edge_count: usize = @intCast(@atomicLoad(u64, edges, .acquire));
+        if (root_count != 0 or edge_count != node.internal) {
             releaseClaims(context);
             discard(context);
-            // This exact graph is still reached by an incoming edge. Cache the
-            // negative proof until an edge retain/drop marks the object dirty.
+            // A concurrent retain or topology mutation invalidates the proof.
+            // Cache the rejection until an edge retain/drop marks it dirty.
             return reject(candidate, null, 4);
         }
     }
@@ -642,6 +644,38 @@ test "X64 callbacks reject a transient null class edge" {
     ));
     try std.testing.expectEqual(@as(u64, 0), candidate[3]);
     try std.testing.expectEqual(@as(u64, 1), candidate[2]);
+}
+
+test "X64 callbacks reject an edge removed during tracing" {
+    const class_type = structure_base;
+    const optional_class_type = (@as(u64, 1) << optional_depth_shift) | class_type;
+    const structure: u64 = 42;
+    const model = [_]u64{
+        1,
+        @intFromEnum(Kind.class),
+        1,
+        5,
+        0,
+        1,
+        structure,
+        2,
+        1,
+        optional_class_type,
+    };
+    var candidate = [_]u64{ structure, 0, 0, 0, 1, 0 };
+    var detached = [_]u64{ structure, 0, 0, 0, 0, 0 };
+    candidate[5] = @intFromPtr(&detached);
+
+    try std.testing.expectEqual(@as(u64, 0), silex_cycle_x64(
+        0,
+        @intFromPtr(&candidate),
+        &model,
+        class_type,
+        testAllocate,
+        testRelease,
+    ));
+    try std.testing.expectEqual(@as(u64, 4), candidate[3]);
+    try std.testing.expectEqual(@as(u64, 0), detached[3]);
 }
 
 test "X64 callbacks cache a negative proof for an externally reached cycle" {
