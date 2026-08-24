@@ -50,6 +50,51 @@ struct X64FloatPair {
     let y:float
 }
 
+enum X64AssetKind {
+    html
+    css
+    javascript
+    custom(str)
+}
+
+enum X64AssetContent {
+    text(str)
+    bytes(uint8[])
+}
+
+struct X64Asset {
+    let path_value:str
+    let kind_value:X64AssetKind
+    let content_value:X64AssetContent
+
+    static func text(path:str, kind:X64AssetKind, content:str) X64Asset {
+        return X64Asset(
+            path_value:path,
+            kind_value:kind,
+            content_value:X64AssetContent.text(content)
+        )
+    }
+
+    func path() str { return self.path_value }
+
+    func text() str {
+        return match self.content_value {
+            text(value) => value
+            bytes(_) => ""
+        }
+    }
+}
+
+struct X64Site {
+    var assets:X64Asset[]
+
+    init(entry:X64Asset) { self.assets = [entry] }
+
+    func add(asset:X64Asset) { self.assets.append(asset) }
+
+    func entry() X64Asset { return self.assets[0] }
+}
+
 func paired_float_checksum(left:X64FloatPair, right:X64FloatPair) float {
     let sum_x = left.x + right.x
     let sum_y = left.y + right.y
@@ -209,6 +254,19 @@ func verify_collections() {
     assert(values.is_empty())
 }
 
+func verify_resource_aggregate_list() {
+    var site = X64Site(X64Asset.text("/index.html", X64AssetKind.html, "index"))
+    site.add(X64Asset.text("/style.css", X64AssetKind.css, "style"))
+    site.add(X64Asset.text("/app.js", X64AssetKind.javascript, "script"))
+    assert(site.assets.count() == 3)
+    assert(site.entry().path() == "/index.html")
+    assert(site.entry().text() == "index")
+    assert(site.assets[1].path() == "/style.css")
+    assert(site.assets[1].text() == "style")
+    assert(site.assets[2].path() == "/app.js")
+    assert(site.assets[2].text() == "script")
+}
+
 test "execute direct indirect and dynamic calls beyond x64 registers" {
     assert(total(1, 2, 3, 4, 5, 6, 7, 8, 9, 10) == 55)
     assert(callback_total() == 55)
@@ -357,6 +415,10 @@ test "execute x64 ownership and deep-copy runtime" {
     verify_deep_copy()
 }
 
+test "preserve resource aggregates across x64 list growth" {
+    verify_resource_aggregate_list()
+}
+
 test "finalize x64 cycles across direct collection and protocol edges" {
     verify_cycles()
 }
@@ -371,6 +433,7 @@ func main() {
         X64FloatPair(x:3.0, y:4.0)
     ) == 20.0)
     verify_collections()
+    verify_resource_aggregate_list()
     verify_deep_copy()
     verify_cycles()
 }
