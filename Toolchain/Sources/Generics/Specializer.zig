@@ -839,6 +839,7 @@ pub const Specializer = struct {
 
     fn specializeCall(self: *Specializer, call: Ast.Expression.Call, locals: []const Binding) SpecializeError!?[]const u8 {
         if (std.mem.eql(u8, call.name, "C.load") or std.mem.eql(u8, call.name, "C.store") or
+            std.mem.eql(u8, call.name, "C.call") or
             std.mem.eql(u8, call.name, "C.object_from_address")) return null;
         const actual_types = try self.allocator.alloc(Ast.Type, call.arguments.len);
         for (call.arguments, 0..) |argument, index| {

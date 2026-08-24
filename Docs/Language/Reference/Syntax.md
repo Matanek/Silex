@@ -30,6 +30,7 @@ constraints.
 | Constructor | `init(value:type) { ... }` |
 | Import | `use Module.Path` |
 | C function binding | `let name = C.function<func(...) Return>(...)` |
+| C function-address call | `C.call<func(...) Return>(address, ...)` |
 | Alias | `use Existing.Type as LocalName` |
 | Public declaration | `public ...` |
 | Package-visible declaration | `package ...` |

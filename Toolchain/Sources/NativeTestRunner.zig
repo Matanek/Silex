@@ -214,7 +214,10 @@ test "link a package boundary provider into a native test" {
     try temporary.dir.createDirPath(std.testing.io, "Bridge/Tests");
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Bridge/provider.c",
-        .data = "int boundary_answer(void) { return 42; }\n",
+        .data = "#include <stdint.h>\n" ++
+            "int boundary_answer(void) { return 42; }\n" ++
+            "int boundary_add(int left, int right) { return left + right; }\n" ++
+            "uintptr_t boundary_add_address(void) { return (uintptr_t)&boundary_add; }\n",
     });
     try temporary.dir.writeFile(std.testing.io, .{
         .sub_path = "Bridge/Package.json",
@@ -226,11 +229,18 @@ test "link a package boundary provider into a native test" {
         \\use Interop.C
         \\use Interop.Boundary
         \\let native_answer = C.function<func() int32>(library:Boundary.Native, name:"boundary_answer")
+        \\let native_add_address = C.function<func() uint>(library:Boundary.Native, name:"boundary_add_address")
         \\public func answer() int32 { return native_answer() }
+        \\public func add(left:int32, right:int32) int32 {
+        \\    return C.call<func(int32, int32) int32>(native_add_address(), left, right)
+        \\}
     });
     try temporary.dir.writeFile(std.testing.io, .{ .sub_path = "Bridge/Tests/Boundary.sx", .data =
         \\use Bridge.Api
-        \\test "provider" { assert(Api.answer() == 42) }
+        \\test "provider" {
+        \\    assert(Api.answer() == 42)
+        \\    assert(Api.add(19, 23) == 42)
+        \\}
     });
     const base = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Bridge" });
     const input = try std.fs.path.join(allocator, &.{ base, "Tests/Boundary.sx" });

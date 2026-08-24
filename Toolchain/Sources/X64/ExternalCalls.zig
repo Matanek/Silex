@@ -435,6 +435,37 @@ pub fn emit(
     _ = function;
 }
 
+pub fn emitIndirect(
+    allocator: Allocator,
+    bytes: *std.ArrayList(u8),
+    platform: Platform,
+    call: Machine.Instruction.ExternalIndirectCall,
+) Error!void {
+    if (call.signature.arguments.len != call.arguments.len or
+        call.arguments.len > Machine.max_external_arguments)
+    {
+        return error.InvalidMachineProgram;
+    }
+    switch (platform) {
+        .linux => try emitLinuxBoundaryArguments(allocator, bytes, call.signature.arguments, call.arguments),
+        .windows => try emitWindowsBoundaryArguments(allocator, bytes, call.signature.arguments, call.arguments),
+    }
+    try emitLoadStack(allocator, bytes, .rax, call.callee);
+    try bytes.appendSlice(allocator, &.{ 0xff, 0xd0 });
+    const stack_size = boundaryStackSize(platform, call.signature.arguments);
+    if (stack_size != 0) try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xc4, stack_size });
+    if (call.result) |result| {
+        if (call.signature.result) |kind| {
+            if (kind == .float32) {
+                try bytes.appendSlice(allocator, &.{ 0x66, 0x0f, 0x7e, 0xc0 });
+            } else if (kind == .float64) {
+                try bytes.appendSlice(allocator, &.{ 0x66, 0x48, 0x0f, 0x7e, 0xc0 });
+            }
+        }
+        try emitStoreStack(allocator, bytes, .rax, result);
+    }
+}
+
 const linux_thread_stack_size: u64 = 1024 * 1024;
 
 fn emitLinuxThreadSpawn(

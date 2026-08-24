@@ -124,6 +124,7 @@ pub const Instruction = union(enum) {
     call: Call,
     indirect_call: IndirectCall,
     boundary_call: BoundaryCall,
+    boundary_indirect_call: BoundaryIndirectCall,
     dynamic_call: DynamicCall,
     print: Print,
     assert: Assert,
@@ -457,6 +458,13 @@ pub const Instruction = union(enum) {
     pub const BoundaryCall = struct {
         result: ?ValueId,
         function: usize,
+        arguments: []const ValueId,
+    };
+
+    pub const BoundaryIndirectCall = struct {
+        result: ?ValueId,
+        callee: ValueId,
+        signature: usize,
         arguments: []const ValueId,
     };
 
@@ -1220,6 +1228,17 @@ fn writeInstruction(
             if (call.result) |result| try appendResult(output, allocator, program, function, result);
             try output.appendSlice(allocator, "boundary.call #");
             try output.appendSlice(allocator, try std.fmt.allocPrint(allocator, "{d}", .{call.function}));
+            try output.append(allocator, '(');
+            for (call.arguments, 0..) |argument, index| {
+                if (index != 0) try output.appendSlice(allocator, ", ");
+                try appendValueChecked(output, allocator, function, argument);
+            }
+            try output.append(allocator, ')');
+        },
+        .boundary_indirect_call => |call| {
+            if (call.result) |result| try appendResult(output, allocator, program, function, result);
+            try output.appendSlice(allocator, "boundary.call.indirect ");
+            try appendValueChecked(output, allocator, function, call.callee);
             try output.append(allocator, '(');
             for (call.arguments, 0..) |argument, index| {
                 if (index != 0) try output.appendSlice(allocator, ", ");

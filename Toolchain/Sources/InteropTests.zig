@@ -257,6 +257,51 @@ test "specialize a named generic callback before exposing its address" {
     try std.testing.expect(std.mem.indexOf(u8, text, "function @Main.worker<Main.Marker>") != null);
 }
 
+test "compose a typed C ABI call through function address bits" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    try temporary.dir.writeFile(std.testing.io, .{
+        .sub_path = "Main.sx",
+        .data =
+        \\use Interop.C
+        \\func main() {
+        \\    let result = C.call<func(int32, C.Pointer<uint8>, float64) int32>(
+        \\        4096 as uint,
+        \\        7 as int32,
+        \\        C.pointer_bits(0 as uint),
+        \\        1.5 as float64
+        \\    )
+        \\    assert(result == 0)
+        \\    C.call<func(uint) void>(8192 as uint, 7 as uint)
+        \\}
+        ,
+    });
+    const input = try std.fs.path.join(allocator, &.{ ".zig-cache", "tmp", &temporary.sub_path, "Main.sx" });
+    var compiler = Project.Compiler.init(allocator, std.testing.io);
+    const compilation = try compiler.compile(input);
+    const text = try Ir.writeText(allocator, compilation.ir);
+    try std.testing.expect(std.mem.indexOf(u8, text, "boundary.call.indirect") != null);
+    _ = try Lower.lowerBoundaries(allocator, compilation.ir, compilation.boundaries);
+}
+
+test "validate an address-based C ABI call at compile time" {
+    try expectError(
+        \\use Interop.C
+        \\func main() { C.call<func(int32) int32>(4096 as uint) }
+    ,
+        "C.call expects 1 function arguments, found 0",
+    );
+    try expectError(
+        \\use Interop.C
+        \\func main() { C.call<func(uint) void>("not an address", 1 as uint) }
+    ,
+        "cannot implicitly convert 'str' to 'uint'",
+    );
+}
+
 test "expose a private mutable string buffer to a direct foreign call" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

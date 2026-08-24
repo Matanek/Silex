@@ -698,6 +698,7 @@ fn encodeFunction(
                 if (call.result) |result| if (!result.aggregate) try emitStoreStack(allocator, bytes, .rax, result.start);
             },
             .external_call => |call| try ExternalCalls.emit(allocator, bytes, windows_import_sites, external_call_sites, platform, program, function, call),
+            .external_indirect_call => |call| try ExternalCalls.emitIndirect(allocator, bytes, platform, call),
             .mutex_lock => try emitMutexOperation(allocator, bytes, global_fixups, windows_import_sites, platform, program, true),
             .mutex_unlock => try emitMutexOperation(allocator, bytes, global_fixups, windows_import_sites, platform, program, false),
             .dynamic_call => |call| try emitDynamicCall(
@@ -2945,6 +2946,39 @@ test "encode internal X64 arguments beyond the register window" {
     defer linux.deinit(allocator);
     const windows = try encodeWindows(allocator, machine);
     defer windows.deinit(allocator);
+    try std.testing.expect(linux.code.len > 0);
+    try std.testing.expect(windows.code.len > 0);
+}
+
+test "encode indirect C ABI calls on Linux and Windows X64" {
+    const arguments = [_]Machine.Slot{ 1, 2 };
+    const argument_types = [_]Machine.AbiValue{ .int32, .int32 };
+    const instructions = [_]Machine.Instruction{
+        .{ .constant_int = .{ .result = 0, .bits = 4096, .type = .uint } },
+        .{ .constant_int = .{ .result = 1, .bits = 19, .type = .int32 } },
+        .{ .constant_int = .{ .result = 2, .bits = 23, .type = .int32 } },
+        .{ .external_indirect_call = .{
+            .result = 3,
+            .callee = 0,
+            .signature = .{ .arguments = &argument_types, .result = .int32 },
+            .arguments = &arguments,
+        } },
+        .return_void,
+    };
+    const functions = [_]Machine.Function{.{
+        .name = "main",
+        .parameter_count = 0,
+        .return_type = .void,
+        .slot_count = 4,
+        .frame_size = 32,
+        .instructions = &instructions,
+    }};
+    const machine: Machine.Program = .{ .functions = &functions };
+    try Machine.validate(machine);
+    const linux = try encodeLinux(std.testing.allocator, machine);
+    defer linux.deinit(std.testing.allocator);
+    const windows = try encodeWindows(std.testing.allocator, machine);
+    defer windows.deinit(std.testing.allocator);
     try std.testing.expect(linux.code.len > 0);
     try std.testing.expect(windows.code.len > 0);
 }

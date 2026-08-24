@@ -1028,7 +1028,7 @@ fn containsBoundaryCall(program: Ir.Program) bool {
     for (program.functions) |function| {
         for (function.blocks) |block| {
             for (block.instructions) |instruction| switch (instruction) {
-                .boundary_call => return true,
+                .boundary_call, .boundary_indirect_call => return true,
                 else => {},
             };
         }

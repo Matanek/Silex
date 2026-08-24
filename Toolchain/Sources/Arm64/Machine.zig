@@ -126,6 +126,7 @@ pub const Instruction = union(enum) {
     call: Call,
     indirect_call: IndirectCall,
     external_call: ExternalCall,
+    external_indirect_call: ExternalIndirectCall,
     dynamic_call: DynamicCall,
     print: Print,
     assert: Assert,
@@ -506,6 +507,13 @@ pub const Instruction = union(enum) {
     pub const ExternalCall = struct {
         result: ?Slot,
         function: usize,
+        arguments: []const Slot,
+    };
+
+    pub const ExternalIndirectCall = struct {
+        result: ?Slot,
+        callee: Slot,
+        signature: ExternalFunction.Signature,
         arguments: []const Slot,
     };
 
@@ -950,6 +958,18 @@ pub fn validate(program: Program) Error!void {
                     } else {
                         try requireSlot(function, call.result orelse return error.InvalidMachineProgram);
                     }
+                },
+                .external_indirect_call => |call| {
+                    try requireSlot(function, call.callee);
+                    if (call.arguments.len > max_external_arguments or
+                        call.arguments.len != call.signature.arguments.len)
+                    {
+                        return error.InvalidMachineProgram;
+                    }
+                    for (call.arguments) |argument| try requireSlot(function, argument);
+                    if (call.signature.result == null) {
+                        if (call.result != null) return error.InvalidMachineProgram;
+                    } else if (call.result) |result| try requireSlot(function, result) else return error.InvalidMachineProgram;
                 },
                 .dynamic_call => |call| {
                     if (call.function >= program.functions.len) return error.InvalidMachineProgram;

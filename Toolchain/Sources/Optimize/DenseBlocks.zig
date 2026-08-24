@@ -8,7 +8,7 @@ pub fn isEligible(function: Ir.Function) bool {
 fn containsCalls(function: Ir.Function) bool {
     for (function.blocks) |block| {
         for (block.instructions) |instruction| switch (instruction) {
-            .call, .indirect_call, .boundary_call, .dynamic_call => return true,
+            .call, .indirect_call, .boundary_call, .boundary_indirect_call, .dynamic_call => return true,
             else => {},
         };
     }

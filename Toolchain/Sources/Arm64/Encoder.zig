@@ -1363,6 +1363,7 @@ fn encodeFunction(
                 if (call.result) |result| if (!result.aggregate) try words.append(allocator, storeStack(.x0, result.start));
             },
             .external_call => |call| try ExternalCalls.emit(allocator, words, external_call_sites, program, function, call),
+            .external_indirect_call => |call| try ExternalCalls.emitIndirect(allocator, words, function, call),
             .mutex_lock => try emitMutexOperation(allocator, words, data_fixups, external_call_sites, platform, program, true),
             .mutex_unlock => try emitMutexOperation(allocator, words, data_fixups, external_call_sites, platform, program, false),
             .dynamic_call => |call| try encodeDynamicCall(allocator, words, calls, &fixups, function, call),

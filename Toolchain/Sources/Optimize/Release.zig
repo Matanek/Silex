@@ -714,6 +714,12 @@ fn rewriteInstruction(allocator: Allocator, instruction: Ir.Instruction, aliases
             .function = value.function,
             .arguments = try rewriteValues(allocator, value.arguments, aliases),
         } },
+        .boundary_indirect_call => |value| .{ .boundary_indirect_call = .{
+            .result = value.result,
+            .callee = canonical(aliases, value.callee),
+            .signature = value.signature,
+            .arguments = try rewriteValues(allocator, value.arguments, aliases),
+        } },
         .dynamic_call => |value| .{ .dynamic_call = .{
             .result = value.result,
             .function = value.function,
@@ -1102,6 +1108,10 @@ fn countUses(instruction: Ir.Instruction, uses: []usize) void {
             useValues(uses, value.arguments);
         },
         .boundary_call => |value| useValues(uses, value.arguments),
+        .boundary_indirect_call => |value| {
+            useValue(uses, value.callee);
+            useValues(uses, value.arguments);
+        },
         .dynamic_call => |value| {
             useValue(uses, value.receiver);
             useValues(uses, value.arguments);

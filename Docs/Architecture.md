@@ -258,6 +258,10 @@ open Silex document
   declared Apple frameworks, and named system libraries. This path does not
   compile foreign sources and does not define a stable Silex object format or
   ABI.
+- Package platform adapters may call a raw function-table entry through
+  `C.call<func(...) T>`. Semantic analysis records its checked C signature in
+  portable IR, and each native backend lowers the indirect call with the same
+  target ABI rules as a named boundary function.
 - The Linux X64 backend owns a distinct Silex call convention, encodes X64
   instructions directly and writes an ELF64 container without section headers
   or an external linker when no package boundary is referenced. Boundary calls

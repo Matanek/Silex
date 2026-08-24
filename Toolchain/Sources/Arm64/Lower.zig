@@ -756,6 +756,27 @@ fn lowerInstruction(
                 .arguments = arguments,
             } };
         },
+        .boundary_indirect_call => |call| external_call: {
+            if (call.signature >= program.function_types.len or call.arguments.len > Machine.max_external_arguments) {
+                return error.TooManyArguments;
+            }
+            const signature = program.function_types[call.signature];
+            const arguments = try allocator.alloc(Machine.Slot, call.arguments.len);
+            const argument_types = try allocator.alloc(Machine.AbiValue, signature.parameter_types.len);
+            for (call.arguments, signature.parameter_types, 0..) |argument, parameter_type, index| {
+                arguments[index] = layout.values[argument].start;
+                argument_types[index] = try lowerExternalType(parameter_type);
+            }
+            break :external_call .{ .external_indirect_call = .{
+                .result = if (call.result) |result| layout.values[result].start else null,
+                .callee = layout.values[call.callee].start,
+                .signature = .{
+                    .arguments = argument_types,
+                    .result = if (signature.return_type == .void) null else try lowerExternalType(signature.return_type),
+                },
+                .arguments = arguments,
+            } };
+        },
         .dynamic_call => |call| dispatch: {
             _ = try Machine.checkedArgumentCount(call.arguments.len);
             const arguments = try allocator.alloc(Machine.Span, call.arguments.len);

@@ -819,6 +819,55 @@ fn externalType(self: anytype, value: Ast.ExternalType, position: anytype) !Type
 }
 
 pub fn analyzeIntrinsic(self: anytype, builder: anytype, call: Ast.Expression.Call) !?Model.TypedValue {
+    if (call.receiver == null and std.mem.eql(u8, call.name, "C.call")) {
+        if (call.type_arguments.len != 1 or call.named_arguments.len != 0 or call.arguments.len == 0) {
+            return self.fail(call.name_position, "C.call<func(...) T> expects a function address followed by its arguments");
+        }
+        const signature_index = call.type_arguments[0].functionIndex() orelse
+            return self.fail(call.name_position, "C.call requires one function signature type");
+        if (signature_index >= self.program.function_types.len) return error.InvalidSource;
+        const signature = self.program.function_types[signature_index];
+        if (call.arguments.len - 1 != signature.parameters.len) {
+            const message = try std.fmt.allocPrint(
+                self.allocator,
+                "C.call expects {d} function arguments, found {d}",
+                .{ signature.parameters.len, call.arguments.len - 1 },
+            );
+            return self.fail(call.name_position, message);
+        }
+        if (!cCallType(signature.return_type, true)) {
+            return self.fail(call.name_position, "C.call return type must be void, a numeric scalar, or a C pointer");
+        }
+        const callee = try self.analyzeExpressionExpected(builder, call.arguments[0], .uint);
+        if (callee.type != .uint) return self.fail(call.arguments[0].position, "C.call expects uint function address bits");
+        var arguments: std.ArrayList(Ir.ValueId) = .empty;
+        for (call.arguments[1..], signature.parameters, 0..) |argument_expression, parameter, index| {
+            if (parameter.mode != .value or !cCallType(parameter.type, false)) {
+                return self.fail(call.name_position, "C.call parameters must be numeric scalars or C pointers passed by value");
+            }
+            var argument = try self.analyzeExpressionExpected(builder, argument_expression, parameter.type);
+            if (argument.type != parameter.type and self.canImplicitlyConvert(argument.type, parameter.type)) {
+                argument = try self.coerce(builder, argument, parameter.type, argument_expression.position);
+            }
+            if (argument.type != parameter.type) {
+                const message = try std.fmt.allocPrint(
+                    self.allocator,
+                    "argument {d} of C.call expects '{s}', found '{s}'",
+                    .{ index + 1, self.typeName(parameter.type), self.typeName(argument.type) },
+                );
+                return self.fail(argument_expression.position, message);
+            }
+            try arguments.append(self.allocator, argument.value);
+        }
+        const result: ?Ir.ValueId = if (signature.return_type == .void) null else try self.newValue(builder, signature.return_type);
+        try self.emit(builder, .{ .boundary_indirect_call = .{
+            .result = result,
+            .callee = callee.value,
+            .signature = signature_index,
+            .arguments = try arguments.toOwnedSlice(self.allocator),
+        } });
+        return if (result) |value| .{ .type = signature.return_type, .value = value } else null;
+    }
     if (call.receiver == null and std.mem.eql(u8, call.name, "C.load")) {
         if (call.type_arguments.len != 1 or call.named_arguments.len != 0 or call.arguments.len != 2) {
             return self.fail(call.name_position, "C.load<T> expects an address and a uint byte offset");
@@ -1015,6 +1064,12 @@ pub fn analyzeIntrinsic(self: anytype, builder: anytype, call: Ast.Expression.Ca
         return .{ .type = .address, .value = prepared.reference };
     }
     return null;
+}
+
+fn cCallType(type_value: Types.Type, allow_void: bool) bool {
+    return (allow_void and type_value == .void) or type_value == .address or
+        type_value == .int32 or type_value == .uint32 or type_value == .int or type_value == .uint or
+        type_value == .float32 or type_value == .float64;
 }
 
 pub fn analyzeCall(self: anytype, builder: anytype, call: Ast.Expression.Call) !?Model.TypedValue {

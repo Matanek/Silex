@@ -25,4 +25,6 @@ restricted to package-boundary implementations. A provider may use named
 system libraries or Apple frameworks without bundling an archive. When it does
 bundle one, that archive must match the target: Mach-O ARM64, ELF x64, COFF
 x64, or COFF ARM64. Arbitrary library paths and runtime-loaded providers remain
-absent.
+absent. Package adapters can call an already-resolved function-table entry with
+`C.call<func(...) T>`, but this does not expose dynamic library loading or C
+types to application code.

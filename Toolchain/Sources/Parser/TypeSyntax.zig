@@ -128,6 +128,16 @@ pub fn parseType(self: anytype) !Ast.Type {
             }
             if (std.mem.eql(u8, name, "C.Size")) break :identifier .uint;
             if (std.mem.eql(u8, name, "C.SignedSize")) break :identifier .int;
+            if (std.mem.eql(u8, name, "C.Pointer") or std.mem.eql(u8, name, "C.MutablePointer")) {
+                if (arguments.items.len != 1) return self.failAt(type_position, "C pointer types expect one scalar type argument");
+                const child = arguments.items[0];
+                if (std.mem.eql(u8, name, "C.Pointer")) {
+                    if (child != .uint8) return self.failAt(type_position, "C.Pointer currently supports only uint8");
+                } else if (!child.isInteger() and !child.isFloat()) {
+                    return self.failAt(type_position, "C.MutablePointer supports integer and floating-point scalars");
+                }
+                break :identifier .address;
+            }
             const base = try self.internTypeName(try self.resolveTypeName(name));
             break :identifier if (arguments.items.len == 0)
                 base

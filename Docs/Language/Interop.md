@@ -101,6 +101,22 @@ identity through an opaque system callback context. These operations are for
 private platform adapters: the object must remain alive until the system has
 finished using the context.
 
+Some C APIs publish functions through a table of addresses rather than named
+linker symbols. A package platform adapter can call one of those entries with
+an explicit C signature:
+
+```sx
+let method = C.load<uint>(vtable, 24 as uint)
+let result = C.call<func(uint, int32) int32>(method, object, value)
+```
+
+`C.call<func(...) T>` applies the selected target's C ABI to a raw `uint`
+function address. Its parameters and result have the same deliberately narrow
+scalar and pointer surface as `C.function`: integer and floating-point scalars,
+`C.Pointer<T>`, `C.MutablePointer<T>`, and `void` for the result. The signature
+is checked at compile time. Resolving the table, retaining its owner, and
+validating the address remain the adapter's responsibility.
+
 ## Current boundary
 
 The implemented surface is deliberately narrow:
@@ -111,7 +127,8 @@ The implemented surface is deliberately narrow:
   backed by archives, named system libraries, Apple frameworks, or any useful
   combination of them; the legacy toolchain providers remain accepted for
   compatibility;
-- implemented capabilities: random seeding, monotonic and local civil clocks, byte console
+- implemented capabilities: named and address-based C ABI calls, random
+  seeding, monotonic and local civil clocks, byte console
   I/O, terminal sessions, files, process metadata, subprocesses, filesystem
   operations, sockets, name resolution, operating-system threads, and the
   typed Objective-C messages needed by the macOS system WebView;
@@ -128,8 +145,8 @@ The implemented surface is deliberately narrow:
   mutable string buffer for byte-oriented system output, or stable
   scalar/fixed-array storage for `C.MutablePointer<T>`.
 
-General retained pointers, captured callbacks, C structure types, variadic
-calls, arbitrary library paths, and public foreign providers are not
+General retained pointers, captured callbacks, first-class C structure types,
+variadic calls, arbitrary library paths, and public foreign providers are not
 implemented. Named callbacks with
 an opaque class context are supported for the platform threading adapters.
 Raw C structures are represented

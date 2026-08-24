@@ -1313,6 +1313,9 @@ pub const Analyzer = struct {
         if (call.receiver == null and std.mem.eql(u8, call.name, "reflect")) return try Reflection.analyze(self, builder, call);
         if (call.receiver == null and std.mem.eql(u8, call.name, "map_error")) return try MapError.analyze(self, builder, call);
         if (try EmbeddedFiles.analyze(self, builder, call)) |value| return value;
+        if (call.receiver == null and std.mem.eql(u8, call.name, "C.call")) {
+            return try Interop.analyzeIntrinsic(self, builder, call);
+        }
         if (try Interop.analyzeIntrinsic(self, builder, call)) |value| return value;
         if (call.receiver) |receiver_expression| {
             if (Collections.isMutation(call.name) and Collections.receiverIsCollection(self, builder, receiver_expression)) {

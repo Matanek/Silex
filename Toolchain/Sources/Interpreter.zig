@@ -274,6 +274,7 @@ fn executeInstruction(
             try store(function, values, conversion.result, .{ .string = result });
         },
         .boundary_call => |call| try executeBoundary(function, values, call, session),
+        .boundary_indirect_call => return error.UnsupportedBoundary,
         .constant_int => |constant| {
             const type_value = function.value_types[constant.result];
             const value: Value = if (type_value.functionIndex() != null)
