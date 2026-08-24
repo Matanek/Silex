@@ -745,14 +745,14 @@ fn encodeFunction(
                 try bytes.appendSlice(allocator, &.{ 0x48, 0x85, 0xc0, 0x0f, 0x85 });
                 const passed = bytes.items.len;
                 try bytes.appendNTimes(allocator, 0, 4);
-                try emitWriteStatic(allocator, bytes, data_fixups, assertion.header);
-                try emitWriteStringSlot(allocator, bytes, assertion.message);
+                try emitWriteStatic(allocator, bytes, data_fixups, windows_import_sites, platform, assertion.header);
+                try emitWriteStringSlot(allocator, bytes, windows_import_sites, platform, assertion.message);
                 try emitRuntimeFailure(allocator, bytes, &epilogue_fixups);
                 try patchRelative(bytes.items, passed, bytes.items.len);
             },
             .panic => |panic_value| {
-                try emitWriteStatic(allocator, bytes, data_fixups, panic_value.header);
-                try emitWriteStringSlot(allocator, bytes, panic_value.message);
+                try emitWriteStatic(allocator, bytes, data_fixups, windows_import_sites, platform, panic_value.header);
+                try emitWriteStringSlot(allocator, bytes, windows_import_sites, platform, panic_value.message);
                 try emitRuntimeFailure(allocator, bytes, &epilogue_fixups);
             },
             .return_value => |value| {
@@ -1412,24 +1412,35 @@ fn emitWriteBuffer(
     }
 }
 
-fn emitWriteStatic(allocator: Allocator, bytes: *std.ArrayList(u8), fixups: *std.ArrayList(DataFixup), string: usize) Allocator.Error!void {
+fn emitWriteStatic(
+    allocator: Allocator,
+    bytes: *std.ArrayList(u8),
+    fixups: *std.ArrayList(DataFixup),
+    import_sites: *std.ArrayList(WindowsImports.X64Site),
+    platform: Platform,
+    string: usize,
+) Error!void {
     try bytes.appendSlice(allocator, &.{ 0x48, 0x8d, 0x35 });
     const displacement_at = bytes.items.len;
     try bytes.appendNTimes(allocator, 0, 4);
     try fixups.append(allocator, .{ .displacement_at = displacement_at, .string = string });
-    try bytes.appendSlice(allocator, &.{ 0x48, 0x8b, 0x16, 0x48, 0x83, 0xc6, 0x08 });
-    try emitImmediate(allocator, bytes, .rax, 1);
-    try emitImmediate(allocator, bytes, .rdi, 2);
-    try bytes.appendSlice(allocator, &.{ 0x0f, 0x05 });
+    try emitLoadMemory(allocator, bytes, .r8, .rsi, 0);
+    try emitAddImmediateRegister(allocator, bytes, .rsi, 8);
+    try emitWriteBuffer(allocator, bytes, import_sites, platform, 2, .rsi, .r8);
 }
 
-fn emitWriteStringSlot(allocator: Allocator, bytes: *std.ArrayList(u8), slot: Machine.Slot) Allocator.Error!void {
+fn emitWriteStringSlot(
+    allocator: Allocator,
+    bytes: *std.ArrayList(u8),
+    import_sites: *std.ArrayList(WindowsImports.X64Site),
+    platform: Platform,
+    slot: Machine.Slot,
+) Error!void {
     try emitLoadStack(allocator, bytes, .rsi, slot);
-    try bytes.appendSlice(allocator, &.{ 0x48, 0x8b, 0x16, 0x48, 0x83, 0xc6, 0x08 });
-    try emitMaskDynamicStringLength(allocator, bytes, .rdx);
-    try emitImmediate(allocator, bytes, .rax, 1);
-    try emitImmediate(allocator, bytes, .rdi, 2);
-    try bytes.appendSlice(allocator, &.{ 0x0f, 0x05 });
+    try emitLoadMemory(allocator, bytes, .r8, .rsi, 0);
+    try emitMaskDynamicStringLength(allocator, bytes, .r8);
+    try emitAddImmediateRegister(allocator, bytes, .rsi, 8);
+    try emitWriteBuffer(allocator, bytes, import_sites, platform, 2, .rsi, .r8);
 }
 
 fn emitStringAddress(allocator: Allocator, bytes: *std.ArrayList(u8), fixups: *std.ArrayList(DataFixup), string: usize, result: Machine.Slot) Allocator.Error!void {
@@ -3078,6 +3089,29 @@ test "encode a no-op Silex main for the Linux X64 process contract" {
     defer windows.deinit(std.testing.allocator);
     try std.testing.expectEqual(@as(usize, 0), windows.windows_import_sites.len);
     try std.testing.expectEqual(@as(u8, 0xc3), windows.code[windows.code.len - 1]);
+}
+
+test "encode X64 panic diagnostics for both process contracts" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var frontend = @import("../Frontend.zig").Frontend.init(allocator);
+    const compilation = try frontend.compile(
+        \\func main() { panic("checkpoint") }
+    );
+    const machine = try @import("../Arm64/Lower.zig").lower(allocator, compilation.ir);
+
+    const linux = try encodeLinux(allocator, machine);
+    defer linux.deinit(allocator);
+    try std.testing.expect(std.mem.indexOf(u8, linux.code, &.{ 0x0f, 0x05 }) != null);
+
+    const windows = try encodeWindows(allocator, machine);
+    defer windows.deinit(allocator);
+    var writes: usize = 0;
+    for (windows.windows_import_sites) |site| {
+        if (site.symbol == .crt_write) writes += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 2), writes);
 }
 
 test "encode ABI callback thunks for Silex function addresses" {
