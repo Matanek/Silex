@@ -46,6 +46,29 @@ test "parallel jobs accept fixed indexed writes and reject structural collection
     );
 }
 
+test "generic methods infer collection observations passed from fields" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var frontend = Frontend.Frontend.init(arena.allocator());
+    _ = try frontend.compile(parallel_job_prelude ++
+        \\class Values { var items:int[] }
+        \\struct Read:ParallelJob {
+        \\    var values:Values
+        \\    var active:int[]
+        \\    func execute(start:int, end:int) { var index = start; while index < end { let value = self.values.items[self.active[index]]; if value < 0 { panic("negative") } index++ } }
+        \\}
+        \\class World {
+        \\    var values:Values
+        \\    var active:int[]
+        \\    init() { self.values = Values(items:[0, 1, 2, 3]); self.active = [0, 1, 2, 3] }
+        \\    func submit(executor:Executor) { executor.submit_parallel(self.active.count(), Read(values:self.values, active:self.active)).complete() }
+        \\    func identity<T>(value:T) T { return value }
+        \\    func empty() bool { return self.identity(self.active.is_empty()) }
+        \\}
+        \\func main() { var executor = Executor(); var world = World(); world.submit(executor); assert(!world.empty()) }
+    );
+}
+
 test "worker-safe jobs preserve the submit surface and follow pure call graphs" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

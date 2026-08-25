@@ -1776,6 +1776,13 @@ pub const Specializer = struct {
                 } else if (self.inferExpressionType(call.receiver.?, locals)) |receiver_type| {
                     const child = receiver_type.optionalChild() orelse receiver_type;
                     if (self.structureForType(child)) |structure| {
+                        if (structure.collection != null and
+                            call.arguments.len == 0 and
+                            call.named_arguments.len == 0)
+                        {
+                            if (std.mem.eql(u8, call.name, "count")) break :call_type .int;
+                            if (std.mem.eql(u8, call.name, "is_empty")) break :call_type .bool;
+                        }
                         for (structure.methods) |method| {
                             if (std.mem.eql(u8, method.name, call.name) and parametersAcceptArity(method.parameters, call.arguments.len)) {
                                 break :call_type if (call.safe and method.return_type.optionalChild() == null)
