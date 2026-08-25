@@ -182,3 +182,33 @@ test "views enforce lexical conflicts and unavailable operations" {
         "a borrowed view cannot be stored inside another local type",
     );
 }
+
+test "mutable views publish class field mutations to their own fields" {
+    const output = try run(
+        \\class Buffers {
+        \\    var first:int[]
+        \\    var second:int[]
+        \\    init() {
+        \\        self.first = [1, 2]
+        \\        self.second = [3, 4]
+        \\    }
+        \\}
+        \\func update(first:&int[..], second:&int[..]) {
+        \\    first[0] = 10
+        \\    second[1] = 40
+        \\}
+        \\func main() {
+        \\    var buffers = Buffers()
+        \\    update(
+        \\        &buffers.first[0:buffers.first.count()],
+        \\        &buffers.second[0:buffers.second.count()]
+        \\    )
+        \\    print(buffers.first[0])
+        \\    print(buffers.first[1])
+        \\    print(buffers.second[0])
+        \\    print(buffers.second[1])
+        \\}
+    );
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("10\n2\n3\n40\n", output);
+}

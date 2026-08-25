@@ -426,27 +426,32 @@ pub fn analyzeView(self: anytype, builder: anytype, unary: Ast.Expression.Unary)
     const root = source.borrowed_root orelse @import("Borrowing.zig").rootName(access.base) orelse
         return self.fail(unary.operator_position, "a borrowed view requires a stable collection root");
     const mode: Ast.Parameter.Mode = if (unary.operator == .borrow_mutable) .mutable else .read;
+    var reference: ?Ir.ValueId = null;
     if (mode == .mutable) {
         const root_name = @import("Borrowing.zig").rootName(access.base).?;
-        const binding = findBinding(builder.bindings.items, root_name) orelse return self.fail(access.base.position, "unknown collection root");
+        const binding = findBinding(builder.bindings.items, root_name) orelse
+            return self.fail(access.base.position, "unknown collection root");
         if (!binding.mutable and binding.borrowed_mode != .mutable and binding.parameter_mode != .mutable) {
             return self.fail(access.base.position, "a mutable view requires a var collection root");
         }
-        if (binding.borrowed_root == null) try @import("Borrowing.zig").ensureRootUnborrowed(self, builder, root_name, unary.operator_position);
+        const prepared = try @import("MutableReferences.zig").prepare(
+            self,
+            builder,
+            access.base,
+            source.type,
+        );
+        if (prepared.temporary != null) {
+            return self.fail(
+                access.base.position,
+                "a mutable view requires a directly addressable collection place",
+            );
+        }
+        reference = prepared.reference;
     }
     const start = try requireIndex(self, builder, access.start);
     const end = try requireIndex(self, builder, access.end);
     const result_type = viewTypeForElement(self.structures, collection.element) orelse return self.fail(unary.operator_position, "view type is unavailable");
     const result = try self.newValue(builder, result_type);
-    var reference: ?Ir.ValueId = null;
-    if (mode == .mutable) {
-        const binding = findBinding(builder.bindings.items, @import("Borrowing.zig").rootName(access.base).?).?;
-        reference = binding.reference;
-        if (reference == null and binding.local != null) {
-            reference = try self.newValue(builder, .address);
-            try self.emit(builder, .{ .local_address = .{ .result = reference.?, .local = binding.local.? } });
-        }
-    }
     try self.emit(builder, .{ .collection_view = .{
         .result = result,
         .collection = source.value,
