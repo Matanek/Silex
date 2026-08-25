@@ -1,0 +1,50 @@
+struct Pair {
+    let first:uint8[32]
+    let second:uint8[32]
+}
+
+struct Seed {
+    let bytes:uint8[32]
+}
+
+func fixed(value:uint8) uint8[32] {
+    var output:uint8[32]
+    var index = 0
+    while index < 32 {
+        output[index] = value + index as uint8
+        index++
+    }
+    return output
+}
+
+func make_pair() Result<Pair, int> {
+    return Result<Pair, int>.success(Pair(first:fixed(10), second:fixed(20)))
+}
+
+func append_seed(value:@uint8[..]) int {
+    var output:uint8[] = [1, 2, 3, 4, 5, 6, 7, 8]
+    for byte in value { output.append(byte) }
+    return output.count()
+}
+
+func exercise() bool {
+    let seed = Seed(bytes:fixed(30))
+    var pair:Pair? = null
+    match make_pair() {
+        success(value) => { pair = value }
+        failure(error) => { return false }
+    }
+    if let keys = pair {
+        if keys.first[0] != 10 { return false }
+    }
+    return append_seed(@seed.bytes[0:32]) == 40
+}
+
+test "preserve fixed collection addresses after a large aggregate result" {
+    assert(exercise())
+}
+
+func main() {
+    assert(exercise())
+    print("aggregate result preserved live fixed arrays")
+}

@@ -667,7 +667,8 @@ fn stackAddress(allocator: Allocator, words: *std.ArrayList(u32), destination: A
     const offset = @as(u64, slot) * Machine.slot_size;
     if (offset <= std.math.maxInt(u12)) return words.append(allocator, A64.addSubtractImmediate(destination, .zero_or_sp, @intCast(offset), true));
     try immediate(allocator, words, .x11, offset);
-    try words.append(allocator, A64.addRegisters(destination, .zero_or_sp, .x11));
+    try words.append(allocator, A64.addSubtractImmediate(destination, .zero_or_sp, 0, true));
+    try words.append(allocator, A64.addRegisters(destination, destination, .x11));
 }
 
 fn insertionBounds(allocator: Allocator, words: *std.ArrayList(u32), index: Machine.Slot) Error!Bounds {
@@ -1388,4 +1389,21 @@ fn emitPrintInteger(allocator: Allocator, words: *std.ArrayList(u32), slot: Mach
     try words.append(allocator, A64.moveWideZero32(.x16, 4));
     try words.append(allocator, A64.serviceCall());
     try words.append(allocator, A64.addSubtractImmediate(.zero_or_sp, .zero_or_sp, 32, true));
+}
+
+test "form fixed collection addresses beyond the immediate range from sp" {
+    var words: std.ArrayList(u32) = .empty;
+    defer words.deinit(std.testing.allocator);
+
+    try stackAddress(std.testing.allocator, &words, .x10, 512);
+
+    try std.testing.expect(words.items.len >= 3);
+    try std.testing.expectEqual(
+        A64.addSubtractImmediate(.x10, .zero_or_sp, 0, true),
+        words.items[words.items.len - 2],
+    );
+    try std.testing.expectEqual(
+        A64.addRegisters(.x10, .x10, .x11),
+        words.items[words.items.len - 1],
+    );
 }
