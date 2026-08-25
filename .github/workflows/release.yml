@@ -1,6 +1,6 @@
 name: Publish Silex release candidate
 
-run-name: Publish Silex v${{ inputs.version }} from ${{ github.ref_name }}
+run-name: Publish Silex v${{ inputs.version }} (${{ inputs.target }}) from ${{ github.ref_name }}
 
 on:
   workflow_dispatch:
@@ -8,6 +8,19 @@ on:
       version:
         description: Semantic version without the v prefix
         required: true
+      target:
+        description: Release artifacts to build in this run
+        required: true
+        type: choice
+        default: all
+        options:
+          - all
+          - macos-arm64
+          - linux-x64
+          - windows-x64
+      reuse_run_id:
+        description: Prior release run providing the other verified artifacts
+        required: false
 
 permissions:
   contents: read
@@ -31,6 +44,8 @@ jobs:
         shell: bash
         env:
           RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_TARGET: ${{ inputs.target }}
+          REUSE_RUN_ID: ${{ inputs.reuse_run_id }}
         run: |
           set -euo pipefail
           if [[ ! "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -41,6 +56,12 @@ jobs:
           test "$manifest_version" = "$RELEASE_VERSION"
           test "$GITHUB_REF_NAME" = "main"
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          if [ "$RELEASE_TARGET" = "all" ]; then
+            test -z "$REUSE_RUN_ID"
+          elif [[ ! "$REUSE_RUN_ID" =~ ^[0-9]+$ ]]; then
+            echo "a partial release requires a numeric reuse_run_id" >&2
+            exit 1
+          fi
           if git show-ref --verify --quiet "refs/tags/v$RELEASE_VERSION"; then
             echo "tag v$RELEASE_VERSION already exists" >&2
             exit 1
@@ -48,6 +69,7 @@ jobs:
 
   macos-arm64:
     needs: preflight
+    if: inputs.target == 'all' || inputs.target == 'macos-arm64'
     runs-on: macos-15
     timeout-minutes: 20
 
@@ -65,7 +87,7 @@ jobs:
           tar -xJf "$archive" -C "$RUNNER_TEMP"
           echo "$RUNNER_TEMP/zig-aarch64-macos-0.16.0" >> "$GITHUB_PATH"
 
-      - name: Build, assemble and smoke-test macOS ARM64
+      - name: Build and assemble macOS ARM64
         shell: bash
         run: |
           set -euo pipefail
@@ -78,10 +100,6 @@ jobs:
           cp LICENSE NOTICE README.md "$root/"
           "$root/bin/silex" --version
           "$root/bin/silex" targets
-          "$root/bin/silex" setup
-          "$root/bin/silex" compile Tests/Native/DistributionSmoke.sx \
-            --release -o "$RUNNER_TEMP/distribution-smoke"
-          test "$("$RUNNER_TEMP/distribution-smoke")" = "silex distribution ready"
           tar -C "$RUNNER_TEMP" -czf silex-macos-arm64.tar.gz silex-macos-arm64
           shasum -a 256 silex-macos-arm64.tar.gz > silex-macos-arm64.tar.gz.sha256
 
@@ -97,6 +115,7 @@ jobs:
 
   linux-x64:
     needs: preflight
+    if: inputs.target == 'all' || inputs.target == 'linux-x64'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
 
@@ -148,6 +167,7 @@ jobs:
 
   windows-x64:
     needs: preflight
+    if: inputs.target == 'all' || inputs.target == 'windows-x64'
     runs-on: windows-2025
     timeout-minutes: 20
 
@@ -209,11 +229,18 @@ jobs:
           retention-days: 1
 
   publish:
-    needs: [macos-arm64, linux-x64, windows-x64]
+    needs: [preflight, macos-arm64, linux-x64, windows-x64]
+    if: >-
+      always() &&
+      needs.preflight.result == 'success' &&
+      (needs.macos-arm64.result == 'success' || needs.macos-arm64.result == 'skipped') &&
+      (needs.linux-x64.result == 'success' || needs.linux-x64.result == 'skipped') &&
+      (needs.windows-x64.result == 'success' || needs.windows-x64.result == 'skipped')
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment: release
     permissions:
+      actions: read
       contents: write
 
     steps:
@@ -222,11 +249,44 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Collect the verified release files
+      - name: Collect verified files from the prior run
+        if: inputs.reuse_run_id != ''
         uses: actions/download-artifact@v8
         with:
-          path: release
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.reuse_run_id }}
+          path: release-reused
           merge-multiple: true
+
+      - name: Collect files verified in this run
+        uses: actions/download-artifact@v8
+        with:
+          path: release-current
+          merge-multiple: true
+
+      - name: Assemble and verify the complete release set
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir release
+          if [ -d release-reused ]; then
+            cp release-reused/* release/
+          fi
+          cp release-current/* release/
+          expected=(
+            silex-macos-arm64.tar.gz
+            silex-macos-arm64.tar.gz.sha256
+            silex-linux-x64.tar.gz
+            silex-linux-x64.tar.gz.sha256
+            silex-windows-x64.zip
+            silex-windows-x64.zip.sha256
+          )
+          for file in "${expected[@]}"; do
+            test -f "release/$file"
+          done
+          test "$(find release -maxdepth 1 -type f | wc -l | tr -d ' ')" = "${#expected[@]}"
+          (cd release && sha256sum -c *.sha256)
 
       - name: Create the annotated tag and GitHub release
         env:

@@ -99,13 +99,16 @@ zig build -Doptimize=ReleaseFast
 ./zig-out/bin/silex --version
 ```
 
-The release workflow accepts a tag only when its version matches the toolchain
-manifest. It builds each standalone executable on its native GitHub runner,
-then installs STD and compiles a package-consuming Silex program before
-publishing the archives and their checksums. Linux and Windows additionally
-execute that program on their runners. macOS native execution is validated on
-Apple Silicon hardware outside the hosted runner, whose environment currently
-faults even on an empty generated Mach-O program.
+The manual release workflow accepts a version only when it matches the
+toolchain manifest. A full run builds the three standalone distributions on
+their native GitHub runners, executes the distribution smoke on Linux and
+Windows, and publishes the exact archives and checksums. macOS native execution
+is validated locally on Apple Silicon hardware because the hosted runner faults
+even on an empty generated Mach-O program; its release job only builds and
+inspects the macOS distribution. A failed platform can be rebuilt atomically by
+selecting that target and supplying the prior run that owns the other verified
+artifacts. The publication job rechecks the complete six-file release set and
+all checksums before creating the tag.
 
 ## Remove Silex
 
